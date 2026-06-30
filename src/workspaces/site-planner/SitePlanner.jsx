@@ -62,6 +62,7 @@ import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
+import { printStrokeWidth, sheetFitScale } from "./lib/exportStyle.js";
 import { jpegToPdf } from "./lib/imagePdf.js";
 import { createHistoryStack } from "./lib/history.js";
 
@@ -5151,11 +5152,79 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // overlays (data-export="skip", already removed above) which are sized for the
     // live viewport. ftPerUnit = feet per viewBox user unit (one foot == view.ppf
     // user units). The planner canvas is north-up, so the arrow points straight up.
+    // NEW-1 no-occlude: bounding boxes (in viewBox px) of the plan's development
+    // content, padded for the red dimension labels that sit just outside each edge,
+    // so furniture is placed in the emptiest corner and can never land on a building.
+    const dimPad = Math.min(w, h) * 0.02;
+    const obstacles = [];
+    els.forEach((e) => {
+      if (!DEV_TYPES.includes(e.type)) return;
+      const ring = e.points || elCorners(e);
+      if (!ring || !ring.length) return;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      ring.forEach((p) => { const q = f2p(p); x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); });
+      obstacles.push({ x: x0 - dimPad, y: y0 - dimPad, w: (x1 - x0) + 2 * dimPad, h: (y1 - y0) + 2 * dimPad });
+    });
     const furn = document.createElementNS("http://www.w3.org/2000/svg", "g");
     furn.setAttribute("font-family", "Inter, system-ui, sans-serif");
-    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
+    furn.setAttribute("data-furniture", "1"); // skip the export stroke-thinning pass — sized with its own hairlines
+    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL, obstacles });
     clone.appendChild(furn);
     return { clone, w, h };
+  };
+  // Export-time presentation pass (NEW-2 / NEW-3, 2026-06-29). Operates on the CLONE
+  // only — the live canvas is never touched. `sheetScale` = centi-inches of paper per
+  // one viewBox unit (the sheet-fit factor), so strokes can be retargeted to a real
+  // physical drafting weight that no longer depends on the zoom at print time:
+  //   • NEW-2 — every plan stroke (object lines, surface edges, parking/dock striping,
+  //     dimension lines + their label halos) is thinned to a crisp point weight,
+  //     preserving the hierarchy; the furniture group is skipped (its own hairlines).
+  //   • NEW-3 — the dark "X ac" acreage pill becomes haloed exhibit text (no UI pill),
+  //     dock aprons lighten, and the building drop-shadow filter is dropped (a soft
+  //     blur shadow reads as screen chrome on a printed exhibit).
+  const restyleExportClone = (root, sheetScale) => {
+    if (!root) return;
+    // NEW-3: acreage chips → exhibit annotation (dark ink + white halo, no pill).
+    root.querySelectorAll('[data-print-chip="acre"]').forEach((g) => {
+      g.querySelectorAll("[data-chip-bg]").forEach((bg) => bg.remove());
+      g.querySelectorAll("[data-chip-text]").forEach((t) => {
+        t.setAttribute("fill", PAL.ink);
+        t.setAttribute("stroke", "#ffffff");
+        t.setAttribute("stroke-width", "3"); // normalized by the stroke-thinning pass below
+        t.setAttribute("paint-order", "stroke");
+        if (t.style) { t.style.fill = ""; t.style.fontWeight = "600"; }
+      });
+    });
+    // NEW-3 secondary: lighten dock aprons so building faces don't read busy.
+    root.querySelectorAll("[data-dock-apron]").forEach((r) => r.setAttribute("fill-opacity", "0.55"));
+    // NEW-3 secondary: drop the building drop-shadow on paper (crisp poché, not a blur).
+    root.querySelectorAll('[filter="url(#bldgShadow)"]').forEach((g) => g.removeAttribute("filter"));
+    // NEW-2: retarget every stroke to a physical drafting weight (skip the furniture).
+    if (sheetScale > 0) {
+      root.querySelectorAll("*").forEach((node) => {
+        if (typeof node.closest === "function" && node.closest("[data-furniture]")) return;
+        const cur = node.getAttribute && node.getAttribute("stroke-width");
+        if (cur != null && cur !== "") {
+          const nw = printStrokeWidth(parseFloat(cur), sheetScale);
+          if (Number.isFinite(nw)) node.setAttribute("stroke-width", String(Number(nw.toFixed(3))));
+        }
+        // Inline-style stroke widths (rare here, but the chip/label paths use style).
+        if (node.style && node.style.strokeWidth) {
+          const nw = printStrokeWidth(parseFloat(node.style.strokeWidth), sheetScale);
+          if (Number.isFinite(nw)) node.style.strokeWidth = `${Number(nw.toFixed(3))}px`;
+        }
+        // Keep dashes proportional to the now-thinner strokes. Filter out any token
+        // that doesn't parse (a stray/trailing separator) so we never emit "NaN".
+        const da = node.getAttribute && node.getAttribute("stroke-dasharray");
+        if (da && /[\d.]/.test(da) && cur != null && cur !== "") {
+          const f = parseFloat(cur) > 0 ? printStrokeWidth(parseFloat(cur), sheetScale) / parseFloat(cur) : 1;
+          if (Number.isFinite(f) && f > 0) {
+            const scaled = da.trim().split(/[\s,]+/).map((n) => parseFloat(n) * f).filter((v) => Number.isFinite(v)).map((v) => Number(v.toFixed(2)));
+            if (scaled.length) node.setAttribute("stroke-dasharray", scaled.join(" "));
+          }
+        }
+      });
+    }
   };
   // Rasterizing/printing an SVG can't fetch remote resources, so inline every
   // <image> (the aerial) as a data URL first. Drops any that are CORS-blocked.
@@ -5187,6 +5256,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     const { clone, w, h } = built;
     await inlineImages(clone); // embed the aerial so the raster includes it
+    // Thin line work + restyle labels to the SAME physical weights the PDF uses, by
+    // scaling against a notional letter-landscape plan box (PNG has no paper of its own),
+    // so a downloaded PNG looks as crisp/professional as the PDF (NEW-2 / NEW-3).
+    const lp = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: buildingRows().length });
+    restyleExportClone(clone, sheetFitScale(w, h, lp.plan.w, lp.plan.h));
     const xml = new XMLSerializer().serializeToString(clone);
     const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
     try {
@@ -5240,6 +5314,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // (B197) and metrics live in the SAME outer SVG coordinate system.
       const rows = buildingRows();
       const layout = printSheetLayout({ paper, orient, buildingCount: rows.length });
+      // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
+      // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
+      // is identical regardless of the zoom the user was at when they hit print.
+      restyleExportClone(built.clone, sheetFitScale(built.w, built.h, layout.plan.w, layout.plan.h));
       const plan = built.clone; // a full <svg viewBox=…> — nest it, keeping its viewBox
       plan.setAttribute("x", layout.plan.x); plan.setAttribute("y", layout.plan.y);
       plan.setAttribute("width", layout.plan.w); plan.setAttribute("height", layout.plan.h);
@@ -5596,12 +5674,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
     const draggable = tool === "select";
     return (
-      <g key={`pl${pc.id}`} pointerEvents={draggable ? "auto" : "none"}
+      <g key={`pl${pc.id}`} data-print-chip="acre" pointerEvents={draggable ? "auto" : "none"}
         style={draggable ? { cursor: "move" } : undefined}
         onPointerDown={draggable ? (e) => startAcChip(e, pc.id) : undefined}>
-        <rect x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7 * ls}
+        {/* NEW-3: on screen this is a dark UI pill; the PDF/PNG export restyles it
+            (data-print-chip) into haloed exhibit text — no solid dark pill on paper. */}
+        <rect data-chip-bg x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7 * ls}
           fill="rgba(17,24,39,0.62)" stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
-        <text x={c.x} y={c.y - boxH / 2 + padY + fs * 0.82} textAnchor="middle" fontSize={fs}
+        <text data-chip-text x={c.x} y={c.y - boxH / 2 + padY + fs * 0.82} textAnchor="middle" fontSize={fs}
           fontFamily="ui-monospace, Menlo, monospace" fill="#e9edf2" pointerEvents="none" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
       </g>
     );
@@ -9970,12 +10050,12 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       if (horiz) {
         const by = s === "bottom" ? h - Dpx : 0;
         const ax = tl.x + startF * ppf, aw = (endF - startF) * ppf;
-        parts.push(<rect key={`db${s}`} x={ax} y={tl.y + by} width={aw} height={Dpx} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
+        parts.push(<rect key={`db${s}`} data-dock-apron x={ax} y={tl.y + by} width={aw} height={Dpx} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
         for (let f = startF + 12; f < endF - 0.5; f += 12) { const x = tl.x + f * ppf; parts.push(<line key={`db${s}d${f}`} x1={x} y1={tl.y + by} x2={x} y2={tl.y + by + Dpx} stroke="#5b6470" strokeWidth={0.5} />); }
       } else {
         const bx = s === "right" ? w - Dpx : 0;
         const ay = tl.y + startF * ppf, ah = (endF - startF) * ppf;
-        parts.push(<rect key={`db${s}`} x={tl.x + bx} y={ay} width={Dpx} height={ah} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
+        parts.push(<rect key={`db${s}`} data-dock-apron x={tl.x + bx} y={ay} width={Dpx} height={ah} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
         for (let f = startF + 12; f < endF - 0.5; f += 12) { const y = tl.y + f * ppf; parts.push(<line key={`db${s}d${f}`} x1={tl.x + bx} y1={y} x2={tl.x + bx + Dpx} y2={y} stroke="#5b6470" strokeWidth={0.5} />); }
       }
     });
