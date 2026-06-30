@@ -2,6 +2,13 @@
 # Format docs: https://developers.cloudflare.com/pages/configuration/headers/
 # This file is copied verbatim from public/ to the deploy root (dist/_headers).
 
+# Baseline security headers for every response — safe globally (they don't restrict
+# resource loading, only MIME-sniffing and referer leakage). Anti-framing is set
+# per-document below (NOT here) so the same-origin /sequence/ iframe still works.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
 # Content-hashed build assets (JS chunks, CSS, fonts, images) are immutable: a given
 # filename's bytes never change across deploys, so cache them for a year and skip
 # revalidation. This is what makes returning visits load instantly.
@@ -13,10 +20,18 @@
 # keeps requesting the previous deploy's (now-deleted) chunks and 404s on lazy load.
 # no-cache = the browser revalidates with the server every time (cheap 304 when
 # unchanged), so a new deploy's asset hashes propagate on the next load.
+# The app shell (which mounts the sign-in / sign-up / reset modal) and the landing must
+# never be framed by another origin — block clickjacking / UI-redress on the login.
+# Anti-framing is scoped to these TOP-LEVEL documents only; /sequence/ deliberately has
+# no framing header so the app can keep embedding it in a same-origin iframe.
 /
   Cache-Control: no-cache
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
 /index.html
   Cache-Control: no-cache
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
 
 # The standalone Sequence page is a self-contained HTML document (no hashed chunks),
 # but it's still HTML — keep it revalidated so a redeploy propagates immediately.
@@ -24,3 +39,17 @@
   Cache-Control: no-cache
 /sequence/index.html
   Cache-Control: no-cache
+
+# The standalone marketing landing page (public/landing/) is the same kind of
+# self-contained HTML document — revalidate the HTML on every load so a redeploy
+# propagates immediately. Its vendored libraries live under /landing/vendor/ and are
+# not content-hashed, so they don't get the immutable /assets/* policy; keep them
+# revalidated too (they're tiny and change only on a deliberate version bump).
+/landing/
+  Cache-Control: no-cache
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+/landing/index.html
+  Cache-Control: no-cache
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'

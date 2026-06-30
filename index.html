@@ -3,6 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Front door (marketing landing): a BRAND-NEW visitor who lands on "/" with no app
+         data, no signed-in session, no deep-link hash, and no explicit ?app intent is sent
+         to the marketing page at /landing/. Returning users (any planyr/supabase data in
+         localStorage), deep links (#/…), and the landing's own "Start a site" links (/?app)
+         all fall through and boot the app exactly as before — so nobody who already uses
+         Planyr is disrupted. Runs FIRST, before any app work, and uses location.replace so
+         the back button can't loop. /landing/ has no such redirect, so there is no loop. -->
+    <script>
+      (function () {
+        try {
+          if (navigator.webdriver) return; // never redirect automated browsers (e2e / ui-audit)
+          var h = window.location.hash || "";
+          if ((h && h !== "#") || /[?&]app\b/.test(window.location.search)) return; // explicit app entry
+          // Supabase auth callbacks (email confirmation, password recovery, magic link, OAuth,
+          // and error returns) come back to "/" with params on the QUERY string under the PKCE
+          // flow (?code=…, ?error=…&error_description=…); a brand-new user confirming their email
+          // has NO session yet, so without this they'd be bounced to /landing/ and the token lost.
+          // (Hash-based implicit callbacks like #access_token=… are already covered above.) Let the
+          // app boot so supabase-js can complete the exchange.
+          var qs = window.location.search || "";
+          if (/[?&](code|access_token|refresh_token|provider_token|error|error_code|error_description)=/.test(qs)
+              || /[?&]type=(recovery|signup|magiclink|invite|email_change)\b/.test(qs)) return;
+          var returning = false;
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i) || "";
+            if (k.indexOf("planarfit:") === 0 || /^sb-.*-auth-token$/.test(k)) { returning = true; break; }
+          }
+          if (!returning) window.location.replace("/landing/");
+        } catch (e) { /* never block app boot */ }
+      })();
+    </script>
     <!-- Mobile pinch fix: on iOS Safari a two-finger pinch on the page zooms the whole
          document and, at minimum scale, pops the "show all tabs" overview — hijacking the
          gesture the user meant for the map/planner. The map (Leaflet) and the planner canvas
@@ -42,7 +73,18 @@
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <title>Planyr - Project Management</title>
+    <title>Planyr — Industrial site planning in your browser</title>
+    <meta name="description" content="Draw an industrial site and get instant yield — coverage, FAR, parking, detention — on one feet-accurate coordinate spine. Live county parcels, auto-stitched drawings." />
+    <link rel="canonical" href="https://planyr.io/" />
+    <!-- Social card for the homepage URL (most-shared); reuses the landing's OG image. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Planyr" />
+    <meta property="og:title" content="Planyr — Industrial site planning in your browser" />
+    <meta property="og:description" content="Draw the site. Get the yield. Same instant." />
+    <meta property="og:url" content="https://planyr.io/" />
+    <meta property="og:image" content="https://planyr.io/landing/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://planyr.io/landing/og.png" />
   </head>
   <body>
     <div id="root"></div>

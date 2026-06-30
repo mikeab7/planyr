@@ -11,27 +11,48 @@ import ThemePicker from "../../../shared/theme/ThemePicker.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
-const btn = (primary) => ({ padding: "9px 14px", fontSize: 13, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${primary ? PAL.accent : PAL.line}`, background: primary ? PAL.accent : "var(--surface-raised)", color: primary ? "#fff" : PAL.ink });
-const linkBtn = { border: "none", background: "transparent", color: PAL.accent, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: 0 };
+const btn = (primary) => ({ padding: "9px 14px", fontSize: 13, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${primary ? PAL.accent : PAL.line}`, background: primary ? PAL.accent : "var(--surface-raised)", color: primary ? "var(--on-accent)" : PAL.ink });
+const linkBtn = { border: "none", background: "transparent", color: PAL.accent, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: "6px 2px" };
 const s = (v) => (v == null ? "" : String(v)).trim();
 
-function Wrap({ onClose, children, msg, width = 360 }) {
-  // B530: a keyboard user must be able to dismiss the modal with Escape, and assistive tech must
-  // announce it as a dialog. One handler on the shared Wrap covers every AuthPanel view.
+function Wrap({ onClose, children, msg, width = 360, title = "Account" }) {
+  const panelRef = useRef(null);
+  // Modal a11y (B530 + focus management): Escape-to-close, AND — because role=dialog /
+  // aria-modal do NOT actually trap focus in browsers — move focus INTO the dialog on
+  // open, TRAP Tab/Shift+Tab inside it, and RESTORE focus to the opener (the Sign-in
+  // pill) on close. One handler on the shared Wrap covers every AuthPanel view.
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose && onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const opener = document.activeElement;
+    const panel = panelRef.current;
+    const getFocusable = () => panel
+      ? Array.from(panel.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter((el) => el.offsetParent !== null)
+      : [];
+    const init = getFocusable();
+    (init.find((el) => el.tagName === "INPUT") || init[0] || panel)?.focus(); // focus in
+    const onKey = (e) => {
+      if (e.key === "Escape") { onClose && onClose(); return; }
+      if (e.key !== "Tab" || !panel) return;
+      const els = getFocusable();
+      if (!els.length) { e.preventDefault(); panel.focus(); return; }
+      const first = els[0], last = els[els.length - 1], active = document.activeElement;
+      if (e.shiftKey && (active === first || !panel.contains(active))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (active === last || !panel.contains(active))) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      try { opener && opener.focus && opener.focus(); } catch (_) { /* opener gone — fine */ }
+    };
   }, [onClose]);
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-      <div role="dialog" aria-modal="true" aria-label="Account" onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto" }}>
+      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto", outline: "none" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Account</h2>
-          <button onClick={onClose} style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close ✕</button>
+          <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>{title}</h2>
+          <button onClick={onClose} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close <span aria-hidden="true">✕</span></button>
         </div>
         {children}
-        {msg && <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.45, color: msg.type === "err" ? "#b91c1c" : "#15803d" }}>{msg.text}</div>}
+        {msg && <div role="alert" aria-live="assertive" style={{ marginTop: 10, fontSize: 12, lineHeight: 1.45, color: msg.type === "err" ? "var(--danger-text)" : "var(--success-text)" }}>{msg.text}</div>}
       </div>
     </div>
   );
@@ -102,16 +123,16 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
           <div style={{ fontSize: 12.5, color: PAL.muted }}>Signed in as</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: PAL.ink, wordBreak: "break-all", margin: "1px 0 12px" }}>{user?.email || "(no email)"}</div>
           <div style={{ display: "flex", gap: 6 }}>
-            <input autoComplete="given-name" placeholder="First name" value={first} onChange={edit(setFirst)} style={{ ...field, flex: 1, marginTop: 0 }} />
-            <input autoComplete="family-name" placeholder="Last name" value={last} onChange={edit(setLast)} style={{ ...field, flex: 1, marginTop: 0 }} />
+            <input aria-label="First name" autoComplete="given-name" placeholder="First name" value={first} onChange={edit(setFirst)} style={{ ...field, flex: 1, marginTop: 0 }} />
+            <input aria-label="Last name" autoComplete="family-name" placeholder="Last name" value={last} onChange={edit(setLast)} style={{ ...field, flex: 1, marginTop: 0 }} />
           </div>
-          <input autoComplete="organization" placeholder="Organization / company" value={org} onChange={edit(setOrg)} style={field} />
+          <input aria-label="Organization or company" autoComplete="organization" placeholder="Organization / company" value={org} onChange={edit(setOrg)} style={field} />
           <button style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy} onClick={saveProfile}>{busy ? "…" : "Save profile"}</button>
         </div>
       ) : (
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink }}>Change password</div>
-          <input type="password" autoComplete="new-password" placeholder="New password (min 6 characters)" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && pw.length >= 6) changePassword(); }} />
+          <input aria-label="New password" type="password" autoComplete="new-password" placeholder="New password (min 6 characters)" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter" && pw.length >= 6) changePassword(); }} />
           <button style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy || pw.length < 6} onClick={changePassword}>{busy ? "…" : "Update password"}</button>
           <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 14 }}>
             Your sites and reviews are saved to your account in the cloud and sync across your devices.
@@ -137,6 +158,11 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
   const [org, setOrg] = useState("");
   const [msg, setMsg] = useState(null); // { type: 'err'|'ok', text }
   const [busy, setBusy] = useState(false);
+
+  // `mode` seeds from `recovery` once at mount; if a reset link fires PASSWORD_RECOVERY
+  // while this panel is already open, sync into recovery mode so the set-password form
+  // shows (never resets a user's signin↔signup choice — only acts when recovery is true).
+  useEffect(() => { if (recovery) setMode("recovery"); }, [recovery]);
 
   const submit = async () => {
     setBusy(true); setMsg(null);
@@ -169,9 +195,9 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
   // Set-new-password (arrived from a reset link).
   if (mode === "recovery") {
     return (
-      <Wrap onClose={onClose} msg={msg}>
+      <Wrap onClose={onClose} msg={msg} title="Set a new password">
         <div style={{ fontSize: 13, color: PAL.ink, marginBottom: 2 }}>Set a new password</div>
-        <input type="password" autoComplete="new-password" placeholder="New password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
+        <input aria-label="New password" type="password" autoComplete="new-password" placeholder="New password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
         <button style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy || pw.length < 6} onClick={submit}>{busy ? "…" : "Update password"}</button>
       </Wrap>
     );
@@ -179,7 +205,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
 
   // Logged-out forms: signin / signup / reset.
   return (
-    <Wrap onClose={onClose} msg={msg}>
+    <Wrap onClose={onClose} msg={msg} title={mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Reset password"}>
       <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
         <button style={{ ...btn(mode === "signin"), flex: 1, padding: "7px 0" }} onClick={() => { setMode("signin"); setMsg(null); }}>Sign in</button>
         <button style={{ ...btn(mode === "signup"), flex: 1, padding: "7px 0" }} onClick={() => { setMode("signup"); setMsg(null); }}>Sign up</button>
@@ -187,15 +213,15 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
       {mode === "signup" && (
         <>
           <div style={{ display: "flex", gap: 6 }}>
-            <input autoComplete="given-name" placeholder="First name" value={first} onChange={(e) => setFirst(e.target.value)} style={{ ...field, flex: 1 }} />
-            <input autoComplete="family-name" placeholder="Last name" value={last} onChange={(e) => setLast(e.target.value)} style={{ ...field, flex: 1 }} />
+            <input aria-label="First name" autoComplete="given-name" placeholder="First name" value={first} onChange={(e) => setFirst(e.target.value)} style={{ ...field, flex: 1 }} />
+            <input aria-label="Last name" autoComplete="family-name" placeholder="Last name" value={last} onChange={(e) => setLast(e.target.value)} style={{ ...field, flex: 1 }} />
           </div>
-          <input autoComplete="organization" placeholder="Organization / company" value={org} onChange={(e) => setOrg(e.target.value)} style={field} />
+          <input aria-label="Organization or company" autoComplete="organization" placeholder="Organization / company" value={org} onChange={(e) => setOrg(e.target.value)} style={field} />
         </>
       )}
-      <input type="email" autoComplete="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} />
+      <input aria-label="Email" type="email" autoComplete="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} />
       {mode !== "reset" && (
-        <input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
+        <input aria-label="Password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
       )}
       <button data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy || !email || (mode !== "reset" && pw.length < 6)}
         onClick={submit}>{busy ? "…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>

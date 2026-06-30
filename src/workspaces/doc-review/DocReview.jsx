@@ -416,8 +416,17 @@ export default function DocReview({
       // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
       // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
       // mid-upload can't strand the backdrop with an unfetchable pointer (B323).
-      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then((r) => {
+      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then(async (r) => {
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s));
+        // B579: a GENUINE store failure (BOTH Drive and Supabase rejected it — not merely `oversize`, which
+        // still saves the work layer and flags the file "re-drop on load") leaves the source permanently
+        // keyless, so buildSnapshot persists sources:[] and the markups reload with NO backdrop. That used
+        // to be silent. Surface it — but only when signed in (logged-out is by-design local-only: the bytes
+        // are cached via cacheSourceBytes and the work layer still mirrors locally, so no cloud store is owed).
+        if (!r.ok && !r.oversize && (await cloudReady())) {
+          const m = "Couldn't save this PDF to the cloud — your markups might open without their drawing next time. Check your connection and drop the file again.";
+          setErr(m); setOpenErr(m);
+        }
       }).catch(() => {}); // best-effort store; a rejection mustn't become an unhandled rejection
     } catch (e) {
       // A read failure must surface on the always-visible banner too (the canvas may already show
