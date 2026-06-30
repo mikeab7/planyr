@@ -16,6 +16,15 @@
           if (navigator.webdriver) return; // never redirect automated browsers (e2e / ui-audit)
           var h = window.location.hash || "";
           if ((h && h !== "#") || /[?&]app\b/.test(window.location.search)) return; // explicit app entry
+          // Supabase auth callbacks (email confirmation, password recovery, magic link, OAuth,
+          // and error returns) come back to "/" with params on the QUERY string under the PKCE
+          // flow (?code=…, ?error=…&error_description=…); a brand-new user confirming their email
+          // has NO session yet, so without this they'd be bounced to /landing/ and the token lost.
+          // (Hash-based implicit callbacks like #access_token=… are already covered above.) Let the
+          // app boot so supabase-js can complete the exchange.
+          var qs = window.location.search || "";
+          if (/[?&](code|access_token|refresh_token|provider_token|error|error_code|error_description)=/.test(qs)
+              || /[?&]type=(recovery|signup|magiclink|invite|email_change)\b/.test(qs)) return;
           var returning = false;
           for (var i = 0; i < localStorage.length; i++) {
             var k = localStorage.key(i) || "";
