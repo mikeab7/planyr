@@ -57,6 +57,17 @@ const ferr = (code, detail) => new FormulaError(code, detail);
 // ── Value model ────────────────────────────────────────────────────────────────
 const BLANK = Object.freeze({ k: "blank" });
 const isBlank = v => v === BLANK || v === null || v === undefined;
+// An ERROR VALUE: a cell holding an already-determined error code. The engine never
+// produces one itself (it THROWS a FormulaError, surfaced as {ok:false}); the HOST writes
+// errVal(code) into a formula column's errored cells so that — exactly like Excel — any
+// aggregation or reference that CONSUMES that cell re-raises the error instead of silently
+// skipping it. (A #DIV/0! row therefore makes SUM over the whole column #DIV/0!, not a
+// quietly-smaller total.)
+const isErrVal = v => v != null && typeof v === "object" && v.k === "error";
+const errVal = code => ({ k: "error", code });
+// Re-raise a stored error value at the point of consumption (scalar coercion, comparison,
+// or a whole-column collector). A transparent no-op for every normal value.
+const raiseIfErr = v => { if (isErrVal(v)) throw ferr(v.code, "propagated error"); return v; };
 // JS Date is valid only within ±8.64e15 ms (≈ ±1e8 days from epoch); beyond that getUTC*() are NaN
 // and a date would serialize to "0NaN-NaN-NaN". Surface an out-of-range date result as #NUM! instead.
 const MAX_DATE_SERIAL = 100000000;
@@ -108,6 +119,7 @@ const MAX_WD_STEPS = 1_000_000;
 
 // ── Coercions ────────────────────────────────────────────────────────────────
 const toNumber = v => {
+  raiseIfErr(v);
   if (typeof v === "number") return v;
   if (typeof v === "boolean") return v ? 1 : 0;
   if (isDate(v)) return v.s;
@@ -126,6 +138,7 @@ const toNumber = v => {
   throw ferr(FORMULA_ERRORS.VALUE, "not a number");
 };
 const toStr = (v, ctx) => {
+  raiseIfErr(v);
   if (typeof v === "string") return v;
   if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
   if (typeof v === "number") return numToGeneralStr(v);
@@ -134,6 +147,7 @@ const toStr = (v, ctx) => {
   return String(v);
 };
 const toBool = v => {
+  raiseIfErr(v);
   if (typeof v === "boolean") return v;
   if (typeof v === "number") return v !== 0;
   if (isDate(v)) return v.s !== 0;
@@ -150,6 +164,7 @@ const toBool = v => {
 // yield BLANK so an empty [Start] in a date function gives an empty cell, not a
 // spurious 1900 date), or throws #VALUE! when it is genuinely non-date text.
 const toDateSerial = v => {
+  raiseIfErr(v);
   if (isDate(v)) return v.s;
   if (typeof v === "number") return Math.trunc(v);
   if (isBlank(v)) return null;
@@ -407,6 +422,7 @@ const TYPE_RANK = v => {
 const compareValues = (a, b) => {
   // Returns -1/0/1, or throws on incomparable. Numbers/dates/blank compare numerically;
   // strings compare case-insensitively; otherwise rank by type (number<text<bool).
+  raiseIfErr(a); raiseIfErr(b);   // comparing against an errored cell propagates the error
   // A blank cell equals the empty string "" (matches Excel + the engine's own ISBLANK("")→true), so the
   // everyday `[Date]=""` empty-test works; a blank sorts before any non-empty text.
   if (isBlank(a) && typeof b === "string") return b === "" ? 0 : -1;
@@ -437,9 +453,9 @@ const FUNCTIONS = {
   AVERAGE: { rng: (an, ctx, ev) => { need(an, 1, null, "AVERAGE"); const n = collectNums(an, ctx, ev); if (!n.length) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGE of no numbers"); return n.reduce((s, v) => s + v, 0) / n.length; } },
   COUNT:   { rng: (an, ctx, ev) => { need(an, 1, null, "COUNT"); return collectCountable(an, ctx, ev); } },
   COUNTA:  { rng: (an, ctx, ev) => { need(an, 1, null, "COUNTA"); return collectNonBlank(an, ctx, ev); } },
-  COUNTIF:   { rng: (an, ctx, ev) => { need(an, 2, 2, "COUNTIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); return range.filter(v => matchesCriteria(v, crit)).length; } },
-  SUMIF:     { rng: (an, ctx, ev) => { need(an, 2, 3, "SUMIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); const sumRange = an.length > 2 ? colArray(an[2], ctx) : range; let s = 0; range.forEach((v, i) => { if (matchesCriteria(v, crit)) { const x = sumRange[i]; if (typeof x === "number") s += x; else if (isDate(x)) s += x.s; } }); return s; } },
-  AVERAGEIF: { rng: (an, ctx, ev) => { need(an, 2, 3, "AVERAGEIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); const avgRange = an.length > 2 ? colArray(an[2], ctx) : range; let s = 0, c = 0; range.forEach((v, i) => { if (matchesCriteria(v, crit)) { const x = avgRange[i]; if (typeof x === "number") { s += x; c++; } else if (isDate(x)) { s += x.s; c++; } } }); if (!c) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGEIF: no matching numbers"); return s / c; } },
+  COUNTIF:   { rng: (an, ctx, ev) => { need(an, 2, 2, "COUNTIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); let c = 0; range.forEach(v => { raiseIfErr(v); if (matchesCriteria(v, crit)) c++; }); return c; } },
+  SUMIF:     { rng: (an, ctx, ev) => { need(an, 2, 3, "SUMIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); const sumRange = an.length > 2 ? colArray(an[2], ctx) : range; let s = 0; range.forEach((v, i) => { raiseIfErr(v); if (matchesCriteria(v, crit)) { const x = sumRange[i]; raiseIfErr(x); if (typeof x === "number") s += x; else if (isDate(x)) s += x.s; } }); return s; } },
+  AVERAGEIF: { rng: (an, ctx, ev) => { need(an, 2, 3, "AVERAGEIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); const avgRange = an.length > 2 ? colArray(an[2], ctx) : range; let s = 0, c = 0; range.forEach((v, i) => { raiseIfErr(v); if (matchesCriteria(v, crit)) { const x = avgRange[i]; raiseIfErr(x); if (typeof x === "number") { s += x; c++; } else if (isDate(x)) { s += x.s; c++; } } }); if (!c) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGEIF: no matching numbers"); return s / c; } },
 
   // ── Lookup (column-based; the modern XLOOKUP / INDEX+MATCH set) ──
   MATCH:   { rng: (an, ctx, ev) => { need(an, 2, 3, "MATCH"); const target = ev(an[0], ctx); const arr = colArray(an[1], ctx); const type = an.length > 2 ? Math.trunc(toNumber(ev(an[2], ctx))) : 1; return matchIndex(target, arr, type); } },
@@ -565,7 +581,7 @@ function colArray(node, ctx) {
     const cols = ctx.columns || {};
     if (!Object.prototype.hasOwnProperty.call(cols, key)) throw ferr(FORMULA_ERRORS.REF, `unknown column "${node.name}"`);
     const v = cols[key];
-    return [v === undefined ? BLANK : v];
+    return [v === undefined ? BLANK : raiseIfErr(v)];   // [@ErrCol] this-row read propagates
   }
   const rows = (ctx.rows && ctx.rows.length) ? ctx.rows : [ctx.columns || {}];
   // Existence check across the union of rows (not just row 0) so a ragged table
@@ -579,7 +595,7 @@ function colArray(node, ctx) {
 function collectNums(argNodes, ctx, ev) {
   const nums = [];
   argNodes.forEach(n => {
-    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { if (typeof v === "number") nums.push(v); else if (isDate(v)) nums.push(v.s); });
+    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { raiseIfErr(v); if (typeof v === "number") nums.push(v); else if (isDate(v)) nums.push(v.s); });
     else { const v = ev(n, ctx); if (isDate(v)) nums.push(v.s); else nums.push(toNumber(v)); }
   });
   return nums;
@@ -589,7 +605,7 @@ function collectNums(argNodes, ctx, ev) {
 // a raw serial number. A mix of dates and plain numbers yields a number (ambiguous).
 function collectNumsKind(argNodes, ctx, ev) {
   const nums = []; let any = false, allDates = true;
-  const take = v => { if (isDate(v)) { nums.push(v.s); any = true; } else if (typeof v === "number") { nums.push(v); allDates = false; } };
+  const take = v => { raiseIfErr(v); if (isDate(v)) { nums.push(v.s); any = true; } else if (typeof v === "number") { nums.push(v); allDates = false; } };
   argNodes.forEach(n => {
     if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(take);
     else { const v = ev(n, ctx); if (isDate(v)) { nums.push(v.s); any = true; } else { nums.push(toNumber(v)); allDates = false; } }
@@ -599,7 +615,7 @@ function collectNumsKind(argNodes, ctx, ev) {
 function collectCountable(argNodes, ctx, ev) { // COUNT — numbers only
   let c = 0;
   argNodes.forEach(n => {
-    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { if (typeof v === "number" || isDate(v)) c++; });
+    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { raiseIfErr(v); if (typeof v === "number" || isDate(v)) c++; });
     else { const v = ev(n, ctx); if (typeof v === "number" || isDate(v)) c++; else if (typeof v === "string") { try { toNumber(v); c++; } catch { /* non-numeric text isn't counted */ } } }
   });
   return c;
@@ -607,7 +623,7 @@ function collectCountable(argNodes, ctx, ev) { // COUNT — numbers only
 function collectNonBlank(argNodes, ctx, ev) { // COUNTA — anything non-blank
   let c = 0;
   argNodes.forEach(n => {
-    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { if (!isBlank(v) && v !== "") c++; });
+    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { raiseIfErr(v); if (!isBlank(v) && v !== "") c++; });
     else { const v = ev(n, ctx); if (!isBlank(v) && v !== "") c++; }
   });
   return c;
@@ -884,7 +900,7 @@ const evalNode = (node, ctx) => {
       const cols = ctx.columns || {};
       if (!Object.prototype.hasOwnProperty.call(cols, key)) throw ferr(FORMULA_ERRORS.REF, `unknown column "${node.name}"`);
       const v = cols[key];
-      return v === undefined ? BLANK : v;
+      return v === undefined ? BLANK : raiseIfErr(v);   // referencing an errored cell propagates its error
     }
     case "unary": {
       if (node.op === "+") return toNumber(evalNode(node.arg, ctx));
@@ -972,6 +988,9 @@ const evaluateFormula = (src, ctx) => {
   };
   try {
     const value = evalNode(parsed.ast, fullCtx);
+    // A formula whose final value IS an error cell (e.g. a bare INDEX/XLOOKUP that returned
+    // one) surfaces as {ok:false} with that code — never a "successful" error object.
+    if (isErrVal(value)) return { ok: false, error: value.code, detail: "propagated error" };
     // Backstop the "never return a non-finite number" contract (the call-boundary and
     // operator guards already cover the known paths; this catches any future one).
     if (typeof value === "number" && !Number.isFinite(value)) return { ok: false, error: FORMULA_ERRORS.NUM, detail: "result is not a finite number" };
@@ -987,6 +1006,7 @@ const evaluateFormula = (src, ctx) => {
 const formatValue = (value, opts) => {
   const o = opts || {};
   if (isFormulaError(value)) return value.code;
+  if (isErrVal(value)) return value.code;             // a stored error cell renders as its code
   if (isBlank(value)) return "";
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   if (isDate(value)) return (o.formatDate ? o.formatDate(value.s) : serialToISO(value.s));
@@ -1089,7 +1109,7 @@ const FUNCTION_NAMES = Object.keys(FUNCTIONS).sort();
 
 export {
   FORMULA_ERRORS, FormulaError, isFormulaError,
-  BLANK, isBlank, makeDate, isDate,
+  BLANK, isBlank, errVal, isErrVal, makeDate, isDate,
   isoToSerial, serialToISO, serialToYMD, ymdToSerial, weekdayOf, parseLooseDate,
   DEFAULT_CALENDAR,
   tokenize, parse, parseFormula, extractRefs,
