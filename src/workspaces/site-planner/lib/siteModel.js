@@ -16,8 +16,11 @@
  */
 
 import { dogEarGeom, dogEarSize, isDogEarSide } from "./dogEar.js";
+import { roadCenterline } from "./roadGeometry.js";
+import { bufferPolyline } from "./metesAndBounds.js";
+import { DEFAULT_ROAD_CLASS } from "./roadClasses.js";
 
-export const SITE_MODEL_VERSION = 9;
+export const SITE_MODEL_VERSION = 10;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
@@ -44,7 +47,8 @@ const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // so a record with NO explicit status is presumed live → "active". Records v3+ carry
 // an explicit status, so the version bump (→6 B276 delete-tombstones, →7 B362/B363
 // bump-out sizing + bonded-rotation repair, →8 team sharing teamId/ownerId, →9 cross-module
-// schedule link hint scheduleProjectId/Name) doesn't disturb it. (saveSite re-normalizes
+// schedule link hint scheduleProjectId/Name, →10 centerline road model B596 pts/vtx/
+// travelW/roadClass) doesn't disturb it. (saveSite re-normalizes
 // through this, so the status it reads back is the explicit one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
@@ -189,9 +193,10 @@ export function createSiteModel(p = {}) {
     // page,pageCount,intrinsic:{w,h},src(local raster dataURL),markups:[],createdAt,updatedAt}.
     parcelDrawings: arr(p.parcelDrawings),
     settings: obj(p.settings),
-    // drawn layout + shapes (kept flat; selectors classify markups). Bonded children are
-    // re-anchored to their host's angle (B363) — idempotent, only touches drifted records.
-    els: normalizeBondedRotations(Array.isArray(p.els) ? p.els : arr(p.elements)),
+    // drawn layout + shapes (kept flat; selectors classify markups). Legacy rect roads are
+    // upgraded to the centerline model (B596), then bonded children are re-anchored to their
+    // host's angle (B363) — both idempotent, only touching records that need it.
+    els: normalizeBondedRotations(migrateRoads(Array.isArray(p.els) ? p.els : arr(p.elements))),
     markups: arr(p.markups),
     measures: arr(p.measures),
     callouts: arr(p.callouts),
@@ -323,6 +328,64 @@ export const buildingNumbers = (els) => {
 // Derived live from w/h so a road's dimension callout always tracks a resize — it used to
 // read a frozen `travelW` snapshot that went stale when the road was dragged bigger.
 export const roadTravelWidth = (w, h, curb) => Math.max(0, Math.min(w, h) - 2 * curb);
+
+/* ---- Centerline road model (B596 / NEW-1) ----
+ * A road evolves from a rotated rectangle to a CENTERLINE polyline:
+ *   { type:"road", pts:[{x,y}…], travelW, curb, roadClass, vtx:[{treatment,radius?}…] }
+ * The surface, curbs and dimension all derive from `pts` (B598); per-vertex curve
+ * treatments come from `vtx` (B597). A 2-point road is the old straight road. */
+
+// Endpoints A/B of a legacy rotated-rect road from its cx,cy,w,h,rot. The LONG axis
+// (max(w,h)) is the centerline; the cross axis carries travelW + a curb each side. So a
+// migrated straight road's centerline is exactly the old rectangle's midline.
+export function rectRoadEndpoints(el) {
+  const w = +el.w || 0, h = +el.h || 0;
+  const rot = ((+el.rot || 0) * Math.PI) / 180;
+  const lengthAlongW = w >= h;                       // which axis is the road's length
+  const halfLen = (lengthAlongW ? w : h) / 2;
+  const ang = lengthAlongW ? rot : rot + Math.PI / 2; // direction of the length axis
+  const dx = Math.cos(ang) * halfLen, dy = Math.sin(ang) * halfLen;
+  return [{ x: el.cx - dx, y: el.cy - dy }, { x: el.cx + dx, y: el.cy + dy }];
+}
+
+// AABB (rot:0) bounding box of a centerline road's strip, kept synced on the element so
+// every GENERIC geometry consumer (zoom-to-fit, flush-snap, group bbox, ring tests) keeps
+// working unchanged — while the road-specific render/area/handles read `pts`. The box is
+// the AABB of the actual pavement+curb strip ring (bufferPolyline of the tessellated
+// centerline at travelW + 2 curbs), so a straight road's box is tight (== the old rect).
+export function roadStripBBox(pts, vtx, travelW, curb, opts = {}) {
+  const dense = roadCenterline(pts, vtx, opts);
+  if (!dense.length) return { cx: 0, cy: 0, w: 1, h: 1, rot: 0 };
+  const ring = bufferPolyline(dense, Math.max(0, (+travelW || 0) + 2 * (+curb || 0))) || dense;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of ring) {
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+  }
+  return {
+    cx: (minX + maxX) / 2, cy: (minY + maxY) / 2,
+    w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY), rot: 0,
+  };
+}
+
+// Convert a legacy rotated-rect road into the centerline model. Idempotent (skips a road
+// that already carries `pts`) and additive (keeps cx/cy/w/h/rot as the tight bbox of the
+// straight road, so it renders identically). A BONDED dock-layer road (attachedTo set) is
+// left as a rect — the relayout engine still owns its geometry.
+function migrateRoad(el) {
+  if (!el || el.type !== "road" || el.attachedTo != null) return el;
+  if (Array.isArray(el.pts) && el.pts.length >= 2) return el; // already a centerline
+  if (!Number.isFinite(el.cx) || !Number.isFinite(el.cy) ||
+      !Number.isFinite(el.w) || !Number.isFinite(el.h)) return el;
+  const curb = Number.isFinite(el.curb) ? el.curb : 0.5;
+  const travelW = Math.max(1, roadTravelWidth(el.w, el.h, curb));
+  return { ...el, pts: rectRoadEndpoints(el), vtx: [], travelW, curb, roadClass: el.roadClass || DEFAULT_ROAD_CLASS };
+}
+function migrateRoads(els) {
+  let changed = false;
+  const out = (els || []).map((e) => { const m = migrateRoad(e); if (m !== e) changed = true; return m; });
+  return changed ? out : (els || []);
+}
 // Placed site-plan overlays (B72) — immutable backdrop sheets over the map.
 export const sheetOverlaysOf = (m) => m.sheetOverlays || [];
 // Parcel-attached drawings (B67) — immutable backdrop + pixel-relative markup, per parcel.

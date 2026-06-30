@@ -47,14 +47,16 @@ import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
-import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot } from "./lib/siteModel.js";
+import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints } from "./lib/siteModel.js";
+import { roadCenterline, roadMinRadius } from "./lib/roadGeometry.js";
+import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
@@ -186,7 +188,7 @@ const TOOLS = [
   { id: "parking", label: "Car Parking", hint: "Pick a row preset from Car Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
   { id: "trailer", label: "Trailer Parking", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Detention Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
-  { id: "road", label: "Road", hint: "Pick a width and click two points to lay a road at any angle; Free draw to drag a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
+  { id: "road", label: "Road", hint: "Pick a width, then click to drop centerline points — Enter or double-click to finish, Backspace to undo a point, Esc to cancel. Curve each vertex sharp / arc / smooth in the panel. Free draw still drags a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
   { id: "easement", label: "Easement", hint: "Draw an easement (Easement ▾ for mode). Centerline+width: click a path, double-click/Enter to finish — it builds a strip of the set width. Boundary: click points, close on the first dot. Offset from parcel edge: click a parcel's edges then Enter. Edit attributes (type/holder/width…) in the Element panel; width re-offsets the strip live" },
   { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Length (two-point distance), Polylength (click a path, double-click / Enter to finish), Area (outline a region, click the first dot or double-click to close), or Count (click to mark items, Enter to finish)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
@@ -654,6 +656,63 @@ function curbEdgesOf(el, allEls) {
 // Plan-view area of an element's curbs (counts in the SF / impervious math).
 const curbAreaOf = (el, allEls) => (el.points ? 0 : curbEdgesOf(el, allEls).reduce((s, e) => s + e.length * e.width, 0));
 
+/* ---- Centerline road geometry (B596–B598 / NEW-1..3) ----
+ * A centerline road carries pts + per-vertex treatment (vtx) + travelW + curb + roadClass.
+ * Its surface, curbs and dimension all DERIVE from these via roadCenterline (B597) fed
+ * through the shared bufferPolyline / offsetPolyline offset primitives (B598) — no new
+ * geometry dependency. The legacy rotated-rect road (no `pts`) keeps the old render. */
+const isCenterlineRoad = (el) => !!el && el.type === "road" && Array.isArray(el.pts) && el.pts.length >= 2;
+const roadCurbWidth = (el) => (Number.isFinite(el && el.curb) ? el.curb : CURB);
+// Default Arc radius for a road's new vertices = its class default (settings-resolved).
+const roadDefaultRadius = (el, settings) => classDefaultRadius(roadClassOf(settings, el && el.roadClass));
+// The dense, tessellated centerline (the rendered alignment) for a centerline road.
+const roadDenseCenterline = (el, settings) => roadCenterline(el.pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings) });
+// The pavement+curb OUTER ring (closed polygon) — total width = travelW + a curb each side.
+const roadStripRing = (el, settings) => {
+  const dense = roadDenseCenterline(el, settings);
+  return bufferPolyline(dense, Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el))) || [];
+};
+// The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
+const roadCurbLines = (el, settings) => {
+  const dense = roadDenseCenterline(el, settings);
+  const hw = Math.max(0, (+el.travelW || 0) / 2);
+  return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
+};
+// Plan-view paved area (sf) of a centerline road = its generated strip polygon area
+// (replaces the old w×h — the curbs are included, matching the B70 three-way contract).
+const roadStripArea = (el, settings) => {
+  const ring = roadStripRing(el, settings);
+  return ring.length >= 3 ? Math.abs(polyArea(ring)) : 0;
+};
+// True length (ft) of a centerline road = its tessellated centerline length.
+const roadCenterlineLength = (el, settings) => {
+  const dense = roadDenseCenterline(el, settings);
+  let L = 0;
+  for (let i = 1; i < dense.length; i++) L += Math.hypot(dense[i].x - dense[i - 1].x, dense[i].y - dense[i - 1].y);
+  return L;
+};
+// Rigidly shift an element by (dx,dy). A centerline road carries BOTH a `pts` alignment and a
+// synced `cx/cy` bbox, so move both; a polygon element moves its `points`; a rect element moves
+// its centre. One road-aware translate used by nudge / move / group-move (B596).
+const shiftEl = (el, dx, dy) => isCenterlineRoad(el)
+  ? { ...el, pts: el.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })), cx: el.cx + dx, cy: el.cy + dy }
+  : el.points
+    ? { ...el, points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
+    : { ...el, cx: el.cx + dx, cy: el.cy + dy };
+// Non-blocking civil min-radius check (B599/NEW-4): the road's TIGHTEST radius of curvature
+// anywhere along its tessellated centerline vs. its class threshold. Pure; returns null when
+// the class carries no threshold (Custom) or the alignment is within spec — so a straight or
+// gently-curved road never warns. Works uniformly for arc fillets and traced/smooth runs.
+function roadRadiusStatus(el, settings) {
+  if (!isCenterlineRoad(el)) return null;
+  const cls = roadClassOf(settings, el.roadClass);
+  const threshold = classMinRadius(cls);
+  if (!(threshold > 0)) return null;
+  const minR = roadMinRadius(el.pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings) });
+  if (!Number.isFinite(minR) || minR >= threshold) return null;
+  return { minR, threshold, label: cls.label };
+}
+
 /* ----------------------- geometry helpers -------------------------- */
 // Parcel split geometry (straight + bent cuts) lives in lib/polygonSplit.js, imported above.
 // Closest point on segment a-b to point p (used for snapping to a boundary).
@@ -986,8 +1045,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
   const [draftRect, setDraftRect] = useState(null);  // {type, x,y,w,h} feet
   const [draftElPoly, setDraftElPoly] = useState(null); // {type, pts:[{x,y}]} polygon element being drawn
-  const [roadStart, setRoadStart] = useState(null);  // first click of a fixed-width road centerline
-  const [draftRoad, setDraftRoad] = useState(null);  // {ax,ay,bx,by,cross} live road preview
+  const [draftRoadPts, setDraftRoadPts] = useState(null); // [{x,y}…] in-progress centerline road (B596/NEW-1)
+  const [roadVtxSel, setRoadVtxSel] = useState(null); // {id, idx} selected road vertex (panel: flip treatment, B597)
   const [measDraft, setMeasDraft] = useState([]);    // in-progress measure vertices
   const [measureMode, setMeasureMode] = useState(() => lsGet("measureMode", "line"));
   const [measureMenu, setMeasureMenu] = useState(false);  // Measure ▾ dropdown open
@@ -2070,7 +2129,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
@@ -2080,7 +2139,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
 
   // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
@@ -2135,12 +2194,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const elIds = new Set(); multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
       const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
       const measIds = new Set(multi.filter((m) => m.kind === "measure").map((m) => m.id));
-      setEls((a) => a.map((el) => elIds.has(el.id) ? (el.points ? { ...el, points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: el.cx + dx, cy: el.cy + dy }) : el));
+      setEls((a) => a.map((el) => elIds.has(el.id) ? shiftEl(el, dx, dy) : el));
       setMarkups((a) => a.map((m) => mkIds.has(m.id) ? translateMarkup(m, dx, dy) : m));
       if (measIds.size) setMeasures((a) => a.map((m) => measIds.has(m.id) ? translateMeasure(m, dx, dy) : m)); // B569
     } else if (sel?.kind === "el") {
       const ids = new Set(assemblyOf(sel.id).map((x) => x.id));
-      setEls((a) => a.map((el) => ids.has(el.id) ? (el.points ? { ...el, points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: el.cx + dx, cy: el.cy + dy }) : el));
+      setEls((a) => a.map((el) => ids.has(el.id) ? shiftEl(el, dx, dy) : el));
     }
   };
   // Copy / cut / paste the selected element (rectangles or polygons).
@@ -2153,16 +2212,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let el;
     if (anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
       const a = snapPt(anchor);            // honor the grid/snap toggle (held-Alt bypasses, same as a drag)
-      if (src.points) {
+      if (isCenterlineRoad(src)) {
+        el = { ...shiftEl(src, a.x - src.cx, a.y - src.cy), id: uid() }; // road: bbox centre under the cursor (pts move too)
+      } else if (src.points) {
         el = { ...src, id: uid(), points: centerOn(src.points, a) }; // polygon: bbox center sits under the cursor
       } else {
         el = { ...src, id: uid(), cx: a.x, cy: a.y }; // a rect's cx/cy IS its center
       }
     } else {
       const off = (settings.gridSize || 10) * 2; // fallback (no pointer seen yet): the old fixed nudge — never a no-op
-      el = src.points
-        ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
-        : { ...src, id: uid(), cx: src.cx + off, cy: src.cy + off };
+      el = isCenterlineRoad(src)
+        ? { ...shiftEl(src, off, off), id: uid() }
+        : src.points
+          ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
+          : { ...src, id: uid(), cx: src.cx + off, cy: src.cy + off };
     }
     pushHistory();
     setEls((a) => [...a, el]);
@@ -2174,9 +2237,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!src) return;
     const rest = detachClone(src);
     const off = settings.gridSize || 10;
-    const el = rest.points
-      ? { ...rest, id: uid(), points: rest.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
-      : { ...rest, id: uid(), cx: rest.cx + off, cy: rest.cy + off };
+    const el = isCenterlineRoad(rest)
+      ? { ...shiftEl(rest, off, off), id: uid() }
+      : rest.points
+        ? { ...rest, id: uid(), points: rest.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
+        : { ...rest, id: uid(), cx: rest.cx + off, cy: rest.cy + off };
     pushHistory();
     setEls((a) => [...a, el]);
     setSel({ kind: "el", id: el.id });
@@ -2447,24 +2512,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         setDraftElPoly((d) => ({ ...d, pts: [...d.pts, sp] }));
         return;
       }
-      // Fixed-width road: two clicks lay a centerline at any angle (no drag).
+      // Centerline road (B596/NEW-1): click to drop centerline points; Enter or double-click
+      // finishes (shared finishActiveDrawing), Backspace removes the last point, Esc cancels.
+      // A 2-point road is the old straight road. Honors snap + Shift-45 like the poly tools.
       if (tool === "road" && roadWidth !== "free") {
-        if (!roadStart) { setRoadStart(sp); return; }
-        const A = roadStart, B = sp, len = Math.hypot(B.x - A.x, B.y - A.y);
-        if (len >= 4) {
-          const curb = +settings.roadCurb || CURB;
-          const cross = +roadWidth + 2 * curb;
-          let rot = Math.atan2(B.y - A.y, B.x - A.x) * 180 / Math.PI;
-          if (e.shiftKey) rot = Math.round(rot / 45) * 45;
-          pushHistory();
-          // Keep the length axis (w) ≥ the cross axis (h): curb render / resize / roadTravel
-          // infer the cross from min(w,h), so a road drawn shorter than it is wide swapped axes (B61).
-          const el = { id: uid(), type: "road", cx: (A.x + B.x) / 2, cy: (A.y + B.y) / 2, w: Math.max(len, cross), h: cross, rot, travelW: +roadWidth, curb };
-          setEls((a) => [...a, el]);
-          setSel({ kind: "el", id: el.id });
-          setTool("select");
-        }
-        setRoadStart(null); setDraftRoad(null);
+        const prev = draftRoadPts && draftRoadPts.length ? draftRoadPts[draftRoadPts.length - 1] : null;
+        const pt = e.shiftKey && prev ? snapPt(snap45(prev, fp)) : sp;
+        setDraftRoadPts((a) => [...(a || []), pt]);
         return;
       }
       pushHistory();
@@ -2716,7 +2770,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const mkIds = new Set(refs.filter((m) => m.kind === "markup").map((m) => m.id));
     const measIds = new Set(refs.filter((m) => m.kind === "measure").map((m) => m.id));
     const orig = {
-      els: els.filter((x) => elIds.has(x.id)).map((x) => x.points ? { id: x.id, points: x.points } : { id: x.id, cx: x.cx, cy: x.cy }),
+      els: els.filter((x) => elIds.has(x.id)).map((x) => isCenterlineRoad(x) ? { id: x.id, pts: x.pts, cx: x.cx, cy: x.cy } : x.points ? { id: x.id, points: x.points } : { id: x.id, cx: x.cx, cy: x.cy }),
       markups: markups.filter((m) => mkIds.has(m.id)).map((m) => ({ ...m })),
       measures: measures.filter((m) => measIds.has(m.id)).map((m) => ({ ...m })), // B569: measurements move with the set
     };
@@ -3002,10 +3056,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fp = p2f(e.clientX, e.clientY);
     lastPtrFt.current = fp; // remember the live cursor in feet so a paste lands here (B417); ref-only — no setState in this hot path
     setCursor(fp);
-    if (roadStart && tool === "road" && roadWidth !== "free") { // live fixed-width road preview
-      const B = snapPt(fp), A = roadStart, curb = +settings.roadCurb || CURB;
-      setDraftRoad({ ax: A.x, ay: A.y, bx: B.x, by: B.y, cross: +roadWidth + 2 * curb });
-    }
+    // (Centerline-road preview renders from draftRoadPts + the live cursor — no per-move state.)
     // Click-to-finish for line/rect/ellipse: the anchored shape tracks the cursor between the first
     // and second click (no button held, so there's no drag.current to drive it).
     if (mkRect && mkRect.pending) {
@@ -3043,7 +3094,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B592: only the length-axis component slides; the perpendicular (depth) component is dropped
       // and the slide is clamped to the valid band — so the line stays on the shape, off any bump-out.
       const next = { x: d.base.x + loc.x, y: d.base.y + loc.y };
-      const off = clampDimOffset(next, d.range);
+      const off = d.range ? clampDimOffset(next, d.range) : next; // centerline road = free 2-D offset (B596)
       setEls((a) => a.map((x) => x.id === d.id ? { ...x, dimOffset: off } : x));
       return;
     }
@@ -3084,7 +3135,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "groupMove") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       const eids = new Set(d.orig.els.map((o) => o.id)), mids = new Set(d.orig.markups.map((o) => o.id));
-      setEls((a) => a.map((el) => { if (!eids.has(el.id)) return el; const o = d.orig.els.find((x) => x.id === el.id); return o.points ? { ...el, points: o.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: o.cx + dx, cy: o.cy + dy }; }));
+      setEls((a) => a.map((el) => { if (!eids.has(el.id)) return el; const o = d.orig.els.find((x) => x.id === el.id); return o.pts ? { ...el, pts: o.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })), cx: o.cx + dx, cy: o.cy + dy } : o.points ? { ...el, points: o.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: o.cx + dx, cy: o.cy + dy }; }));
       setMarkups((a) => a.map((m) => { if (!mids.has(m.id)) return m; const o = d.orig.markups.find((x) => x.id === m.id); return translateMarkup(o, dx, dy); }));
       if (d.orig.measures?.length) { // B569: measurements travel with the set
         const sids = new Set(d.orig.measures.map((o) => o.id));
@@ -3132,6 +3183,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let rot = d.rot0 + (Math.atan2(fp.y - d.pivot.y, fp.x - d.pivot.x) - d.a0) * 180 / Math.PI;
       rot = snapOn ? Math.round(rot / 15) * 15 : Math.round(rot);
       setMarkups((a) => a.map((m) => m.id === d.id ? { ...m, rot: ((rot % 360) + 360) % 360 } : m));
+      return;
+    }
+    if (d.mode === "roadVtx") { // drag one vertex of a centerline road (B596/B597)
+      const el = els.find((x) => x.id === d.id);
+      if (!el || !isCenterlineRoad(el)) return;
+      const ref = d.idx > 0 ? el.pts[d.idx - 1] : el.pts[d.idx + 1]; // 45°-lock against the neighbour
+      const P = e.shiftKey && ref ? snapPt(snap45(ref, fp)) : snapPt(fp);
+      setEls((arr) => arr.map((x) => {
+        if (x.id !== d.id || !isCenterlineRoad(x)) return x;
+        return reRoad({ ...x, pts: x.pts.map((p, i) => (i === d.idx ? P : p)) });
+      }));
       return;
     }
     if (d.mode === "roadEnd") { // drag a road end: pivot on the fixed end → new angle + length, width kept
@@ -3193,6 +3255,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         setEls((a) => a.map((el) => {
           const m = d.members.find((x) => x.id === el.id);
           if (!m) return el;
+          if (m.pts) return { ...el, pts: m.pts.map((p) => ({ x: p.x + effDx, y: p.y + effDy })), cx: m.cx + effDx, cy: m.cy + effDy };
           if (m.points) return { ...el, points: m.points.map((p) => ({ x: p.x + effDx, y: p.y + effDy })) };
           return { ...el, cx: m.cx + effDx, cy: m.cy + effDy };
         }));
@@ -3380,6 +3443,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (strandedIds.length) { setEls((a) => a.filter((x) => !strandedIds.includes(x.id))); tombstone(strandedIds); } // B556 — tombstone the pruned apron so it stays gone + doesn't trip the thin-clobber guard
       }
     }
+    // Civil min-radius check on edit (B599/NEW-4): a vertex drag that tightened a curve below the
+    // class threshold warns loudly on release (never blocks). The persistent ⚠ lives in the panel.
+    if (d && d.mode === "roadVtx") {
+      const r = els.find((x) => x.id === d.id);
+      const stt = r && roadRadiusStatus(r, settings);
+      if (stt) flashWarn(`⚠ ${f0(stt.minR)}′ radius — below ${f0(stt.threshold)}′ min for ${stt.label}`, 6000);
+    }
     drag.current = null;
     setPanning(false);
     capturePidRef.current = null;
@@ -3410,6 +3480,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDraftElPoly(null);
     setTool("select");
   };
+  // Commit the in-progress centerline road (B596/NEW-1). Dedupes coincident points (a
+  // finishing double-click can drop the last point twice), defaults each INTERIOR vertex to
+  // an Arc at the class default radius, stores the synced strip bbox, and single-step undoes.
+  const finishRoad = () => {
+    const raw = (draftRoadPts || []).filter((p, i, a) => i === 0 || Math.hypot(p.x - a[i - 1].x, p.y - a[i - 1].y) > 0.5);
+    if (raw.length < 2) { setDraftRoadPts(null); return; }
+    const curb = +settings.roadCurb || CURB;
+    const travelW = roadWidth !== "free" && +roadWidth > 0 ? +roadWidth : 24;
+    const roadClass = DEFAULT_ROAD_CLASS;
+    const defR = classDefaultRadius(roadClassOf(settings, roadClass));
+    const vtx = raw.map((_, i) => (i === 0 || i === raw.length - 1) ? {} : { treatment: "arc", radius: defR });
+    const bbox = roadStripBBox(raw, vtx, travelW, curb, { defaultRadius: defR });
+    const el = { id: uid(), type: "road", pts: raw, vtx, travelW, curb, roadClass, ...bbox };
+    pushHistory();
+    setEls((a) => [...a, el]);
+    setSel({ kind: "el", id: el.id });
+    setDraftRoadPts(null);
+    setTool("select");
+    const st = roadRadiusStatus(el, settings); // B599/NEW-4: warn loudly on commit, never block
+    if (st) flashWarn(`⚠ ${f0(st.minR)}′ radius — below ${f0(st.threshold)}′ min for ${st.label}`, 7000);
+  };
   // One shared completion path for EVERY multi-point tool, used by BOTH Enter and double-click,
   // so "finish / auto-close" behaves identically everywhere. Each finisher guards its own minimum
   // point count, so this no-ops (rather than cancelling the draft) when there aren't enough yet.
@@ -3421,6 +3512,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
     if (tool === "parcel" && draftPoly?.length >= 3) { closePoly(); return true; }
     if (draftElPoly?.pts?.length >= 3) { closeElPoly(); return true; } // any area element drawn as a polygon
+    if (tool === "road" && draftRoadPts?.length >= 2) { finishRoad(); return true; } // centerline road (B596)
     if (tool === "easement" && easeMode === "parceledge" && easeEdges?.idx?.length) { finishEaseEdges(); return true; }
     if (tool === "easement" && easeDraft?.pts?.length >= (easeMode === "boundary" ? 3 : 2)) { finishEaseDraft(); return true; }
     return false;
@@ -3434,6 +3526,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (mkPoly?.pts?.length) { setMkPoly((m) => { const pts = m.pts.slice(0, -1); return pts.length ? { ...m, pts } : null; }); return true; }
     if (draftPoly?.length) { setDraftPoly((a) => { const n = a.slice(0, -1); return n.length ? n : null; }); return true; }
     if (draftElPoly?.pts?.length) { setDraftElPoly((d) => { const pts = d.pts.slice(0, -1); return pts.length ? { ...d, pts } : null; }); return true; }
+    if (draftRoadPts?.length) { setDraftRoadPts((a) => { const n = a.slice(0, -1); return n.length ? n : null; }); return true; } // centerline road (B596)
     if (easeDraft?.pts?.length) { setEaseDraft((d) => { const pts = d.pts.slice(0, -1); return pts.length ? { pts } : null; }); return true; }
     return false;
   };
@@ -4558,9 +4651,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "el", id });
     pushHistory();
     // Snapshot every member of the assembly (attachedTo children) so they move together.
-    const members = assemblyOf(id).map((m) => m.points
-      ? { id: m.id, points: m.points }
-      : { id: m.id, cx: m.cx, cy: m.cy, w: m.w, h: m.h });
+    const members = assemblyOf(id).map((m) => isCenterlineRoad(m)
+      ? { id: m.id, pts: m.pts, cx: m.cx, cy: m.cy }
+      : m.points
+        ? { id: m.id, points: m.points }
+        : { id: m.id, cx: m.cx, cy: m.cy, w: m.w, h: m.h });
     drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
@@ -4648,7 +4743,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const alignToElement = (target) => {
     const el = els.find((x) => x.id === alignFor);
     setAlignFor(null);
-    if (!el || el.points || !target || target.id === el.id) return;
+    // A centerline road has no single rotation (it's a polyline), so "align parallel" doesn't apply
+    // to it as either the source or the target — skip rather than spin its (unused) bbox rot.
+    if (!el || el.points || isCenterlineRoad(el) || !target || target.id === el.id || isCenterlineRoad(target)) return;
     const ang = target.points ? null : (target.rot || 0);
     if (ang == null) return; // polygon target has no single rotation
     rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
@@ -4713,7 +4810,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!el) return;
     setSel({ kind: "el", id });
     pushHistory();
-    drag.current = { mode: "dimMove", id, start: p2f(e.clientX, e.clientY), base: el.dimOffset || { x: 0, y: 0 }, rot: el.rot || 0, range: dimSlideFor(el, els) };
+    // A centerline road's dimension drags FREELY (a dashed leader bridges back to the
+    // centerline midpoint) — its alignment isn't a single rotated rect to slide along.
+    drag.current = { mode: "dimMove", id, start: p2f(e.clientX, e.clientY), base: el.dimOffset || { x: 0, y: 0 }, rot: el.rot || 0, range: isCenterlineRoad(el) ? null : dimSlideFor(el, els) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   // NEW-3: start dragging a parcel's acreage chip; offset is kept in parcel-local feet
@@ -4790,6 +4889,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "roadEnd", id, fixed };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // Drag one VERTEX of a centerline road (B596/B597); also selects it so the panel can flip its
+  // treatment. Shift = 45° lock relative to the adjacent vertex; the strip bbox re-syncs live.
+  const startRoadVtx = (e, id, idx) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    if (!el || !isCenterlineRoad(el)) return;
+    setSel({ kind: "el", id });
+    setRoadVtxSel({ id, idx });
+    pushHistory();
+    drag.current = { mode: "roadVtx", id, idx };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
   // Double-click an element: if it's in a group, "drill in" to edit just that member in
   // place (without ungrouping, B261). Otherwise open its actions menu (dock/sidewalk/…).
   const onElDouble = (e, id) => {
@@ -4837,8 +4949,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
   els.forEach((e) => {
-    const a = e.points ? polyArea(e.points) : e.w * e.h;
-    const curb = curbAreaOf(e, els); // derived curbs count in the SF / impervious math (0 for non-paved types)
+    const a = isCenterlineRoad(e) ? roadStripArea(e, settings) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598)
+    const curb = curbAreaOf(e, els); // derived curbs count in the SF / impervious math (0 for non-paved types; a road's curb is already inside its strip area)
     if (e.type === "building") {
       bldg += a;
       if (e.dogEar) {
@@ -6083,9 +6195,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
     const cpx0 = f2p({ x: el.cx, y: el.cy });
-    // A ROAD is a two-point object: show a draggable END grip at each end (drag → change the road's
-    // angle AND length in one move, pivoting on the other end — owner request) plus the two WIDTH
-    // grips. No corners / rotate handle — the endpoints make a separate rotate unnecessary.
+    // A CENTERLINE road (B596/B597): a draggable handle at each clicked vertex. Drag to reshape
+    // the alignment (Shift = 45° lock); click a handle to SELECT that vertex, then flip it
+    // sharp / arc / smooth in the Element panel. Interior handles are hollow→filled when selected.
+    if (isCenterlineRoad(el)) {
+      return (
+        <g>
+          {el.pts.map((p, i) => {
+            const m = f2p(p);
+            const isEnd = i === 0 || i === el.pts.length - 1;
+            const selected = roadVtxSel && roadVtxSel.id === el.id && roadVtxSel.idx === i;
+            return (
+              <circle key={`rv${i}`} cx={m.x} cy={m.y} r={isEnd ? 6 : 5.5}
+                fill={selected ? PAL.accent : PAL.paper} stroke={PAL.accent} strokeWidth={1.75}
+                style={{ cursor: "grab" }} onPointerDown={(e) => startRoadVtx(e, el.id, i)}>
+                <title>{isEnd ? "Drag to move this end" : "Drag to move · select it in the panel to set sharp / arc / smooth"}</title>
+              </circle>
+            );
+          })}
+        </g>
+      );
+    }
+    // A legacy (bonded dock-layer) rect road: keep the draggable END grip at each end (drag →
+    // change angle AND length, pivoting on the other end) plus the two WIDTH grips.
     if (el.type === "road") {
       const [A, B] = roadEndsF(el).map(f2p);
       return (
@@ -6326,7 +6458,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const selectTool = (id) => {
     setTool(id);
     setParcelMode("add"); // B598 — always (re)enter the Parcel tool in Draw mode, never a stale Remove
-    setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
+    setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
     if (id !== "easement") { setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); }
     if (id !== "select") setMulti([]);
     if (id !== "select") setCombineSel([]); // merge selection only lives in the Select tool
@@ -6629,25 +6761,64 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (hc) clampToHost(nb, hc);
     setEls((a) => refitChildren(a, selEl.id, nb, kids));
   };
-  // Road travel width = element cross-width − two curbs. Editing it keeps the curb.
+  // Re-sync a centerline road's stored strip bbox (cx/cy/w/h/rot) after a pts/travelW/curb/
+  // class change, so every generic geometry consumer (fit, snap, group bbox) stays correct.
+  const reRoad = (road) => {
+    if (!isCenterlineRoad(road)) return road;
+    const bbox = roadStripBBox(road.pts, road.vtx, road.travelW, roadCurbOf(road), { defaultRadius: roadDefaultRadius(road, settings) });
+    return { ...road, ...bbox };
+  };
+  // Road travel width: a centerline road carries `travelW` directly; a legacy rect road
+  // derives it live from its cross-width minus a curb each side. Editing it keeps the curb.
   const roadCurbOf = (el) => el.curb ?? (+settings.roadCurb || CURB);
-  const roadTravel = (el) => roadTravelWidth(el.w, el.h, roadCurbOf(el)); // live geometry — tracks resizes (not a frozen travelW)
+  const roadTravel = (el) => isCenterlineRoad(el) ? Math.max(0, +el.travelW || 0) : roadTravelWidth(el.w, el.h, roadCurbOf(el));
   const setRoadTravel = (el, travel) => {
-    const curb = roadCurbOf(el), cross = Math.max(1, travel) + 2 * curb, crossIsH = el.h <= el.w;
     pushHistory();
-    setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { h: cross } : { w: cross }), travelW: Math.max(1, travel), curb } : x));
+    const t = Math.max(1, travel);
+    if (isCenterlineRoad(el)) { setEls((a) => a.map((x) => x.id === el.id ? reRoad({ ...x, travelW: t }) : x)); return; }
+    const curb = roadCurbOf(el), cross = t + 2 * curb, crossIsH = el.h <= el.w;
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { h: cross } : { w: cross }), travelW: t, curb } : x));
   };
   const setRoadLength = (el, len) => {
-    const crossIsH = el.h <= el.w; // the length axis is the other one
     pushHistory();
-    setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { w: Math.max(1, len) } : { h: Math.max(1, len) }) } : x));
+    const L = Math.max(1, len);
+    if (isCenterlineRoad(el)) {
+      setEls((a) => a.map((x) => {
+        if (x.id !== el.id || !isCenterlineRoad(x)) return x;
+        const cur = roadCenterlineLength(x, settings);
+        if (!(cur > 0)) return x;
+        const s = L / cur;
+        const cx = x.pts.reduce((p, q) => p + q.x, 0) / x.pts.length;
+        const cy = x.pts.reduce((p, q) => p + q.y, 0) / x.pts.length;
+        const pts = x.pts.map((p) => ({ x: cx + (p.x - cx) * s, y: cy + (p.y - cy) * s }));
+        return reRoad({ ...x, pts });
+      }));
+      return;
+    }
+    const crossIsH = el.h <= el.w; // the length axis is the other one
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { w: L } : { h: L }) } : x));
+  };
+  // Road class (B599/NEW-4) — the arc default radius can change, so re-sync the bbox.
+  const setRoadClass = (el, key) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? reRoad({ ...x, roadClass: key }) : x)); };
+  // Per-vertex curve treatment / radius (B597/NEW-2). Endpoints carry no corner; a new arc
+  // seeds the class default radius. Re-syncs the strip bbox after the curve changes.
+  const setRoadVtx = (el, idx, patch) => {
+    pushHistory();
+    setEls((a) => a.map((x) => {
+      if (x.id !== el.id || !isCenterlineRoad(x)) return x;
+      const n = x.pts.length;
+      if (!(idx > 0 && idx < n - 1)) return x;
+      const vtx = x.pts.map((_, i) => ({ ...((x.vtx && x.vtx[i]) || {}) }));
+      vtx[idx] = { ...vtx[idx], ...patch };
+      return reRoad({ ...x, vtx });
+    }));
   };
   // Road cost attributes (B181): curb type / curbed sides / gutter-pan width drive the
   // separately-priced Paving (SY) + Curb (LF) quantities. Geometry is untouched — these
   // only steer the cost takeoff (the drawn curb band still reads off el.curb).
   const setRoadCost = (el, patch) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...patch } : x)); };
   // Road length (ft) + FC-FC travel width (ft) for the cost takeoff — live geometry.
-  const roadLengthOf = (el) => Math.max(el.w, el.h);
+  const roadLengthOf = (el) => isCenterlineRoad(el) ? roadCenterlineLength(el, settings) : Math.max(el.w, el.h);
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
   // Per-edge setbacks: pc.setbacks aligned to edges (edge i = pts[i]→pts[i+1]);
   // falls back to the global default for any parcel that predates per-edge.
@@ -7012,7 +7183,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onContextMenuCapture={onCanvasVtxContextCapture}
             onPointerMoveCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxMoveCapture(e); }}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
-            onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
+            onContextMenu={(e) => { if (draftRoadPts) { e.preventDefault(); setDraftRoadPts(null); } }}>
 
             <defs>
               <filter id="bldgShadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -7710,18 +7881,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ travel` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
                 </g>
               ); })()}
-              {/* fixed-width road centerline preview (two-click) */}
-              {draftRoad && (() => {
-                const A = { x: draftRoad.ax, y: draftRoad.ay }, B = { x: draftRoad.bx, y: draftRoad.by }, len = dist(A, B);
-                if (len < 1) return null;
-                const ang = Math.atan2(B.y - A.y, B.x - A.x), nx = -Math.sin(ang), ny = Math.cos(ang), hw = draftRoad.cross / 2;
-                const corners = [{ x: A.x + nx * hw, y: A.y + ny * hw }, { x: B.x + nx * hw, y: B.y + ny * hw }, { x: B.x - nx * hw, y: B.y - ny * hw }, { x: A.x - nx * hw, y: A.y - ny * hw }].map(f2p);
-                const a = f2p(A), b = f2p(B), mid = f2p({ x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 });
+              {/* centerline road preview (B596/NEW-1): live tessellated centerline + the
+                  provisional pavement+curb offset strip as points are placed */}
+              {draftRoadPts && draftRoadPts.length > 0 && (() => {
+                const live = cursor ? snapPt(cursor) : null;
+                const all = live ? [...draftRoadPts, live] : draftRoadPts;
+                if (all.length < 2) {
+                  const c0 = f2p(draftRoadPts[0]);
+                  return <circle cx={c0.x} cy={c0.y} r={5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.75} pointerEvents="none" />;
+                }
+                const curb = +settings.roadCurb || CURB;
+                const travelW = roadWidth !== "free" && +roadWidth > 0 ? +roadWidth : 24;
+                const defR = classDefaultRadius(roadClassOf(settings, DEFAULT_ROAD_CLASS));
+                const vtx = all.map((_, i) => (i === 0 || i === all.length - 1) ? {} : { treatment: "arc", radius: defR });
+                const dense = roadCenterline(all, vtx, { defaultRadius: defR });
+                const ring = bufferPolyline(dense, travelW + 2 * curb);
+                const centerStr = dense.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join(" ");
+                let total = 0; for (let i = 1; i < dense.length; i++) total += Math.hypot(dense[i].x - dense[i - 1].x, dense[i].y - dense[i - 1].y);
+                const lp = f2p(all[all.length - 1]);
                 return (
                   <g pointerEvents="none">
-                    <polygon points={corners.map((p) => `${p.x},${p.y}`).join(" ")} fill={typeStyle("road", settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
-                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 4" />
-                    <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(len)}′</text>
+                    {ring && ring.length >= 3 && <polygon points={ring.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join(" ")} fill={typeStyle("road", settings).fill} fillOpacity={0.4} stroke={PAL.accent} strokeWidth={1.25} strokeDasharray="5 4" />}
+                    <polyline points={centerStr} fill="none" stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 4" />
+                    {draftRoadPts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
+                    {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ travel · {f0(total)}′</text>}
                   </g>
                 );
               })()}
@@ -8237,7 +8420,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("road")}>
                       <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="road" /> Road</span>
-                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel`}</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel · click points`}</span>
                     </button>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-label="Road presets">▾</button>
                   </div>
@@ -8245,7 +8428,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
                     <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
                     {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
-                      <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ travel — drag the length</button>
+                      <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ travel — click points, Enter to finish</button>
                     ))}
                   </AnchoredMenu>
                 </div>
@@ -8702,12 +8885,52 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
               {!selEl.points ? (
                 <>
-                  {selEl.type === "road" ? (
+                  {selEl.type === "road" ? (() => {
+                    const cl = isCenterlineRoad(selEl);
+                    const warn = cl ? roadRadiusStatus(selEl, settings) : null;
+                    const vsel = cl && roadVtxSel && roadVtxSel.id === selEl.id && roadVtxSel.idx > 0 && roadVtxSel.idx < selEl.pts.length - 1 ? roadVtxSel.idx : null;
+                    const vtreat = vsel != null ? ((selEl.vtx && selEl.vtx[vsel] && selEl.vtx[vsel].treatment) || "arc") : null;
+                    return (
                     <>
-                      <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(Math.max(selEl.w, selEl.h))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
+                      <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(roadLengthOf(selEl))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
                       <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                      {cl && (
+                        <Field label="Road class">
+                          <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
+                            {roadClassesOf(settings).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                          </select>
+                        </Field>
+                      )}
+                      {warn && (
+                        <div style={{ fontSize: 11.5, color: PAL.danger, fontWeight: 600, marginTop: 2, lineHeight: 1.4 }}>
+                          ⚠ {f0(warn.minR)}′ radius — below {f0(warn.threshold)}′ min for {warn.label}
+                          <div style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 400, marginTop: 1 }}>Screening only — verify against the adopted code. The geometry isn’t changed.</div>
+                        </div>
+                      )}
+                      {cl && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Curve at vertex</div>
+                          {vsel == null ? (
+                            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45 }}>Click a road vertex on the canvas to set it sharp · arc · smooth.{selEl.pts.length <= 2 ? " A straight 2-point road has no interior vertex." : ""}</div>
+                          ) : (
+                            <>
+                              <div style={{ display: "flex", gap: 6 }}>
+                                {[["sharp", "Sharp"], ["arc", "Arc"], ["smooth", "Smooth"]].map(([k, lbl]) => (
+                                  <button key={k} style={{ ...chip, flex: 1, ...(vtreat === k ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }}
+                                    onClick={() => setRoadVtx(selEl, vsel, k === "arc" ? { treatment: "arc", radius: (selEl.vtx && selEl.vtx[vsel] && selEl.vtx[vsel].radius) || roadDefaultRadius(selEl, settings) } : { treatment: k })}>{lbl}</button>
+                                ))}
+                              </div>
+                              {vtreat === "arc" && (
+                                <Field label="Arc radius (ft)"><NumInput style={numInput} value={Math.round((selEl.vtx && selEl.vtx[vsel] && selEl.vtx[vsel].radius) || roadDefaultRadius(selEl, settings))} min={1} onCommit={(n) => setRoadVtx(selEl, vsel, { treatment: "arc", radius: n })} /></Field>
+                              )}
+                              <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Vertex {vsel + 1} of {selEl.pts.length}. Arc fillets are feasibility-clamped to the adjacent segments.</div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </>
-                  ) : isDockZone(selEl) ? (() => {
+                    );
+                  })() : isDockZone(selEl) ? (() => {
                     // A dock-zone stack member (court / trailer / buffer). Edit its DEPTH inline,
                     // and — the button Michael relies on — a "＋" to add the NEXT outward zone on
                     // THIS side (court → trailer parking → buffer), plus a direct remove. This is the
@@ -8910,7 +9133,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
-                  {!isDockZone(selEl) && !isBuilding(selEl) && (
+                  {!isDockZone(selEl) && !isBuilding(selEl) && !isCenterlineRoad(selEl) && (
                   <Field label="Rotation (°)">
                     <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
                       onCommit={(deg) => rotateSelTo(deg)}
@@ -8997,7 +9220,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
               {(() => {
                 const poly = !!selEl.points;
-                const area = poly ? polyArea(selEl.points) : selEl.w * selEl.h;
+                const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
                 return (
                   <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
                     {poly ? "Area" : "Footprint"}: <b style={{ color: PAL.ink }}>{f0(area)} sf</b>{poly ? ` · ${f2(area / SQFT_PER_ACRE)} ac` : ""}<br />
@@ -9675,6 +9898,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <input style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
                 onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
             </Field>
+            {/* Road classes — civil defaults + min-radius warning thresholds (B599/NEW-4). */}
+            {(() => {
+              const setRCC = (key, patch) => setSettings((s) => {
+                const list = (Array.isArray(s.roadClasses) && s.roadClasses.length ? s.roadClasses : ROAD_CLASS_SEEDS).map((c) => ({ ...c }));
+                const i = list.findIndex((c) => c.key === key);
+                if (i >= 0) list[i] = { ...list[i], ...patch };
+                return { ...s, roadClasses: list };
+              });
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 4px" }}>Road classes — civil defaults</div>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 6 }}>Default curve radius for new vertices + a min-radius warning per class. Seeds are starting points — verify against current AASHTO / the adopted fire code; nothing here is authoritative.</div>
+                  {roadClassesOf(settings).map((c) => (
+                    <div key={c.key} style={{ marginBottom: 7 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink, marginBottom: 2 }}>{c.label}</div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Default R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.defaultRadius ?? 50)} min={1} onCommit={(n) => setRCC(c.key, { defaultRadius: n })} /></label>
+                        {c.designSpeed != null ? (
+                          <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Design mph <NumInput style={{ ...numInput, width: 48 }} value={Math.round(c.designSpeed)} min={0} onCommit={(n) => setRCC(c.key, { designSpeed: n })} /></label>
+                        ) : (
+                          <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Warn below R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.minRadius ?? 0)} min={0} onCommit={(n) => setRCC(c.key, { minRadius: n })} /></label>
+                        )}
+                        <span style={{ fontSize: 10.5, color: PAL.muted }}>= {f0(classMinRadius(c))}′ min</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </Section>
 
           {/* element default colors — edit without selecting anything */}
@@ -10273,6 +10525,79 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         {ghostPath && ghostEl("ghost")}
         {el.type === "pond" && pondContourEls(el, f2p, f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x, "pc")}
       </g>
+    );
+  }
+  if (isCenterlineRoad(el)) { // centerline road (B596–B599): surface + curbs + dimension all from pts
+    const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
+    const ring = roadStripRing(el, settings);
+    const dPath = ring.length >= 3 ? ring.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
+    const stroke = isSel ? selStroke : st.stroke;
+    const rparts = [];
+    if (dPath) {
+      // Pavement+curb surface = bufferPolyline of the tessellated centerline at travelW + 2 curbs.
+      rparts.push(<path key="surf" d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />);
+      if (texFill) rparts.push(<path key="tex" d={dPath} fill={texFill} stroke="none" pointerEvents="none" />);
+      rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={isSel ? st.weight + 1 : st.weight} />);
+    }
+    // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges),
+    // so the striping follows the offset edges — NOT the old w>=h axis logic (B70 contract held:
+    // a 24′ travel road still reads 25′ wide because the strip ring is travelW + a curb each side).
+    roadCurbLines(el, settings).forEach((cl, i) => {
+      if (!cl || cl.length < 2) return;
+      rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={1} pointerEvents="none" />);
+    });
+    // Travel-width dimension anchored to the CENTERLINE MIDPOINT (excludes the curb — reads the
+    // true travel width). B149 detail tier (a road width hides at site-overview zoom); kept while
+    // selected so the click-to-edit / drag handle never vanishes mid-edit.
+    if (!el.noLabel) {
+      const dense = roadDenseCenterline(el, settings);
+      const segLens = []; let totalLen = 0;
+      for (let i = 1; i < dense.length; i++) { const l = Math.hypot(dense[i].x - dense[i - 1].x, dense[i].y - dense[i - 1].y); segLens.push(l); totalLen += l; }
+      let acc = totalLen / 2, midPt = dense[0] || { x: el.cx, y: el.cy }, dir = { x: 1, y: 0 };
+      for (let i = 1; i < dense.length; i++) {
+        const sl = segLens[i - 1];
+        if (acc <= sl || i === dense.length - 1) {
+          const t = sl > 0 ? acc / sl : 0;
+          midPt = { x: dense[i - 1].x + (dense[i].x - dense[i - 1].x) * t, y: dense[i - 1].y + (dense[i].y - dense[i - 1].y) * t };
+          const dl = sl || 1; dir = { x: (dense[i].x - dense[i - 1].x) / dl, y: (dense[i].y - dense[i - 1].y) / dl };
+          break;
+        }
+        acc -= sl;
+      }
+      const nrm = { x: -dir.y, y: dir.x }, hw = Math.max(0, (+el.travelW || 0) / 2);
+      const off = el.dimOffset || { x: 0, y: 0 };
+      const anchorPx = f2p(midPt);
+      const A = f2p({ x: midPt.x + nrm.x * hw + off.x, y: midPt.y + nrm.y * hw + off.y });
+      const B = f2p({ x: midPt.x - nrm.x * hw + off.x, y: midPt.y - nrm.y * hw + off.y });
+      const M = f2p({ x: midPt.x + off.x, y: midPt.y + off.y });
+      const RED = "#dc2626", k = Math.max(0.34, Math.min(1, ppf / 0.45)), tick = 4 * k, fz = 11 * k, txt = `${f0(+el.travelW || 0)}′`;
+      const dimSel = isSel && tool === "select";
+      const dimVisible = detailLabelVisible(+el.travelW || 0, ppf);
+      const moved = Math.hypot(off.x, off.y) > 0.5;
+      const numHandlers = dimSel
+        ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id, e); } }
+        : {};
+      if (dimVisible || dimSel) {
+        const dim = [];
+        if (moved) dim.push(<line key="lead" x1={M.x} y1={M.y} x2={anchorPx.x} y2={anchorPx.y} stroke={RED} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />);
+        dim.push(<line key="dl" x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={RED} strokeWidth={1.25} />);
+        const tnx = nrm.x * tick, tny = nrm.y * tick; // ticks perpendicular to the dim line (along the road)
+        dim.push(<line key="t0" x1={A.x - dir.x * tick} y1={A.y - dir.y * tick} x2={A.x + dir.x * tick} y2={A.y + dir.y * tick} stroke={RED} strokeWidth={1.25} />);
+        dim.push(<line key="t1" x1={B.x - dir.x * tick} y1={B.y - dir.y * tick} x2={B.x + dir.x * tick} y2={B.y + dir.y * tick} stroke={RED} strokeWidth={1.25} />);
+        if (dimSel) dim.push(<line key="grab" x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="transparent" strokeWidth={14} />);
+        dim.push(<text key="tx" x={M.x + dir.x * (fz * 0.9) - tnx} y={M.y + dir.y * (fz * 0.9) - tny} textAnchor="middle" dominantBaseline="middle" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
+        rparts.push(
+          <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
+            onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
+            {dim}
+          </g>,
+        );
+      }
+    }
+    return (
+      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
+        onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
+        onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{rparts}</g>
     );
   }
   const tl = f2p({ x: el.cx - el.w / 2, y: el.cy - el.h / 2 });
