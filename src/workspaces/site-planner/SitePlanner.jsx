@@ -789,8 +789,9 @@ const DEFAULT_SETTINGS = {
   roadCurb: 0.5, roadWidths: "24, 26, 30, 36, 40",
   showDocks: true,
   // Structural column grid on drawn buildings (B568): speed bay off each dock face, then
-  // typical bays flexing within an industry band toward the per-direction targets. Dock
-  // doors at doorOC o.c., doorWidth wide. Per-building overrides live on the element.
+  // FIXED interior bays at the per-direction typical size — only the end bays (length) and
+  // rear/centre bay (depth) flex to close. Dock doors at doorOC o.c., doorWidth wide.
+  // The band bounds the typical size. Per-building overrides live on the element.
   showGrid: true,
   speedBay: 60, bayLengthTarget: 56, bayDepthTarget: 50, bayMin: 50, bayMax: 58,
   doorWidth: 9, doorOC: 12,
@@ -9278,7 +9279,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Typ. bay — depth"><NumInput style={numInput} value={settings.bayDepthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayDepthTarget: n }))} /></Field>
             <Field label="Bay band (min / max)"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.bayMin} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMin: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.bayMax} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMax: n }))} /></span></Field>
             <Field label="Dock door — W / o.c."><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.doorWidth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, doorWidth: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.doorOC} min={2} onCommit={(n) => setSettings((s) => ({ ...s, doorOC: n }))} /></span></Field>
-            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Typical bays flex within the band to close the grid cleanly; the speed bay is pinned and the end / rear bays absorb any leftover.</div>
+            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Interior bays are fixed at the typical size and the speed bay is pinned; only the end bays (length) and the rear / centre bay (depth) flex to close the building. The band bounds the typical size.</div>
           </Section>
 
           <Section title="Parking" collapsed>

@@ -7,17 +7,19 @@
 //
 //   • Depth direction: the first bay off each dock face is the SPEED BAY (default 60′ —
 //     the staging strip between the docks and the first interior columns). The rest of
-//     the depth is divided into uniform interior bays that FLEX within an industry band
-//     (default 50–58′) toward a depth target; any genuine residual lands in the rear bay
-//     (single-load) or the centre bay (cross-dock, a speed bay mirrored to both walls).
-//   • Length direction: uniform bays flexing within the band toward a length target; the
-//     residual splits between the two end bays (where offices / odd geometry live).
+//     the depth is FIXED interior bays at a clean depth module (default 50′), with the
+//     leftover absorbed by the REAR bay (single-load) or the CENTRE bay (cross-dock, a
+//     speed bay mirrored to both walls).
+//   • Length direction: FIXED interior bays at a clean length module (default 56′), with
+//     the leftover absorbed by the two END bays (where offices / odd geometry live).
 //
-// "Flex to close cleanly" is the headline rule (owner, 2026-06-29): we first try to pick a
-// bay COUNT whose uniform size lands inside the band and nearest the target — so the grid
-// closes with no leftover at all. Only when no in-band uniform division exists do we fall
-// back to a standard module + a residual end/rear/centre bay. Length and depth targets are
-// INDEPENDENT (real buildings run e.g. 56′ × 50′).
+// Headline rule (owner, 2026-06-30): the typical/interior bays are a FIXED standard module
+// — never stretched to an odd number to force an even division. The ONLY bays that flex are
+// the end bays (length) and the rear/centre bay (depth); the speed bay stays pinned at 60′.
+// The interior count is chosen so each flex bay stays near the module (no slivers, nothing
+// oversized) and a flex bay that lands exactly on the module reads as a normal bay. Length
+// and depth modules are INDEPENDENT (real buildings run e.g. 56′ × 50′ — confirmed against
+// the owner's Grand Port approved set).
 //
 // Output is in building-LOCAL feet (offsets 0..L / 0..D). The renderer maps those onto the
 // element's axis-aligned frame (and the existing rot/ppf transform handles rotation), so
@@ -80,62 +82,42 @@ export function resolveGridSettings(el, settings = {}) {
   };
 }
 
-// Divide a span S into bays. Primary: the bay COUNT whose uniform size lands inside
-// [min,max] and nearest `target` → all bays uniform, NO residual ("flex to close
-// cleanly"). Fallback (no in-band uniform division exists): a standard module pulled
-// to the nearest band edge, with the leftover pushed into a residual bay positioned by
-// `residual` ("ends" → two end bays · "rear" → one far bay · "center" → one middle bay ·
-// "none" → just uniform). Returns { sizes, roles } where role is "std" | "flex".
+// Divide a span S into bays the way spec industrial is actually framed (owner rule,
+// 2026-06-30): the interior/typical bays are a FIXED, clean standard module (`target` —
+// e.g. 56′ along the docks, 50′ deep), and ONLY the flex bays vary to close the building.
+// `residual` says where the flex lives: "ends" → the two end bays (length — offices / odd
+// geometry), "rear" → one far bay (single-load depth), "center" → one middle bay (cross-
+// dock depth). We pick the interior count so each flex bay stays near the module (never a
+// sliver, never oversized: ~0.75–1.25× for two ends, ~0.5–1.5× for one). A flex bay that
+// lands exactly on the module is tagged "std" (no dashed line); only a genuinely different
+// one is tagged "flex". `min`/`max` only bound the module + the single-bay threshold now.
+// Returns { sizes, roles } where role is "std" | "flex".
 export function divideSpan(S, opts = {}) {
   const span = num(S);
   if (span == null || span <= EPS) return { sizes: [], roles: [] };
-  // Default + sanitise the band so a direct API call without it can never emit NaN bays
-  // or throw. The target is CLAMPED into the band: an out-of-band target would otherwise
-  // over-count bays in the fallback and drive a residual end/rear bay negative.
   let min = Math.max(1, num(opts.min) ?? GRID_DEFAULTS.bayMin);
   let max = Math.max(1, num(opts.max) ?? GRID_DEFAULTS.bayMax);
   if (max < min) [min, max] = [max, min];
   const residual = opts.residual || "ends";
-  const t = clamp(num(opts.target) ?? (min + max) / 2, min, max);
-  // A short span is a single bay (no interior column line). Allow up to max so a lone
-  // bay isn't forced to split into two sub-min slivers.
+  const M = clamp(num(opts.target) ?? (min + max) / 2, min, max); // the FIXED interior module
+  // A short span is a single bay (no interior column line).
   if (span <= max + EPS) return { sizes: [span], roles: ["std"] };
 
-  // Primary — uniform, in-band, closest to target. As n grows, u = S/n shrinks, so the
-  // in-band window is a contiguous run of counts; scan it and keep the nearest-to-target.
-  let best = null;
-  const nLo = Math.max(1, Math.ceil(span / max - EPS));
-  const nHi = Math.floor(span / min + EPS);
-  for (let n = nLo; n <= nHi; n++) {
-    const u = span / n;
-    const dev = Math.abs(u - t);
-    if (!best || dev < best.dev - EPS) best = { n, u, dev };
-  }
-  if (best) return { sizes: Array(best.n).fill(best.u), roles: Array(best.n).fill("std") };
-
-  // Fallback — no uniform in-band division. Keep interior bays a clean standard module;
-  // the residual bay(s) absorb the rest.
-  const minBays = residual === "ends" ? 2 : 1;
-  const n = Math.max(minBays, Math.round(span / t));
-  const u = clamp(span / n, min, max); // standard module, pulled into the band
-  const fill = (k, size) => Array(Math.max(0, k)).fill(size);
-  if (residual === "ends") {
-    const interior = n - 2;
-    const each = (span - interior * u) / 2;
-    return { sizes: [each, ...fill(interior, u), each], roles: ["flex", ...fill(interior, "std"), "flex"] };
-  }
+  const E = residual === "ends" ? 2 : 1;                 // how many bays flex
+  const nFull = Math.max(0, Math.round(span / M) - E);   // interior bays pinned at exactly M
+  const each = (span - nFull * M) / E;                   // each flex bay absorbs the residual
+  const flexRole = Math.abs(each - M) > 0.5 ? "flex" : "std"; // clean division → not a dashed line
+  const fill = (k) => Array(Math.max(0, k)).fill(M);
+  const fillR = (k) => Array(Math.max(0, k)).fill("std");
   if (residual === "rear") {
-    const interior = n - 1;
-    const rear = span - interior * u;
-    return { sizes: [...fill(interior, u), rear], roles: [...fill(interior, "std"), "flex"] };
+    return { sizes: [...fill(nFull), each], roles: [...fillR(nFull), flexRole] };
   }
   if (residual === "center") {
-    const interior = n - 1;
-    const left = Math.floor(interior / 2), right = interior - left;
-    const center = span - interior * u;
-    return { sizes: [...fill(left, u), center, ...fill(right, u)], roles: [...fill(left, "std"), "flex", ...fill(right, "std")] };
+    const left = Math.floor(nFull / 2), right = nFull - left;
+    return { sizes: [...fill(left), each, ...fill(right)], roles: [...fillR(left), flexRole, ...fillR(right)] };
   }
-  return { sizes: fill(n, span / n), roles: fill(n, "std") };
+  // "ends" (default): a flex bay at each end, fixed module between.
+  return { sizes: [each, ...fill(nFull), each], roles: [flexRole, ...fillR(nFull), flexRole] };
 }
 
 // Cumulative interior column-line offsets from a bay-size list (drops the trailing edge,
