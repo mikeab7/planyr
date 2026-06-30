@@ -146,6 +146,31 @@ try {
   if (aggOk) ok("SUM([Cost])=400 and COUNTIF([Cost],\">=100\")=2 via the live in-page engine");
   else fail("in-page aggregation (SUM/COUNTIF) returned the wrong result");
 
+  // 5) B597 — error propagation through aggregation (match Excel exactly). The HOST stores
+  //    an errored formula-column cell as PF.errVal(code); a SUM/COUNT/reference over that
+  //    column must PROPAGATE the code, not silently skip the bad row. Exercise the live
+  //    in-page engine through the same window.PlanyrFormula the grid uses.
+  const propOk = await page.evaluate(() => {
+    const PF = window.PlanyrFormula;
+    if (!PF || typeof PF.errVal !== "function") return { ok: false, why: "errVal missing on window.PlanyrFormula" };
+    const E = PF.errVal("#DIV/0!");
+    const rows = [{ cost: 10 }, { cost: E }, { cost: 30 }];
+    const ctx = { columns: rows[0], rows, rowIndex: 0 };
+    const sum = PF.evaluateFormula("SUM([Cost])", ctx);
+    const cnt = PF.evaluateFormula("COUNT([Cost])", ctx);
+    const ref = PF.evaluateFormula("[Cost] + 1", { columns: { cost: E }, rows: [{ cost: E }], rowIndex: 0 });
+    const trap = PF.evaluateFormula("IFERROR(SUM([Cost]), -1)", ctx);
+    const clean = PF.evaluateFormula("SUM([Cost])", { columns: { cost: 10 }, rows: [{ cost: 10 }, { cost: 20 }], rowIndex: 0 });
+    return {
+      ok: !sum.ok && sum.error === "#DIV/0!" && !cnt.ok && cnt.error === "#DIV/0!" &&
+          !ref.ok && ref.error === "#DIV/0!" && trap.ok && trap.value === -1 &&
+          clean.ok && clean.value === 30,
+      detail: JSON.stringify({ sum, cnt, ref, trap, clean }),
+    };
+  });
+  if (propOk.ok) ok("B597: SUM/COUNT over an errored cell propagate #DIV/0!, IFERROR traps it, a clean column still sums — via the live engine");
+  else fail("B597 error-propagation failed in-page: " + (propOk.why || propOk.detail));
+
   try { await page.screenshot({ path: "ui-audit/screens/b583-formula-column.png" }); } catch { /* screens/ is gitignored; optional */ }
 
   // Final: no uncaught JS errors during the whole flow. Environmental network

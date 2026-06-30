@@ -668,8 +668,14 @@ export function loadSitesList() {
 export function loadPlansOfGroup(groupId) {
   return loadSitesList().filter((s) => groupOf(s) === groupId);
 }
-// Rename a whole site (location) — updates `site` on every plan in the group.
-export function renameSiteGroup(groupId, site) {
+// Rename a whole site (location) — updates `site` on every plan in the group. The id may arrive
+// as the group id OR as any plan id within it: the map's site list passes a *representative*
+// plan's id, which for a multi-plan site is often NOT the group's anchor plan. Resolve to the
+// group first — otherwise loadPlansOfGroup(planId) matches nothing, no plan is saved, and the
+// rename silently no-ops, reading as the name "reverting" to the old one. (rename-revert)
+export function renameSiteGroup(idOrGroup, site) {
+  const rec = loadSite(idOrGroup);
+  const groupId = rec ? groupOf(rec) : idOrGroup;
   loadPlansOfGroup(groupId).forEach((s) => saveSite({ id: s.id, site }));
 }
 // Mirror the cross-module schedule link onto a site group (schema v9). The canonical pairing
