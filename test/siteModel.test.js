@@ -148,6 +148,56 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
   });
 });
 
+import { rectRoadEndpoints, roadStripBBox } from "../src/workspaces/site-planner/lib/siteModel.js";
+
+describe("Centerline road migration (B596 / NEW-1)", () => {
+  // A legacy axis-aligned road: 200′ long (w), 25′ cross (h) = 24′ travel + 0.5′ curb each side.
+  const legacy = { id: "r1", type: "road", cx: 100, cy: 50, w: 200, h: 25, rot: 0, travelW: 24, curb: 0.5 };
+
+  it("converts a legacy rect road to a 2-point centerline, preserving travel/curb", () => {
+    const m = createSiteModel({ els: [legacy] });
+    const r = m.els[0];
+    expect(r.pts).toHaveLength(2);
+    expect(r.vtx).toEqual([]);
+    expect(r.travelW).toBe(24);
+    expect(r.curb).toBe(0.5);
+    expect(r.roadClass).toBe("aisle"); // DEFAULT_ROAD_CLASS
+    // endpoints lie on the centerline (cy), 200′ apart, centred on cx
+    expect(r.pts[0]).toEqual({ x: 0, y: 50 });
+    expect(r.pts[1]).toEqual({ x: 200, y: 50 });
+  });
+
+  it("derives endpoints along the LONG axis for a rotated road", () => {
+    const rot90 = { id: "r2", type: "road", cx: 0, cy: 0, w: 300, h: 25, rot: 90, travelW: 24, curb: 0.5 };
+    const [a, b] = rectRoadEndpoints(rot90);
+    expect(Math.hypot(b.x - a.x, b.y - a.y)).toBeCloseTo(300, 6); // length = w (the long axis)
+  });
+
+  it("is idempotent — a road that already has pts is left untouched", () => {
+    const cl = { id: "r3", type: "road", pts: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 50 }],
+      vtx: [{}, { treatment: "arc" }, {}], travelW: 26, curb: 0.5, roadClass: "truck" };
+    const once = createSiteModel({ els: [cl] }).els[0];
+    expect(once.pts).toEqual(cl.pts);
+    expect(once.roadClass).toBe("truck");
+    const twice = createSiteModel({ els: [once] }).els[0];
+    expect(twice.pts).toEqual(cl.pts);
+  });
+
+  it("leaves a BONDED dock-layer road (attachedTo) as a rect — relayout still owns it", () => {
+    const bonded = { id: "r4", type: "road", attachedTo: "b1", cx: 10, cy: 10, w: 100, h: 25, rot: 0, travelW: 24, curb: 0.5 };
+    const r = createSiteModel({ els: [bonded] }).els[0];
+    expect(r.pts).toBeUndefined();
+  });
+
+  it("roadStripBBox returns a containing AABB (rot:0) around the strip", () => {
+    const bb = roadStripBBox([{ x: 0, y: 0 }, { x: 100, y: 0 }], [], 24, 0.5);
+    expect(bb.rot).toBe(0);
+    expect(bb.w).toBeCloseTo(100, 6);     // length
+    expect(bb.h).toBeCloseTo(25, 6);      // travel + 2 curbs
+    expect(bb.cx).toBeCloseTo(50, 6);
+  });
+});
+
 import { mergeSiteContent, toMs } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 describe("toMs + mergeSiteContent newer-wins is timestamp-type-safe (B559)", () => {
