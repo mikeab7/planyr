@@ -503,7 +503,7 @@ const roadRowName = (r) => r.name || (r.route ? `Route ${r.route}` : "Unnamed ro
  * Rows arrive already ordered longest-frontage-first from identifyRoadAuthority. Any
  * road that can't be classified shows an explicit "Unknown" (never a guess). With no
  * roads matched it reads the honest zero-match note, not a blank. Carries `mapLayer` so
- * the card gets a "◍ Map" toggle (B190) → the color-coded road overlay (NEW-2/B5264). */
+ * the card gets a "◍ Map" toggle (B190) → the color-coded road overlay (NEW-2/B571). */
 export function buildRoadFinding(road) {
   const roads = Array.isArray(road.roads) ? road.roads : [];
   const haveRoads = roads.length > 0;
@@ -524,7 +524,7 @@ export function buildRoadFinding(road) {
     status: haveRoads ? "info" : "unknown",
     summary: haveRoads ? null : (road.error || road.note || "No roads matched — screening only."),
     detail, rows,
-    mapLayer: "jur_road_authority", // NEW-2/B5264: lifts the B190 suppression — the card gets a "◍ Map" toggle
+    mapLayer: "jur_road_authority", // NEW-2/B571: lifts the B190 suppression — the card gets a "◍ Map" toggle
     sourceName: "TxDOT Roadway Inventory", ageMs: road.ageMs ?? null, ts: road.ts ?? null,
     error: road.error || null, caveat: road.note || "Local-road coverage is patchy — an honest \"unknown\" beats a wrong guess.", verified: true,
   };

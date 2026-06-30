@@ -18,10 +18,14 @@ const B = "var(--border-default)";  // hairlines
 
 function ColorControl({ value, label, onChange }) {
   const hex = (value && /^#[0-9a-fA-F]{3,8}$/.test(value)) ? value : "#000000";
+  // <input type="color"> fires `input` live as you move through the palette but `change` only when
+  // the dialog closes — so wire `onInput` (flagged live) for instant recolor, `onChange` as the
+  // committed value. The host coalesces the live burst into one undo frame. (B567)
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
       <input type="color" value={hex} aria-label={label}
-        onChange={(e) => onChange(e.target.value)}
+        onInput={(e) => onChange(e.target.value, { live: true })}
+        onChange={(e) => onChange(e.target.value, { live: false })}
         style={{ width: 30, height: 24, padding: 1, border: `1px solid ${B}`, borderRadius: 4, cursor: "pointer", background: "none" }} />
       <span style={{ fontSize: 11, color: L, fontFamily: "ui-monospace, monospace" }}>{hex}</span>
     </label>
@@ -96,7 +100,7 @@ export default function PropertyPanel({ markup, onChange, style: outerStyle }) {
   return (
     <div style={{ fontFamily: FONT, ...outerStyle }}>
       {schema.map(({ key, type, label, value, options, min, max, step }) => {
-        const emit = (v) => onChange && onChange(key, v);
+        const emit = (v, opts) => onChange && onChange(key, v, opts);
         return (
           <div key={key} style={{ padding: "6px 12px", borderBottom: `1px solid ${B}` }}>
             {type === "bool" ? (

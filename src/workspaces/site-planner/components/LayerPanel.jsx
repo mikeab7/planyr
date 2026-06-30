@@ -120,7 +120,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             {ls.msg || meta.label}
           </div>
         )}
-        {/* NEW-2/B5264: categorical legend for a per-feature-colored overlay (road
+        {/* NEW-2/B571: categorical legend for a per-feature-colored overlay (road
             authority) — shown only while the layer is on, so the colors on the map are
             named. Unknown is drawn dashed (a neutral, never a faded line). */}
         {st.on && cfg.legend && (

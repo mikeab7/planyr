@@ -396,7 +396,7 @@ describe("polylineLengthMeters — abutment length for ordering", () => {
   });
 });
 
-describe("roadAuthorityStyle (NEW-2/B5264) — per-feature color reuses roadAuthority()", () => {
+describe("roadAuthorityStyle (NEW-2/B571) — per-feature color reuses roadAuthority()", () => {
   it("colors each maintainer distinctly, drawn solid", () => {
     expect(roadAuthorityStyle({ RDWAY_MAINT_AGCY: 1, HSYS: "IH" }).color).toBe(ROAD_AUTHORITY_COLORS["State (TxDOT)"]);
     expect(roadAuthorityStyle({ RDWAY_MAINT_AGCY: 2, HSYS: "CR" }).color).toBe(ROAD_AUTHORITY_COLORS["County"]);

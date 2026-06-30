@@ -202,7 +202,7 @@ export const JURISDICTIONS = {
     note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. A boundary is a TAXING / authority district, NOT proof that water or sewer is connected to a parcel. Screening only — verify against the district / tax statement.",
   },
   jur_road_authority: {
-    // NEW-2/B5264 — the road-authority overlay: the actual fronting roads drawn and
+    // NEW-2/B571 — the road-authority overlay: the actual fronting roads drawn and
     // COLORED BY MAINTAINER, so the Site Analysis "Road authority" card's call can be
     // confirmed against the map. Same TxDOT Roadway Inventory FeatureServer the identify
     // reads (one source of truth), drawn client-side as vector features (esriFeature) so

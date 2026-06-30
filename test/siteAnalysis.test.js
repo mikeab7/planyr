@@ -370,7 +370,7 @@ describe("derived jurisdiction findings", () => {
     expect(buildRoadFinding({ roads: [], note: "No roads matched within 40 m — screening only." }).summary).toMatch(/no roads matched/i);
     expect(buildRoadFinding({ roads: [] }).rows).toBeNull();
   });
-  it("buildRoadFinding: per-road rows, mixed roll-up, map toggle (B94 + B5264)", () => {
+  it("buildRoadFinding: per-road rows, mixed roll-up, map toggle (B94 + B571)", () => {
     const f = buildRoadFinding({ ageMs: 500, roads: [
       { name: "IH 45", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 },
       { name: "Greens Rd", route: "g1", authority: { label: "City" }, funcClass: 4 },

@@ -44,7 +44,8 @@ import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
-import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
@@ -295,6 +296,9 @@ const measMode = (m) => m.mode || "line";
 // move-only — they carry derived geometry that hand-editing would desync.
 const MK_VERTEX_KINDS = ["line", "polyline", "polygon"];
 const MK_BOX_KINDS = ["rect", "ellipse"];
+// Width (screen px) of the transparent fat hit-stroke under open-path markups (line/polyline),
+// so they grab within ~6px on either side at any zoom — matching a polyline's forgiving feel (B155).
+const MK_HIT_PX = 12;
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
 const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
@@ -1125,7 +1129,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [excChecked, setExcChecked] = useState({});  // exception index → ticked
   const [mbText, setMbText] = useState("");          // legal description to plot
   const [mbWidth, setMbWidth] = useState(20);        // corridor width (ft) for open traverses
-  const [pobMode, setPobMode] = useState(null);      // { calls } awaiting a POB click on the canvas
+  const [pobMode, setPobMode] = useState(null);      // { tracts } awaiting a POB click on the canvas
+  const [deedBusy, setDeedBusy] = useState(false);   // reading a dropped deed file
+  const [deedErr, setDeedErr] = useState("");        // deed-file read error
+  const [deedName, setDeedName] = useState("");      // last-read deed file name
+  const [deedDrag, setDeedDrag] = useState(false);   // drop-zone hover state
+  const deedFileRef = useRef(null);
+  const deedReqRef = useRef(0);                       // in-flight read token (ignore a stale read)
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
   // Single-owner warning toast (B56b): every non-empty warning goes through flashWarn,
   // which cancels any pending auto-clear first — so a stale timer from an earlier message
@@ -2443,7 +2453,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
   const setCallout = (id, patch) => setCallouts((a) => a.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   // Resolved style for a callout (defaults + per-callout overrides).
-  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 8, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
+  // padX default is more generous than padY (B566): equal 8/8 padding read as cramped on the
+  // sides because text butts closer to a vertical edge than to the line-height-cushioned top/bottom.
+  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 14, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
   // Inline editing: a textarea overlays the box. Empty text removes the callout.
   const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); }; // no history on open — pushed on commit only if the text changed (B32)
   const commitEditCallout = () => {
@@ -5000,6 +5012,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
+    // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
+    // restore above silently skipped it: the canvas kept the CURRENT drawings while every other
+    // collection reverted (a mixed-version state), and noteLocalContent(v) below then recorded v's
+    // drawings as the local baseline — so live ≠ baseline. The stored version DOES capture
+    // parcelDrawings (sigOf + snapshotVersion store the full model), so restore + durably persist
+    // them via persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    persistDrawings(v.parcelDrawings || []);
     // B556 — restoring an older (possibly thinner) version is a deliberate local restore; rebase the
     // thin-clobber baseline onto it so the next push isn't falsely rejected as a cross-session conflict.
     if (siteId) noteLocalContent(siteId, v);
@@ -6055,57 +6074,112 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // --- Title reader + metes-and-bounds plotting ---
   const elRingOf = (el) => (el.points ? el.points : elCorners(el));
 
-  // Parse the legal description and arm POB placement (the user then clicks the
-  // canvas to anchor the point of beginning).
-  const startPlotMetes = (asEasement = false) => {
-    const calls = parseCalls(mbText);
-    if (!calls.length) { setTitleErr("No bearing/distance calls found. Paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
-    setTitleErr("");
-    setPobMode({ calls, asEasement });
-    setTitleOpen(false);
-    setSel(null); setTool("select");
-    flashWarn(`Click the point of beginning — ${calls.length} call${calls.length > 1 ? "s" : ""} ready${asEasement ? " (easement)" : ""}.`, 0);
+  // Read a dropped/selected deed file (.docx / .txt) into the plotter textarea so
+  // the user can "just drop in the files" instead of pasting. Parses on the way in
+  // to give an immediate honest read-out (calls found, or why not).
+  const readDeed = async (file) => {
+    if (!file) return;
+    const myReq = ++deedReqRef.current; // a newer drop supersedes a slow in-flight read
+    setDeedErr(""); setDeedBusy(true); setDeedName(file.name || "");
+    try {
+      const text = await readDeedFile(file);
+      if (deedReqRef.current !== myReq) return;
+      setMbText(text);
+      const found = parseTracts(text).reduce((s, t) => s + t.calls.length, 0);
+      if (!found) setDeedErr("Read the file, but found no bearing/distance calls — is this a metes-and-bounds legal description?");
+    } catch (e) {
+      if (deedReqRef.current !== myReq) return;
+      setDeedErr((e && e.message) || "Couldn't read that file.");
+    } finally {
+      if (deedReqRef.current === myReq) setDeedBusy(false);
+    }
   };
 
-  // Drop the POB at `pob` (feet), build the encumbrance, warn on overlaps.
-  const anchorEncumbrance = (pob) => {
-    const { calls, asEasement } = pobMode;
-    if (!calls || !calls.length) { flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
+  // Parse the legal description and arm POB placement (the user then clicks the
+  // canvas to anchor the point of beginning). Multi-tract aware: the first tract
+  // is the boundary; each SAVE-AND-EXCEPT tract is plotted as a hole positioned
+  // from its commencing tie relative to the SAME point of beginning.
+  const startPlotMetes = (asEasement = false) => {
+    const tracts = parseTracts(mbText);
+    const main = tracts[0];
+    if (!main || !main.calls.length) { setTitleErr("No bearing/distance calls found. Drop a deed (.docx) or paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
+    setTitleErr("");
+    setPobMode({ tracts, asEasement });
+    setTitleOpen(false);
+    setSel(null); setTool("select");
+    const ex = tracts.length - 1;
+    flashWarn(`Click the point of beginning — ${main.calls.length} call${main.calls.length > 1 ? "s" : ""} ready${ex > 0 ? ` (+${ex} save-and-except)` : ""}${asEasement ? " (easement)" : ""}.`, 0);
+  };
+
+  // Build a polygon encumbrance markup from a traverse anchored at `pob`. A tract
+  // boundary is ALWAYS a polygon — if the calls don't close, the last→first edge
+  // carries the gap (shown honestly) rather than being redrawn as a corridor.
+  const buildEncumbranceMarkup = (calls, pob, { label, except }) => {
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
-    // NEW-2 — reuse the M&B parser to spawn a first-class Easement (mode B for a closed
-    // tract; a corridor strip for an open traverse), attributes editable afterward.
+    const ring = closed ? path.slice(0, -1) : path;
+    if (ring.length < 3) return null;
+    return {
+      mk: {
+        id: uid(), kind: "encumbrance",
+        pts: ring, centerline: path, closed,
+        calls: calls.map((c) => ({ label: c.label, az: c.az, distFt: c.distFt })),
+        label,
+        // exception holes read in a muted dashed red so they're clearly "carved out"
+        stroke: except ? "#b91c1c" : "#7c3aed", fill: except ? "#b91c1c" : "#7c3aed",
+        fillOpacity: except ? 0.1 : 0.14, weight: 2, dash: except ? "6 4" : "solid",
+      },
+      ring, closed, gap: misclosure(path),
+    };
+  };
+
+  // Drop the POB at `pob` (feet), build the encumbrance(s), warn on overlaps.
+  const anchorEncumbrance = (pob) => {
+    const { tracts, asEasement } = pobMode;
+    const main = tracts && tracts[0];
+    if (!main || !main.calls.length) { flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
+    // NEW-2 — Easement path spawns a first-class Easement from the MAIN tract.
     if (asEasement) {
+      const path = callsToPath(main.calls, pob);
+      const closed = pathCloses(path);
       const mk = closed
         ? makeEasement({ mode: "boundary", pts: path.slice(0, -1) })
         : makeEasement({ mode: "centerline", centerline: path, width: mbWidth });
       setPobMode(null);
       commitEasement(mk);
+      if (tracts.length > 1) flashWarn(`Plotted the main tract as an easement — its ${tracts.length - 1} save-and-except exception(s) were not carved. Use “Plot on canvas” to include the holes.`, 8000);
       return;
     }
-    const ring = closed ? path.slice(0, -1) : bufferPolyline(path, mbWidth);
-    if (!ring || ring.length < 3) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
-    const gap = misclosure(path);
-    const mk = {
-      id: uid(), kind: "encumbrance",
-      pts: ring, centerline: path, closed,
-      calls: calls.map((c) => ({ label: c.label, az: c.az, distFt: c.distFt })),
-      label: closed ? "Tract / easement" : "Easement corridor",
-      stroke: "#7c3aed", fill: "#7c3aed", fillOpacity: 0.14, weight: 2, dash: "solid",
-    };
+    const built = buildEncumbranceMarkup(main.calls, pob, { label: (main.label && main.label !== "Boundary") ? main.label : "Tract boundary" });
+    if (!built) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
+    // SAVE-AND-EXCEPT holes: position each from its commencing tie off the same POB.
+    const exMarks = [];
+    for (const t of tracts.slice(1)) {
+      if (!t.calls.length) continue;
+      // the tie's END point locates the exception POB — take the LAST path point
+      // (a curved tie tessellates to many points, so don't index by call count).
+      const tiePath = t.tie && t.tie.length ? callsToPath(t.tie, pob) : null;
+      const exPob = tiePath ? tiePath[tiePath.length - 1] : pob;
+      const eb = buildEncumbranceMarkup(t.calls, exPob, { label: t.label || "Save & except", except: true });
+      if (eb) exMarks.push(eb.mk);
+    }
     pushHistory();
-    setMarkups((a) => [...a, mk]);
-    setSel({ kind: "markup", id: mk.id });
+    setMarkups((a) => [...a, built.mk, ...exMarks]);
+    setSel({ kind: "markup", id: built.mk.id });
     setPobMode(null);
-    // overlap check against buildings + paving
-    const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(ring, elRingOf(e)));
-    const closeNote = closed && gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "";
+    // overlap check against buildings + paving (main ring only)
+    const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(built.ring, elRingOf(e)));
+    const gap = built.gap;
+    const closeNote = !built.closed
+      ? ` ⚠ Traverse does NOT close (gap ≈ ${gap.toFixed(1)}′) — plotted as drawn; verify the calls.`
+      : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "");
+    const exNote = exMarks.length ? ` +${exMarks.length} save-and-except hole${exMarks.length > 1 ? "s" : ""}.` : "";
     if (hits.length) {
       const b = hits.filter((e) => e.type === "building").length, p = hits.length - b;
       const parts = [b && `${b} building${b > 1 ? "s" : ""}`, p && `${p} paving area${p > 1 ? "s" : ""}`].filter(Boolean).join(" and ");
-      flashWarn(`⚠ Encumbrance overlaps ${parts}.${closeNote}`, 9000);
+      flashWarn(`⚠ Boundary overlaps ${parts}.${closeNote}${exNote}`, 9000);
     } else {
-      flashWarn(`Encumbrance placed — no conflicts with buildings or paving.${closeNote}`, 9000);
+      flashWarn(`Boundary placed${exMarks.length ? " with its exception(s)" : ""}.${closeNote}${exNote}`, 9000);
     }
   };
 
@@ -6331,6 +6405,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const curStyle = selEl ? elStyle(selEl, settings) : null;
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); };
+
+  /* ---- live color picking (B567) ----
+   * A native <input type="color"> fires `change` only when the OS palette CLOSES, but fires
+   * `input` continuously as you click/drag through swatches. Wiring `onInput` makes the selected
+   * object recolor the INSTANT you click a color, instead of waiting for the dialog to close.
+   * To keep one-step undo, push exactly ONE history frame per picking session — lazily on the first
+   * change, reset on focus — so the live mutators below must NOT push their own (they'd flood undo
+   * with a frame per swatch). `livePick(apply)` spreads onto the <input>; `apply` is a no-history
+   * mutator. pickSnapRef survives re-renders (only one color input can be active at a time). */
+  const pickSnapRef = useRef(false);
+  const livePick = (apply) => ({
+    onFocus: () => { pickSnapRef.current = false; },
+    onInput:  (e) => { if (!pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
+    onChange: (e) => { if (!pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
+  });
+  const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
+  const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
+  const liveTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } }));
   // Make the selected element's current colors the default for its type.
   const setStyleDefault = () => { if (!selEl || !curStyle) return; setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity }); };
   // Drop the selected element's per-element overrides (back to the type default).
@@ -6845,8 +6937,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {markups.map((m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
                 const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
-                const stroke = isSel ? PAL.accent : m.stroke;
-                const common = { stroke, strokeWidth: sw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
+                const stroke = isSel ? PAL.accent : m.stroke; // semantic markups (encumbrance) keep the accent selection tint
+                // Neutral markups (line/polyline/polygon/rect/ellipse) render their REAL stroke color
+                // even when selected (WYSIWYG) so a live color-picker change is visible immediately
+                // instead of being hidden under the accent tint; selection is cued by the grips plus a
+                // faint width bump. (B567 — matches the shared MarkupRenderer's deliberate choice.)
+                const nStroke = m.stroke;
+                const nsw = sw + (isSel ? 1 : 0);
+                const common = { stroke: nStroke, strokeWidth: nsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
                 // Closed shapes (rect/ellipse/polygon) get an always-on pointer target so the WHOLE
                 // body selects + drags, not just the painted border. pointerEvents:"all" makes the
                 // interior a hit target even when the shape is UNFILLED (fill:"none" is otherwise dead
@@ -6923,8 +7021,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
-                if (m.kind === "line") { const a = f2p(m.a), b = f2p(m.b); return <line key={m.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...common} />; }
-                if (m.kind === "polyline") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polyline key={m.id} points={s} {...common} />; }
+                // Open paths (line/polyline) carry a transparent FAT hit-stroke (~6px each side at
+                // any zoom — f2p already projects feet→screen px) so they grab as forgivingly as a
+                // closed shape's interior, instead of forcing a pixel-perfect landing on the 2px
+                // visible line. Without this a Line was far harder to select than a Polyline. The
+                // visible stroke is pointer-inert; the fat companion carries the select/drag handler.
+                // Reuses the B420 technique; closes the open-path tranche of B155.
+                if (m.kind === "line") {
+                  const a = f2p(m.a), b = f2p(m.b);
+                  return (
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={nsw} strokeDasharray={da} fill="none" pointerEvents="none" />
+                    </g>
+                  );
+                }
+                if (m.kind === "polyline") {
+                  const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  return (
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
+                      <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
+                      <polyline points={s} fill="none" stroke={nStroke} strokeWidth={nsw} strokeDasharray={da} pointerEvents="none" />
+                    </g>
+                  );
+                }
                 if (m.kind === "polygon") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polygon key={m.id} points={s} {...common} {...fillProps} />; }
                 const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
                 if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
@@ -7731,9 +7851,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div ref={boundaryAnchor} style={{ position: "relative" }}>
-            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw or split a parcel boundary"><ToolIcon id="parcel" /> Boundary <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw, plot from a deed, or split a parcel"><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
               <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
+              {/* B570 — the Deed / Title (metes & bounds) tool lives HERE in the Parcel
+                  group, folded in from the old standalone rail launcher (B543). Opens the
+                  existing reader/plotter modal — no second modal, no parser fork. */}
+              <button data-testid="boundary-menu-mb" style={menuItem(false)} title="Read a deed / title commitment (or paste a legal description) to plot a parcel boundary from its metes & bounds"
+                onClick={() => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><ToolIcon id="deed" size={13} /> Deed / Title — metes &amp; bounds…</span>
+              </button>
               <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
               <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
                 <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
@@ -7741,19 +7868,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </AnchoredMenu>
           </div>
-
-          {/* B543 — Deed / Title launcher. A rail ENTRY, not a tool mode: it opens the
-              metes-and-bounds / Schedule B reader modal directly. Always rbtn(false) —
-              it never gets the active-tool highlight and never calls selectTool (which
-              would corrupt `tool` and reset drafts). On the phone overlay rail, dismiss
-              the scrim first so the zIndex:3000 modal isn't shown over a dimmed rail. */}
-          <button className="rbtn" style={{ ...rbtn(false), flexDirection: "column", alignItems: "flex-start", gap: 1 }}
-            data-testid="tool-deed"
-            title="Read a deed / title commitment to pull Schedule B exceptions and plot a metes-and-bounds boundary."
-            onClick={() => { if (narrow) setMobileTools(false); setTitleErr(""); setTitleOpen(true); }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="deed" /> Deed / Title…</span>
-            <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>Schedule B · metes &amp; bounds</span>
-          </button>
 
           {railHdr("Site elements")}
 
@@ -8126,7 +8240,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             return (
               <div data-testid="property-panel">
               <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
-                <Field label="Line color"><input type="color" value={toHex6(selMarkup.stroke)} onChange={(e) => setSelMarkup({ stroke: e.target.value })} style={swatch} /></Field>
+                <Field label="Line color"><input type="color" value={toHex6(selMarkup.stroke)} {...livePick((v) => liveMarkup({ stroke: v }))} style={swatch} /></Field>
                 <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
                 <Field label="Dash">
                   <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
@@ -8134,7 +8248,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </select>
                 </Field>
                 {closed && <>
-                  <Field label="Fill color"><input type="color" value={toHex6(selMarkup.fill)} onChange={(e) => setSelMarkup({ fill: e.target.value })} style={swatch} /></Field>
+                  <Field label="Fill color"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} onChange={(e) => setSelMarkup({ fillOpacity: +e.target.value })} /></Field>
                 </>}
                 {MK_BOX_KINDS.includes(selMarkup.kind) && <>
@@ -8173,9 +8287,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* row 1: size · text color · fill */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
                   <NumInput style={{ ...numInput, width: 52 }} value={cs.size} min={6} max={96} onCommit={(n) => setSelCallout({ size: n })} />
-                  <input type="color" title="Text" value={toHex6(cs.color)} onChange={(e) => setSelCallout({ color: e.target.value })} style={swatch} />
-                  <input type="color" title="Fill" value={toHex6(cs.fill)} onChange={(e) => setSelCallout({ fill: e.target.value })} style={swatch} />
-                  <input type="color" title="Line" value={toHex6(cs.stroke)} onChange={(e) => setSelCallout({ stroke: e.target.value })} style={swatch} />
+                  <input type="color" title="Text" value={toHex6(cs.color)} {...livePick((v) => liveCallout({ color: v }))} style={swatch} />
+                  <input type="color" title="Fill" value={toHex6(cs.fill)} {...livePick((v) => liveCallout({ fill: v }))} style={swatch} />
+                  <input type="color" title="Line" value={toHex6(cs.stroke)} {...livePick((v) => liveCallout({ stroke: v }))} style={swatch} />
                 </div>
                 {/* row 2: B / I / U · align L C R */}
                 <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
@@ -8501,6 +8615,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ring = selEl.points ? selEl.points : elCorners(selEl);
                 const r = detentionStorage(ring, depth, fb, slope);
                 const setDet = (patch) => { pushHistory(); setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); };
+                const setDetLive = (patch) => setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); // B567: no-history sibling for live color picking
                 // --- Expand this pond (B139): baseline + steppers; both steppers and free
                 // drag feed the one Existing→Proposed readout. Baseline freezes the original
                 // footprint + depth/slope so the delta is apples-to-apples. ---
@@ -8644,13 +8759,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
                               <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")}
-                                onChange={(e) => setDet({ existFill: e.target.value })}
+                                {...livePick((v) => setDetLive({ existFill: v }))}
                                 style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
                               <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
-                                onChange={(e) => setDet({ addFill: e.target.value })}
+                                {...livePick((v) => setDetLive({ addFill: v }))}
                                 style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                           </div>
@@ -8672,12 +8787,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Section title="Properties">
               <Field label="Fill color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.fill)} onChange={(e) => { pushHistory(); setSelEl({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" value={toHex6(curStyle.fill)} {...livePick((v) => setSelEl({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
               </Field>
               <Field label="Line color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.stroke)} onChange={(e) => { pushHistory(); setSelEl({ stroke: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" value={toHex6(curStyle.stroke)} {...livePick((v) => setSelEl({ stroke: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
               </Field>
               <Field label="Fill opacity">
@@ -9006,7 +9121,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </Field>
                   <Field label="Fill color">
                     <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <input type="color" value={toHex6(selParcel.fill)} onChange={(e) => { pushHistory(); setSelParcel({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                      <input type="color" value={toHex6(selParcel.fill)} {...livePick((v) => setSelParcel({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                     </span>
                   </Field>
                 </>
@@ -9126,8 +9241,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
                   <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{TYPE[k].label.split(" / ")[0]}</span>
-                  <input type="color" title="Fill" value={toHex6(st.fill)} onChange={(e) => setTypeStyle(k, { fill: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
-                  <input type="color" title="Line" value={toHex6(st.stroke)} onChange={(e) => setTypeStyle(k, { stroke: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Fill" value={toHex6(st.fill)} {...livePick((v) => liveTypeStyle(k, { fill: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Line" value={toHex6(st.stroke)} {...livePick((v) => liveTypeStyle(k, { stroke: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </div>
               );
             })}
@@ -9230,9 +9345,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
       {/* Title reader + metes-and-bounds modal */}
       {titleOpen && (() => {
-        const calls = parseCalls(mbText);
+        const tracts = parseTracts(mbText);
+        const calls = tracts[0] ? tracts[0].calls : [];
         const path = calls.length ? callsToPath(calls, { x: 0, y: 0 }) : [];
         const closes = pathCloses(path);
+        const gap = misclosure(path);
+        const exCount = Math.max(0, tracts.length - 1);
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -9241,7 +9359,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <button className="gbtn" onClick={() => setTitleOpen(false)} style={{ ...chip }}>Close ✕</button>
             </div>
             <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 14 }}>
-              Upload a title commitment to pull its Schedule B exceptions into a checklist, then plot any metes-and-bounds easement on the plan.
+              Upload a title commitment to pull its Schedule B exceptions into a checklist, or <b>drop a deed / legal description (.docx)</b> below to read and plot its metes-and-bounds boundary.
             </div>
 
             {/* API key */}
@@ -9295,18 +9413,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* metes-and-bounds plotter */}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>2 · Plot a metes-and-bounds description</div>
+              {/* Drop a deed file (.docx / .txt) → read its text into the box below. */}
+              <input ref={deedFileRef} data-testid="deed-file-input" type="file" accept=".docx,.txt,.text,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" style={{ display: "none" }}
+                onChange={(e) => { readDeed(e.target.files?.[0]); e.target.value = ""; }} />
+              <div
+                onClick={() => !deedBusy && deedFileRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDeedDrag(true); }}
+                onDragLeave={() => setDeedDrag(false)}
+                onDrop={(e) => { e.preventDefault(); setDeedDrag(false); readDeed(e.dataTransfer.files?.[0]); }}
+                style={{ border: `1.5px dashed ${deedDrag ? PAL.accent : PAL.panelLine}`, background: deedDrag ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "default" : "pointer", marginBottom: 10 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>{deedBusy ? "Reading…" : "Drop a deed file here, or click to choose"}</div>
+                <div style={{ fontSize: 11, color: PAL.muted, marginTop: 3, lineHeight: 1.4 }}>Word (.docx) or text (.txt) — bearings, distances, curves, and save-and-except are read automatically.</div>
+                {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: "ui-monospace, monospace", wordBreak: "break-all" }}>📄 {deedName}</div>}
+              </div>
+              {deedErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{deedErr}</div>}
               <textarea value={mbText} onChange={(e) => setMbText(e.target.value)} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
                 style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
-                  {calls.length ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? "closes (tract)" : "open (corridor)"}` : "No calls parsed yet"}
+                  {calls.length
+                    ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? `closes${gap > 1 ? ` (misclosure ${gap.toFixed(1)}′)` : ""}` : `does NOT close — gap ${gap.toFixed(1)}′`}${exCount ? ` · +${exCount} save-and-except` : ""}`
+                    : "No calls parsed yet"}
                 </div>
-                {calls.some((c) => c.curve) && (
+                {calls.length > 0 && !closes && (
                   <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
-                    ⚠ {calls.filter((c) => c.curve).length} curve(s) plotted as straight chords — verify against the survey.
+                    ⚠ These calls don't close back to the start — the boundary is plotted exactly as written, with the gap on the last edge. Check the description against the survey.
                   </div>
                 )}
+                {calls.some((c) => c.curve) && (() => {
+                  const cv = calls.filter((c) => c.curve);
+                  const hasArc = (c) => c.curveMeta && (c.curveMeta.radiusFt > 0 || c.curveMeta.centralAngleDeg > 0);
+                  const chord = cv.filter((c) => !hasArc(c)).length;
+                  return (
+                    <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
+                      ⚠ {cv.length} curve(s) reconstructed as true arcs{chord ? ` (${chord} drawn as a straight chord — no radius/angle stated)` : ""} — verify against the survey.
+                    </div>
+                  );
+                })()}
                 {calls.length > 0 && !closes && (
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: PAL.muted }}>
                     Corridor width
@@ -9321,7 +9465,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: "ui-monospace, monospace" }}>
                   {calls.map((c, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px", borderBottom: i < calls.length - 1 ? "1px solid #f3efe5" : "none", color: PAL.ink }}>
-                      <span>{i + 1}. {c.bearing}{c.curve ? " ⤿ (chord)" : ""}</span><span>{c.distFt.toFixed(2)}′</span>
+                      <span>{i + 1}. {c.bearing}{c.curve ? (c.curveMeta && (c.curveMeta.radiusFt > 0 || c.curveMeta.centralAngleDeg > 0) ? " ⤾ (arc)" : " ⤿ (chord)") : ""}</span><span>{c.distFt.toFixed(2)}′</span>
                     </div>
                   ))}
                 </div>

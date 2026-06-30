@@ -97,6 +97,12 @@ function Badge({ state, onRetry, detail }) {
     <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
       <button
         type="button"
+        // Stable hook for the B278 Playwright harness to assert the cloud badge is present and
+        // in the right state across every workspace (Site / Schedule / Review) — same testid
+        // everywhere so "Cloud-on / save-persistence" is checked the same way on each path. The
+        // live state is also exposed via data-sync-state for a precise per-state assertion.
+        data-testid="cloud-sync-badge"
+        data-sync-state={state ?? "none"}
         onClick={canPop ? () => setOpen((o) => !o) : undefined}
         title={tip}
         aria-label={`Cloud sync: ${v.title}`}
@@ -163,6 +169,7 @@ export class CloudBadgeBoundary extends Component {
     if (this.state.crashed) {
       return (
         <span role="img" aria-label="Cloud sync: status unavailable"
+          data-testid="cloud-sync-badge" data-sync-state="crashed"
           title="Sync status couldn't be read — your latest work is saved on this device."
           style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: 7,
             color: "var(--danger)", border: "1px solid var(--danger)" }}>

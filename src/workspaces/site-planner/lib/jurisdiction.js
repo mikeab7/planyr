@@ -167,7 +167,7 @@ export function roadAuthority(maintCode, hsys) {
 }
 
 // ---------------------------------------------------------------------------
-// Road-authority MAP overlay palette + per-feature style (NEW-2 / B5264).
+// Road-authority MAP overlay palette + per-feature style (NEW-2 / B571).
 // A NEW categorical palette, deliberately NOT drawn from the locked palettes
 // (project-status coral/blue/amber/grays, module accents Site #1D9E75 /
 // Schedule #7F77DD / Review #EF9F27 / brand #D85A30) — each maintainer gets a

@@ -257,6 +257,7 @@ export default function DocReview({
   useEffect(() => { docStateRef.current = { markups, calByPage, calInfo }; });
   const pastRef = useRef([]);
   const futureRef = useRef([]);
+  const colorSessionRef = useRef(null); // active live color-pick key, so the burst is one undo frame (B567)
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1);
   const histKey = (s) => JSON.stringify({ m: s.markups, c: s.calByPage, i: s.calInfo });
@@ -782,9 +783,19 @@ export default function DocReview({
   // Property panel onChange (B426 + B437): patch the selected markup if one is selected, and ALWAYS
   // update the sticky style default — so the panel also works for an ARMED tool with nothing selected
   // (set color/weight/fill/font BEFORE drawing; new markups inherit it via commit()).
-  const onPropChange = (key, value) => {
+  const onPropChange = (key, value, opts = {}) => {
     if (sel) {
-      pushHistory();
+      // Live color picking (opts.live) fires `input` continuously while the palette is open — take
+      // ONE undo snapshot on the first live event of a session (keyed on `key`), then skip the rest
+      // so undo reverts the whole pick in one step instead of one frame per swatch (B567). The
+      // committed `change` (opts.live falsy) of that same session must NOT push a second frame; any
+      // other key (a normal discrete change) ends the session and pushes its own frame as before.
+      if (opts.live) {
+        if (colorSessionRef.current !== key) { pushHistory(); colorSessionRef.current = key; }
+      } else {
+        if (colorSessionRef.current !== key) pushHistory();
+        colorSessionRef.current = null;
+      }
       setMarkups((a) => a.map((m) => m.id === sel ? { ...m, ...writeProp(m, key, value) } : m));
     }
     setPropStyle((s) => ({ ...s, [key]: value }));
