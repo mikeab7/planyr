@@ -177,7 +177,7 @@ const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • drag to move (snap only ALIGNS to the grid/edges, never bonds; hold Alt to bypass) • Shift-click or marquee to pick several, then Group (Ctrl+G) so they move/copy/select as one unit; double-click a group member to edit it in place • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
   { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: H, or hold Space to pan temporarily (press V for Select)" },
   { id: "marquee", label: "Marquee", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" },
-  { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
+  { id: "parcel", label: "Parcel", hint: "Draw mode: click to drop boundary points, then click the first point (or double-click) to close — draw as many as you like • Remove mode: click a parcel to delete it • click Done (or Esc) to exit" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
   { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text" },
   { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit" },
@@ -992,6 +992,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [measureMode, setMeasureMode] = useState(() => lsGet("measureMode", "line"));
   const [measureMenu, setMeasureMenu] = useState(false);  // Measure ▾ dropdown open
   const [splitPath, setSplitPath] = useState([]);    // vertices of a split cut polyline
+  // B598 — the Parcel tool now stays active (so several lots draw in a row) with an explicit
+  // banner: a Draw/Remove sub-mode + a Done exit. "add" = click to drop boundary points (the
+  // original behaviour); "remove" = click an existing parcel to delete it. Reset to "add" on
+  // every tool switch (selectTool), so re-entering the Parcel tool always starts in Draw.
+  const [parcelMode, setParcelMode] = useState("add"); // 'add' | 'remove'
 
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
@@ -2065,7 +2070,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
@@ -2398,6 +2403,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (tool === "parcel") {
+      if (parcelMode === "remove") { // B598: click a parcel (interior OR boundary — both bubble here) to delete it; stay in the tool to remove more
+        const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points)); // topmost (last-drawn) wins
+        if (hit) removeParcelById(hit.id);
+        return;
+      }
       const sp = snapPt(fp);
       if (draftPoly && draftPoly.length >= 3 && dist(f2p(sp), f2p(draftPoly[0])) < 12) { closePoly(); return; }
       setDraftPoly((d) => (d ? [...d, sp] : [sp]));
@@ -2565,6 +2575,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setCombineSel([]);
     setSel({ kind: "parcel", id: np.id });
     setTool("select");
+  };
+  // Remove ONE parcel by id (B598) — used by the Parcel tool's Remove mode AND the panel-row ✕.
+  // Mirrors deleteSel's parcel branch exactly: pushHistory (so it's undoable) + filter it out +
+  // tombstone so the deletion sticks across reload / cross-tab / cross-device merge and never trips
+  // the thin-clobber guard (B556/B596). Also drops it from the current selection / merge pick.
+  const removeParcelById = (id) => {
+    if (!parcels.some((p) => p.id === id)) return;
+    pushHistory();
+    setParcels((a) => a.filter((p) => p.id !== id));
+    tombstone(id);
+    setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : s));
+    setSel((cur) => (cur && cur.kind === "parcel" && cur.id === id ? null : cur));
   };
 
   /* ------------ callouts (annotations) ------------ */
@@ -3373,7 +3395,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       requestFit();
     }
     setDraftPoly(null);
-    setTool("select");
+    // B598 — stay in the Parcel tool (Draw mode) so the next lot can be drawn immediately; the
+    // banner's Done button (or Esc / picking another tool) is the explicit, discoverable exit.
+    // (Previously this auto-switched to Select, which is exactly what made "how do I get out?"
+    // unclear and forced re-opening the Parcel menu for each additional lot.)
   };
   const closeElPoly = () => {
     if (draftElPoly && draftElPoly.pts.length >= 3) {
@@ -6300,6 +6325,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     setTool(id);
+    setParcelMode("add"); // B598 — always (re)enter the Parcel tool in Draw mode, never a stale Remove
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
     if (id !== "easement") { setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); }
     if (id !== "select") setMulti([]);
@@ -6653,6 +6679,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const selCallout = sel?.kind === "callout" ? callouts.find((c) => c.id === sel.id) : null;
   const setSelCallout = (patch) => { pushHistory(); setCallout(selCallout.id, patch); };
   const curHint = TOOLS.find((t) => t.id === tool)?.hint;
+  // B598 — in the Parcel tool's Remove mode, highlight the lot under the cursor (danger hue) so it's
+  // unmistakable WHICH parcel a click deletes; topmost (last-drawn) wins, matching the click hit-test.
+  const parcelRemoveHoverId = (tool === "parcel" && parcelMode === "remove" && cursor)
+    ? ([...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(cursor, pc.points))?.id ?? null)
+    : null;
 
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
   const curStyle = selEl ? elStyle(styleHostOf(selEl), settings) : null;
@@ -7168,16 +7199,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 const picked = combineSel.includes(pc.id);
+                const removeHover = pc.id === parcelRemoveHoverId; // B598: about to be deleted in Remove mode
                 const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
                 const ring = pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 return <g key={pc.id}>
                   <polygon points={ring}
-                    fill={picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
-                    stroke={picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={picked || isSel ? 3 : 2}
+                    fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
+                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={removeHover || picked || isSel ? 3 : 2}
                     strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-                    style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
+                    style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : (tool === "parcel" && parcelMode === "remove") ? "pointer" : "crosshair" }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
                     onContextMenu={(e) => onParcelContext(e, pc.id)} />
                 </g>;
@@ -8069,6 +8101,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <button className="dbtn" style={{ ...btn(!!(easeEdges && easeEdges.idx.length)), padding: "5px 12px", opacity: (easeEdges && easeEdges.idx.length) ? 1 : 0.5, cursor: (easeEdges && easeEdges.idx.length) ? "pointer" : "default" }}
                 disabled={!(easeEdges && easeEdges.idx.length)} onClick={finishEaseEdges}>Create easement ⏎</button>
               {easeEdges && <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => setEaseEdges(null)}>Clear</button>}
+            </div>
+          )}
+
+          {/* Parcel tool banner (B598) — the owner couldn't tell how to EXIT the parcel tool, and
+              wanted to remove parcels from it too. So the tool now shows a persistent banner with a
+              Draw/Remove sub-mode switch and an explicit Done exit. Same zIndex/stopPropagation guard
+              as the merge banner so its buttons clear the transparent SVG canvas and stay clickable. */}
+          {tool === "parcel" && (
+            <div onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
+              style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 8px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 9, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
+              {/* Draw / Remove mode pill */}
+              <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.13)", borderRadius: 99, padding: 2 }}>
+                <button className="dbtn" onClick={() => setParcelMode("add")} aria-pressed={parcelMode === "add"}
+                  style={{ padding: "4px 12px", borderRadius: 99, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: parcelMode === "add" ? "#fff" : "transparent", color: parcelMode === "add" ? "#19160f" : "#fff" }}>✏️ Draw</button>
+                <button className="dbtn" onClick={() => { setDraftPoly(null); setParcelMode("remove"); }} aria-pressed={parcelMode === "remove"}
+                  style={{ padding: "4px 12px", borderRadius: 99, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: parcelMode === "remove" ? "#fff" : "transparent", color: parcelMode === "remove" ? "#19160f" : "#fff" }}>✕ Remove</button>
+              </div>
+              <span style={{ color: "rgba(255,255,255,0.92)" }}>
+                {parcelMode === "remove"
+                  ? (parcels.length ? "Click a parcel to delete it" : "No parcels to remove")
+                  : (draftPoly && draftPoly.length >= 1 ? `${draftPoly.length} point${draftPoly.length > 1 ? "s" : ""} — click the first dot or double-click to close` : "Click on the plan to drop boundary points")}
+              </span>
+              {parcelMode === "add" && draftPoly && draftPoly.length >= 3 && (
+                <button className="dbtn" style={{ ...btn(true), padding: "5px 12px" }} onClick={closePoly}>Finish ⏎</button>
+              )}
+              {parcelMode === "add" && draftPoly && draftPoly.length >= 1 && (
+                <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => removeLastVertex()}>Undo point</button>
+              )}
+              <button className="dbtn" style={{ ...chip, padding: "5px 13px" }} title="Finish working with parcels and go back to Select (Esc)" onClick={() => selectTool("select")}>Done</button>
             </div>
           )}
 
@@ -9272,6 +9333,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{inactive ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
+                        {/* B598 — per-row remove (✕). Undo-able (removeParcelById pushes history); the
+                            tombstone keeps it deleted across reload/merge. The most discoverable place
+                            to remove a parcel, alongside the Parcel tool's Remove mode. */}
+                        <button title="Remove this parcel" aria-label={`Remove ${pc.addr || `Parcel ${i + 1}`}`}
+                          onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
+                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid #e2dccb`, borderRadius: 8, background: "#fff", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
                       </div>
                     );
                   })}
