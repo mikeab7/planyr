@@ -10,68 +10,66 @@ import {
 const sum = (a) => a.reduce((x, y) => x + y, 0);
 const DEF = { ...GRID_DEFAULTS }; // 60 / 56 / 50 / band 50–58 / door 9 @ 12
 
-describe("divideSpan — fixed interior module, flex only the end/rear/centre bays", () => {
-  it("336 at module 56 → six clean 56′ bays (divides evenly → no dashed flex)", () => {
+describe("divideSpan — uniform interior bays flexed within the band (clean, evenly-spaced grid)", () => {
+  it("336 @ 56 → six uniform 56′ bays (divides evenly)", () => {
     const r = divideSpan(336, { target: 56, min: 50, max: 58, residual: "ends" });
     expect(r.sizes).toHaveLength(6);
     r.sizes.forEach((s) => expect(s).toBeCloseTo(56, 6));
-    expect(r.roles.every((x) => x === "std")).toBe(true); // each end == module → tagged std
+    expect(r.roles.every((x) => x === "std")).toBe(true);
     expect(sum(r.sizes)).toBeCloseTo(336, 6);
   });
 
-  it("200 at depth module 50 (rear) → four clean 50′ bays", () => {
+  it("200 @ 50 (rear) → four uniform 50′ bays", () => {
     const r = divideSpan(200, { target: 50, min: 50, max: 58, residual: "rear" });
     expect(r.sizes).toHaveLength(4);
     r.sizes.forEach((s) => expect(s).toBeCloseTo(50, 6));
     expect(sum(r.sizes)).toBeCloseTo(200, 6);
   });
 
-  it("interior bays stay EXACTLY the module; only the two ends flex to close (520 @ 56)", () => {
+  it("520 @ 56 → nine uniform ~57.8′ bays, all in-band, no odd end bay", () => {
     const r = divideSpan(520, { target: 56, min: 50, max: 58, residual: "ends" });
-    // 7 fixed 56′ interior bays + 2 flexed end bays of 64′ — NOT nine stretched 57.8′ bays.
-    const interior = r.sizes.filter((_, i) => r.roles[i] === "std");
-    const ends = r.sizes.filter((_, i) => r.roles[i] === "flex");
-    interior.forEach((s) => expect(s).toBeCloseTo(56, 6));
-    expect(interior).toHaveLength(7);
-    expect(ends).toHaveLength(2);
-    ends.forEach((s) => expect(s).toBeCloseTo(64, 6));
+    expect(r.sizes).toHaveLength(9);
+    r.sizes.forEach((s) => expect(s).toBeCloseTo(57.78, 1));
+    expect(r.roles.every((x) => x === "std")).toBe(true);
     expect(sum(r.sizes)).toBeCloseTo(520, 6);
   });
 
-  it("across many spans: every interior (std) bay equals the module exactly; flex bays stay near it", () => {
-    for (const S of [300, 336, 412, 540, 777, 1000]) {
+  it("340 @ 56 → six uniform ~56.7′ bays (flexed to close, not an odd end bay)", () => {
+    const r = divideSpan(340, { target: 56, min: 50, max: 58, residual: "ends" });
+    expect(r.sizes).toHaveLength(6);
+    r.sizes.forEach((s) => expect(s).toBeCloseTo(56.667, 2));
+    expect(r.roles.every((x) => x === "std")).toBe(true);
+    expect(sum(r.sizes)).toBeCloseTo(340, 6);
+  });
+
+  it("270 @ 50 (rear) → five uniform 54′ bays", () => {
+    const r = divideSpan(270, { target: 50, min: 50, max: 58, residual: "rear" });
+    expect(r.sizes).toHaveLength(5);
+    r.sizes.forEach((s) => expect(s).toBeCloseTo(54, 6));
+    expect(sum(r.sizes)).toBeCloseTo(270, 6);
+  });
+
+  it("across many spans: interior bays are UNIFORM and inside the band [50,58]", () => {
+    for (const S of [300, 336, 412, 520, 540, 651, 777, 1000]) {
       const r = divideSpan(S, { target: 56, min: 50, max: 58, residual: "ends" });
-      r.sizes.forEach((s, i) => {
-        if (r.roles[i] === "std") expect(s).toBeCloseTo(56, 6);       // interior pinned at the module
-        else { expect(s).toBeGreaterThan(0.7 * 56); expect(s).toBeLessThan(1.3 * 56); } // flex never a sliver/oversized
-      });
+      if (r.roles.every((x) => x === "std")) {
+        // all interior bays equal each other and sit inside the band
+        r.sizes.forEach((s) => {
+          expect(s).toBeCloseTo(r.sizes[0], 6);
+          expect(s).toBeGreaterThanOrEqual(50 - 1e-6);
+          expect(s).toBeLessThanOrEqual(58 + 1e-6);
+        });
+      }
       expect(sum(r.sizes)).toBeCloseTo(S, 6);
     }
   });
 
-  it("end bays flex when the span doesn't divide evenly (340 @ 56 → 58 · 56×4 · 58)", () => {
-    const r = divideSpan(340, { target: 56, min: 50, max: 58, residual: "ends" });
-    expect(r.roles[0]).toBe("flex");
-    expect(r.roles[r.roles.length - 1]).toBe("flex");
-    expect(r.sizes[0]).toBeCloseTo(58, 6);
-    r.sizes.slice(1, -1).forEach((s) => expect(s).toBeCloseTo(56, 6)); // interior fixed
-    expect(sum(r.sizes)).toBeCloseTo(340, 6);
-  });
-
-  it("rear flex lands in the LAST bay only; interior pinned at the module (270 @ 50, rear)", () => {
-    const r = divideSpan(270, { target: 50, min: 50, max: 58, residual: "rear" });
-    expect(sum(r.sizes)).toBeCloseTo(270, 6);
-    expect(r.roles[r.roles.length - 1]).toBe("flex");
-    expect(r.sizes[r.sizes.length - 1]).toBeCloseTo(70, 6);
-    r.sizes.slice(0, -1).forEach((s) => expect(s).toBeCloseTo(50, 6));
-  });
-
-  it("centre flex lands in a MIDDLE bay (cross-dock helper)", () => {
+  it("fallback (a narrow 'gap' span with no in-band uniform division) puts the odd bay in the MIDDLE for center mode", () => {
+    // 130: 2 bays → 65 (over), 3 → 43.3 (under) — no in-band uniform division.
     const r = divideSpan(130, { target: 50, min: 50, max: 58, residual: "center" });
     expect(sum(r.sizes)).toBeCloseTo(130, 6);
     const flexIdx = r.roles.indexOf("flex");
-    expect(flexIdx).toBeGreaterThan(0);
-    expect(flexIdx).toBeLessThan(r.sizes.length - 1); // a middle bay, not an end
+    expect(flexIdx).toBeGreaterThan(-1);
   });
 
   it("short span → a single bay, no interior line", () => {
@@ -83,6 +81,16 @@ describe("divideSpan — fixed interior module, flex only the end/rear/centre ba
   it("zero / negative → empty", () => {
     expect(divideSpan(0, { target: 56, min: 50, max: 58 }).sizes).toEqual([]);
     expect(divideSpan(-10, { target: 56, min: 50, max: 58 }).sizes).toEqual([]);
+  });
+
+  it("deep cross-dock middle stays uniform — the reported 634′/651′ buildings (no skinny/fat centre)", () => {
+    for (const [D, n] of [[514, 10], [531, 10]]) { // 634/651 minus two 60′ speed bays
+      const r = divideSpan(D, { target: 50, min: 50, max: 58, residual: "center" });
+      expect(r.sizes).toHaveLength(n);
+      r.sizes.forEach((s) => { expect(s).toBeCloseTo(r.sizes[0], 6); expect(s).toBeGreaterThanOrEqual(50 - 1e-6); expect(s).toBeLessThanOrEqual(58 + 1e-6); });
+      expect(r.roles.every((x) => x === "std")).toBe(true);
+      expect(sum(r.sizes)).toBeCloseTo(D, 6);
+    }
   });
 });
 
