@@ -233,15 +233,60 @@ export function parseCalls(text) {
   return tracts.length ? tracts[0].calls : [];
 }
 
+/* Tessellate the TRUE circular arc of a curve course into points (planner frame).
+ * Given the arc's start (p0) and end (p1 = the chord endpoint) plus the curve's
+ * stated radius / central angle / turn direction, reconstruct the circle and walk
+ * the minor arc from p0 to p1 — so a plotted boundary follows the real curve, not a
+ * straight chord. Returns the intermediate points ENDING at p1 (so the next course
+ * continues from the chord endpoint exactly). Falls back to [p1] (a straight chord)
+ * when there's no usable radius/angle or the geometry is degenerate (chord > 2R).
+ *
+ * Frame: +x east, +y south. `turn:"R"` (curve to the right) puts the centre on the
+ * traveller's right; `turn:"L"` on the left. The minor arc bulges away from centre. */
+export function arcChordPoints(p0, p1, meta) {
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const c = Math.hypot(dx, dy);
+  let R = meta && meta.radiusFt ? +meta.radiusFt : 0;
+  const deltaDeg = meta && meta.centralAngleDeg ? +meta.centralAngleDeg : 0;
+  if ((!R || R <= 0) && deltaDeg > 0) {
+    const half = (deltaDeg * Math.PI) / 360;
+    if (Math.sin(half) > 1e-9) R = c / (2 * Math.sin(half)); // derive R from chord + delta
+  }
+  if (!R || R <= 0 || c <= 1e-9 || c > 2 * R + 1e-6) return [{ x: p1.x, y: p1.y }];
+  const m = Math.sqrt(Math.max(0, R * R - (c / 2) * (c / 2))); // apothem (centre↔chord midpoint)
+  const px = -dy / c, py = dx / c;                              // left normal of p0→p1
+  const sign = meta && meta.turn === "L" ? -1 : 1;              // R → centre on the right
+  const cx = (p0.x + p1.x) / 2 + sign * m * px;
+  const cy = (p0.y + p1.y) / 2 + sign * m * py;
+  const a0 = Math.atan2(p0.y - cy, p0.x - cx);
+  const a1 = Math.atan2(p1.y - cy, p1.x - cx);
+  let da = a1 - a0;
+  while (da > Math.PI) da -= 2 * Math.PI;   // sweep the minor arc (the deed's central angle)
+  while (da < -Math.PI) da += 2 * Math.PI;
+  const n = Math.max(8, Math.min(48, Math.round(Math.abs(da) / (4 * Math.PI / 180)))); // ~1 pt / 4°
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const a = a0 + (da * i) / n;
+    out.push({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) });
+  }
+  return out; // last point ≈ p1 exactly
+}
+
 /* Dead-reckon the calls from a POB into a path of feet points (planner frame:
- * +y is south, so north subtracts y). Returns [{x,y}, ...] incl. the POB. */
+ * +y is south, so north subtracts y). Curve courses are tessellated into their
+ * true arc; straight courses add one vertex. Returns [{x,y}, ...] incl. the POB. */
 export function callsToPath(calls, pob) {
   const pts = [{ x: pob.x, y: pob.y }];
   let cur = { ...pob };
   for (const c of calls) {
     const a = (c.az * Math.PI) / 180;
-    cur = { x: cur.x + c.distFt * Math.sin(a), y: cur.y - c.distFt * Math.cos(a) };
-    pts.push(cur);
+    const end = { x: cur.x + c.distFt * Math.sin(a), y: cur.y - c.distFt * Math.cos(a) };
+    if (c.curve && c.curveMeta && ((c.curveMeta.radiusFt > 0) || (c.curveMeta.centralAngleDeg > 0))) {
+      for (const p of arcChordPoints(cur, end, c.curveMeta)) pts.push(p);
+    } else {
+      pts.push(end);
+    }
+    cur = end; // the next course starts at the chord endpoint either way
   }
   return pts;
 }
