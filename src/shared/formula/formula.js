@@ -226,7 +226,11 @@ const tokenize = src => {
         if ((ch === "e" || ch === "E") && !exp) { exp = true; j++; if (s[j] === "+" || s[j] === "-") j++; continue; }
         break;
       }
-      toks.push({ t: "num", v: parseFloat(s.slice(i, j)), pos: i }); i = j; continue;
+      const numVal = parseFloat(s.slice(i, j));
+      // A literal that overflows the float range (e.g. 1e309 → Infinity) is a #NUM! at the
+      // source, so it can never slip into a comparison/label as a silent Infinity.
+      if (!Number.isFinite(numVal)) throw ferr(FORMULA_ERRORS.NUM, "number literal out of range");
+      toks.push({ t: "num", v: numVal, pos: i }); i = j; continue;
     }
     // Identifier: function name / TRUE / FALSE. Letters, digits, _, ., and a
     // trailing % only inside names like none — names are [A-Za-z_][A-Za-z0-9_.]*
@@ -254,7 +258,16 @@ const COMPARE = { "=": 1, "<>": 1, "<": 1, ">": 1, "<=": 1, ">=": 1 };
 // exists only so a pathological input (e.g. thousands of "((((…") can't blow the
 // recursive-descent parser's / evaluator's call stack with an uncatchable RangeError.
 const MAX_PARSE_DEPTH = 200;
+// Hard ceiling on total token count. The parser is iterative for operator chains (no
+// recursion), but the tree-walk EVALUATOR recurses down a long left-leaning chain
+// (a+b+c+…), so a multi-thousand-term formula could overflow the JS call stack — and
+// WHETHER it does depends on the ambient stack depth at call time, making the result
+// non-deterministic (#ERROR! vs a value for the very same input). Rejecting an
+// over-large formula up front (well above any real formula, far below the overflow
+// boundary) makes the verdict input-determined. ~1000 tokens ⇒ ≤~1000 eval frames.
+const MAX_TOKENS = 1000;
 const parse = toks => {
+  if (toks.length > MAX_TOKENS) throw ferr(FORMULA_ERRORS.ERR, "formula too large");
   let p = 0;
   let depth = 0;
   const peek = () => toks[p];
@@ -440,8 +453,12 @@ const FUNCTIONS = {
   ROUNDDOWN: { fn: a => { need(a, 1, 2, "ROUNDDOWN"); const d = a.length > 1 ? Math.trunc(num1(a[1])) : 0, f = Math.pow(10, d), n = num1(a[0]); return (n < 0 ? -Math.floor(Math.abs(n) * f + 1e-9) : Math.floor(n * f + 1e-9)) / f; } },
   INT:   { fn: a => { need(a, 1, 1, "INT"); return Math.floor(num1(a[0])); } },
   MOD:   { fn: a => { need(a, 2, 2, "MOD"); const n = num1(a[0]), d = num1(a[1]); if (d === 0) throw ferr(FORMULA_ERRORS.DIV0, "MOD by zero"); return n - d * Math.floor(n / d); } },
-  CEILING: { fn: a => { need(a, 1, 2, "CEILING"); const n = num1(a[0]), sig = a.length > 1 ? num1(a[1]) : 1; if (sig === 0) return 0; if (n > 0 && sig < 0) throw ferr(FORMULA_ERRORS.NUM, "CEILING: number and significance must share a sign"); return Math.ceil(n / sig) * sig; } },
-  FLOOR: { fn: a => { need(a, 1, 2, "FLOOR"); const n = num1(a[0]), sig = a.length > 1 ? num1(a[1]) : 1; if (sig === 0) throw ferr(FORMULA_ERRORS.DIV0, "FLOOR significance 0"); if (n > 0 && sig < 0) throw ferr(FORMULA_ERRORS.NUM, "FLOOR: number and significance must share a sign"); return Math.floor(n / sig) * sig; } },
+  // The ±1e-9 on the quotient defeats binary-float drift (n/sig comes out a hair under/over
+  // the true integer multiple), so FLOOR(2.4,0.1)=2.4 not 2.3 and CEILING never over-steps.
+  // Matches the same epsilon discipline used by ROUNDUP/ROUNDDOWN above. (n/sig ≥ 0: the
+  // sign-mismatch case already threw, so the epsilon always nudges toward the true multiple.)
+  CEILING: { fn: a => { need(a, 1, 2, "CEILING"); const n = num1(a[0]), sig = a.length > 1 ? num1(a[1]) : 1; if (sig === 0) return 0; if (n > 0 && sig < 0) throw ferr(FORMULA_ERRORS.NUM, "CEILING: number and significance must share a sign"); return Math.ceil(n / sig - 1e-9) * sig; } },
+  FLOOR: { fn: a => { need(a, 1, 2, "FLOOR"); const n = num1(a[0]), sig = a.length > 1 ? num1(a[1]) : 1; if (sig === 0) throw ferr(FORMULA_ERRORS.DIV0, "FLOOR significance 0"); if (n > 0 && sig < 0) throw ferr(FORMULA_ERRORS.NUM, "FLOOR: number and significance must share a sign"); return Math.floor(n / sig + 1e-9) * sig; } },
   POWER: { fn: a => { need(a, 2, 2, "POWER"); const r = Math.pow(num1(a[0]), num1(a[1])); if (!Number.isFinite(r)) throw ferr(FORMULA_ERRORS.NUM, "POWER overflow/!domain"); return r; } },
   SQRT:  { fn: a => { need(a, 1, 1, "SQRT"); const n = num1(a[0]); if (n < 0) throw ferr(FORMULA_ERRORS.NUM, "SQRT of negative"); return Math.sqrt(n); } },
 
@@ -503,7 +520,9 @@ const FUNCTIONS = {
   LOG10:  { fn: a => { need(a, 1, 1, "LOG10"); const n = num1(a[0]); if (n <= 0) throw ferr(FORMULA_ERRORS.NUM, "LOG10 of non-positive"); return Math.log10(n); } },
   PI:     { fn: () => Math.PI },
   QUOTIENT: { fn: a => { need(a, 2, 2, "QUOTIENT"); const d = num1(a[1]); if (d === 0) throw ferr(FORMULA_ERRORS.DIV0, "QUOTIENT by zero"); return Math.trunc(num1(a[0]) / d); } },
-  MROUND: { fn: a => { need(a, 2, 2, "MROUND"); const n = num1(a[0]), m = num1(a[1]); if (m === 0) return 0; if ((n > 0) !== (m > 0)) throw ferr(FORMULA_ERRORS.NUM, "MROUND: number and multiple must share a sign"); return Math.round(n / m) * m; } },
+  // n/m ≥ 0 (signs must match), so +1e-9 rounds the half AWAY from zero like Excel and
+  // defeats float drift — MROUND(6.05,0.1)=6.1 not 6.0 (6.05/0.1 comes out as 60.4999…).
+  MROUND: { fn: a => { need(a, 2, 2, "MROUND"); const n = num1(a[0]), m = num1(a[1]); if (m === 0) return 0; if ((n > 0) !== (m > 0)) throw ferr(FORMULA_ERRORS.NUM, "MROUND: number and multiple must share a sign"); return Math.round(n / m + 1e-9) * m; } },
   EVEN:   { fn: a => { need(a, 1, 1, "EVEN"); const n = num1(a[0]); const r = Math.ceil(Math.abs(n) / 2) * 2; return n < 0 ? -r : r; } },
   ODD:    { fn: a => { need(a, 1, 1, "ODD"); const n = num1(a[0]); let r = Math.ceil(Math.abs(n)); if (r % 2 === 0) r += 1; if (r === 0) r = 1; return n < 0 ? -r : r; } },
   FACT:   { fn: a => { need(a, 1, 1, "FACT"); let n = Math.trunc(num1(a[0])); if (n < 0) throw ferr(FORMULA_ERRORS.NUM, "FACT of negative"); if (n > 170) throw ferr(FORMULA_ERRORS.NUM, "FACT overflow"); let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; } },
@@ -632,8 +651,13 @@ function matchesCriteria(value, criteria) {
     if (m) { op = m[1]; operand = m[2]; }
     const operandVal = parseCriteriaOperand(operand);
     if (op === "=" || op === "<>") {
-      if (typeof value === "string" && typeof operandVal === "string") {
-        const matched = wildcardToRegExp(operandVal.toLowerCase()).test(value.toLowerCase());
+      // A TEXT cell is always matched against the raw criterion TEXT (with wildcards),
+      // even when the operand text happens to look numeric or date-ish ("3/4", "100",
+      // "2026-06-01"). parseCriteriaOperand turns those into a number/date for comparing
+      // against numeric/date cells, but a string cell must compare as text — otherwise a
+      // literal "3/4" code would never match its own "3/4" criterion.
+      if (typeof value === "string") {
+        const matched = wildcardToRegExp(String(operand).toLowerCase()).test(value.toLowerCase());
         return op === "=" ? matched : !matched;
       }
       const eq = looseEqual(value, operandVal);
@@ -801,21 +825,51 @@ function formatDateToken(serial, fmt) {
     }
   });
 }
+// Excel number formats carry up to four ';'-separated sections: positive;negative;zero;text.
+// Pick the section by the value's sign. A dedicated negative/zero section owns its own sign
+// through literal text (e.g. parentheses), so its magnitude is formatted with no auto "-".
 function formatNumberToken(n, fmt) {
-  let pct = false;
-  if (/%/.test(fmt)) { pct = true; n *= 100; }
-  const useThousands = /#,##0|0,000|,/.test(fmt);
-  const dollar = /^\s*\$/.test(fmt) || /\$/.test(fmt);
-  const dotIdx = fmt.indexOf(".");
-  let decimals = 0;
-  if (dotIdx >= 0) { const after = fmt.slice(dotIdx + 1).match(/[0#]/g); decimals = after ? after.length : 0; }
-  // Count integer-side '0' placeholders to left-pad the integer part (Excel "00" → 7 = "07").
-  const intZeros = ((dotIdx >= 0 ? fmt.slice(0, dotIdx) : fmt).match(/0/g) || []).length;
-  const neg = n < 0;
+  const sections = splitFormatSections(fmt);
+  if (sections.length <= 1) return formatNumberSection(n, fmt, true);
+  if (n > 0) return formatNumberSection(n, sections[0], false);
+  if (n < 0) return formatNumberSection(Math.abs(n), sections[1], false);
+  return formatNumberSection(0, sections.length >= 3 ? sections[2] : sections[0], false);
+}
+// Split on top-level ';' only — a ';' inside a "quoted" run is a literal, not a separator.
+function splitFormatSections(fmt) {
+  const out = []; let cur = "", q = false;
+  for (let i = 0; i < fmt.length; i++) {
+    const c = fmt[i];
+    if (c === '"') { q = !q; cur += c; continue; }
+    if (c === ";" && !q) { out.push(cur); cur = ""; continue; }
+    cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+// Excel marks literal text with surrounding quotes or a leading backslash; drop the markers.
+function stripFormatLiterals(s) { return s.replace(/\\(.)/g, "$1").replace(/"/g, ""); }
+// Format one section as a template: the run from the first to the last digit placeholder
+// ([0#]) is the number; text before/after is emitted verbatim (so "$", "%", "(", ")" survive
+// in place). Decimal/integer placeholders are counted WITHIN this section only — never across
+// the ';' boundary, which is what made a 2-section format show 8 decimals. autoSign prefixes
+// "-" for a negative value only in the single-section case.
+function formatNumberSection(n, fmt, autoSign) {
+  const first = fmt.search(/[0#]/);
+  if (first < 0) return stripFormatLiterals(fmt);   // literal-only section
+  let last = first;
+  for (let i = first; i < fmt.length; i++) if (fmt[i] === "0" || fmt[i] === "#") last = i;
+  const prefix = fmt.slice(0, first), placeholder = fmt.slice(first, last + 1), suffix = fmt.slice(last + 1);
+  if (/%/.test(fmt)) n *= 100;                       // a '%' anywhere scales by 100 (the '%' glyph rides in the literals)
+  const useThousands = /,/.test(placeholder);
+  const dotIdx = placeholder.indexOf(".");
+  const decimals = dotIdx >= 0 ? (placeholder.slice(dotIdx + 1).match(/[0#]/g) || []).length : 0;
+  const intZeros = ((dotIdx >= 0 ? placeholder.slice(0, dotIdx) : placeholder).match(/0/g) || []).length;
+  const neg = autoSign && n < 0;
   const parts = roundAwayFromZero(Math.abs(n), decimals).toFixed(decimals).split(".");
   if (intZeros > parts[0].length) parts[0] = parts[0].padStart(intZeros, "0");
   if (useThousands) parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return (neg ? "-" : "") + (dollar ? "$" : "") + parts.join(".") + (pct ? "%" : "");
+  return (neg ? "-" : "") + stripFormatLiterals(prefix) + parts.join(".") + stripFormatLiterals(suffix);
 }
 
 // ── Evaluator ────────────────────────────────────────────────────────────────
@@ -885,10 +939,16 @@ const evalBinary = (node, ctx) => {
 const evalCall = (node, ctx) => {
   const def = FUNCTIONS[node.name];
   if (!def) throw ferr(FORMULA_ERRORS.NAME, `unknown function ${node.name}`);
-  if (def.rng) return def.rng(node.args, ctx, evalNode);    // range/lookup: needs the arg NODES (to read whole columns)
-  if (def.lazy) return def.lazy(node.args, ctx, evalNode);  // short-circuit / error-trapping forms
-  const args = node.args.map(a => evalNode(a, ctx));
-  return def.fn(args, ctx);
+  let r;
+  if (def.rng) r = def.rng(node.args, ctx, evalNode);          // range/lookup: needs the arg NODES (to read whole columns)
+  else if (def.lazy) r = def.lazy(node.args, ctx, evalNode);   // short-circuit / error-trapping forms
+  else r = def.fn(node.args.map(a => evalNode(a, ctx)), ctx);
+  // A function must never hand back a non-finite number (overflow → ±Infinity, or 0×Infinity →
+  // NaN from e.g. TRUNC(0, huge)) as a "value" — it would slip into a comparison or label.
+  // Surface it as #NUM!, mirroring the arithmetic-operator guard. (POWER/EXP/FACT/SQRT throw
+  // their own domain errors earlier, so they never reach here non-finite.)
+  if (typeof r === "number" && !Number.isFinite(r)) throw ferr(FORMULA_ERRORS.NUM, `${node.name} produced a non-finite number`);
+  return r;
 };
 
 // ── Public entry points ────────────────────────────────────────────────────────
@@ -910,7 +970,13 @@ const evaluateFormula = (src, ctx) => {
     today: (ctx && ctx.today != null) ? ctx.today : Math.round(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) / MS_PER_DAY),
     formatDate: (ctx && ctx.formatDate) || serialToISO,
   };
-  try { return { ok: true, value: evalNode(parsed.ast, fullCtx) }; }
+  try {
+    const value = evalNode(parsed.ast, fullCtx);
+    // Backstop the "never return a non-finite number" contract (the call-boundary and
+    // operator guards already cover the known paths; this catches any future one).
+    if (typeof value === "number" && !Number.isFinite(value)) return { ok: false, error: FORMULA_ERRORS.NUM, detail: "result is not a finite number" };
+    return { ok: true, value };
+  }
   // Contract: never throw to the host (this runs per-row during a React render — an
   // uncaught throw would blank the grid). FormulaError → its code; anything else →
   // a generic #ERROR! cell.
