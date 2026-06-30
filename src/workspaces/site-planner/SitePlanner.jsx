@@ -7,6 +7,7 @@ import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
@@ -756,16 +757,16 @@ const countyAcres = (attrs) => {
   return null;
 };
 
-let _id = 1;
-const uid = () => `e${_id++}`;
-// After restoring saved work, bump the id counter past any restored ids so new
-// elements don't collide with old ones (which would break keys/selection).
-const ensureIdAbove = (ids) => {
-  (ids || []).forEach((id) => {
-    const n = parseInt(String(id).replace(/\D/g, ""), 10);
-    if (!isNaN(n) && n >= _id) _id = n + 1;
-  });
-};
+// B591 — collision-resistant element ids. A per-TAB salt is appended to every minted id so
+// two tabs (or a reopen after a delete) can never mint the same id, and a freshly drawn item
+// can never reuse an id already sitting in a `deletedIds` tombstone (which mergeSiteContent's
+// tombstone filter would then strip — the polyline that vanished mid-session). The salt is
+// letters only, so seedAbove still parses the numeric sequence for ordering.
+const uid = createIdMinter(randomIdSalt());
+// After restoring saved work, bump the id counter past any restored ids so new elements don't
+// collide with old ones (which would break keys/selection). Feed it EVERY id-bearing
+// collection (not just parcels+els) plus the tombstone list — see the callers below.
+const ensureIdAbove = (ids) => uid.seedAbove(ids);
 
 // Snap is a per-SESSION drafting preference (a tool mode), NOT a per-site attribute.
 // It defaults OFF every time the app is opened and is remembered only within the
@@ -862,7 +863,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
     const s = loadSite(siteId);
-    if (s) ensureIdAbove([...(s.parcels || []).map((p) => p.id), ...(s.els || []).map((e) => e.id)]);
+    // B591 — seed past EVERY id-bearing collection + tombstones, not just parcels+els, so a
+    // new id can't re-collide with a retained markup/measure/callout or a deleted-id tombstone.
+    if (s) ensureIdAbove([
+      ...(s.parcels || []).map((p) => p.id), ...(s.els || []).map((e) => e.id),
+      ...(s.markups || []).map((m) => m.id), ...(s.measures || []).map((m) => m.id),
+      ...(s.callouts || []).map((c) => c.id), ...(s.deletedIds || []),
+    ]);
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1134,7 +1141,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (dog-ears / sidewalks / parking) in one shot, always clearing the ≥2 bar, which is exactly the
   // phantom "Take over editing" re-prompt the owner hit (a MOVE keeps the item count, so it never
   // tripped); (2) mergeSiteContent would RESURRECT the deleted item from the cloud / another copy on
-  // reload or take-over. Ids are never reused (fresh uid() per add), so tombstoning by id is safe.
+  // reload or take-over. Ids are never reused — uid() carries a per-tab salt (B591), so a fresh
+  // add can never reuse a deleted item's id across tabs/sessions — so tombstoning by id is safe.
   const tombstone = (ids) => {
     const add = (Array.isArray(ids) ? ids : [ids]).filter((x) => typeof x === "string");
     if (!add.length) return;
@@ -1615,9 +1623,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const want = parcels.length + els.length + measures.length + callouts.length + markups.length + sheetOverlays.length;
       const back = loadSite(siteId);
       const got = drawnCount(back);
-      if (!ok || got < want) {
+      // B592 — verify by MEMBERSHIP, not only count. A same-count swap (one item dropped while
+      // another lands — exactly the tombstone/id-collision fold that vanished the polyline) leaves
+      // got==want yet silently loses the just-drawn item, so the count check alone is blind to it.
+      // Confirm every id we just wrote actually read back; if a specific id is missing, go LOUD
+      // immediately (within the ~50ms mirror) rather than discovering the loss later (the "notice
+      // popped up too late"). No cry-wolf: only fires when an id we literally just wrote is absent.
+      const wantIds = [parcels, els, measures, callouts, markups, sheetOverlays].flatMap((a) => (a || []).map((it) => it && it.id)).filter(Boolean);
+      const haveIds = new Set([back?.parcels, back?.els, back?.measures, back?.callouts, back?.markups, back?.sheetOverlays].flatMap((a) => (a || []).map((it) => it && it.id)).filter(Boolean));
+      const missingId = wantIds.find((id) => !haveIds.has(id));
+      if (!ok || got < want || missingId) {
         setLocalSaveFailed(true);
-        reportClientEvent("save-verify-failed", "on-device write did not persist", { id: siteId, want, got, ok: !!ok });
+        reportClientEvent("save-verify-failed", "on-device write did not persist", { id: siteId, want, got, ok: !!ok, missingId: missingId || null });
       } else { setLocalSaveFailed(false); setSavedToCloudOnly(false); } // device can hold it again → clear both
     };
     let microT = null;
@@ -1743,8 +1760,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const live = liveRef.current || {};
       const liveModel = createSiteModel({ id: siteId, ...metaRef.current, ...live, updatedAt: Date.now() });
       const merged = mergeSiteContent(liveModel, stored); // our (newest) scalars + union of content
-      const sig = (m) => [m.parcels, m.els, m.measures, m.callouts, m.markups, m.sheetOverlays].map((a) => (a && a.length) || 0).join("/");
-      if (sig(merged) === sig(liveModel)) return; // the other tab added nothing new → leave our canvas alone
+      // B591 — an id-MEMBERSHIP signature (not just counts): a same-count swap (the other tab
+      // deleted one item and added another) must still converge, and a count-only sig missed it,
+      // leaving the two tabs permanently divergent. Includes deletedIds so a pure remote delete
+      // re-hydrates too.
+      const collIds = (m) => ["parcels", "els", "measures", "callouts", "markups", "sheetOverlays"]
+        .map((k) => (m[k] || []).map((it) => (it && it.id != null ? it.id : it)).sort().join(",")).join("|");
+      const sig = (m) => collIds(m) + "#" + (m.deletedIds || []).slice().sort().join(",");
+      if (sig(merged) === sig(liveModel)) return; // nothing changed vs our canvas → leave it alone
+      // B592 tripwire — post-B591 a union must NEVER drop an id the live canvas holds without a
+      // tombstone explaining it. If it ever does (a regression of the id-collision class), make it
+      // LOUD in telemetry rather than letting the canvas silently shrink (the original failure).
+      const idsOf = (m) => new Set(["parcels", "els", "measures", "callouts", "markups", "sheetOverlays"]
+        .flatMap((k) => (m[k] || []).map((it) => it && it.id)).filter(Boolean));
+      const liveIds = idsOf(liveModel), mergedIds = idsOf(merged), tomb = new Set(merged.deletedIds || []);
+      const droppedLive = [...liveIds].filter((id) => !mergedIds.has(id) && !tomb.has(id));
+      if (droppedLive.length) reportClientEvent("merge-dropped-live", "cross-tab merge dropped a live item with no tombstone", { id: siteId, dropped: droppedLive.slice(0, 5) });
       setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
       setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
     };
@@ -4831,7 +4862,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const d = JSON.parse(fr.result);
         if (!d || (!Array.isArray(d.parcels) && !Array.isArray(d.els))) throw new Error();
-        ensureIdAbove([...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id)]);
+        ensureIdAbove([
+          ...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id),
+          ...(d.markups || []).map((m) => m.id), ...(d.measures || []).map((m) => m.id),
+          ...(d.callouts || []).map((c) => c.id), ...(d.deletedIds || []),
+        ]); // B591 — seed past all imported ids + tombstones (not just parcels+els)
         pushHistory();
         setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
         setCallouts(d.callouts || []); setMarkups(d.markups || []); // symmetric with exportJSON (was dropped → data loss / bleed-through)
