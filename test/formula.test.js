@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   evaluateFormula, formatValue, parseFormula, extractRefs, planFormulaColumns,
   makeDate, isoToSerial, serialToISO, BLANK, FORMULA_ERRORS, isDate,
+  errVal, isErrVal,
 } from "../src/shared/formula/formula.js";
 
 // ── Test harness ────────────────────────────────────────────────────────────
@@ -630,5 +631,103 @@ describe("B590 — round-2 adversarial-debug fixes", () => {
     // single-section formats are unchanged (auto "-" for negatives)
     expect(val('TEXT(-5, "0.00")')).toBe("-5.00");
     expect(val('TEXT(1234.5, "#,##0.00")')).toBe("1,234.50");
+  });
+});
+
+// ── B597 — error propagation through aggregation (match Excel exactly) ──────────
+// The HOST stores an errored formula-column cell as errVal(code) in the row map; the
+// engine must RE-RAISE that error wherever a cell is consumed — so an aggregation or a
+// reference over a column that has a #DIV/0! row yields #DIV/0!, not a silently-smaller
+// total. Errors only enter via the host (the engine itself always THROWS, never returns
+// an error value), so we simulate the host by seeding errVal cells into the table.
+describe("B597 — error cells propagate through aggregation & references (Excel parity)", () => {
+  const E = code => errVal(code);
+  const DIV0 = FORMULA_ERRORS.DIV0, REF = FORMULA_ERRORS.REF, VALUE = FORMULA_ERRORS.VALUE;
+
+  it("plain aggregations propagate an error cell with its exact code", () => {
+    const rows = [{ Cost: 10 }, { Cost: E(DIV0) }, { Cost: 30 }];
+    expect(errTable("SUM([Cost])", rows)).toBe(DIV0);
+    expect(errTable("AVERAGE([Cost])", rows)).toBe(DIV0);
+    expect(errTable("MIN([Cost])", rows)).toBe(DIV0);
+    expect(errTable("MAX([Cost])", rows)).toBe(DIV0);
+    expect(errTable("PRODUCT([Cost])", rows)).toBe(DIV0);
+    expect(errTable("COUNT([Cost])", rows)).toBe(DIV0);
+    expect(errTable("COUNTA([Cost])", rows)).toBe(DIV0);
+  });
+
+  it("the propagated code is whichever error the cell holds", () => {
+    expect(errTable("SUM([X])", [{ X: 1 }, { X: E(REF) }])).toBe(REF);
+    expect(errTable("SUM([X])", [{ X: 1 }, { X: E(VALUE) }])).toBe(VALUE);
+  });
+
+  it("a column with NO error cells still aggregates normally (no regression)", () => {
+    expect(valTable("SUM([Cost])", [{ Cost: 10 }, { Cost: 20 }, { Cost: 30 }])).toBe(60);
+    // a blank cell is still skipped — only a real error value propagates
+    expect(valTable("SUM([Cost])", [{ Cost: 10 }, { Cost: BLANK }, { Cost: 30 }])).toBe(40);
+    // an error in a DIFFERENT, unreferenced column does not affect this aggregation
+    expect(valTable("SUM([Cost])", [{ Cost: 10, Other: E(DIV0) }, { Cost: 20, Other: 5 }])).toBe(30);
+  });
+
+  it("conditional aggregations propagate an error in the criteria range", () => {
+    const rows = [{ Status: "Done", Amt: 5 }, { Status: E(VALUE), Amt: 7 }];
+    expect(errTable('COUNTIF([Status], "Done")', rows)).toBe(VALUE);
+    expect(errTable('SUMIF([Status], "Done", [Amt])', rows)).toBe(VALUE);
+    expect(errTable('AVERAGEIF([Status], "Done", [Amt])', rows)).toBe(VALUE);
+  });
+
+  it("SUMIF propagates an error in a MATCHING sum cell, but skips one in a non-matching row", () => {
+    expect(errTable('SUMIF([S], "Y", [A])', [{ S: "Y", A: E(DIV0) }, { S: "N", A: 7 }])).toBe(DIV0);
+    // a non-matching row's sum-cell error is never consumed → not propagated (documented boundary)
+    expect(valTable('SUMIF([S], "Y", [A])', [{ S: "N", A: E(DIV0) }, { S: "Y", A: 7 }])).toBe(7);
+  });
+
+  it("a bare reference / arithmetic / concat / comparison over an errored cell propagates", () => {
+    expect(err("[Bad]", { Bad: E(REF) })).toBe(REF);
+    expect(err("[Bad] + 1", { Bad: E(DIV0) })).toBe(DIV0);
+    expect(err("[Bad] * 2", { Bad: E(VALUE) })).toBe(VALUE);
+    expect(err('[Bad] & "x"', { Bad: E(VALUE) })).toBe(VALUE);
+    expect(err("[Bad] > 5", { Bad: E(DIV0) })).toBe(DIV0);
+    expect(err("[@Bad] + 1", { Bad: E(REF) })).toBe(REF);
+  });
+
+  it("IFERROR / ISERROR / ISNA trap a propagated error cell", () => {
+    expect(val("IFERROR([Bad], 99)", { Bad: E(DIV0) })).toBe(99);
+    expect(val("ISERROR([Bad])", { Bad: E(DIV0) })).toBe(true);
+    expect(val("ISNA([Bad])", { Bad: E(FORMULA_ERRORS.NA) })).toBe(true);
+    expect(val("ISERR([Bad])", { Bad: E(FORMULA_ERRORS.NA) })).toBe(false); // #N/A is excluded from ISERR
+    expect(val("ISERR([Bad])", { Bad: E(DIV0) })).toBe(true);
+  });
+
+  it("INDEX propagates only the SPECIFIC indexed error cell", () => {
+    const rows = [{ Cost: 10 }, { Cost: E(DIV0) }, { Cost: 30 }];
+    expect(errTable("INDEX([Cost], 2)", rows)).toBe(DIV0);  // the indexed cell IS the error
+    expect(valTable("INDEX([Cost], 1)", rows)).toBe(10);    // a good cell is fine despite an error elsewhere
+    expect(valTable("INDEX([Cost], 3)", rows)).toBe(30);
+  });
+
+  it("XLOOKUP propagates an error scanned BEFORE a match, but returns an earlier match untouched", () => {
+    const rows = [{ K: "a", V: 1 }, { K: E(REF), V: 2 }, { K: "c", V: 3 }];
+    expect(errTable('XLOOKUP("c", [K], [V])', rows)).toBe(REF); // must scan past the errored key
+    expect(valTable('XLOOKUP("a", [K], [V])', rows)).toBe(1);   // matches index 0 before the error
+  });
+
+  it("documented boundary: MATCH's compare-safe scan skips an error cell (use XLOOKUP to propagate)", () => {
+    const rows = [{ K: 1 }, { K: E(DIV0) }, { K: 3 }];
+    expect(valTable("MATCH(3, [K], 0)", rows)).toBe(3); // exact match found; the error cell is skipped, not raised
+  });
+
+  it("isErrVal / errVal / formatValue contract", () => {
+    expect(isErrVal(errVal(DIV0))).toBe(true);
+    expect(isErrVal(BLANK)).toBe(false);
+    expect(isErrVal(5)).toBe(false);
+    expect(isErrVal("x")).toBe(false);
+    expect(isErrVal(makeDate(0))).toBe(false);
+    expect(formatValue(errVal(DIV0))).toBe(DIV0);
+  });
+
+  it("a healthy formula never produces an error value itself (only the host injects them)", () => {
+    const r = runTable("SUM([Cost])", [{ Cost: 1 }, { Cost: 2 }]);
+    expect(r.ok).toBe(true);
+    expect(isErrVal(r.value)).toBe(false);
   });
 });
