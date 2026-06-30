@@ -60,6 +60,17 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V183 — B589: Scheduler bug-batch round 3 — the cloud/interaction paths owed a signed-in / click-through confirm ✅ headless boot + 2064 unit tests; ⏳ confirm owed
+- **Added** 2026-06-30 · **Cadence** once (fix acceptance) · **Last checked** 2026-06-30 (headless ✅) · **Next check** — on planyr.io, **signed in**, on the **Schedule** tab.
+- **✅ Proven here:** `ui-audit/verify-scheduler-mixes.mjs` boots the real `/sequence/` page with all 9 fixes, 0 scheduler-code errors (it caught a scope slip mid-batch). Plus lint 0 · **2064 unit tests** (+9 anti-drift) · build green.
+- **⏳ Signed-in / click-through steps on planyr.io → Schedule tab:**
+  1. **B1 / import — restore + import** (the headline data-integrity fixes): Version History → Restore an older snapshot → it loads cleanly (no white-screen, dates recascade); and the gear → **Import JSON** of an exported backup actually loads (this was throwing a ReferenceError → silently doing nothing).
+  2. **D1 contacts** — open Contacts, rename a contact that owns some tasks → those tasks show the new name AND the old name does NOT reappear on reload; delete a contact → its tasks lose that owner and it doesn't respawn.
+  3. **C1 modal guard** — set a task with a not-started successor to Complete (opens the "add a successor?" prompt), then press **Delete** → nothing behind the modal is deleted.
+  4. **E1 Gantt** — a schedule containing one far-past or far-future task (e.g. a 1900 or 4000 date) still shows the real bars + today line aligned with the month/year axis (the outlier pins to the chart edge), and the tab doesn't freeze.
+  5. **C2 multi-delete cells** — drag-select a block of Owner (or Start/Finish) cells across several rows, press Delete → the whole block clears, not just one cell.
+  6. **D2 notes** — switch a task's notes to "Free text", confirm editing one note doesn't change the dates of the others.
+  7. **D3 cost** — give a task a Cost, add a subtask under it → the parent's rolled total still includes the original cost (Budget/Actual too).
 ### V182 — B587/B588: multi-select + marquee box-select (Ctrl/⌘ + Shift-click, multi-move, multi-delete) ✅ headless 20/20 logged-out; ⏳ signed-in cloud-persistence confirm owed
 - **Added** 2026-06-30 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-30 (headless ✅) · **Next check** — on planyr.io, **signed in**, on a CLOUD-loaded site + a saved Review.
 - **✅ Proven here (logged-out, headless):** lint 0 · 1874 tests (16 new) · build green · `ui-audit/verify-multiselect.mjs` **Site Planner 12/12** (Marquee rail tool present + LIGHTS when active; a box-drag selects both elements into the neutral hue-free chrome; dragging one member moves the whole set; Delete removes all and a SINGLE undo restores all; Ctrl/⌘-click toggles an object in then back out; a lone-measurement marquee highlights + deletes it — the regression guard for the review-caught index/id bug) and `ui-audit/verify-multiselect-docreview.mjs` **Document Review 8/8** (same Marquee tool over the fixture PDF: arms + lights, box-select two rectangles, multi-delete proven by a re-marquee finding nothing).
