@@ -481,6 +481,49 @@ describe("B586 — expanded function library", () => {
   });
 });
 
+describe("B589 — adversarial-debug fixes", () => {
+  it("date-literal criteria match in COUNTIF/SUMIF/AVERAGEIF", () => {
+    const T = [{ D: D("2026-01-01"), V: 1 }, { D: D("2026-06-01"), V: 2 }, { D: D("2026-12-31"), V: 3 }];
+    expect(valTable('COUNTIF([D], ">=2026-03-01")', T)).toBe(2);
+    expect(valTable('COUNTIF([D], "2026-06-01")', T)).toBe(1);
+    expect(valTable('COUNTIF([D], "<>2026-06-01")', T)).toBe(2);
+    expect(valTable('SUMIF([D], ">=2026-03-01", [V])', T)).toBe(5);
+  });
+  it("[@Column] forces this-row inside COUNTIF/SUMIF", () => {
+    const T = [{ Cost: 100 }, { Cost: 250 }, { Cost: 50 }];
+    expect(valTable('COUNTIF([@Cost], ">=50")', T, 1)).toBe(1);
+    expect(valTable('SUMIF([@Cost], ">=50")', T, 1)).toBe(250);
+  });
+  it("WEEKNUM supports types 1/2/11/21 and #NUM! on an invalid type", () => {
+    expect(num("WEEKNUM([d], 2)", { d: D("2026-01-05") })).toBe(2);
+    expect(num("WEEKNUM([d], 11)", { d: D("2026-01-04") })).toBe(1);
+    expect(num("WEEKNUM([d], 21)", { d: D("2021-01-01") })).toBe(53);
+    expect(err("WEEKNUM([d], 99)", { d: D("2026-01-04") })).toBe(FORMULA_ERRORS.NUM);
+  });
+  it("[@[Column]] bracketed structured reference parses", () => {
+    expect(num("[@[Duration]] + 1", { Duration: 4 })).toBe(5);
+    expect(num("[@[% Complete]] / 100", { "% Complete": 50 })).toBe(0.5);
+  });
+  it("MIN/MAX over a date column return a date (not a serial)", () => {
+    const T = [{ Start: D("2026-03-01") }, { Start: D("2026-01-15") }, { Start: D("2026-07-04") }];
+    const mn = valTable("MIN([Start])", T), mx = valTable("MAX([Start])", T);
+    expect(isDate(mn)).toBe(true); expect(serialToISO(mn.s)).toBe("2026-01-15");
+    expect(isDate(mx)).toBe(true); expect(serialToISO(mx.s)).toBe("2026-07-04");
+  });
+  it("MATCH approximate (type 1/-1) doesn't leak across type families", () => {
+    const N = [{ V: 10 }, { V: 20 }, { V: 30 }];
+    expect(errTable('MATCH("abc", [V], 1)', N)).toBe(FORMULA_ERRORS.NA);
+    expect(valTable("MATCH(25, [V], 1)", N)).toBe(2); // numbers still work
+  });
+  it("YEARFRAC is non-negative regardless of argument order", () => {
+    expect(num("YEARFRAC([a],[b])", { a: D("2026-01-01"), b: D("2025-01-01") })).toBeGreaterThan(0);
+  });
+  it("a column present on only some rows isn't #REF! when row 0 lacks it", () => {
+    const T = [{ Task: "a" }, { Task: "b", Cost: 250 }, { Task: "c", Cost: 50 }];
+    expect(valTable("SUM([Cost])", T)).toBe(300);
+  });
+});
+
 describe("a realistic scheduling formula", () => {
   it("computes a working-day buffer label", () => {
     const cols = { Start: D("2026-06-29"), Finish: D("2026-07-10"), "% Complete": 40 };
