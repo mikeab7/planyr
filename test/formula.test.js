@@ -366,7 +366,7 @@ describe("B583 adversarial-review fixes", () => {
   });
 });
 
-describe("B585 — cross-row aggregation over a whole column", () => {
+describe("B586 — cross-row aggregation over a whole column", () => {
   const TABLE = [
     { Cost: 100, Status: "Done", Phase: "DD" },
     { Cost: 250, Status: "Open", Phase: "DD" },
@@ -400,7 +400,7 @@ describe("B585 — cross-row aggregation over a whole column", () => {
   });
 });
 
-describe("B585 — lookups", () => {
+describe("B586 — lookups", () => {
   const T = [
     { Task: "Dig", Owner: "Sam", Cost: 100 },
     { Task: "Pour", Owner: "Lee", Cost: 250 },
@@ -423,7 +423,7 @@ describe("B585 — lookups", () => {
   });
 });
 
-describe("B585 — % operator and structured-ref niceties", () => {
+describe("B586 — % operator and structured-ref niceties", () => {
   it("postfix % divides by 100", () => {
     expect(num("50%")).toBe(0.5);
     expect(num("[Budget] * 25%", { Budget: 100000 })).toBe(25000);
@@ -434,7 +434,7 @@ describe("B585 — % operator and structured-ref niceties", () => {
   });
 });
 
-describe("B585 — expanded function library", () => {
+describe("B586 — expanded function library", () => {
   it("math extras", () => {
     expect(num("SIGN(-3)")).toBe(-1);
     expect(num("TRUNC(3.99)")).toBe(3);
@@ -490,5 +490,25 @@ describe("a realistic scheduling formula", () => {
   it("weighted cost-to-go", () => {
     const cols = { Budget: 100000, "% Complete": 25 };
     expect(num("ROUND([Budget] * (1 - [% Complete] / 100), 0)", cols)).toBe(75000);
+  });
+});
+
+// ── Round-2 scheduler fix batch (2026-06-30) ──────────────────────────────────
+describe("round-2 formula fixes", () => {
+  it("a blank cell equals the empty string — the [Date]=\"\" empty test works", () => {
+    expect(val('[d] = ""', { d: BLANK })).toBe(true);
+    expect(val('IF([d] = "", "empty", "full")', { d: BLANK })).toBe("empty");
+    expect(val('[d] <> ""', { d: BLANK })).toBe(false);
+    // ...but a blank is NOT equal to a non-empty string, and sorts before it
+    expect(val('[d] = "x"', { d: BLANK })).toBe(false);
+    expect(val('[d] < "x"', { d: BLANK })).toBe(true);
+    // consistent with the engine's own ISBLANK + LEN idioms
+    expect(val("ISBLANK([d])", { d: BLANK })).toBe(true);
+  });
+  it("date arithmetic that overflows JS Date is surfaced as #NUM!, never a NaN date", () => {
+    expect(err("DATE(2024,1,1) + 1000000000000")).toBe(FORMULA_ERRORS.NUM);
+    expect(err("EDATE(DATE(2024,1,1), 1000000000)")).toBe(FORMULA_ERRORS.NUM);
+    // a normal date offset still works
+    expect(iso("DATE(2024,1,1) + 31")).toBe("2024-02-01");
   });
 });

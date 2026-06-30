@@ -107,7 +107,7 @@ try {
   const ref = await page.evaluate(() => (document.body.textContent || "").includes("#REF!"));
   if (ref) ok("#REF! surfaced for an unknown column"); else fail("#REF! not shown for a bad column reference");
 
-  // 4) B585 — cross-row aggregation: SUM([Duration]) must equal the column total AND
+  // 4) B586 — cross-row aggregation: SUM([Duration]) must equal the column total AND
   //    show that same total on every row (column-wide, not the per-row value).
   await addFormula("Total dur", "SUM([Duration])");
   const agg = await page.evaluate(() => {

@@ -374,7 +374,14 @@ const ferr = (code, detail) => new FormulaError(code, detail);
 // ── Value model ────────────────────────────────────────────────────────────────
 const BLANK = Object.freeze({ k: "blank" });
 const isBlank = v => v === BLANK || v === null || v === undefined;
-const makeDate = serial => ({ k: "date", s: Math.trunc(serial) });
+// JS Date is valid only within ±8.64e15 ms (≈ ±1e8 days from epoch); beyond that getUTC*() are NaN
+// and a date would serialize to "0NaN-NaN-NaN". Surface an out-of-range date result as #NUM! instead.
+const MAX_DATE_SERIAL = 100000000;
+const makeDate = serial => {
+  const s = Math.trunc(serial);
+  if (!Number.isFinite(s) || Math.abs(s) > MAX_DATE_SERIAL) throw ferr(FORMULA_ERRORS.NUM, "date out of range");
+  return { k: "date", s };
+};
 const isDate = v => !!v && typeof v === "object" && v.k === "date";
 
 // ── Serial date helpers (epoch = 1970-01-01 UTC; integer days) ──────────────────
@@ -695,6 +702,10 @@ const TYPE_RANK = v => {
 const compareValues = (a, b) => {
   // Returns -1/0/1, or throws on incomparable. Numbers/dates/blank compare numerically;
   // strings compare case-insensitively; otherwise rank by type (number<text<bool).
+  // A blank cell equals the empty string "" (matches Excel + the engine's own ISBLANK("")→true), so the
+  // everyday `[Date]=""` empty-test works; a blank sorts before any non-empty text.
+  if (isBlank(a) && typeof b === "string") return b === "" ? 0 : -1;
+  if (isBlank(b) && typeof a === "string") return a === "" ? 0 : 1;
   const ra = TYPE_RANK(a), rb = TYPE_RANK(b);
   if (ra === 0 && rb === 0) { const x = toNumber(a), y = toNumber(b); return x < y ? -1 : x > y ? 1 : 0; }
   if (ra === 1 && rb === 1) { const x = a.toLowerCase(), y = b.toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; }
@@ -3391,7 +3402,12 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
       if (!SGQ_ALLOWED_PATCH.has(k)) return;
       const v = patch[k];
       if (v === undefined || v === null || v === "") return;
-      if (target && String(target[k]) === String(v)) return;
+      // "unchanged?" check: structural-compare objects/arrays (a `predecessors` array of {id,type,lag}
+      // objects all stringify to "[object Object]" via String(), so a real dependency change was silently
+      // dropped); keep the cheap String() compare for primitives.
+      const same = (x, y) => ((x && typeof x === "object") || (y && typeof y === "object"))
+        ? JSON.stringify(x) === JSON.stringify(y) : String(x) === String(y);
+      if (target && same(target[k], v)) return;
       out[k] = v;
     });
     return out;
@@ -3400,6 +3416,9 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
     let ts = tasks.map(t => {
       if (t.id !== tId) return t;
       const u = { ...t, ...patch };
+      // Editing a predecessor clears any manual pin so the cascade controls the start — mirror updateTask
+      // here, else the preview cascades a PINNED task in place while the real apply moves it (the preview lies).
+      if ('predecessors' in patch) delete u.pinnedStart;
       if ('duration' in patch && !('end' in patch)) u.end = calcEnd(u.start, u.duration);
       else if ('start' in patch && !('end' in patch)) u.end = calcEnd(u.start, u.duration);
       else if ('end' in patch && !('start' in patch)) u.duration = (u.start && u.end) ? Math.max(0, difBD(u.start, u.end) + 1) : "";
@@ -4344,14 +4363,19 @@ function App() {
     if (!skipHolRecasc.current && holKey !== prevHolKey.current && prevHolKey.current !== null) {
       prevHolKey.current = holKey;
       skipHolRecasc.current = true;
-      const newProjects = {};
-      Object.entries(data.projects).forEach(([id, proj]) => {
-        let tasks = proj.tasks.map(t => ({...t, end: calcEnd(t.start, t.duration)}));
-        tasks = cascadeDates(tasks);
-        tasks = rollupParentDates(tasks);
-        newProjects[id] = {...proj, tasks};
+      // Recompute from the LIVE `d` inside the updater, not the effect's closure snapshot — otherwise a
+      // setData that lands between this effect's render and its callback (a realtime suggestion insert, an
+      // autosave merge, a rapid second edit) would be clobbered by the stale projects map (data loss).
+      setData(d => {
+        const newProjects = {};
+        Object.entries(d.projects).forEach(([id, proj]) => {
+          let tasks = proj.tasks.map(t => ({...t, end: calcEnd(t.start, t.duration)}));
+          tasks = cascadeDates(tasks);
+          tasks = rollupParentDates(tasks);
+          newProjects[id] = {...proj, tasks};
+        });
+        return {...d, projects: newProjects};
       });
-      setData(d => ({...d, projects: newProjects}));
     } else {
       if (skipHolRecasc.current) skipHolRecasc.current = false;
       else prevHolKey.current = holKey;
@@ -4464,7 +4488,7 @@ function App() {
           const col = activeEffectiveCols(dataRef.current)[selectedColIdx];
           if (col?.e && col.t !== "health" && col.t !== "notes") {
             const selTask = flatTasksRef.current.find(t => t.id === selectedId);
-            const isParentDateLocked = selTask?.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.k==="cost");
+            const isParentDateLocked = selTask?.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.t==="cost");
             if (!isParentDateLocked) {
               const blank = (col.k === "duration" || col.k === "percentComplete") ? 0 : "";
               updateTask(selectedId, {[col.k]: blank});
@@ -4593,7 +4617,7 @@ function App() {
             trigger?.click();
           } else if (col.e) {
               const selTask = flatTasksRef.current.find(t => t.id === selectedId);
-              const isParentDateLocked = selTask?.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.k==="cost");
+              const isParentDateLocked = selTask?.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.t==="cost");
               if (!isParentDateLocked) setEdit({taskId: selectedId, col: col.k});
           }
           return;
@@ -4611,7 +4635,7 @@ function App() {
           }
           if (col.e && col.t !== "health") {
             const selTask = flatTasksRef.current.find(t => t.id === selectedId);
-            const isParentDateLocked = selTask?.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.k==="cost");
+            const isParentDateLocked = selTask?.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.t==="cost");
             if (isParentDateLocked) return;
             // Fix #3: numeric columns reject non-digit type-to-edit (matches Grid view behaviour)
             const isNum = col.k === "duration" || col.k === "percentComplete";
@@ -5489,7 +5513,10 @@ function App() {
   }, []);
 
   const renameProject = useCallback((id, name) => {
-    setData(d => { return {...d, editProjId: null, projects: {...d.projects, [id]: {...d.projects[id], name}}}; });
+    // Guard a stale/non-existent id (e.g. a deleted project still in the shell breadcrumb): spreading
+    // {...undefined, name} would mint a malformed ghost project (no id, no tasks) that white-screens the
+    // schedule when activated. Matches the existence guard nav-link / nav-select already have.
+    setData(d => (d.projects && d.projects[id]) ? {...d, editProjId: null, projects: {...d.projects, [id]: {...d.projects[id], name}}} : d);
   }, []);
 
   const duplicateProject = useCallback((id) => {
@@ -5503,7 +5530,12 @@ function App() {
         nPid: newId + 1,
         nTid: {...d.nTid, [newId]: maxTid},
         aPid: newId,
-        projects: {...d.projects, [newId]: {id: newId, name: src.name + " (Copy)", tasks: newTasks}},
+        // Spread ...src so the copy keeps the project's column layout (colConfig), label alignment, and
+        // user-defined Formula columns — the old literal dropped all of them. Deep-copy formulaCols so
+        // editing the copy can't mutate the original; a duplicate must NOT inherit the original's site link.
+        projects: {...d.projects, [newId]: {...src, id: newId, name: src.name + " (Copy)", tasks: newTasks,
+          formulaCols: Array.isArray(src.formulaCols) ? src.formulaCols.map(fc => ({...fc})) : undefined,
+          linkedSiteId: undefined, linkedSiteName: undefined}},
       };
     });
   }, []);
@@ -5633,9 +5665,12 @@ function App() {
         // B440 — delete from the shell breadcrumb (already confirmed inline → skipConfirm).
         // If the deleted project was the active one, route home to the Dashboard (reports),
         // matching the "the open project no longer exists → go home" behavior.
+        const projCount = latestData.current ? Object.keys(latestData.current.projects || {}).length : 0;
         const wasActive = latestData.current && latestData.current.aPid === m.id;
         deleteProject(m.id, { skipConfirm: true });
-        if (wasActive) setData(d => ({ ...d, section: "reports" }));
+        // Only route home when a delete actually happens — deleteProject refuses to remove the LAST
+        // project, so routing unconditionally kicked the user to the Dashboard on a no-op.
+        if (wasActive && projCount > 1) setData(d => ({ ...d, section: "reports" }));
       }
     };
     window.addEventListener("message", onMsg);
@@ -7465,7 +7500,10 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
         } else {
           for (let r = minR; r <= maxR; r++) {
             const t = tasks[r];
-            if (t) applyUpdate(t.id, col, val);
+            // Don't fill a parent's rolled-up fields: dates self-correct via rollupParentDates, but
+            // cost/budget/actual have no rollup-on-write, so a filled value would persist invisibly into
+            // cloud-save + JSON/CSV export. Matches the single-cell parent lock.
+            if (t && !(t.hasChildren && (col==="start"||col==="end"||col==="duration"||col==="cost"||col==="budget"||col==="actualCost"))) applyUpdate(t.id, col, val);
           }
         }
         setEdit(null); return;
@@ -7813,9 +7851,12 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                       if (c.k === "health" && e.target.closest("[data-health-dot]")) {
                         setSelectedId(task.id);
                         setSelectedColIdx(ci);
-                        // Collapse any previous range to this cell — without this, the prior
-                        // selection's range bg lingers and you see two highlighted cells.
-                        setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
+                        // Keep an active multi-row range that COVERS this row so the picker fills the whole
+                        // range — the mouse path used to collapse here, so a multi-row health/status fill
+                        // silently changed only the clicked cell while the keyboard path filled every row.
+                        // Only collapse when the click is OUTSIDE the range (a fresh single selection).
+                        const inSpan = selRange && ri >= Math.min(selRange.r1, selRange.r2) && ri <= Math.max(selRange.r1, selRange.r2);
+                        if (!inSpan) setSelRange({r1:ri, r2:ri, c1:ci, c2:ci});
                         return;
                       }
                       // ID column — Excel row-header behavior: click selects the
@@ -7865,7 +7906,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     }}
                     onDoubleClick={() => {
                       if (review) return;
-                      const isParentDateLocked = task.hasChildren && (c.k==="start"||c.k==="end"||c.k==="duration"||c.k==="cost");
+                      const isParentDateLocked = task.hasChildren && (c.k==="start"||c.k==="end"||c.k==="duration"||c.t==="cost");
                       // Picker columns (health/status) have their own popover — text-edit on them
                       // would render the raw value (e.g. "yellow") in an input, which is meaningless
                       // to the user. Notes also handled separately via the notes modal.
