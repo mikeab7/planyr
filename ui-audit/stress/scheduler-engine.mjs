@@ -16,16 +16,16 @@ const nthWeekday = (y, mo, n, dow) => {
 };
 const HOLIDAY_DEFS = [
   {k:"newYearsDay",          fn: y => `${y}-01-01`},
-  {k:"mlkDay",               fn: y => fd(nthWeekday(y,1,3,1))},
-  {k:"presidentsDay",        fn: y => fd(nthWeekday(y,2,3,1))},
-  {k:"memorialDay",          fn: y => fd(nthWeekday(y,5,-1,1))},
+  {k:"mlkDay",               fn: y => fdLocal(nthWeekday(y,1,3,1))},
+  {k:"presidentsDay",        fn: y => fdLocal(nthWeekday(y,2,3,1))},
+  {k:"memorialDay",          fn: y => fdLocal(nthWeekday(y,5,-1,1))},
   {k:"juneteenth",           fn: y => `${y}-06-19`},
   {k:"independence",         fn: y => `${y}-07-04`},
-  {k:"laborDay",             fn: y => fd(nthWeekday(y,9,1,1))},
-  {k:"columbusDay",          fn: y => fd(nthWeekday(y,10,2,1))},
+  {k:"laborDay",             fn: y => fdLocal(nthWeekday(y,9,1,1))},
+  {k:"columbusDay",          fn: y => fdLocal(nthWeekday(y,10,2,1))},
   {k:"veteransDay",          fn: y => `${y}-11-11`},
-  {k:"thanksgiving",         fn: y => fd(nthWeekday(y,11,4,4))},
-  {k:"dayAfterThanksgiving", fn: y => { const d=pd(fd(nthWeekday(y,11,4,4))); d.setDate(d.getDate()+1); return fd(d); }},
+  {k:"thanksgiving",         fn: y => fdLocal(nthWeekday(y,11,4,4))},
+  {k:"dayAfterThanksgiving", fn: y => { const d=pd(fdLocal(nthWeekday(y,11,4,4))); d.setDate(d.getDate()+1); return fdLocal(d); }},
   {k:"christmasEve",         fn: y => `${y}-12-24`},
   {k:"christmas",            fn: y => `${y}-12-25`},
   {k:"newYearsEve",          fn: y => `${y}-12-31`},
@@ -220,7 +220,13 @@ export const scheduleExportName = (projects, date = new Date()) => {
 };
 export const parseFlexDate = s => {
   if (!s) return null; s = String(s).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // ISO fast-path that still rejects impossible calendar dates (mirror of index.html).
+  const isoM = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoM) {
+    const Y = +isoM[1], Mo = +isoM[2], Da = +isoM[3];
+    const chk = new Date(s + "T12:00:00");
+    return (!isNaN(chk) && chk.getMonth() + 1 === Mo && chk.getDate() === Da && Mo >= 1 && Mo <= 12 && Y >= 2000) ? s : null;
+  }
   const parts = s.split(/[\/\-\.]/);
   if (parts.length < 2) return null;
   const m = parseInt(parts[0], 10), d = parseInt(parts[1], 10);

@@ -162,3 +162,4 @@ blob-report/
 e2e/.auth/
 test-results/
 playwright-report/
+ui-audit/.cache-vendor/
