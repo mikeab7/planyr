@@ -4,7 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Planyr — Draw the site. Get the yield. Same instant.</title>
-<meta name="description" content="An all-in-one web suite for industrial site work. Pull a live county parcel, drop buildings, parking, truck courts and detention, and watch coverage, FAR, impervious % and stall counts compute the moment you draw — all on one real-world coordinate spine (EPSG:2278, US survey feet)." />
+<meta name="description" content="An all-in-one web suite for industrial site work — pull a live county parcel, drop buildings and parking, and watch coverage, FAR and stall counts compute as you draw." />
+<link rel="canonical" href="https://planyr.io/landing/" />
 <meta name="theme-color" content="#15171C" />
 <meta name="color-scheme" content="dark" />
 
@@ -15,6 +16,9 @@
 <meta property="og:description" content="Industrial site planning in the browser. Live county parcels, instant yield, auto-stitched drawings — deed → map → drawings → layout → schedule, all on one feet-accurate coordinate spine." />
 <meta property="og:url" content="https://planyr.io/landing/" />
 <meta property="og:image" content="https://planyr.io/landing/og.png" />
+<meta property="og:image:width" content="2400" />
+<meta property="og:image:height" content="1260" />
+<meta property="og:image:alt" content="Planyr — instant industrial site yield from a drawn parcel" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Planyr — Draw the site. Get the yield. Same instant." />
 <meta name="twitter:description" content="Industrial site planning in the browser. Live county parcels, instant yield, auto-stitched drawings — all on one feet-accurate coordinate spine." />
@@ -29,6 +33,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<!-- Structured data — helps search + knowledge graphs understand what Planyr is. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Planyr","applicationCategory":"BusinessApplication","operatingSystem":"Web","url":"https://planyr.io/landing/","description":"Industrial site planning in the browser — draw a site and get instant yield (coverage, FAR, parking, detention) on one feet-accurate coordinate spine.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@type":"Organization","name":"Planyr","url":"https://planyr.io/"}}
+</script>
 
 <style>
 /* ============================================================================
@@ -128,6 +137,16 @@ body::after {
 }
 
 main { position: relative; z-index: 3; }
+
+/* Skip-to-content link — visually hidden until keyboard-focused (WCAG 2.4.1). */
+.skip-link {
+  position: fixed; top: 8px; left: 8px; z-index: 60;
+  transform: translateY(-150%); transition: transform .15s ease;
+  background: var(--coral-mid); color: #fff; font-weight: 700; font-size: 0.86rem;
+  padding: 10px 16px; border-radius: 9px; text-decoration: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.skip-link:focus-visible, .skip-link:focus { transform: translateY(0); outline: 2px solid var(--cream); outline-offset: 2px; }
 
 /* ---- shared layout ---- */
 .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(20px, 5vw, 56px); }
@@ -405,6 +424,8 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
 </head>
 <body>
 
+<a class="skip-link" href="#hero">Skip to content</a>
+
 <!-- decorative WebGL canvas + static fallback -->
 <canvas id="bg" aria-hidden="true"></canvas>
 <img id="bg-fallback" src="/planyr-mark.svg" alt="" aria-hidden="true" />
@@ -417,7 +438,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
 <!-- ============ TOP BAR ============ -->
 <header class="topbar">
   <a class="brand" href="#top" aria-label="Planyr home">
-    <svg width="26" height="26" viewBox="0 0 100 100" role="img" aria-hidden="true">
+    <svg width="26" height="26" viewBox="0 0 100 100" aria-hidden="true">
       <rect width="100" height="100" rx="22" fill="#15171C"/>
       <polygon points="50,60 70,68 50,76 30,68" fill="#A8482B"/><polygon points="30,68 50,76 50,79 30,71" fill="#963F26"/><polygon points="50,76 70,68 70,71 50,79" fill="#823620"/>
       <polygon points="50,39 70,47 50,55 30,47" fill="#DC6B42"/><polygon points="30,47 50,55 50,58 30,50" fill="#C85F3A"/><polygon points="50,55 70,47 70,50 50,58" fill="#B25431"/>
