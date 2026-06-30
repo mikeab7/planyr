@@ -796,9 +796,9 @@ const DEFAULT_SETTINGS = {
   roadCurb: 0.5, roadWidths: "24, 26, 30, 36, 40",
   showDocks: true,
   // Structural column grid on drawn buildings (B568): speed bay off each dock face, then
-  // FIXED interior bays at the per-direction typical size — only the end bays (length) and
-  // rear/centre bay (depth) flex to close. Dock doors at doorOC o.c., doorWidth wide.
-  // The band bounds the typical size. Per-building overrides live on the element.
+  // UNIFORM interior bays sized within the band toward the per-direction target (so the
+  // grid reads as evenly-spaced columns; the speed bay is the only different bay). Dock
+  // doors at doorOC o.c., doorWidth wide. Per-building overrides live on the element.
   showGrid: true,
   speedBay: 60, bayLengthTarget: 56, bayDepthTarget: 50, bayMin: 50, bayMax: 58,
   doorWidth: 9, doorOC: 12,
@@ -2974,9 +2974,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : pc));
       return;
     }
-    if (d.mode === "dimMove") { // B146/B590: slide a selected element's dimension callout along its length
+    if (d.mode === "dimMove") { // B146/B592: slide a selected element's dimension callout along its length
       const loc = rot2(fp.x - d.start.x, fp.y - d.start.y, -d.rot); // world pointer delta → element-local frame
-      // B590: only the length-axis component slides; the perpendicular (depth) component is dropped
+      // B592: only the length-axis component slides; the perpendicular (depth) component is dropped
       // and the slide is clamped to the valid band — so the line stays on the shape, off any bump-out.
       const next = { x: d.base.x + loc.x, y: d.base.y + loc.y };
       const off = clampDimOffset(next, d.range);
@@ -4626,7 +4626,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // B146: a selected element's dimension callout is grab-and-drag to reposition (stored as a
   // local-feet offset on the element); on a road, clicking the number edits the travel width.
-  // B590: the drag is CONSTRAINED — it slides along the shape's long (length) axis only and stays
+  // B592: the drag is CONSTRAINED — it slides along the shape's long (length) axis only and stays
   // ON the footprint, never onto a building's corner bump-outs (where the depth would differ). The
   // valid band is fixed by geometry that can't change mid-drag, so resolve it once at grab time.
   const startDimMove = (e, id) => {
@@ -9513,7 +9513,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Typ. bay — depth"><NumInput style={numInput} value={settings.bayDepthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayDepthTarget: n }))} /></Field>
             <Field label="Bay band (min / max)"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.bayMin} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMin: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.bayMax} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMax: n }))} /></span></Field>
             <Field label="Dock door — W / o.c."><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.doorWidth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, doorWidth: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.doorOC} min={2} onCommit={(n) => setSettings((s) => ({ ...s, doorOC: n }))} /></span></Field>
-            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Interior bays are fixed at the typical size and the speed bay is pinned; only the end bays (length) and the rear / centre bay (depth) flex to close the building. The band bounds the typical size.</div>
+            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Interior bays are sized evenly within the band toward the typical size, so the columns are uniformly spaced; the speed bay is pinned. The band is the allowed bay range.</div>
           </Section>
 
           <Section title="Parking" collapsed>
@@ -10076,7 +10076,7 @@ function dockDoorRun(el, side, dogEars, lengthLines, g) {
 
 // Corner bump-outs of a host building as [{sign, along}] measured along its length axis — the
 // spans a depth dimension callout must not slide onto, since the building's depth differs there
-// (B590). Pure; shared by the dimension drag handler + the renderer so they never disagree.
+// (B592). Pure; shared by the dimension drag handler + the renderer so they never disagree.
 function bumpsAlongLength(host, allEls) {
   if (!host || host.points || host.type !== "building") return [];
   return (allEls || [])
@@ -10084,7 +10084,7 @@ function bumpsAlongLength(host, allEls) {
     .map((x) => ({ sign: x.dogEar.sign, along: dogEarSize(x.dogEar, x.w, x.h).along }));
 }
 
-// The slide constraint for an element's red dimension callout (B590): it rides the long (length)
+// The slide constraint for an element's red dimension callout (B592): it rides the long (length)
 // axis only, clamped to stay ON the footprint and — for a building — off its corner bump-outs.
 // posF matches renderElPx's default position (road = centred, building/paving = 18% in).
 function dimSlideFor(el, allEls) {
@@ -10305,7 +10305,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const dimVisible = el.type === "building" ? dimCalloutVisible(ppf) : detailLabelVisible(dimW, ppf);
     const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
-    // B146/B590: user reposition (local feet → px). Clamp the stored offset to the slide
+    // B146/B592: user reposition (local feet → px). Clamp the stored offset to the slide
     // constraint for DISPLAY too — a legacy free-drag offset (off the shape, or carrying a depth
     // component) or one stranded by a later bump-out/resize edit renders back ON the footprint and
     // off the bumps; the next drag then persists the clamped value.
@@ -10323,7 +10323,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const posF = el.type === "road" ? DIM_POS_F_ROAD : DIM_POS_F_DEFAULT;
     if (horizLong) { // short side is vertical (h)
       const x = tl.x + w * posF, y0 = tl.y, y1 = tl.y + h, my = (y0 + y1) / 2;
-      // B590: no leader line — the dimension slides ALONG the length and stays on the footprint
+      // B592: no leader line — the dimension slides ALONG the length and stays on the footprint
       // (oy is pinned to 0), so there is never a gap to bridge back to an anchor.
       const X = x + ox, Y0 = y0 + oy, Y1 = y1 + oy, MY = my + oy;
       dim.push(<line key="dl" x1={X} y1={Y0} x2={X} y2={Y1} stroke={RED} strokeWidth={1.25} />);
@@ -10334,7 +10334,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<text key="tx" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
     } else { // short side is horizontal (w)
       const y = tl.y + h * posF, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
-      // B590: no leader line — the dimension slides ALONG the length and stays on the footprint
+      // B592: no leader line — the dimension slides ALONG the length and stays on the footprint
       // (ox is pinned to 0 here), so there is never a gap to bridge back to an anchor.
       const Y = y + oy, X0 = x0 + ox, X1 = x1 + ox, MX = mx + ox;
       dim.push(<line key="dl" x1={X0} y1={Y} x2={X1} y2={Y} stroke={RED} strokeWidth={1.25} />);

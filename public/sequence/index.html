@@ -2808,11 +2808,41 @@ function ContactsPanel({ data, setData, onClose }) {
   }
   function startEdit(c) { setEditId(c.id); setEditName(c.name); setEditEmail(c.email||''); setAddMode(false); }
   function commitEdit() {
-    if (!editName.trim()) return;
-    saveContacts(contacts.map(c => c.id===editId ? {...c, name:editName.trim(), email:editEmail.trim()} : c));
+    const nm = editName.trim();
+    if (!nm) return;
+    const oldName = (contacts.find(c => c.id === editId) || {}).name;
+    setData(d => {
+      const settings = {...d.settings, contacts: (d.settings?.contacts||[]).map(c => c.id===editId ? {...c, name:nm, email:editEmail.trim()} : c)};
+      // The owner link is by NAME (and ensureContacts re-derives contacts from task owners on load), so
+      // a rename must also rewrite every task's responsibleParty — else the change shows nothing on the
+      // tasks AND the old name respawns as a duplicate contact on the next load (the rename "bounces back").
+      let projects = d.projects;
+      if (oldName && oldName !== nm) {
+        projects = {};
+        Object.entries(d.projects).forEach(([pid, proj]) => {
+          projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => t.responsibleParty === oldName ? {...t, responsibleParty: nm} : t)};
+        });
+      }
+      return {...d, settings, projects};
+    });
     setEditId(null);
   }
-  function del(id) { saveContacts(contacts.filter(c => c.id!==id)); }
+  function del(id) {
+    const goneName = (contacts.find(c => c.id === id) || {}).name;
+    setData(d => {
+      const settings = {...d.settings, contacts: (d.settings?.contacts||[]).filter(c => c.id!==id)};
+      // Clear the owner on tasks that referenced this contact, else ensureContacts respawns it on the
+      // next load (the link is by name) and the delete silently undoes itself.
+      let projects = d.projects;
+      if (goneName) {
+        projects = {};
+        Object.entries(d.projects).forEach(([pid, proj]) => {
+          projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => t.responsibleParty === goneName ? {...t, responsibleParty: ""} : t)};
+        });
+      }
+      return {...d, settings, projects};
+    });
+  }
   function addContact() {
     if (!newName.trim()) return;
     const id = Date.now();
@@ -2913,7 +2943,7 @@ function ContactsPanel({ data, setData, onClose }) {
 }
 
 // ── HistoryPanel — browse / preview / restore snapshots from planar_history ─
-function HistoryPanel({ data, setData, onClose, exportJSON, importJSON }) {
+function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoadedData }) {
   const [rows, setRows]           = useState(null);   // null = loading
   const [previewRow, setPreviewRow] = useState(null);
   const [previewData, setPreviewData] = useState(null); // parsed full snapshot
@@ -3003,8 +3033,11 @@ function HistoryPanel({ data, setData, onClose, exportJSON, importJSON }) {
       const valStr = await window.storage.getHistoryValue(row.id);
       if (!valStr) { showToast("Could not load snapshot.", { type: "error" }); setBusy(false); return; }
       const parsed = JSON.parse(valStr);
-      // 3. Apply — setData will trigger the auto-save useEffect, persisting it to hs-v1
-      setData(parsed);
+      // 3. Apply through the SAME normalize + cascade pipeline import/load use (B4). Applying a snapshot
+      // RAW skipped B550 cycle-breaking (a parentId cycle → sortByVisualOrder infinite-recurses → white-
+      // screen on render), id renumbering (B568 dup-id graph scramble), the holiday remerge, and the
+      // date recascade — restore was the inconsistent twin of importJSON, which routes through it.
+      if (applyLoadedData) applyLoadedData(parsed); else setData(parsed);
       showToast(`Restored snapshot from ${fmtAgo(row.created_at)}.`, { type: "success", duration: 4000 });
       onClose && onClose();
     } catch (e) {
@@ -4304,6 +4337,11 @@ function App() {
     return {...d, settings: {...d.settings, holidays: merged}};
   };
 
+  // Shared "apply a loaded / imported / restored data blob" pipeline. normalizeIds + ensureContacts are
+  // defined INSIDE the load effect below, so importJSON + version-restore route through this ref rather
+  // than re-calling them out of scope — calling them directly was a ReferenceError (import was broken).
+  const applyLoadedDataRef = useRef(null);
+
   useEffect(() => {
     (async () => {
       // Auto-renumber every project's tasks on load so IDs are always sequential
@@ -4354,6 +4392,21 @@ function App() {
           });
         });
         return {...d, settings: {...d.settings, contacts: existing}};
+      };
+      // Expose the full normalize + cascade pipeline so importJSON + version-restore can reuse it (they
+      // can't call normalizeIds/ensureContacts directly — those are scoped to this effect). Set
+      // synchronously on mount, before the first await, so it's ready before any user import/restore.
+      applyLoadedDataRef.current = (parsed) => {
+        let d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(parsed))));
+        d._pinnedClean = true;
+        HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
+        Object.keys(d.projects).forEach(pid => {
+          let tasks = d.projects[pid].tasks.map(({_pinStart, __wasDirectEdit, ...t}) => t);
+          tasks = cascadeDates(tasks);
+          tasks = rollupParentDates(tasks);
+          d.projects[pid] = {...d.projects[pid], tasks};
+        });
+        setData(d);
       };
       try {
         const isMobile = window.innerWidth < 768;
@@ -4525,8 +4578,22 @@ function App() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
+  // True while any blocking overlay (modal / context menu / panel) is open. Read by the global key
+  // handler below so document-level grid shortcuts (Delete / Insert / undo / paste / arrows) can't
+  // fire on the hidden grid behind a modal — e.g. Delete behind the Successor prompt was clearing /
+  // deleting the still-selected row or cell. A ref (not an effect dep) keeps the always-attached key
+  // listener fresh without re-binding it every time a panel opens.
+  const overlayOpenRef = useRef(false);
+  useEffect(() => {
+    overlayOpenRef.current = !!(successorPrompt || notesCtx || projCtx || taskCtx || renameModal ||
+      pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen || historyOpen ||
+      reviewOpen);
+  }, [successorPrompt, notesCtx, projCtx, taskCtx, renameModal, pdfExportOpen, formatOpen, settingsOpen,
+      automationOpen, contactsOpen, historyOpen, reviewOpen]);
+
   useEffect(() => {
     const onKey = (e) => {
+      if (overlayOpenRef.current) return;  // a modal/menu owns the keyboard — don't run grid shortcuts behind it
       const tag = document.activeElement.tagName;
       const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       if (e.key === "Insert" && !typing) {
@@ -4548,8 +4615,29 @@ function App() {
             setSelectedId(null); setSelRange(null);
             return;
           }
+          // Multi-cell range delete (Excel-style): blank every editable, non-locked, non-picker cell in
+          // the span — mirrors the fill path (typing into a range fills the whole range), which Delete
+          // previously didn't match (it only cleared the focused cell).
+          const cols = activeEffectiveCols(dataRef.current);
+          if (selRange && (Math.min(selRange.r1,selRange.r2) !== Math.max(selRange.r1,selRange.r2) || Math.min(selRange.c1,selRange.c2) !== Math.max(selRange.c1,selRange.c2))) {
+            const minR = Math.min(selRange.r1,selRange.r2), maxR = Math.max(selRange.r1,selRange.r2);
+            const minC = Math.min(selRange.c1,selRange.c2), maxC = Math.max(selRange.c1,selRange.c2);
+            const ftasks = flatTasksRef.current;
+            for (let r = minR; r <= maxR; r++) {
+              const t = ftasks[r]; if (!t) continue;
+              const patch = {};
+              for (let c = minC; c <= maxC; c++) {
+                const col = cols[c];
+                if (!col?.e || col.t === "health" || col.t === "notes") continue;
+                if (t.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.t==="cost")) continue;
+                patch[col.k] = (col.k === "duration" || col.k === "percentComplete") ? 0 : "";
+              }
+              if (Object.keys(patch).length) updateTask(t.id, patch);
+            }
+            return;
+          }
           // Fix #7: Delete on a single cell clears its value (Excel-style)
-          const col = activeEffectiveCols(dataRef.current)[selectedColIdx];
+          const col = cols[selectedColIdx];
           if (col?.e && col.t !== "health" && col.t !== "notes") {
             const selTask = flatTasksRef.current.find(t => t.id === selectedId);
             const isParentDateLocked = selTask?.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.t==="cost");
@@ -5876,7 +5964,10 @@ function App() {
     const costOf = id => {
       if (id in costMemo) return costMemo[id];
       const kids = kidsOf(id);
-      const v = kids.length ? kids.reduce((s, c) => s + costOf(c.id), 0) : (Number(byId[id]?.cost) || 0);
+      // Include the node's OWN value too (0 for a normal parent → no change), so a cost entered on a
+      // task BEFORE it gained children isn't silently dropped from the total (it's locked from editing,
+      // so it would otherwise be stranded in the saved data, invisible + uneditable).
+      const v = kids.length ? (Number(byId[id]?.cost) || 0) + kids.reduce((s, c) => s + costOf(c.id), 0) : (Number(byId[id]?.cost) || 0);
       costMemo[id] = v; return v;
     };
     // B212 — same bottom-up roll-up for the optional Budget / Actual columns.
@@ -5885,7 +5976,7 @@ function App() {
       const k = field + ":" + id;
       if (k in _fieldMemo) return _fieldMemo[k];
       const kids = kidsOf(id);
-      const v = kids.length ? kids.reduce((s, c) => s + sumOf(c.id, field), 0) : (Number(byId[id]?.[field]) || 0);
+      const v = kids.length ? (Number(byId[id]?.[field]) || 0) + kids.reduce((s, c) => s + sumOf(c.id, field), 0) : (Number(byId[id]?.[field]) || 0);
       _fieldMemo[k] = v; return v;
     };
 
@@ -5977,19 +6068,13 @@ function App() {
       }
       // Snapshot the current state with a pre-import label BEFORE applying
       if (data) { try { window.storage.set("hs-v1", JSON.stringify(data), { label: "pre-import", skipSanity: true }); } catch {} }
-      // Route the import through the SAME normalization + cascade pipeline the cloud/seed
-      // load path uses, so old or partial backups get migrated (predecessor format, holidays,
-      // ids, contacts) and dates are recomputed — instead of being dropped in raw (B4).
-      let d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(parsed))));
-      d._pinnedClean = true;
-      HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
-      Object.keys(d.projects).forEach(pid => {
-        let tasks = d.projects[pid].tasks.map(({_pinStart, __wasDirectEdit, ...t}) => t);
-        tasks = cascadeDates(tasks);
-        tasks = rollupParentDates(tasks);
-        d.projects[pid] = {...d.projects[pid], tasks};
-      });
-      setData(d);
+      // Route the import through the SAME shared normalize + cascade pipeline the cloud/seed load and
+      // version-restore use (B4), so old/partial backups get migrated (predecessor format, holidays,
+      // ids, contacts) and dates recomputed. (This used to inline the pipeline, calling normalizeIds/
+      // ensureContacts directly — but those are scoped INSIDE the load effect, so the call threw
+      // ReferenceError and import was silently broken. The ref closes over them.)
+      if (applyLoadedDataRef.current) applyLoadedDataRef.current(parsed);
+      else setData(parsed);
       showToast(`Imported ${projCount} project${projCount===1?"":"s"}, ${taskCount} task${taskCount===1?"":"s"}.`, { type: "success", duration: 3000 });
     };
     r.readAsText(f);
@@ -6338,7 +6423,7 @@ function App() {
       {formatOpen      && <FormatPanel      data={data} setData={setData} onClose={()=>setFormatOpen(false)} />}
       {automationOpen  && <AutomationPanel  data={data} setData={setData} onClose={()=>setAutomationOpen(false)} />}
       {contactsOpen    && <ContactsPanel    data={data} setData={setData} onClose={()=>setContactsOpen(false)} />}
-      {historyOpen     && <HistoryPanel     data={data} setData={setData} exportJSON={exportJSON} importJSON={importJSON} onClose={()=>setHistoryOpen(false)} />}
+      {historyOpen     && <HistoryPanel     data={data} setData={setData} exportJSON={exportJSON} importJSON={importJSON} applyLoadedData={(parsed)=>applyLoadedDataRef.current?.(parsed)} onClose={()=>setHistoryOpen(false)} />}
       {successorPrompt && <SuccessorPromptModal prompt={successorPrompt} updateTask={updateTask} onClose={()=>setSuccessorPrompt(null)} onOpenTask={(pid, taskId)=>{ goToTask(pid, taskId); setSuccessorPrompt(null); }} />}
 
       {/* BODY */}
@@ -7584,6 +7669,10 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     const nextIdBefore = tasks[idxBefore + 1]?.id ?? null;
     commit(taskId, col, val);
     if (nextIdBefore !== null) setSelectedId(nextIdBefore);
+    // A date / dependency edit can re-sort rows via the cascade, so the flat-index selRange is now stale
+    // (its highlight + Shift-Arrow anchor would point at whatever rows moved into that span); drop it so
+    // the next selection re-derives cleanly. Non-reordering edits (owner/cost/…) keep their range.
+    if (col === "start" || col === "end" || col === "duration" || col === "predecessors") setSelRange(null);
   };
 
   // ── Per-project column config (B212) ────────────────────────
@@ -8772,18 +8861,24 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
     const ends   = tasks.map(t=>t.end  ).filter(Boolean).slice().sort();
     if (!starts.length || !ends.length) return {minD: windowStart, totD: dif(windowStart, windowEnd)};
     // Use whichever is earlier/later: fixed window or actual task extent
-    const mn = starts[0] < windowStart ? addD(starts[0], -60) : windowStart;
-    const mx = ends[ends.length-1] > windowEnd ? addD(ends[ends.length-1], 60) : windowEnd;
-    // Cap the span: one fat-fingered / imported far-future date (e.g. year 4000) would otherwise make
-    // totalW = totD*ppd a multi-million-px container and spin the month/year loops tens of thousands
-    // of times, freezing the tab. ~100 years is far beyond any real schedule (the SVG export bounds
-    // its own month loop the same way with _mGuard).
-    const MAX_SPAN_DAYS = 365 * 100;
-    return {minD: mn, totD: Math.min(dif(mn, mx), MAX_SPAN_DAYS)};
+    let mn = starts[0] < windowStart ? addD(starts[0], -60) : windowStart;
+    let mx = ends[ends.length-1] > windowEnd ? addD(ends[ends.length-1], 60) : windowEnd;
+    // Anchor the axis to TODAY. Expanding the window to the real task extent is right for a normal long
+    // schedule, but a single far-past/far-future outlier (a 1900 baseline, a year-4000 typo, an import
+    // artifact) must not drag the axis to it: that froze the tab (a multi-million-px canvas + tens of
+    // thousands of axis cells) and — once the span was naively capped — pushed the real bars + today
+    // line off the clamped axis. Cap expansion at NOW-30y .. NOW+50y (~80y, beyond any real schedule);
+    // anything past that pins to the chart edge because xOf is clamped to [0, totalW] below.
+    const hardBack = addD(NOW, -365 * 30), hardFwd = addD(NOW, 365 * 50);
+    if (mn < hardBack) mn = hardBack;
+    if (mx > hardFwd)  mx = hardFwd;
+    return {minD: mn, totD: dif(mn, mx)};
   }, [tasks]);
 
-  const xOf = d => dif(minD, d) * ppd;
   const totalW = totD * ppd;
+  // Clamp positions to the axis window so an out-of-window outlier date pins to the chart edge instead
+  // of drawing past the months/years header — keeps every bar + the today line aligned with the axis.
+  const xOf = d => Math.max(0, Math.min(totalW, dif(minD, d) * ppd));
   const todayX = xOf(NOW);
 
   const months = useMemo(() => {
@@ -9016,7 +9111,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
             const ri  = startIdx + i;
             const isBlankDates = !task.start || !task.end;
             const bx  = isBlankDates ? 0 : xOf(task.start);
-            const bw  = isBlankDates ? 0 : Math.max(6, dif(task.start, task.end) * ppd);
+            const bw  = isBlankDates ? 0 : Math.max(6, xOf(task.end) - bx);  // clamped endpoints bound a far-future bar to the canvas (== dif(start,end)*ppd for any in-window task)
             const isSummary   = childParentIds.has(task.id);
             const isMilestone = task.duration === 0;
             const isCollapsed = isSummary && !task.isExpanded;
@@ -10770,7 +10865,7 @@ function buildPDFHtml(cfg, data, forPreview) {
     return true;
   });
   // Rolled cost for the exhibit: parent = sum of descendant leaf costs; leaf = own value.
-  const costOfIn = (tasks, id) => { const kids = tasks.filter(x=>x.parentId===id); return kids.length ? kids.reduce((s,c)=>s+costOfIn(tasks,c.id),0) : (Number(tasks.find(x=>x.id===id)?.cost)||0); };
+  const costOfIn = (tasks, id) => { const kids = tasks.filter(x=>x.parentId===id); const own = Number(tasks.find(x=>x.id===id)?.cost)||0; return kids.length ? own + kids.reduce((s,c)=>s+costOfIn(tasks,c.id),0) : own; };
   const cellVal = (t,k,tasks,projId) => {    switch(k){
       case "start": case "end": return fmtD(t[k]);
       case "duration": return `${t.duration}d`;
@@ -11879,8 +11974,18 @@ function NotesModal({task, projectId, updateTask, onClose, initChar}) {
             <textarea
               value={(task.notes||[]).map(n=>n.text).join("\n\n")}
               onChange={e=>{
-                const lines = e.target.value.split(/\n\n+/);
-                updateTask(task.id, {notes: lines.map((t,i)=>({id:(task.notes||[])[i]?.id||Date.now()+i, date:(task.notes||[])[i]?.date||NOW, text:t})).filter(n=>n.text.trim())}, projectId);
+                // Match each block to an existing note by TEXT (preserving its id + date), consuming
+                // matches so duplicates don't both grab one note; only genuinely new/edited text mints a
+                // fresh id+date. The old code matched by ARRAY INDEX, so a note containing a blank line
+                // (which splits into two) shifted every following note's id + date — scrambling history.
+                const blocks = e.target.value.split(/\n\n+/).map(t=>t.trim()).filter(Boolean);
+                const prev = (task.notes||[]).slice();
+                const next = blocks.map((text,i)=>{
+                  const mi = prev.findIndex(n => n && n.text === text);
+                  if (mi >= 0) { const reuse = prev[mi]; prev[mi] = null; return reuse; }
+                  return {id: Date.now()+i, date: NOW, text};
+                });
+                updateTask(task.id, {notes: next}, projectId);
               }}
               placeholder="Type your notes here…"
               style={{width:"100%",minHeight:200,background:"var(--bg)",border:"1px solid var(--bd2)",borderRadius:4,

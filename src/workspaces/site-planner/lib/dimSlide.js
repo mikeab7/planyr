@@ -1,4 +1,4 @@
-/* Footprint dimension-callout slide constraint (B590).
+/* Footprint dimension-callout slide constraint (B592).
  *
  * The red footprint dimension (a building's depth, a road's travel width, a paving strip's short
  * side — rendered in renderElPx) is grab-and-drag to reposition (B146, stored as a local-feet

@@ -1,4 +1,4 @@
-/* B590 — best-effort REAL drag gesture: select the building, grab its depth dimension, drag it
+/* B592 — best-effort REAL drag gesture: select the building, grab its depth dimension, drag it
  * hard toward the +X edge (past the bump-out), and confirm the PERSISTED dimOffset came out
  * clamped (slid along X only — y forced to 0 — and stopped at the bump band, not out in space).
  * Canvas drags are historically flaky under automation; if the gesture doesn't register this
@@ -8,7 +8,7 @@ const { chromium } = pw;
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 
 const site = {
-  id: "b590-drag", groupId: "b590-drag", site: "B590 drag", name: "Plan 1", origin: null, county: null,
+  id: "b592-drag", groupId: "b592-drag", site: "B592 drag", name: "Plan 1", origin: null, county: null,
   parcels: [{ id: "pc1", locked: false, points: [{ x: -900, y: -700 }, { x: 900, y: -700 }, { x: 900, y: 700 }, { x: -900, y: 700 }] }],
   els: [
     { id: "b1", type: "building", cx: 0, cy: 0, w: 620, h: 300, rot: 0, dock: "cross", dimOffset: { x: 0, y: 0 } },
@@ -17,8 +17,8 @@ const site = {
   measures: [], callouts: [], markups: [], settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now(),
 };
 const seed = `(() => { try {
-  localStorage.setItem('planarfit:sites:v1', JSON.stringify({ "b590-drag": ${JSON.stringify(site)} }));
-  localStorage.setItem('planarfit:currentSite:v1', "b590-drag");
+  localStorage.setItem('planarfit:sites:v1', JSON.stringify({ "b592-drag": ${JSON.stringify(site)} }));
+  localStorage.setItem('planarfit:currentSite:v1', "b592-drag");
 } catch (e) {} })();`;
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -43,7 +43,7 @@ const find = () => page.evaluate(() => {
   return { fp, dl };
 });
 const offsetOf = () => page.evaluate(() => {
-  try { const s = JSON.parse(localStorage.getItem("planarfit:sites:v1"))["b590-drag"]; return s.els.find((e) => e.id === "b1").dimOffset; } catch (e) { return null; }
+  try { const s = JSON.parse(localStorage.getItem("planarfit:sites:v1"))["b592-drag"]; return s.els.find((e) => e.id === "b1").dimOffset; } catch (e) { return null; }
 });
 
 const { fp, dl } = await find();
@@ -73,5 +73,5 @@ if (!skip) {
 }
 await ctx.close();
 await browser.close();
-console.log(fail === 0 ? "\n✓ B590 drag check ok (or skipped)" : `\n✗ ${fail} drag assertion(s) failed`);
+console.log(fail === 0 ? "\n✓ B592 drag check ok (or skipped)" : `\n✗ ${fail} drag assertion(s) failed`);
 process.exit(fail === 0 ? 0 : 1);

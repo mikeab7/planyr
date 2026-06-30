@@ -4,7 +4,7 @@ import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD } from
 // The rendered dimension line sits at this local length-coordinate (feet from centre).
 const lineAt = (L, posF, offset) => L * (posF - 0.5) + offset;
 
-describe("dimSlide — footprint dimension slide constraint (B590)", () => {
+describe("dimSlide — footprint dimension slide constraint (B592)", () => {
   it("a long-horizontal building slides along X (length), pins Y (depth)", () => {
     const r = dimSlideRange({ w: 620, h: 300 }, [], DIM_POS_F_DEFAULT);
     expect(r.axis).toBe("x");

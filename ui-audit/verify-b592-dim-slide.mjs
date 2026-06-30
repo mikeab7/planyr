@@ -1,4 +1,4 @@
-/* Self-verification for B590 — the building DEPTH dimension callout slides ALONG the length and
+/* Self-verification for B592 — the building DEPTH dimension callout slides ALONG the length and
  * STAYS ON the building, never floating off and never sliding onto a corner bump-out (where the
  * printed depth would no longer be true). Proves the constraint end-to-end through the real render
  * path (lib/dimSlide → renderElPx), which uses the SAME pure clamp the drag handler does.
@@ -13,7 +13,7 @@
  *      line stops ~100′ short of the right edge (a clear gap vs B), so 620′ stays true under it.
  *   D) orientation symmetry — a long-VERTICAL building: the horizontal line slides along Y, X locked.
  *
- * Run:  node ui-audit/verify-b590-dim-slide.mjs   (preview server must be on :4173)
+ * Run:  node ui-audit/verify-b592-dim-slide.mjs   (preview server must be on :4173)
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
@@ -40,10 +40,10 @@ const dogEar = () => ({ id: "de1", type: "building", attachedTo: "b1", dock: "no
   dogEar: { side: "top", sign: 1 }, cx: 260, cy: -180, w: 100, h: 60, rot: 0 }); // w=100 → along-span 100′
 
 const SITES = {
-  "b590-lock": mkSite("b590-lock", "B590 lock", bldg({ x: 80, y: 9999 })),               // A
-  "b590-edge": mkSite("b590-edge", "B590 edge", bldg({ x: 9999, y: 0 })),                 // B
-  "b590-bump": mkSite("b590-bump", "B590 bump", bldg({ x: 9999, y: 0 }, [dogEar()])),     // C
-  "b590-vert": mkSite("b590-vert", "B590 vert", [{ id: "b1", type: "building", cx: 0, cy: 0, w: 300, h: 620, rot: 0, dock: "cross", dimOffset: { x: 9999, y: 80 } }]), // D
+  "b592-lock": mkSite("b592-lock", "B592 lock", bldg({ x: 80, y: 9999 })),               // A
+  "b592-edge": mkSite("b592-edge", "B592 edge", bldg({ x: 9999, y: 0 })),                 // B
+  "b592-bump": mkSite("b592-bump", "B592 bump", bldg({ x: 9999, y: 0 }, [dogEar()])),     // C
+  "b592-vert": mkSite("b592-vert", "B592 vert", [{ id: "b1", type: "building", cx: 0, cy: 0, w: 300, h: 620, rot: 0, dock: "cross", dimOffset: { x: 9999, y: 80 } }]), // D
 };
 const seedFor = (cur) => `(() => { try {
   localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(SITES)}));
@@ -95,7 +95,7 @@ async function run(cur, label, orient) {
 
 // A — on-building + perpendicular lock (vertical line stays full-height + centred despite y:9999)
 {
-  const r = await run("b590-lock", "A · stays on the building (perpendicular locked)", "horiz");
+  const r = await run("b592-lock", "A · stays on the building (perpendicular locked)", "horiz");
   if (r) {
     const { fp, dl } = r;
     ok("A: depth line spans ~full footprint height (not floated off)", dl.h > fp.h * 0.8, `line ${Math.round(dl.h)}px vs fp ${Math.round(fp.h)}px`);
@@ -106,7 +106,7 @@ async function run(cur, label, orient) {
 // B — slide clamps at the footprint edge (x:9999 → right edge, never beyond)
 let edgeGapFt = null;
 {
-  const r = await run("b590-edge", "B · slide clamps at the footprint edge", "horiz");
+  const r = await run("b592-edge", "B · slide clamps at the footprint edge", "horiz");
   if (r) {
     const { fp, dl, ppf } = r;
     edgeGapFt = (fp.x + fp.w - dl.cx) / ppf;
@@ -116,7 +116,7 @@ let edgeGapFt = null;
 }
 // C — stops at the bump-out (same offset, +end dog-ear of 100′ → line stops ~100′ short)
 {
-  const r = await run("b590-bump", "C · stops short of a corner bump-out", "horiz");
+  const r = await run("b592-bump", "C · stops short of a corner bump-out", "horiz");
   if (r && edgeGapFt != null) {
     const { fp, dl, ppf } = r;
     const gapFt = (fp.x + fp.w - dl.cx) / ppf;
@@ -127,7 +127,7 @@ let edgeGapFt = null;
 }
 // D — orientation symmetry (long-vertical building: horizontal line slides along Y, X locked)
 {
-  const r = await run("b590-vert", "D · long-vertical building (horizontal line, slides along Y)", "vert");
+  const r = await run("b592-vert", "D · long-vertical building (horizontal line, slides along Y)", "vert");
   if (r) {
     const { fp, dl } = r;
     ok("D: depth line spans ~full footprint width (X locked → full-width, on the building)", dl.w > fp.w * 0.8, `line ${Math.round(dl.w)}px vs fp ${Math.round(fp.w)}px`);
@@ -136,6 +136,6 @@ let edgeGapFt = null;
   }
 }
 
-console.log(fail === 0 ? "\n✓ ALL B590 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
+console.log(fail === 0 ? "\n✓ ALL B592 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
 await browser.close();
 process.exit(fail === 0 ? 0 : 1);
