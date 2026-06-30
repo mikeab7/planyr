@@ -26,6 +26,8 @@ const LIGHT = {
   canvasBg: "#EDF1F6", canvasGridMinor: "#DCE3EB", canvasGridMajor: "#C5CED9",
   canvasParcel: "#5b6650", canvasSetback: "#b45309", canvasSelection: "#C2410C",
   canvasAccentSoft: "#f0d9cc", canvasMat: "#DCE1E8",
+  /* Multi-select / marquee chrome — hue-free two-tone (light casing under a dark line), B569. */
+  selCasing: "#FFFFFF", selLine: "#1B1E26",
   /* Module accents — fills fixed both themes; -text swaps */
   accentSite: "#1D9E75", accentSchedule: "#7F77DD", accentReview: "#EF9F27", accentLibrary: "#0E7490",
   accentSiteText: "#0F6E56", accentScheduleText: "#534AB7", accentReviewText: "#8A5410", accentLibraryText: "#0C677E",
@@ -53,6 +55,8 @@ const DARK = {
   canvasBg: "#0E1014", canvasGridMinor: "rgba(232,235,240,0.05)", canvasGridMajor: "rgba(232,235,240,0.10)",
   canvasParcel: "#2FBE90", canvasSetback: "#E0954A", canvasSelection: "#F26B3A",
   canvasAccentSoft: "rgba(242,107,58,0.18)", canvasMat: "#0E1014",
+  /* Two-tone selection chrome (B569) — light casing + dark line, legible on a dark aerial. */
+  selCasing: "#E8EBF0", selLine: "#15171C",
   /* Module accents — fills unchanged; -text is the light-on-dark set */
   accentSite: "#1D9E75", accentSchedule: "#7F77DD", accentReview: "#EF9F27", accentLibrary: "#0E7490",
   accentSiteText: "#5DCAA5", accentScheduleText: "#AFA9EC", accentReviewText: "#EF9F27", accentLibraryText: "#5AC4DB",

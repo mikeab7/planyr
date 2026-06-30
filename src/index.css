@@ -80,6 +80,10 @@
   --canvas-selection:   #C2410C;   /* drafting red-orange — selection + dimension lines */
   --canvas-accent-soft: #f0d9cc;
   --canvas-mat:         #DCE1E8;
+  /* Multi-select / marquee chrome — HUE-FREE two-tone (light casing under a dark line) so it
+     never collides with a status/accent hue and stays legible on aerial imagery (B569). */
+  --sel-casing:         #FFFFFF;
+  --sel-line:           #1B1E26;
 
   /* Global interactive accent (focus rings, form controls, active states).
      Replaces the retired ember (#e8590c); tracks the drafting accent. */
@@ -173,6 +177,8 @@
   --canvas-selection:   #F26B3A;
   --canvas-accent-soft: rgba(242, 107, 58, 0.18);
   --canvas-mat:         #0E1014;
+  --sel-casing:         #E8EBF0;   /* light casing for the two-tone selection chrome (B569) */
+  --sel-line:           #15171C;   /* dark line over the casing — legible on a dark aerial */
 
   /* Global interactive accent */
   --accent:          #F26B3A;

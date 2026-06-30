@@ -407,6 +407,15 @@ All tools in both workspaces (and the Stitcher) flow through one shared engine i
   DocReview parity tools (Line/Polyline/Polygon/Ellipse/Arc/Dimension/Pen/Highlight/Eraser/
   Snapshot), property-set completion, Count in Site Planner, vtx-drag handles, Shift snap,
   ParcelDrawing inline calibrate. B432 (NEW-9) closes the umbrella.
+- **Shared SELECTION layer (B587/B588; in-code labels read the provisional B569/B570).** On top of the engine sits one shared selection model:
+  `shared/markup/selection.js` (pure — `pickInMarquee` crossing/window box-test, `nextSelection`
+  with Ctrl/⌘=toggle · Shift=add · plain=replace, `cornerGrips`) + `shared/markup/SelectionChrome.jsx`
+  (the ONE neutral hue-free chrome — light casing under a dark line + grips, tokens `--sel-casing`/
+  `--sel-line`). Both workspaces consume it for multi-select (Ctrl/⌘ + Shift-click), the **Marquee**
+  rail tool (a `mode` row in `tools.matrix.js`, `data-testid="tool-marquee"`), multi-move, and
+  multi-delete. Selection STATE/wiring stays per-host (different coordinate spaces); only the
+  logic/visual is shared. Site Planner covers els+markups+measures; **parcels keep their merge
+  interaction** (the one sanctioned divergence). Single-select keeps its resize/rotate handles.
 
 ## KEY DECISIONS (must persist)
 - **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
