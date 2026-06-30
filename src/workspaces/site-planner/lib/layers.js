@@ -14,7 +14,7 @@
  */
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
-import { JURISDICTION_SOURCES, ETJ_SOURCES } from "./jurisdiction.js";
+import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
@@ -201,6 +201,23 @@ export const JURISDICTIONS = {
     url: "https://harcags.harcresearch.org/arcgisserver/rest/services/Boundaries/TCEQ_Water_Districts/MapServer", layers: null, opacity: 0.55,
     note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. A boundary is a TAXING / authority district, NOT proof that water or sewer is connected to a parcel. Screening only — verify against the district / tax statement.",
   },
+  jur_road_authority: {
+    // NEW-2/B571 — the road-authority overlay: the actual fronting roads drawn and
+    // COLORED BY MAINTAINER, so the Site Analysis "Road authority" card's call can be
+    // confirmed against the map. Same TxDOT Roadway Inventory FeatureServer the identify
+    // reads (one source of truth), drawn client-side as vector features (esriFeature) so
+    // each segment is individually styled via roadAuthorityStyle — the SAME roadAuthority()
+    // decode the card uses, no parallel mapping. Dense statewide data, so it's gated to
+    // minZoom 14 (never paints at metro scale) and fetches only the two style fields;
+    // esri-leaflet does its own viewport-bbox tiled fetching on top. Display-only screening
+    // overlay on the EPSG:4326 basemap — never feeds the editable layer / measurements / the
+    // 2278 site frame.
+    kind: "esriFeature", label: "Road maintenance authority",
+    url: JURISDICTION_SOURCES.road.url, minZoom: 14, weight: 3, opacity: 0.95,
+    fields: ["OBJECTID", "RDWAY_MAINT_AGCY", "HSYS"],
+    styleFn: roadAuthorityStyle, legend: ROAD_AUTHORITY_LEGEND,
+    note: "Who maintains each road, from the TxDOT Roadway Inventory — City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Screening only — verify the access/ROW desk with the jurisdiction.",
+  },
 };
 
 // Flatten the per-jurisdiction registry into id→config (tagged with its county),
@@ -242,6 +259,7 @@ export const LAYER_VINTAGE = {
   jur_city: "TxGIO city limits — current edition",
   jur_etj: "H-GAC ETJ — current edition",
   jur_mud: "TCEQ water districts (via HARC) — current edition",
+  jur_road_authority: "TxDOT Roadway Inventory — current edition",
   // Per-county utility layers
   hcfcd_row: "HCFCD channels & ROW — current edition",
   coh_ww: "City of Houston GIS (test host) — current edition",
@@ -423,7 +441,13 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           let lyr;
           if (cfg.kind === "esriFeature") {
             lyr = EL.featureLayer(featureLayerOptions(cfg, st.opacity, pane));
-            lyr.setOpacity = (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
+            // A per-feature-styled layer (road authority) must re-derive its WHOLE style on an
+            // opacity change — re-applying the style function (not a flat {opacity}) so the
+            // per-maintainer colors survive AND newly fetched tiles keep them. A flat-styled
+            // layer just merges the new opacity.
+            lyr.setOpacity = typeof cfg.styleFn === "function"
+              ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
+              : (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.
