@@ -34,9 +34,13 @@ const mkSite = (id, name, els) => ({
 // length runs along the dock wall; w is the long (length) axis, h the depth axis.
 const SINGLE = "verify-b568-single";
 const CROSS = "verify-b568-cross";
+const FLIP = "verify-b568-flip"; // stale dockSide vs the current axis (the resize-flip repro, B569 review)
 const sites = {
   [SINGLE]: mkSite(SINGLE, "Verify B568 single", [{ id: "b1", type: "building", cx: 0, cy: 0, w: 336, h: 260, rot: 0, dock: "single", dockSide: "bottom" }]),
   [CROSS]: mkSite(CROSS, "Verify B568 cross", [{ id: "b1", type: "building", cx: 0, cy: 0, w: 336, h: 320, rot: 0, dock: "cross" }]),
+  // w<h so "bottom" is no longer a long side — dockSidesFor must re-validate it to a long
+  // side ("right"); the grid + doors must stay coherent (1 speed line), not desync.
+  [FLIP]: mkSite(FLIP, "Verify B568 flip", [{ id: "b1", type: "building", cx: 0, cy: 0, w: 260, h: 336, rot: 0, dock: "single", dockSide: "bottom" }]),
 };
 const seedFor = (cur) => `(() => { try {
   localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(sites)}));
@@ -95,6 +99,7 @@ async function run(cur, label, expectSpeedLines) {
 
 await run(SINGLE, "single-load", 1);
 await run(CROSS, "cross-dock", 2);
+await run(FLIP, "stale-dockside (axis-flip)", 1);
 
 console.log(fail === 0 ? "\n✓ ALL B568/B569 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
 await browser.close();

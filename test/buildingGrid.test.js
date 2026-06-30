@@ -225,3 +225,55 @@ describe("placeDockDoors — doors fall BETWEEN columns, count tracks o.c.", () 
     expect(placeDockDoors(0, 5, [], { doorOC: 12, doorWidth: 9 })).toEqual([]);
   });
 });
+
+describe("robustness — review-found edge cases (B568/B569)", () => {
+  it("an out-of-band bay target never produces a negative or off-building bay", () => {
+    // The reported repro: a per-building target BELOW the band (20 with band 50–58).
+    for (const target of [10, 20, 200]) {
+      for (const residual of ["ends", "rear", "center"]) {
+        for (const S of [90, 120, 150, 300, 777]) {
+          const r = divideSpan(S, { target, min: 50, max: 58, residual });
+          expect(sum(r.sizes)).toBeCloseTo(S, 6);
+          r.sizes.forEach((s) => expect(s).toBeGreaterThan(-1e-6)); // no negative bays
+          // interior column lines all land strictly inside (0, S)
+          let acc = 0;
+          for (let i = 0; i < r.sizes.length - 1; i++) { acc += r.sizes[i]; expect(acc).toBeGreaterThan(0); expect(acc).toBeLessThan(S); }
+        }
+      }
+    }
+  });
+
+  it("resolveGridSettings clamps the bay targets into the flex band", () => {
+    const lo = resolveGridSettings({ bayLengthOverride: 20, bayDepthOverride: 5 }, { bayMin: 50, bayMax: 58 });
+    expect(lo.bayLengthTarget).toBe(50);
+    expect(lo.bayDepthTarget).toBe(50);
+    const hi = resolveGridSettings({ bayLengthOverride: 90 }, { bayMin: 50, bayMax: 58 });
+    expect(hi.bayLengthTarget).toBe(58);
+    const inBand = resolveGridSettings(null, { bayLengthTarget: 54, bayMin: 50, bayMax: 58 });
+    expect(inBand.bayLengthTarget).toBe(54); // untouched when already in band
+  });
+
+  it("computeBuildingGrid with an out-of-band override yields only valid on-building lines", () => {
+    const grid = resolveGridSettings({ bayDepthOverride: 20 }, { bayMin: 50, bayMax: 58 });
+    const r = computeBuildingGrid({ length: 300, depth: 150, dock: "single", grid });
+    r.depthBays.forEach((s) => expect(s).toBeGreaterThan(-1e-6));
+    r.depthLines.forEach((l) => { expect(l.at).toBeGreaterThan(0); expect(l.at).toBeLessThan(150); });
+    r.lengthLines.forEach((l) => { expect(l.at).toBeGreaterThan(0); expect(l.at).toBeLessThan(300); });
+    expect(sum(r.depthBays)).toBeCloseTo(150, 6);
+  });
+
+  it("divideSpan never throws or emits NaN when the band is omitted (exported-API safety)", () => {
+    expect(() => divideSpan(300)).not.toThrow();
+    expect(() => divideSpan(300, { target: 56 })).not.toThrow();
+    for (const r of [divideSpan(300), divideSpan(300, { target: 56 }), divideSpan(1000, {})]) {
+      expect(r.sizes.length).toBeGreaterThan(0);
+      r.sizes.forEach((s) => expect(Number.isFinite(s)).toBe(true));
+    }
+  });
+
+  it("tolerates a swapped band passed directly to divideSpan", () => {
+    const r = divideSpan(336, { target: 56, min: 58, max: 50 });
+    expect(sum(r.sizes)).toBeCloseTo(336, 6);
+    r.sizes.forEach((s) => expect(Number.isFinite(s)).toBe(true));
+  });
+});

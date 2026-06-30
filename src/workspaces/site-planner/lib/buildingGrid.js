@@ -51,20 +51,23 @@ export function resolveGridSettings(el, settings = {}) {
     const val = ov != null ? ov : base != null ? base : def;
     return { val: Math.max(floor, val), overridden: ov != null };
   };
+  // The flex band first — the bay targets are then CLAMPED into it, since the band is the
+  // hard industry constraint and the per-building target is only a preference within it
+  // (an out-of-band target would otherwise drive a negative residual bay; see divideSpan).
+  let bayMin = num(settings.bayMin); bayMin = Math.max(1, bayMin != null ? bayMin : GRID_DEFAULTS.bayMin);
+  let bayMax = num(settings.bayMax); bayMax = Math.max(1, bayMax != null ? bayMax : GRID_DEFAULTS.bayMax);
+  if (bayMax < bayMin) [bayMin, bayMax] = [bayMax, bayMin]; // tolerate a swapped band
   const speedBay = pick("speedBay", "speedBayOverride");
   const bayLengthTarget = pick("bayLengthTarget", "bayLengthOverride");
   const bayDepthTarget = pick("bayDepthTarget", "bayDepthOverride");
   const doorWidth = pick("doorWidth", "doorWidthOverride");
   const doorOC = pick("doorOC", "doorOCOverride", 2);
-  let bayMin = num(settings.bayMin); bayMin = bayMin != null ? bayMin : GRID_DEFAULTS.bayMin;
-  let bayMax = num(settings.bayMax); bayMax = bayMax != null ? bayMax : GRID_DEFAULTS.bayMax;
-  if (bayMax < bayMin) [bayMin, bayMax] = [bayMax, bayMin]; // tolerate a swapped band
   return {
     speedBay: speedBay.val,
-    bayLengthTarget: bayLengthTarget.val,
-    bayDepthTarget: bayDepthTarget.val,
-    bayMin: Math.max(1, bayMin),
-    bayMax: Math.max(1, bayMax),
+    bayLengthTarget: clamp(bayLengthTarget.val, bayMin, bayMax),
+    bayDepthTarget: clamp(bayDepthTarget.val, bayMin, bayMax),
+    bayMin,
+    bayMax,
     doorWidth: doorWidth.val,
     doorOC: doorOC.val,
     overrides: {
@@ -83,10 +86,17 @@ export function resolveGridSettings(el, settings = {}) {
 // to the nearest band edge, with the leftover pushed into a residual bay positioned by
 // `residual` ("ends" → two end bays · "rear" → one far bay · "center" → one middle bay ·
 // "none" → just uniform). Returns { sizes, roles } where role is "std" | "flex".
-export function divideSpan(S, { target, min, max, residual = "ends" } = {}) {
+export function divideSpan(S, opts = {}) {
   const span = num(S);
   if (span == null || span <= EPS) return { sizes: [], roles: [] };
-  const t = num(target) ?? (min + max) / 2;
+  // Default + sanitise the band so a direct API call without it can never emit NaN bays
+  // or throw. The target is CLAMPED into the band: an out-of-band target would otherwise
+  // over-count bays in the fallback and drive a residual end/rear bay negative.
+  let min = Math.max(1, num(opts.min) ?? GRID_DEFAULTS.bayMin);
+  let max = Math.max(1, num(opts.max) ?? GRID_DEFAULTS.bayMax);
+  if (max < min) [min, max] = [max, min];
+  const residual = opts.residual || "ends";
+  const t = clamp(num(opts.target) ?? (min + max) / 2, min, max);
   // A short span is a single bay (no interior column line). Allow up to max so a lone
   // bay isn't forced to split into two sub-min slivers.
   if (span <= max + EPS) return { sizes: [span], roles: ["std"] };

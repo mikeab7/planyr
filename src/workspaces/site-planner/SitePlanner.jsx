@@ -8512,7 +8512,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         {grpHdr("Column grid")}
                         {(() => {
                           const grd = resolveGridSettings(b, settings);
-                          const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "single", grid: grd });
+                          const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
                           const ovRow = (label, valueShown, ovKey, floor) => (
                             <Field label={label} key={ovKey}>
                               <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -8525,7 +8525,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           );
                           return (
                             <>
-                              {(b.dock || "single") !== "none" && ovRow("Speed bay (ft)", grd.speedBay, "speedBayOverride", 1)}
+                              {(b.dock || "cross") !== "none" && ovRow("Speed bay (ft)", grd.speedBay, "speedBayOverride", 1)}
                               {ovRow("Typ. bay — length", grd.bayLengthTarget, "bayLengthOverride", 1)}
                               {ovRow("Typ. bay — depth", grd.bayDepthTarget, "bayDepthOverride", 1)}
                               {ovRow("Dock door o.c. (ft)", grd.doorOC, "doorOCOverride", 2)}
@@ -8649,14 +8649,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       // Door count + column-grid readout track the SAME pure layout the canvas draws
-                      // (B568/B569): doors are placed to fall between columns, so the count reflects
-                      // the column-avoidance gaps and the configured o.c. — not a naive L÷12.
-                      const dock = selEl.dock || "single";
+                      // (B568/B569): doors fall between columns, so the count reflects the column
+                      // gaps + the configured o.c. — and routes through the SAME dockDoorRun helper
+                      // as the canvas (incl. the dog-ear skip), so panel and canvas never disagree.
+                      const dock = selEl.dock || "cross";
                       const grd = resolveGridSettings(selEl, settings);
                       const gg = computeBuildingGrid({ length: footprintLength(selEl), depth: footprintDepth(selEl), dock, grid: grd });
                       const lenOffsets = gg.lengthLines.map((l) => l.at);
-                      const per = placeDockDoors(0, footprintLength(selEl), lenOffsets, { doorOC: grd.doorOC, doorWidth: grd.doorWidth }).length;
-                      const total = dock === "cross" ? per * 2 : dock === "none" ? 0 : per;
+                      const dogEars = els.filter((x) => x.attachedTo === selEl.id && x.dogEar);
+                      const total = dockSidesFor(selEl).dockSides.reduce((sum, s) => sum + dockDoorRun(selEl, s, dogEars, lenOffsets, grd).doors.length, 0);
                       return (
                         <>
                           {settings.showGrid && gg.summary && <>Column grid: <b style={{ color: PAL.ink }}>{gg.summary.lengthTyp}′ × {gg.summary.depthTyp}′</b> typ{gg.summary.speedBay ? <> · speed bay {gg.summary.speedBay}′</> : ""} · {gg.summary.lengthCount} × {gg.summary.depthCount} bays<br /></>}
@@ -9817,6 +9818,22 @@ function pondContourEls(el, f2p, ppf, keyPfx = "") {
   return out;
 }
 
+// Dock-door run for ONE dock side (B569): the clear wall span between any dog-ear bumps,
+// plus the door centres placed to fall BETWEEN columns. Shared by the canvas (renderElPx)
+// and the panel door count so the two NEVER disagree — including the dog-ear case, where
+// a bump on the dock face shortens the door run. `g` = resolveGridSettings(el, settings).
+function dockDoorRun(el, side, dogEars, lengthLines, g) {
+  const horiz = side === "top" || side === "bottom";
+  const L = horiz ? el.w : el.h; // wall length (ft)
+  // Subtract a dog-ear by its ACTUAL span along this wall (B362: a resized bump consumes
+  // more/less of the dock face than the nominal 55′).
+  const bumpAlong = (sign) => { const d = (dogEars || []).find((x) => x.dogEar && x.dogEar.side === side && x.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
+  const startF = bumpAlong(-1);
+  const endF = L - bumpAlong(1);
+  const doors = endF - startF < g.doorWidth ? [] : placeDockDoors(startF, endF, lengthLines, { doorOC: g.doorOC, doorWidth: g.doorWidth });
+  return { startF, endF, horiz, doors };
+}
+
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
 function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext, selStroke) {
@@ -9924,8 +9941,12 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // Structural column grid + dock doors (B568/B569). The grid is built in building-LOCAL
     // feet by the pure lib; here we just map its length/depth column-line offsets onto the
     // element's axis-aligned frame (the outer <g> rotation/ppf transform does the rest).
-    const dock = el.dock || "single";
-    const side = el.dockSide || (el.w >= el.h ? "bottom" : "right"); // persistent dock side
+    // Default to "cross" to match dockSidesFor / the Docks <select> / the dock-zone stacks
+    // (a dock-less legacy building reads as cross-dock everywhere else). And read the dock
+    // side from dockSidesFor — it VALIDATES el.dockSide against the current long axis, so an
+    // axis-flipping resize can't desync the grid from footprintAxes below.
+    const dock = el.dock || "cross";
+    const { dside: side, dockSides } = dockSidesFor(el);
     const Dpx = Math.min(8, Math.min(el.w, el.h) * 0.25) * ppf; // dock-apron depth
     const g = resolveGridSettings(el, settings);
     const grid = computeBuildingGrid({ length: footprintLength(el), depth: footprintDepth(el), dock, grid: g });
@@ -9947,9 +9968,8 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         : role === "flex"
           ? { stroke: GRID_FLEX, strokeWidth: 0.6, strokeDasharray: "5 4", opacity: 0.85 } // end/rear/centre flex boundary
           : { stroke: GRID_LINE, strokeWidth: 0.5, opacity: 0.8 };                   // interior column line
-      // Dock wall = the heaviest edge (one per dock face).
-      const wallSides = dock === "cross" ? (depthVert ? ["top", "bottom"] : ["left", "right"]) : dock === "none" ? [] : [side];
-      wallSides.forEach((s) => {
+      // Dock wall = the heaviest edge (one per dock face) — the validated dock sides.
+      dockSides.forEach((s) => {
         const edge = s === "bottom" ? [tl.x, tl.y + h, tl.x + w, tl.y + h]
           : s === "top" ? [tl.x, tl.y, tl.x + w, tl.y]
           : s === "right" ? [tl.x + w, tl.y, tl.x + w, tl.y + h]
@@ -9968,25 +9988,16 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     }
 
     // ---- Dock doors (B569) — apron + door leaves placed to sit BETWEEN columns, never
-    // straddling a column line. Keeps the existing dog-ear skip + dock-side logic; the
-    // hardcoded 12′ spacing is now g.doorOC and the count tracks it.
-    if (settings.showDocks && dock !== "none") {
-      const sides = dock === "cross"
-        ? ((side === "top" || side === "bottom") ? ["bottom", "top"] : ["right", "left"])
-        : [side];
+    // straddling a column line. Iterates the VALIDATED dock sides and routes through the
+    // shared dockDoorRun helper (the dog-ear skip lives there), so the drawn doors match
+    // the panel count exactly. The hardcoded 12′ spacing is now g.doorOC.
+    if (settings.showDocks && dockSides.length) {
       const dogEars = (allEls || []).filter((x) => x.attachedTo === el.id && x.dogEar);
       const lenOffsets = grid.lengthLines.map((l) => l.at);
       const leaf = g.doorWidth * ppf;
-      sides.forEach((s) => {
-        const horiz = s === "top" || s === "bottom";
-        const L = horiz ? el.w : el.h; // wall length (ft)
-        // Don't draw doors where a dog-ear takes up the end of the wall — by its ACTUAL span
-        // along this wall (B362: a resized bump consumes more/less of the dock face than 55′).
-        const bumpAlong = (sign) => { const d = dogEars.find((g2) => g2.dogEar.side === s && g2.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
-        const startF = bumpAlong(-1);
-        const endF = L - bumpAlong(1);
-        if (endF - startF < g.doorWidth) return; // no room for a door
-        const doors = placeDockDoors(startF, endF, lenOffsets, { doorOC: g.doorOC, doorWidth: g.doorWidth });
+      dockSides.forEach((s) => {
+        const { startF, endF, horiz, doors } = dockDoorRun(el, s, dogEars, lenOffsets, g);
+        if (!doors.length) return;
         if (horiz) {
           const by = s === "bottom" ? h - Dpx : 0;
           const ax = tl.x + startF * ppf, aw = (endF - startF) * ppf;
