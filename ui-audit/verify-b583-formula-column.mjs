@@ -1,4 +1,4 @@
-/* B562 — headless verification of the scheduler's Excel-style Formula column.
+/* B583 — headless verification of the scheduler's Excel-style Formula column.
  *
  * Drives the standalone scheduler (/sequence/, served by `vite preview` on :4173)
  * in a real Chromium and exercises the user-facing flow end-to-end:
@@ -9,7 +9,7 @@
  *   5. an error formula (1/0) surfaces "#DIV/0!" in the cell (never a silent blank);
  *   6. a bad column ref surfaces "#REF!".
  *
- * Run:  node ui-audit/verify-b562-formula-column.mjs   (preview server must be up)
+ * Run:  node ui-audit/verify-b583-formula-column.mjs   (preview server must be up)
  *
  * NOTE on this sandbox: the scheduler loads React/Babel/Supabase from public CDNs
  * that the agent proxy's allowlist blocks (ERR_CONNECTION_CLOSED), so /sequence/
@@ -21,7 +21,7 @@
  *     && cp node_modules/@babel/standalone/babel.min.js dist/sequence/_vendor/babel.js \
  *     && cp node_modules/@supabase/supabase-js/dist/umd/supabase.js dist/sequence/_vendor/supabase.js
  *   # rewrite the 3 CDN <script src> in dist/sequence/index.html to ./_vendor/*.js → dist/sequence/_test.html
- *   BASE_URL="http://localhost:4173/sequence/_test.html" node ui-audit/verify-b562-formula-column.mjs
+ *   BASE_URL="http://localhost:4173/sequence/_test.html" node ui-audit/verify-b583-formula-column.mjs
  * A browser-equipped teammate on an unrestricted network can run it against /sequence/ directly.
  */
 import { chromium } from "playwright";
@@ -107,7 +107,7 @@ try {
   const ref = await page.evaluate(() => (document.body.textContent || "").includes("#REF!"));
   if (ref) ok("#REF! surfaced for an unknown column"); else fail("#REF! not shown for a bad column reference");
 
-  try { await page.screenshot({ path: "ui-audit/screens/b562-formula-column.png" }); } catch { /* screens/ is gitignored; optional */ }
+  try { await page.screenshot({ path: "ui-audit/screens/b583-formula-column.png" }); } catch { /* screens/ is gitignored; optional */ }
 
   // Final: no uncaught JS errors during the whole flow. Environmental network
   // failures are expected in the sandbox (the scheduler's own Supabase backend and

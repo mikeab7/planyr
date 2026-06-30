@@ -257,6 +257,7 @@ export default function DocReview({
   useEffect(() => { docStateRef.current = { markups, calByPage, calInfo }; });
   const pastRef = useRef([]);
   const futureRef = useRef([]);
+  const colorSessionRef = useRef(null); // active live color-pick key, so the burst is one undo frame (B567)
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1);
   const histKey = (s) => JSON.stringify({ m: s.markups, c: s.calByPage, i: s.calInfo });
@@ -388,8 +389,17 @@ export default function DocReview({
       // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
       // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
       // mid-upload can't strand the backdrop with an unfetchable pointer (B323).
-      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then((r) => {
+      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then(async (r) => {
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s));
+        // B579: a GENUINE store failure (BOTH Drive and Supabase rejected it — not merely `oversize`, which
+        // still saves the work layer and flags the file "re-drop on load") leaves the source permanently
+        // keyless, so buildSnapshot persists sources:[] and the markups reload with NO backdrop. That used
+        // to be silent. Surface it — but only when signed in (logged-out is by-design local-only: the bytes
+        // are cached via cacheSourceBytes and the work layer still mirrors locally, so no cloud store is owed).
+        if (!r.ok && !r.oversize && (await cloudReady())) {
+          const m = "Couldn't save this PDF to the cloud — your markups might open without their drawing next time. Check your connection and drop the file again.";
+          setErr(m); setOpenErr(m);
+        }
       }).catch(() => {}); // best-effort store; a rejection mustn't become an unhandled rejection
     } catch (e) {
       // A read failure must surface on the always-visible banner too (the canvas may already show
@@ -782,9 +792,19 @@ export default function DocReview({
   // Property panel onChange (B426 + B437): patch the selected markup if one is selected, and ALWAYS
   // update the sticky style default — so the panel also works for an ARMED tool with nothing selected
   // (set color/weight/fill/font BEFORE drawing; new markups inherit it via commit()).
-  const onPropChange = (key, value) => {
+  const onPropChange = (key, value, opts = {}) => {
     if (sel) {
-      pushHistory();
+      // Live color picking (opts.live) fires `input` continuously while the palette is open — take
+      // ONE undo snapshot on the first live event of a session (keyed on `key`), then skip the rest
+      // so undo reverts the whole pick in one step instead of one frame per swatch (B567). The
+      // committed `change` (opts.live falsy) of that same session must NOT push a second frame; any
+      // other key (a normal discrete change) ends the session and pushes its own frame as before.
+      if (opts.live) {
+        if (colorSessionRef.current !== key) { pushHistory(); colorSessionRef.current = key; }
+      } else {
+        if (colorSessionRef.current !== key) pushHistory();
+        colorSessionRef.current = null;
+      }
       setMarkups((a) => a.map((m) => m.id === sel ? { ...m, ...writeProp(m, key, value) } : m));
     }
     setPropStyle((s) => ({ ...s, [key]: value }));

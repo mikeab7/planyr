@@ -921,7 +921,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                     onPointerDown={(e) => { detailDrag.current = { sx: e.clientX, sy: e.clientY, tx: detail.view?.tx || 0, ty: detail.view?.ty || 0 }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }}
                     onPointerMove={(e) => { const dd = detailDrag.current; if (!dd) return; setDetailPopup((d) => (d && d.view ? { ...d, view: { ...d.view, tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy) } } : d)); }}
                     onPointerUp={(e) => { detailDrag.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} }}
-                    onPointerCancel={() => { detailDrag.current = null; }}>
+                    onPointerCancel={(e) => { detailDrag.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} /* B579: release capture on interrupt (blur/tab-hide/OS gesture) too — else the popup keeps pointer capture, swallowing all events with a stuck grab cursor until closed/reopened; same class as B551 on the main canvas */ }}>
                     {detail.view && <img src={detail.href} alt={detail.title} draggable={false}
                       style={{ position: "absolute", left: 0, top: 0, width: detail.baseW, height: detail.baseH, transformOrigin: "0 0", transform: `translate(${detail.view.tx}px, ${detail.view.ty}px) scale(${detail.view.scale})`, imageRendering: "auto", userSelect: "none" }} />}
                     {detail.view && detail.anchor && (() => {

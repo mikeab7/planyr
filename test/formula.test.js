@@ -312,7 +312,7 @@ describe("planFormulaColumns (recalc order + circular detection)", () => {
   });
 });
 
-describe("B562 adversarial-review fixes", () => {
+describe("B583 adversarial-review fixes", () => {
   it("numbers display clean (no binary-float noise) — General formatting", () => {
     expect(val('[c] & ""', { c: 9999999.99 })).toBe("9999999.99");
     expect(val('[c] & ""', { c: 1234567.89 })).toBe("1234567.89");
