@@ -4009,7 +4009,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Truck-court (zone 0) along-span + centre shift on a dock side (B492): pulled IN to the clear
   // dock face between the corner bump-outs, then capped by an optional manual length (court.alongLen)
-  // so a typed length never re-overlaps a bump. Other zones (trailer/buffer) ignore this (full wall).
+  // so a typed length never re-overlaps a bump. The WHOLE outward stack (trailer parking + buffer +
+  // any appended layer) now follows this same span, so the trailer never over-hangs the court.
   const courtBumpOpts = (arr, b, side) => {
     const horiz = side === "top" || side === "bottom";
     const full = horiz ? b.w : b.h;
@@ -4043,7 +4044,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const chainKindOf = (z) => (z.type === "trailer" || z.forCourt ? "trailer" : "strip");
   // Re-lay the whole chain on one side of building `b` (pure over `arr`): each present zone
   // flush-outward from the building face, depth-correct. The truck court (head) pulls in to the
-  // clear face between corner bump-outs (B492); everything beyond keeps the full wall length.
+  // clear face between corner bump-outs (B492), and the trailer parking + buffer + any appended
+  // layer track that SAME span, so nothing stacked outward ever over-hangs the court.
   const relayoutSide = (arr, b, side) => {
     const zones = dockChainOnSide(arr, b, side);
     if (!zones.length) return arr;
@@ -4052,7 +4054,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const courtOpts = courtBumpOpts(arr, b, side);
     const patch = new Map();
     zones.forEach((z, i) => {
-      const g = layoutZoneByKind(b, side, i, depths, kinds, i === 0 && z.truckCourt ? courtOpts : {});
+      const g = layoutZoneByKind(b, side, i, depths, kinds, courtOpts);
       patch.set(z.id, z.type === "trailer"
         ? { ...g, cfg: { ...(z.cfg || {}), trailerW: (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W, trailerL: depths[i], trailerAisle: 0, single: true } }
         : g);
