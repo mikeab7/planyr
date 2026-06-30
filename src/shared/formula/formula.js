@@ -57,7 +57,14 @@ const ferr = (code, detail) => new FormulaError(code, detail);
 // ── Value model ────────────────────────────────────────────────────────────────
 const BLANK = Object.freeze({ k: "blank" });
 const isBlank = v => v === BLANK || v === null || v === undefined;
-const makeDate = serial => ({ k: "date", s: Math.trunc(serial) });
+// JS Date is valid only within ±8.64e15 ms (≈ ±1e8 days from epoch); beyond that getUTC*() are NaN
+// and a date would serialize to "0NaN-NaN-NaN". Surface an out-of-range date result as #NUM! instead.
+const MAX_DATE_SERIAL = 100000000;
+const makeDate = serial => {
+  const s = Math.trunc(serial);
+  if (!Number.isFinite(s) || Math.abs(s) > MAX_DATE_SERIAL) throw ferr(FORMULA_ERRORS.NUM, "date out of range");
+  return { k: "date", s };
+};
 const isDate = v => !!v && typeof v === "object" && v.k === "date";
 
 // ── Serial date helpers (epoch = 1970-01-01 UTC; integer days) ──────────────────
@@ -361,6 +368,10 @@ const TYPE_RANK = v => {
 const compareValues = (a, b) => {
   // Returns -1/0/1, or throws on incomparable. Numbers/dates/blank compare numerically;
   // strings compare case-insensitively; otherwise rank by type (number<text<bool).
+  // A blank cell equals the empty string "" (matches Excel + the engine's own ISBLANK("")→true), so the
+  // everyday `[Date]=""` empty-test works; a blank sorts before any non-empty text.
+  if (isBlank(a) && typeof b === "string") return b === "" ? 0 : -1;
+  if (isBlank(b) && typeof a === "string") return a === "" ? 0 : 1;
   const ra = TYPE_RANK(a), rb = TYPE_RANK(b);
   if (ra === 0 && rb === 0) { const x = toNumber(a), y = toNumber(b); return x < y ? -1 : x > y ? 1 : 0; }
   if (ra === 1 && rb === 1) { const x = a.toLowerCase(), y = b.toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; }

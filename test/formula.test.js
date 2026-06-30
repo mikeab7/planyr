@@ -366,3 +366,23 @@ describe("a realistic scheduling formula", () => {
     expect(num("ROUND([Budget] * (1 - [% Complete] / 100), 0)", cols)).toBe(75000);
   });
 });
+
+// ── Round-2 scheduler fix batch (2026-06-30) ──────────────────────────────────
+describe("round-2 formula fixes", () => {
+  it("a blank cell equals the empty string — the [Date]=\"\" empty test works", () => {
+    expect(val('[d] = ""', { d: BLANK })).toBe(true);
+    expect(val('IF([d] = "", "empty", "full")', { d: BLANK })).toBe("empty");
+    expect(val('[d] <> ""', { d: BLANK })).toBe(false);
+    // ...but a blank is NOT equal to a non-empty string, and sorts before it
+    expect(val('[d] = "x"', { d: BLANK })).toBe(false);
+    expect(val('[d] < "x"', { d: BLANK })).toBe(true);
+    // consistent with the engine's own ISBLANK + LEN idioms
+    expect(val("ISBLANK([d])", { d: BLANK })).toBe(true);
+  });
+  it("date arithmetic that overflows JS Date is surfaced as #NUM!, never a NaN date", () => {
+    expect(err("DATE(2024,1,1) + 1000000000000")).toBe(FORMULA_ERRORS.NUM);
+    expect(err("EDATE(DATE(2024,1,1), 1000000000)")).toBe(FORMULA_ERRORS.NUM);
+    // a normal date offset still works
+    expect(iso("DATE(2024,1,1) + 31")).toBe("2024-02-01");
+  });
+});
