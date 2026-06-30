@@ -60,13 +60,22 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V186 — B596: renaming a site no longer snaps back to the old name (planner breadcrumb dropdown + map multi-plan row) ✅ headless logged-out 10/10; ⏳ signed-in cloud round-trip owed
+### V187 — B597: renaming a site no longer snaps back to the old name (planner breadcrumb dropdown + map multi-plan row) ✅ headless logged-out 10/10; ⏳ signed-in cloud round-trip owed  *(renumbered from a provisional V186 that a concurrent `main` took for the parcel-merge-conflict item below; the commit/PR keep the provisional B596 label)*
 - **Added** 2026-06-30 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-30 (lint + unit + headless ✅) · **Next check** — on planyr.io, **signed in**.
 - **✅ Proven here (logged-out, headless):** lint 0 · full suite **2106 green** (+4 `test/storage.test.js` rename cases) · build green · `ui-audit/verify-rename-revert.mjs` **10/10**: in the PLANNER, renaming the project from the breadcrumb switcher (kebab → Rename → type → Enter) leaves the row, the header crumb, AND the store all showing the NEW name, and it survives a full reload; on the MAP, renaming a MULTI-PLAN site from its YOUR SITES row renames the whole group — both the anchor plan and the newer sibling the list actually represents — with no revert.
 - **⏳ Why pending (sign-in is CORS-blocked in the sandbox):** for a signed-in user the rename also pushes each renamed plan to Supabase, and Fix B in particular now pushes plans it previously skipped — the cloud write + a cross-device pull can't be exercised logged-out. **Signed-in steps on planyr.io:**
   1. Sign in, open a site in the planner, rename it from the breadcrumb switcher, press Enter → the name updates everywhere; reload → still the new name (not the old).
   2. For a site with **two+ plans**, rename it from the **map's** YOUR SITES row → reload → the new name sticks; on a **second device/tab**, pull → it shows the new name too (the rename actually reached the cloud).
   3. Sanity: no console errors; the save badge settles to "synced".
+
+### V186 — B596: merging parcels no longer raises a false "changed in another session" conflict ✅ unit-locked + headless logged-out (tombstones land); ⏳ signed-in confirm owed
+- **Added** 2026-06-30 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-30 (unit + headless ✅) · **Next check** — on planyr.io, **signed in**, on a CLOUD-loaded site.
+- **✅ Proven here (logged-out, headless):** lint 0 · full suite **2105 green** incl. 3 new `test/cloudThinGuard.test.js` cases (a 3→1 merge with NO tombstone is wrongly blocked = the bug; WITH the consumed ids tombstoned it's allowed = the fix; a 2-parcel merge was always fine) · build green · **headless `ui-audit/verify-b596-merge-tombstone.mjs` 6/6**: seeds 3 adjacent parcels, shift-selects + clicks **Merge parcels**, then reads the persisted Site Model back — it holds **exactly 1 parcel** and `deletedIds` now lists **all 3** merged-away ids (the new parcel's fresh id is NOT tombstoned). That tombstone is what explains the ≥2-item drop to the thin-clobber guard (B459), so no false conflict can fire. Existing `verify-merge-banner.mjs` still 6/6 (merge flow intact).
+- **⏳ Why pending (the conflict path is auth-only — only a signed-in cloud write hits the guard; the sandbox is logged-out and CORS-blocks the cloud handshake):** **Signed-in steps on planyr.io:**
+  1. Sign in, open (or create) a cloud site with **3+ adjacent parcels** that share boundaries.
+  2. In **Select**, Shift-click 3 of them, then **Merge parcels**. Confirm they collapse to one parcel AND the save badge stays **"Saved"** — **no** "This project was changed in another session / Take over editing" banner appears (pre-fix this fired immediately on a 3+ parcel merge).
+  3. Reload the page → the merged parcel is still a single parcel; the old un-merged parcels do **not** reappear (the tombstone also blocks resurrection on the boot union-merge).
+  4. Sanity: merging just **2** parcels (always allowed pre-fix too) still works with no banner.
 
 ### V185 — B594/B595: a freshly drawn polyline/markup survives cross-tab sync (id-collision fix) + the not-saving notice is now edge-of-loss ✅ unit-locked + headless logged-out; ⏳ signed-in two-tab confirm owed  *(renumbered from a provisional V183 that a concurrent `main` took for the Scheduler-r3 item; the items likewise renumbered B591/B592 → B594/B595 — the in-code/commit/harness-filename labels keep the provisional B591/B592)*
 - **Added** 2026-06-30 · **Cadence** once (data-loss fix acceptance) · **Last checked** 2026-06-30 (unit + headless ✅) · **Next check** — on planyr.io, **signed in**, with the SAME plan open in **two tabs**.
