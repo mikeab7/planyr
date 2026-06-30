@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   JURISDICTION_SOURCES, ETJ_SOURCES, etjSourcesForPoint, ROAD_MAINT_AGENCY, roadAuthority,
-  buildIdentifyParams, normalizeFeature, simplifyRing, polylineDistMeters,
+  buildIdentifyParams, normalizeFeature, simplifyRing, polylineDistMeters, polylineLengthMeters,
   identifySource, identifyJurisdiction, identifyRoadAuthority, countyAtPoint,
+  formatHighway, roadDisplayName, roadAuthorityStyle, ROAD_AUTHORITY_COLORS, ROAD_AUTHORITY_LEGEND,
 } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 
 const HGAC = ETJ_SOURCES.find((s) => s.id === "etj_hgac"); // the regional Houston ETJ source
@@ -351,7 +352,7 @@ describe("identifyRoadAuthority (B94) — nearest segment / parcel frontage", ()
     expect(out.nearest).toBeNull();
     expect(out.roads).toEqual([]);
     expect(out.authorities).toEqual([]);
-    expect(out.note).toMatch(/unknown/i);
+    expect(out.note).toMatch(/no roads matched within 40 m — screening only/i);
   });
   it("a server error surfaces as empty + error note, not a throw", async () => {
     const out = await identifyRoadAuthority(-95.0, 29.0, {
@@ -360,5 +361,94 @@ describe("identifyRoadAuthority (B94) — nearest segment / parcel frontage", ()
     });
     expect(out.roads).toEqual([]);
     expect(out.error).toBeTruthy();
+  });
+});
+
+// ----------------------------------------------------------------------------
+describe("road display name (B94 per-road) — STE_NAM / HWY / TOLL", () => {
+  it("formatHighway turns a coded HWY into a readable route", () => {
+    expect(formatHighway("SL0008")).toBe("SL 8");
+    expect(formatHighway("IH0045")).toBe("IH 45");
+    expect(formatHighway("US0059")).toBe("US 59");
+    expect(formatHighway("FM1960")).toBe("FM 1960");
+    expect(formatHighway("")).toBeNull();
+    expect(formatHighway(null)).toBeNull();
+  });
+  it("roadDisplayName prefers the street name, then the highway, then the toll name", () => {
+    expect(roadDisplayName({ name: "ATRIUM DR" })).toBe("Atrium Dr");
+    expect(roadDisplayName({ name: "BENMAR  DR" })).toBe("Benmar Dr"); // collapses doubled spaces
+    expect(roadDisplayName({ name: "", hwy: "SL0008" })).toBe("SL 8");
+    expect(roadDisplayName({ name: null, hwy: null, toll: "SAM HOUSTON TOLLWAY" })).toBe("Sam Houston Tollway");
+    // a bare numeric inventory id is NOT a name → null (the row labels by route instead)
+    expect(roadDisplayName({ route: "1124150" })).toBeNull();
+  });
+});
+
+describe("polylineLengthMeters — abutment length for ordering", () => {
+  it("sums path segment lengths in metres", () => {
+    const geom = { paths: [[[-95.0, 29.0], [-95.0, 29.001]]] }; // ~111 m vertical
+    expect(polylineLengthMeters(geom, 29.0)).toBeGreaterThan(105);
+    expect(polylineLengthMeters(geom, 29.0)).toBeLessThan(118);
+  });
+  it("is 0 for missing geometry", () => {
+    expect(polylineLengthMeters(null)).toBe(0);
+    expect(polylineLengthMeters({ paths: [] })).toBe(0);
+  });
+});
+
+describe("roadAuthorityStyle (NEW-2/B571) — per-feature color reuses roadAuthority()", () => {
+  it("colors each maintainer distinctly, drawn solid", () => {
+    expect(roadAuthorityStyle({ RDWAY_MAINT_AGCY: 1, HSYS: "IH" }).color).toBe(ROAD_AUTHORITY_COLORS["State (TxDOT)"]);
+    expect(roadAuthorityStyle({ RDWAY_MAINT_AGCY: 2, HSYS: "CR" }).color).toBe(ROAD_AUTHORITY_COLORS["County"]);
+    expect(roadAuthorityStyle({ RDWAY_MAINT_AGCY: 4, HSYS: "LS" }).color).toBe(ROAD_AUTHORITY_COLORS["City"]);
+    expect(roadAuthorityStyle({ RDWAY_MAINT_AGCY: 5, HSYS: "TL" }).color).toBe(ROAD_AUTHORITY_COLORS["Toll / managed-lane authority"]);
+    expect(roadAuthorityStyle({ RDWAY_MAINT_AGCY: 1, HSYS: "IH" }).dashArray).toBeUndefined();
+  });
+  it("Unknown is a neutral gray, distinguished by a dash pattern (never by fading)", () => {
+    const s = roadAuthorityStyle({ RDWAY_MAINT_AGCY: 999, HSYS: "ZZ" }, 0.9);
+    expect(s.color).toBe(ROAD_AUTHORITY_COLORS["Unknown"]);
+    expect(s.dashArray).toBeTruthy();
+    expect(s.opacity).toBe(0.9); // opacity carries through; hierarchy is via dash, not a faded line
+  });
+  it("the palette never reuses a locked status/module/brand hex", () => {
+    // project-status (coral/blue/amber/grays) + ALL four module accents (Site/Schedule/
+    // Review/Library) + brand + the alert reds — the full locked set the road palette must avoid.
+    const locked = new Set(["#D85A30", "#378ADD", "#BA7517", "#888780", "#1D9E75", "#7F77DD", "#EF9F27", "#0E7490", "#E24B4A", "#F2706F"].map((h) => h.toLowerCase()));
+    for (const hex of Object.values(ROAD_AUTHORITY_COLORS)) expect(locked.has(String(hex).toLowerCase())).toBe(false);
+    expect(ROAD_AUTHORITY_LEGEND.find((l) => l.label === "Unknown").dash).toBe(true);
+  });
+});
+
+describe("identifyRoadAuthority frontage — per-road merge + ordering (B94)", () => {
+  it("merges same-named segments into one row, longest frontage first", async () => {
+    const ring = [[-95.0, 29.0], [-95.0, 29.002], [-94.997, 29.002], [-94.997, 29.0]];
+    // Greens Rd in 3 inventory segments (short) + a state highway frontage (longest).
+    const seg = (lat0, lat1) => ({ paths: [[[-95.0, lat0], [-95.0, lat1]]] });
+    const fetchJson = fakeFetch({
+      [ROAD]: () => [
+        { attributes: { RIA_RTE_ID: "g1", STE_NAM: "GREENS RD", HSYS: "LS", RDWAY_MAINT_AGCY: 4, F_SYSTEM: 4 }, geometry: seg(29.0, 29.0003) },
+        { attributes: { RIA_RTE_ID: "g2", STE_NAM: "GREENS RD", HSYS: "LS", RDWAY_MAINT_AGCY: 4, F_SYSTEM: 4 }, geometry: seg(29.0003, 29.0006) },
+        { attributes: { RIA_RTE_ID: "g3", STE_NAM: "GREENS  RD", HSYS: "LS", RDWAY_MAINT_AGCY: 4, F_SYSTEM: 4 }, geometry: seg(29.0006, 29.0009) },
+        { attributes: { RIA_RTE_ID: "h1", HWY: "IH0045", HSYS: "IH", RDWAY_MAINT_AGCY: 1, F_SYSTEM: 1 }, geometry: seg(29.0, 29.0020) },
+      ],
+    });
+    const out = await identifyRoadAuthority(-94.999, 29.001, { ring, cache: freshCache(), fetchJson });
+    expect(out.roads.length).toBe(2); // 3 Greens Rd segments collapsed to one
+    expect(out.roads[0].name).toBe("IH 45"); // longest abutment first
+    expect(out.roads[0].authority.label).toBe("State (TxDOT)");
+    expect(out.roads[1].name).toBe("Greens Rd");
+    expect(out.roads[1].authority.label).toBe("City");
+    expect(out.authorities.sort()).toEqual(["City", "State (TxDOT)"]);
+  });
+  it("an unclassifiable segment carries an explicit Unknown authority (never a guess)", async () => {
+    const ring = [[-95.0, 29.0], [-95.0, 29.001], [-94.999, 29.001], [-94.999, 29.0]];
+    const fetchJson = fakeFetch({
+      [ROAD]: () => [
+        { attributes: { RIA_RTE_ID: "x1", STE_NAM: "MYSTERY LN", HSYS: "ZZ", RDWAY_MAINT_AGCY: 999 }, geometry: { paths: [[[-95.0, 29.0], [-95.0, 29.0005]]] } },
+      ],
+    });
+    const out = await identifyRoadAuthority(-94.9995, 29.0005, { ring, cache: freshCache(), fetchJson });
+    expect(out.roads[0].name).toBe("Mystery Ln");
+    expect(out.roads[0].authority.label).toBe("Unknown");
   });
 });
