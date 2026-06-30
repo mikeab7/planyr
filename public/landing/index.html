@@ -276,7 +276,8 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
 /* ---- sticky showpiece sections ---- */
 .stage-section { position: relative; }
 .stage {
-  position: -webkit-sticky; position: sticky; top: 0;
+  position: relative;   /* NOT sticky — the page scrolls smoothly past; the build/stitch
+                           plays as the section enters view rather than pinning the screen. */
   min-height: 100svh; min-height: 100vh; display: flex; align-items: center;
   overflow: hidden;
 }
@@ -507,7 +508,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   </section>
 
   <!-- ============ SITE (sticky showpiece) ============ -->
-  <section class="stage-section" id="site" style="height: 300vh;">
+  <section class="stage-section" id="site">
     <div class="stage">
       <div class="wrap">
        <div class="site-left">
@@ -542,7 +543,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   </section>
 
   <!-- ============ REVIEW (sticky showpiece) ============ -->
-  <section class="stage-section review-stage" id="review" style="height: 260vh;">
+  <section class="stage-section review-stage" id="review">
     <div class="stage">
       <div class="wrap">
         <div class="stage-copy">
@@ -1052,9 +1053,10 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     // SPINE — one stroke drawn by scroll
     buildSpine();
 
-    // SITE — sticky build showpiece (desktop). siteActive gates the 3D so it never
-    // bleeds out. On mobile the pin is dropped: the live-yield numbers simply count up
-    // when the section scrolls into view (no pinned 3D — the lighter form).
+    // SITE — the build showpiece plays as the section scrolls into view; the page is NEVER
+    // pinned, so scrolling stays smooth. On mobile the 3D is dropped (the lighter form);
+    // on desktop the 3D is shown whenever the section is on screen (siteActive) and the
+    // building + yield run once on entry. Scrolling back up re-shows the finished state.
     if (IS_MOBILE) {
       ScrollTrigger.create({
         trigger: "#site", start: "top 72%", once: true,
@@ -1065,19 +1067,22 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
         }
       });
     } else {
+      // Show the 3D whenever the section is anywhere on screen…
+      ScrollTrigger.create({ trigger: "#site", start: "top bottom", end: "bottom top",
+        onToggle: function (s) { state.siteActive = s.isActive; } });
+      // …and scrub the build to the section's position as it passes through — NO pin, so
+      // the page scrolls smoothly the whole time (and a mid-page refresh shows the right
+      // state, because onUpdate also fires on ScrollTrigger.refresh()).
       ScrollTrigger.create({
-        trigger: "#site", start: "top top", end: "bottom bottom", scrub: 0.6,
+        trigger: "#site", start: "top 85%", end: "bottom 35%", scrub: 0.5,
         onUpdate: function (s) {
-          var bp = gsap.utils.clamp(0, 1, (s.progress - 0.08) / 0.82);
-          state.siteProgress = bp;
-          setYield(bp);
-          updateSiteReadout(bp);
-        },
-        onToggle: function (s) { state.siteActive = s.isActive; }
+          var bp = gsap.utils.clamp(0, 1, s.progress);
+          state.siteProgress = bp; setYield(bp); updateSiteReadout(bp);
+        }
       });
     }
 
-    // REVIEW — sticky stitch
+    // REVIEW — stitch-on-scroll-in (no pin)
     buildReview();
 
     // SCHEDULE gantt bars
@@ -1217,9 +1222,10 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
         }
       });
     } else {
+      // desktop: stitch scrubs to the section's position as it passes — no pin, smooth scroll.
       ScrollTrigger.create({
-        trigger: "#review", start: "top top", end: "bottom bottom", scrub: 0.6,
-        onUpdate: function (s) { place(gsap.utils.clamp(0, 1, (s.progress - 0.06) / 0.84)); }
+        trigger: "#review", start: "top 85%", end: "bottom 35%", scrub: 0.5,
+        onUpdate: function (s) { place(gsap.utils.clamp(0, 1, s.progress)); }
       });
     }
   }
