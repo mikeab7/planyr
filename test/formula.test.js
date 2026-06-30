@@ -391,6 +391,22 @@ describe("B586 — cross-row aggregation over a whole column", () => {
   it("COUNTIF honors wildcards", () => {
     expect(valTable('COUNTIF([Phase], "P*")', TABLE)).toBe(2); // Permit, Permit
   });
+  it("text criteria that LOOK date-ish/numeric still match TEXT cells (B589 regression guard)", () => {
+    // A criterion like "3/4", "6/1", "2026-06-01" or "100" is parsed as a date/number for
+    // comparing against date/number columns — but a TEXT cell must still match it as text.
+    const slash = [{ Code: "3/4" }, { Code: "1/2" }, { Code: "3/4" }];
+    expect(valTable('COUNTIF([Code], "3/4")', slash)).toBe(2);
+    expect(valTable('COUNTIF([Code], "<>3/4")', slash)).toBe(1);
+    const isoT = [{ Lbl: "2026-06-01" }, { Lbl: "x" }, { Lbl: "2026-06-01" }];
+    expect(valTable('COUNTIF([Lbl], "2026-06-01")', isoT)).toBe(2);
+    const numT = [{ X: "100" }, { X: "abc" }, { X: "100" }];
+    expect(valTable('COUNTIF([X], "100")', numT)).toBe(2);
+    const sif = [{ Code: "3/4", Amt: 5 }, { Code: "3/4", Amt: 7 }, { Code: "1/2", Amt: 9 }];
+    expect(valTable('SUMIF([Code], "3/4", [Amt])', sif)).toBe(12);
+    // The intended fix must still hold: a date criterion matches a real DATE column.
+    const dates = [{ D: D("2026-06-01") }, { D: D("2026-06-02") }];
+    expect(valTable('COUNTIF([D], "2026-06-01")', dates)).toBe(1);
+  });
   it("a bare [Column] still means THIS row in a scalar position (implicit intersection)", () => {
     expect(valTable("[Cost] * 2", TABLE, 1)).toBe(500);       // row 1 cost 250
     expect(valTable("[Cost] / SUM([Cost])", TABLE, 0)).toBe(100 / 400);
@@ -553,5 +569,66 @@ describe("round-2 formula fixes", () => {
     expect(err("EDATE(DATE(2024,1,1), 1000000000)")).toBe(FORMULA_ERRORS.NUM);
     // a normal date offset still works
     expect(iso("DATE(2024,1,1) + 31")).toBe("2024-02-01");
+  });
+});
+
+describe("B590 — round-2 adversarial-debug fixes", () => {
+  it("a non-finite literal or function result is #NUM!, never a silent Infinity/NaN", () => {
+    // Literal overflow is caught at the source (so it can't slip into a comparison/label).
+    expect(err("1e309")).toBe(FORMULA_ERRORS.NUM);
+    expect(err("-1e309")).toBe(FORMULA_ERRORS.NUM);
+    expect(err("1e309%")).toBe(FORMULA_ERRORS.NUM);
+    expect(err("1e309 > 5")).toBe(FORMULA_ERRORS.NUM);     // overflow can't masquerade as TRUE
+    expect(err('"big: " & 1e309')).toBe(FORMULA_ERRORS.NUM);
+    // Aggregation/maths that overflow from finite inputs are caught at the call boundary.
+    expect(err("SUM(1e308, 1e308)")).toBe(FORMULA_ERRORS.NUM);
+    expect(err("PRODUCT(1e308, 1e308)")).toBe(FORMULA_ERRORS.NUM);
+    expect(err("AVERAGE(1e308, 1e308)")).toBe(FORMULA_ERRORS.NUM);
+    expect(err("TRUNC(0, 9999999999999999)")).toBe(FORMULA_ERRORS.NUM); // 0 × Infinity = NaN
+    expect(err("ROUND(1, 1e308)")).toBe(FORMULA_ERRORS.NUM);
+    // ...but a finite large literal is still a perfectly good number.
+    expect(num("1e300")).toBe(1e300);
+    expect(num("SUM(1e150, 1e150)")).toBe(2e150);
+  });
+
+  it("MROUND rounds the half AWAY from zero despite float drift (6.05 → 6.1, not 6.0)", () => {
+    expect(num("MROUND(6.05, 0.1)")).toBeCloseTo(6.1, 9);
+    expect(num("MROUND(1.005, 0.01)")).toBeCloseTo(1.01, 9);
+    expect(num("MROUND(-6.05, -0.1)")).toBeCloseTo(-6.1, 9);
+    expect(num("MROUND(2.5, 1)")).toBe(3);
+    // a value below the half still rounds down (the epsilon only bridges float noise)
+    expect(num("MROUND(6.04, 0.1)")).toBeCloseTo(6.0, 9);
+    expect(num("MROUND(17, 5)")).toBe(15);  // integer steps unchanged
+  });
+
+  it("FLOOR/CEILING to a fractional step land on the true multiple (2.4, not 2.3)", () => {
+    expect(num("FLOOR(2.4, 0.1)")).toBeCloseTo(2.4, 9);
+    expect(num("CEILING(0.7, 0.1)")).toBeCloseTo(0.7, 9);
+    expect(num("FLOOR(2.45, 0.1)")).toBeCloseTo(2.4, 9);
+    expect(num("CEILING(2.41, 0.1)")).toBeCloseTo(2.5, 9);
+    expect(num("FLOOR(-2.4, -0.1)")).toBeCloseTo(-2.4, 9);
+    // integer-significance behavior is unchanged
+    expect(num("FLOOR(2.6, 0.5)")).toBe(2.5);
+    expect(num("CEILING(2.1, 0.5)")).toBe(2.5);
+  });
+
+  it("an over-large formula is rejected deterministically (#ERROR!), never a stack-dependent flip", () => {
+    const huge = "1" + "+1".repeat(1500);   // ~3000 tokens — past the token cap
+    expect(err(huge)).toBe(FORMULA_ERRORS.ERR);
+    expect(run(huge).error).toBe(run(huge).error);   // same input → same verdict every time
+    // a normal-length chain still evaluates fine
+    expect(num("1" + "+1".repeat(100))).toBe(101);
+  });
+
+  it("TEXT() honors ;-separated positive;negative;zero sections (accounting formats)", () => {
+    expect(val('TEXT(-1234.5, "#,##0.00;(#,##0.00)")')).toBe("(1,234.50)");
+    expect(val('TEXT(1234.5, "#,##0.00;(#,##0.00)")')).toBe("1,234.50");
+    expect(val('TEXT(-500, "$#,##0;($#,##0)")')).toBe("($500)");
+    expect(val('TEXT(-0.5, "0.00%;(0.00)")')).toBe("(0.50)");
+    expect(val('TEXT(0.5, "0.00%;(0.00)")')).toBe("50.00%");
+    expect(val('TEXT(0, "0.0;(0.0)")')).toBe("0.0");        // 2-section: zero uses the positive section
+    // single-section formats are unchanged (auto "-" for negatives)
+    expect(val('TEXT(-5, "0.00")')).toBe("-5.00");
+    expect(val('TEXT(1234.5, "#,##0.00")')).toBe("1,234.50");
   });
 });

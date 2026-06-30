@@ -673,9 +673,12 @@ describe("anti-drift: the scheduler bug-batch fixes still exist in the real sour
   it("#8 autoSizeCol measures an empty date as nothing, not 'NaN/NaN/'", () => {
     expect(src).toMatch(/case 'start': case 'end': \{ if\(!t\[colKey\]\)\{ val=''; break; \}/);
   });
-  it("#9 the on-screen Gantt axis span is capped so a far-future date can't freeze the tab", () => {
-    expect(src).toMatch(/const MAX_SPAN_DAYS = 365 \* 100;/);
-    expect(src).toMatch(/totD: Math\.min\(dif\(mn, mx\), MAX_SPAN_DAYS\)/);
+  it("#9 the on-screen Gantt axis is anchored to today + positions clamped (R3: supersedes the R1 span cap)", () => {
+    // Round 3 replaced the R1 totD=Math.min(...,MAX_SPAN_DAYS) cap (which froze→desynced bars/today line)
+    // with a today-anchored window + clamped xOf, so an outlier date pins to the chart edge.
+    expect(src).toMatch(/const hardBack = addD\(NOW, -365 \* 30\), hardFwd = addD\(NOW, 365 \* 50\);/);
+    expect(src).toMatch(/const xOf = d => Math\.max\(0, Math\.min\(totalW, dif\(minD, d\) \* ppd\)\);/);
+    expect(src).not.toMatch(/Math\.min\(dif\(mn, mx\), MAX_SPAN_DAYS\)/); // old incomplete cap is gone
   });
   it("#10 the dependency y-helpers test the summary case before the milestone case (both paths)", () => {
     expect(src).toMatch(/test this BEFORE the milestone case/);     // on-screen depYCenter
@@ -763,5 +766,44 @@ describe("anti-drift: the round-2 scheduler fixes still exist in the real source
     // ...and the source-of-truth engine matches (so the two can't drift)
     expect(fjs).toMatch(/if \(isBlank\(a\) && typeof b === "string"\) return b === "" \? 0 : -1;/);
     expect(fjs).toMatch(/Math\.abs\(s\) > MAX_DATE_SERIAL/);
+  });
+});
+
+// ── Round-3 scheduler bug-batch (2026-06-30) — anti-drift guards ──
+describe("anti-drift: the round-3 scheduler fixes still exist in the real source", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+
+  it("E1: the Gantt window is anchored to today + xOf is clamped (axis-clamp regression fixed)", () => {
+    expect(src).toMatch(/const hardBack = addD\(NOW, -365 \* 30\), hardFwd = addD\(NOW, 365 \* 50\);/);
+    expect(src).toMatch(/const xOf = d => Math\.max\(0, Math\.min\(totalW, dif\(minD, d\) \* ppd\)\);/);
+    expect(src).toMatch(/const bw  = isBlankDates \? 0 : Math\.max\(6, xOf\(task\.end\) - bx\);/);
+  });
+  it("C1: the global key handler bails while any blocking overlay is open", () => {
+    expect(src).toMatch(/const overlayOpenRef = useRef\(false\);/);
+    expect(src).toMatch(/if \(overlayOpenRef\.current\) return;/);
+  });
+  it("C2: Delete blanks the whole multi-cell selection", () => {
+    expect(src).toMatch(/Multi-cell range delete/);
+    expect(src).toMatch(/if \(Object\.keys\(patch\)\.length\) updateTask\(t\.id, patch\);/);
+  });
+  it("C3: a date/dependency commit clears the now-stale selRange", () => {
+    expect(src).toMatch(/if \(col === "start" \|\| col === "end" \|\| col === "duration" \|\| col === "predecessors"\) setSelRange\(null\);/);
+  });
+  it("B1+import: a shared applyLoadedData pipeline feeds load / import / restore", () => {
+    expect(src).toMatch(/const applyLoadedDataRef = useRef\(null\);/);
+    expect(src).toMatch(/applyLoadedDataRef\.current = \(parsed\) =>/);
+    expect(src).toMatch(/if \(applyLoadedDataRef\.current\) applyLoadedDataRef\.current\(parsed\);/);   // importJSON (was a ReferenceError)
+    expect(src).toMatch(/if \(applyLoadedData\) applyLoadedData\(parsed\); else setData\(parsed\);/);    // doRestore
+  });
+  it("D1: a contact rename/delete propagates to tasks' responsibleParty", () => {
+    expect(src).toMatch(/t\.responsibleParty === oldName \? \{\.\.\.t, responsibleParty: nm\}/);
+    expect(src).toMatch(/t\.responsibleParty === goneName \? \{\.\.\.t, responsibleParty: ""\}/);
+  });
+  it("D2: free-text notes match existing notes by TEXT, not array index", () => {
+    expect(src).toMatch(/const mi = prev\.findIndex\(n => n && n\.text === text\);/);
+  });
+  it("D3: cost/budget/actual rollups include the node's OWN value (no stranded parent value)", () => {
+    expect(src).toMatch(/\(Number\(byId\[id\]\?\.cost\) \|\| 0\) \+ kids\.reduce\(\(s, c\) => s \+ costOf\(c\.id\), 0\)/);
+    expect(src).toMatch(/\(Number\(byId\[id\]\?\.\[field\]\) \|\| 0\) \+ kids\.reduce/);
   });
 });

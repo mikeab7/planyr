@@ -543,7 +543,11 @@ const tokenize = src => {
         if ((ch === "e" || ch === "E") && !exp) { exp = true; j++; if (s[j] === "+" || s[j] === "-") j++; continue; }
         break;
       }
-      toks.push({ t: "num", v: parseFloat(s.slice(i, j)), pos: i }); i = j; continue;
+      const numVal = parseFloat(s.slice(i, j));
+      // A literal that overflows the float range (e.g. 1e309 → Infinity) is a #NUM! at the
+      // source, so it can never slip into a comparison/label as a silent Infinity.
+      if (!Number.isFinite(numVal)) throw ferr(FORMULA_ERRORS.NUM, "number literal out of range");
+      toks.push({ t: "num", v: numVal, pos: i }); i = j; continue;
     }
     // Identifier: function name / TRUE / FALSE. Letters, digits, _, ., and a
     // trailing % only inside names like none — names are [A-Za-z_][A-Za-z0-9_.]*
@@ -571,7 +575,16 @@ const COMPARE = { "=": 1, "<>": 1, "<": 1, ">": 1, "<=": 1, ">=": 1 };
 // exists only so a pathological input (e.g. thousands of "((((…") can't blow the
 // recursive-descent parser's / evaluator's call stack with an uncatchable RangeError.
 const MAX_PARSE_DEPTH = 200;
+// Hard ceiling on total token count. The parser is iterative for operator chains (no
+// recursion), but the tree-walk EVALUATOR recurses down a long left-leaning chain
+// (a+b+c+…), so a multi-thousand-term formula could overflow the JS call stack — and
+// WHETHER it does depends on the ambient stack depth at call time, making the result
+// non-deterministic (#ERROR! vs a value for the very same input). Rejecting an
+// over-large formula up front (well above any real formula, far below the overflow
+// boundary) makes the verdict input-determined. ~1000 tokens ⇒ ≤~1000 eval frames.
+const MAX_TOKENS = 1000;
 const parse = toks => {
+  if (toks.length > MAX_TOKENS) throw ferr(FORMULA_ERRORS.ERR, "formula too large");
   let p = 0;
   let depth = 0;
   const peek = () => toks[p];
@@ -757,8 +770,12 @@ const FUNCTIONS = {
   ROUNDDOWN: { fn: a => { need(a, 1, 2, "ROUNDDOWN"); const d = a.length > 1 ? Math.trunc(num1(a[1])) : 0, f = Math.pow(10, d), n = num1(a[0]); return (n < 0 ? -Math.floor(Math.abs(n) * f + 1e-9) : Math.floor(n * f + 1e-9)) / f; } },
   INT:   { fn: a => { need(a, 1, 1, "INT"); return Math.floor(num1(a[0])); } },
   MOD:   { fn: a => { need(a, 2, 2, "MOD"); const n = num1(a[0]), d = num1(a[1]); if (d === 0) throw ferr(FORMULA_ERRORS.DIV0, "MOD by zero"); return n - d * Math.floor(n / d); } },
-  CEILING: { fn: a => { need(a, 1, 2, "CEILING"); const n = num1(a[0]), sig = a.length > 1 ? num1(a[1]) : 1; if (sig === 0) return 0; if (n > 0 && sig < 0) throw ferr(FORMULA_ERRORS.NUM, "CEILING: number and significance must share a sign"); return Math.ceil(n / sig) * sig; } },
-  FLOOR: { fn: a => { need(a, 1, 2, "FLOOR"); const n = num1(a[0]), sig = a.length > 1 ? num1(a[1]) : 1; if (sig === 0) throw ferr(FORMULA_ERRORS.DIV0, "FLOOR significance 0"); if (n > 0 && sig < 0) throw ferr(FORMULA_ERRORS.NUM, "FLOOR: number and significance must share a sign"); return Math.floor(n / sig) * sig; } },
+  // The ±1e-9 on the quotient defeats binary-float drift (n/sig comes out a hair under/over
+  // the true integer multiple), so FLOOR(2.4,0.1)=2.4 not 2.3 and CEILING never over-steps.
+  // Matches the same epsilon discipline used by ROUNDUP/ROUNDDOWN above. (n/sig ≥ 0: the
+  // sign-mismatch case already threw, so the epsilon always nudges toward the true multiple.)
+  CEILING: { fn: a => { need(a, 1, 2, "CEILING"); const n = num1(a[0]), sig = a.length > 1 ? num1(a[1]) : 1; if (sig === 0) return 0; if (n > 0 && sig < 0) throw ferr(FORMULA_ERRORS.NUM, "CEILING: number and significance must share a sign"); return Math.ceil(n / sig - 1e-9) * sig; } },
+  FLOOR: { fn: a => { need(a, 1, 2, "FLOOR"); const n = num1(a[0]), sig = a.length > 1 ? num1(a[1]) : 1; if (sig === 0) throw ferr(FORMULA_ERRORS.DIV0, "FLOOR significance 0"); if (n > 0 && sig < 0) throw ferr(FORMULA_ERRORS.NUM, "FLOOR: number and significance must share a sign"); return Math.floor(n / sig + 1e-9) * sig; } },
   POWER: { fn: a => { need(a, 2, 2, "POWER"); const r = Math.pow(num1(a[0]), num1(a[1])); if (!Number.isFinite(r)) throw ferr(FORMULA_ERRORS.NUM, "POWER overflow/!domain"); return r; } },
   SQRT:  { fn: a => { need(a, 1, 1, "SQRT"); const n = num1(a[0]); if (n < 0) throw ferr(FORMULA_ERRORS.NUM, "SQRT of negative"); return Math.sqrt(n); } },
 
@@ -820,7 +837,9 @@ const FUNCTIONS = {
   LOG10:  { fn: a => { need(a, 1, 1, "LOG10"); const n = num1(a[0]); if (n <= 0) throw ferr(FORMULA_ERRORS.NUM, "LOG10 of non-positive"); return Math.log10(n); } },
   PI:     { fn: () => Math.PI },
   QUOTIENT: { fn: a => { need(a, 2, 2, "QUOTIENT"); const d = num1(a[1]); if (d === 0) throw ferr(FORMULA_ERRORS.DIV0, "QUOTIENT by zero"); return Math.trunc(num1(a[0]) / d); } },
-  MROUND: { fn: a => { need(a, 2, 2, "MROUND"); const n = num1(a[0]), m = num1(a[1]); if (m === 0) return 0; if ((n > 0) !== (m > 0)) throw ferr(FORMULA_ERRORS.NUM, "MROUND: number and multiple must share a sign"); return Math.round(n / m) * m; } },
+  // n/m ≥ 0 (signs must match), so +1e-9 rounds the half AWAY from zero like Excel and
+  // defeats float drift — MROUND(6.05,0.1)=6.1 not 6.0 (6.05/0.1 comes out as 60.4999…).
+  MROUND: { fn: a => { need(a, 2, 2, "MROUND"); const n = num1(a[0]), m = num1(a[1]); if (m === 0) return 0; if ((n > 0) !== (m > 0)) throw ferr(FORMULA_ERRORS.NUM, "MROUND: number and multiple must share a sign"); return Math.round(n / m + 1e-9) * m; } },
   EVEN:   { fn: a => { need(a, 1, 1, "EVEN"); const n = num1(a[0]); const r = Math.ceil(Math.abs(n) / 2) * 2; return n < 0 ? -r : r; } },
   ODD:    { fn: a => { need(a, 1, 1, "ODD"); const n = num1(a[0]); let r = Math.ceil(Math.abs(n)); if (r % 2 === 0) r += 1; if (r === 0) r = 1; return n < 0 ? -r : r; } },
   FACT:   { fn: a => { need(a, 1, 1, "FACT"); let n = Math.trunc(num1(a[0])); if (n < 0) throw ferr(FORMULA_ERRORS.NUM, "FACT of negative"); if (n > 170) throw ferr(FORMULA_ERRORS.NUM, "FACT overflow"); let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; } },
@@ -949,8 +968,13 @@ function matchesCriteria(value, criteria) {
     if (m) { op = m[1]; operand = m[2]; }
     const operandVal = parseCriteriaOperand(operand);
     if (op === "=" || op === "<>") {
-      if (typeof value === "string" && typeof operandVal === "string") {
-        const matched = wildcardToRegExp(operandVal.toLowerCase()).test(value.toLowerCase());
+      // A TEXT cell is always matched against the raw criterion TEXT (with wildcards),
+      // even when the operand text happens to look numeric or date-ish ("3/4", "100",
+      // "2026-06-01"). parseCriteriaOperand turns those into a number/date for comparing
+      // against numeric/date cells, but a string cell must compare as text — otherwise a
+      // literal "3/4" code would never match its own "3/4" criterion.
+      if (typeof value === "string") {
+        const matched = wildcardToRegExp(String(operand).toLowerCase()).test(value.toLowerCase());
         return op === "=" ? matched : !matched;
       }
       const eq = looseEqual(value, operandVal);
@@ -1118,21 +1142,51 @@ function formatDateToken(serial, fmt) {
     }
   });
 }
+// Excel number formats carry up to four ';'-separated sections: positive;negative;zero;text.
+// Pick the section by the value's sign. A dedicated negative/zero section owns its own sign
+// through literal text (e.g. parentheses), so its magnitude is formatted with no auto "-".
 function formatNumberToken(n, fmt) {
-  let pct = false;
-  if (/%/.test(fmt)) { pct = true; n *= 100; }
-  const useThousands = /#,##0|0,000|,/.test(fmt);
-  const dollar = /^\s*\$/.test(fmt) || /\$/.test(fmt);
-  const dotIdx = fmt.indexOf(".");
-  let decimals = 0;
-  if (dotIdx >= 0) { const after = fmt.slice(dotIdx + 1).match(/[0#]/g); decimals = after ? after.length : 0; }
-  // Count integer-side '0' placeholders to left-pad the integer part (Excel "00" → 7 = "07").
-  const intZeros = ((dotIdx >= 0 ? fmt.slice(0, dotIdx) : fmt).match(/0/g) || []).length;
-  const neg = n < 0;
+  const sections = splitFormatSections(fmt);
+  if (sections.length <= 1) return formatNumberSection(n, fmt, true);
+  if (n > 0) return formatNumberSection(n, sections[0], false);
+  if (n < 0) return formatNumberSection(Math.abs(n), sections[1], false);
+  return formatNumberSection(0, sections.length >= 3 ? sections[2] : sections[0], false);
+}
+// Split on top-level ';' only — a ';' inside a "quoted" run is a literal, not a separator.
+function splitFormatSections(fmt) {
+  const out = []; let cur = "", q = false;
+  for (let i = 0; i < fmt.length; i++) {
+    const c = fmt[i];
+    if (c === '"') { q = !q; cur += c; continue; }
+    if (c === ";" && !q) { out.push(cur); cur = ""; continue; }
+    cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+// Excel marks literal text with surrounding quotes or a leading backslash; drop the markers.
+function stripFormatLiterals(s) { return s.replace(/\\(.)/g, "$1").replace(/"/g, ""); }
+// Format one section as a template: the run from the first to the last digit placeholder
+// ([0#]) is the number; text before/after is emitted verbatim (so "$", "%", "(", ")" survive
+// in place). Decimal/integer placeholders are counted WITHIN this section only — never across
+// the ';' boundary, which is what made a 2-section format show 8 decimals. autoSign prefixes
+// "-" for a negative value only in the single-section case.
+function formatNumberSection(n, fmt, autoSign) {
+  const first = fmt.search(/[0#]/);
+  if (first < 0) return stripFormatLiterals(fmt);   // literal-only section
+  let last = first;
+  for (let i = first; i < fmt.length; i++) if (fmt[i] === "0" || fmt[i] === "#") last = i;
+  const prefix = fmt.slice(0, first), placeholder = fmt.slice(first, last + 1), suffix = fmt.slice(last + 1);
+  if (/%/.test(fmt)) n *= 100;                       // a '%' anywhere scales by 100 (the '%' glyph rides in the literals)
+  const useThousands = /,/.test(placeholder);
+  const dotIdx = placeholder.indexOf(".");
+  const decimals = dotIdx >= 0 ? (placeholder.slice(dotIdx + 1).match(/[0#]/g) || []).length : 0;
+  const intZeros = ((dotIdx >= 0 ? placeholder.slice(0, dotIdx) : placeholder).match(/0/g) || []).length;
+  const neg = autoSign && n < 0;
   const parts = roundAwayFromZero(Math.abs(n), decimals).toFixed(decimals).split(".");
   if (intZeros > parts[0].length) parts[0] = parts[0].padStart(intZeros, "0");
   if (useThousands) parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return (neg ? "-" : "") + (dollar ? "$" : "") + parts.join(".") + (pct ? "%" : "");
+  return (neg ? "-" : "") + stripFormatLiterals(prefix) + parts.join(".") + stripFormatLiterals(suffix);
 }
 
 // ── Evaluator ────────────────────────────────────────────────────────────────
@@ -1202,10 +1256,16 @@ const evalBinary = (node, ctx) => {
 const evalCall = (node, ctx) => {
   const def = FUNCTIONS[node.name];
   if (!def) throw ferr(FORMULA_ERRORS.NAME, `unknown function ${node.name}`);
-  if (def.rng) return def.rng(node.args, ctx, evalNode);    // range/lookup: needs the arg NODES (to read whole columns)
-  if (def.lazy) return def.lazy(node.args, ctx, evalNode);  // short-circuit / error-trapping forms
-  const args = node.args.map(a => evalNode(a, ctx));
-  return def.fn(args, ctx);
+  let r;
+  if (def.rng) r = def.rng(node.args, ctx, evalNode);          // range/lookup: needs the arg NODES (to read whole columns)
+  else if (def.lazy) r = def.lazy(node.args, ctx, evalNode);   // short-circuit / error-trapping forms
+  else r = def.fn(node.args.map(a => evalNode(a, ctx)), ctx);
+  // A function must never hand back a non-finite number (overflow → ±Infinity, or 0×Infinity →
+  // NaN from e.g. TRUNC(0, huge)) as a "value" — it would slip into a comparison or label.
+  // Surface it as #NUM!, mirroring the arithmetic-operator guard. (POWER/EXP/FACT/SQRT throw
+  // their own domain errors earlier, so they never reach here non-finite.)
+  if (typeof r === "number" && !Number.isFinite(r)) throw ferr(FORMULA_ERRORS.NUM, `${node.name} produced a non-finite number`);
+  return r;
 };
 
 // ── Public entry points ────────────────────────────────────────────────────────
@@ -1227,7 +1287,13 @@ const evaluateFormula = (src, ctx) => {
     today: (ctx && ctx.today != null) ? ctx.today : Math.round(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) / MS_PER_DAY),
     formatDate: (ctx && ctx.formatDate) || serialToISO,
   };
-  try { return { ok: true, value: evalNode(parsed.ast, fullCtx) }; }
+  try {
+    const value = evalNode(parsed.ast, fullCtx);
+    // Backstop the "never return a non-finite number" contract (the call-boundary and
+    // operator guards already cover the known paths; this catches any future one).
+    if (typeof value === "number" && !Number.isFinite(value)) return { ok: false, error: FORMULA_ERRORS.NUM, detail: "result is not a finite number" };
+    return { ok: true, value };
+  }
   // Contract: never throw to the host (this runs per-row during a React render — an
   // uncaught throw would blank the grid). FormulaError → its code; anything else →
   // a generic #ERROR! cell.
@@ -2808,11 +2874,41 @@ function ContactsPanel({ data, setData, onClose }) {
   }
   function startEdit(c) { setEditId(c.id); setEditName(c.name); setEditEmail(c.email||''); setAddMode(false); }
   function commitEdit() {
-    if (!editName.trim()) return;
-    saveContacts(contacts.map(c => c.id===editId ? {...c, name:editName.trim(), email:editEmail.trim()} : c));
+    const nm = editName.trim();
+    if (!nm) return;
+    const oldName = (contacts.find(c => c.id === editId) || {}).name;
+    setData(d => {
+      const settings = {...d.settings, contacts: (d.settings?.contacts||[]).map(c => c.id===editId ? {...c, name:nm, email:editEmail.trim()} : c)};
+      // The owner link is by NAME (and ensureContacts re-derives contacts from task owners on load), so
+      // a rename must also rewrite every task's responsibleParty — else the change shows nothing on the
+      // tasks AND the old name respawns as a duplicate contact on the next load (the rename "bounces back").
+      let projects = d.projects;
+      if (oldName && oldName !== nm) {
+        projects = {};
+        Object.entries(d.projects).forEach(([pid, proj]) => {
+          projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => t.responsibleParty === oldName ? {...t, responsibleParty: nm} : t)};
+        });
+      }
+      return {...d, settings, projects};
+    });
     setEditId(null);
   }
-  function del(id) { saveContacts(contacts.filter(c => c.id!==id)); }
+  function del(id) {
+    const goneName = (contacts.find(c => c.id === id) || {}).name;
+    setData(d => {
+      const settings = {...d.settings, contacts: (d.settings?.contacts||[]).filter(c => c.id!==id)};
+      // Clear the owner on tasks that referenced this contact, else ensureContacts respawns it on the
+      // next load (the link is by name) and the delete silently undoes itself.
+      let projects = d.projects;
+      if (goneName) {
+        projects = {};
+        Object.entries(d.projects).forEach(([pid, proj]) => {
+          projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => t.responsibleParty === goneName ? {...t, responsibleParty: ""} : t)};
+        });
+      }
+      return {...d, settings, projects};
+    });
+  }
   function addContact() {
     if (!newName.trim()) return;
     const id = Date.now();
@@ -2913,7 +3009,7 @@ function ContactsPanel({ data, setData, onClose }) {
 }
 
 // ── HistoryPanel — browse / preview / restore snapshots from planar_history ─
-function HistoryPanel({ data, setData, onClose, exportJSON, importJSON }) {
+function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoadedData }) {
   const [rows, setRows]           = useState(null);   // null = loading
   const [previewRow, setPreviewRow] = useState(null);
   const [previewData, setPreviewData] = useState(null); // parsed full snapshot
@@ -3003,8 +3099,11 @@ function HistoryPanel({ data, setData, onClose, exportJSON, importJSON }) {
       const valStr = await window.storage.getHistoryValue(row.id);
       if (!valStr) { showToast("Could not load snapshot.", { type: "error" }); setBusy(false); return; }
       const parsed = JSON.parse(valStr);
-      // 3. Apply — setData will trigger the auto-save useEffect, persisting it to hs-v1
-      setData(parsed);
+      // 3. Apply through the SAME normalize + cascade pipeline import/load use (B4). Applying a snapshot
+      // RAW skipped B550 cycle-breaking (a parentId cycle → sortByVisualOrder infinite-recurses → white-
+      // screen on render), id renumbering (B568 dup-id graph scramble), the holiday remerge, and the
+      // date recascade — restore was the inconsistent twin of importJSON, which routes through it.
+      if (applyLoadedData) applyLoadedData(parsed); else setData(parsed);
       showToast(`Restored snapshot from ${fmtAgo(row.created_at)}.`, { type: "success", duration: 4000 });
       onClose && onClose();
     } catch (e) {
@@ -4304,6 +4403,11 @@ function App() {
     return {...d, settings: {...d.settings, holidays: merged}};
   };
 
+  // Shared "apply a loaded / imported / restored data blob" pipeline. normalizeIds + ensureContacts are
+  // defined INSIDE the load effect below, so importJSON + version-restore route through this ref rather
+  // than re-calling them out of scope — calling them directly was a ReferenceError (import was broken).
+  const applyLoadedDataRef = useRef(null);
+
   useEffect(() => {
     (async () => {
       // Auto-renumber every project's tasks on load so IDs are always sequential
@@ -4354,6 +4458,21 @@ function App() {
           });
         });
         return {...d, settings: {...d.settings, contacts: existing}};
+      };
+      // Expose the full normalize + cascade pipeline so importJSON + version-restore can reuse it (they
+      // can't call normalizeIds/ensureContacts directly — those are scoped to this effect). Set
+      // synchronously on mount, before the first await, so it's ready before any user import/restore.
+      applyLoadedDataRef.current = (parsed) => {
+        let d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(parsed))));
+        d._pinnedClean = true;
+        HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
+        Object.keys(d.projects).forEach(pid => {
+          let tasks = d.projects[pid].tasks.map(({_pinStart, __wasDirectEdit, ...t}) => t);
+          tasks = cascadeDates(tasks);
+          tasks = rollupParentDates(tasks);
+          d.projects[pid] = {...d.projects[pid], tasks};
+        });
+        setData(d);
       };
       try {
         const isMobile = window.innerWidth < 768;
@@ -4525,8 +4644,22 @@ function App() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
+  // True while any blocking overlay (modal / context menu / panel) is open. Read by the global key
+  // handler below so document-level grid shortcuts (Delete / Insert / undo / paste / arrows) can't
+  // fire on the hidden grid behind a modal — e.g. Delete behind the Successor prompt was clearing /
+  // deleting the still-selected row or cell. A ref (not an effect dep) keeps the always-attached key
+  // listener fresh without re-binding it every time a panel opens.
+  const overlayOpenRef = useRef(false);
+  useEffect(() => {
+    overlayOpenRef.current = !!(successorPrompt || notesCtx || projCtx || taskCtx || renameModal ||
+      pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen || historyOpen ||
+      reviewOpen);
+  }, [successorPrompt, notesCtx, projCtx, taskCtx, renameModal, pdfExportOpen, formatOpen, settingsOpen,
+      automationOpen, contactsOpen, historyOpen, reviewOpen]);
+
   useEffect(() => {
     const onKey = (e) => {
+      if (overlayOpenRef.current) return;  // a modal/menu owns the keyboard — don't run grid shortcuts behind it
       const tag = document.activeElement.tagName;
       const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       if (e.key === "Insert" && !typing) {
@@ -4548,8 +4681,29 @@ function App() {
             setSelectedId(null); setSelRange(null);
             return;
           }
+          // Multi-cell range delete (Excel-style): blank every editable, non-locked, non-picker cell in
+          // the span — mirrors the fill path (typing into a range fills the whole range), which Delete
+          // previously didn't match (it only cleared the focused cell).
+          const cols = activeEffectiveCols(dataRef.current);
+          if (selRange && (Math.min(selRange.r1,selRange.r2) !== Math.max(selRange.r1,selRange.r2) || Math.min(selRange.c1,selRange.c2) !== Math.max(selRange.c1,selRange.c2))) {
+            const minR = Math.min(selRange.r1,selRange.r2), maxR = Math.max(selRange.r1,selRange.r2);
+            const minC = Math.min(selRange.c1,selRange.c2), maxC = Math.max(selRange.c1,selRange.c2);
+            const ftasks = flatTasksRef.current;
+            for (let r = minR; r <= maxR; r++) {
+              const t = ftasks[r]; if (!t) continue;
+              const patch = {};
+              for (let c = minC; c <= maxC; c++) {
+                const col = cols[c];
+                if (!col?.e || col.t === "health" || col.t === "notes") continue;
+                if (t.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.t==="cost")) continue;
+                patch[col.k] = (col.k === "duration" || col.k === "percentComplete") ? 0 : "";
+              }
+              if (Object.keys(patch).length) updateTask(t.id, patch);
+            }
+            return;
+          }
           // Fix #7: Delete on a single cell clears its value (Excel-style)
-          const col = activeEffectiveCols(dataRef.current)[selectedColIdx];
+          const col = cols[selectedColIdx];
           if (col?.e && col.t !== "health" && col.t !== "notes") {
             const selTask = flatTasksRef.current.find(t => t.id === selectedId);
             const isParentDateLocked = selTask?.hasChildren && (col.k==="start"||col.k==="end"||col.k==="duration"||col.t==="cost");
@@ -5876,7 +6030,10 @@ function App() {
     const costOf = id => {
       if (id in costMemo) return costMemo[id];
       const kids = kidsOf(id);
-      const v = kids.length ? kids.reduce((s, c) => s + costOf(c.id), 0) : (Number(byId[id]?.cost) || 0);
+      // Include the node's OWN value too (0 for a normal parent → no change), so a cost entered on a
+      // task BEFORE it gained children isn't silently dropped from the total (it's locked from editing,
+      // so it would otherwise be stranded in the saved data, invisible + uneditable).
+      const v = kids.length ? (Number(byId[id]?.cost) || 0) + kids.reduce((s, c) => s + costOf(c.id), 0) : (Number(byId[id]?.cost) || 0);
       costMemo[id] = v; return v;
     };
     // B212 — same bottom-up roll-up for the optional Budget / Actual columns.
@@ -5885,7 +6042,7 @@ function App() {
       const k = field + ":" + id;
       if (k in _fieldMemo) return _fieldMemo[k];
       const kids = kidsOf(id);
-      const v = kids.length ? kids.reduce((s, c) => s + sumOf(c.id, field), 0) : (Number(byId[id]?.[field]) || 0);
+      const v = kids.length ? (Number(byId[id]?.[field]) || 0) + kids.reduce((s, c) => s + sumOf(c.id, field), 0) : (Number(byId[id]?.[field]) || 0);
       _fieldMemo[k] = v; return v;
     };
 
@@ -5977,19 +6134,13 @@ function App() {
       }
       // Snapshot the current state with a pre-import label BEFORE applying
       if (data) { try { window.storage.set("hs-v1", JSON.stringify(data), { label: "pre-import", skipSanity: true }); } catch {} }
-      // Route the import through the SAME normalization + cascade pipeline the cloud/seed
-      // load path uses, so old or partial backups get migrated (predecessor format, holidays,
-      // ids, contacts) and dates are recomputed — instead of being dropped in raw (B4).
-      let d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(parsed))));
-      d._pinnedClean = true;
-      HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
-      Object.keys(d.projects).forEach(pid => {
-        let tasks = d.projects[pid].tasks.map(({_pinStart, __wasDirectEdit, ...t}) => t);
-        tasks = cascadeDates(tasks);
-        tasks = rollupParentDates(tasks);
-        d.projects[pid] = {...d.projects[pid], tasks};
-      });
-      setData(d);
+      // Route the import through the SAME shared normalize + cascade pipeline the cloud/seed load and
+      // version-restore use (B4), so old/partial backups get migrated (predecessor format, holidays,
+      // ids, contacts) and dates recomputed. (This used to inline the pipeline, calling normalizeIds/
+      // ensureContacts directly — but those are scoped INSIDE the load effect, so the call threw
+      // ReferenceError and import was silently broken. The ref closes over them.)
+      if (applyLoadedDataRef.current) applyLoadedDataRef.current(parsed);
+      else setData(parsed);
       showToast(`Imported ${projCount} project${projCount===1?"":"s"}, ${taskCount} task${taskCount===1?"":"s"}.`, { type: "success", duration: 3000 });
     };
     r.readAsText(f);
@@ -6338,7 +6489,7 @@ function App() {
       {formatOpen      && <FormatPanel      data={data} setData={setData} onClose={()=>setFormatOpen(false)} />}
       {automationOpen  && <AutomationPanel  data={data} setData={setData} onClose={()=>setAutomationOpen(false)} />}
       {contactsOpen    && <ContactsPanel    data={data} setData={setData} onClose={()=>setContactsOpen(false)} />}
-      {historyOpen     && <HistoryPanel     data={data} setData={setData} exportJSON={exportJSON} importJSON={importJSON} onClose={()=>setHistoryOpen(false)} />}
+      {historyOpen     && <HistoryPanel     data={data} setData={setData} exportJSON={exportJSON} importJSON={importJSON} applyLoadedData={(parsed)=>applyLoadedDataRef.current?.(parsed)} onClose={()=>setHistoryOpen(false)} />}
       {successorPrompt && <SuccessorPromptModal prompt={successorPrompt} updateTask={updateTask} onClose={()=>setSuccessorPrompt(null)} onOpenTask={(pid, taskId)=>{ goToTask(pid, taskId); setSuccessorPrompt(null); }} />}
 
       {/* BODY */}
@@ -7305,9 +7456,13 @@ function FormulaColumnEditor({mode, initLabel, initFormula, columnNames, existin
   const trimmedLabel = label.trim();
   const dupLabel = existingLabels.some(l => (l || "").trim().toLowerCase() === trimmedLabel.toLowerCase());
   const isBuiltinName = isBuiltinFormulaName(trimmedLabel);
+  // A name containing [ or ] could never be referenced from another formula: a [Column]
+  // reference scans to the first ], so a name like "Cost [USD]" would tokenize as the
+  // truncated "Cost [USD" plus a stray ] and surface #ERROR! — reject the brackets up front.
+  const bracketInName = /[[\]]/.test(trimmedLabel);
   const parsed = PF ? PF.parseFormula(formula) : { error: "engine unavailable" };
   const parseErr = parsed && parsed.error ? parsed.error : null;
-  const labelErr = !trimmedLabel ? "Give the column a name" : dupLabel ? "A column with this name already exists" : isBuiltinName ? "That name is reserved for a built-in column" : null;
+  const labelErr = !trimmedLabel ? "Give the column a name" : bracketInName ? "Name can't contain [ or ]" : dupLabel ? "A column with this name already exists" : isBuiltinName ? "That name is reserved for a built-in column" : null;
   const canSave = !labelErr && !parseErr && formula.trim() !== "";
   const prev = (canSave && preview) ? preview(formula) : null;
 
@@ -7584,6 +7739,10 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     const nextIdBefore = tasks[idxBefore + 1]?.id ?? null;
     commit(taskId, col, val);
     if (nextIdBefore !== null) setSelectedId(nextIdBefore);
+    // A date / dependency edit can re-sort rows via the cascade, so the flat-index selRange is now stale
+    // (its highlight + Shift-Arrow anchor would point at whatever rows moved into that span); drop it so
+    // the next selection re-derives cleanly. Non-reordering edits (owner/cost/…) keep their range.
+    if (col === "start" || col === "end" || col === "duration" || col === "predecessors") setSelRange(null);
   };
 
   // ── Per-project column config (B212) ────────────────────────
@@ -8772,18 +8931,24 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
     const ends   = tasks.map(t=>t.end  ).filter(Boolean).slice().sort();
     if (!starts.length || !ends.length) return {minD: windowStart, totD: dif(windowStart, windowEnd)};
     // Use whichever is earlier/later: fixed window or actual task extent
-    const mn = starts[0] < windowStart ? addD(starts[0], -60) : windowStart;
-    const mx = ends[ends.length-1] > windowEnd ? addD(ends[ends.length-1], 60) : windowEnd;
-    // Cap the span: one fat-fingered / imported far-future date (e.g. year 4000) would otherwise make
-    // totalW = totD*ppd a multi-million-px container and spin the month/year loops tens of thousands
-    // of times, freezing the tab. ~100 years is far beyond any real schedule (the SVG export bounds
-    // its own month loop the same way with _mGuard).
-    const MAX_SPAN_DAYS = 365 * 100;
-    return {minD: mn, totD: Math.min(dif(mn, mx), MAX_SPAN_DAYS)};
+    let mn = starts[0] < windowStart ? addD(starts[0], -60) : windowStart;
+    let mx = ends[ends.length-1] > windowEnd ? addD(ends[ends.length-1], 60) : windowEnd;
+    // Anchor the axis to TODAY. Expanding the window to the real task extent is right for a normal long
+    // schedule, but a single far-past/far-future outlier (a 1900 baseline, a year-4000 typo, an import
+    // artifact) must not drag the axis to it: that froze the tab (a multi-million-px canvas + tens of
+    // thousands of axis cells) and — once the span was naively capped — pushed the real bars + today
+    // line off the clamped axis. Cap expansion at NOW-30y .. NOW+50y (~80y, beyond any real schedule);
+    // anything past that pins to the chart edge because xOf is clamped to [0, totalW] below.
+    const hardBack = addD(NOW, -365 * 30), hardFwd = addD(NOW, 365 * 50);
+    if (mn < hardBack) mn = hardBack;
+    if (mx > hardFwd)  mx = hardFwd;
+    return {minD: mn, totD: dif(mn, mx)};
   }, [tasks]);
 
-  const xOf = d => dif(minD, d) * ppd;
   const totalW = totD * ppd;
+  // Clamp positions to the axis window so an out-of-window outlier date pins to the chart edge instead
+  // of drawing past the months/years header — keeps every bar + the today line aligned with the axis.
+  const xOf = d => Math.max(0, Math.min(totalW, dif(minD, d) * ppd));
   const todayX = xOf(NOW);
 
   const months = useMemo(() => {
@@ -9016,7 +9181,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
             const ri  = startIdx + i;
             const isBlankDates = !task.start || !task.end;
             const bx  = isBlankDates ? 0 : xOf(task.start);
-            const bw  = isBlankDates ? 0 : Math.max(6, dif(task.start, task.end) * ppd);
+            const bw  = isBlankDates ? 0 : Math.max(6, xOf(task.end) - bx);  // clamped endpoints bound a far-future bar to the canvas (== dif(start,end)*ppd for any in-window task)
             const isSummary   = childParentIds.has(task.id);
             const isMilestone = task.duration === 0;
             const isCollapsed = isSummary && !task.isExpanded;
@@ -10770,7 +10935,7 @@ function buildPDFHtml(cfg, data, forPreview) {
     return true;
   });
   // Rolled cost for the exhibit: parent = sum of descendant leaf costs; leaf = own value.
-  const costOfIn = (tasks, id) => { const kids = tasks.filter(x=>x.parentId===id); return kids.length ? kids.reduce((s,c)=>s+costOfIn(tasks,c.id),0) : (Number(tasks.find(x=>x.id===id)?.cost)||0); };
+  const costOfIn = (tasks, id) => { const kids = tasks.filter(x=>x.parentId===id); const own = Number(tasks.find(x=>x.id===id)?.cost)||0; return kids.length ? own + kids.reduce((s,c)=>s+costOfIn(tasks,c.id),0) : own; };
   const cellVal = (t,k,tasks,projId) => {    switch(k){
       case "start": case "end": return fmtD(t[k]);
       case "duration": return `${t.duration}d`;
@@ -11879,8 +12044,18 @@ function NotesModal({task, projectId, updateTask, onClose, initChar}) {
             <textarea
               value={(task.notes||[]).map(n=>n.text).join("\n\n")}
               onChange={e=>{
-                const lines = e.target.value.split(/\n\n+/);
-                updateTask(task.id, {notes: lines.map((t,i)=>({id:(task.notes||[])[i]?.id||Date.now()+i, date:(task.notes||[])[i]?.date||NOW, text:t})).filter(n=>n.text.trim())}, projectId);
+                // Match each block to an existing note by TEXT (preserving its id + date), consuming
+                // matches so duplicates don't both grab one note; only genuinely new/edited text mints a
+                // fresh id+date. The old code matched by ARRAY INDEX, so a note containing a blank line
+                // (which splits into two) shifted every following note's id + date — scrambling history.
+                const blocks = e.target.value.split(/\n\n+/).map(t=>t.trim()).filter(Boolean);
+                const prev = (task.notes||[]).slice();
+                const next = blocks.map((text,i)=>{
+                  const mi = prev.findIndex(n => n && n.text === text);
+                  if (mi >= 0) { const reuse = prev[mi]; prev[mi] = null; return reuse; }
+                  return {id: Date.now()+i, date: NOW, text};
+                });
+                updateTask(task.id, {notes: next}, projectId);
               }}
               placeholder="Type your notes here…"
               style={{width:"100%",minHeight:200,background:"var(--bg)",border:"1px solid var(--bd2)",borderRadius:4,
