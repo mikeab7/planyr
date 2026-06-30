@@ -60,7 +60,13 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V175 — B568: a schedule's task dependencies survive load even if persisted data had a duplicate task id ⏳ signed-in confirm owed
+### V176 — B579: Document Review robustness batch (detail-popup capture · failed-delete mirror · silent PDF-store failure) ⏳ signed-in / interaction confirm owed
+- **Added** 2026-06-29 · **Cadence** once (regression acceptance) · **Last checked** 2026-06-29 (unit/anti-drift ✅) · **Next check** — on planyr.io, **signed in**.
+- **✅ Proven here (no browser):** lint 0 · 1874 tests · build green; 3 anti-drift guards in `test/bugHuntGuards.test.js` (pointercancel releases capture; `clearDraft` only on `!error`; the `cloudReady()`-gated store-failure banner).
+- **⏳ Why pending (need a real browser / sign-in):**
+  1. **Detail popup capture:** open a stitched set, click a detail callout to open the "cloud" popup, start panning inside it, then trigger an interrupt (alt-tab / switch tabs) → return and confirm the popup is still responsive (no stuck grab cursor, clicks/drag/wheel work). (Hard to drive headless — `pointercancel` needs a real interrupt.)
+  2. **Failed-delete mirror:** signed in, delete a review while offline (or with a forced network failure) → confirm the review still appears in the Library (cloud row intact) and the app stays consistent; a successful delete still clears it everywhere.
+  3. **Silent store failure:** signed in, drop a PDF while the network/Drive is unreachable → confirm an error banner now appears ("Couldn't save this PDF to the cloud…") instead of silently saving markups that reload with no backdrop. Logged-out: confirm dropping a PDF shows **no** such banner (local-only is expected).
 - **Added** 2026-06-29 · **Cadence** once (regression acceptance) · **Last checked** 2026-06-29 (unit/anti-drift ✅) · **Next check** — on planyr.io, **signed in** (the scheduler talks to its own Supabase, unreachable headless).
 - **✅ Proven here (no browser):** lint 0 · 1798 tests · build green · scheduler JSX transpiles. Behavioral tests prove a predecessor pointing at a duplicated id now remaps to the FIRST occurrence (original task), and clean unique-id data is unchanged; anti-drift guard ties the fix to source + mirror.
 - **⏳ Why pending:** exercising a *real* persisted schedule (especially any legacy one that may carry a duplicate id) needs the live signed-in scheduler. **Signed-in steps on planyr.io:** open the **Sequence Planyr** tab on a project with task dependencies → confirm the Gantt/dependency arrows and cascade dates match the declared predecessors (nothing pointing at the wrong task), edit a predecessor and confirm the cascade updates correctly, and reload to confirm the dependency graph is stable across loads.
