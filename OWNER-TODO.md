@@ -44,6 +44,15 @@ _Last updated: 2026-06-27._
       check, again before inviting people. (B491)
 
 ## Things Claude needs FROM Michael to finish/verify
+- [x] **Reference drawings — DONE (2026-06-30, found in Google Drive, defaults validated).** Measured the
+      **Grand Port** approved arch set (1,005,560 SF cross-dock, 40′ clear): the **56′** typical bay is the
+      single dominant grid dimension (~130 callouts) and the slab plan literally labels a **60′ SPEED BAY** —
+      so the column-grid defaults (**56′ along the docks · 60′ speed bay**) are confirmed against your real
+      plans. Depth bays read **~45–50′** (my 50′ default sits at the top of that range). Pinnacle/Urban
+      Logistics are small (~85k SF) and Goose Creek's set is 141 MB (too big for the text reader) — neither
+      changes the conclusion. **One optional call for you:** the Grand Port depth bays run as tight as 45–48′,
+      below the current 50–58′ flex band floor. Want me to drop the band floor to ~45′ so a building's *depth*
+      can flex tighter to match? Default = leave it at 50–58′ (your stated range). Say the word and it's a one-liner.
 - [ ] **A second test account** — to verify Team Workspaces end-to-end (invite → accept → shared edit → member
       can't delete → make-private revokes). Claude can audit the code + fix bugs without it, but the live
       two-person round-trip needs a 2nd login.
