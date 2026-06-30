@@ -13,7 +13,7 @@ import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
 import { uploadOverlayFile, uploadParcelDrawingFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
-import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale } from "./lib/overlayScale.js";
+import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
@@ -44,7 +44,8 @@ import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
-import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
@@ -296,6 +297,9 @@ const measMode = (m) => m.mode || "line";
 // move-only — they carry derived geometry that hand-editing would desync.
 const MK_VERTEX_KINDS = ["line", "polyline", "polygon"];
 const MK_BOX_KINDS = ["rect", "ellipse"];
+// Width (screen px) of the transparent fat hit-stroke under open-path markups (line/polyline),
+// so they grab within ~6px on either side at any zoom — matching a polyline's forgiving feel (B155).
+const MK_HIT_PX = 12;
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
 const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
@@ -791,6 +795,28 @@ const EyeOffIcon = () => (
     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" />
   </svg>
 );
+// Lock / Unlock / Remove icons — inline SVG (B574) so the overlay header buttons share the eye
+// icon's exact metrics instead of mixing emoji (🔒/✕) whose glyph boxes never matched.
+const LockIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </svg>
+);
+const UnlockIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.5-1.9" />
+  </svg>
+);
+const XIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
+  </svg>
+);
+// Compact number formatting for the scale picker (B574–B578). trimNum: a field value without
+// trailing-zero noise (0.125 → "0.125", 1 → "1"). fmtScaleNum: the "1″=X′" readout (integer when
+// near-integer, else one decimal — so an architectural 3/4″=1′ shows 1.3, not a misleading 1).
+const trimNum = (n) => String(Math.round(n * 1000) / 1000);
+const fmtScaleNum = (n) => { const r = Math.round(n * 10) / 10; return Number.isInteger(r) ? String(r) : r.toFixed(1); };
 
 export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false } = {}) {
   // Theme palette as real hexes (canvas = SVG + PNG/PDF export, where var() can't be
@@ -945,6 +971,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
   const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
+  // Transient editor state for the ONE expanded overlay row (B575 opacity field draft + B576 scale
+  // picker mode/paired fields). Keyed by overlay id; `null` = follow the overlay's stored values.
+  // Reset whenever the expanded overlay changes so a fresh row derives its display from the model.
+  const [ovEdit, setOvEdit] = useState(null);           // { id, opacityText?, scaleMode?, page?, pageUnit?, real?, realUnit? } | null
+  const setOvEditFor = (id, patch) => setOvEdit((cur) => ({ id, ...(cur && cur.id === id ? cur : {}), ...patch }));
+  useEffect(() => { setOvEdit(null); }, [selOverlay]); // a different row expands → drop the previous row's draft
   const overlayClip = useRef(null);                     // copied site-plan overlay (B461 Copy/Paste — shares the source ref, not a re-import)
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Drag-and-drop affordance for the site-plan overlay (NEW-1). Two independent hover flags:
@@ -1126,7 +1158,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [excChecked, setExcChecked] = useState({});  // exception index → ticked
   const [mbText, setMbText] = useState("");          // legal description to plot
   const [mbWidth, setMbWidth] = useState(20);        // corridor width (ft) for open traverses
-  const [pobMode, setPobMode] = useState(null);      // { calls } awaiting a POB click on the canvas
+  const [pobMode, setPobMode] = useState(null);      // { tracts } awaiting a POB click on the canvas
+  const [deedBusy, setDeedBusy] = useState(false);   // reading a dropped deed file
+  const [deedErr, setDeedErr] = useState("");        // deed-file read error
+  const [deedName, setDeedName] = useState("");      // last-read deed file name
+  const [deedDrag, setDeedDrag] = useState(false);   // drop-zone hover state
+  const deedFileRef = useRef(null);
+  const deedReqRef = useRef(0);                       // in-flight read token (ignore a stale read)
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
   // Single-owner warning toast (B56b): every non-empty warning goes through flashWarn,
   // which cancels any pending auto-clear first — so a stale timer from an earlier message
@@ -2444,7 +2482,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
   const setCallout = (id, patch) => setCallouts((a) => a.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   // Resolved style for a callout (defaults + per-callout overrides).
-  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 8, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
+  // padX default is more generous than padY (B566): equal 8/8 padding read as cramped on the
+  // sides because text butts closer to a vertical edge than to the line-height-cushioned top/bottom.
+  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 14, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
   // Inline editing: a textarea overlays the box. Empty text removes the callout.
   const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); }; // no history on open — pushed on commit only if the text changed (B32)
   const commitEditCallout = () => {
@@ -3543,8 +3583,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return { ...o, ftPerPx, x: cx - (o.imgW * ftPerPx) / 2, y: cy - (o.imgH * ftPerPx) / 2 };
     }));
   };
-  // Which scale-dropdown option matches an overlay's current size (else "custom").
-  const overlayScaleSel = (o) => { const s = Math.round(scaleForFtPerPoint(o.ftPerPx)); return COMMON_SCALES.includes(s) ? String(s) : "custom"; };
+  // Which scale-preset matches an overlay's current size (else null → the picker shows "Custom").
+  const overlayScalePreset = (o) => matchScalePreset(scaleForFtPerPoint(o.ftPerPx));
   // B73 fallbacks — calibrate by clicking the canvas. trace: 2 points on the drawing +
   // a real length → rescale (pinned at the first click). align: 2 points on the drawing
   // then the 2 matching points on the map → similarity (move + rotate + scale).
@@ -6118,6 +6158,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
+  // One shared square icon-button (B574) — identical width/height/padding/hit-target for the overlay
+  // header's hide / lock / remove controls, so they can never render at mismatched sizes again.
+  const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: `1px solid var(--border-default)`, borderRadius: 4, background: "var(--surface-raised)", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
   const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
   const menuPanel = { background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
@@ -6142,57 +6185,112 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // --- Title reader + metes-and-bounds plotting ---
   const elRingOf = (el) => (el.points ? el.points : elCorners(el));
 
-  // Parse the legal description and arm POB placement (the user then clicks the
-  // canvas to anchor the point of beginning).
-  const startPlotMetes = (asEasement = false) => {
-    const calls = parseCalls(mbText);
-    if (!calls.length) { setTitleErr("No bearing/distance calls found. Paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
-    setTitleErr("");
-    setPobMode({ calls, asEasement });
-    setTitleOpen(false);
-    setSel(null); setTool("select");
-    flashWarn(`Click the point of beginning — ${calls.length} call${calls.length > 1 ? "s" : ""} ready${asEasement ? " (easement)" : ""}.`, 0);
+  // Read a dropped/selected deed file (.docx / .txt) into the plotter textarea so
+  // the user can "just drop in the files" instead of pasting. Parses on the way in
+  // to give an immediate honest read-out (calls found, or why not).
+  const readDeed = async (file) => {
+    if (!file) return;
+    const myReq = ++deedReqRef.current; // a newer drop supersedes a slow in-flight read
+    setDeedErr(""); setDeedBusy(true); setDeedName(file.name || "");
+    try {
+      const text = await readDeedFile(file);
+      if (deedReqRef.current !== myReq) return;
+      setMbText(text);
+      const found = parseTracts(text).reduce((s, t) => s + t.calls.length, 0);
+      if (!found) setDeedErr("Read the file, but found no bearing/distance calls — is this a metes-and-bounds legal description?");
+    } catch (e) {
+      if (deedReqRef.current !== myReq) return;
+      setDeedErr((e && e.message) || "Couldn't read that file.");
+    } finally {
+      if (deedReqRef.current === myReq) setDeedBusy(false);
+    }
   };
 
-  // Drop the POB at `pob` (feet), build the encumbrance, warn on overlaps.
-  const anchorEncumbrance = (pob) => {
-    const { calls, asEasement } = pobMode;
-    if (!calls || !calls.length) { flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
+  // Parse the legal description and arm POB placement (the user then clicks the
+  // canvas to anchor the point of beginning). Multi-tract aware: the first tract
+  // is the boundary; each SAVE-AND-EXCEPT tract is plotted as a hole positioned
+  // from its commencing tie relative to the SAME point of beginning.
+  const startPlotMetes = (asEasement = false) => {
+    const tracts = parseTracts(mbText);
+    const main = tracts[0];
+    if (!main || !main.calls.length) { setTitleErr("No bearing/distance calls found. Drop a deed (.docx) or paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
+    setTitleErr("");
+    setPobMode({ tracts, asEasement });
+    setTitleOpen(false);
+    setSel(null); setTool("select");
+    const ex = tracts.length - 1;
+    flashWarn(`Click the point of beginning — ${main.calls.length} call${main.calls.length > 1 ? "s" : ""} ready${ex > 0 ? ` (+${ex} save-and-except)` : ""}${asEasement ? " (easement)" : ""}.`, 0);
+  };
+
+  // Build a polygon encumbrance markup from a traverse anchored at `pob`. A tract
+  // boundary is ALWAYS a polygon — if the calls don't close, the last→first edge
+  // carries the gap (shown honestly) rather than being redrawn as a corridor.
+  const buildEncumbranceMarkup = (calls, pob, { label, except }) => {
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
-    // NEW-2 — reuse the M&B parser to spawn a first-class Easement (mode B for a closed
-    // tract; a corridor strip for an open traverse), attributes editable afterward.
+    const ring = closed ? path.slice(0, -1) : path;
+    if (ring.length < 3) return null;
+    return {
+      mk: {
+        id: uid(), kind: "encumbrance",
+        pts: ring, centerline: path, closed,
+        calls: calls.map((c) => ({ label: c.label, az: c.az, distFt: c.distFt })),
+        label,
+        // exception holes read in a muted dashed red so they're clearly "carved out"
+        stroke: except ? "#b91c1c" : "#7c3aed", fill: except ? "#b91c1c" : "#7c3aed",
+        fillOpacity: except ? 0.1 : 0.14, weight: 2, dash: except ? "6 4" : "solid",
+      },
+      ring, closed, gap: misclosure(path),
+    };
+  };
+
+  // Drop the POB at `pob` (feet), build the encumbrance(s), warn on overlaps.
+  const anchorEncumbrance = (pob) => {
+    const { tracts, asEasement } = pobMode;
+    const main = tracts && tracts[0];
+    if (!main || !main.calls.length) { flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
+    // NEW-2 — Easement path spawns a first-class Easement from the MAIN tract.
     if (asEasement) {
+      const path = callsToPath(main.calls, pob);
+      const closed = pathCloses(path);
       const mk = closed
         ? makeEasement({ mode: "boundary", pts: path.slice(0, -1) })
         : makeEasement({ mode: "centerline", centerline: path, width: mbWidth });
       setPobMode(null);
       commitEasement(mk);
+      if (tracts.length > 1) flashWarn(`Plotted the main tract as an easement — its ${tracts.length - 1} save-and-except exception(s) were not carved. Use “Plot on canvas” to include the holes.`, 8000);
       return;
     }
-    const ring = closed ? path.slice(0, -1) : bufferPolyline(path, mbWidth);
-    if (!ring || ring.length < 3) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
-    const gap = misclosure(path);
-    const mk = {
-      id: uid(), kind: "encumbrance",
-      pts: ring, centerline: path, closed,
-      calls: calls.map((c) => ({ label: c.label, az: c.az, distFt: c.distFt })),
-      label: closed ? "Tract / easement" : "Easement corridor",
-      stroke: "#7c3aed", fill: "#7c3aed", fillOpacity: 0.14, weight: 2, dash: "solid",
-    };
+    const built = buildEncumbranceMarkup(main.calls, pob, { label: (main.label && main.label !== "Boundary") ? main.label : "Tract boundary" });
+    if (!built) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
+    // SAVE-AND-EXCEPT holes: position each from its commencing tie off the same POB.
+    const exMarks = [];
+    for (const t of tracts.slice(1)) {
+      if (!t.calls.length) continue;
+      // the tie's END point locates the exception POB — take the LAST path point
+      // (a curved tie tessellates to many points, so don't index by call count).
+      const tiePath = t.tie && t.tie.length ? callsToPath(t.tie, pob) : null;
+      const exPob = tiePath ? tiePath[tiePath.length - 1] : pob;
+      const eb = buildEncumbranceMarkup(t.calls, exPob, { label: t.label || "Save & except", except: true });
+      if (eb) exMarks.push(eb.mk);
+    }
     pushHistory();
-    setMarkups((a) => [...a, mk]);
-    setSel({ kind: "markup", id: mk.id });
+    setMarkups((a) => [...a, built.mk, ...exMarks]);
+    setSel({ kind: "markup", id: built.mk.id });
     setPobMode(null);
-    // overlap check against buildings + paving
-    const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(ring, elRingOf(e)));
-    const closeNote = closed && gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "";
+    // overlap check against buildings + paving (main ring only)
+    const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(built.ring, elRingOf(e)));
+    const gap = built.gap;
+    const closeNote = !built.closed
+      ? ` ⚠ Traverse does NOT close (gap ≈ ${gap.toFixed(1)}′) — plotted as drawn; verify the calls.`
+      : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "");
+    const exNote = exMarks.length ? ` +${exMarks.length} save-and-except hole${exMarks.length > 1 ? "s" : ""}.` : "";
     if (hits.length) {
       const b = hits.filter((e) => e.type === "building").length, p = hits.length - b;
       const parts = [b && `${b} building${b > 1 ? "s" : ""}`, p && `${p} paving area${p > 1 ? "s" : ""}`].filter(Boolean).join(" and ");
-      flashWarn(`⚠ Encumbrance overlaps ${parts}.${closeNote}`, 9000);
+      flashWarn(`⚠ Boundary overlaps ${parts}.${closeNote}${exNote}`, 9000);
     } else {
-      flashWarn(`Encumbrance placed — no conflicts with buildings or paving.${closeNote}`, 9000);
+      flashWarn(`Boundary placed${exMarks.length ? " with its exception(s)" : ""}.${closeNote}${exNote}`, 9000);
     }
   };
 
@@ -6418,6 +6516,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const curStyle = selEl ? elStyle(selEl, settings) : null;
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); };
+
+  /* ---- live color picking (B567) ----
+   * A native <input type="color"> fires `change` only when the OS palette CLOSES, but fires
+   * `input` continuously as you click/drag through swatches. Wiring `onInput` makes the selected
+   * object recolor the INSTANT you click a color, instead of waiting for the dialog to close.
+   * To keep one-step undo, push exactly ONE history frame per picking session — lazily on the first
+   * change, reset on focus — so the live mutators below must NOT push their own (they'd flood undo
+   * with a frame per swatch). `livePick(apply)` spreads onto the <input>; `apply` is a no-history
+   * mutator. pickSnapRef survives re-renders (only one color input can be active at a time). */
+  const pickSnapRef = useRef(false);
+  const livePick = (apply) => ({
+    onFocus: () => { pickSnapRef.current = false; },
+    onInput:  (e) => { if (!pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
+    onChange: (e) => { if (!pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
+  });
+  const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
+  const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
+  const liveTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } }));
   // Make the selected element's current colors the default for its type.
   const setStyleDefault = () => { if (!selEl || !curStyle) return; setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity }); };
   // Drop the selected element's per-element overrides (back to the type default).
@@ -6932,8 +7048,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {markups.map((m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
                 const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
-                const stroke = isSel ? PAL.accent : m.stroke;
-                const common = { stroke, strokeWidth: sw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
+                const stroke = isSel ? PAL.accent : m.stroke; // semantic markups (encumbrance) keep the accent selection tint
+                // Neutral markups (line/polyline/polygon/rect/ellipse) render their REAL stroke color
+                // even when selected (WYSIWYG) so a live color-picker change is visible immediately
+                // instead of being hidden under the accent tint; selection is cued by the grips plus a
+                // faint width bump. (B567 — matches the shared MarkupRenderer's deliberate choice.)
+                const nStroke = m.stroke;
+                const nsw = sw + (isSel ? 1 : 0);
+                const common = { stroke: nStroke, strokeWidth: nsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
                 // Closed shapes (rect/ellipse/polygon) get an always-on pointer target so the WHOLE
                 // body selects + drags, not just the painted border. pointerEvents:"all" makes the
                 // interior a hit target even when the shape is UNFILLED (fill:"none" is otherwise dead
@@ -7010,8 +7132,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
-                if (m.kind === "line") { const a = f2p(m.a), b = f2p(m.b); return <line key={m.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...common} />; }
-                if (m.kind === "polyline") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polyline key={m.id} points={s} {...common} />; }
+                // Open paths (line/polyline) carry a transparent FAT hit-stroke (~6px each side at
+                // any zoom — f2p already projects feet→screen px) so they grab as forgivingly as a
+                // closed shape's interior, instead of forcing a pixel-perfect landing on the 2px
+                // visible line. Without this a Line was far harder to select than a Polyline. The
+                // visible stroke is pointer-inert; the fat companion carries the select/drag handler.
+                // Reuses the B420 technique; closes the open-path tranche of B155.
+                if (m.kind === "line") {
+                  const a = f2p(m.a), b = f2p(m.b);
+                  return (
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={nsw} strokeDasharray={da} fill="none" pointerEvents="none" />
+                    </g>
+                  );
+                }
+                if (m.kind === "polyline") {
+                  const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  return (
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
+                      <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
+                      <polyline points={s} fill="none" stroke={nStroke} strokeWidth={nsw} strokeDasharray={da} pointerEvents="none" />
+                    </g>
+                  );
+                }
                 if (m.kind === "polygon") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polygon key={m.id} points={s} {...common} {...fillProps} />; }
                 const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
                 if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
@@ -7818,9 +7962,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div ref={boundaryAnchor} style={{ position: "relative" }}>
-            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw or split a parcel boundary"><ToolIcon id="parcel" /> Boundary <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw, plot from a deed, or split a parcel"><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
               <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
+              {/* B570 — the Deed / Title (metes & bounds) tool lives HERE in the Parcel
+                  group, folded in from the old standalone rail launcher (B543). Opens the
+                  existing reader/plotter modal — no second modal, no parser fork. */}
+              <button data-testid="boundary-menu-mb" style={menuItem(false)} title="Read a deed / title commitment (or paste a legal description) to plot a parcel boundary from its metes & bounds"
+                onClick={() => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><ToolIcon id="deed" size={13} /> Deed / Title — metes &amp; bounds…</span>
+              </button>
               <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
               <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
                 <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
@@ -7828,19 +7979,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </AnchoredMenu>
           </div>
-
-          {/* B543 — Deed / Title launcher. A rail ENTRY, not a tool mode: it opens the
-              metes-and-bounds / Schedule B reader modal directly. Always rbtn(false) —
-              it never gets the active-tool highlight and never calls selectTool (which
-              would corrupt `tool` and reset drafts). On the phone overlay rail, dismiss
-              the scrim first so the zIndex:3000 modal isn't shown over a dimmed rail. */}
-          <button className="rbtn" style={{ ...rbtn(false), flexDirection: "column", alignItems: "flex-start", gap: 1 }}
-            data-testid="tool-deed"
-            title="Read a deed / title commitment to pull Schedule B exceptions and plot a metes-and-bounds boundary."
-            onClick={() => { if (narrow) setMobileTools(false); setTitleErr(""); setTitleOpen(true); }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="deed" /> Deed / Title…</span>
-            <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>Schedule B · metes &amp; bounds</span>
-          </button>
 
           {railHdr("Site elements")}
 
@@ -8068,37 +8206,55 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add site plan (PDF / image)…"}</button>
               <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
               <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
-                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this site plan</b> : <>Drop a site-plan PDF or image <b>here or on the map</b> — or browse. Drag it to move; set size, rotation &amp; opacity below, then Lock it to draw on top. White paper is knocked out so the map shows through. <i>(Sizing to the drawing scale comes next.)</i></>}
+                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this site plan</b> : <>Drop a site-plan PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through.</>}
               </div>
             </div>
             {!sheetOverlays.length ? null : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                 {sheetOverlays.map((o) => {
-                  const on = selOverlay === o.id, wFt = o.imgW * o.ftPerPx;
+                  const on = selOverlay === o.id;
                   return (
                     <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <button style={{ ...chip, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
-                        <button style={{ ...chip, color: o.visible === false ? PAL.muted : PAL.ink, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "5px 7px" }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
-                        <button style={chip} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? "🔒" : "🔓"}</button>
-                        <button style={{ ...chip, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}>✕</button>
+                      {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
+                          sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
+                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
+                      {/* Hide / lock / remove — one shared square icon style (B574) so the three render identically. */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                        <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
+                        <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
+                        <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}><XIcon /></button>
                       </div>
                       {on && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
                           <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
-                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity} style={{ flex: 1 }} onChange={(e) => patchOverlay(o.id, { opacity: +e.target.value }, false)} />
+                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); }} />
+                            {/* Numeric percent alongside the slider (B575), two-way bound. While typing we hold a
+                                raw draft (so a half-typed value isn't clobbered); the slider + overlay update live;
+                                on blur the draft clears so the field follows the overlay again. Stored 0.1–1.0 ↔ 10–100%. */}
+                            <input type="number" min={10} max={100} step={5} aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct"
+                              style={{ ...numInput, width: 54, textAlign: "right" }}
+                              value={(ovEdit && ovEdit.id === o.id && ovEdit.opacityText != null) ? ovEdit.opacityText : Math.round((o.opacity ?? 1) * 100)}
+                              onChange={(e) => { const txt = e.target.value; setOvEditFor(o.id, { opacityText: txt }); const n = Math.round(+txt); if (txt !== "" && Number.isFinite(n)) patchOverlay(o.id, { opacity: Math.min(1, Math.max(0.1, n / 100)) }, false); }}
+                              onBlur={() => setOvEditFor(o.id, { opacityText: null })} />
+                            <span style={{ fontSize: 11, color: PAL.muted }}>%</span>
                           </label>
                           <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
                             <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it" data-testid="overlay-rotation"
                               onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
                               onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
                           </label>
-                          <label style={ovRow}><span style={{ width: 48 }}>Width</span>
-                            <input style={numInput} value={Math.round(wFt)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
-                            <span>ft</span>
-                            <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
-                            <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
-                          </label>
+                          {/* Numeric width — kept ONLY for image overlays (B577). A PDF carries a `sheet`
+                              (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
+                              a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
+                              and this stays its one direct numeric size + ±10% nudge control. */}
+                          {!o.sheet && (
+                            <label style={ovRow}><span style={{ width: 48 }}>Width</span>
+                              <input style={numInput} value={Math.round(o.imgW * o.ftPerPx)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
+                              <span>ft</span>
+                              <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
+                              <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
+                            </label>
+                          )}
                           {o.pageCount > 1 && (
                             <div style={ovRow}><span style={{ width: 48 }}>Page</span>
                               <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
@@ -8111,25 +8267,75 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
                             <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
                           </div>
-                          {o.sheet && (
-                            <div style={{ borderTop: `1px dashed #e3dccb`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                              <div style={{ fontSize: 11, color: PAL.muted }}>Scale to the drawing — sizes the sheet to true real-world feet.</div>
-                              <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
-                              <label style={ovRow}><span style={{ width: 48 }}>Scale</span><span>1″=</span>
-                                <select style={{ ...numInput, width: 78, fontFamily: "inherit" }} value={overlayScaleSel(o)} onChange={(e) => { if (e.target.value !== "custom") applyOverlayScale(o.id, e.target.value); }}>
-                                  {COMMON_SCALES.map((s) => <option key={s} value={s}>{s}′</option>)}
-                                  <option value="custom">custom…</option>
-                                </select>
-                                {overlayScaleSel(o) === "custom" && <input style={{ ...numInput, width: 52 }} placeholder="ft" title="Feet per inch — press Enter" onKeyDown={(e) => { if (e.key === "Enter") applyOverlayScale(o.id, e.currentTarget.value); }} />}
-                              </label>
-                              {o.detectedScale && (
-                                <div style={{ fontSize: 11, color: PAL.muted }}>Read from sheet: <b style={{ color: PAL.ink }}>1″={o.detectedScale}′</b>{Math.round(scaleForFtPerPoint(o.ftPerPx)) !== o.detectedScale && <button style={{ ...chip, marginLeft: 6, padding: "3px 8px" }} onClick={() => applyOverlayScale(o.id, o.detectedScale)}>Apply</button>}</div>
-                              )}
-                              <div style={{ fontSize: 10.5, color: PAL.muted }}>Now ≈ <b style={{ color: PAL.ink }}>1″={Math.round(scaleForFtPerPoint(o.ftPerPx))}′</b> · {Math.round(o.imgW * o.ftPerPx)}′ wide</div>
-                            </div>
-                          )}
+                          {o.sheet && (() => {
+                            // Bluebeam-style scale entry (B576): the page→real ratio is the single source of
+                            // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
+                            // [page][unit] = [real][unit] fields. The mode lives in explicit editor state (ovEdit),
+                            // NOT derived from the current size — so picking Custom always reveals the fields.
+                            const ed = ovEdit && ovEdit.id === o.id ? ovEdit : null;
+                            const curFpi = scaleForFtPerPoint(o.ftPerPx);
+                            const matched = overlayScalePreset(o);
+                            const selVal = ed?.scaleMode ?? (matched ? matched.id : "custom");
+                            const pageUnit = ed?.pageUnit ?? "in";
+                            const realUnit = ed?.realUnit ?? "ft";
+                            // DISPLAY values (rounded for readability) vs COMMIT defaults (full precision). A field
+                            // the user never edited must re-apply its EXACT current value, never the rounded display
+                            // string — otherwise an idle focus→blur on a non-round scale (e.g. metric 1″=1m → 3.2808)
+                            // would quantize it to 3.3. The per-field *Dirty flags below then skip the commit entirely
+                            // when a field wasn't touched, so an idle blur is a true no-op (no scale change, no history).
+                            const pageVal = ed?.page ?? (matched ? trimNum(matched.pageIn) : "1");
+                            const realVal = ed?.real ?? (matched ? trimNum(matched.realFt) : fmtScaleNum(curFpi));
+                            const pageCommit = ed?.page ?? (matched ? matched.pageIn : 1);
+                            const realCommit = ed?.real ?? (matched ? matched.realFt : curFpi);
+                            const commit = (next) => {
+                              const fpi = feetPerInchFromPair({ pageVal: next.page ?? pageCommit, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? realCommit, realUnit: next.realUnit ?? realUnit });
+                              if (fpi) applyOverlayScale(o.id, fpi);
+                            };
+                            return (
+                              <div style={{ borderTop: `1px dashed #e3dccb`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                                <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
+                                <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
+                                  <select data-testid="overlay-scale-preset" style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selVal}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      if (v === "custom") { setOvEditFor(o.id, { scaleMode: "custom", page: pageVal, pageUnit, real: realVal, realUnit }); return; }
+                                      const p = SCALE_PRESETS.find((x) => x.id === v);
+                                      if (p) { setOvEditFor(o.id, { scaleMode: p.id, page: trimNum(p.pageIn), pageUnit: "in", real: trimNum(p.realFt), realUnit: "ft" }); applyOverlayScale(o.id, feetPerInchForPreset(p)); }
+                                    }}>
+                                    <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+                                    <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+                                    <option value="custom">Custom…</option>
+                                  </select>
+                                </label>
+                                {selVal === "custom" && (
+                                  <label style={ovRow} data-testid="overlay-scale-custom">
+                                    <input style={{ ...numInput, width: 48 }} value={pageVal} placeholder="0.5 or 1/2" title="Distance measured on the page (decimals or fractions)"
+                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", page: e.target.value, pageDirty: true })}
+                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.pageDirty) commit({ page: e.currentTarget.value }); }}
+                                      onBlur={(e) => { if (ed?.pageDirty) commit({ page: e.currentTarget.value }); }} />
+                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={pageUnit} title="Page unit"
+                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", pageUnit: e.target.value }); commit({ pageUnit: e.target.value }); }}>
+                                      {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                    <span style={{ fontWeight: 700, color: PAL.ink }}>=</span>
+                                    <input style={{ ...numInput, width: 48 }} value={realVal} placeholder="real" title="Real-world distance"
+                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", real: e.target.value, realDirty: true })}
+                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.realDirty) commit({ real: e.currentTarget.value }); }}
+                                      onBlur={(e) => { if (ed?.realDirty) commit({ real: e.currentTarget.value }); }} />
+                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={realUnit} title="Real-world unit"
+                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", realUnit: e.target.value }); commit({ realUnit: e.target.value }); }}>
+                                      {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                  </label>
+                                )}
+                                {o.detectedScale && (
+                                  <div style={{ fontSize: 11, color: PAL.muted }}>Read from sheet: <b style={{ color: PAL.ink }}>1″={o.detectedScale}′</b>{Math.round(scaleForFtPerPoint(o.ftPerPx)) !== o.detectedScale && <button style={{ ...chip, marginLeft: 6, padding: "3px 8px" }} onClick={() => applyOverlayScale(o.id, o.detectedScale)}>Apply</button>}</div>
+                                )}
+                                <div style={{ fontSize: 10.5, color: PAL.muted }}>Now ≈ <b style={{ color: PAL.ink }}>1″={fmtScaleNum(scaleForFtPerPoint(o.ftPerPx))}′</b> · {Math.round(o.imgW * o.ftPerPx)}′ wide</div>
+                              </div>
+                            );
+                          })()}
                           <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1 }} onClick={() => patchOverlay(o.id, { rotation: 0 })}>Reset rotation</button>
                             {/* Resize THIS drawing to ~60% of the current view and recentre it — the
                                 one-click rescue when a drawing came in far too big/small (then set the
                                 real scale above). Distinct from "Fit view", which zooms the canvas. */}
@@ -8213,7 +8419,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             return (
               <div data-testid="property-panel">
               <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
-                <Field label="Line color"><input type="color" value={toHex6(selMarkup.stroke)} onChange={(e) => setSelMarkup({ stroke: e.target.value })} style={swatch} /></Field>
+                <Field label="Line color"><input type="color" value={toHex6(selMarkup.stroke)} {...livePick((v) => liveMarkup({ stroke: v }))} style={swatch} /></Field>
                 <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
                 <Field label="Dash">
                   <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
@@ -8221,7 +8427,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </select>
                 </Field>
                 {closed && <>
-                  <Field label="Fill color"><input type="color" value={toHex6(selMarkup.fill)} onChange={(e) => setSelMarkup({ fill: e.target.value })} style={swatch} /></Field>
+                  <Field label="Fill color"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} onChange={(e) => setSelMarkup({ fillOpacity: +e.target.value })} /></Field>
                 </>}
                 {MK_BOX_KINDS.includes(selMarkup.kind) && <>
@@ -8260,9 +8466,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* row 1: size · text color · fill */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
                   <NumInput style={{ ...numInput, width: 52 }} value={cs.size} min={6} max={96} onCommit={(n) => setSelCallout({ size: n })} />
-                  <input type="color" title="Text" value={toHex6(cs.color)} onChange={(e) => setSelCallout({ color: e.target.value })} style={swatch} />
-                  <input type="color" title="Fill" value={toHex6(cs.fill)} onChange={(e) => setSelCallout({ fill: e.target.value })} style={swatch} />
-                  <input type="color" title="Line" value={toHex6(cs.stroke)} onChange={(e) => setSelCallout({ stroke: e.target.value })} style={swatch} />
+                  <input type="color" title="Text" value={toHex6(cs.color)} {...livePick((v) => liveCallout({ color: v }))} style={swatch} />
+                  <input type="color" title="Fill" value={toHex6(cs.fill)} {...livePick((v) => liveCallout({ fill: v }))} style={swatch} />
+                  <input type="color" title="Line" value={toHex6(cs.stroke)} {...livePick((v) => liveCallout({ stroke: v }))} style={swatch} />
                 </div>
                 {/* row 2: B / I / U · align L C R */}
                 <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
@@ -8588,6 +8794,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ring = selEl.points ? selEl.points : elCorners(selEl);
                 const r = detentionStorage(ring, depth, fb, slope);
                 const setDet = (patch) => { pushHistory(); setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); };
+                const setDetLive = (patch) => setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); // B567: no-history sibling for live color picking
                 // --- Expand this pond (B139): baseline + steppers; both steppers and free
                 // drag feed the one Existing→Proposed readout. Baseline freezes the original
                 // footprint + depth/slope so the delta is apples-to-apples. ---
@@ -8731,13 +8938,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
                               <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")}
-                                onChange={(e) => setDet({ existFill: e.target.value })}
+                                {...livePick((v) => setDetLive({ existFill: v }))}
                                 style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
                               <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
-                                onChange={(e) => setDet({ addFill: e.target.value })}
+                                {...livePick((v) => setDetLive({ addFill: v }))}
                                 style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                           </div>
@@ -8759,12 +8966,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Section title="Properties">
               <Field label="Fill color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.fill)} onChange={(e) => { pushHistory(); setSelEl({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" value={toHex6(curStyle.fill)} {...livePick((v) => setSelEl({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
               </Field>
               <Field label="Line color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.stroke)} onChange={(e) => { pushHistory(); setSelEl({ stroke: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" value={toHex6(curStyle.stroke)} {...livePick((v) => setSelEl({ stroke: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
               </Field>
               <Field label="Fill opacity">
@@ -9093,7 +9300,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </Field>
                   <Field label="Fill color">
                     <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <input type="color" value={toHex6(selParcel.fill)} onChange={(e) => { pushHistory(); setSelParcel({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                      <input type="color" value={toHex6(selParcel.fill)} {...livePick((v) => setSelParcel({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                     </span>
                   </Field>
                 </>
@@ -9213,8 +9420,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
                   <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{TYPE[k].label.split(" / ")[0]}</span>
-                  <input type="color" title="Fill" value={toHex6(st.fill)} onChange={(e) => setTypeStyle(k, { fill: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
-                  <input type="color" title="Line" value={toHex6(st.stroke)} onChange={(e) => setTypeStyle(k, { stroke: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Fill" value={toHex6(st.fill)} {...livePick((v) => liveTypeStyle(k, { fill: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Line" value={toHex6(st.stroke)} {...livePick((v) => liveTypeStyle(k, { stroke: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </div>
               );
             })}
@@ -9317,9 +9524,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
       {/* Title reader + metes-and-bounds modal */}
       {titleOpen && (() => {
-        const calls = parseCalls(mbText);
+        const tracts = parseTracts(mbText);
+        const calls = tracts[0] ? tracts[0].calls : [];
         const path = calls.length ? callsToPath(calls, { x: 0, y: 0 }) : [];
         const closes = pathCloses(path);
+        const gap = misclosure(path);
+        const exCount = Math.max(0, tracts.length - 1);
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -9328,7 +9538,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <button className="gbtn" onClick={() => setTitleOpen(false)} style={{ ...chip }}>Close ✕</button>
             </div>
             <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 14 }}>
-              Upload a title commitment to pull its Schedule B exceptions into a checklist, then plot any metes-and-bounds easement on the plan.
+              Upload a title commitment to pull its Schedule B exceptions into a checklist, or <b>drop a deed / legal description (.docx)</b> below to read and plot its metes-and-bounds boundary.
             </div>
 
             {/* API key */}
@@ -9382,18 +9592,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* metes-and-bounds plotter */}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>2 · Plot a metes-and-bounds description</div>
+              {/* Drop a deed file (.docx / .txt) → read its text into the box below. */}
+              <input ref={deedFileRef} data-testid="deed-file-input" type="file" accept=".docx,.txt,.text,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" style={{ display: "none" }}
+                onChange={(e) => { readDeed(e.target.files?.[0]); e.target.value = ""; }} />
+              <div
+                onClick={() => !deedBusy && deedFileRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDeedDrag(true); }}
+                onDragLeave={() => setDeedDrag(false)}
+                onDrop={(e) => { e.preventDefault(); setDeedDrag(false); readDeed(e.dataTransfer.files?.[0]); }}
+                style={{ border: `1.5px dashed ${deedDrag ? PAL.accent : PAL.panelLine}`, background: deedDrag ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "default" : "pointer", marginBottom: 10 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>{deedBusy ? "Reading…" : "Drop a deed file here, or click to choose"}</div>
+                <div style={{ fontSize: 11, color: PAL.muted, marginTop: 3, lineHeight: 1.4 }}>Word (.docx) or text (.txt) — bearings, distances, curves, and save-and-except are read automatically.</div>
+                {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: "ui-monospace, monospace", wordBreak: "break-all" }}>📄 {deedName}</div>}
+              </div>
+              {deedErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{deedErr}</div>}
               <textarea value={mbText} onChange={(e) => setMbText(e.target.value)} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
                 style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
-                  {calls.length ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? "closes (tract)" : "open (corridor)"}` : "No calls parsed yet"}
+                  {calls.length
+                    ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? `closes${gap > 1 ? ` (misclosure ${gap.toFixed(1)}′)` : ""}` : `does NOT close — gap ${gap.toFixed(1)}′`}${exCount ? ` · +${exCount} save-and-except` : ""}`
+                    : "No calls parsed yet"}
                 </div>
-                {calls.some((c) => c.curve) && (
+                {calls.length > 0 && !closes && (
                   <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
-                    ⚠ {calls.filter((c) => c.curve).length} curve(s) plotted as straight chords — verify against the survey.
+                    ⚠ These calls don't close back to the start — the boundary is plotted exactly as written, with the gap on the last edge. Check the description against the survey.
                   </div>
                 )}
+                {calls.some((c) => c.curve) && (() => {
+                  const cv = calls.filter((c) => c.curve);
+                  const hasArc = (c) => c.curveMeta && (c.curveMeta.radiusFt > 0 || c.curveMeta.centralAngleDeg > 0);
+                  const chord = cv.filter((c) => !hasArc(c)).length;
+                  return (
+                    <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
+                      ⚠ {cv.length} curve(s) reconstructed as true arcs{chord ? ` (${chord} drawn as a straight chord — no radius/angle stated)` : ""} — verify against the survey.
+                    </div>
+                  );
+                })()}
                 {calls.length > 0 && !closes && (
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: PAL.muted }}>
                     Corridor width
@@ -9408,7 +9644,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: "ui-monospace, monospace" }}>
                   {calls.map((c, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px", borderBottom: i < calls.length - 1 ? "1px solid #f3efe5" : "none", color: PAL.ink }}>
-                      <span>{i + 1}. {c.bearing}{c.curve ? " ⤿ (chord)" : ""}</span><span>{c.distFt.toFixed(2)}′</span>
+                      <span>{i + 1}. {c.bearing}{c.curve ? (c.curveMeta && (c.curveMeta.radiusFt > 0 || c.curveMeta.centralAngleDeg > 0) ? " ⤾ (arc)" : " ⤿ (chord)") : ""}</span><span>{c.distFt.toFixed(2)}′</span>
                     </div>
                   ))}
                 </div>

@@ -185,10 +185,12 @@ export const GIS_SOURCES = {
     serviceUrl: "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Roadway_Inventory/FeatureServer/0",
     layerId: null,
     geometryType: "line",
-    fields: { route: "RIA_RTE_ID", system: "HSYS", authority: "RDWAY_MAINT_AGCY", funcClass: "F_SYSTEM" },
+    // name = local-street name (STE_NAM); hwy = coded on-system route (HWY); toll =
+    // toll-facility name — added for B94 per-road rows (a road's human-readable name).
+    fields: { route: "RIA_RTE_ID", name: "STE_NAM", hwy: "HWY", toll: "TOLL_NM", system: "HSYS", authority: "RDWAY_MAINT_AGCY", funcClass: "F_SYSTEM" },
     coverage: "statewide",
     tier: "production",
-    lastVerified: "2026-06-16",
+    lastVerified: "2026-06-29",
     fixtures: [],
   },
   etj_hgac: {

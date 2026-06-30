@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 import { parseNavState, deriveCurrentProject, findBySiteId } from "./lib/navState.js";
+import { scheduleSaveState } from "./lib/saveState.js";
 import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
 import { listProjects, warmProjectsIfEmpty, suggestNameMatch } from "../../shared/projects/projects.js";
 import LinkSchedulePanel from "./components/LinkSchedulePanel.jsx";
@@ -71,6 +72,7 @@ export default function Scheduler({
           zoomPct: Number(m.zoomPct) || 0, zoomable: !!m.zoomable,
           reviewCount: Number(m.reviewCount) || 0, reviewOpen: !!m.reviewOpen,
           saveStatus: m.saveStatus, savePulse: !!m.savePulse, fileLinked: !!m.fileLinked,
+          offlineFallback: !!m.offlineFallback, // B566 — cloud-unreachable → badge shows honest "offline", not a false "synced"
           activePanel: m.activePanel || null,
         });
         return;
@@ -202,6 +204,14 @@ export default function Scheduler({
   const showLinkPanel = ready && projectId != null && !linkedSchedule && !!routedSiteName;
   const suggestedMatch = showLinkPanel ? suggestNameMatch(routedSiteName, projects) : null;
 
+  // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
+  // Site Planner (Row-1 right zone of AppHeader), driven by the embedded app's already-reported
+  // save status, instead of a separate floppy-disk "Save" button down in the Row-2 toolbar. The
+  // embedded Gantt app auto-saves to its own cloud; this only re-skins that live status. Retry on
+  // a failed write is wired through onRetrySave → the embedded app's planar:save (which, in the
+  // error state, re-attempts the cloud save).
+  const saveState = scheduleSaveState(toolbar);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f6f8fa" }}>
       <AppHeader
@@ -210,6 +220,12 @@ export default function Scheduler({
         authControl={authControl}
         accountActive={accountActive}
         homeLabel="Dashboard"
+        // B566 — unified cloud save-status badge (Row-1, top-right), replacing the floppy Save
+        // button. `saveState` is the embedded app's reported status mapped to the shared badge's
+        // vocabulary; the loud error state's popover "Retry now" re-posts planar:save to re-attempt
+        // the cloud write. The embedded app is the single source of truth — the badge only displays.
+        saveState={saveState}
+        onRetrySave={() => post({ type: "planar:save" })}
         // The breadcrumb drives the EMBEDDED scheduler (its own projects), not the
         // Site Planner: pick a project → switch to its Gantt; Dashboard → the reports
         // overview; New project → add one in the scheduler.
