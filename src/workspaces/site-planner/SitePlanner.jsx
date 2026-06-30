@@ -54,11 +54,12 @@ import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot } from "./lib/siteModel.js";
-import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps } from "./lib/dogEar.js";
+import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
+import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
 import { offsetInward, ringsArea, maxInwardOffset } from "./lib/pondOffset.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
@@ -2973,9 +2974,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : pc));
       return;
     }
-    if (d.mode === "dimMove") { // B146: drag a selected element's dimension callout to reposition it
+    if (d.mode === "dimMove") { // B146/B592: slide a selected element's dimension callout along its length
       const loc = rot2(fp.x - d.start.x, fp.y - d.start.y, -d.rot); // world pointer delta → element-local frame
-      setEls((a) => a.map((x) => x.id === d.id ? { ...x, dimOffset: { x: d.base.x + loc.x, y: d.base.y + loc.y } } : x));
+      // B592: only the length-axis component slides; the perpendicular (depth) component is dropped
+      // and the slide is clamped to the valid band — so the line stays on the shape, off any bump-out.
+      const next = { x: d.base.x + loc.x, y: d.base.y + loc.y };
+      const off = clampDimOffset(next, d.range);
+      setEls((a) => a.map((x) => x.id === d.id ? { ...x, dimOffset: off } : x));
       return;
     }
     if (d.mode === "pan") {
@@ -4621,6 +4626,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // B146: a selected element's dimension callout is grab-and-drag to reposition (stored as a
   // local-feet offset on the element); on a road, clicking the number edits the travel width.
+  // B592: the drag is CONSTRAINED — it slides along the shape's long (length) axis only and stays
+  // ON the footprint, never onto a building's corner bump-outs (where the depth would differ). The
+  // valid band is fixed by geometry that can't change mid-drag, so resolve it once at grab time.
   const startDimMove = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -4628,7 +4636,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!el) return;
     setSel({ kind: "el", id });
     pushHistory();
-    drag.current = { mode: "dimMove", id, start: p2f(e.clientX, e.clientY), base: el.dimOffset || { x: 0, y: 0 }, rot: el.rot || 0 };
+    drag.current = { mode: "dimMove", id, start: p2f(e.clientX, e.clientY), base: el.dimOffset || { x: 0, y: 0 }, rot: el.rot || 0, range: dimSlideFor(el, els) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   // NEW-3: start dragging a parcel's acreage chip; offset is kept in parcel-local feet
@@ -10066,6 +10074,24 @@ function dockDoorRun(el, side, dogEars, lengthLines, g) {
   return { startF, endF, horiz, doors };
 }
 
+// Corner bump-outs of a host building as [{sign, along}] measured along its length axis — the
+// spans a depth dimension callout must not slide onto, since the building's depth differs there
+// (B592). Pure; shared by the dimension drag handler + the renderer so they never disagree.
+function bumpsAlongLength(host, allEls) {
+  if (!host || host.points || host.type !== "building") return [];
+  return (allEls || [])
+    .filter((x) => x.attachedTo === host.id && x.dogEar && isDogEarSide(x.dogEar.side))
+    .map((x) => ({ sign: x.dogEar.sign, along: dogEarSize(x.dogEar, x.w, x.h).along }));
+}
+
+// The slide constraint for an element's red dimension callout (B592): it rides the long (length)
+// axis only, clamped to stay ON the footprint and — for a building — off its corner bump-outs.
+// posF matches renderElPx's default position (road = centred, building/paving = 18% in).
+function dimSlideFor(el, allEls) {
+  const posF = el?.type === "road" ? DIM_POS_F_ROAD : DIM_POS_F_DEFAULT;
+  return dimSlideRange(el, bumpsAlongLength(el, allEls), posF);
+}
+
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
 function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext, selStroke) {
@@ -10279,8 +10305,12 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const dimVisible = el.type === "building" ? dimCalloutVisible(ppf) : detailLabelVisible(dimW, ppf);
     const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
-    const ox = (el.dimOffset?.x || 0) * ppf, oy = (el.dimOffset?.y || 0) * ppf; // B146: user reposition (local feet → px)
-    const moved = Math.abs(ox) + Math.abs(oy) > 2;
+    // B146/B592: user reposition (local feet → px). Clamp the stored offset to the slide
+    // constraint for DISPLAY too — a legacy free-drag offset (off the shape, or carrying a depth
+    // component) or one stranded by a later bump-out/resize edit renders back ON the footprint and
+    // off the bumps; the next drag then persists the clamped value.
+    const dimOff = clampDimOffset(el.dimOffset, dimSlideFor(el, allEls));
+    const ox = dimOff.x * ppf, oy = dimOff.y * ppf;
     const dimSel = isSel && tool === "select"; // interactive (drag/edit) only when the element is selected
     const isRoad = el.type === "road";
     const numHandlers = dimSel && isRoad // road number: click to edit width (and don't start a drag)
@@ -10290,10 +10320,11 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // NEW-1: a road's width dimension anchors to the MIDPOINT of the measured span
     // (centred along the road's length), not 18% in from one end — otherwise the
     // "24′" label drifts toward the left edge instead of sitting on the centreline.
-    const posF = el.type === "road" ? 0.5 : 0.18;
+    const posF = el.type === "road" ? DIM_POS_F_ROAD : DIM_POS_F_DEFAULT;
     if (horizLong) { // short side is vertical (h)
       const x = tl.x + w * posF, y0 = tl.y, y1 = tl.y + h, my = (y0 + y1) / 2;
-      if (moved) dim.push(<line key="ld" x1={x} y1={my} x2={x + ox} y2={my + oy} stroke={RED} strokeWidth={0.75} strokeDasharray="3 3" opacity={0.55} />);
+      // B592: no leader line — the dimension slides ALONG the length and stays on the footprint
+      // (oy is pinned to 0), so there is never a gap to bridge back to an anchor.
       const X = x + ox, Y0 = y0 + oy, Y1 = y1 + oy, MY = my + oy;
       dim.push(<line key="dl" x1={X} y1={Y0} x2={X} y2={Y1} stroke={RED} strokeWidth={1.25} />);
       dim.push(<line key="t0" x1={X - tick} y1={Y0} x2={X + tick} y2={Y0} stroke={RED} strokeWidth={1.25} />);
@@ -10303,7 +10334,8 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<text key="tx" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
     } else { // short side is horizontal (w)
       const y = tl.y + h * posF, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
-      if (moved) dim.push(<line key="ld" x1={mx} y1={y} x2={mx + ox} y2={y + oy} stroke={RED} strokeWidth={0.75} strokeDasharray="3 3" opacity={0.55} />);
+      // B592: no leader line — the dimension slides ALONG the length and stays on the footprint
+      // (ox is pinned to 0 here), so there is never a gap to bridge back to an anchor.
       const Y = y + oy, X0 = x0 + ox, X1 = x1 + ox, MX = mx + ox;
       dim.push(<line key="dl" x1={X0} y1={Y} x2={X1} y2={Y} stroke={RED} strokeWidth={1.25} />);
       dim.push(<line key="t0" x1={X0} y1={Y - tick} x2={X0} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
