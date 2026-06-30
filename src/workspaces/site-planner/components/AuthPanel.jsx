@@ -11,7 +11,7 @@ import ThemePicker from "../../../shared/theme/ThemePicker.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
-const btn = (primary) => ({ padding: "9px 14px", fontSize: 13, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${primary ? PAL.accent : PAL.line}`, background: primary ? PAL.accent : "var(--surface-raised)", color: primary ? "#fff" : PAL.ink });
+const btn = (primary) => ({ padding: "9px 14px", fontSize: 13, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${primary ? PAL.accent : PAL.line}`, background: primary ? PAL.accent : "var(--surface-raised)", color: primary ? "var(--on-accent)" : PAL.ink });
 const linkBtn = { border: "none", background: "transparent", color: PAL.accent, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: 0 };
 const s = (v) => (v == null ? "" : String(v)).trim();
 
@@ -31,7 +31,7 @@ function Wrap({ onClose, children, msg, width = 360 }) {
           <button onClick={onClose} style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close ✕</button>
         </div>
         {children}
-        {msg && <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.45, color: msg.type === "err" ? "#b91c1c" : "#15803d" }}>{msg.text}</div>}
+        {msg && <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.45, color: msg.type === "err" ? "var(--danger-text)" : "var(--success-text)" }}>{msg.text}</div>}
       </div>
     </div>
   );
@@ -137,6 +137,11 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
   const [org, setOrg] = useState("");
   const [msg, setMsg] = useState(null); // { type: 'err'|'ok', text }
   const [busy, setBusy] = useState(false);
+
+  // `mode` seeds from `recovery` once at mount; if a reset link fires PASSWORD_RECOVERY
+  // while this panel is already open, sync into recovery mode so the set-password form
+  // shows (never resets a user's signin↔signup choice — only acts when recovery is true).
+  useEffect(() => { if (recovery) setMode("recovery"); }, [recovery]);
 
   const submit = async () => {
     setBusy(true); setMsg(null);

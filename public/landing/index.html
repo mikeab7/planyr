@@ -658,6 +658,22 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   var IS_MOBILE = window.matchMedia && window.matchMedia("(max-width: 860px)").matches;
   var fmt = function (n) { return n.toLocaleString("en-US"); };
 
+  // IS_MOBILE and the 640px spine breakpoint are read ONCE, but the CSS @media queries
+  // re-evaluate live. Crossing 860px or 640px after load — most realistically rotating a
+  // tablet — would desync the JS (sticky-scrub vs onEnter branch, 3D placement) from the
+  // layout and freeze/blank the Site + Review showpieces. matchMedia "change" is
+  // edge-triggered (fires only when a boundary is actually crossed, never on a same-mode
+  // resize or a mobile URL-bar height change), so re-init cleanly with one reload. The
+  // reload itself halts further JS, so there is no loop. (debounced to coalesce a flap.)
+  try {
+    var _xt, reloadOnCross = function () { clearTimeout(_xt); _xt = setTimeout(function () { try { window.location.reload(); } catch (e) {} }, 220); };
+    ["(max-width: 860px)", "(max-width: 640px)"].forEach(function (q) {
+      var mq = window.matchMedia(q);
+      if (mq.addEventListener) mq.addEventListener("change", reloadOnCross);
+      else if (mq.addListener) mq.addListener(reloadOnCross); // older Safari
+    });
+  } catch (e) { /* matchMedia unavailable — nothing to re-sync */ }
+
   if (gsap && ScrollTrigger) gsap.registerPlugin(ScrollTrigger);
 
   /* ----------------------------------------------------------------------
@@ -667,8 +683,12 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
      ---------------------------------------------------------------------- */
   var vp = document.getElementById("vp-dim");
   var vpState = { shown: 0 };
+  var vpTweens = []; // in-flight count/line tweens — killed before a rebuild orphans their nodes
   function drawVpDim(animateCount) {
     if (!vp) return;
+    // A resize during the ~1s intro count animation would rebuild innerHTML and orphan the
+    // #vpline / #vpnum nodes the tweens point at (count silently dies). Kill them first.
+    if (gsap) { vpTweens.forEach(function (tw) { try { tw.kill(); } catch (e) {} }); vpTweens = []; }
     var w = window.innerWidth, h = 96;
     var pad = Math.max(24, Math.min(w * 0.06, 90));
     var y = h - 30;
@@ -688,10 +708,9 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
         '<tspan id="vpnum" font-weight="600">' + fmt(feet) + '</tspan> ft&#160;&#160;·&#160;&#160;EPSG:2278 · US survey feet</text>';
     var lineEl = document.getElementById("vpline");
     if (animateCount && !REDUCE && gsap && lineEl) {
-      var L = x2 - x1;
-      gsap.fromTo(lineEl, { attr: { x2: x1 } }, { attr: { x2: x2 }, duration: 1.0, ease: "power2.out" });
+      vpTweens.push(gsap.fromTo(lineEl, { attr: { x2: x1 } }, { attr: { x2: x2 }, duration: 1.0, ease: "power2.out" }));
       var o = { n: 0 }, numEl = document.getElementById("vpnum");
-      gsap.to(o, { n: feet, duration: 1.1, ease: "power2.out", onUpdate: function () { if (numEl) numEl.textContent = fmt(Math.round(o.n)); } });
+      vpTweens.push(gsap.to(o, { n: feet, duration: 1.1, ease: "power2.out", onUpdate: function () { if (numEl) numEl.textContent = fmt(Math.round(o.n)); } }));
     }
   }
   drawVpDim(false);
@@ -826,6 +845,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
       dummy.position.set(-2.0 + c * 0.19, 0.03, 2.0 + r * 0.62 * (r < 2 ? 1 : 1.05));
       dummy.updateMatrix(); parking.setMatrixAt(pidx++, dummy.matrix);
     }
+    parking.instanceMatrix.needsUpdate = true; parking.frustumCulled = false; // off-centre; a count-0 bound can mis-cull
     parking.count = 0; siteGroup.add(parking);
 
     // truck court slab + trailers
@@ -835,6 +855,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     var trailerMat = track(new THREE.MeshStandardMaterial({ color: 0xC85F3A, roughness: 0.6, transparent: true }));
     var NT = 10, trailers = new THREE.InstancedMesh(trailerGeo, trailerMat, NT);
     for (var k = 0; k < NT; k++) { dummy.position.set(-2.0 + k * 0.42, 0.12, -2.3); dummy.updateMatrix(); trailers.setMatrixAt(k, dummy.matrix); }
+    trailers.instanceMatrix.needsUpdate = true; trailers.frustumCulled = false;
     trailers.count = 0; siteGroup.add(trailers);
 
     // detention pond
@@ -930,6 +951,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     var ok = false;
     try { ok = initThree(); } catch (e) { ok = false; }
     if (!ok) { window.__landingWebglFallback = true; return; } // WebGL unavailable → keep static mark
+    window.__landingWebglFallback = false; // booted (clear a stale give-up flag if the load-backstop recovered)
     if (fbEl) fbEl.classList.remove("show"); // upgrade: reveal the live canvas
     if (gsap) {
       var last = 0, rendering = false;
@@ -944,6 +966,10 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   }
   if (window.requestIdleCallback) requestIdleCallback(bootWebGL, { timeout: 700 });
   else setTimeout(bootWebGL, 200);
+  // Backstop: if three.min.js (deferred) loads slower than the idle-poll window above
+  // gave up on, the `load` event fires after it's parsed — try once more (the webglBooted
+  // guard makes this a no-op if we already booted).
+  window.addEventListener("load", function () { bootWebGL(); });
 
   /* ----------------------------------------------------------------------
      4) ScrollTrigger choreography.
@@ -975,6 +1001,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
       gsap.utils.toArray(".crumb, .crumb-sep").forEach(function (c) { c.style.opacity = 1; c.style.transform = "none"; });
       gsap.utils.toArray(".spec-row .ck").forEach(function (c) { c.style.opacity = 1; c.style.transform = "none"; });
       drawSpineStatic();
+      buildReview(); // snaps the sheets to the final stitched set (place(1)) — no motion
       var cal = document.getElementById("calib"), fil = document.getElementById("filed");
       if (cal) cal.style.opacity = 1; if (fil) fil.style.opacity = 1;
       finishReady();
@@ -1158,6 +1185,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
       if (top) gsap.set(top, { opacity: p > 0.9 ? 1 - (p - 0.9) * 1.2 : 1 });
     }
     place(0);
+    if (REDUCE) { place(1); return; } // reduced motion: show the final stitched set, no animation
     if (IS_MOBILE) {
       // lighter form: the sheets stitch together once, on scroll-in (no pin).
       ScrollTrigger.create({
