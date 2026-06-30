@@ -91,19 +91,22 @@ export function usableCourtSpan(full, bumpStart = 0, bumpEnd = 0) {
 // flush beyond the previous one (cumulative inner depth), full wall length along
 // the dock face. The trailer (i=1) is rotated so its striped stalls run ALONG the
 // wall — matching the legacy `oppTrailerGeom`. Returns {cx,cy,w,h,rot}.
-// `opts` (B492) lets the CALLER pull zone 0 (the truck court) in to the usable dock face between
-// corner bump-outs: {along} overrides its wall-length span and {alongShift} offsets its centre
-// along the wall. Other zones (trailer/buffer) always keep the full wall length, so a 4-arg call
-// (and every existing caller/test) is unchanged.
+// `opts` lets the CALLER pull a zone IN to the usable dock face between corner bump-outs: {along}
+// overrides its wall-length span and {alongShift} offsets its centre along the wall. Omit it and the
+// zone keeps the full wall length, so a 4-arg call (and every existing caller/test) is unchanged.
+// The truck court (zone 0) AND every zone stacked outward from it (trailer parking, buffer, appended
+// road/landscape) honour the SAME override, so the whole stack tracks the court's clear span between
+// the bump-outs — the trailer parking no longer over-hangs the court (owner fix, 2026-06-30). The
+// caller chooses which zones to trim by passing or withholding `opts` (relayoutSide passes the
+// court's resolved span to every chain member).
 // Generalized (B495): lay the i-th zone of an ARBITRARY chain whose per-zone layout kinds are
 // `kinds` ("strip" | "trailer"; road/buffer/sidewalk/court are all "strip" — a road along a wall is
-// geometrically a strip). `i === 0` (the chain head, a court) still honours the bump-out trim opts.
-// Other zones keep full wall length. The cumulative-outward math is identical to the old layoutZone.
+// geometrically a strip). The cumulative-outward math is identical to the old layoutZone.
 export function layoutZoneByKind(b, side, i, depths, kinds = [], opts = {}) {
   const [nx, ny] = SIDE_N[side] || SIDE_N.bottom;
   const horiz = ny !== 0;                       // top/bottom wall → zones run along X
   const fullAlong = horiz ? b.w : b.h;          // full wall length
-  const useOverride = i === 0 && Number.isFinite(opts.along);
+  const useOverride = Number.isFinite(opts.along); // any zone may pull in to the clear bump-out span
   const along = useOverride ? opts.along : fullAlong;
   const alongShift = useOverride && Number.isFinite(opts.alongShift) ? opts.alongShift : 0;
   const inner = depths.slice(0, i).reduce((s, d) => s + (d || 0), 0); // depth nearer the wall

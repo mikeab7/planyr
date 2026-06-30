@@ -118,7 +118,7 @@ describe("usableCourtSpan — truck court pulls in between corner bump-outs (B49
   });
 });
 
-describe("layoutZone opts — only the court (zone 0) pulls in (B492)", () => {
+describe("layoutZone opts — the court AND the outward stack pull in together (trailer-bumpout fix)", () => {
   const b = { cx: 0, cy: 0, w: 600, h: 300, rot: 0 }; // docks top/bottom
   const depths = [135, 50, 15];
 
@@ -130,16 +130,33 @@ describe("layoutZone opts — only the court (zone 0) pulls in (B492)", () => {
     expect(g.cy).toBeCloseTo(150 + 135 / 2, 6);                        // depth/position unchanged
   });
 
-  it("trailer (zone 1) and buffer (zone 2) IGNORE the override — they keep the full wall", () => {
-    expect(layoutZone(b, "bottom", 1, depths, { along: 510, alongShift: 10 }).w).toBe(600);
-    expect(layoutZone(b, "bottom", 2, depths, { along: 510, alongShift: 10 }).w).toBe(600);
+  it("trailer (zone 1) ALSO pulls in with the override, so it tracks the court span + shift", () => {
+    const t = layoutZone(b, "bottom", 1, depths, { along: 510, alongShift: 10 });
+    expect(t.w).toBe(510);                                             // matches the court, not full 600
+    expect(t.cx).toBeCloseTo(10, 6);                                   // shares the court's centre shift
+    expect(t.cy).toBeCloseTo(150 + 135 + 50 / 2, 6);                   // depth/position unchanged
   });
 
-  it("on a vertical dock side the court pulls in along Y", () => {
+  it("buffer (zone 2) ALSO pulls in with the override — the whole stack stays aligned", () => {
+    const bf = layoutZone(b, "bottom", 2, depths, { along: 510, alongShift: 10 });
+    expect(bf.w).toBe(510);
+    expect(bf.cx).toBeCloseTo(10, 6);
+  });
+
+  it("with NO override every zone keeps the full wall (un-bumped sides are unchanged)", () => {
+    expect(layoutZone(b, "bottom", 1, depths).w).toBe(600);
+    expect(layoutZone(b, "bottom", 2, depths).w).toBe(600);
+  });
+
+  it("on a vertical dock side the court AND trailer pull in along Y", () => {
     const tall = { cx: 0, cy: 0, w: 300, h: 600, rot: 0 }; // docks left/right
     const g = layoutZone(tall, "right", 0, depths, { along: 520, alongShift: -10 });
-    expect(g.h).toBe(520);                 // along the tall axis
+    expect(g.h).toBe(520);                 // court (strip) lays `along` on its h axis
     expect(g.cy).toBeCloseTo(-10, 6);      // shifted −Y
+    const t = layoutZone(tall, "right", 1, depths, { along: 520, alongShift: -10 });
+    expect(t.w).toBe(520);                 // trailer is rotated 90° → `along` is its w; matches the court
+    expect(t.rot).toBe(90);
+    expect(t.cy).toBeCloseTo(-10, 6);      // shares the court's centre shift along the wall
   });
 });
 
