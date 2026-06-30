@@ -98,10 +98,12 @@ body::before {
           mask-image: radial-gradient(120% 90% at 60% 35%, #000 35%, transparent 100%);
 }
 
-/* The Three.js canvas — fixed full-viewport, behind the DOM, decorative. */
+/* The Three.js canvas — fixed full-viewport, behind the DOM, decorative.
+   width/height 100% (not 100vw/vh) so it never exceeds the layout width by the
+   scrollbar gutter — that overflow was pushing the fixed topbar CTA off the edge. */
 #bg {
   position: fixed; inset: 0; z-index: 1;
-  width: 100vw; height: 100vh;
+  width: 100%; height: 100%;
   pointer-events: none;
   display: block;
 }
@@ -155,9 +157,12 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
   background: linear-gradient(to bottom, rgba(21,23,28,.92), rgba(21,23,28,.62) 70%, transparent);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
-.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; }
+.topbar { flex-wrap: nowrap; }
+.topbar .btn { flex: none; }
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; min-width: 0; }
 .brand svg { display: block; flex: none; }
-.brand b { font-weight: 800; font-size: 1.05rem; letter-spacing: -0.01em; color: var(--cream); }
+.brand b { font-weight: 800; font-size: 1.05rem; letter-spacing: -0.01em; color: var(--cream); white-space: nowrap; }
+.lbl-sm { display: none; }
 .tabs { display: flex; gap: 2px; margin-left: 8px; }
 .tab {
   font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.04em; text-transform: uppercase;
@@ -179,6 +184,11 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
 .btn-primary:hover { filter: brightness(1.06); }
 .btn-ghost { background: transparent; color: var(--cream); border-color: var(--ink-3); }
 .btn-ghost:hover { border-color: var(--line-1); color: var(--line-2); }
+/* Visible keyboard focus on every interactive element (coral ring reads on both the
+   ink field and the coral button fill). */
+.btn:focus-visible, .tab:focus-visible, .brand:focus-visible {
+  outline: 2px solid var(--line-2); outline-offset: 3px; border-radius: 9px;
+}
 .topbar .btn { padding: 7px 13px; font-size: 0.8rem; }
 .topbar .btn-ghost { display: none; }
 
@@ -232,6 +242,17 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
 #spine-svg text { font-family: var(--mono); fill: var(--cream); }
 #spine-svg .cap { fill: var(--cream); font-size: 13px; font-weight: 600; letter-spacing: .02em; }
 #spine-svg .sub { fill: var(--line-1); font-size: 9px; letter-spacing: .14em; }
+.spine-vert { display: none; }
+@media (max-width: 640px) {
+  #spine-svg { display: none; }
+  .spine-track { height: auto; margin-top: 6px; }
+  .spine-vert { display: block; list-style: none; margin: 0; padding: 4px 0 2px 24px; border-left: 2px solid var(--line-1); }
+  .spine-vert li { position: relative; padding: 0 0 22px 12px; opacity: 0; transform: translateY(8px); }
+  .spine-vert li:last-child { padding-bottom: 2px; }
+  .spine-vert li::before { content: ""; position: absolute; left: -31px; top: 3px; width: 11px; height: 11px; border-radius: 50%; background: var(--coral-mid); border: 2px solid var(--ink); }
+  .spine-vert .vn { display: block; font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em; color: var(--cream); }
+  .spine-vert .vs { display: block; font-family: var(--mono); font-size: 0.64rem; letter-spacing: .14em; text-transform: uppercase; color: var(--line-1); margin-top: 3px; }
+}
 
 /* ---- sticky showpiece sections ---- */
 .stage-section { position: relative; }
@@ -281,7 +302,10 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
 }
 
 /* Review */
-.review-stage .frame { position: relative; width: 100%; aspect-ratio: 4 / 3; max-width: 560px; margin-inline: auto; }
+/* overflow:hidden clips the sheets to the drawing frame (correct for a viewport) and,
+   crucially, stops their scattered pre-stitch transforms from overflowing the page —
+   that overflow was widening the mobile layout viewport and cropping the topbar CTA. */
+.review-stage .frame { position: relative; width: 100%; aspect-ratio: 4 / 3; max-width: 560px; margin-inline: auto; overflow: hidden; border-radius: 10px; }
 .sheet {
   position: absolute; inset: 0; border-radius: 8px; background: #F4F1EA;
   border: 1px solid #c9c3b4; box-shadow: 0 18px 50px rgba(0,0,0,.5);
@@ -294,11 +318,14 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
 .sheet .glyph::after { content: ""; position: absolute; inset: 18% 30% 30% 14%; border: 1px solid #b0aa99; }
 .sheet .code { position: absolute; left: 9px; top: 9px; font-family: var(--mono); font-size: 11px; color: #5a5446; font-weight: 600; letter-spacing: .05em; }
 .calib-label, .filed-label {
-  position: absolute; font-family: var(--mono); font-size: 0.66rem; letter-spacing: .06em;
-  padding: 5px 10px; border-radius: 7px; opacity: 0; white-space: nowrap;
+  position: absolute; font-family: var(--mono); font-size: 0.74rem; letter-spacing: .04em; font-weight: 500;
+  padding: 6px 11px; border-radius: 8px; opacity: 0; white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0,0,0,.45);
 }
-.calib-label { left: 6%; bottom: -6%; color: var(--line-1); border: 1px solid rgba(232,154,120,.4); background: rgba(21,23,28,.85); }
-.filed-label { right: 4%; top: -7%; color: var(--review); border: 1px solid rgba(239,159,39,.45); background: rgba(21,23,28,.85); }
+/* Inside the sheet's corners (the reading zone) so these two payoff badges —
+   auto-calibrated, auto-filed — actually get seen, on a near-solid backing. */
+.calib-label { left: 4%; bottom: 5%; color: var(--line-2); border: 1px solid rgba(240,168,136,.5); background: rgba(21,23,28,.95); }
+.filed-label { right: 4%; top: 5%; color: var(--review); border: 1px solid rgba(239,159,39,.55); background: rgba(21,23,28,.95); }
 
 /* Schedule gantt */
 .gantt { display: grid; gap: 9px; margin-top: 12px; }
@@ -353,11 +380,18 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   .metrics { grid-template-columns: 1fr 1fr; }
   .proof-row { gap: 6px 16px; }
   .gantt .row { grid-template-columns: 96px 1fr; }
-  /* keep the persistent CTA from clipping off the right edge on narrow phones */
+  /* keep the persistent CTA from clipping off the right edge on narrow phones:
+     tighten the bar and swap the button label to the short form. */
   .topbar { gap: 10px; padding: 10px 14px; }
-  .topbar .btn-primary { padding: 7px 12px; font-size: 0.78rem; }
+  .topbar .btn-primary { padding: 7px 13px; font-size: 0.8rem; }
+  .topbar .lbl-lg { display: none; }
+  .topbar .lbl-sm { display: inline; }
   .brand b { font-size: 0.98rem; }
   .hero h1 { font-size: clamp(2.1rem, 11vw, 3rem); }
+  /* Hero/close CTAs stack full-width and wrap their text so the long label can't
+     overflow a narrow phone. */
+  .hero .ctas, .close .ctas { flex-direction: column; align-items: stretch; }
+  .hero .ctas .btn, .close .ctas .btn { width: 100%; white-space: normal; justify-content: center; text-align: center; }
 }
 
 /* ---- reduced motion: everything legible, zero motion ---- */
@@ -365,6 +399,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   .scroll-cue .chev { animation: none; }
   .chip.live .dot { animation: none; }
   .reveal { opacity: 1 !important; transform: none !important; }
+  .spine-vert li { opacity: 1 !important; transform: none !important; }
 }
 </style>
 </head>
@@ -398,7 +433,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   </nav>
   <div class="spacer"></div>
   <a class="btn btn-ghost" href="#how">See the flow</a>
-  <a class="btn btn-primary" href="https://planyr.io/">Start a site</a>
+  <a class="btn btn-primary" href="https://planyr.io/"><span class="lbl-lg">Start a site</span><span class="lbl-sm">Start</span></a>
 </header>
 
 <main id="top">
@@ -438,6 +473,14 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
       </div>
       <div class="spine-track">
         <svg id="spine-svg" viewBox="0 0 1200 150" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <!-- On narrow phones the horizontal track can't fit 5 stations — stack them. -->
+        <ol id="spine-vert" class="spine-vert">
+          <li><span class="vn">Deed</span><span class="vs">Metes &amp; bounds</span></li>
+          <li><span class="vn">Map</span><span class="vs">Aerial · GIS</span></li>
+          <li><span class="vn">Drawings</span><span class="vs">Stitched set</span></li>
+          <li><span class="vn">Layout</span><span class="vs">Massing · yield</span></li>
+          <li><span class="vn">Schedule</span><span class="vs">Sequence</span></li>
+        </ol>
       </div>
     </div>
   </section>
@@ -507,7 +550,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     <div class="wrap">
       <div class="stage .nostick" style="min-height:auto; display:block; position:static;">
         <div class="sec-head" style="max-width:680px">
-          <span class="eyebrow reveal"><span style="color:var(--schedule)">●</span>&nbsp;Sequence</span>
+          <span class="eyebrow reveal"><span style="color:var(--schedule)">●</span>&nbsp;Schedule</span>
           <h2 class="reveal">The schedule, wired to the site.</h2>
           <p class="lede reveal">A development timeline linked to the same project — click the site,
             see its sequence: entitlement, grading, foundations, tilt-up, TI, CO. One spine, every phase.</p>
@@ -598,15 +641,19 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
 
 </main>
 
-<!-- vendored, zero third-party runtime deps -->
-<script src="/landing/vendor/three.min.js"></script>
+<!-- vendored, zero third-party runtime deps. three.js (590 KB) is deferred — it only
+     drives the Hero + Site 3D and is booted on idle, off the critical path. gsap +
+     ScrollTrigger stay synchronous (they drive every DOM/SVG section). -->
+<script defer src="/landing/vendor/three.min.js"></script>
 <script src="/landing/vendor/gsap.min.js"></script>
 <script src="/landing/vendor/ScrollTrigger.min.js"></script>
 <script>
 /* eslint-disable */
 (function () {
   "use strict";
-  var gsap = window.gsap, ScrollTrigger = window.ScrollTrigger, THREE = window.THREE;
+  // gsap + ScrollTrigger are synchronous (loaded before this script). THREE is deferred,
+  // so it is read at boot time (window.THREE) inside initThree, never captured here.
+  var gsap = window.gsap, ScrollTrigger = window.ScrollTrigger;
   var REDUCE = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var IS_MOBILE = window.matchMedia && window.matchMedia("(max-width: 860px)").matches;
   var fmt = function (n) { return n.toLocaleString("en-US"); };
@@ -676,6 +723,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   }
 
   function initThree() {
+    var THREE = window.THREE; // deferred lib — read at call time, not at script parse time
     if (!THREE || !hasWebGL()) return false;
     var canvas = document.getElementById("bg");
     var renderer;
@@ -696,9 +744,11 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     cam.lookAt(0, 0, 0);
 
     // Lighting — warm key upper-right (lit top, darker sides, like the mark) + cool fill.
-    var key = new THREE.DirectionalLight(0xF4EFE6, 1.25); key.position.set(7, 12, 5); scene.add(key);
-    scene.add(new THREE.AmbientLight(0x2a2630, 1.0));
-    scene.add(new THREE.HemisphereLight(0x6a7488, 0x140f0c, 0.55));
+    // Brighter ambient/hemisphere so the Site build reads clearly through the whole scrub
+    // (the solid "built" skin was getting lost on the near-black field).
+    var key = new THREE.DirectionalLight(0xF4EFE6, 1.4); key.position.set(7, 12, 5); scene.add(key);
+    scene.add(new THREE.AmbientLight(0x4a4452, 1.0));
+    scene.add(new THREE.HemisphereLight(0x8a93a8, 0x1a1410, 0.82));
 
     var mats = []; // track for opacity control
     function track(m) { mats.push(m); return m; }
@@ -707,8 +757,8 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     var markGroup = new THREE.Group();
     markGroup.rotation.y = Math.PI / 4; // square footprint -> diamond
     markGroup.position.x = IS_MOBILE ? 0 : 4.0;
-    markGroup.position.y = IS_MOBILE ? 3.0 : 1.0;
-    markGroup.scale.setScalar(IS_MOBILE ? 0.6 : 0.92);
+    markGroup.position.y = IS_MOBILE ? 3.6 : 1.0;
+    markGroup.scale.setScalar(IS_MOBILE ? 0.52 : 0.92);
     scene.add(markGroup);
 
     var F = 2.3; // tier footprint half-width
@@ -741,9 +791,9 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     // --- the SITE group (the build showpiece), starts hidden ---
     var siteGroup = new THREE.Group();
     siteGroup.rotation.y = Math.PI / 4;
-    siteGroup.position.x = IS_MOBILE ? 0 : 4.4; // right half (copy + yield card sit left)
+    siteGroup.position.x = IS_MOBILE ? 0 : 4.3; // right half (copy + yield card sit left)
     siteGroup.position.y = IS_MOBILE ? -0.2 : 0.4;
-    siteGroup.scale.setScalar(IS_MOBILE ? 0.6 : 0.8);
+    siteGroup.scale.setScalar(IS_MOBILE ? 0.62 : 0.9);
     siteGroup.visible = false;
     scene.add(siteGroup);
 
@@ -756,7 +806,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     // building — one geometry, three skins (wire -> glass -> solid) cross-faded by progress
     var bH = 2.2;
     var bGeo = new THREE.BoxGeometry(4.6, 1, 3.2); bGeo.translate(0, 0.5, 0); // base at y=0
-    var bSolidMat = track(new THREE.MeshStandardMaterial({ color: 0xA8482B, roughness: 0.6, metalness: 0.05, transparent: true, opacity: 0 }));
+    var bSolidMat = track(new THREE.MeshStandardMaterial({ color: 0xDC6B42, roughness: 0.5, metalness: 0.05, transparent: true, opacity: 0 }));
     var bSolid = new THREE.Mesh(bGeo, bSolidMat); siteGroup.add(bSolid);
     var bGlassMat = track(supportsGlass
       ? new THREE.MeshPhysicalMaterial({ color: 0xDC6B42, roughness: 0.15, transmission: 0.5, transparent: true, opacity: 0, thickness: 1 })
@@ -779,7 +829,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     parking.count = 0; siteGroup.add(parking);
 
     // truck court slab + trailers
-    var courtMat = track(new THREE.MeshStandardMaterial({ color: 0x14110e, roughness: 0.95, transparent: true, opacity: 0 }));
+    var courtMat = track(new THREE.MeshStandardMaterial({ color: 0x312a22, roughness: 0.95, transparent: true, opacity: 0 }));
     var court = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.05, 1.6), courtMat); court.position.set(0, 0.02, -2.3); siteGroup.add(court);
     var trailerGeo = new THREE.BoxGeometry(0.3, 0.22, 0.9);
     var trailerMat = track(new THREE.MeshStandardMaterial({ color: 0xC85F3A, roughness: 0.6, transparent: true }));
@@ -788,7 +838,7 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     trailers.count = 0; siteGroup.add(trailers);
 
     // detention pond
-    var pondMat = track(new THREE.MeshStandardMaterial({ color: 0x244a55, roughness: 0.2, metalness: 0.3, transparent: true, opacity: 0 }));
+    var pondMat = track(new THREE.MeshStandardMaterial({ color: 0x2f6f86, roughness: 0.2, metalness: 0.3, transparent: true, opacity: 0 }));
     var pond = new THREE.Mesh(new THREE.CircleGeometry(1.15, 28), pondMat);
     pond.rotation.x = -Math.PI / 2; pond.position.set(2.9, 0.01, 1.9); pond.scale.setScalar(0.01); siteGroup.add(pond);
 
@@ -806,8 +856,10 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
     function applyState(dt) {
-      // MARK — only while the Hero section is active (else 0 → hidden).
-      var mo = state.heroActive ? state.markOpacity : 0;
+      // MARK — only while the Hero section is active (else 0 → hidden). On mobile/tablet
+      // the mark shares the vertical band with the headline, so dim it to an ambient
+      // level (the scrim + this keep the coral headline word legible over it).
+      var mo = (state.heroActive ? state.markOpacity : 0) * (IS_MOBILE ? 0.5 : 1);
       markGroup.visible = mo > 0.002;
       clampOpacity(botMat, 0.999 * mo); clampOpacity(gridMat, 0.85 * mo);
       clampOpacity(midMat, (supportsGlass ? 0.78 : 0.42) * mo); clampOpacity(midEdge, mo);
@@ -858,29 +910,40 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     return true;
   }
 
-  var hadWebGL = false;
-  try { hadWebGL = initThree(); } catch (e) { hadWebGL = false; }
-  if (!hadWebGL) {
-    window.__landingWebglFallback = true;
-    var fb = document.getElementById("bg-fallback");
-    if (fb) fb.classList.add("show");
-    var bgc = document.getElementById("bg"); if (bgc) bgc.style.display = "none";
-  }
-
   /* ----------------------------------------------------------------------
-     3) Single shared rAF via gsap.ticker — Three render + nothing else idle.
-     Renders only while hero or site beat is on screen; pauses on tab blur.
+     3) Boot WebGL lazily. three.min.js is loaded with `defer`, so it parses off the
+     critical path; we show the static mark immediately (hero is never empty) and
+     upgrade to the live scene on idle once Three is ready. The shared gsap.ticker rAF
+     renders only while the Hero or Site beat is on screen, and pauses on tab blur.
      ---------------------------------------------------------------------- */
-  if (three.ok && gsap) {
-    var last = 0, rendering = false;
-    gsap.ticker.add(function (time) {
-      var dt = last ? time - last : 0; last = time;
-      if (document.hidden) return;
-      var active = state.heroActive || state.siteActive;
-      if (active) { rendering = true; three.render(dt); }
-      else if (rendering) { rendering = false; three.render(0); } // one clearing frame, then idle
-    });
+  var fbEl = document.getElementById("bg-fallback");
+  if (fbEl) fbEl.classList.add("show"); // static mark up-front; hidden once WebGL takes over
+
+  var webglBooted = false, webglTries = 0;
+  function bootWebGL() {
+    if (webglBooted) return;
+    if (!window.THREE) { // wait for the deferred three.min.js (cap the wait, then give up)
+      if (webglTries++ < 80) { setTimeout(bootWebGL, 50); return; }
+      window.__landingWebglFallback = true; return; // keep the static mark
+    }
+    webglBooted = true;
+    var ok = false;
+    try { ok = initThree(); } catch (e) { ok = false; }
+    if (!ok) { window.__landingWebglFallback = true; return; } // WebGL unavailable → keep static mark
+    if (fbEl) fbEl.classList.remove("show"); // upgrade: reveal the live canvas
+    if (gsap) {
+      var last = 0, rendering = false;
+      gsap.ticker.add(function (time) {
+        var dt = last ? time - last : 0; last = time;
+        if (document.hidden) return;
+        var active = state.heroActive || state.siteActive;
+        if (active) { rendering = true; three.render(dt); }
+        else if (rendering) { rendering = false; three.render(0); } // one clearing frame, then idle
+      });
+    }
   }
+  if (window.requestIdleCallback) requestIdleCallback(bootWebGL, { timeout: 700 });
+  else setTimeout(bootWebGL, 200);
 
   /* ----------------------------------------------------------------------
      4) ScrollTrigger choreography.
@@ -1044,6 +1107,14 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   }
   function drawSpineStatic() { spineMarkup(true); }
   function buildSpine() {
+    // Narrow phones use the vertical DOM stack (the horizontal SVG can't fit 5 stations).
+    if (window.matchMedia && window.matchMedia("(max-width:640px)").matches) {
+      gsap.utils.toArray("#spine-vert li").forEach(function (li) {
+        gsap.to(li, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out",
+          scrollTrigger: { trigger: li, start: "top 90%" } });
+      });
+      return;
+    }
     spineMarkup(false);
     var line = document.getElementById("spine-line");
     if (!line) return;
