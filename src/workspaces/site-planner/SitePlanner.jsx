@@ -2550,7 +2550,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (remaining.length) { alert("Those parcels don't all share a boundary — pick parcels that touch edge-to-edge."); return; }
     pushHistory();
     const np = { id: uid(), points: result, locked: true };
+    // The merged-away parcels are genuinely removed (replaced by `np`), so TOMBSTONE them — the same
+    // invariant every other delete honors (B276/B556). Two reasons, both real bugs without it (B596):
+    //   1. A reload / cross-tab / cross-device union-merge (mergeSiteContent) would otherwise RESURRECT
+    //      them from a copy that still holds their ids, silently undoing the merge.
+    //   2. Collapsing 3+ parcels into one drops contentCount by ≥2 with nothing to explain it, so the
+    //      thin-clobber guard (B459) misreads a legitimate active-tab merge as a stale-tab clobber and
+    //      blocks the save with a false "changed in another session" conflict (the owner's report).
+    // pushHistory() above already snapshotted the pre-merge deletedIds, so undo cleanly drops these
+    // tombstones and restores the parcels; the new parcel's fresh uid() can never collide with them.
+    const goneIds = parcels.filter((p) => combineSel.includes(p.id)).map((p) => p.id);
     setParcels((arr) => [...arr.filter((p) => !combineSel.includes(p.id)), np]);
+    tombstone(goneIds);
     setCombineSel([]);
     setSel({ kind: "parcel", id: np.id });
     setTool("select");
