@@ -914,9 +914,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
   const inMulti = (kind, id) => multi.some((m) => m.kind === kind && m.id === id);
   const refEq = (a, b) => a.kind === b.kind && a.id === b.id; // compares {kind,id} refs in the multi set (B569)
+  // Measures are INDEX-keyed in single-selection (`sel.i`, used by delete/highlight/vertex-edit)
+  // but ID-keyed in the multi set. Convert between the two so a measure works in both. (B569)
+  const measureSelRef = (ref) => (ref && ref.kind === "measure" && ref.id != null) ? { kind: "measure", i: measures.findIndex((m) => m.id === ref.id) } : ref;
   // Seed an empty multi-set with the current single selection so click-A then Ctrl/Shift-click-B
-  // gives {A,B}, not just {B}. Only the multi-movable kinds (el/markup/measure) seed in. (B569)
-  const seedMulti = (s) => (s.length || !sel || !["el", "markup", "measure"].includes(sel.kind)) ? s : [sel];
+  // gives {A,B}, not just {B}. Only the multi-movable kinds (el/markup/measure) seed in; an
+  // index-keyed measure `sel` is converted to its id-keyed multi ref so it actually participates. (B569)
+  const seedMulti = (s) => {
+    if (s.length || !sel || !["el", "markup", "measure"].includes(sel.kind)) return s;
+    if (sel.kind === "measure") { const m = measures[sel.i]; return m ? [{ kind: "measure", id: m.id }] : s; }
+    return [sel];
+  };
   // snap comes from the global pref (a tool mode), never the per-site saved value.
   const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}), snap: loadSnapPref() }));
   const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
@@ -3176,7 +3184,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ...pickInMarquee(measures, box, { bboxOf: featBBox, refOf: (m) => ({ kind: "measure", id: m.id }) }),
       ];
       setMulti(picked);
-      setSel(picked.length === 1 ? picked[0] : null);
+      // A lone pick becomes the single `sel`; a measure must use its INDEX form (B569 — else its
+      // delete/highlight/vertex-edit, all keyed on sel.i, silently no-op).
+      setSel(picked.length === 1 ? measureSelRef(picked[0]) : null);
       setMarquee(null); drag.current = null;
       if (tool === "marquee") setTool("select"); // hand the live selection to the move tool (don't clear it via selectTool)
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}

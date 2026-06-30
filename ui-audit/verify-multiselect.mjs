@@ -20,7 +20,8 @@ const mkSite = () => ({ id: A_ID, groupId: A_ID, site: "Verify Multiselect", nam
   parcels: [], els: [
     { id: "b1", type: "building", cx: 60, cy: 0, w: 180, h: 140, rot: 0, dock: "none" },
     { id: "p1", type: "parking", cx: 380, cy: 0, w: 180, h: 140, rot: 0 },
-  ], measures: [], callouts: [], markups: [], settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now() });
+  ], measures: [{ id: "meas1", mode: "line", pts: [{ x: 90, y: 130 }, { x: 290, y: 130 }] }],
+  callouts: [], markups: [], settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now() });
 
 const seedScript = `(() => { try {
   localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [A_ID]: mkSite() })}));
@@ -68,6 +69,19 @@ const selChromeCount = () => page.evaluate(() => {
   return n;
 });
 const bbox = (sel) => page.evaluate((s) => { const el = document.querySelector(s); if (!el) return null; const b = el.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height }; }, sel);
+// The seeded distance measurement renders a colored polyline (accent #c2410c when calibrated /
+// amber #b45309 when not) whose stroke-width is 2.5 when SELECTED, 1.5 otherwise — a direct read
+// on whether `sel` is usable. (The invisible 14-px hit path is skipped via the color filter.)
+const measurePoly = () => page.evaluate(() => {
+  const c = new Set(["#c2410c", "#b45309"]);
+  for (const pl of document.querySelectorAll("svg polyline")) {
+    if (c.has((pl.getAttribute("stroke") || "").toLowerCase())) {
+      const b = pl.getBoundingClientRect();
+      return { present: true, sw: pl.getAttribute("stroke-width"), x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    }
+  }
+  return { present: false };
+});
 const drag = async (from, to) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2); await page.mouse.move(to.x, to.y); await page.mouse.move(to.x, to.y); await page.mouse.up(); await page.waitForTimeout(300); };
 const modClick = async (pt, key) => { await page.keyboard.down(key); await page.mouse.click(pt.x, pt.y); await page.keyboard.up(key); await page.waitForTimeout(200); };
 
@@ -80,7 +94,18 @@ await marqueeBtn.click();
 await page.waitForTimeout(200);
 log((await marqueeBtn.getAttribute("aria-pressed")) === "true", "B570 selecting Marquee LIGHTS the button (aria-pressed=true) — clear active feedback");
 
+/* ── B569 regression: a marquee selecting a LONE measurement must produce a usable single
+      selection (measures are index-keyed in single-select; the marquee writes id-keyed refs). ── */
+const meas0 = await measurePoly();
+log(meas0.present, "a measurement is on the canvas");
+await drag({ x: meas0.x - 70, y: meas0.y - 45 }, { x: meas0.x + 70, y: meas0.y + 45 }); // box just the measure
+const meas1 = await measurePoly();
+log(meas1.present && meas1.sw === "2.5", `B569 marquee on a lone measurement HIGHLIGHTS it (stroke-width=${meas1.sw}) — single sel is usable`);
+await page.keyboard.press("Delete"); await page.waitForTimeout(300);
+log(!(await measurePoly()).present, "B569 Delete removed the single marquee-selected measurement (sel.i was valid)");
+
 // Drag a box around BOTH elements → both selected into the shared set.
+await marqueeBtn.click(); await page.waitForTimeout(150); // re-arm (the measure marquee handed back to Select)
 let b = await centerOf("#f3ece1"), p = await centerOf("#cdd7dd");
 log(!!b && !!p, `two separate elements present (building ${!!b}, parking ${!!p})`);
 const box = await bbox("svg");
