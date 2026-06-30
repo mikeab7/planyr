@@ -238,6 +238,10 @@ input, textarea {
 
 input, select, button, textarea { font-family: inherit; }
 
+/* Dialog inputs (e.g. the auth modal) double their placeholder as a hint; the UA default
+   gray fails AA on the white panel, so pin it to a token that clears 4.5:1 in both themes. */
+[role="dialog"] input::placeholder { color: var(--text-tertiary); opacity: 1; }
+
 /* ---- interaction states (inline styles can't express these) ---- */
 button { transition: filter .12s ease, background-color .12s ease, border-color .12s ease, box-shadow .12s ease, color .12s ease, transform .05s ease; }
 button:hover:not(:disabled) { filter: brightness(.97); }
