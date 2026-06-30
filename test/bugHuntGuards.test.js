@@ -276,4 +276,22 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(dr).toMatch(/const colorSessionRef = useRef\(null\)/);
     expect(dr).toMatch(/if \(opts\.live\) \{\s*if \(colorSessionRef\.current !== key\) \{ pushHistory\(\); colorSessionRef\.current = key; \}/);
   });
+
+  it("B579: the Stitcher detail popup releases pointer capture on pointercancel (no stuck grab)", () => {
+    const src = read("../src/workspaces/doc-review/Stitcher.jsx");
+    // onPointerCancel must release capture, matching onPointerUp — not just clear drag state
+    expect(src).toMatch(/onPointerCancel=\{\(e\) => \{ detailDrag\.current = null; try \{ e\.currentTarget\.releasePointerCapture\(e\.pointerId\)/);
+  });
+
+  it("B579: reviewStore deleteReview clears the local mirror only after a successful cloud delete", () => {
+    const src = read("../src/workspaces/doc-review/lib/reviewStore.js");
+    // the unconditional pre-delete clearDraft is gone; it now runs only on !error
+    expect(src).not.toMatch(/\}\s*catch \(_\) \{\}\s*\n\s*if \(uid\) clearDraft\(uid, id\);/);
+    expect(src).toMatch(/if \(!error && uid\) clearDraft\(uid, id\)/);
+  });
+
+  it("B579: DocReview warns on a genuine signed-in PDF store failure (not oversize, not logged-out)", () => {
+    const src = read("../src/workspaces/doc-review/DocReview.jsx");
+    expect(src).toMatch(/if \(!r\.ok && !r\.oversize && \(await cloudReady\(\)\)\)/);
+  });
 });

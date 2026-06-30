@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickScaleBar, furnitureLayout, buildSheetFurnitureSvg, buildScreenFurnitureSvg } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+import { pickScaleBar, furnitureLayout, buildSheetFurnitureSvg, buildScreenFurnitureSvg, chooseFurnitureCorners } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
 
 const NICE = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
 
@@ -67,8 +67,13 @@ describe("furnitureLayout — both plates sit wholly inside the safe area (no cl
     expect(disjoint).toBe(true);
   });
 
-  it("the arrow is a modest ~0.5 in tall on a letter sheet (≈0.06 of the short side)", () => {
-    expect(L.north.arrowH).toBeCloseTo(L.refS * 0.06, 6);
+  it("the arrow is a modest ~0.35 in tall on a letter sheet (≈0.05 of the short side)", () => {
+    expect(L.north.arrowH).toBeCloseTo(L.refS * 0.05, 6);
+  });
+
+  it("the whole north plate stays compact (≤ ~0.10 of the short side, not the old ~0.11+)", () => {
+    // NEW-1: the plate must hug its glyph, not balloon ~30% past it.
+    expect(L.north.plateH).toBeLessThan(L.refS * 0.1);
   });
 
   it("the scale bar encodes a real round distance as user units (feet / ftPerUnit)", () => {
@@ -106,6 +111,35 @@ describe("buildSheetFurnitureSvg — renders the expected sheet furniture", () =
     expect(svg).not.toContain("rotate(");
     const turned = buildSheetFurnitureSvg({ ...frame, bearingDeg: 30 });
     expect(turned).toContain("rotate(-30");
+  });
+});
+
+describe("chooseFurnitureCorners — no-occlude placement (NEW-1)", () => {
+  const fr = { x: 0, y: 0, w: 1000, h: 800, inset: 20 };
+  const bar = { plateW: 200, plateH: 70 };
+  const north = { plateW: 70, plateH: 90 };
+
+  it("with no obstacles, defaults to bar=br / north=tl (historical layout)", () => {
+    const p = chooseFurnitureCorners({ ...fr, bar, north, obstacles: null });
+    expect(p.bar.corner).toBe("br");
+    expect(p.north.corner).toBe("tl");
+  });
+
+  it("places furniture away from plan content, in two different corners", () => {
+    // A building occupying the center + bottom-right (where the bar would default).
+    const obstacles = [{ x: 350, y: 300, w: 600, h: 480 }];
+    const p = chooseFurnitureCorners({ ...fr, bar, north, obstacles });
+    expect(p.bar.corner).not.toBe(p.north.corner);
+    // the bottom-right is occupied, so the bar must avoid it
+    expect(p.bar.corner).not.toBe("br");
+  });
+
+  it("the chosen corners actually overlap content less than the occupied corner would", () => {
+    const obstacles = [{ x: 600, y: 450, w: 400, h: 350 }]; // fills bottom-right
+    const p = chooseFurnitureCorners({ ...fr, bar, north, obstacles });
+    const barBox = { x: p.bar.tx, y: p.bar.ty, w: bar.plateW, h: bar.plateH };
+    const ov = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    expect(ov(barBox, obstacles[0])).toBe(0); // a clear corner exists and was chosen
   });
 });
 

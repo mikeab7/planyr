@@ -43,12 +43,18 @@ export function imageLayerOptions(cfg, opacity, pane, { proxy = false } = {}) {
 }
 
 /* esri featureLayer (vector FeatureServer) options. The style closure carries the
- * current opacity; nothing here filters features. */
+ * current opacity; nothing here filters features. A layer may supply a PER-FEATURE
+ * `styleFn(props, opacity)` (e.g. road authority colored by maintainer) — then the
+ * style is derived per feature from its attributes; otherwise a single flat style.
+ * `cfg.fields` (optional) limits the attributes fetched (smaller payload for a dense
+ * statewide layer); `cfg.minZoom` gates a dense layer so it never paints at metro scale. */
 export function featureLayerOptions(cfg, opacity, pane) {
-  return {
-    url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: false,
-    style: () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity, fillOpacity: 0 }),
-  };
+  const o = { url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: false };
+  if (cfg.fields) o.fields = cfg.fields;
+  o.style = typeof cfg.styleFn === "function"
+    ? (feature) => cfg.styleFn(feature && feature.properties, opacity)
+    : () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity, fillOpacity: 0 });
+  return o;
 }
 
 /* Retry policy for a FeatureServer `requesterror` (NEW-5/B287). esri-leaflet issues its

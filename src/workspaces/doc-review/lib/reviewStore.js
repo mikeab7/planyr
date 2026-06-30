@@ -250,10 +250,14 @@ export async function deleteReview(id) {
       if (files && files.length) await supabase.storage.from(BUCKET).remove(files.map((f) => `${uid}/${id}/${f.name}`));
     }
   } catch (_) {}
-  if (uid) clearDraft(uid, id);
   // Scope by id only; RLS decides (own review OR team-admin on a shared one). A user_id filter
   // would block an admin from deleting a teammate's shared review, which the policy permits.
   const { error } = await supabase.from("doc_reviews").delete().eq("id", id);
+  // B579: clear the localStorage mirror only AFTER the cloud delete succeeds. Clearing it first
+  // (the old order) meant a failed delete (network/auth) left the cloud row alive but the local
+  // mirror gone → the row stayed in the library yet could no longer auto-resume; keep them in
+  // step so a failed delete leaves a fully consistent, retry-able state.
+  if (!error && uid) clearDraft(uid, id);
   return { ok: !error, error: error ? error.message : null };
 }
 

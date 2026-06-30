@@ -242,7 +242,9 @@ export const parseFlexDate = s => {
 
 export const renumberTasks = (tasks) => {
   const map = {};
-  tasks.forEach((t, i) => { map[t.id] = i + 1; });
+  // B568: first-occurrence wins on a duplicate id (see index.html) — original task in visual order
+  // keeps the reference, instead of the last occurrence silently capturing it. No-op for clean data.
+  tasks.forEach((t, i) => { if (!(t.id in map)) map[t.id] = i + 1; });
   return tasks.map((t, i) => ({
     ...t,
     id: i + 1,
