@@ -586,3 +586,103 @@ describe("scheduleExportName — matches the Site Planner PDF filename format", 
     expect(E.scheduleExportName([{ name: 'A/B: C* <x>|2' }], D)).toBe("2026.06.27 A B C x 2 - Schedule");
   });
 });
+
+// ── Scheduler bug-batch (2026-06-30) — "find and debug and ship fixes" ──────────────────────────
+// Twenty real bugs found by an adversarial bug hunt over public/sequence/index.html + the React
+// shell. Runtime tests for the engine-level fixes (parseFlexDate); anti-drift source-presence
+// assertions for the App-level fixes (same style as the blocks above — the App code isn't
+// importable, so we assert the fix still exists in the real source).
+
+describe("parseFlexDate — ISO fast-path must reject impossible calendar dates (bug-batch #1)", () => {
+  it("rejects impossible ISO dates the same way the slash path does", () => {
+    expect(E.parseFlexDate("2026-02-30")).toBeNull(); // was returned verbatim → pd() rolled it to Mar 2
+    expect(E.parseFlexDate("2026-04-31")).toBeNull();
+    expect(E.parseFlexDate("2026-13-01")).toBeNull();
+    expect(E.parseFlexDate("2026-00-15")).toBeNull();
+    expect(E.parseFlexDate("2026-06-00")).toBeNull();
+  });
+  it("still accepts real ISO dates unchanged", () => {
+    expect(E.parseFlexDate("2026-02-28")).toBe("2026-02-28");
+    expect(E.parseFlexDate("2026-06-22")).toBe("2026-06-22");
+    expect(E.parseFlexDate("2024-02-29")).toBe("2024-02-29"); // leap day
+  });
+});
+
+describe("anti-drift: the scheduler bug-batch fixes still exist in the real source", () => {
+  const src  = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs  = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("#1 parseFlexDate ISO fast-path round-trips through the calendar check (source + mirror)", () => {
+    expect(src).toMatch(/const isoM = s\.match\(/);
+    expect(src).toMatch(/chk\.getMonth\(\) \+ 1 === Mo && chk\.getDate\(\) === Da/);
+    expect(mjs).toMatch(/const isoM = s\.match/);
+  });
+  it("#2 concurrency guard treats an unknown base rev as 0 (no stale overwrite on the seed/offline path)", () => {
+    expect(src).toMatch(/cloudRev > \(knownRev\[k\] \|\| 0\)/);
+  });
+  it("#3 grid zoom is adopted from persisted data after the async load", () => {
+    expect(src).toMatch(/if \(data && typeof data\.gridZoom === "number"\) setGridZoom\(data\.gridZoom\);/);
+  });
+  it("#4 a narrow viewport NEVER mutates the persisted view (render-time gating only)", () => {
+    expect(src).not.toMatch(/d\.view = "grid"/);          // all three load-path mutations removed
+    expect(src).toMatch(/\(isMobile\?"grid":data\.view\)==="split"/);
+  });
+  it("#5 undo/redo push the LIVE current state (dataRef.current), not the stale closure", () => {
+    expect(src).toMatch(/future\.current = \[\.\.\.future\.current, dataRef\.current\]/);
+    expect(src).toMatch(/history\.current = \[\.\.\.history\.current, dataRef\.current\]/);
+  });
+  it("#6 cut+paste rewires every remaining task's predecessors onto the moved subtree's new ids", () => {
+    expect(src).toMatch(/idMap\[p\.id\] !== undefined \? \{ \.\.\.p, id: idMap\[p\.id\] \} : p/);
+  });
+  it("#7 commit() still commits the focused name/notes/predecessors cell under a range selection", () => {
+    expect(src).toMatch(/never range-filled \(filling one name across many rows is destructive\)/);
+  });
+  it("#8 autoSizeCol measures an empty date as nothing, not 'NaN/NaN/'", () => {
+    expect(src).toMatch(/case 'start': case 'end': \{ if\(!t\[colKey\]\)\{ val=''; break; \}/);
+  });
+  it("#9 the on-screen Gantt axis span is capped so a far-future date can't freeze the tab", () => {
+    expect(src).toMatch(/const MAX_SPAN_DAYS = 365 \* 100;/);
+    expect(src).toMatch(/totD: Math\.min\(dif\(mn, mx\), MAX_SPAN_DAYS\)/);
+  });
+  it("#10 the dependency y-helpers test the summary case before the milestone case (both paths)", () => {
+    expect(src).toMatch(/test this BEFORE the milestone case/);     // on-screen depYCenter
+    expect(src).toMatch(/test summary BEFORE milestone/);           // export edgeYOf
+  });
+  it("#11 on-screen dependency connectors skip unparseable-date endpoints (mirrors the export)", () => {
+    expect(src).toMatch(/isNaN\(pd\(pred\.start\)\) \|\| isNaN\(pd\(pred\.end\)\) \|\| isNaN\(pd\(task\.start\)\)/);
+  });
+  it("#12 the PDF split-Gantt slices are guarded on a non-null svgEl", () => {
+    expect(src).toMatch(/if\(pr\.svgEl\)\{/);
+    expect(src).toMatch(/a project filtered to zero rows yields an empty Gantt/);
+  });
+  it("#13 the @page size uses explicit orientation-swapped dimensions (valid for Tabloid too)", () => {
+    expect(src).toMatch(/@page\{size:\$\{pgW\}in \$\{pgR\}in;/);
+    expect(src).not.toMatch(/@page\{size:\$\{ps\.css\} \$\{cfg\.orientation\}/);
+  });
+  it("#16 approving a suggestion only attaches a note when the reviewer typed one", () => {
+    expect(src).toMatch(/const noteTxt = String\(noteText \|\| ""\)\.trim\(\);/);
+  });
+  it("#17 the owner ContactPicker only ghost-accepts on Enter when the typed text is a NEW name", () => {
+    expect(src).toMatch(/else if \(ghostText && prediction && isNewName\) onCommit\(prediction\.name\);/);
+  });
+  it("#18 the grid uses rolled child health for every parent (collapsed or expanded)", () => {
+    expect(src).toMatch(/A parent ALWAYS reflects rolled-up child health/);
+    expect(src).toMatch(/const displayHealth = task\.hasChildren\s*\n\s*\? \(rolledHealthMap/);
+  });
+  it("#15 MasterView keys cell selection to the RENDERED columns (displayCols)", () => {
+    expect(src).toMatch(/const ci = displayCols\.indexOf\(col\);/);
+  });
+  it("#14 MasterView shows the empty-state row whenever NOTHING is displayed (filtered or empty)", () => {
+    expect(src).toMatch(/\{sortedRows\.length===0 && \(/);
+  });
+  it("#19 floating (nth-weekday) holidays serialize with the local-calendar formatter (source + mirror)", () => {
+    expect(src).not.toMatch(/fd\(nthWeekday\(/);            // all converted to fdLocal
+    expect(src).toMatch(/fdLocal\(nthWeekday\(y,11,4,4\)\)/);
+    expect(mjs).not.toMatch(/fd\(nthWeekday\(/);
+    expect(mjs).toMatch(/fdLocal\(nthWeekday\(y,5,-1,1\)\)/);
+  });
+  it("#20 the nav-request handshake reply carries the cross-module link fields (≥2 emit sites)", () => {
+    const hits = src.match(/linkedSiteId: p\.linkedSiteId \?\? null/g) || [];
+    expect(hits.length).toBeGreaterThanOrEqual(2); // primary data-change emit + nav-request reply
+  });
+});

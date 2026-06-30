@@ -9,7 +9,7 @@ import reactHooks from "eslint-plugin-react-hooks";
  * the recommended *correctness* rules' essentials and leave stylistic rules off.
  */
 export default [
-  { ignores: ["dist/**", "node_modules/**"] },
+  { ignores: ["dist/**", "node_modules/**", "ui-audit/.cache-vendor/**"] },  // vendored 3rd-party libs the scheduler boot-check downloads (gitignored; minified, not ours to lint)
   {
     files: ["**/*.{js,jsx}"],
     plugins: { "react-hooks": reactHooks },
