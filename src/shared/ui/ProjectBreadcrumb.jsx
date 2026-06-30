@@ -226,7 +226,15 @@ export default function ProjectBreadcrumb({
     setEditingId(null);
     if (!v) return; // reject empty/whitespace-only — keep the prior name
     if (onRenameProject) onRenameProject(id, v);
-    else { storeRename(id, v); refresh(); notifyStoreChange(); }
+    else storeRename(id, v);
+    // Reflect the new name immediately. Uncontrolled mode owns the local `internalProjects`
+    // list, and a same-tab store write does NOT fire the native 'storage' event — so without an
+    // explicit refresh the just-edited row (and every other planarfit:sites surface) keeps the
+    // OLD name and the rename reads as if it reverted. This must run for BOTH branches: the Site
+    // Planner supplies onRenameProject yet is still UNcontrolled, and the old code only refreshed
+    // in the bare `else`, so that path never updated. Controlled mode (Schedule) gets its list
+    // pushed back through the bridge prop, so skip it there. (rename-revert)
+    if (!controlled) { refresh(); notifyStoreChange(); }
   };
   const doDelete = (id) => {
     const wasCurrent = id === currentProject?.id;
