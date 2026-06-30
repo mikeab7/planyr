@@ -3,6 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Front door (marketing landing): a BRAND-NEW visitor who lands on "/" with no app
+         data, no signed-in session, no deep-link hash, and no explicit ?app intent is sent
+         to the marketing page at /landing/. Returning users (any planyr/supabase data in
+         localStorage), deep links (#/…), and the landing's own "Start a site" links (/?app)
+         all fall through and boot the app exactly as before — so nobody who already uses
+         Planyr is disrupted. Runs FIRST, before any app work, and uses location.replace so
+         the back button can't loop. /landing/ has no such redirect, so there is no loop. -->
+    <script>
+      (function () {
+        try {
+          if (navigator.webdriver) return; // never redirect automated browsers (e2e / ui-audit)
+          var h = window.location.hash || "";
+          if ((h && h !== "#") || /[?&]app\b/.test(window.location.search)) return; // explicit app entry
+          var returning = false;
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i) || "";
+            if (k.indexOf("planarfit:") === 0 || /^sb-.*-auth-token$/.test(k)) { returning = true; break; }
+          }
+          if (!returning) window.location.replace("/landing/");
+        } catch (e) { /* never block app boot */ }
+      })();
+    </script>
     <!-- Mobile pinch fix: on iOS Safari a two-finger pinch on the page zooms the whole
          document and, at minimum scale, pops the "show all tabs" overview — hijacking the
          gesture the user meant for the map/planner. The map (Leaflet) and the planner canvas
