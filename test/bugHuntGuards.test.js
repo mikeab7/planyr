@@ -65,6 +65,15 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/M_TO_FT = 3937 \/ 1200/);        // US survey foot, matching the EPSG:2278 spine
   });
 
+  it("B603: the 3DEP elevation overlay uses the exact ArcGIS rasterFunction template name", () => {
+    const src = read("../src/workspaces/site-planner/lib/layers.js");
+    // The USGS press-release PROSE ("Elevation Tinted Hillshade") is NOT a valid
+    // rasterFunctionInfos[].name — exportImage errors on it and the overlay renders blank.
+    expect(src).not.toMatch(/rendering: "Elevation Tinted Hillshade"/);
+    // The real 3DEP template name (verbatim, "Hillshade <modifier>" like its siblings).
+    expect(src).toMatch(/rendering: "Hillshade Elevation Tinted"/);
+  });
+
   it("B534/B535: the Doc Review boot-resume IIFEs handle their own rejection (no unhandled promise)", () => {
     const stitch = read("../src/workspaces/doc-review/Stitcher.jsx");
     const dr = read("../src/workspaces/doc-review/DocReview.jsx");

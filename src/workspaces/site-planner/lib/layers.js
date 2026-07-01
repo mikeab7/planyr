@@ -156,7 +156,13 @@ export const EVIDENCE = {
   elevation: {
     kind: "esriImage", label: "Elevation / hillshade (USGS 3DEP)",
     url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
-    rendering: "Elevation Tinted Hillshade", opacity: 0.55,
+    // B603: the rasterFunction name must EXACTLY match one of the service's published
+    // rasterFunctionInfos[].name, or exportImage returns an error tile and the overlay
+    // renders blank. The 3DEP templates are named "Hillshade <modifier>" ("Hillshade Gray",
+    // "Hillshade Multidirectional", "Hillshade Elevation Tinted"). This was "Elevation Tinted
+    // Hillshade" — the USGS press-release PROSE wording, which is NOT a valid template name,
+    // so the tinted-hillshade overlay never painted. Do NOT reorder back to the prose form.
+    rendering: "Hillshade Elevation Tinted", opacity: 0.55,
     note: "USGS 3DEP LiDAR bare-earth DEM — screening only, verify with survey. The cross-section tool samples it.",
   },
 };
