@@ -274,7 +274,30 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // otherwise a live stroke-color change would be hidden under the selection highlight.
     expect(src).toMatch(/const nStroke = m\.stroke;/);
     expect(src).toMatch(/const nsw = sw \+ \(isSel \? 1 : 0\);/);
-    expect(src).toMatch(/const common = \{ stroke: nStroke, strokeWidth: nsw,/);
+    // B617: the on-screen width is the zoom-scaled vsw (held constant relative to the drawing).
+    expect(src).toMatch(/const common = \{ stroke: nStroke, strokeWidth: vsw,/);
+  });
+
+  it("B617: linear stroke weights scale with zoom (strokeZoom), NOT fixed screen px", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the pure clamp helper exists and is clamped both ends (floor + relative ceil)
+    expect(src).toMatch(/const strokeZoom = \(base, zk\) => Math\.max\(STROKE_ZOOM_FLOOR, Math\.min\(base \* zk, base \* 3\.5\)\);/);
+    // the markup layer computes the zoom-scaled width and uses it
+    expect(src).toMatch(/const vsw = strokeZoom\(nsw, zk\);/);
+    // roads-as-lines: the centerline road pavement edge + curb stripes scale too
+    expect(src).toMatch(/stroke=\{stroke\} strokeWidth=\{strokeZoom\(isSel \? st\.weight \+ 1 : st\.weight, zk\)\}/);
+  });
+
+  it("B619: selecting an object never recolors it to the app accent (handle-based selection)", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the neutral blue selection chrome + white handle constants exist (real hexes, not var() tokens)
+    expect(src).toMatch(/const SEL_BLUE = "#2563eb";/);
+    expect(src).toMatch(/const SEL_HANDLE_FILL = "#ffffff";/);
+    // NO canvas object stroke is recolored to PAL.accent on selection anymore
+    expect(src).not.toMatch(/isSel \? PAL\.accent : /);
+    expect(src).not.toMatch(/isSel \? selStroke : st\.stroke/);
+    // the callout border keeps the callout's own color when selected
+    expect(src).toMatch(/const border = st\.stroke;/);
   });
 
   it("B567: shared ColorControl fires live on input + Doc Review coalesces it to one undo frame", () => {
