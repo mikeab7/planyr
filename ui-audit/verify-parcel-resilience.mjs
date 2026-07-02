@@ -34,10 +34,12 @@ page.on("pageerror", (e) => { pageErrors.push(String(e)); console.log("  [pageer
 page.on("console", (m) => { if (m.type() === "error") { consoleErrors.push(m.text()); console.log("  [console.error]", m.text()); } });
 
 // Watch which CAD hosts the app actually reaches (proves the flow ran end-to-end).
+// FBCAD is now the Esri-hosted layer (org D4saGHECICkCeoJm on services2.arcgis.com),
+// not the retired self-hosted gis.fbcad.org.
 const hostHits = { fbcad: 0, hctx: 0, txgio: 0 };
 page.on("request", (r) => {
   const u = r.url();
-  if (u.includes("gis.fbcad.org")) hostHits.fbcad++;
+  if (u.includes("D4saGHECICkCeoJm") || u.includes("gis.fbcad.org")) hostHits.fbcad++;
   else if (u.includes("gis.hctx.net")) hostHits.hctx++;
   else if (u.includes("feature.geographic.texas.gov")) hostHits.txgio++;
 });

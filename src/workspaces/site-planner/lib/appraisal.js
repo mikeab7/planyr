@@ -14,11 +14,13 @@ export const APPR_FIELDS = [
   [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
   [/(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],
   [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
-  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area)/i, "Acreage"],
+  // ...|land_?size_?ac matches FBCAD's LANDSIZEAC (acres) — NOT LANDSIZEFT (square feet).
+  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area|land_?size_?ac)/i, "Acreage"],
   [/(land_?val|land_?mkt|land_?value)/i, "Land value"],
   [/(imp_?val|improvement_?val|bld_?val|impr_?val)/i, "Improvement value"],
   [/(tot_?val|market_?val|appr_?val|assessed_?val|total_?val|tot_?mkt|mkt_?val|mkt_?value)/i, "Total value"],
-  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type|stat_?land_?use)/i, "Land use"],
+  // ...|land_?state_?code matches FBCAD's Land_State_Code (state land-use category code).
+  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type|stat_?land_?use|land_?state_?code)/i, "Land use"],
   [/zoning/i, "Zoning"],
   [/(year_?built|yr_?built)/i, "Year built"],
   [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
