@@ -481,10 +481,13 @@ describe("anti-drift: the schedule-input fixes still exist in the real source", 
     expect(src).toMatch(/recomputeAfterStructureChange\(sortByVisualOrder\(final\)\)/);
   });
   it("setting Finish on a startless task anchors a 1-day task (no bare 'd', no lost date)", () => {
-    expect(src).toMatch(/if \(u\.end && !u\.start\) \{ u\.start = u\.end; u\.duration = 1; \}/);
+    // B616 added the durUnit/durValue stamp + finish-lock, but the startless-anchor invariant holds.
+    expect(src).toMatch(/if \(u\.end && !u\.start\) \{ u\.start = u\.end; u\.durUnit = 'd'; u\.durValue = 1; u\.duration = 1; \}/);
   });
-  it("the duration cell never renders a bare 'd'", () => {
-    expect(src).toMatch(/\(task\.duration === "" \|\| task\.duration == null\) \? "" : task\.duration \+ "d"/);
+  it("the duration cell never renders a bare 'd' (fmtTaskDuration guards blank)", () => {
+    // B615 routes the cell through fmtTaskDuration, which returns "" for a blank duration → no bare "d".
+    expect(src).toContain("fmtTaskDuration(task)");
+    expect(src).toMatch(/if \(t\.duration === "" \|\| t\.duration == null\) return "";/);
   });
   it("grid date input clears, gives feedback on junk, and rejects Finish-before-Start", () => {
     expect(src).toMatch(/Couldn't read that date/);
@@ -810,5 +813,260 @@ describe("anti-drift: the round-3 scheduler fixes still exist in the real source
   it("D3: cost/budget/actual rollups include the node's OWN value (no stranded parent value)", () => {
     expect(src).toMatch(/\(Number\(byId\[id\]\?\.cost\) \|\| 0\) \+ kids\.reduce\(\(s, c\) => s \+ costOf\(c\.id\), 0\)/);
     expect(src).toMatch(/\(Number\(byId\[id\]\?\.\[field\]\) \|\| 0\) \+ kids\.reduce/);
+  });
+});
+
+// ── B615 — duration input model: working-day weeks/days, calendar-real months/years ──────────
+describe("B615 parseDurationInput — unit-aware duration parsing (visible error, never silent 0)", () => {
+  it("days & weeks", () => {
+    expect(E.parseDurationInput("15d")).toEqual({ value: 15, unit: "d" });
+    expect(E.parseDurationInput("15 days")).toEqual({ value: 15, unit: "d" });
+    expect(E.parseDurationInput("3w")).toEqual({ value: 3, unit: "w" });
+    expect(E.parseDurationInput("3 weeks")).toEqual({ value: 3, unit: "w" });
+    expect(E.parseDurationInput("2wk")).toEqual({ value: 2, unit: "w" });
+  });
+  it("months & years", () => {
+    expect(E.parseDurationInput("2mo")).toEqual({ value: 2, unit: "mo" });
+    expect(E.parseDurationInput("2 months")).toEqual({ value: 2, unit: "mo" });
+    expect(E.parseDurationInput("1y")).toEqual({ value: 1, unit: "y" });
+    expect(E.parseDurationInput("1 year")).toEqual({ value: 1, unit: "y" });
+    expect(E.parseDurationInput("3yrs")).toEqual({ value: 3, unit: "y" });
+  });
+  it("a bare number → days; an empty field → 0 days (a cleared cell = milestone, not an error)", () => {
+    expect(E.parseDurationInput("5")).toEqual({ value: 5, unit: "d" });
+    expect(E.parseDurationInput("0")).toEqual({ value: 0, unit: "d" });
+    expect(E.parseDurationInput("")).toEqual({ value: 0, unit: "d" });
+    expect(E.parseDurationInput("   ")).toEqual({ value: 0, unit: "d" });
+  });
+  it("decimals truncate to whole units (matches the existing addBD truncation)", () => {
+    expect(E.parseDurationInput("2.9w")).toEqual({ value: 2, unit: "w" });
+    expect(E.parseDurationInput("1.5mo")).toEqual({ value: 1, unit: "mo" });
+  });
+  it("an unparseable string returns {error} — the caller shows it, never coerces to 0", () => {
+    expect(E.parseDurationInput("abc").error).toBeTruthy();
+    expect(E.parseDurationInput("3x").error).toBeTruthy();
+    expect(E.parseDurationInput("-4").error).toBeTruthy();
+    expect(E.parseDurationInput("fortnight").error).toBeTruthy();
+  });
+});
+
+describe("B615 addCalendarMonths — calendar math with end-of-month clamp", () => {
+  it("clamps the day to the target month's last day", () => {
+    expect(E.addCalendarMonths("2026-01-31", 1)).toBe("2026-02-28");   // non-leap
+    expect(E.addCalendarMonths("2024-01-31", 1)).toBe("2024-02-29");   // leap
+    expect(E.addCalendarMonths("2026-03-31", -1)).toBe("2026-02-28");
+  });
+  it("plain month + year rollover, and one year = same day next year", () => {
+    expect(E.addCalendarMonths("2026-01-15", 2)).toBe("2026-03-15");
+    expect(E.addCalendarMonths("2026-11-15", 3)).toBe("2027-02-15");
+    expect(E.addCalendarMonths("2026-12-31", 1)).toBe("2027-01-31");
+    expect(E.addCalendarMonths("2026-03-10", 12)).toBe("2027-03-10");
+  });
+});
+
+describe("B615 rollForwardToWorkday — plain forward off a weekend/holiday", () => {
+  it("weekends roll to Monday; a working day is unchanged", () => {
+    expect(E.rollForwardToWorkday("2026-06-20")).toBe("2026-06-22"); // Sat → Mon
+    expect(E.rollForwardToWorkday("2026-06-21")).toBe("2026-06-22"); // Sun → Mon
+    expect(E.rollForwardToWorkday("2026-06-22")).toBe("2026-06-22"); // Mon (working)
+    expect(E.rollForwardToWorkday("2026-06-23")).toBe("2026-06-23"); // Tue (working)
+  });
+  it("a weekday HOLIDAY_SET date rolls forward to the next working day", () => {
+    const weekdayHoliday = [...E.HOLIDAY_SET].find(h => h.startsWith("2026-") && ![0,6].includes(new Date(h + "T12:00:00").getDay()));
+    expect(weekdayHoliday).toBeTruthy();
+    const rolled = E.rollForwardToWorkday(weekdayHoliday);
+    expect(rolled > weekdayHoliday).toBe(true);
+    const rd = new Date(rolled + "T12:00:00");
+    expect([0,6].includes(rd.getDay())).toBe(false);
+    expect(E.HOLIDAY_SET.has(rolled)).toBe(false);
+  });
+});
+
+describe("B615 workdaysBetween — closed-form count agrees with a day-by-day reference", () => {
+  const ref = (aIso, bIso) => {
+    let a = new Date(aIso + "T12:00:00"), b = new Date(bIso + "T12:00:00");
+    if (a > b) { const t = a; a = b; b = t; }
+    let c = 0; const cur = new Date(a);
+    while (cur <= b) { if (cur.getDay() !== 0 && cur.getDay() !== 6 && !E.HOLIDAY_SET.has(E.fd(cur))) c++; cur.setDate(cur.getDate() + 1); }
+    return c;
+  };
+  it("known spans", () => {
+    expect(E.workdaysBetween("2026-06-22", "2026-06-22")).toBe(1); // Mon inclusive
+    expect(E.workdaysBetween("2026-06-22", "2026-06-26")).toBe(5); // Mon–Fri
+    expect(E.workdaysBetween("2026-06-22", "2026-06-29")).toBe(6); // Mon–Fri + next Mon
+    expect(E.workdaysBetween("2026-06-26", "2026-06-22")).toBe(5); // order-independent
+  });
+  it("agrees with the reference across 400 spans that cross weekends AND federal holidays", () => {
+    const base = new Date("2026-01-01T12:00:00");
+    for (let i = 0; i < 400; i += 7) {
+      const a = new Date(base); a.setDate(a.getDate() + i);
+      const b = new Date(base); b.setDate(b.getDate() + i + (i % 37));
+      const aIso = E.fd(a), bIso = E.fd(b);
+      expect(E.workdaysBetween(aIso, bIso)).toBe(ref(aIso, bIso));
+    }
+  });
+});
+
+describe("B615 resolveDuration — days/weeks = working days · months/years = calendar-real", () => {
+  it("days & weeks resolve to a WORKING-day span (inclusive), matching calcEnd", () => {
+    const d10 = E.resolveDuration("2026-06-22", 10, "d");
+    expect(d10.duration).toBe(10);
+    expect(d10.end).toBe(E.calcEnd("2026-06-22", 10));
+    expect(E.workdaysBetween("2026-06-22", d10.end)).toBe(10);
+    const w3 = E.resolveDuration("2026-06-22", 3, "w");
+    expect(w3.duration).toBe(15);                                   // 3 weeks = 15 working days
+    expect(w3.end).toBe(E.calcEnd("2026-06-22", 15));
+  });
+  it("months add CALENDAR months + roll forward; the working-day count is DERIVED off the span", () => {
+    const r = E.resolveDuration("2026-01-15", 2, "mo");
+    expect(r.end).toBe(E.rollForwardToWorkday("2026-03-15"));        // 2 calendar months
+    expect(r.duration).toBe(E.workdaysBetween("2026-01-15", r.end)); // derived, never an input
+    // end-of-month clamp flows through
+    expect(E.resolveDuration("2026-01-31", 1, "mo").end).toBe(E.rollForwardToWorkday("2026-02-28"));
+  });
+  it("years = same day next year (+ roll forward)", () => {
+    expect(E.resolveDuration("2026-03-10", 1, "y").end).toBe(E.rollForwardToWorkday("2027-03-10"));
+  });
+  it("0 of any unit is a milestone; no start yields a blank end", () => {
+    expect(E.resolveDuration("2026-06-22", 0, "d")).toEqual({ end: "2026-06-22", duration: 0 });
+    expect(E.resolveDuration("2026-06-22", 0, "mo")).toEqual({ end: "2026-06-22", duration: 0 });
+    expect(E.resolveDuration("", 5, "d")).toEqual({ end: "", duration: 5 });
+    expect(E.resolveDuration("", 2, "mo")).toEqual({ end: "", duration: 0 });
+  });
+  it("ACCEPTED divergence: 4 weeks (20 wd) is NOT 1 month (calendar) — different measuring sticks", () => {
+    expect(E.resolveDuration("2026-06-22", 4, "w").duration).toBe(20);
+    expect(E.resolveDuration("2026-06-22", 4, "w").end)
+      .not.toBe(E.resolveDuration("2026-06-22", 1, "mo").end);
+  });
+});
+
+describe("B615 cascadeDates — unit-aware end derivation flows through the dependency chain", () => {
+  const leaf = (id, o) => ({ id, name: "t" + id, start: "2026-06-22", end: "", duration: 1, durUnit: "d", durValue: 1, predecessors: [], parentId: null, ...o });
+  it("a WEEK successor cascades as 5 working days per week", () => {
+    const out = E.cascadeDates([
+      leaf(1, { start: "2026-06-22", duration: 1, durValue: 1 }),
+      leaf(2, { durUnit: "w", durValue: 1, predecessors: [{ id: 1, type: "FS" }] }),
+    ]);
+    const t2 = out.find(t => t.id === 2);
+    expect(t2.start).toBe(E.addBD("2026-06-22", 1));      // FS: pred end + 1 BD
+    expect(t2.duration).toBe(5);                           // 1 week = 5 working days
+    expect(t2.end).toBe(E.calcEnd(t2.start, 5));
+  });
+  it("a MONTH successor cascades as calendar months, working-day count derived off the span", () => {
+    const out = E.cascadeDates([
+      leaf(1, { start: "2026-06-22", duration: 1, durValue: 1 }),
+      leaf(2, { durUnit: "mo", durValue: 2, predecessors: [{ id: 1, type: "FS" }] }),
+    ]);
+    const t2 = out.find(t => t.id === 2);
+    expect(t2.end).toBe(E.rollForwardToWorkday(E.addCalendarMonths(t2.start, 2)));
+    expect(t2.duration).toBe(E.workdaysBetween(t2.start, t2.end));
+  });
+});
+
+describe("B615 normalizeToV7 — legacy durations become unit 'd' with ZERO end-date shift", () => {
+  const legacy = () => ({ projects: { p1: { name: "P", tasks: [
+    { id: 1, name: "a", start: "2026-06-22", end: "2026-06-26", duration: 5, predecessors: [], parentId: null },
+    { id: 2, name: "b", start: "2026-07-06", end: "2026-07-06", duration: 1, predecessors: [], parentId: null },
+  ] } } });
+  it("stamps durUnit/durValue and preserves every end date (no silent shift)", () => {
+    const before = E.normalizeToV6(legacy());
+    const after = E.normalizeToV7(before);
+    const t = after.projects.p1.tasks;
+    expect(t[0]).toMatchObject({ durUnit: "d", durValue: 5, end: before.projects.p1.tasks[0].end });
+    expect(t[1]).toMatchObject({ durUnit: "d", durValue: 1, end: before.projects.p1.tasks[1].end });
+    // The before/after end-date diff the migration must surface: for legacy data it is EMPTY.
+    const shifted = t.filter((x, i) => x.end !== before.projects.p1.tasks[i].end);
+    expect(shifted).toHaveLength(0);
+  });
+  it("is idempotent (the _v7 flag short-circuits a second pass)", () => {
+    const once = E.normalizeToV7(E.normalizeToV6(legacy()));
+    const twice = E.normalizeToV7(once);
+    expect(twice._v7).toBe(true);
+    expect(twice.projects.p1.tasks).toEqual(once.projects.p1.tasks);
+  });
+});
+
+// ── B616 — a locked finish is a hard constraint (fixed point + loud conflict) ─────────────────
+describe("B616 startForEnd — back-calc a start that finishes ON a locked date", () => {
+  it("inverts calcEnd for the working-day span", () => {
+    expect(E.startForEnd("2026-06-26", 5)).toBe("2026-06-22"); // Fri, 5 wd → Mon
+    expect(E.startForEnd("2026-06-26", 1)).toBe("2026-06-26"); // 1-day / milestone
+    expect(E.startForEnd("2026-06-26", 0)).toBe("2026-06-26");
+    expect(E.startForEnd("", 5)).toBe("");
+  });
+});
+
+describe("B616 cascadeDates — a pinnedEnd task is a FIXED POINT, conflicts flagged loudly", () => {
+  const T2 = (id, o) => ({ id, name: "t" + id, start: "2026-06-22", end: "2026-06-22", duration: 1, durUnit: "d", durValue: 1, predecessors: [], parentId: null, ...o });
+  it("locked finish with no predecessors: end stays, start back-calcs, no conflict", () => {
+    const out = E.cascadeDates([T2(1, { start: "2026-06-22", end: "2026-06-26", duration: 5, durValue: 5, pinnedEnd: true })]);
+    const t = out.find(x => x.id === 1);
+    expect(t.end).toBe("2026-06-26");                    // never moved
+    expect(t.start).toBe("2026-06-22");                  // back-calc of 5 wd ending Fri
+    expect(t.finishConflict).toBe(false);
+  });
+  it("a predecessor chain that can't fit the duration flags a conflict, but NEVER moves the lock", () => {
+    const out = E.cascadeDates([
+      T2(1, { start: "2026-06-22", duration: 5, durValue: 5 }),                             // ends Fri 06-26
+      T2(2, { end: "2026-06-25", duration: 5, durValue: 5, pinnedEnd: true, predecessors: [{ id: 1, type: "FS" }] }),
+    ]);
+    const t2 = out.find(x => x.id === 2);
+    expect(t2.end).toBe("2026-06-25");                   // locked finish held, not overwritten/exceeded
+    expect(t2.finishConflict).toBe(true);                // chain needs more time than the lock allows
+  });
+  it("a predecessor chain with room does NOT flag a conflict", () => {
+    const out = E.cascadeDates([
+      T2(1, { start: "2026-06-01", duration: 1, durValue: 1 }),
+      T2(2, { end: "2026-07-31", duration: 5, durValue: 5, pinnedEnd: true, predecessors: [{ id: 1, type: "FS" }] }),
+    ]);
+    const t2 = out.find(x => x.id === 2);
+    expect(t2.end).toBe("2026-07-31");
+    expect(t2.finishConflict).toBe(false);
+  });
+  it("a successor cascades from the locked finish (the fixed point), not a floating end", () => {
+    const out = E.cascadeDates([
+      T2(1, { start: "2026-06-22", end: "2026-06-30", duration: 7, durValue: 7, pinnedEnd: true }),
+      T2(2, { duration: 1, durValue: 1, predecessors: [{ id: 1, type: "FS" }] }),
+    ]);
+    expect(out.find(x => x.id === 1).end).toBe("2026-06-30");
+    expect(out.find(x => x.id === 2).start).toBe(E.addBD("2026-06-30", 1));
+  });
+});
+
+// ── anti-drift: the B615/B616 engine lives in BOTH the source and the mirror ──────────────────
+describe("anti-drift: the B615/B616 duration + finish-lock engine exists in the real source", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("B615: the pure helpers are present in source AND mirror", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toContain("parseDurationInput");
+      expect(s).toContain("addCalendarMonths");
+      expect(s).toContain("rollForwardToWorkday");
+      expect(s).toContain("workdaysBetween");
+      expect(s).toContain("resolveDuration");
+      expect(s).toContain("normalizeToV7");
+    }
+  });
+  it("B615: the V7 migration is wired into the load pipeline (source + mirror)", () => {
+    expect(src).toMatch(/normalizeToV7\(normalizeToV6\(/);
+    expect(mjs).toMatch(/normalizeToV7\(normalizeToV6\(/);
+    expect(src).toContain("_v7");
+  });
+  it("B615: the duration cell renders the typed unit, parses via parseDurationInput", () => {
+    expect(src).toContain("fmtTaskDuration(task)");
+    expect(src).toMatch(/const parsed = parseDurationInput\(val\);/);
+    expect(src).toMatch(/if \(parsed\.error\) \{ showToast\(parsed\.error\); return; \}/);
+  });
+  it("B616: pinnedEnd is a fixed point + finishConflict flag in cascade (source + mirror)", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toMatch(/if \(t\.pinnedEnd && t\.end\)/);
+      expect(s).toContain("finishConflict");
+      expect(s).toContain("startForEnd");
+    }
+  });
+  it("B616: the finish lock icon + conflict banner are wired in the source UI", () => {
+    expect(src).toContain("Finish locked (hard constraint)");
+    expect(src).toMatch(/pinnedEnd: false, durValue: taskDurValue\(task\)/);      // unlock → flow
+    expect(src).toContain("locked finish date");                                  // the loud banner
   });
 });

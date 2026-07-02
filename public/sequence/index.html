@@ -1750,6 +1750,113 @@ const constrainedStartFrom = (pred, dep, taskDur) => {
 // end = last working day (inclusive). duration 0 = milestone (start=end)
 const calcEnd = (start, dur) => !start ? "" : dur === 0 ? start : addBD(start, Math.max(0, dur - 1));
 
+// ── Duration model (B615): days/weeks = WORKING days · months/years = CALENDAR-real ──────
+// Two measuring sticks keyed to the typed unit. `duration` stays the canonical WORKING-DAY
+// inclusive count every consumer already reads; durValue+durUnit carry the typed intent.
+// All pure + dependency-free + unit-tested (test/schedulerEngine.test.js via the .mjs mirror).
+//
+// Parse a typed duration → {value, unit} | {error}. Accepts 3w/3 weeks, 15d/15 days, 2mo/
+// 2 months, 1y/1 year, and a bare number → days. Empty = a cleared field → 0 days (milestone).
+// Anything else → {error} so the field shows a VISIBLE inline error — never a silent 0 (B615).
+const DUR_UNIT_ALIASES = [
+  { re: /^(mo|mos|month|months)$/,               unit: "mo" },
+  { re: /^(y|yr|yrs|year|years)$/,               unit: "y"  },
+  { re: /^(w|wk|wks|week|weeks)$/,               unit: "w"  },
+  { re: /^(d|day|days|wd|workday|workdays)$/,    unit: "d"  },
+];
+const parseDurationInput = raw => {
+  const str = String(raw == null ? "" : raw).trim().toLowerCase();
+  if (str === "") return { value: 0, unit: "d" };                       // cleared → milestone, not an error
+  const m = str.match(/^(-?\d+(?:\.\d+)?)\s*([a-z]*)$/);
+  if (!m) return { error: `Couldn't read "${String(raw).trim()}" — try 10d, 3w, 2mo, or 1y` };
+  let value = Math.trunc(Number(m[1]));
+  if (!Number.isFinite(value) || value < 0) return { error: `Duration can't be negative — try 10d, 3w, 2mo, or 1y` };
+  value = Math.min(value, 100000);                                      // upper clamp (fat-finger freeze guard)
+  const suffix = m[2];
+  if (suffix === "") return { value, unit: "d" };                       // bare number → days
+  const hit = DUR_UNIT_ALIASES.find(u => u.re.test(suffix));
+  if (!hit) return { error: `Unknown unit "${suffix}" — try d (days), w (weeks), mo (months), y (years)` };
+  return { value, unit: hit.unit };
+};
+// Add n calendar months to an ISO date, clamping to the target month's last day
+// (Jan 31 + 1mo → Feb 28/29). n may be negative. Pure — no HOLIDAY_SET, no weekends.
+const addCalendarMonths = (iso, n) => {
+  const mt = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+  if (!mt) return iso;
+  const y = +mt[1], mo0 = +mt[2] - 1, d = +mt[3];
+  const total = mo0 + Math.trunc(n);
+  const ty = y + Math.floor(total / 12);
+  const tm = ((total % 12) + 12) % 12;
+  const lastDay = new Date(ty, tm + 1, 0).getDate();                    // day 0 of next month = last day of this
+  const td = Math.min(d, lastDay);
+  return `${ty}-${String(tm + 1).padStart(2, "0")}-${String(td).padStart(2, "0")}`;
+};
+// Roll an ISO date FORWARD to the next working day if it lands on a weekend or a HOLIDAY_SET
+// date. Plain forward — NO month-crossing guard (owner decision, B615). A working day is unchanged.
+const rollForwardToWorkday = iso => {
+  const d = pd(iso);
+  if (isNaN(d)) return iso;
+  let steps = 0;
+  while ((d.getDay() === 0 || d.getDay() === 6 || HOLIDAY_SET.has(fd(d))) && steps++ < 4000) d.setDate(d.getDate() + 1);
+  return fd(d);
+};
+// Inclusive WORKING-day count between two ISO dates — CLOSED FORM (full-weeks×5 + partial-week
+// remainder, then subtract HOLIDAY_SET weekday hits); NO day-by-day loop (B615). Order-independent.
+// This is the DERIVED display count for a calendar (month/year) span — read off the resolved dates.
+const workdaysBetween = (aIso, bIso) => {
+  let a = pd(aIso), b = pd(bIso);
+  if (isNaN(a) || isNaN(b)) return 0;
+  if (a > b) { const t = a; a = b; b = t; }
+  const MS = 86400000;
+  const totalDays = Math.round((b - a) / MS) + 1;                       // inclusive span length in calendar days
+  const full = Math.floor(totalDays / 7);
+  let count = full * 5;
+  const rem = totalDays - full * 7;                                     // 0..6 leftover days, starting on a's weekday
+  const startDow = a.getDay();
+  for (let i = 0; i < rem; i++) { const dow = (startDow + i) % 7; if (dow !== 0 && dow !== 6) count++; }
+  for (const h of HOLIDAY_SET) {                                        // subtract holidays landing on a weekday in [a,b]
+    const hd = pd(h);
+    if (!isNaN(hd) && hd >= a && hd <= b) { const dow = hd.getDay(); if (dow !== 0 && dow !== 6) count--; }
+  }
+  return Math.max(0, count);
+};
+// Resolve a typed (value, unit) duration against a real start → {end, duration}. `duration` is
+// always the working-day inclusive count (the canonical field). d/w = working days; mo/y = calendar
+// add + roll-forward, with the working-day count DERIVED off the resolved span. No months→days factor.
+const DUR_WD_FACTOR = { d: 1, w: 5 };
+const resolveDuration = (start, value, unit) => {
+  const u = unit || "d";
+  const v = Math.max(0, Math.trunc(Number(value) || 0));
+  if (u === "d" || u === "w") {
+    const count = v * DUR_WD_FACTOR[u];
+    return { end: start ? calcEnd(start, count) : "", duration: count };
+  }
+  if (!start || v === 0) return { end: start && v === 0 ? start : "", duration: 0 };  // 0 = milestone / no anchor yet
+  const months = u === "y" ? v * 12 : v;
+  const end = rollForwardToWorkday(addCalendarMonths(start, months));
+  return { end, duration: workdaysBetween(start, end) };
+};
+// Read a task's typed duration into (value, unit) — defaulting legacy/parent tasks to days.
+const taskDurValue = t => (t.durValue != null ? t.durValue : (typeof t.duration === "number" ? t.duration : 0));
+const taskDurUnit  = t => t.durUnit || "d";
+const resolveTaskSpan = t => resolveDuration(t.start, taskDurValue(t), taskDurUnit(t));
+// Back-calculate the start that makes a `duration`-working-day bar finish ON `end` (working-day
+// inverse of calcEnd). Used for a locked finish (pinnedEnd, B616).
+const startForEnd = (end, duration) => !end ? "" : (duration <= 1 ? end : addBD(end, -(Math.max(1, duration) - 1)));
+// Display: a task's duration with its typed unit. Month/year bars also expose the derived
+// working-day count via the cell tooltip (nothing hidden — B615).
+const fmtTaskDuration = t => {
+  if (t.duration === "" || t.duration == null) return "";
+  const u = taskDurUnit(t);
+  return `${taskDurValue(t)}${u}`;
+};
+const durTooltip = t => {
+  const u = taskDurUnit(t);
+  if (u !== "mo" && u !== "y") return null;
+  const n = taskDurValue(t);
+  return `${n} ${u === "y" ? "year" : "month"}${n === 1 ? "" : "s"} ≈ ${t.duration} working day${t.duration === 1 ? "" : "s"} (calendar-based)`;
+};
+
 // Topological cascade: recompute start/end for all tasks driven by predecessors
 const cascadeDates = tasks => {
   const map = {};
@@ -1774,14 +1881,34 @@ const cascadeDates = tasks => {
   queue.forEach(id => {
     const t = map[id];
     const preds = t.predecessors.filter(p => map[p.id]);
-    // _pinStart preserves manually dragged/set positions. Duration-only edits (hasDirectEdit)
-    // let predecessors re-anchor the start so successors cascade correctly.
-    if (!preds.length || t.pinnedStart) { t.end = calcEnd(t.start, t.duration); return; }
+    // Locked FINISH (B616): the end is a FIXED POINT — successors cascade from it, the start
+    // back-calcs to preserve the working-day duration, and the end never moves/exceeds the lock.
+    // If the predecessor chain can't fit the duration before the locked finish, flag a LOUD
+    // conflict (t.finishConflict) rather than silently overwriting or overrunning the lock.
+    if (t.pinnedEnd && t.end) {
+      if (t.pinnedStart && t.start) {                                   // both endpoints pinned → span is fixed
+        t.duration = t.start > t.end ? t.duration : Math.max(0, workdaysBetween(t.start, t.end));
+        t.finishConflict = !!(t.start && t.start > t.end);
+      } else {
+        const backStart = startForEnd(t.end, t.duration);
+        t.start = backStart;
+        let conflict = false;
+        if (preds.length) {
+          const earliest = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean).reduce((a,b) => a>b?a:b, "");
+          if (earliest && earliest > backStart) conflict = true;       // chain forces a start too late to finish on time
+        }
+        t.finishConflict = conflict;
+      }
+      return;
+    }
+    t.finishConflict = false;
+    // pinnedStart preserves a manually set/dragged start; duration edits still re-derive the end.
+    if (!preds.length || t.pinnedStart) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
     const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
-    if (!starts.length) { t.end = calcEnd(t.start, t.duration); return; }
+    if (!starts.length) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
     const latest = starts.reduce((a,b) => a>b?a:b, starts[0] || t.start);
     t.start = latest;
-    t.end   = calcEnd(t.start, t.duration);
+    const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
   });
   return tasks.map(t => { const {_pinStart, __wasDirectEdit, ...rest} = map[t.id] || t; return rest; });
 };
@@ -1948,7 +2075,7 @@ const mkt = (id, name, start, dur, parentId=null, health="gray", predecessors=[]
   // empty until the user types one — calcEnd("", 0) is "" by design.
   const safeDur   = isBlank ? 0 : dur;
   return {
-    id, name, start: safeStart, end: calcEnd(safeStart, safeDur), duration: safeDur, predecessors, health,
+    id, name, start: safeStart, end: calcEnd(safeStart, safeDur), duration: safeDur, durUnit: "d", durValue: safeDur, predecessors, health,
     percentComplete: health==="green" ? 100 : health==="yellow" ? 40 : 0,
     parentId, responsibleParty: "", cost: "", notes: [], isExpanded: true,
   };
@@ -3605,9 +3732,17 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
       // Editing a predecessor clears any manual pin so the cascade controls the start — mirror updateTask
       // here, else the preview cascades a PINNED task in place while the real apply moves it (the preview lies).
       if ('predecessors' in patch) delete u.pinnedStart;
-      if ('duration' in patch && !('end' in patch)) u.end = calcEnd(u.start, u.duration);
-      else if ('start' in patch && !('end' in patch)) u.end = calcEnd(u.start, u.duration);
-      else if ('end' in patch && !('start' in patch)) u.duration = (u.start && u.end) ? Math.max(0, difBD(u.start, u.end) + 1) : "";
+      if ('duration' in patch && !('durValue' in patch) && !('durUnit' in patch)) { u.durUnit = 'd'; u.durValue = Math.max(0, Math.trunc(Number(patch.duration) || 0)); }
+      if (('durValue' in patch) || ('durUnit' in patch)) { u.durUnit = u.durUnit || 'd'; if (u.durValue == null) u.durValue = 0; }
+      const durEdited = ('duration' in patch) || ('durValue' in patch) || ('durUnit' in patch);
+      if ((durEdited || ('start' in patch)) && !('end' in patch)) {
+        if (!(u.pinnedEnd && u.end)) { const r = resolveDuration(u.start, taskDurValue(u), taskDurUnit(u)); u.end = r.end; u.duration = r.duration; }
+      }
+      else if ('end' in patch && !('start' in patch)) {
+        if (u.end && !u.start) { u.start = u.end; u.durUnit = 'd'; u.durValue = 1; u.duration = 1; }
+        else { u.duration = (u.start && u.end) ? Math.max(0, difBD(u.start, u.end) + 1) : ""; u.durUnit = 'd'; u.durValue = (typeof u.duration === 'number' ? u.duration : 0); }
+        u.pinnedEnd = !!u.end;
+      }
       if ('start' in patch) u.pinnedStart = true;
       return u;
     });
@@ -3694,7 +3829,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
     if (eff.patch.end && (eff.patch.duration == null || eff.patch.duration === '')) {
       dur = (fallbackStart && eff.patch.end) ? Math.max(0, difBD(fallbackStart, eff.patch.end) + 1) : dur;
     }
-    let prov = { id: newId, name: eff.patch.name.trim(), start: fallbackStart, end: '', duration: dur, predecessors: preds, health: eff.patch.health || 'gray', percentComplete: 0, parentId: parent ? parent.id : null, responsibleParty: eff.patch.responsibleParty || '', notes: [], isExpanded: true };
+    let prov = { id: newId, name: eff.patch.name.trim(), start: fallbackStart, end: '', duration: dur, durUnit: 'd', durValue: dur, predecessors: preds, health: eff.patch.health || 'gray', percentComplete: 0, parentId: parent ? parent.id : null, responsibleParty: eff.patch.responsibleParty || '', notes: [], isExpanded: true };
     prov.end = calcEnd(prov.start, prov.duration);
     let sim = cascadeDates([...proj.tasks, prov]); sim = rollupParentDates(sim);
     const c = sim.find(t => t.id === newId) || prov;
@@ -4419,6 +4554,31 @@ function App() {
       settings: d.settings ? {...DEFAULT_SETTINGS, ...d.settings, holidays:{...DEFAULT_HOLIDAYS,...(d.settings.holidays||{})}, customHealth: d.settings.customHealth||[], healthLabelOverrides: d.settings.healthLabelOverrides||{}} : {...DEFAULT_SETTINGS, holidays:{...DEFAULT_HOLIDAYS}}};
   };
 
+  // One-time migration to the B615 duration model: stamp durUnit/durValue onto every task. Pre-B615
+  // durations were ALL working-day counts, so legacy tasks become unit 'd', durValue = duration —
+  // which re-derives to the SAME end date (resolveDuration('d') === calcEnd, already applied by v6).
+  // A shifted end here would be a bug to SURFACE, not to move silently (see the before/after diff in
+  // ui-audit/stress/verify-b615-migration.mjs). Idempotent via _v7. Does NOT touch a locked finish.
+  const normalizeToV7 = d => {
+    if (!d || typeof d !== "object") d = {};
+    if (d._v7) return d;
+    const projects = {};
+    const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+    Object.entries(srcProjects).forEach(([id, proj]) => {
+      if (!proj || typeof proj !== "object") return;
+      const srcTasks = Array.isArray(proj.tasks) ? proj.tasks : [];
+      const tasks = srcTasks.filter(t => t && typeof t === "object").map(t => {
+        const durUnit = t.durUnit || "d";
+        const durValue = (t.durValue != null) ? t.durValue : (typeof t.duration === "number" ? t.duration : 0);
+        if (t.pinnedEnd && t.end) return {...t, durUnit, durValue};                 // locked finish is authoritative
+        const r = resolveDuration(t.start, durValue, durUnit);
+        return {...t, durUnit, durValue, duration: r.duration, end: r.end};
+      });
+      projects[id] = {...proj, tasks: rollupParentDates(tasks)};
+    });
+    return {...d, projects, _v7: true};
+  };
+
   // Ensure any new DEFAULT_HOLIDAYS keys (added in future versions) are merged in
   const ensureHolidays = d => {
     if (!d?.settings) return d;
@@ -4486,7 +4646,7 @@ function App() {
       // can't call normalizeIds/ensureContacts directly — those are scoped to this effect). Set
       // synchronously on mount, before the first await, so it's ready before any user import/restore.
       applyLoadedDataRef.current = (parsed) => {
-        let d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(parsed))));
+        let d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed)))));
         d._pinnedClean = true;
         HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
         Object.keys(d.projects).forEach(pid => {
@@ -4503,7 +4663,7 @@ function App() {
         // __PLANAR_DATA__ is the seed used only when Supabase has no record yet.
         const r = await window.storage.get("hs-v1");
         if (r) {
-          const d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(JSON.parse(r.value)))));
+          const d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(JSON.parse(r.value))))));
           // NOTE: a narrow viewport forces the GRID layout at RENDER time (see the body switch),
           // never by mutating the persisted `view` — baking "grid" into saved data let one phone
           // session overwrite the desktop's saved split/gantt preference across every device.
@@ -4526,7 +4686,7 @@ function App() {
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
         const seed = window.__PLANAR_DATA__ || SEED;
-        const d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(seed))));
+        const d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(seed)))));
           // Enforce predecessor relationships on load (seed data — no stale pins)
           HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
           d._pinnedClean = true;
@@ -4539,7 +4699,7 @@ function App() {
         if (window.__planarCloudError) setOfflineFallback(true);
         setData(d);
       } catch {
-        const d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(window.__PLANAR_DATA__ || SEED))));
+        const d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED)))));
         setOfflineFallback(true);
         setData(d);
       }
@@ -4575,7 +4735,10 @@ function App() {
       setData(d => {
         const newProjects = {};
         Object.entries(d.projects).forEach(([id, proj]) => {
-          let tasks = proj.tasks.map(t => ({...t, end: calcEnd(t.start, t.duration)}));
+          let tasks = proj.tasks.map(t => {
+            if (t.pinnedEnd && t.end) return t;                        // preserve a locked finish (B616) — never re-derive its end
+            const r = resolveTaskSpan(t); return {...t, end: r.end, duration: r.duration};  // unit-aware re-derive (days/weeks vs calendar)
+          });
           tasks = cascadeDates(tasks);
           tasks = rollupParentDates(tasks);
           newProjects[id] = {...proj, tasks};
@@ -5008,17 +5171,25 @@ function App() {
           // control this task's start. Clear any manual pin so it takes effect.
           delete u.pinnedStart;
         }
-        if ('duration' in updates && !('end' in updates))   u.end      = calcEnd(u.start, u.duration);
-        else if ('start' in updates && !('end' in updates)) u.end      = calcEnd(u.start, u.duration);
-        else if ('end' in updates && !('start' in updates)) {
-          // Setting a Finish on a task that has no Start: anchor a 1-day task on that date
-          // instead of leaving duration "" (which rendered a bare "d") and letting the
-          // cascade wipe the just-typed finish (calcEnd("",…) === "").
-          if (u.end && !u.start) { u.start = u.end; u.duration = 1; }
-          else u.duration = (u.start && u.end) ? Math.max(0, difBD(u.start, u.end) + 1) : 0;  // numeric 0, never "" (no bare "d")
+        // Fold a duration edit into the typed-intent model (durValue/durUnit); a legacy programmatic
+        // {duration} edit (range-fill / import) maps to days so back-compat consumers are unaffected.
+        if ('duration' in updates && !('durValue' in updates) && !('durUnit' in updates)) { u.durUnit = 'd'; u.durValue = Math.max(0, Math.trunc(Number(updates.duration) || 0)); }
+        if (('durValue' in updates) || ('durUnit' in updates)) { u.durUnit = u.durUnit || 'd'; if (u.durValue == null) u.durValue = 0; }
+        const durEdited = ('duration' in updates) || ('durValue' in updates) || ('durUnit' in updates);
+        if ((durEdited || ('start' in updates)) && !('end' in updates)) {
+          // Duration or start is the source of truth → derive end + working-day count from the unit.
+          // EXCEPT when a finish is locked (B616): the locked end wins; cascadeDates back-calcs the
+          // start and flags a conflict — never let a duration edit silently overwrite the lock.
+          if (!(u.pinnedEnd && u.end)) { const r = resolveDuration(u.start, taskDurValue(u), taskDurUnit(u)); u.end = r.end; u.duration = r.duration; }
         }
-        // Duration-only: pin start but flag as direct edit so cascadeDates re-anchors from predecessor
-        // duration-only edit: no pinning needed — cascade will re-anchor from predecessor or keep current start
+        else if ('end' in updates && !('start' in updates)) {
+          // Typing a Finish PINS it as a hard-finish constraint (B616), mirroring the start lock.
+          // Setting a Finish on a task that has no Start anchors a 1-day task on that date instead
+          // of leaving duration "" (which rendered a bare "d") and letting the cascade wipe it.
+          if (u.end && !u.start) { u.start = u.end; u.durUnit = 'd'; u.durValue = 1; u.duration = 1; }
+          else { u.duration = (u.start && u.end) ? Math.max(0, difBD(u.start, u.end) + 1) : 0; u.durUnit = 'd'; u.durValue = u.duration; }  // numeric 0, never "" (no bare "d")
+          u.pinnedEnd = !!u.end;                    // a real typed finish locks; clearing it unlocks (flow resumes)
+        }
         // Start directly set (drag/manual date): pin position, successors still cascade from new end
         if ('start' in updates && !('predecessors' in updates)) u.pinnedStart = true;
         return u;
@@ -6230,6 +6401,25 @@ function App() {
           </button>
         </div>
       )}
+      {(() => {
+        // B616 — LOUD, unmissable surface for locked-finish conflicts in the active project. A
+        // conflicted task keeps its locked finish; this banner makes the user resolve it rather
+        // than the schedule silently overrunning or overwriting the lock.
+        const cft = (data?.projects?.[data.aPid]?.tasks || []).filter(t => t.finishConflict);
+        if (!cft.length) return null;
+        return (
+          <div style={{background:"#fef2f2",borderBottom:"1px solid #fecaca",color:"#991b1b",padding:"7px 14px",
+            display:"flex",alignItems:"center",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
+            <span style={{fontSize:14,flexShrink:0}}>⚠</span>
+            <span style={{flex:1}}>
+              <strong>{cft.length} task{cft.length>1?"s":""} can’t meet {cft.length>1?"their":"its"} locked finish date.</strong>{" "}
+              The predecessor chain needs more time than the locked finish allows
+              ({cft.slice(0,3).map(t=>t.name||`Task ${t.id}`).join(", ")}{cft.length>3?`, +${cft.length-3} more`:""}).
+              Move the finish, shorten the duration, or change the dependency.
+            </span>
+          </div>
+        );
+      })()}
       <div className="app-header" style={{minHeight:46,background:"#fff",borderBottom:"1px solid var(--bd2)",display:"flex",alignItems:"center",flexWrap:"wrap",rowGap:6,columnGap:8,padding:"6px 14px",flexShrink:0,zIndex:30}}>
 
         {/* Logo — hidden when embedded (the shell chrome already shows the Planyr wordmark) */}
@@ -7680,7 +7870,13 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       updateTask(id,{[col]:p});
     }
     else if (col==="percentComplete") updateTask(id,{percentComplete:Math.max(0,Math.min(100,parseInt(val)||0))});
-    else if (col==="duration") updateTask(id,{duration:Math.max(0,Math.min(100000,parseInt(val)||0))});  // upper clamp: no real schedule needs >100k working days; stops a fat-fingered freeze
+    else if (col==="duration") {
+      // B615: parse the typed unit — days/weeks = working days, months/years = calendar-real.
+      // An unparseable string surfaces a VISIBLE inline error, never silently coercing to 0.
+      const parsed = parseDurationInput(val);
+      if (parsed.error) { showToast(parsed.error); return; }
+      updateTask(id,{durValue: parsed.value, durUnit: parsed.unit});   // updateTask derives duration + end from the unit
+    }
     else if (col==="predecessors") {
       // Drop self-references (Fix #16), references to ids that don't exist, and references
       // that would create a circular dependency — each surfaced with a toast so the edit is
@@ -8676,20 +8872,29 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       if (!rawDate) return <span style={{...s,...mono,justifyContent:"center",color:"var(--mut)",fontSize:11}} />;
       const [y,m,d] = rawDate.split('-');
       const dateStr = String(+m).padStart(2,'0')+'/'+String(+d).padStart(2,'0')+'/'+y.slice(2);
-      const isPinned = col.k === "start" && task.pinnedStart;
+      // Start pin (existing) + Finish lock (B616) — one padlock, identical icon + interaction.
+      const isStart = col.k === "start";
+      const isPinned = !task.hasChildren && (isStart ? task.pinnedStart : task.pinnedEnd);
+      const isConflict = !task.hasChildren && !isStart && !!task.finishConflict;
+      const unpin = e => {
+        e.stopPropagation();
+        if (isStart) updateTask(task.id, {pinnedStart: false, predecessors: task.predecessors}, projId);
+        else         updateTask(task.id, {pinnedEnd: false, durValue: taskDurValue(task), durUnit: taskDurUnit(task)}, projId);  // unlock → finish flows from start + duration
+      };
       return (
-        <span style={{...s,...mono,justifyContent:"center",color: task.hasChildren ? "#94a3b8" : "var(--mut)",fontSize:11}}
-          title={task.hasChildren ? "Computed from subtasks" : isPinned ? "Date pinned — click lock to let cascade take over" : undefined}>
+        <span style={{...s,...mono,justifyContent:"center",color: isConflict ? "var(--danger,#d83a3a)" : task.hasChildren ? "#94a3b8" : "var(--mut)",fontSize:11,fontWeight: isConflict ? 700 : undefined}}
+          title={task.hasChildren ? "Computed from subtasks"
+            : isConflict ? "Locked finish can't be met — the predecessor chain needs more time. Move the finish, shorten the duration, or change the dependency."
+            : isPinned ? (isStart ? "Start pinned — click the lock to let the predecessor drive this date" : "Finish locked (hard constraint) — click the lock to let it flow from start + duration")
+            : undefined}>
+          {isConflict && <span style={{marginRight:2,flexShrink:0,fontSize:11}}>⚠</span>}
           {isPinned && (
             <span
-              title="Pinned date — click to unpin and let predecessor drive this date"
-              onClick={e => {
-                e.stopPropagation();
-                updateTask(task.id, {pinnedStart: false, predecessors: task.predecessors}, projId);
-              }}
-              style={{display:"inline-flex",alignItems:"center",marginRight:3,cursor:"pointer",color:"var(--amber)",opacity:0.8,flexShrink:0}}
+              title={isStart ? "Pinned start — click to unpin and let the predecessor drive this date" : "Locked finish — click to unlock and let it flow from start + duration"}
+              onClick={unpin}
+              style={{display:"inline-flex",alignItems:"center",marginRight:3,cursor:"pointer",color: isConflict ? "var(--danger,#d83a3a)" : "var(--amber)",opacity:0.85,flexShrink:0}}
               onMouseEnter={e=>e.currentTarget.style.opacity="1"}
-              onMouseLeave={e=>e.currentTarget.style.opacity="0.8"}>
+              onMouseLeave={e=>e.currentTarget.style.opacity="0.85"}>
               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                 <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
@@ -8702,8 +8907,8 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
     }
     case "duration":
       return <span style={{...s,...mono,color: task.hasChildren ? "#94a3b8" : "var(--mut)"}}
-        title={task.hasChildren ? "Computed from subtasks" : undefined}>
-        {(task.duration === "" || task.duration == null) ? "" : task.duration + "d"}
+        title={task.hasChildren ? "Computed from subtasks" : (durTooltip(task) || undefined)}>
+        {fmtTaskDuration(task)}
       </span>;
     case "predecessors": {
       const preds = normPreds(task.predecessors);
