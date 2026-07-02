@@ -24,15 +24,20 @@ describe("supabaseIdStore — durable Planyr↔Drive map (B207)", () => {
     const store = supabaseIdStore({ supabaseUrl: "u", anonKey: "a", token: "t", fetchImpl: async () => errRes(404) });
     expect(await store.get("k")).toBe(null);
   });
-  it("set upserts and is best-effort (a failed write doesn't throw)", async () => {
+  it("set reports failure ({ok:false}) on a non-2xx write, still never throws (NEW-4 rollback)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const calls = [];
     const f = async (url, opts) => { calls.push({ url, opts }); return errRes(404); };
     const store = supabaseIdStore({ supabaseUrl: "u", anonKey: "a", token: "t", fetchImpl: f });
-    await expect(store.set("k", "drive_1")).resolves.toBeUndefined(); // no throw
+    const r = await store.set("k", "drive_1"); // no throw — a result the caller can act on
+    expect(r).toEqual({ ok: false, error: "drive_files set 404" });
     expect(calls[0].opts.method).toBe("POST");
     expect(calls[0].opts.headers.prefer).toMatch(/merge-duplicates/);
     warn.mockRestore();
+  });
+  it("set resolves { ok:true } on a successful write", async () => {
+    const store = supabaseIdStore({ supabaseUrl: "u", anonKey: "a", token: "t", fetchImpl: async () => okRes(null) });
+    expect(await store.set("k", "drive_1")).toEqual({ ok: true });
   });
   it("works as a createIdMap store end-to-end (bind→resolve via the same backend)", async () => {
     const db = new Map();

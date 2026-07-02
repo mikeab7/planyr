@@ -36,7 +36,15 @@ export function createStorageAdapter({ backend, idMap = createIdMap(), linkProvi
       const r = await attempt(() => backend.put({ bytes, contentType, name, folder, planyrKey }), "Upload");
       if (!r.ok) return r;
       if (!r.backendId) return fail("Backend did not return an id for the saved file.");
-      await idMap.bind(planyrKey, r.backendId, { name });
+      // Record the key↔backend-id mapping. If THIS fails after the bytes already landed, the
+      // file would read back as "missing" (nothing resolves it) while the upload looked like a
+      // success — the silent failure NEW-4 forbids. So roll the bytes back (best-effort) and
+      // fail honestly; the caller retries / falls back, and no orphaned copy is left behind.
+      const bound = await idMap.bind(planyrKey, r.backendId, { name });
+      if (bound && bound.ok === false) {
+        await attempt(() => backend.remove(r.backendId), "Rollback");
+        return fail("Saved the file but couldn't record it; the upload was rolled back — please retry.");
+      }
       return ok({ planyrKey });
     },
 

@@ -6,9 +6,10 @@
  * one request can be FETCHED in a later one. Scoped to the caller by RLS via their token.
  *
  * Implements the same { get, getByBackend, set, del } shape memoryIdStore() exposes;
- * createIdMap() awaits these transparently. Network is injectable for tests. `set` is
- * best-effort (a missing table / transient error won't break the underlying Drive write —
- * the bytes still land; only the mapping is skipped, surfaced via console.warn).
+ * createIdMap() awaits these transparently. Network is injectable for tests. `set` REPORTS
+ * failure ({ ok:false }) so the caller (adapter.save / the resumable COMMIT) can roll the
+ * just-uploaded bytes back and fail honestly — a file whose mapping never persisted reads
+ * back as "missing", exactly the silent success NEW-4 forbids. Still never throws.
  */
 const REST = (url) => `${String(url).replace(/\/+$/, "")}/rest/v1/drive_files`;
 
@@ -37,6 +38,7 @@ export function supabaseIdStore({ supabaseUrl, anonKey, token, fetchImpl = fetch
     },
     async set(planyrKey, driveId, meta = {}) {
       // Upsert on the (user_id, planyr_key) primary key; user_id defaults to auth.uid().
+      // Returns { ok } so the caller can roll back + fail honestly if the mapping doesn't land.
       try {
         const row = { planyr_key: planyrKey, drive_id: driveId, updated_at: new Date().toISOString() };
         if (meta && meta.name) row.name = meta.name; // store the display name (Cowork: was NULL)
@@ -45,8 +47,15 @@ export function supabaseIdStore({ supabaseUrl, anonKey, token, fetchImpl = fetch
           headers: { ...headers, prefer: "resolution=merge-duplicates,return=minimal" },
           body: JSON.stringify(row),
         });
-        if (!res.ok) console.warn(`drive_files set ${res.status} (mapping not persisted; Drive bytes are saved)`);
-      } catch (e) { console.warn("drive_files set failed:", e && e.message); }
+        if (!res.ok) {
+          console.warn(`drive_files set ${res.status} (mapping not persisted)`);
+          return { ok: false, error: `drive_files set ${res.status}` };
+        }
+        return { ok: true };
+      } catch (e) {
+        console.warn("drive_files set failed:", e && e.message);
+        return { ok: false, error: (e && e.message) || "drive_files set failed" };
+      }
     },
     async del(planyrKey) {
       try { await fetchImpl(`${REST(supabaseUrl)}?planyr_key=eq.${enc(planyrKey)}`, { method: "DELETE", headers }); } catch (_) { /* best-effort */ }

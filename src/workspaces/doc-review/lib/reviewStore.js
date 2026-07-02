@@ -232,7 +232,11 @@ export async function deleteReview(id) {
   delete reviewVersions[id]; // stop tracking a removed review's version (B314)
   const uid = await currentUid();
   // Remove the source files (by their stored keys, so any path scheme is covered),
-  // then the row. RLS scopes both stores to the owner.
+  // then the row. RLS scopes both stores to the owner. Track cleanup failures so the caller
+  // can surface "some bytes may be orphaned" (NEW-4) — the row delete stays authoritative, so
+  // this is a non-blocking notice, not data loss.
+  let orphaned = 0;      // # source files whose byte-cleanup didn't confirm
+  let cleanupErr = false; // an unexpected throw during cleanup
   try {
     // Prefer the cloud record; if the network read misses, fall back to the local mirror so
     // we can still clean up Storage + Drive instead of orphaning bytes (B321/NEW-1).
@@ -240,16 +244,19 @@ export async function deleteReview(id) {
     if (!rec && uid) rec = readDraft(uid, id);
     const srcs = (rec && rec.sources) || [];
     const keys = srcs.map((s) => s.storageKey).filter(Boolean);
-    if (keys.length) await supabase.storage.from(BUCKET).remove(keys);
+    if (keys.length) { const { error: rmErr } = await supabase.storage.from(BUCKET).remove(keys); if (rmErr) orphaned += keys.length; }
     // Also remove the Google Drive copy (B207) so a Drive-only file doesn't orphan bytes
     // in Drive when its review is deleted. Best-effort, in parallel; never blocks the row.
     const driveKeys = srcs.map((s) => s.driveKey).filter(Boolean);
-    if (driveKeys.length) await Promise.allSettled(driveKeys.map((k) => deleteFromDrive(k)));
+    if (driveKeys.length) {
+      const results = await Promise.allSettled(driveKeys.map((k) => deleteFromDrive(k)));
+      orphaned += results.filter((rr) => rr.status !== "fulfilled" || rr.value !== true).length;
+    }
     if (uid) { // back-compat: also clear any legacy <uid>/<reviewId>/ folder
       const { data: files } = await supabase.storage.from(BUCKET).list(`${uid}/${id}`);
-      if (files && files.length) await supabase.storage.from(BUCKET).remove(files.map((f) => `${uid}/${id}/${f.name}`));
+      if (files && files.length) { const { error: legErr } = await supabase.storage.from(BUCKET).remove(files.map((f) => `${uid}/${id}/${f.name}`)); if (legErr) orphaned += files.length; }
     }
-  } catch (_) {}
+  } catch (_) { cleanupErr = true; }
   // Scope by id only; RLS decides (own review OR team-admin on a shared one). A user_id filter
   // would block an admin from deleting a teammate's shared review, which the policy permits.
   const { error } = await supabase.from("doc_reviews").delete().eq("id", id);
@@ -258,7 +265,8 @@ export async function deleteReview(id) {
   // mirror gone → the row stayed in the library yet could no longer auto-resume; keep them in
   // step so a failed delete leaves a fully consistent, retry-able state.
   if (!error && uid) clearDraft(uid, id);
-  return { ok: !error, error: error ? error.message : null };
+  const cleanupFailed = orphaned > 0 || cleanupErr;
+  return { ok: !error, error: error ? error.message : null, orphaned: orphaned || undefined, cleanupFailed: cleanupFailed || undefined };
 }
 
 // Re-file an existing review under a (different) project/discipline — the one-click
@@ -447,6 +455,26 @@ export async function downloadFromDrive(driveKey) {
     if (!resp.ok) return null;
     return await resp.arrayBuffer();
   } catch (_) { return null; }
+}
+
+/* Generate a shareable link for a filed drawing (POST /api/files/share?key=…). Returns
+ * { ok, url } or an honest { ok:false, error } — never a silent failure (NEW-4/NEW-3). The
+ * link is minted server-side through the storage adapter's link provider: Drive's native
+ * "anyone with the link" webViewLink today, a future planyr.io/s/<token> being a one-place
+ * switch with no change here. driveKey = the same stable key downloadFromDrive uses (the
+ * server prefixes the uid). Never throws. */
+export async function getShareLink(driveKey) {
+  if (!supabase || !driveKey) return { ok: false, error: "No file to share." };
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return { ok: false, error: "Sign in to share." }; }
+  if (!token) return { ok: false, error: "Sign in to share." };
+  try {
+    const resp = await fetch(`/api/files/share?key=${encodeURIComponent(driveKey)}`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+    let jr = {}; try { jr = await resp.json(); } catch (_) { /* ignore */ }
+    if (resp.status === 503) return { ok: false, error: "Drive isn’t enabled yet." };
+    if (resp.status === 404) return { ok: false, error: jr.error || "This file isn’t stored in Drive, so there’s no shareable link." };
+    return resp.ok && jr.ok && jr.url ? { ok: true, url: jr.url } : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+  } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }
 
 // File a dropped PDF as a new (single-sheet) review under a project/discipline. Drive is

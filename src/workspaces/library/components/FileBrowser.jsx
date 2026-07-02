@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   listProjects, listReviews, listFileFacts, fileNewReview, refileReview,
-  upsertFileFacts, deleteReview, DISCIPLINES,
+  upsertFileFacts, deleteReview, loadReview, getShareLink, DISCIPLINES,
 } from "../../doc-review/lib/reviewStore.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../../doc-review/lib/fileIndex.js";
 import { fileWarn } from "../../doc-review/lib/sourceState.js";
@@ -83,6 +83,8 @@ export default function FileBrowser({
   const [queue, setQueue] = useState([]);
   const [refileSel, setRefileSel] = useState({});          // fileId -> { category, discipline }
   const [pendingDel, setPendingDel] = useState(null);
+  const [share, setShare] = useState({});                  // fileId -> { status, url, error }
+  const [delNotice, setDelNotice] = useState(null);        // { orphaned } after a delete left bytes behind
   const fileInputRef = useRef(null);
   const reqRef = useRef(0);
 
@@ -197,7 +199,27 @@ export default function FileBrowser({
   const onPick = (e) => { ingest(e.target.files); e.target.value = ""; };
 
   const open = (f) => { const r = reviews.find((x) => x.id === f.id); onOpenReview?.(r || f); };
-  const del = async (id) => { setPendingDel(null); await deleteReview(id); refresh(); };
+  const del = async (id) => {
+    setPendingDel(null);
+    const r = await deleteReview(id);
+    if (r && (r.orphaned || r.cleanupFailed)) setDelNotice({ orphaned: r.orphaned || 0 }); // never silent (NEW-4)
+    refresh();
+  };
+  // Share-by-link: outward-facing, so confirm first, then mint a link. driveKey lives on the
+  // review's sources (not the file-fact row), so load the record on demand.
+  const startShare = (id) => setShare((s) => ({ ...s, [id]: { status: "confirm" } }));
+  const closeShare = (id) => setShare((s) => { const n = { ...s }; delete n[id]; return n; });
+  const doShare = async (f) => {
+    setShare((s) => ({ ...s, [f.id]: { status: "loading" } }));
+    try {
+      const rec = await loadReview(f.id);
+      const driveSrcs = ((rec && rec.sources) || []).filter((s) => s.driveKey);
+      if (driveSrcs.length === 0) { setShare((s) => ({ ...s, [f.id]: { status: "error", error: "This drawing isn’t stored in Drive yet, so there’s no shareable link — open it once to file it to Drive, then try again." } })); return; }
+      if (driveSrcs.length > 1) { setShare((s) => ({ ...s, [f.id]: { status: "error", error: "This is a multi-sheet set — Planyr shares one drawing at a time for now. Open it in Google Drive to share the whole set." } })); return; }
+      const r = await getShareLink(driveSrcs[0].driveKey);
+      setShare((s) => ({ ...s, [f.id]: r.ok ? { status: "done", url: r.url } : { status: "error", error: r.error || "Couldn’t create a link." } }));
+    } catch (e) { setShare((s) => ({ ...s, [f.id]: { status: "error", error: (e && e.message) || "Couldn’t create a link." } })); }
+  };
   const doRefile = async (f) => {
     const sel = refileSel[f.id] || {};
     const discipline = sel.discipline || f.discipline || "Civil";
@@ -289,6 +311,15 @@ export default function FileBrowser({
           </button>
         </div>
 
+        {/* delete left bytes behind — surface it (never a silent cleanup failure, NEW-4) */}
+        {delNotice && (
+          <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
+            border: "1px solid var(--warn-border, #d6a64a)", background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
+            <span style={{ flex: 1 }}>Deleted — but {delNotice.orphaned ? `${delNotice.orphaned} ` : ""}file{delNotice.orphaned === 1 ? "" : "s"} couldn’t be removed from storage, so a copy may linger. You can remove it directly in Google Drive.</span>
+            <button onClick={() => setDelNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
+          </div>
+        )}
+
         {/* file list */}
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 12px 4px" }}>
           {busy && shown.length === 0 && <div style={{ fontSize: 12, color: "var(--text-secondary)", padding: 12 }}>Loading…</div>}
@@ -323,6 +354,8 @@ export default function FileBrowser({
                   </button>
                   {spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
+                  <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
+                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
                   {pendingDel === f.id ? (
                     <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "var(--text-secondary)" }}>
                       <button onClick={() => del(f.id)} title="Confirm delete" style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✓</button>
@@ -336,6 +369,10 @@ export default function FileBrowser({
                 {(needs || refileSel[f.id]) && (
                   <RefileRow value={refileSel[f.id]} discipline={f.discipline}
                     onChange={(v) => setRefileSel((s) => ({ ...s, [f.id]: v }))} onFile={() => doRefile(f)} />
+                )}
+                {/* share-by-link — inline, two-step (confirm → link); failure never silent */}
+                {share[f.id] && (
+                  <ShareRow state={share[f.id]} onCreate={() => doShare(f)} onClose={() => closeShare(f.id)} />
                 )}
               </div>
             );
@@ -399,6 +436,49 @@ function RefileRow({ value = {}, discipline, onChange, onFile }) {
         onChange={(e) => onChange({ ...value, discipline: e.target.value })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
       <datalist id="dr-disciplines">{DISCIPLINES.map((d) => <option key={d} value={d} />)}</datalist>
       <button onClick={onFile} title="File this document" style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 6, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>File</button>
+    </div>
+  );
+}
+
+/* Share a drawing as a Google Drive "anyone with the link" link. Two-step + inline (no
+ * window.prompt, per the owner rule): confirm (outward-facing — a public link) → create →
+ * a copyable link, or an honest error. Link-generation failure is never silent (NEW-4). */
+function ShareRow({ state = {}, onCreate, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const wrap = { display: "flex", gap: 8, alignItems: "center", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" };
+  const btn = (accent) => ({ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 6, padding: "3px 11px",
+    border: `1px solid ${accent ? "var(--accent-library)" : "var(--border-default)"}`, background: accent ? "var(--accent-library)" : "var(--surface-page)", color: accent ? "var(--on-accent-library)" : "var(--text-secondary)" });
+  if (state.status === "done") {
+    const copy = () => { try { navigator.clipboard?.writeText(state.url).then(() => setCopied(true)).catch(() => {}); } catch (_) { /* clipboard blocked */ } };
+    return (
+      <div style={wrap}>
+        <span style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, flex: "none" }}>Link:</span>
+        <input readOnly value={state.url} onFocus={(e) => e.target.select()}
+          style={{ flex: 1, minWidth: 120, fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 6, padding: "3px 6px", color: "var(--text-primary)", background: "var(--surface-page)" }} />
+        <button onClick={copy} style={btn(true)}>{copied ? "Copied ✓" : "Copy"}</button>
+        <button onClick={onClose} style={btn(false)}>Done</button>
+      </div>
+    );
+  }
+  if (state.status === "error") {
+    return (
+      <div style={wrap}>
+        <span style={{ fontSize: 11, color: "var(--danger-text)", flex: 1, minWidth: 120, lineHeight: 1.45 }}>{state.error}</span>
+        <button onClick={onClose} style={btn(false)}>Close</button>
+      </div>
+    );
+  }
+  if (state.status === "loading") {
+    return <div style={wrap}><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Creating link…</span></div>;
+  }
+  // confirm (default) — the outward-facing gate
+  return (
+    <div style={wrap}>
+      <span style={{ fontSize: 10.5, color: "var(--text-secondary)", flex: 1, minWidth: 120, lineHeight: 1.45 }}>
+        Anyone with this link can view it · creates a Google Drive link · to stop sharing, remove it in Google Drive.
+      </span>
+      <button onClick={onCreate} style={btn(true)}>Create link</button>
+      <button onClick={onClose} style={btn(false)}>Cancel</button>
     </div>
   );
 }
