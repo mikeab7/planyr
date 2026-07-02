@@ -799,8 +799,13 @@ describe("anti-drift: the round-3 scheduler fixes still exist in the real source
     expect(src).toMatch(/t\.responsibleParty === oldName \? \{\.\.\.t, responsibleParty: nm\}/);
     expect(src).toMatch(/t\.responsibleParty === goneName \? \{\.\.\.t, responsibleParty: ""\}/);
   });
-  it("D2: free-text notes match existing notes by TEXT, not array index", () => {
-    expect(src).toMatch(/const mi = prev\.findIndex\(n => n && n\.text === text\);/);
+  it("D2 (B613): the rebuilt notes panel edits notes by id and guards the dismiss", () => {
+    // The B613 rebuild replaced the free-text bulk editor (which matched notes by text to avoid
+    // scrambling ids) with a per-note running log: every edit maps by note id, so it structurally
+    // cannot scramble the other notes. And the panel closes only on a genuine backdrop press+click
+    // (the fix for "editing a note dismisses the panel").
+    expect(src).toMatch(/notes: notes\.map\(x => x\.id === cur\.id \?/);
+    expect(src).toMatch(/e\.target === backdropRef\.current && downOnBackdropRef\.current/);
   });
   it("D3: cost/budget/actual rollups include the node's OWN value (no stranded parent value)", () => {
     expect(src).toMatch(/\(Number\(byId\[id\]\?\.cost\) \|\| 0\) \+ kids\.reduce\(\(s, c\) => s \+ costOf\(c\.id\), 0\)/);

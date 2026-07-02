@@ -7212,8 +7212,7 @@ const NOTE_SIZES = [{k:"sm",l:"Small",px:11},{k:"md",l:"Medium",px:13},{k:"lg",l
 
 function NotesColHeader({data, setData}) {
   const [open, setOpen] = useState(false);
-  const [confirm, setConfirm] = useState(null); // {type:"size"|"mode", value:string}
-  const [mode, setMode] = useState(() => { try { return localStorage.getItem("planar_noteMode")||"datelog"; } catch { return "datelog"; } });
+  const [confirm, setConfirm] = useState(null); // {value:string} — pending text-size change
   const [size, setSize] = useState(() => { try { return localStorage.getItem("planar_noteSize")||"sm"; } catch { return "sm"; } });
   const ref = useRef(null);
   const menuRef = useRef(null);
@@ -7244,14 +7243,7 @@ function NotesColHeader({data, setData}) {
     setConfirm(null); setOpen(false);
   };
 
-  const applyMode = (value, confirmed) => {
-    if (!confirmed) { setConfirm(null); return; }
-    setMode(value); try { localStorage.setItem("planar_noteMode", value); } catch {}
-    setConfirm(null); setOpen(false);
-  };
-
-  const handleSize = value => { if (value===size) { setOpen(false); return; } hasNotes ? setConfirm({type:"size",value}) : applySize(value, true); };
-  const handleMode = value => { if (value===mode) { setOpen(false); return; } hasNotes ? setConfirm({type:"mode",value}) : applyMode(value, true); };
+  const handleSize = value => { if (value===size) { setOpen(false); return; } hasNotes ? setConfirm({value}) : applySize(value, true); };
 
   const BtnStyle = (primary) => ({border:primary?"none":"1px solid var(--bd2)",borderRadius:4,padding:"6px 10px",fontSize:11,
     cursor:"pointer",textAlign:"left",fontFamily:"inherit",width:"100%",
@@ -7272,37 +7264,15 @@ function NotesColHeader({data, setData}) {
           boxShadow:"0 4px 18px rgba(0,0,0,.13)",zIndex:9999,minWidth:192,padding:"4px 0",overflow:"hidden"}}>
           {confirm ? (
             <div style={{padding:"10px 12px",display:"flex",flexDirection:"column",gap:6}}>
-              <div style={{fontSize:11,fontWeight:600,color:"var(--txt)"}}>
-                {confirm.type==="size" ? "Change text size?" : "Change note display?"}
-              </div>
+              <div style={{fontSize:11,fontWeight:600,color:"var(--txt)"}}>Change text size?</div>
               <div style={{fontSize:11,color:"var(--mut)",lineHeight:1.5}}>
-                {confirm.type==="size"
-                  ? "Apply the new size to all existing notes, or only to new ones going forward?"
-                  : "This changes how all note panels display. Apply to all existing notes?"}
+                Apply the new size to all existing notes, or only to new ones going forward?
               </div>
-              {confirm.type==="size" ? <>
-                <button style={BtnStyle(true)} onClick={()=>applySize(confirm.value, true)}>Override all existing</button>
-                <button style={BtnStyle(false)} onClick={()=>applySize(confirm.value, false)}>New notes only</button>
-                <button style={{...BtnStyle(false),background:"transparent",border:"none",color:"var(--mut)"}} onClick={()=>setConfirm(null)}>Cancel</button>
-              </> : <>
-                <button style={BtnStyle(true)} onClick={()=>applyMode(confirm.value, true)}>Yes, apply to all</button>
-                <button style={{...BtnStyle(false),background:"transparent",border:"none",color:"var(--mut)"}} onClick={()=>setConfirm(null)}>Cancel</button>
-              </>}
+              <button style={BtnStyle(true)} onClick={()=>applySize(confirm.value, true)}>Override all existing</button>
+              <button style={BtnStyle(false)} onClick={()=>applySize(confirm.value, false)}>New notes only</button>
+              <button style={{...BtnStyle(false),background:"transparent",border:"none",color:"var(--mut)"}} onClick={()=>setConfirm(null)}>Cancel</button>
             </div>
           ) : <>
-            <div style={{padding:"4px 12px 3px",fontSize:9,fontWeight:600,letterSpacing:".07em",textTransform:"uppercase",color:"#9ca3af"}}>View as</div>
-            {[["datelog","Date log"],["freetext","Free text"]].map(([m,label])=>(
-              <div key={m} onClick={()=>handleMode(m)}
-                style={{padding:"7px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,
-                  background:mode===m?"#f6f8fa":"transparent",fontSize:12,
-                  color:mode===m?"var(--amber)":"var(--txt)",fontWeight:mode===m?500:400}}
-                onMouseEnter={e=>e.currentTarget.style.background="#f6f8fa"}
-                onMouseLeave={e=>e.currentTarget.style.background=mode===m?"#f6f8fa":"transparent"}>
-                {mode===m?<span style={{color:"var(--amber)",fontSize:11}}>✓</span>:<span style={{display:"inline-block",width:11}}/>}
-                {label}
-              </div>
-            ))}
-            <div style={{height:1,background:"var(--bd)",margin:"3px 0"}}/>
             <div style={{padding:"4px 12px 3px",fontSize:9,fontWeight:600,letterSpacing:".07em",textTransform:"uppercase",color:"#9ca3af"}}>Text size</div>
             <div style={{display:"flex",gap:4,padding:"4px 12px 8px"}}>
               {NOTE_SIZES.map(({k,l})=>(
@@ -11917,248 +11887,280 @@ function PDFExportModal({data, activePid, onClose, setData}) {
 }
 
 
-// ── NotesModal ────────────────────────────────────────────
-function NotesModal({task, projectId, updateTask, onClose, initChar}) {
-  const [text, setText] = useState(() => initChar || "");
-  // Date input for the new-note row — defaults to today in M/D/YY
-  const [dateStr, setDateStr] = useState(() => toShortDate(NOW));
-  const taRef = useRef(null);
-  useEffect(() => {
-    if (taRef.current) {
-      const len = taRef.current.value.length;
-      taRef.current.selectionStart = len;
-      taRef.current.selectionEnd = len;
-    }
-  }, []);
-  const [editId, setEditId] = useState(null);
-  const [editText, setEditText] = useState("");
-  const [editDateStr, setEditDateStr] = useState(""); // date field while editing an existing note
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [noteMode, setNoteMode] = useState(() => {
-    try { return localStorage.getItem("planar_noteMode") || "datelog"; } catch { return "datelog"; }
-  });
-  const [sortOldest, setSortOldest] = useState(false);
-  const [noteSize, setNoteSize] = useState(() => {
-    try { return localStorage.getItem("planar_noteSize") || "sm"; } catch { return "sm"; }
-  });
-  const setSize = s => { setNoteSize(s); try { localStorage.setItem("planar_noteSize", s); } catch {} setMenuOpen(false); };
-  const noteFontSize = NOTE_SIZES.find(s=>s.k===noteSize)?.px ?? 11;
-  const getNoteSize = n => NOTE_SIZES.find(s=>s.k===(n.size||noteSize))?.px ?? noteFontSize;
-  const skipSaveRef = React.useRef(false);
+// ── NotesModal — per-task running log (B613 rebuild) ──────────────────
+// A clean per-task running log. Each note is a two-column row: a compact M/D date in a fixed
+// left rail (plain Schedule-purple text, click to edit) │ hairline divider │ the note body
+// (click to edit in place). Newest first, no sort toggle. Add-at-top composer. Inline CRUD that
+// never strands you — commit-on-Enter/blur SAVES and stays open; the panel closes ONLY on ✕ or a
+// click that both STARTS and LANDS on the backdrop itself (defeats the old "editing dismisses the
+// panel" bug + native-picker/portal clicks reaching the backdrop). All CRUD rides
+// updateTask → setData, the same autosave/cloudSync path every task edit uses (B210/B212/B566).
+const SCHED_ACCENT = "#7F77DD";        // Schedule module accent — chrome / solid fills only
+const SCHED_ACCENT_TEXT = "#534AB7";   // AA-safe purple for small accent TEXT (the date) on white
+const NOTE_RAIL_W = 54;
 
+// Compact M/D for the rail — DISPLAY ONLY. The stored value stays a real, sortable ISO date
+// ("YYYY-MM-DD"); this just trims it so the running log reads cleanly. A bare M/D can't tell the
+// same day apart across years — acceptable for now (add a 2-digit year later only if it matters).
+const noteShortMD = s => { if (!s) return ""; const [y, m, d] = String(s).split("-"); return (m && d) ? `${+m}/${+d}` : ""; };
+// Normalize any stored note date to the ISO a native <input type=date> needs. Every date the app
+// writes is already ISO (parseFlexDate / fdLocal output); this is just defensive for legacy values.
+const noteISO = s => parseFlexDate(s) || "";
+
+// Shared inline-editor styles. The native date input pops wider than the compact rail while
+// editing — that's fine (spec): the resting display stays compact, only the editor is wide.
+const noteDateInputStyle = {
+  width: 132, background: "var(--bg)", border: `1px solid ${SCHED_ACCENT}`, borderRadius: 5,
+  padding: "3px 6px", fontSize: 12, fontFamily: "inherit", outline: "none",
+  color: "var(--txt)", boxSizing: "border-box",
+};
+const noteDateBtnStyle = {
+  background: "transparent", border: "none", padding: "0 2px", cursor: "pointer",
+  color: SCHED_ACCENT_TEXT, fontWeight: 600, fontSize: 12, fontFamily: "inherit",
+  lineHeight: 1.4, whiteSpace: "nowrap",
+};
+
+// One note row — MODULE SCOPE, never defined inside NotesModal: an inner-defined component
+// remounts every render and drops the caret/focus (the B247/B258 trap). Fully controlled by the
+// parent, so the editable text/date inputs keep focus across the parent's re-renders.
+function NoteRow({ note, bodyFs, editingText, editingDate, textValue, dateValue,
+                   onTextChange, onDateChange, onStartText, onStartDate, onCommit, onCancel, onDelete }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ display: "flex", alignItems: "flex-start", gap: 10,
+        padding: "9px 2px", borderBottom: "1px solid var(--bd)", position: "relative" }}>
+      {/* left rail — compact date, click to edit (native picker) */}
+      <div style={{ minWidth: NOTE_RAIL_W, flexShrink: 0, paddingTop: 1 }}>
+        {editingDate
+          ? <input type="date" autoFocus value={dateValue}
+              onChange={e => onDateChange(e.target.value)}
+              onBlur={onCommit}
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); onCommit(); }
+                                if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}
+              style={noteDateInputStyle} />
+          : <button onClick={() => onStartDate()} style={noteDateBtnStyle}
+              title="Click to change the date">{noteShortMD(note.date) || "—"}</button>}
+      </div>
+      {/* hairline divider */}
+      <div style={{ width: 1, alignSelf: "stretch", background: "var(--bd)", flexShrink: 0 }} />
+      {/* body — click to edit in place */}
+      <div style={{ flex: 1, minWidth: 0, paddingRight: 16 }}>
+        {editingText
+          ? <textarea autoFocus value={textValue}
+              onChange={e => onTextChange(e.target.value)}
+              onBlur={onCommit}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); onCommit(); }
+                                if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); } }}
+              style={{ width: "100%", background: "var(--bg)", border: `1px solid ${SCHED_ACCENT}`,
+                borderRadius: 5, padding: "6px 8px", color: "var(--txt)", fontSize: bodyFs,
+                lineHeight: 1.55, fontFamily: "inherit", resize: "vertical", minHeight: 46, outline: "none" }} />
+          : <div onClick={() => onStartText()}
+              style={{ color: "var(--txt)", fontSize: bodyFs, lineHeight: 1.55, cursor: "text",
+                whiteSpace: "pre-wrap", wordBreak: "break-word", minHeight: 18 }}>{note.text}</div>}
+      </div>
+      {/* delete — reveals on row hover */}
+      {!editingText && !editingDate && (
+        <span onClick={() => onDelete()} title="Delete note"
+          style={{ position: "absolute", top: 8, right: 2, cursor: "pointer", fontSize: 13, lineHeight: 1,
+            color: hover ? "#dc2626" : "transparent", transition: "color .12s", userSelect: "none" }}>✕</span>
+      )}
+    </div>
+  );
+}
+
+// The add-at-top composer — also MODULE SCOPE. Body textarea always live; the date defaults to
+// today and is click-to-edit like a row. Enter (no Shift) adds; the note prepends (today = newest
+// under the descending sort) and the composer clears for the next entry.
+function AddNoteComposer({ text, onText, dateISO, onDate, onAdd, bodyRef }) {
+  const [dateEdit, setDateEdit] = useState(false);
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 2px 12px" }}>
+      <div style={{ minWidth: NOTE_RAIL_W, flexShrink: 0, paddingTop: 6 }}>
+        {dateEdit
+          ? <input type="date" autoFocus value={dateISO}
+              onChange={e => onDate(e.target.value)}
+              onBlur={() => setDateEdit(false)}
+              onKeyDown={e => { if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); setDateEdit(false); } }}
+              style={noteDateInputStyle} />
+          : <button onClick={() => setDateEdit(true)} style={noteDateBtnStyle}
+              title="Click to change the date">{noteShortMD(dateISO) || "—"}</button>}
+      </div>
+      <div style={{ width: 1, alignSelf: "stretch", background: "var(--bd)", flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+        <textarea ref={bodyRef} value={text} onChange={e => onText(e.target.value)}
+          placeholder="Add a note…"
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); onAdd(); } }}
+          style={{ width: "100%", background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 5,
+            padding: "7px 9px", color: "var(--txt)", fontSize: 13, lineHeight: 1.5, fontFamily: "inherit",
+            resize: "vertical", minHeight: 44, outline: "none", transition: "border-color .15s" }}
+          onFocus={e => e.target.style.borderColor = SCHED_ACCENT}
+          onBlur={e => e.target.style.borderColor = "var(--bd2)"} />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button onClick={() => onAdd()}
+            style={{ padding: "5px 16px", background: SCHED_ACCENT, color: "#fff", border: "none",
+              borderRadius: 6, fontSize: 12, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>
+            Add note
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
+  const [draftText, setDraftText] = useState(() => initChar || "");
+  const [draftDate, setDraftDate] = useState(() => NOW);   // ISO; defaults to today
+  const [edit, setEdit] = useState(null);                  // { id, field:'text'|'date' } | null
+  const [editText, setEditText] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  // Body text size honors the per-note stamp (set from the Notes column-header control), else the
+  // saved default, else Small — so the existing "Text size" preference keeps working.
+  const defSize = (() => { try { return localStorage.getItem("planar_noteSize") || "sm"; } catch { return "sm"; } })();
+  const noteFs = n => NOTE_SIZES.find(s => s.k === (n.size || defSize))?.px ?? 13;
+
+  const taRef = useRef(null);
+  const backdropRef = useRef(null);
+  const downOnBackdropRef = useRef(false);
+  const editRef = useRef(null);
+  useEffect(() => { editRef.current = edit; }, [edit]);
+
+  // Focus the composer on open; caret at end so an initChar keystroke continues seamlessly.
   useEffect(() => {
-    const handler = e => { if (e.key === "Escape") onClose(); };
+    const ta = taRef.current;
+    if (ta) { const len = ta.value.length; ta.focus(); ta.selectionStart = ta.selectionEnd = len; }
+  }, []);
+
+  // Escape cancels an active inline edit; otherwise closes the panel. Capture phase so it wins
+  // over the inputs' own handlers — but it only CLOSES when nothing is being edited, so a stray
+  // Escape while editing a note can never dismiss the whole panel.
+  useEffect(() => {
+    const handler = e => {
+      if (e.key !== "Escape") return;
+      // Escape backs out one level: cancel an active row edit → close a composer date-picker →
+      // else dismiss the panel. Never dismiss the panel out from under an open inline editor.
+      if (editRef.current) { e.preventDefault(); e.stopPropagation(); editRef.current = null; setEdit(null); return; }
+      const ae = document.activeElement;
+      if (ae && ae.tagName === "INPUT" && ae.type === "date" && backdropRef.current && backdropRef.current.contains(ae)) return;
+      onClose();
+    };
     document.addEventListener("keydown", handler, true);
     return () => document.removeEventListener("keydown", handler, true);
   }, [onClose]);
 
-  const setMode = m => {
-    setNoteMode(m);
-    try { localStorage.setItem("planar_noteMode", m); } catch {}
-    setMenuOpen(false);
+  const notes = task.notes || [];
+  // Descending by parsed date (newest first); stable tiebreak on id so same-day notes hold order.
+  const sorted = [...notes].sort((a, b) => {
+    const da = noteISO(a.date) || "", db = noteISO(b.date) || "";
+    if (da !== db) return da < db ? 1 : -1;
+    return (b.id || 0) - (a.id || 0);
+  });
+
+  const addDraft = () => {
+    const v = (draftText || "").trim();
+    if (!v) return;                                   // empty draft → nothing persisted
+    const iso = noteISO(draftDate) || NOW;
+    updateTask(task.id, { notes: [...notes, { id: Date.now(), date: iso, text: v }] }, projectId);
+    setDraftText("");
+    setDraftDate(NOW);
+    if (taRef.current) taRef.current.focus();
   };
 
-  const add = () => {
-    if (!text.trim()) return;
-    // Parse the typed date — fall back to today if unparseable
-    const parsedDate = parseFlexDate(dateStr) || NOW;
-    updateTask(task.id, {notes: [...(task.notes||[]), {id: Date.now(), date: parsedDate, text: text.trim()}]}, projectId);
-    setText("");
-    setDateStr(toShortDate(NOW)); // reset to today for the next entry
-    onClose();
-  };
-  const del = id => updateTask(task.id, {notes: task.notes.filter(n=>n.id!==id)}, projectId);
-  const clearAll = () => { updateTask(task.id, {notes: []}, projectId); setMenuOpen(false); };
-  const startEdit = n => { setEditId(n.id); setEditText(n.text); setEditDateStr(toShortDate(n.date)); };
-  const saveEdit = () => {
-    const v = editText.trim();
-    if (v) {
-      const parsedDate = parseFlexDate(editDateStr) || NOW;
-      updateTask(task.id, {notes: task.notes.map(n => n.id===editId ? {...n, text:v, date:parsedDate} : n)}, projectId);
+  const startText = n => { editRef.current = { id: n.id, field: "text" }; setEdit({ id: n.id, field: "text" }); setEditText(n.text || ""); };
+  const startDate = n => { editRef.current = { id: n.id, field: "date" }; setEdit({ id: n.id, field: "date" }); setEditDate(noteISO(n.date) || NOW); };
+  const cancelEdit = () => { editRef.current = null; setEdit(null); };
+  const commitEdit = () => {
+    const cur = editRef.current;
+    if (!cur) return;                                 // guard re-entrant blur (Enter → setEdit(null) → blur)
+    editRef.current = null;
+    setEdit(null);
+    const n = (task.notes || []).find(x => x.id === cur.id);
+    if (!n) return;
+    if (cur.field === "text") {
+      const v = editText.trim();                      // empty edit leaves the note unchanged (never silently wipes)
+      if (v && v !== n.text) updateTask(task.id, { notes: notes.map(x => x.id === cur.id ? { ...x, text: v } : x) }, projectId);
+    } else {
+      const iso = noteISO(editDate);
+      if (iso && iso !== n.date) updateTask(task.id, { notes: notes.map(x => x.id === cur.id ? { ...x, date: iso } : x) }, projectId);
     }
-    setEditId(null); setEditText(""); setEditDateStr("");
   };
-  const cancelEdit = () => { skipSaveRef.current = true; setEditId(null); setEditText(""); setEditDateStr(""); };
 
-  const sortedNotes = sortOldest ? [...(task.notes||[])] : [...(task.notes||[])].reverse();
-
-  // Shared date input style
-  const dateInputStyle = {
-    width: 96, background: "var(--bg)", border: "1px solid var(--bd2)", borderRadius: 4,
-    padding: "6px 9px", fontSize: 12, fontFamily: "inherit", outline: "none", color: "#374151",
-    transition: "border-color .15s", boxSizing: "border-box",
-  };
+  const del = id => { if (editRef.current && editRef.current.id === id) { editRef.current = null; setEdit(null); } updateTask(task.id, { notes: notes.filter(n => n.id !== id) }, projectId); };
+  const clearAll = () => { updateTask(task.id, { notes: [] }, projectId); setConfirmClear(false); setMenuOpen(false); };
 
   return (
-    <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
-      <div style={{background:"var(--surf)",border:"1px solid var(--bd2)",borderTop:"2px solid var(--amber)",borderRadius:6,padding:20,width:540,maxHeight:"72vh",display:"flex",flexDirection:"column",gap:14}} onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+    <div ref={backdropRef}
+      onMouseDown={e => { downOnBackdropRef.current = (e.target === backdropRef.current); }}
+      onClick={e => { const hit = e.target === backdropRef.current && downOnBackdropRef.current; downOnBackdropRef.current = false; if (hit) onClose(); }}
+      style={{ position: "fixed", inset: 0, background: "#00000090", zIndex: 100,
+        display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div onMouseDown={e => e.stopPropagation()}
+        style={{ background: "var(--bg)", border: "1px solid var(--bd2)", borderTop: `2px solid ${SCHED_ACCENT}`,
+          borderRadius: 8, width: 560, maxWidth: "94vw", maxHeight: "78vh",
+          display: "flex", flexDirection: "column", boxShadow: "0 12px 40px rgba(0,0,0,.22)" }}>
+        {/* header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+          padding: "16px 18px 12px", borderBottom: "1px solid var(--bd)" }}>
           <div>
-            <div style={{color:"var(--amber)",fontFamily:"'Inter',system-ui,sans-serif",fontWeight:600,fontSize:11,letterSpacing:".06em",marginBottom:3}}>NOTES</div>
-            <div style={{color:"#1f2328",fontSize:14,fontWeight:500}}>{task.name}</div>
+            <div style={{ color: SCHED_ACCENT_TEXT, fontWeight: 700, fontSize: 10, letterSpacing: ".08em", marginBottom: 3 }}>NOTES</div>
+            <div style={{ color: "var(--txt)", fontSize: 14, fontWeight: 600 }}>{task.name}</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            {/* ··· menu */}
-            <div style={{position:"relative"}}>
-              {menuOpen && <div style={{position:"fixed",inset:0,zIndex:998}} onClick={()=>setMenuOpen(false)} />}
-              <button onClick={()=>setMenuOpen(o=>!o)}
-                style={{background:menuOpen?"#f0f0f0":"transparent",border:"none",cursor:"pointer",
-                  borderRadius:4,padding:"3px 7px",fontSize:16,lineHeight:1,color:"var(--mut)",
-                  letterSpacing:"1px",fontFamily:"inherit",transition:"background .1s"}}
-                onMouseEnter={e=>e.currentTarget.style.background="#f0f0f0"}
-                onMouseLeave={e=>{if(!menuOpen)e.currentTarget.style.background="transparent"}}>···</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{ position: "relative" }}>
+              {menuOpen && <div style={{ position: "fixed", inset: 0, zIndex: 998 }} onClick={() => { setMenuOpen(false); setConfirmClear(false); }} />}
+              <button onClick={() => { setMenuOpen(o => !o); setConfirmClear(false); }}
+                style={{ background: menuOpen ? "var(--surf)" : "transparent", border: "none", cursor: "pointer",
+                  borderRadius: 5, padding: "3px 7px", fontSize: 16, lineHeight: 1, color: "var(--mut)", fontFamily: "inherit" }}>···</button>
               {menuOpen && (
-                <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,background:"#fff",
-                  border:"1px solid var(--bd2)",borderRadius:7,boxShadow:"0 4px 18px rgba(0,0,0,.13)",
-                  zIndex:999,minWidth:178,padding:"4px 0",overflow:"hidden"}}>
-                  <div style={{padding:"4px 12px 3px",fontSize:9,fontWeight:600,letterSpacing:".07em",textTransform:"uppercase",color:"#9ca3af"}}>View as</div>
-                  {[["datelog","Date log"],["freetext","Free text"]].map(([m,label])=>(
-                    <div key={m} onClick={()=>setMode(m)}
-                      style={{padding:"7px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,
-                        background:noteMode===m?"#f6f8fa":"transparent",fontSize:12,color:noteMode===m?"var(--amber)":"var(--txt)",fontWeight:noteMode===m?500:400}}
-                      onMouseEnter={e=>e.currentTarget.style.background="#f6f8fa"}
-                      onMouseLeave={e=>e.currentTarget.style.background=noteMode===m?"#f6f8fa":"transparent"}>
-                      {noteMode===m && <span style={{color:"var(--amber)",fontSize:11}}>✓</span>}
-                      {noteMode!==m && <span style={{display:"inline-block",width:11}} />}
-                      {label}
-                    </div>
-                  ))}
-                  <div style={{height:1,background:"var(--bd)",margin:"3px 0"}} />
-                  <div style={{padding:"4px 12px 3px",fontSize:9,fontWeight:600,letterSpacing:".07em",textTransform:"uppercase",color:"#9ca3af"}}>Text size</div>
-                  <div style={{display:"flex",gap:4,padding:"4px 12px 6px"}}>
-                    {NOTE_SIZES.map(({k,l})=>(
-                      <div key={k} onClick={()=>setSize(k)}
-                        style={{flex:1,textAlign:"center",padding:"4px 0",cursor:"pointer",borderRadius:4,fontSize:11,
-                          fontWeight:noteSize===k?600:400,
-                          background:noteSize===k?"var(--amber)":"var(--surf)",
-                          color:noteSize===k?"#fff":"var(--mut)",
-                          border:`1px solid ${noteSize===k?"var(--amber)":"var(--bd2)"}`}}>
-                        {l}
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{height:1,background:"var(--bd)",margin:"3px 0"}} />
-                  <div onClick={()=>{setSortOldest(o=>!o);setMenuOpen(false);}}
-                    style={{padding:"7px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--txt)"}}
-                    onMouseEnter={e=>e.currentTarget.style.background="#f6f8fa"}
-                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    {sortOldest && <span style={{color:"var(--amber)",fontSize:11}}>✓</span>}
-                    {!sortOldest && <span style={{display:"inline-block",width:11}} />}
-                    Sort oldest first
-                  </div>
-                  {(task.notes||[]).length > 0 && <>
-                    <div style={{height:1,background:"var(--bd)",margin:"3px 0"}} />
-                    <div onClick={clearAll}
-                      style={{padding:"7px 12px",cursor:"pointer",fontSize:12,color:"#dc2626"}}
-                      onMouseEnter={e=>e.currentTarget.style.background="#fff5f5"}
-                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      Clear all notes
-                    </div>
-                  </>}
+                <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--bg)",
+                  border: "1px solid var(--bd2)", borderRadius: 8, boxShadow: "0 4px 18px rgba(0,0,0,.14)",
+                  zIndex: 999, minWidth: 200, padding: 6 }}>
+                  {notes.length === 0
+                    ? <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--mut)" }}>No notes yet.</div>
+                    : confirmClear
+                      ? <div style={{ padding: "4px 6px" }}>
+                          <div style={{ fontSize: 12, color: "var(--txt)", marginBottom: 8 }}>Delete all {notes.length} notes?</div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button onClick={clearAll} style={{ flex: 1, padding: "6px 0", background: "#dc2626", color: "#fff", border: "none", borderRadius: 5, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Delete all</button>
+                            <button onClick={() => setConfirmClear(false)} style={{ flex: 1, padding: "6px 0", background: "var(--surf)", color: "var(--txt)", border: "1px solid var(--bd2)", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+                          </div>
+                        </div>
+                      : <div onClick={() => setConfirmClear(true)}
+                          style={{ padding: "8px 10px", cursor: "pointer", fontSize: 12, color: "#dc2626", borderRadius: 5 }}
+                          onMouseEnter={e => e.currentTarget.style.background = "#fff5f5"}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>Clear all notes</div>}
                 </div>
               )}
             </div>
-            <span style={{color:"var(--mut)",cursor:"pointer",fontSize:16,lineHeight:1}} onClick={onClose}>✕</span>
+            <span onClick={onClose} title="Close"
+              style={{ color: "var(--mut)", cursor: "pointer", fontSize: 17, lineHeight: 1, padding: "2px 4px" }}>✕</span>
           </div>
         </div>
 
-        <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:8,maxHeight:360}}>
-          {noteMode === "freetext" ? (
-            <textarea
-              value={(task.notes||[]).map(n=>n.text).join("\n\n")}
-              onChange={e=>{
-                // Match each block to an existing note by TEXT (preserving its id + date), consuming
-                // matches so duplicates don't both grab one note; only genuinely new/edited text mints a
-                // fresh id+date. The old code matched by ARRAY INDEX, so a note containing a blank line
-                // (which splits into two) shifted every following note's id + date — scrambling history.
-                const blocks = e.target.value.split(/\n\n+/).map(t=>t.trim()).filter(Boolean);
-                const prev = (task.notes||[]).slice();
-                const next = blocks.map((text,i)=>{
-                  const mi = prev.findIndex(n => n && n.text === text);
-                  if (mi >= 0) { const reuse = prev[mi]; prev[mi] = null; return reuse; }
-                  return {id: Date.now()+i, date: NOW, text};
-                });
-                updateTask(task.id, {notes: next}, projectId);
-              }}
-              placeholder="Type your notes here…"
-              style={{width:"100%",minHeight:200,background:"var(--bg)",border:"1px solid var(--bd2)",borderRadius:4,
-                padding:"10px 12px",color:"#374151",fontSize:noteFontSize,lineHeight:1.6,fontFamily:"inherit",
-                resize:"vertical",outline:"none",transition:"border-color .15s"}}
-              onFocus={e=>e.target.style.borderColor="var(--blue)"}
-              onBlur={e=>e.target.style.borderColor="var(--bd2)"}
-            />
-          ) : (
-            (!task.notes||task.notes.length===0)
-              ? <div style={{color:"var(--mut)",fontSize:noteFontSize,textAlign:"center",padding:28}}>No notes yet.</div>
-              : sortedNotes.map(n => {
-                  const isEditing = editId === n.id;
-                  const fs = getNoteSize(n);
-                  return (
-                  <div key={n.id} style={{background:"var(--bg)",border:`1px solid ${isEditing?"var(--blue)":"var(--bd)"}`,borderRadius:4,padding:"10px 12px",position:"relative",transition:"border-color .15s"}}>
-                    {isEditing ? (
-                      <input
-                        value={editDateStr}
-                        onChange={e => setEditDateStr(e.target.value)}
-                        placeholder="M/D or M/D/YY"
-                        style={{...dateInputStyle, marginBottom:6, display:"block"}}
-                        onFocus={e=>e.target.style.borderColor="var(--blue)"}
-                        onBlur={e=>e.target.style.borderColor="var(--bd2)"}
-                        onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();saveEdit();}if(e.key==="Escape"){e.preventDefault();cancelEdit();}}}
-                      />
-                    ) : (
-                      <div style={{color:"var(--amber)",fontSize:Math.max(9,fs-2),fontFamily:"inherit",marginBottom:5}}>{toShortDate(n.date)}</div>
-                    )}
-                    {isEditing
-                      ? <textarea autoFocus value={editText} onChange={e=>setEditText(e.target.value)}
-                          onBlur={()=>{ if (skipSaveRef.current) { skipSaveRef.current = false; return; } saveEdit(); }}
-                          onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();e.stopPropagation();saveEdit();}if(e.key==="Escape"){e.preventDefault();e.stopPropagation();cancelEdit();}}}
-                          style={{width:"100%",background:"transparent",border:"none",outline:"none",color:"#374151",fontSize:fs,lineHeight:1.55,fontFamily:"inherit",resize:"vertical",minHeight:48,padding:0}} />
-                      : <div onClick={()=>startEdit(n)} style={{color:"#374151",fontSize:fs,lineHeight:1.55,cursor:"text",whiteSpace:"pre-wrap",fontFamily:"inherit"}}>{n.text}</div>}
-                    {!isEditing && <span style={{position:"absolute",top:8,right:8,color:"#f8514933",cursor:"pointer",fontSize:11,transition:"color .15s"}}
-                      onMouseEnter={e=>e.target.style.color="#f85149"} onMouseLeave={e=>e.target.style.color="#f8514933"}
-                      onClick={()=>del(n.id)}>✕</span>}
-                  </div>
-                  );
-                })
-          )}
+        {/* add-at-top composer */}
+        <div style={{ padding: "0 18px", borderBottom: "1px solid var(--bd)" }}>
+          <AddNoteComposer text={draftText} onText={setDraftText} dateISO={draftDate} onDate={setDraftDate} onAdd={addDraft} bodyRef={taRef} />
         </div>
 
-        {noteMode === "datelog" && (
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            <textarea ref={taRef} autoFocus value={text} onChange={e=>setText(e.target.value)} placeholder="Add a note…"
-              style={{width:"100%",background:"var(--bg)",border:"1px solid var(--bd2)",borderRadius:4,
-                padding:"8px 10px",color:"#374151",fontSize:noteFontSize,resize:"none",height:68,
-                fontFamily:"inherit",outline:"none",transition:"border-color .15s",boxSizing:"border-box"}}
-              onFocus={e=>e.target.style.borderColor="var(--blue)"}
-              onBlur={e=>e.target.style.borderColor="var(--bd2)"}
-              onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();e.stopPropagation();add();}}} />
-            {/* Compact metadata row: date chip left, Add button right */}
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
-                <span style={{fontSize:11,color:"var(--mut)",userSelect:"none",flexShrink:0}}>📅</span>
-                <input
-                  value={dateStr}
-                  onChange={e => setDateStr(e.target.value)}
-                  placeholder="M/D/YY"
-                  style={{
-                    width:72, background:"transparent", border:"1px solid var(--bd)",
-                    borderRadius:20, padding:"2px 8px", fontSize:11,
-                    fontFamily:"inherit", outline:"none", color:"var(--amber)",
-                    fontWeight:500, transition:"border-color .15s, background .15s",
-                    textAlign:"center",
-                  }}
-                  onFocus={e=>{e.target.style.borderColor="var(--amber)";e.target.style.background="var(--bg)";}}
-                  onBlur={e=>{e.target.style.borderColor="var(--bd)";e.target.style.background="transparent";}}
-                  onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();add();}}}
-                />
-              </div>
-              <button className="btn" onClick={add}
-                style={{padding:"5px 16px",borderColor:"var(--amber)",color:"var(--amber)",fontSize:12}}>
-                Add
-              </button>
-            </div>
-          </div>
-        )}
+        {/* running log — newest first */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 18px 6px" }}>
+          {sorted.length === 0
+            ? <div style={{ color: "var(--mut)", fontSize: 13, textAlign: "center", padding: "28px 0" }}>No notes yet — add one above.</div>
+            : sorted.map(n => (
+                <NoteRow key={n.id} note={n} bodyFs={noteFs(n)}
+                  editingText={!!edit && edit.id === n.id && edit.field === "text"}
+                  editingDate={!!edit && edit.id === n.id && edit.field === "date"}
+                  textValue={editText} dateValue={editDate}
+                  onTextChange={setEditText} onDateChange={setEditDate}
+                  onStartText={() => startText(n)} onStartDate={() => startDate(n)}
+                  onCommit={commitEdit} onCancel={cancelEdit} onDelete={() => del(n.id)} />
+              ))}
+        </div>
       </div>
     </div>
   );
