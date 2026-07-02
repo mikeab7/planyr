@@ -1069,4 +1069,22 @@ describe("anti-drift: the B615/B616 duration + finish-lock engine exists in the 
     expect(src).toMatch(/pinnedEnd: false, durValue: taskDurValue\(task\)/);      // unlock → flow
     expect(src).toContain("locked finish date");                                  // the loud banner
   });
+  it("B624: a typed Start/Finish on a weekend/holiday rolls forward to the next working day + toasts", () => {
+    // rollForwardToWorkday is applied to the parsed date in the grid commit path, and the toast
+    // names the reason (weekend vs holiday) — never a silent weekend/holiday endpoint.
+    expect(src).toMatch(/const rolled = rollForwardToWorkday\(p\);/);
+    expect(src).toMatch(/const why = \(wd === 0 \|\| wd === 6\) \? "a weekend" : "a holiday";/);
+    expect(src).toMatch(/moved to \$\{toShortDate\(rolled\)\} — you picked \$\{why\}/);
+  });
+});
+
+// B624 runtime: the engine helper the input guard reuses (weekend/holiday → next working day).
+describe("B624 rollForwardToWorkday — the input-guard primitive", () => {
+  it("a weekend rolls to Monday; a working day is unchanged; a weekday holiday rolls forward", () => {
+    expect(E.rollForwardToWorkday("2026-06-20")).toBe("2026-06-22"); // Sat → Mon
+    expect(E.rollForwardToWorkday("2026-06-21")).toBe("2026-06-22"); // Sun → Mon
+    expect(E.rollForwardToWorkday("2026-06-23")).toBe("2026-06-23"); // Tue (working) unchanged
+    const wkHol = [...E.HOLIDAY_SET].find(h => h.startsWith("2026-") && ![0,6].includes(new Date(h + "T12:00:00").getDay()));
+    if (wkHol) expect(E.rollForwardToWorkday(wkHol) > wkHol).toBe(true);
+  });
 });

@@ -7861,8 +7861,18 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     if (col==="start"||col==="end") {
       const raw = String(val ?? "").trim();
       if (!raw) { updateTask(id,{[col]:""}); return; }                  // cleared → unschedule that endpoint (was: silently reverted)
-      const p = parseFlexDate(raw);
+      let p = parseFlexDate(raw);
       if (!p) { showToast("Couldn't read that date — try M/D or M/D/YY"); return; }  // was: silently reverted, no feedback
+      // The schedule runs on WORKING days — a Start/Finish can't sit on a weekend or holiday (B624).
+      // Roll a non-working-day entry FORWARD to the next working day and say why, rather than silently
+      // accepting it. rollForwardToWorkday skips Sat/Sun + HOLIDAY_SET; a working day is unchanged.
+      const rolled = rollForwardToWorkday(p);
+      if (rolled !== p) {
+        const wd = pd(p).getDay();
+        const why = (wd === 0 || wd === 6) ? "a weekend" : "a holiday";
+        showToast(`${col==="end" ? "Finish" : "Start"} moved to ${toShortDate(rolled)} — you picked ${why}.`, { type: "info" });
+        p = rolled;
+      }
       if (col==="end") {
         const t = tasks.find(x => x.id === id);
         if (t && t.start && p < t.start) { showToast("Finish can't be before Start — change the Start date first."); return; }  // was: silently collapsed to a 0-day milestone, losing the typed date
