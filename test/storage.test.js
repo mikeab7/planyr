@@ -157,6 +157,49 @@ describe("mergeSiteContent — delete-tombstones keep a deletion deleted (B276)"
     expect(mergeSiteContent(older, newer).els.map((e) => e.id)).toEqual(["a"]);
   });
 
+  // NEW-1 — the owner's exact report: "Remove truck court (+ outer)" drops the court AND its bonded
+  // trailer parking + buffer. The delete handler (removeFeature/removeWithChildren) must tombstone the
+  // WHOLE cascade — else this merge (forced by "Take over editing here" → fetchSiteForReconcile) unions
+  // the still-present cloud copy back and the trailer parking reappears.
+  it("does NOT resurrect a whole tombstoned dock-zone cascade (court → trailer → buffer)", () => {
+    const court = { id: "court", type: "paving", cx: 0, cy: 0, w: 100, h: 60, truckCourt: { side: "left" }, attachedTo: "b1" };
+    const trailer = { id: "trailer", type: "trailer", cx: 0, cy: 0, w: 100, h: 60, forCourt: "court", prevZone: "court", attachedTo: "b1" };
+    const buffer = { id: "buffer", type: "landscape", cx: 0, cy: 0, w: 100, h: 10, forTrailer: "trailer", prevZone: "trailer", attachedTo: "b1" };
+    const cloudStillHas = site("s", 100, [bld("b1"), court, trailer, buffer]);      // pre-delete copy (cloud)
+    const localDeleted = site("s", 500, [bld("b1")], { deletedIds: ["court", "trailer", "buffer"] }); // all three tombstoned
+    const m = mergeSiteContent(cloudStillHas, localDeleted);
+    expect(m.els.map((e) => e.id).sort()).toEqual(["b1"]);       // building kept, none of the three come back
+    expect(m.deletedIds.sort()).toEqual(["buffer", "court", "trailer"]);
+  });
+
+  it("end-to-end via mergePulledSites: a locally-deleted dock-zone cascade isn't brought back by the cloud", () => {
+    const court = { id: "court", type: "paving", cx: 0, cy: 0, w: 100, h: 60, truckCourt: { side: "left" }, attachedTo: "b1" };
+    const trailer = { id: "trailer", type: "trailer", cx: 0, cy: 0, w: 100, h: 60, forCourt: "court", prevZone: "court", attachedTo: "b1" };
+    const localDeleted = site("s", 500, [bld("b1")], { deletedIds: ["court", "trailer"] });
+    const cloudStillHas = site("s", 100, [bld("b1"), court, trailer]);
+    const { map } = mergePulledSites({ s: localDeleted }, [cloudStillHas]);
+    expect(map.s.els.map((e) => e.id).sort()).toEqual(["b1"]); // stays deleted across the cloud pull
+  });
+
+  // NEW-1 (review follow-ups) — measures / callouts / split-away parcels ALL carry stable uid() ids and
+  // are unioned by id in mergeSiteContent, so each delete path now tombstones. Prove none resurrect.
+  it("does NOT resurrect a tombstoned measure (measures are unioned by id)", () => {
+    const meas = (id) => ({ id, mode: "line", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] });
+    const older = site("s", 100, [], { measures: [meas("m1"), meas("m2")] });
+    const newer = site("s", 500, [], { measures: [meas("m1")], deletedIds: ["m2"] });
+    expect(mergeSiteContent(older, newer).measures.map((m) => m.id)).toEqual(["m1"]);
+  });
+
+  it("does NOT resurrect a blanked callout, nor a parcel replaced by a split", () => {
+    const tri = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }];
+    const older = site("s", 100, [], { callouts: [{ id: "c1", text: "note", tip: { x: 0, y: 0 } }], parcels: [{ id: "p1", points: tri }] });
+    // c1 blanked; p1 split into pa+pb (source tombstoned) — the review-confirmed callout + parcel-split paths.
+    const newer = site("s", 500, [], { callouts: [], parcels: [{ id: "pa", points: tri }, { id: "pb", points: tri }], deletedIds: ["c1", "p1"] });
+    const m = mergeSiteContent(older, newer);
+    expect(m.callouts.map((c) => c.id)).toEqual([]);                 // blanked callout stays gone
+    expect(m.parcels.map((p) => p.id).sort()).toEqual(["pa", "pb"]); // split source not resurrected
+  });
+
   it("end-to-end via mergePulledSites: a locally-deleted overlay isn't brought back by a cloud copy that still has it", () => {
     const localDeleted = site("s", 500, [bld("a")], { sheetOverlays: [], deletedIds: ["o1"] });
     const cloudStillHas = site("s", 100, [bld("a")], { sheetOverlays: [ov("o1")] });

@@ -73,6 +73,28 @@ describe("wouldThinClobber — never silently shrink the cloud (B459)", () => {
     expect(wouldThinClobber({ parcels: [{ id: "pNew" }] }, 2, 0)).toBe(false);
     expect(wouldThinClobber({ parcels: [{ id: "pNew" }], deletedIds: ["p1", "p2"] }, 2, 0)).toBe(false);
   });
+
+  // NEW-1 — the owner's truck-court report is the SAME false-conflict shape as B596, on els: "Remove
+  // truck court (+ outer)" drops the court + its trailer + its buffer (3 items) in one shot. Without a
+  // tombstone that always clears the ≥2 bar → the guard falsely blocks the save → the phantom "changed
+  // in another session / Take over editing" prompt. Tombstoning the whole cascade explains the drop.
+  it("removing a truck-court cascade (court+trailer+buffer) WITHOUT tombstones is wrongly blocked (the pre-fix bug)", () => {
+    // baseline: building + court + trailer + buffer = 4 els; after remove → 1 el (the building), no tombstone
+    expect(wouldThinClobber(els(1), 4, 0)).toBe(true);
+  });
+  it("removing a truck-court cascade WITH the 3 zone ids tombstoned is allowed (the fix)", () => {
+    expect(wouldThinClobber({ ...els(1), deletedIds: ["court", "trailer", "buffer"] }, 4, 0)).toBe(false);
+  });
+
+  // NEW-1 (measures) — measures carry a stable uid() id and count in contentCount, so multi-deleting ≥2
+  // of them (the B569 multi-select delete) drops ≥2 with no tombstone → the SAME false-conflict class.
+  it("multi-deleting 3 measures WITHOUT tombstones is wrongly blocked (the pre-fix bug)", () => {
+    // baseline: 4 measures; after multi-delete → 1 measure, no tombstone → 3 unexplained → BLOCK
+    expect(wouldThinClobber({ measures: [{ id: "m1" }] }, 4, 0)).toBe(true);
+  });
+  it("multi-deleting 3 measures WITH their ids tombstoned is allowed (the fix)", () => {
+    expect(wouldThinClobber({ measures: [{ id: "m1" }], deletedIds: ["m2", "m3", "m4"] }, 4, 0)).toBe(false);
+  });
 });
 
 // B556 — the owner's "phantom conflict" class: a DELIBERATE local shrink (deleting a building +
