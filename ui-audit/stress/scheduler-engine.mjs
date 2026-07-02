@@ -118,6 +118,85 @@ export const constrainedStartFrom = (pred, dep, taskDur) => {
 };
 export const calcEnd = (start, dur) => !start ? "" : dur === 0 ? start : addBD(start, Math.max(0, dur - 1));
 
+// ── Duration model (B615): days/weeks = WORKING days · months/years = CALENDAR-real ──────
+// Faithful copy of the pure helpers in public/sequence/index.html. Keep in sync.
+const DUR_UNIT_ALIASES = [
+  { re: /^(mo|mos|month|months)$/,               unit: "mo" },
+  { re: /^(y|yr|yrs|year|years)$/,               unit: "y"  },
+  { re: /^(w|wk|wks|week|weeks)$/,               unit: "w"  },
+  { re: /^(d|day|days|wd|workday|workdays)$/,    unit: "d"  },
+];
+export const parseDurationInput = raw => {
+  const str = String(raw == null ? "" : raw).trim().toLowerCase();
+  if (str === "") return { value: 0, unit: "d" };
+  const m = str.match(/^(-?\d+(?:\.\d+)?)\s*([a-z]*)$/);
+  if (!m) return { error: `Couldn't read "${String(raw).trim()}" — try 10d, 3w, 2mo, or 1y` };
+  let value = Math.trunc(Number(m[1]));
+  if (!Number.isFinite(value) || value < 0) return { error: `Duration can't be negative — try 10d, 3w, 2mo, or 1y` };
+  value = Math.min(value, 100000);
+  const suffix = m[2];
+  if (suffix === "") return { value, unit: "d" };
+  const hit = DUR_UNIT_ALIASES.find(u => u.re.test(suffix));
+  if (!hit) return { error: `Unknown unit "${suffix}" — try d (days), w (weeks), mo (months), y (years)` };
+  return { value, unit: hit.unit };
+};
+export const addCalendarMonths = (iso, n) => {
+  const mt = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+  if (!mt) return iso;
+  const y = +mt[1], mo0 = +mt[2] - 1, d = +mt[3];
+  const total = mo0 + Math.trunc(n);
+  const ty = y + Math.floor(total / 12);
+  const tm = ((total % 12) + 12) % 12;
+  const lastDay = new Date(ty, tm + 1, 0).getDate();
+  const td = Math.min(d, lastDay);
+  return `${ty}-${String(tm + 1).padStart(2, "0")}-${String(td).padStart(2, "0")}`;
+};
+export const rollForwardToWorkday = iso => {
+  const d = pd(iso);
+  if (isNaN(d)) return iso;
+  let steps = 0;
+  while ((d.getDay() === 0 || d.getDay() === 6 || HOLIDAY_SET.has(fd(d))) && steps++ < 4000) d.setDate(d.getDate() + 1);
+  return fd(d);
+};
+export const workdaysBetween = (aIso, bIso) => {
+  let a = pd(aIso), b = pd(bIso);
+  if (isNaN(a) || isNaN(b)) return 0;
+  if (a > b) { const t = a; a = b; b = t; }
+  const MS = 86400000;
+  const totalDays = Math.round((b - a) / MS) + 1;
+  const full = Math.floor(totalDays / 7);
+  let count = full * 5;
+  const rem = totalDays - full * 7;
+  const startDow = a.getDay();
+  for (let i = 0; i < rem; i++) { const dow = (startDow + i) % 7; if (dow !== 0 && dow !== 6) count++; }
+  for (const h of HOLIDAY_SET) {
+    const hd = pd(h);
+    if (!isNaN(hd) && hd >= a && hd <= b) { const dow = hd.getDay(); if (dow !== 0 && dow !== 6) count--; }
+  }
+  return Math.max(0, count);
+};
+const DUR_WD_FACTOR = { d: 1, w: 5 };
+export const resolveDuration = (start, value, unit) => {
+  const u = unit || "d";
+  const v = Math.max(0, Math.trunc(Number(value) || 0));
+  if (u === "d" || u === "w") {
+    const count = v * DUR_WD_FACTOR[u];
+    return { end: start ? calcEnd(start, count) : "", duration: count };
+  }
+  if (!start || v === 0) return { end: start && v === 0 ? start : "", duration: 0 };
+  const months = u === "y" ? v * 12 : v;
+  const end = rollForwardToWorkday(addCalendarMonths(start, months));
+  return { end, duration: workdaysBetween(start, end) };
+};
+export const taskDurValue = t => (t.durValue != null ? t.durValue : (typeof t.duration === "number" ? t.duration : 0));
+export const taskDurUnit  = t => t.durUnit || "d";
+export const resolveTaskSpan = t => resolveDuration(t.start, taskDurValue(t), taskDurUnit(t));
+export const startForEnd = (end, duration) => !end ? "" : (duration <= 1 ? end : addBD(end, -(Math.max(1, duration) - 1)));
+export const fmtTaskDuration = t => {
+  if (t.duration === "" || t.duration == null) return "";
+  return `${taskDurValue(t)}${taskDurUnit(t)}`;
+};
+
 // Worst-of-descendants rolled status for each parent task (faithful copy from index.html).
 export const HEALTH_PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
 export const computeRolledHealth = (all) => {
@@ -158,12 +237,30 @@ export const cascadeDates = tasks => {
   queue.forEach(id => {
     const t = map[id];
     const preds = t.predecessors.filter(p => map[p.id]);
-    if (!preds.length || t.pinnedStart) { t.end = calcEnd(t.start, t.duration); return; }
+    // Locked FINISH (B616): the end is a FIXED POINT; the start back-calcs; the end never moves.
+    if (t.pinnedEnd && t.end) {
+      if (t.pinnedStart && t.start) {
+        t.duration = t.start > t.end ? t.duration : Math.max(0, workdaysBetween(t.start, t.end));
+        t.finishConflict = !!(t.start && t.start > t.end);
+      } else {
+        const backStart = startForEnd(t.end, t.duration);
+        t.start = backStart;
+        let conflict = false;
+        if (preds.length) {
+          const earliest = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean).reduce((a,b) => a>b?a:b, "");
+          if (earliest && earliest > backStart) conflict = true;
+        }
+        t.finishConflict = conflict;
+      }
+      return;
+    }
+    t.finishConflict = false;
+    if (!preds.length || t.pinnedStart) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
     const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
-    if (!starts.length) { t.end = calcEnd(t.start, t.duration); return; }
+    if (!starts.length) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
     const latest = starts.reduce((a,b) => a>b?a:b, starts[0] || t.start);
     t.start = latest;
-    t.end   = calcEnd(t.start, t.duration);
+    const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
   });
   return tasks.map(t => { const {_pinStart, __wasDirectEdit, ...rest} = map[t.id] || t; return rest; });
 };
@@ -291,6 +388,27 @@ export const normalizeToV6 = d => {
   return {...d, projects, _v6: true, healthColStyle: d.healthColStyle || "stoplight",
     settings: d.settings ? {...DEFAULT_SETTINGS, ...d.settings, holidays:{...DEFAULT_HOLIDAYS,...(d.settings.holidays||{})}, customHealth: d.settings.customHealth||[], healthLabelOverrides: d.settings.healthLabelOverrides||{}} : {...DEFAULT_SETTINGS, holidays:{...DEFAULT_HOLIDAYS}}};
 };
+// B615 duration-model migration — faithful copy of normalizeToV7 in index.html. Stamps durUnit/
+// durValue (legacy = working days = unit 'd'), re-derives to the SAME end for 'd', idempotent (_v7).
+export const normalizeToV7 = d => {
+  if (!d || typeof d !== "object") d = {};
+  if (d._v7) return d;
+  const projects = {};
+  const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+  Object.entries(srcProjects).forEach(([id, proj]) => {
+    if (!proj || typeof proj !== "object") return;
+    const srcTasks = Array.isArray(proj.tasks) ? proj.tasks : [];
+    const tasks = srcTasks.filter(t => t && typeof t === "object").map(t => {
+      const durUnit = t.durUnit || "d";
+      const durValue = (t.durValue != null) ? t.durValue : (typeof t.duration === "number" ? t.duration : 0);
+      if (t.pinnedEnd && t.end) return {...t, durUnit, durValue};
+      const r = resolveDuration(t.start, durValue, durUnit);
+      return {...t, durUnit, durValue, duration: r.duration, end: r.end};
+    });
+    projects[id] = {...proj, tasks: rollupParentDates(tasks)};
+  });
+  return {...d, projects, _v7: true};
+};
 export const ensureHolidays = d => {
   if (!d?.settings) return d;
   const merged = {...DEFAULT_HOLIDAYS, ...(d.settings.holidays||{})};
@@ -333,7 +451,7 @@ export const ensureContacts = d => {
   return {...d, settings: {...d.settings, contacts: existing}};
 };
 // The full load pipeline as index.html composes it.
-export const loadPipeline = d => ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(d))));
+export const loadPipeline = d => ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(d)))));
 
 // Faithful logic copy of rebuildHEALTH (index.html mutates module globals; this returns
 // the maps so it's testable). Builds the status color maps from settings.customHealth +

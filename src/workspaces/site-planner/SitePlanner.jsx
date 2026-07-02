@@ -216,6 +216,26 @@ const ORPHAN_TAGS = ["attachedTo", "groupId", "truckCourt", "forCourt", "forTrai
 const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
 const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
+
+// B619 — neutral, handle-based selection chrome for the planner canvas. Selecting an object must
+// NEVER recolor the object's own fill/stroke (that reads as "the object turned orange" and hides a
+// live color change); selection is signalled by WHITE square handles with a thin BLUE outline.
+// Real hexes, NOT var() tokens — the canvas is SVG that exports to PNG/PDF where CSS vars don't
+// resolve (B317/B319). Blue is chosen over black (which vanishes on the dark aerial and reads heavy
+// over light linework) and over the app accent (the "it turned orange" trap); it is none of the five
+// status colors or three module accents. All selection chrome carries data-export="skip" so it never
+// lands in an exported exhibit. (Generalizes the B231 pond / B567 neutral-markup no-recolor rule.)
+const SEL_BLUE = "#2563eb";
+const SEL_HANDLE_FILL = "#ffffff";
+// B617 — hold a line's on-screen weight CONSTANT RELATIVE TO THE DRAWING across zoom. A stroke drawn
+// in fixed screen px balloons on zoom-out (the geometry shrinks but the stroke doesn't) and hairlines
+// on zoom-in. Multiplying the base weight by the SAME zoom factor the callouts use (zk = view.ppf /
+// 0.35) makes the stroke track the drawing; the clamp keeps it from vanishing at extreme zoom-out
+// (floor) or getting absurd at extreme zoom-in (ceil). Scoped to stroke-only linear features (markup
+// lines/polylines, utility routes, easement/encumbrance spines, road curbs, dominant property/element
+// outlines); pond/building filled-area edges keep their fixed pixel edge (the fill carries the shape).
+const STROKE_ZOOM_FLOOR = 0.6;
+const strokeZoom = (base, zk) => Math.max(STROKE_ZOOM_FLOOR, Math.min(base * zk, base * 3.5));
 // Snap an angle to the nearest 45° (for Shift-constrained drawing).
 const snap45 = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, r = Math.hypot(dx, dy), ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4); return { x: a.x + r * Math.cos(ang), y: a.y + r * Math.sin(ang) }; };
 
@@ -6234,8 +6254,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const isEnd = i === 0 || i === el.pts.length - 1;
             const selected = roadVtxSel && roadVtxSel.id === el.id && roadVtxSel.idx === i;
             return (
-              <circle key={`rv${i}`} cx={m.x} cy={m.y} r={isEnd ? 6 : 5.5}
-                fill={selected ? PAL.accent : PAL.paper} stroke={PAL.accent} strokeWidth={1.75}
+              <circle key={`rv${i}`} cx={m.x} cy={m.y} r={isEnd ? 6 : 5.5} data-export="skip"
+                fill={selected ? SEL_BLUE : SEL_HANDLE_FILL} stroke={selected ? SEL_HANDLE_FILL : SEL_BLUE} strokeWidth={1.75}
                 style={{ cursor: "grab" }} onPointerDown={(e) => startRoadVtx(e, el.id, i)}>
                 <title>{isEnd ? "Drag to move this end" : "Drag to move · select it in the panel to set sharp / arc / smooth"}</title>
               </circle>
@@ -6253,16 +6273,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {[[0, 1], [0, -1]].map(([nx, ny], i) => { // width grips on the long edges
             const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
             const m = f2p({ x: el.cx + o.x, y: el.cy + o.y });
-            return <rect key={`rw${i}`} x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2}
-              fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+            return <rect key={`rw${i}`} x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2} data-export="skip"
+              fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
               style={{ cursor: resizeCursor(m.x - cpx0.x, m.y - cpx0.y) }}
               onPointerDown={(e) => startEdgeResize(e, el.id, nx, ny)} />;
           })}
-          <circle cx={A.x} cy={A.y} r={6} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.75}
+          <circle cx={A.x} cy={A.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.75} data-export="skip"
             style={{ cursor: "grab" }} onPointerDown={(e) => startRoadEnd(e, el.id, "a")}>
             <title>Drag to move this end (changes angle + length)</title>
           </circle>
-          <circle cx={B.x} cy={B.y} r={6} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.75}
+          <circle cx={B.x} cy={B.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.75} data-export="skip"
             style={{ cursor: "grab" }} onPointerDown={(e) => startRoadEnd(e, el.id, "b")}>
             <title>Drag to move this end (changes angle + length)</title>
           </circle>
@@ -6277,12 +6297,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
     const rotPos = { x: topMid.x + ux * 26, y: topMid.y + uy * 26 };
     return (
-      <g>
-        <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={PAL.accent} strokeWidth={1.25} />
-        <circle cx={rotPos.x} cy={rotPos.y} r={6} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5}
+      <g data-export="skip">
+        {/* B619 — the thin blue bounding outline is drawn by elSelOutline (one place, so it also
+            covers locked + polygon elements); here we draw only the grips + rotate handle. */}
+        <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={SEL_BLUE} strokeWidth={1.25} />
+        <circle cx={rotPos.x} cy={rotPos.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
           style={{ cursor: "grab" }} onPointerDown={(e) => startRotate(e, el.id)} />
         {corners.map((c, i) => (
-          <rect key={i} x={c.x - 5} y={c.y - 5} width={10} height={10} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5}
+          <rect key={i} x={c.x - 5} y={c.y - 5} width={10} height={10} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
             style={{ cursor: resizeCursor(c.x - cpx.x, c.y - cpx.y) }} onPointerDown={(e) => startResize(e, el.id, signs[i][0], signs[i][1])} />
         ))}
         {/* side grips: drag one edge to expand/shrink that side (opposite side stays put) */}
@@ -6291,7 +6313,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const m = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           return (
             <rect key={`edge${i}`} x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2}
-              fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+              fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
               style={{ cursor: resizeCursor(m.x - cpx.x, m.y - cpx.y) }}
               onPointerDown={(e) => startEdgeResize(e, el.id, nx, ny)} />
           );
@@ -6354,8 +6376,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // handles are gone: Shift-click (or right-click) an edge inserts a control point at the click
   // point instead. The active control point (the Delete-key target) is shown inverted.
   const vtxRect = (key, c, on, cursor, onDown) => (
-    <rect key={key} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2}
-      fill={on ? PAL.paper : PAL.accent} stroke={on ? PAL.accent : PAL.paper} strokeWidth={on ? 2 : 1.5}
+    <rect key={key} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2} data-export="skip"
+      fill={on ? SEL_BLUE : SEL_HANDLE_FILL} stroke={on ? SEL_HANDLE_FILL : SEL_BLUE} strokeWidth={on ? 2 : 1.5}
       style={{ cursor }} onPointerDown={onDown} />
   );
   const isSelVtx = (layer, id, i) => !!selVtx && selVtx.layer === layer && String(selVtx.id) === String(id) && selVtx.index === i;
@@ -6373,6 +6395,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = els.find((x) => x.id === sel.id);
     if (!el || !el.points || el.locked) return null;
     return <g>{el.points.map((a, i) => vtxRect(`epv${i}`, f2p(a), isSelVtx("el", el.id, i), "move", (e) => startElVertex(e, el.id, i)))}</g>;
+  })();
+
+  // B619 — the ONE thin blue selection outline for a selected element (never recolors the element
+  // itself). Covers rect (rotated corners), polygon (its ring), AND locked elements — the single
+  // place the outline lives, so it can't double up with handleNodes/elPolyHandles. Roads are linear
+  // (a bounding box around a line is wrong, per the owner rule) → grips only, no outline here. Never
+  // exported (data-export="skip").
+  const elSelOutline = (() => {
+    if (sel?.kind !== "el" || tool !== "select") return null;
+    const el = els.find((x) => x.id === sel.id);
+    if (!el) return null;
+    if (isCenterlineRoad(el) || el.type === "road") {
+      // A road is linear (a bounding box around a line is wrong). An UNLOCKED road's grips
+      // (handleNodes) carry the selection; a LOCKED road has no grips, so draw a soft blue halo
+      // ALONG its geometry so a locked selected road doesn't look identical to an unselected one.
+      if (!el.locked) return null;
+      if (isCenterlineRoad(el)) {
+        const pts = (el.pts || []).map(f2p);
+        if (pts.length < 2) return null;
+        return <polyline data-export="skip" points={pts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={2} strokeOpacity={0.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />;
+      }
+      const rc = elCorners(el).map(f2p);
+      return <polygon data-export="skip" points={rc.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />;
+    }
+    const pts = el.points ? el.points.map(f2p) : elCorners(el).map(f2p);
+    if (!pts || pts.length < 2) return null;
+    return <polygon data-export="skip" points={pts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1} pointerEvents="none" />;
   })();
 
   // Bluebeam-style editing chrome on a selected markup (select tool):
@@ -6393,18 +6442,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let ux = topMid.x - cpx.x, uy = topMid.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
       const rotPos = { x: topMid.x + ux * 26, y: topMid.y + uy * 26 };
       return (
-        <g>
-          <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={PAL.accent} strokeWidth={1.25} />
-          <circle cx={rotPos.x} cy={rotPos.y} r={6} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5}
+        <g data-export="skip">
+          {/* B619 — thin blue bounding outline through the (rotated) corners. */}
+          <polygon points={corners.map(([sx, sy]) => { const p = at(sx * m.w / 2, sy * m.h / 2); return `${p.x},${p.y}`; }).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1} pointerEvents="none" />
+          <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={SEL_BLUE} strokeWidth={1.25} />
+          <circle cx={rotPos.x} cy={rotPos.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
             style={{ cursor: "grab" }} onPointerDown={(e) => startMarkupRotate(e, m.id)} />
           {edges.map(([nx, ny], i) => { const p = at(nx * m.w / 2, ny * m.h / 2); return (
             <rect key={`mke${i}`} x={p.x - 4.5} y={p.y - 4.5} width={9} height={9} rx={2}
-              fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+              fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
               style={{ cursor: resizeCursor(p.x - cpx.x, p.y - cpx.y) }} onPointerDown={(e) => startMarkupResize(e, m.id, nx, ny)} />
           ); })}
           {corners.map(([sx, sy], i) => { const p = at(sx * m.w / 2, sy * m.h / 2); return (
             <rect key={`mkc${i}`} x={p.x - 5} y={p.y - 5} width={10} height={10}
-              fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5}
+              fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
               style={{ cursor: resizeCursor(p.x - cpx.x, p.y - cpx.y) }} onPointerDown={(e) => startMarkupResize(e, m.id, sx, sy)} />
           ); })}
         </g>
@@ -7404,10 +7455,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const removeHover = pc.id === parcelRemoveHoverId; // B598: about to be deleted in Remove mode
                 const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
                 const ring = pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+                const zk = view.ppf / 0.35;
+                // B619: no accent recolor on select — the property line keeps its own color; the square
+                // vertex handles carry the selection. B617: the boundary weight holds constant relative
+                // to the drawing across zoom (dominant property outline → scaled, not fixed pixels).
                 return <g key={pc.id}>
                   <polygon points={ring}
                     fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
-                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={removeHover || picked || isSel ? 3 : 2}
+                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.stroke || PAL.parcel)} strokeWidth={strokeZoom(removeHover || picked || isSel ? 3 : 2, zk)}
                     strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
@@ -7419,19 +7474,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext, PAL.accent))}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) */}
               {markups.map((m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
+                const zk = view.ppf / 0.35; // B617 zoom multiplier (matches the callout scale)
                 const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
-                const stroke = isSel ? PAL.accent : m.stroke; // semantic markups (encumbrance) keep the accent selection tint
-                // Neutral markups (line/polyline/polygon/rect/ellipse) render their REAL stroke color
-                // even when selected (WYSIWYG) so a live color-picker change is visible immediately
-                // instead of being hidden under the accent tint; selection is cued by the grips plus a
-                // faint width bump. (B567 — matches the shared MarkupRenderer's deliberate choice.)
+                // B619: NEVER recolor a markup on select — every markup keeps its own authored stroke
+                // (so a live color-picker change shows instantly instead of hiding under an accent tint);
+                // selection is cued by the blue grips / halo, plus a faint width bump. (Generalizes the
+                // B567 neutral-markup choice to the semantic markups too — utilRoute/traced/encumbrance.)
+                const stroke = m.stroke;
                 const nStroke = m.stroke;
                 const nsw = sw + (isSel ? 1 : 0);
-                const common = { stroke: nStroke, strokeWidth: nsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
+                const vsw = strokeZoom(nsw, zk); // B617: on-screen weight held constant relative to the drawing
+                const common = { stroke: nStroke, strokeWidth: vsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
                 // Closed shapes (rect/ellipse/polygon) get an always-on pointer target so the WHOLE
                 // body selects + drags, not just the painted border. pointerEvents:"all" makes the
                 // interior a hit target even when the shape is UNFILLED (fill:"none" is otherwise dead
@@ -7442,15 +7499,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ? { fill: m.fill, fillOpacity: m.fillOpacity, pointerEvents: "all" }
                   : { pointerEvents: "all" };
                 if (m.kind === "utilRoute") {
-                  const col = isSel ? PAL.accent : m.stroke;
+                  const col = m.stroke; // B619: keep the route's own color when selected
                   const cor = m.corridor.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const pad = m.pad.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const cl = m.pts.map((p) => f2p(p));
+                  const clStr = cl.map((q) => `${q.x},${q.y}`).join(" ");
+                  const clW = strokeZoom(2.2, zk); // B617
                   const padC = f2p(centroid(m.pad)), mid = { x: (cl[0].x + cl[cl.length - 1].x) / 2, y: (cl[0].y + cl[cl.length - 1].y) / 2 };
                   return (
                     <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
-                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={1.2} strokeDasharray={m.util === "water" ? "5 4" : undefined} />
-                      <polyline points={cl.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={col} strokeWidth={2.2} />
+                      {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
+                      {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
+                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? "5 4" : undefined} />
+                      <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
                       <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
                       <text x={padC.x} y={padC.y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
                       <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
@@ -7461,10 +7522,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const pp = m.pts.map((p) => f2p(p));
                   const s = pp.map((q) => `${q.x},${q.y}`).join(" ");
                   const mid = pp[Math.floor((pp.length - 1) / 2)];
-                  const col = isSel ? PAL.accent : m.stroke;
+                  const col = m.stroke; // B619: keep the traced line's own color when selected
+                  const tw = strokeZoom(m.weight ?? 2.4, zk); // B617
                   return (
                     <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
-                      <polyline points={s} fill="none" stroke={col} strokeWidth={m.weight ?? 2.4} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
+                      {isSel && <polyline points={s} fill="none" stroke={SEL_BLUE} strokeWidth={tw + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
+                      <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
                       {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
                       {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2} y={q.y - 2} width={4} height={4} fill={col} stroke="#fff" strokeWidth={0.8} />)}
                       {mid && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>}
@@ -7477,9 +7540,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const ctr = centroid(m.pts), cp = f2p(ctr);
                   return (
                     <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
-                      <polygon points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={sw} strokeDasharray={da} />
+                      {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
+                      <polygon points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} />
                       {/* centerline + per-call bearing/distance labels */}
-                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={0.8} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.12 && (m.calls || []).map((c, i) => {
                         const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
@@ -7492,7 +7556,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "easement") {
                   if (m.parcelId && inactiveParcelIds.has(m.parcelId)) return null; // B213: anchored easement hides with its parcel
                   const tcol = easementColor(m);
-                  const ecol = isSel ? PAL.accent : tcol;
+                  const ecol = tcol; // B619: keep the easement's own type color when selected (blue vertex handles cue the selection)
                   const proposed = m.status === "proposed";
                   const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const cen = (m.centerline && m.mode !== "boundary") ? m.centerline.map(f2p) : [];
@@ -7500,9 +7564,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const area = easementArea(m);
                   return (
                     <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
-                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={isSel ? 2.4 : 1.8} strokeDasharray={proposed ? "7 5" : undefined} />
+                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? "7 5" : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
-                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={0.9} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
                     </g>
@@ -7519,7 +7583,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
-                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={nsw} strokeDasharray={da} fill="none" pointerEvents="none" />
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
                     </g>
                   );
                 }
@@ -7528,7 +7592,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
-                      <polyline points={s} fill="none" stroke={nStroke} strokeWidth={nsw} strokeDasharray={da} pointerEvents="none" />
+                      <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
                     </g>
                   );
                 }
@@ -7666,7 +7730,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const padX = st.padX * zk, padY = st.padY * zk;
                 const tw = Math.max(fontPx, ...lines.map((l) => l.length * charW));
                 const w = tw + padX * 2, h = lines.length * lineH + padY * 2;
-                const border = isSel ? PAL.accent : st.stroke;
+                const border = st.stroke; // B619: no recolor on select — the leader/box keep the callout's own color; blue chrome cues selection
                 const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
                 const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
                 const hasLeader = !c.noLeader && c.tip;
@@ -7680,7 +7744,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
                     </>}
                     <rect x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} rx={4}
-                      fill={st.fill} stroke={border} strokeWidth={isSel ? 2 : 1.4}
+                      fill={st.fill} stroke={border} strokeWidth={1.4}
                       pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
                       style={{ cursor: tool === "select" ? "move" : "default" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
@@ -7690,8 +7754,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
                         fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
+                    {/* B619 — blue selection chrome (outline + corner handles + tip grip); never exported. */}
+                    {isSel && tool === "select" && (() => {
+                      const gx = bp.x - w / 2, gy = bp.y - h / 2;
+                      const corners = [[gx, gy], [gx + w, gy], [gx + w, gy + h], [gx, gy + h]];
+                      return (
+                        <g data-export="skip" pointerEvents="none">
+                          <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={5} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} />
+                          {corners.map(([hx, hy], i) => (
+                            <rect key={i} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25} />
+                          ))}
+                        </g>
+                      );
+                    })()}
                     {isSel && hasLeader && tool === "select" && (
-                      <circle cx={tp.x} cy={tp.y} r={5} fill="#fff" stroke={PAL.accent} strokeWidth={2}
+                      <circle cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2} data-export="skip"
                         style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip")} />
                     )}
                   </g>
@@ -7711,11 +7788,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const c = callouts.find((x) => x.id === editCallout.id);
                 if (!c) return null;
                 const st = calloutStyle(c);
-                const fontPx = st.size * (view.ppf / 0.35);
-                const bp = f2p(c.box), W = Math.max(200, fontPx * 12), H = Math.max(64, fontPx * 4);
+                // B616 — WYSIWYG editor: auto-size the box to the LIVE text with the SAME symmetric
+                // padX/padY (× zoom) the committed render uses, so left/right margins match and
+                // top/bottom margins match, and there's no jump between editing and committed. Mirror
+                // the exact geometry from the callouts.map render above (zk/charW/lineH/tw/w/h).
+                const zk = view.ppf / 0.35;
+                const fontPx = st.size * zk;
+                const text = editCallout.text || "";
+                const lines = String(text).split("\n");
+                const charW = fontPx * 0.56 * (st.bold ? 1.05 : 1), lineH = fontPx * st.lineHeight;
+                const padX = st.padX * zk, padY = st.padY * zk;
+                const tw = Math.max(fontPx, ...lines.map((l) => l.length * charW));
+                // Match the committed box, but never collapse below a usable typing target — an empty
+                // new callout, a tiny font, or a zoomed-way-out edit would otherwise be a few px wide.
+                // The floor only lifts sub-64px content (where the committed callout is itself tiny/
+                // invisible), so it never causes a perceptible jump for real, visible content.
+                const w = Math.max(64, tw + padX * 2), h = Math.max(30, lines.length * lineH + padY * 2);
+                const bp = f2p(c.box);
                 return (
-                  <foreignObject x={bp.x - W / 2} y={bp.y - H / 2} width={W} height={H} style={{ overflow: "visible" }}>
-                    <textarea autoFocus value={editCallout.text}
+                  <foreignObject x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} style={{ overflow: "visible" }}>
+                    <textarea autoFocus value={editCallout.text} wrap="off"
                       onChange={(e) => setEditCallout((s) => ({ ...s, text: e.target.value }))}
                       onBlur={commitEditCallout}
                       onPointerDown={(e) => e.stopPropagation()}
@@ -7725,9 +7817,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         // Bluebeam text box: Enter makes a new line; finish by clicking away or Esc.
                         if (e.key === "Escape") { e.preventDefault(); commitEditCallout(); }
                       }}
-                      placeholder="Type; click away or Esc to finish"
+                      placeholder="Type…"
                       maxLength={2000}
-                      style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      /* padding is padY(top/bottom)/padX(left/right) — equal per axis by construction,
+                         so the whitespace is symmetric while typing (matches the committed box). The
+                         active-edit ring is an OUTLINE (not a border) so it doesn't consume any content
+                         box — the padded text area then equals the committed SVG text region exactly (a
+                         2px border would shrink each axis by 4px and clip the last line / caret). */
+                      style={{ width: w, height: h, resize: "none", overflow: "hidden", whiteSpace: "pre", border: "none", outline: `2px solid ${PAL.accent}`, borderRadius: 4, padding: `${padY}px ${padX}px`, fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -7982,6 +8079,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {sideAddNodes}
                 {parkingAddNodes}
                 {parcelHandles}
+                {elSelOutline}
                 {elPolyHandles}
                 {markupHandles}
                 {/* B230 — transient candidate-insertion dot, snapped to the nearest point on the
@@ -8819,21 +8917,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             return (
               <div data-testid="property-panel">
               <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
-                <Field label="Line color"><input type="color" value={toHex6(selMarkup.stroke)} {...livePick((v) => liveMarkup({ stroke: v }))} style={swatch} /></Field>
-                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
+                <Field label="Outline"><input type="color" value={toHex6(selMarkup.stroke)} {...livePick((v) => liveMarkup({ stroke: v }))} style={swatch} /></Field>
+                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
                 <Field label="Dash">
                   <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
                     <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
                   </select>
                 </Field>
                 {closed && <>
-                  <Field label="Fill color"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
+                  <Field label="Fill"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} onChange={(e) => setSelMarkup({ fillOpacity: +e.target.value })} /></Field>
                 </>}
                 {MK_BOX_KINDS.includes(selMarkup.kind) && <>
                   <Field label="Width / Height"><span style={{ display: "flex", gap: 5 }}>
-                    <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.w)} min={1} onCommit={(n) => setSelMarkupGeom({ w: n })} />
-                    <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.h)} min={1} onCommit={(n) => setSelMarkupGeom({ h: n })} />
+                    <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.w)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ w: n })} />
+                    <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.h)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ h: n })} />
                   </span></Field>
                   <Field label="Rotation°"><RotationStepper value={selMarkup.rot || 0} disabled={!!selMarkup.locked} disabledReason="Unlock this markup to rotate it"
                     onCommit={(deg) => setSelMarkupGeom({ rot: deg })}
@@ -8858,6 +8956,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {leftPanel === "props" && selCallout && (() => {
             const cs = calloutStyle(selCallout);
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
+            // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
+            const cap = { fontSize: 9.5, color: PAL.muted, lineHeight: 1, textAlign: "center", letterSpacing: "0.02em" };
+            const swatchCap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 3 };
             const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
             return (
               <div data-testid="property-panel">
@@ -8865,10 +8966,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button style={{ ...chip, width: "100%", marginBottom: 9 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
                 {/* row 1: size · text color · fill */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
-                  <NumInput style={{ ...numInput, width: 52 }} value={cs.size} min={6} max={96} onCommit={(n) => setSelCallout({ size: n })} />
-                  <input type="color" title="Text" value={toHex6(cs.color)} {...livePick((v) => liveCallout({ color: v }))} style={swatch} />
-                  <input type="color" title="Fill" value={toHex6(cs.fill)} {...livePick((v) => liveCallout({ fill: v }))} style={swatch} />
-                  <input type="color" title="Line" value={toHex6(cs.stroke)} {...livePick((v) => liveCallout({ stroke: v }))} style={swatch} />
+                  <span style={{ ...cap, marginRight: 1 }}>Size</span>
+                  <NumInput style={{ ...numInput, width: 48 }} value={cs.size} min={6} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} />
+                  <span style={swatchCap} title="Text color"><input type="color" value={toHex6(cs.color)} {...livePick((v) => liveCallout({ color: v }))} style={swatch} /><span style={cap}>Text</span></span>
+                  <span style={swatchCap} title="Fill color"><input type="color" value={toHex6(cs.fill)} {...livePick((v) => liveCallout({ fill: v }))} style={swatch} /><span style={cap}>Fill</span></span>
+                  <span style={swatchCap} title="Outline color"><input type="color" value={toHex6(cs.stroke)} {...livePick((v) => liveCallout({ stroke: v }))} style={swatch} /><span style={cap}>Outline</span></span>
                 </div>
                 {/* row 2: B / I / U · align L C R */}
                 <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
@@ -8876,13 +8978,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={{ ...seg(cs.italic), fontStyle: "italic" }} title="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
                   <button style={{ ...seg(cs.underline), textDecoration: "underline" }} title="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
                   <span style={{ width: 6 }} />
-                  {["left", "center", "right"].map((a) => (
-                    <button key={a} style={seg(cs.align === a)} title={a} onClick={() => setSelCallout({ align: a })}>{a === "left" ? "⤙" : a === "right" ? "⤚" : "≡"}</button>
+                  {/* B615 — clear align icons (⇤ left / ▭ center / ⇥ right) instead of the cryptic ⤙ ≡ ⤚. */}
+                  {[["left", "⇤", "Align left"], ["center", "≣", "Align center"], ["right", "⇥", "Align right"]].map(([a, icon, lbl]) => (
+                    <button key={a} style={seg(cs.align === a)} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}>{icon}</button>
                   ))}
                 </div>
                 {/* row 3: padding · line spacing */}
-                <Field label="Padding X / Y"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={cs.padX} min={0} onCommit={(n) => setSelCallout({ padX: n })} /> <NumInput style={{ ...numInput, width: 42 }} value={cs.padY} min={0} onCommit={(n) => setSelCallout({ padY: n })} /></span></Field>
-                <Field label="Line spacing"><NumInput style={numInput} value={cs.lineHeight} min={0.8} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
+                <Field label="Padding X / Y"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={cs.padX} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padX: n })} /> <NumInput style={{ ...numInput, width: 42 }} value={cs.padY} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padY: n })} /></span></Field>
+                <Field label="Line spacing"><NumInput style={numInput} value={cs.lineHeight} min={0.8} step={0.1} coarse={0.5} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
                 </div>
@@ -9043,8 +9146,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                       <>
                         {grpHdr("Footprint")}
-                        <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ [ax.length]: n })} /></Field>
-                        <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} /></Field>
+                        <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.length]: n })} /></Field>
+                        <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} /></Field>
 
                         {grpHdr("Loading")}
                         <Field label="Docks">
@@ -9139,8 +9242,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     );
                   })() : (
                     <>
-                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
+                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
                   {!isDockZone(selEl) && !isBuilding(selEl) && !isCenterlineRoad(selEl) && (
@@ -9443,12 +9546,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* Bluebeam-style Properties — colors for the selected element + set defaults */}
           {leftPanel === "props" && selEl && curStyle && (
             <Section title="Properties">
-              <Field label="Fill color">
+              <Field label="Fill">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <input type="color" value={toHex6(curStyle.fill)} {...livePick((v) => setSelEl({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
               </Field>
-              <Field label="Line color">
+              <Field label="Outline">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <input type="color" value={toHex6(curStyle.stroke)} {...livePick((v) => setSelEl({ stroke: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
@@ -10489,7 +10592,10 @@ function dimSlideFor(el, allEls) {
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext, selStroke) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext) {
+  // B617 — zoom multiplier (px/ft ÷ the default 0.35) so a road's curb/edge stroke holds constant
+  // relative to the drawing across zoom, exactly like the in-component markup/utility strokes.
+  const zk = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x) / 0.35;
   // Per-element striping config. renderElPx is a MODULE-level fn, so it can't close
   // over the component-scoped cfgOf — referencing that one here threw "cfgOf is not
   // defined" inside the els.map during render and blanked the whole page on any
@@ -10509,7 +10615,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   // handles, not a colour change.
   const waterFill = st.cartoWater ? "url(#grad-water)" : st.fill;
   const waterOp = st.cartoWater ? 0.8 : fillOp;
-  const elStroke = st.cartoWater ? st.stroke : (isSel ? selStroke : st.stroke);
+  const elStroke = st.stroke; // B619: no accent recolor on select — the element keeps its own outline color (blue chrome cues the selection)
   // Detention "expand vs. existing" ghost: the locked baseline footprint, in world
   // feet, drawn dashed so the user sees what the pond grew from. Same path for the
   // polygon and rect branches (the rect branch counter-rotates it back to world).
@@ -10531,6 +10637,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         <path d={dPath} fill={ghostPath ? addF : waterFill} fillOpacity={waterOp} stroke="none" />
         {ghostPath && <path d={ghostPath} fill={existF} fillOpacity={waterOp} stroke="none" pointerEvents="none" />}
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
+        {/* B617: a polygon element is a filled AREA (irregular pond / building / paving / landscape) —
+            its outline is a filled-area edge, so it keeps a FIXED pixel weight (the fill carries the
+            shape). Only linear features (roads, markup/utility lines) scale. */}
         <path d={dPath} fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
         {ghostPath && ghostEl("ghost")}
         {el.type === "pond" && pondContourEls(el, f2p, f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x, "pc")}
@@ -10541,20 +10650,21 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
     const ring = roadStripRing(el, settings);
     const dPath = ring.length >= 3 ? ring.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
-    const stroke = isSel ? selStroke : st.stroke;
+    const stroke = st.stroke; // B619: no accent recolor on select — blue vertex handles cue the selection
     const rparts = [];
     if (dPath) {
       // Pavement+curb surface = bufferPolyline of the tessellated centerline at travelW + 2 curbs.
       rparts.push(<path key="surf" d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />);
       if (texFill) rparts.push(<path key="tex" d={dPath} fill={texFill} stroke="none" pointerEvents="none" />);
-      rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={isSel ? st.weight + 1 : st.weight} />);
+      // B617: the pavement edge + curb stripes are stroke-only linework (roads-as-lines) → scale with zoom.
+      rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={strokeZoom(isSel ? st.weight + 1 : st.weight, zk)} />);
     }
     // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges),
     // so the striping follows the offset edges — NOT the old w>=h axis logic (B70 contract held:
     // a 24′ travel road still reads 25′ wide because the strip ring is travelW + a curb each side).
     roadCurbLines(el, settings).forEach((cl, i) => {
       if (!cl || cl.length < 2) return;
-      rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={1} pointerEvents="none" />);
+      rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={strokeZoom(1, zk)} pointerEvents="none" />);
     });
     // Travel-width dimension anchored to the CENTERLINE MIDPOINT (excludes the curb — reads the
     // true travel width). B149 detail tier (a road width hides at site-overview zoom); kept while
@@ -10621,7 +10731,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const rectExistF = el.det?.existFill ?? waterFill;
   const rectAddF = el.det?.addFill ?? POND_ADD_FILL_DEFAULT;
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : waterFill} fillOpacity={waterOp}
-    stroke={st.cartoWater ? st.stroke : (isSel ? selStroke : st.stroke)} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
+    stroke={st.stroke /* B619: no accent recolor on select */} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : el.type === "road" ? strokeZoom(isSel ? st.weight + 0.75 : st.weight, zk) : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
   // Baseline ghost fill (existing basin) sits on top of the added-tint rect; stroke layer added below.
   if (ghostPath) parts.push(<g key="ghostfill" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}><path d={ghostPath} fill={rectExistF} fillOpacity={waterOp} stroke="none" pointerEvents="none" /></g>);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
@@ -10744,13 +10854,13 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     }
   }
   if (el.type === "road") { // curb lines inside each long edge; pavement between
-    const cp = (el.curb ?? CURB) * ppf;
+    const cp = (el.curb ?? CURB) * ppf, cw = strokeZoom(1, zk); // B617: curb stripes scale with zoom
     if (el.w >= el.h) {
-      parts.push(<line key="cu0" x1={tl.x} y1={tl.y + cp} x2={tl.x + w} y2={tl.y + cp} stroke={st.stroke} strokeWidth={1} />);
-      parts.push(<line key="cu1" x1={tl.x} y1={tl.y + h - cp} x2={tl.x + w} y2={tl.y + h - cp} stroke={st.stroke} strokeWidth={1} />);
+      parts.push(<line key="cu0" x1={tl.x} y1={tl.y + cp} x2={tl.x + w} y2={tl.y + cp} stroke={st.stroke} strokeWidth={cw} />);
+      parts.push(<line key="cu1" x1={tl.x} y1={tl.y + h - cp} x2={tl.x + w} y2={tl.y + h - cp} stroke={st.stroke} strokeWidth={cw} />);
     } else {
-      parts.push(<line key="cu0" x1={tl.x + cp} y1={tl.y} x2={tl.x + cp} y2={tl.y + h} stroke={st.stroke} strokeWidth={1} />);
-      parts.push(<line key="cu1" x1={tl.x + w - cp} y1={tl.y} x2={tl.x + w - cp} y2={tl.y + h} stroke={st.stroke} strokeWidth={1} />);
+      parts.push(<line key="cu0" x1={tl.x + cp} y1={tl.y} x2={tl.x + cp} y2={tl.y + h} stroke={st.stroke} strokeWidth={cw} />);
+      parts.push(<line key="cu1" x1={tl.x + w - cp} y1={tl.y} x2={tl.x + w - cp} y2={tl.y + h} stroke={st.stroke} strokeWidth={cw} />);
     }
   }
   if ((el.type === "building" || el.type === "paving" || el.type === "road") && !el.points && !el.noLabel) {
@@ -10858,30 +10968,71 @@ function Field({ label, children }) {
 }
 // A numeric input you can edit freely (clear it, type partial values) — it only
 // commits (parse + clamp) on Enter or blur, never live on each keystroke.
-function NumInput({ value, onCommit, min, max, style, placeholder }) {
+function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   const editing = useRef(false);
   useEffect(() => { if (!editing.current) setDraft(value == null ? "" : String(value)); }, [value]);
-  const commit = () => {
-    editing.current = false;
-    const n = parseFloat(draft);
-    // Reject NaN AND ±Infinity: parseFloat("1e999")/"Infinity" are NOT NaN, and Math.max(min, Infinity)
-    // is Infinity, so a min-clamp can't catch it — a non-finite value poisons geometry to NaN and then
-    // persists as null (JSON.stringify(Infinity) === null). The default 1e7 cap also bounds the absurd.
-    if (!Number.isFinite(n)) { setDraft(value == null ? "" : String(value)); return; }
+  // Clamp a candidate value the same way for a typed commit AND a stepper nudge: floor at min,
+  // ceil at max (default 1e7 bounds the absurd). Reject NaN AND ±Infinity here — parseFloat("1e999")
+  // is NOT NaN and Math.max(min, Infinity) stays Infinity, so a min-clamp alone can't catch it; a
+  // non-finite value poisons geometry to NaN and persists as null (JSON.stringify(Infinity) === null).
+  const clampNum = (n) => {
+    if (!Number.isFinite(n)) return null;
     let v = n;
     if (min != null) v = Math.max(min, v);
-    v = Math.min(max != null ? max : 1e7, v);
+    return Math.min(max != null ? max : 1e7, v);
+  };
+  const commit = () => {
+    editing.current = false;
+    const v = clampNum(parseFloat(draft));
+    if (v == null) { setDraft(value == null ? "" : String(value)); return; }
     setDraft(String(v));
     if (v !== value) onCommit(v);
   };
-  return (
+  // B618 — stepper / arrow-key nudge (opt-in via `step`). Nudges about the COMMITTED value
+  // (falls back to the current draft when the prop isn't yet a number) so repeated presses never
+  // drift, rounds to kill float dust (0.1+0.2 → 0.30000000000000004), and commits immediately.
+  const nudge = (d) => {
+    if (step == null) return;
+    const base = Number.isFinite(value) ? value : (parseFloat(draft) || 0);
+    const v = clampNum(Math.round((base + d) * 1000) / 1000);
+    if (v == null) return;
+    editing.current = false;
+    setDraft(String(v));
+    if (v !== value) onCommit(v);
+  };
+  const coarseStep = coarse != null ? coarse : (step != null ? step * 5 : 0);
+  const input = (
     <input style={style} value={draft} placeholder={placeholder} inputMode="decimal"
       onFocus={() => { editing.current = true; }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
-      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { setDraft(value == null ? "" : String(value)); e.currentTarget.blur(); } }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        else if (e.key === "Escape") { setDraft(value == null ? "" : String(value)); e.currentTarget.blur(); }
+        else if (step != null && e.key === "ArrowUp") { e.preventDefault(); nudge(e.shiftKey ? coarseStep : step); }
+        else if (step != null && e.key === "ArrowDown") { e.preventDefault(); nudge(-(e.shiftKey ? coarseStep : step)); }
+      }}
     />
+  );
+  if (step == null) return input;
+  // preventDefault on mousedown keeps the input focused so a click nudges rather than firing a
+  // blur-commit on a half-typed draft first (same trick as RotationStepper's spinner).
+  const spinBtn = {
+    width: 18, height: 12, padding: 0, display: "grid", placeItems: "center", fontSize: 9,
+    lineHeight: 1, border: "1px solid var(--border-default)", borderRadius: 4,
+    background: "var(--surface-raised)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
+  };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      {input}
+      <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <button type="button" style={spinBtn} aria-label="Increase" title="Increase (↑ · Shift for a larger step)"
+          onMouseDown={(e) => e.preventDefault()} onClick={() => nudge(step)}>▲</button>
+        <button type="button" style={spinBtn} aria-label="Decrease" title="Decrease (↓ · Shift for a larger step)"
+          onMouseDown={(e) => e.preventDefault()} onClick={() => nudge(-step)}>▼</button>
+      </span>
+    </span>
   );
 }
 
