@@ -39,10 +39,7 @@ _Last updated: 2026-06-27._
       bind. Archived as V150 in `VERIFICATION-DONE.md`. (B491)
 - [x] ~~Run `db/team_rehome_guard.sql`~~ — **DONE 2026-06-26.** Closed a gap where a teammate on two teams could
       move your shared project to their other team. (B486)
-- [ ] **(2-min dashboard check) Confirm "Confirm email" is ON** in Supabase → Authentication → Providers → Email.
-      Team invites trust a person's email; if confirmation were off, someone could sign up as a co-worker's
-      address (without owning it) and auto-join their team. On by default — this is just a didn't-get-turned-off
-      check, again before inviting people. (B491)
+- [x] ~~**(2-min dashboard check) Confirm "Confirm email" is ON** in Supabase → Authentication → Providers → Email.~~ — **DONE (Cowork verified 2026-07-01).** Supabase Dashboard → Authentication → Sign In / Providers → Email shows **Confirm email: Enabled**. Email is the only enabled sign-in provider (Phone, SAML 2.0, Web3 Wallet, Apple, Azure, etc. all Disabled; no third-party OAuth or magic-link providers on). (B491 tail check.)
 
 ## Things Claude needs FROM Michael to finish/verify
 - [x] **Reference drawings — DONE (2026-06-30, found in Google Drive, defaults validated).** Measured the
