@@ -18,3 +18,6 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.
+
+<!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
+     lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->

@@ -20,6 +20,13 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > whole 250 KB file into context to find a 5-line item is the single biggest avoidable
 > token burn here. The `*-DONE.md` archives are **write-only — never Read them** except to
 > look up one specific past ID.
+>
+> **🔄 Keep the per-folder pointers fresh.** Some module folders carry a short `CLAUDE.md`
+> pointer (what's here + key files) that auto-loads only when you work in that folder. **When
+> you rename, move, or delete a key file, update that folder's pointer in the SAME commit.**
+> This is machine-enforced: `node ui-audit/doc-pointer-audit.mjs` (in the `/improve` gate +
+> `test/docPointers.test.js`) fails CI if a pointer names a code file that no longer exists.
+> Keep pointers short — signposts, never duplicated detail — so they don't drift.
 
 > **⛔ STANDING RULE #1 — when Michael drops in a problem, FIX IT AND SHIP IT this session. Never log-and-defer.**
 > A bug report or change request = **fix it, verify it, and merge it live this same session.** Parking it in

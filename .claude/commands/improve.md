@@ -55,6 +55,7 @@ Read `CLAUDE.md` first if anything below is unclear — its standing rules win o
 ```
 npm run lint
 node ui-audit/gis-source-audit.mjs
+node ui-audit/doc-pointer-audit.mjs
 npm test
 npm run build
 ```

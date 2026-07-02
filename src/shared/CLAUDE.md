@@ -17,3 +17,6 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
 - `projects/`, `profile/`, `cloud/`, `presence/`, `telemetry/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.
+
+<!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
+     lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->

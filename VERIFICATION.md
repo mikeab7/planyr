@@ -45,15 +45,23 @@ was never clicked" quietly ships broken.
    policy above, do **not** hand this list to Michael as his to-do; only escalate a **critical**
    (won't build / won't render / crashing) issue.
 2. **Verify it yourself in a headless browser** (see "🤖 Self-verification" above): run the
-   **Steps**, compare to **Expect**, then record the outcome — flip ⏳→✅ (or ❌ with a note),
-   set `Last checked`, and bump `Next check` by the `Cadence`. Prefer doing this in the same session
-   that shipped the change.
-3. **Only if no browser is reachable:** leave the item logged here and move on — don't block on
+   **Steps**, compare to **Expect**, then record the outcome.
+3. **⛔ CLEAR OUT what you finish — don't leave passed items piling up here (owner rule, 2026-07-02).**
+   This is the #1 reason this file bloats. Whoever runs a check (usually Claude Cowork on the live app —
+   NOT Michael) archives it the SAME session, by item type:
+   - **One-off item** (`Cadence: once` — a bug/feature acceptance check): once it **fully passes with
+     nothing pending**, **MOVE its whole block to `VERIFICATION-DONE.md`** — do not just mark it ✅ and
+     leave it here. (Same archiving discipline as `BACKLOG.md → BACKLOG-DONE.md`.) If it only *partly*
+     passes (some steps still owed), it **stays** with the passed parts noted and the remainder ⏳.
+   - **Recurring item** (`🌐` endpoint-liveness / any `Cadence: every N days`): it **stays here** —
+     don't archive it. Just record the run: flip the status, set `Last checked`, bump `Next check` by
+     the `Cadence`. These are meant to be re-run forever.
+   - A **❌** stays ❌ (with the date + what broke) until it's re-fixed and re-run — never archive a fail.
+4. **Only if no browser is reachable:** leave the item logged here and move on — don't block on
    Michael. Do **not** mark anything ✅ from reading the code — confirming-in-the-running-app is the
    entire point of this file.
-4. **Endpoint-liveness items (tagged 🌐) are the exception** — a `curl`/REST probe, runnable
-   without a browser. Run those when due.
-5. Keep it honest: a ❌ stays ❌ with the date and what broke until it's re-fixed and re-run.
+5. **Endpoint-liveness items (tagged 🌐) are the exception to "needs a browser"** — a `curl`/REST
+   probe, runnable without a browser. Run those when due (and per rule 3 they stay, they don't archive).
 
 `CLAUDE.md` points every session here, so this list is consulted automatically.
 
