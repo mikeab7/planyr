@@ -60,10 +60,25 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V147 — B486: team re-home guard — only the OWNER can change a project's sharing (needs 2 accounts) ⏳ owner must run `db/team_rehome_guard.sql` first
-- **What changed.** A BEFORE UPDATE trigger on `sites`/`doc_reviews`/`file_facts` blocks a non-owner from changing `team_id` (share/unshare/re-home) — closes the gap where a teammate on two teams could re-home the owner's shared project. SQL-only (no app code); audited the rest of the Team Workspaces surface and this was the one real bug.
-- **Owner step first:** run `db/team_rehome_guard.sql` in the Supabase SQL editor (handed over + on OWNER-TODO).
-- **⏳ Verify (needs 2 test accounts, signed-in — the sandbox can't):** A owns a project shared with team X; B is a member of X **and** of another team Y. As B, attempt to set the project's `team_id` to Y (re-home) → it must FAIL with "Only the project owner can change sharing." As B, edit the project's CONTENT (a building/markup) → still SUCCEEDS (team_id unchanged). As A (owner), share/unshare/re-home → all SUCCEED. Folds into the broader B406 team round-trip (V118). Cadence: once after the SQL is run.
+
+<!-- Cowork 2026-06-26 batch 5 fold-in: NEW bug found (V98 dog-ear orphan-bumpout) → filed **B487** and
+     fixed this session (V148 below). Batch 5 confirmations of already-tracked items: V100 (Site↔Review
+     carry ✅), V102 (delete-durable via T2.5 cleanup ✅), V101/V71/V129 (FEMA render + proxy ✅ via
+     T2.6), V81 (stale-write rejected — served by the newer CAS path proven at T2.3/V134). Optional-
+     eyeball-only (not re-driven, existing proofs remain): V103, V97, V90, V68, V67, V83, V70. Batch 5's
+     T3.3 full drawing-tool sweep confirmed 11 tools draw+persist; Pen/Highlight/Eraser/Shift-snap need
+     the auth-gated e2e suite (Chrome-automation limitations). Blocked items handed to Michael via
+     OWNER-TODO. -->
+
+### V148 — B487: dog-ear ("corner bump-out") children re-anchor to the host's current edge on load ✅ lint 0 · 1602 tests (+5) · build green; ⏳ one signed-in Jacintoport eyeball
+- **What changed.** Cowork's 2026-06-26 signed-in audit found a real Jacintoport site (`smqdxst8pf3g`) with both right-side dog-ear bump-outs orphaned **13.5 ft inside** the host's current edge — the host was widened ~27 ft via a code path that missed the runtime `refitChildren`, so the dog-ears stayed at the pre-resize `cx`. B363 (rotation) held; B362 (size) held; only dog-ear **position** was un-repaired at load. Fix: `siteModel.js` adds `normalizeDogEarPositions` next to `normalizeBondedRotations` — for each dog-ear child, snap `cx/cy/w/h` to `dogEarGeom(host, dogEar)` (the same pure geometry the runtime resize uses). Idempotent; only touches drifted records.
+- **✅ Verified here.** New `test/dogEarReanchor.test.js` (5): reproduces Jacintoport's exact numbers (host 328.5 wide, drifted `cx` 4.2 → snaps to the current right edge); a correctly-anchored dog-ear is untouched (object identity preserved, no version churn); truck-court/dock children stay untouched; a missing-host child no-ops; rotated-host frame handled.
+- **⏳ Signed-in eyeball (Cowork/owner):** open **Jacintoport** on planyr.io signed-in — the two right-side dog-ears now render flush with the current building edge (no 13.5-ft overlap into the truck court). No user action required; the record self-heals on load and re-saves clean on the next edit. Bonded-child sweep across the other 24 sites showed zero other affected records, so blast radius = Jacintoport only.
+
+### V147 — B486: team re-home guard — only the OWNER can change a project's sharing (needs 2 accounts) ✅ owner ran the SQL 2026-06-26; ⏳ one signed-in 2-account round-trip
+- **What changed.** A BEFORE UPDATE trigger on `sites`/`doc_reviews`/`file_facts` blocks a non-owner from changing `team_id` (share/unshare/re-home) — closes the gap where a teammate on two teams could re-home the owner's shared project. SQL-only (no app code); audited the rest of the Team Workspaces surface and this was the one real bug. Trigger hardened with `set search_path = pg_catalog` (Cowork FYI — Supabase-linter-clean).
+- **✅ Owner step done: `db/team_rehome_guard.sql` run in Supabase.**
+- **⏳ Verify (needs 2 test accounts, signed-in):** A owns a project shared with team X; B is a member of X **and** of another team Y. As B, attempt to set the project's `team_id` to Y (re-home) → it must FAIL with "Only the project owner can change sharing." As B, edit the project's CONTENT (a building/markup) → still SUCCEEDS (team_id unchanged). As A (owner), share/unshare/re-home → all SUCCEED. Folds into the broader B406 team round-trip (V118). Cadence: once after 2nd account exists.
 ### V146 — B481 + B482: signed-in re-confirm of the Cowork-found overlay/switcher fixes ⏳ (logged-out + headless ✅; the exact signed-in cases need Cowork)
 - **B481 (large overlay rehydrate)** ✅ headless `verify-b480-overlay-large.mjs` 8/8 (a 2.1 MB overlay re-renders after reload from IndexedDB, no placeholder) + `verify-b474-overlay-idb.mjs` 7/7 (no regression). ⏳ **Signed-in re-confirm (Cowork):** the exact 7.5 MB+ case — drop a >5 MB site-plan overlay, reload, confirm it RE-RENDERS (not the "Re-add … not on this device" placeholder).
 - **B482 (cold Review switcher)** — the cache warm only fires signed in, so logged-out can't drive it (logged-out the switcher correctly reads the legacy store). ⏳ **Signed-in re-confirm (Cowork):** open a FRESH tab straight into Review (`/project/<id>/markup`) without opening the Site Planner first → open the "▾" switcher → it lists your projects (briefly "Loading projects…", then populated), NOT "No projects yet."
