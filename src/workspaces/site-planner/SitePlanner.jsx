@@ -60,10 +60,10 @@ import { roadCenterline, roadMinRadius } from "./lib/roadGeometry.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds } from "./lib/labelLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
-import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD } from "./lib/dimSlide.js";
+import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
 import { offsetInward, ringsArea, maxInwardOffset } from "./lib/pondOffset.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
@@ -881,6 +881,10 @@ const DEFAULT_SETTINGS = {
   // grid reads as evenly-spaced columns; the speed bay is the only different bay). Dock
   // doors at doorOC o.c., doorWidth wide. Per-building overrides live on the element.
   showGrid: true,
+  // B121 label-legibility toggles (default ON): the red edge-dimension callouts, and the sf/acreage
+  // line on centred element labels — let a crowded layout shed either tier. Read via `!== false` so a
+  // project saved before these keys existed still shows both.
+  showDims: true, showAreas: true,
   speedBay: 60, bayLengthTarget: 56, bayDepthTarget: 50, bayMin: 50, bayMax: 58,
   doorWidth: 9, doorOC: 12,
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
@@ -5824,6 +5828,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // dodge a neighbour, and hides it only as a last resort; bigger elements and buildings
   // win the space. Zoomed in, shapes are large and spread out, so all lines show as before.
   const seenLabels = new Set(); // suppress duplicate overlapping callouts (e.g. two stacked sidewalks)
+  const showAreas = settings.showAreas !== false; // B121: drop the sf/acreage line when the user turns areas off (name + dimension lines stay)
   const labelCands = [];
   for (const el of els) {
     if (NO_LABEL.includes(el.type) || el.noLabel) continue;
@@ -5863,11 +5868,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // Seat the EXISTING-area label over the existing basin (baseline centroid), not the
         // whole-pond centre — so it reads over the old pond and clears the "+added" label.
         fc = centroid(base.ring);
-        lines = ["Existing Detention Pond", `${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`];
+        lines = ["Existing Detention Pond"];
+        if (showAreas) lines.push(`${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`);
         if (pt) pondAdd = { pt, addA };
-        else { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`); }
+        else if (showAreas) { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`); }
       } else {
-        lines = ["Detention Pond", `${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`];
+        lines = ["Detention Pond"];
+        if (showAreas) lines.push(`${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`);
         // Stage-storage line, seated on the pond with its name (rides the same LOD/collision
         // pool). Same detentionStorage() the side panel reads, so the two can never disagree.
         // Gated on the contours toggle (default on) AND the same zoom floor as the depth-ring
@@ -5898,7 +5905,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // when the building has bump-outs (whose area is folded into the on-plan sf).
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
-        lines = buildingLabelLines({ name, sqft: `${f0(area + ba)} sf`, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} sf` : null, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
       } else if (el.type === "trailer") {
         // B194: the trailer-parking label is TWO lines — "<stall depth>′ Trailer Parking" then
         // the trailer count. The stall depth is the per-stall trailer LENGTH (the depth a trailer
@@ -5909,8 +5916,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         lines = [`${f0(tc.trailerL)}′ ${name}`, `${f0(count)} trailers${poly ? " (est)" : ""}`];
       } else {
         lines = [name];
-        lines.push(`${f0(area)} sf`);
-        lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
+        if (showAreas) lines.push(`${f0(area)} sf`);        // sf is an AREA line — drop with areas off
+        // A rect's "W × H" is a DIMENSION line (kept); a polygon's only size line IS its acreage
+        // (an AREA line — dropped with areas off, leaving just the name).
+        if (!poly) lines.push(`${f0(el.w)}′ × ${f0(el.h)}′`);
+        else if (showAreas) lines.push(`${f2(area / SQFT_PER_ACRE)} ac`);
       }
     }
     // Shape's on-screen bounding half-extents (rotation-aware for rects). halfH drives the
@@ -5937,13 +5947,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true });
+        lines: showAreas ? ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`] : ["Additional Detention"], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true });
     }
   }
   const labelShow = layoutLabels(
     labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader })),
     { pad: 2 },
   );
+  // B121 (round 3): fold the red per-edge dimension callouts into the collision pool. The dimension
+  // number is the lowest tier — if its screen box would overprint a committed centred name/area
+  // label, HIDE it (never move it: B592 pins it on the footprint). Iterate ELS (not labelCands — a
+  // deduped / LOD-dropped label still draws its dimension), mirroring renderElPx's visibility gate
+  // (:10866/:10887) and number geometry so the collision test and the render can't disagree.
+  const committedLabelBoxes = [...labelShow.values()].map((p) => p.box).filter(Boolean);
+  const dimItems = [];
+  for (const el of els) {
+    if (!(el.type === "building" || el.type === "paving" || el.type === "road") || el.points || el.noLabel) continue;
+    const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB))
+      : el.type === "building" ? footprintDepth(el) : Math.min(el.w, el.h);
+    const dimVisible = el.type === "building" ? dimCalloutVisible(view.ppf) : detailLabelVisible(dimW, view.ppf);
+    if (!dimVisible) continue;
+    const tl = f2p({ x: el.cx - el.w / 2, y: el.cy - el.h / 2 });
+    const c = f2p({ x: el.cx, y: el.cy });
+    const dimOff = clampDimOffset(el.dimOffset, dimSlideFor(el, els));
+    dimItems.push({
+      id: el.id,
+      box: dimNumberBox({
+        tlx: tl.x, tly: tl.y, w: el.w * view.ppf, h: el.h * view.ppf, cx: c.x, cy: c.y,
+        rot: el.rot || 0, horizLong: el.w >= el.h,
+        posF: el.type === "road" ? DIM_POS_F_ROAD : DIM_POS_F_DEFAULT,
+        ox: dimOff.x * view.ppf, oy: dimOff.y * view.ppf,
+        textLen: `${f0(dimW)}′`.length, fz: 11 * Math.max(0.34, Math.min(1, view.ppf / 0.45)),
+      }),
+    });
+  }
+  const dimSuppressed = suppressedDimIds(dimItems, committedLabelBoxes, 2);
   const labelEls = labelCands.map((d) => {
     const place = labelShow.get(d.lid);
     if (!place) return null; // hidden this frame to avoid overprinting a higher-priority label
@@ -7474,7 +7512,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext))}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext, dimSuppressed))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) */}
               {markups.map((m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
@@ -9972,6 +10010,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 next to the object it acts on — see B164. Not duplicated here. */}
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showGrid} onChange={(e) => setSettings((s) => ({ ...s, showGrid: e.target.checked }))} /> Show column grid</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }} title="Show the red footprint dimension callouts (building depth, road width, strip width)"><input type="checkbox" checked={settings.showDims !== false} onChange={(e) => setSettings((s) => ({ ...s, showDims: e.target.checked }))} /> Show dimensions</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }} title="Show the square-footage / acreage line on element labels"><input type="checkbox" checked={settings.showAreas !== false} onChange={(e) => setSettings((s) => ({ ...s, showAreas: e.target.checked }))} /> Show areas</label>
           </Section>
 
           {/* Structural column grid (B568): speed bay + flex-to-band typical bays + dock doors.
@@ -10592,7 +10632,7 @@ function dimSlideFor(el, allEls) {
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext, dimSuppressed) {
   // B617 — zoom multiplier (px/ft ÷ the default 0.35) so a road's curb/edge stroke holds constant
   // relative to the drawing across zoom, exactly like the in-component markup/utility strokes.
   const zk = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x) / 0.35;
@@ -10697,7 +10737,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       const numHandlers = dimSel
         ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id, e); } }
         : {};
-      if (dimVisible || dimSel) {
+      if (settings.showDims !== false && (dimVisible || dimSel)) { // B121: "Show dimensions" gates the centerline-road width callout too
         const dim = [];
         if (moved) dim.push(<line key="lead" x1={M.x} y1={M.y} x2={anchorPx.x} y2={anchorPx.y} stroke={RED} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />);
         dim.push(<line key="dl" x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={RED} strokeWidth={1.25} />);
@@ -10930,7 +10970,11 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // dimVisible (B149) drops a detail-tier paving/road width at site-overview zoom. A SELECTED
     // paving/road keeps its dimension so the click-to-edit / drag-to-reposition handle never
     // vanishes mid-edit; buildings keep their exact prior behaviour (site tier, no select exception).
-    if (dimVisible || (dimSel && el.type !== "building")) parts.push(
+    // B121 r3: the red dimension draws when its zoom tier is visible AND it isn't collision-suppressed
+    // (its number would overprint a higher-priority centred label) — a selected non-building keeps its
+    // dimension so the drag/edit handle never vanishes mid-edit. The "Show dimensions" toggle (B121)
+    // gates the whole layer. We only HIDE here; B592 keeps the dimension pinned on the footprint.
+    if (settings.showDims !== false && ((dimVisible && !dimSuppressed?.has(el.id)) || (dimSel && el.type !== "building"))) parts.push(
       <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
         onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
         {dim}

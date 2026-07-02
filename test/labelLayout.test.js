@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines, dimCalloutVisible, DIM_CALLOUT_MIN_PPF, detailLabelVisible, DETAIL_LABEL_MIN_PX } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines, dimCalloutVisible, DIM_CALLOUT_MIN_PPF, detailLabelVisible, DETAIL_LABEL_MIN_PX, suppressedDimIds } from "../src/workspaces/site-planner/lib/labelLayout.js";
 
 describe("labelLayout — shared label level-of-detail + collision engine (B121)", () => {
   it("boxOf centres a box on its point; boxesOverlap respects pad", () => {
@@ -153,5 +153,42 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     ]).get("t");
     expect(p.lines).toEqual(["50′ Trailer Parking"]);  // count line dropped to fit the short side
     expect(p.leader).toBeNull();                       // and it sits inside, no leader
+  });
+
+  it("B121 r3: layoutLabels returns each placement's committed screen box", () => {
+    // Single 1-line label at the origin: widthOf(["AA"],6)=12, height=1·lh=10, box centred on (0,0).
+    const p = layoutLabels([
+      { id: "a", cx: 0, cy: 0, lines: ["AA"], lh: 10, charW: 6, maxH: 1000, importance: 100 },
+    ]).get("a");
+    expect(p.box).toEqual(boxOf(0, 0, 12, 10));
+  });
+
+  it("B121 r3: suppressedDimIds hides a dimension whose box overlaps a committed label, keeps clear ones", () => {
+    const labelBoxes = [boxOf(0, 0, 40, 20)];          // a placed centred label at the origin
+    const set = suppressedDimIds([
+      { id: "over", box: boxOf(5, 0, 20, 10) },         // overlaps the label → hidden
+      { id: "clear", box: boxOf(300, 0, 20, 10) },      // far away → kept
+      { id: "nobox" },                                  // no box (not visible this frame) → skipped
+    ], labelBoxes, 0);
+    expect(set.has("over")).toBe(true);
+    expect(set.has("clear")).toBe(false);
+    expect(set.has("nobox")).toBe(false);
+  });
+
+  it("B121 r3: suppressedDimIds pad closes a touching seam; empty inputs are safe", () => {
+    const labelBoxes = [boxOf(0, 0, 10, 10)];           // spans -5..5
+    const touching = [{ id: "t", box: boxOf(10, 0, 10, 10) }]; // spans 5..15 — edges touch at x=5
+    expect(suppressedDimIds(touching, labelBoxes, 0).has("t")).toBe(false); // no pad → no overlap
+    expect(suppressedDimIds(touching, labelBoxes, 1).has("t")).toBe(true);  // 1px pad closes the seam
+    expect(suppressedDimIds([{ id: "x", box: boxOf(0, 0, 4, 4) }], []).size).toBe(0); // no labels → nothing hidden
+    expect(suppressedDimIds([], labelBoxes).size).toBe(0);
+    expect(suppressedDimIds(null, null).size).toBe(0);
+  });
+
+  it("B121: buildingLabelLines omits the sf line when sqft is falsy (Show areas off)", () => {
+    expect(buildingLabelLines({ name: "Building 1", sqft: null, bumpCount: 0, dims: "300′ × 638′" }))
+      .toEqual(["Building 1", "300′ × 638′"]);          // name + dims, no sf line
+    expect(buildingLabelLines({ name: "Building 2", sqft: undefined, bumpCount: 2, dims: "200′ × 250′" }))
+      .toEqual(["Building 2", "(incl. 2 bump-outs)", "200′ × 250′"]); // bump note kept, sf dropped
   });
 });

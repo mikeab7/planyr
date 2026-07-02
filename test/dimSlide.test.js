@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD } from "../src/workspaces/site-planner/lib/dimSlide.js";
+import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "../src/workspaces/site-planner/lib/dimSlide.js";
 
 // The rendered dimension line sits at this local length-coordinate (feet from centre).
 const lineAt = (L, posF, offset) => L * (posF - 0.5) + offset;
@@ -101,5 +101,44 @@ describe("dimSlide — footprint dimension slide constraint (B592)", () => {
     const out = clampDimOffset({ x: 120, y: 40 }, r);
     expect(out.x).toBe(0);
     expect(out.y).toBe(40);
+  });
+});
+
+describe("dimNumberBox — screen box of the red dimension number (B121 r3, mirrors renderElPx)", () => {
+  // A 620×300 building whose UNROTATED screen rect is tl=(100,200), w=620, h=300 → centre (410,350).
+  const base = { tlx: 100, tly: 200, w: 620, h: 300, cx: 410, cy: 350, horizLong: true, posF: DIM_POS_F_DEFAULT, ox: 0, oy: 0, textLen: 4, fz: 10 };
+
+  it("long-horizontal: the (end-anchored) number's RIGHT edge sits at the line, vertically centred", () => {
+    const box = dimNumberBox({ ...base, rot: 0 });
+    expect(box.w).toBeCloseTo(4 * 10 * 0.6, 6);              // textLen·fz·charWRatio
+    expect(box.h).toBeCloseTo(10, 6);
+    expect(box.x + box.w).toBeCloseTo(100 + 620 * DIM_POS_F_DEFAULT - 6, 6); // right edge = X - 6 (textAnchor=end)
+    expect(box.y + box.h / 2).toBeCloseTo(350, 6);          // centred on the element mid-height
+  });
+
+  it("long-vertical: the (middle-anchored) number is horizontally centred, just above the y-6 anchor", () => {
+    const box = dimNumberBox({ tlx: 100, tly: 200, w: 300, h: 620, cx: 250, cy: 510, rot: 0, horizLong: false, posF: DIM_POS_F_DEFAULT, ox: 0, oy: 0, textLen: 4, fz: 10 });
+    expect(box.x + box.w / 2).toBeCloseTo(250, 6);           // centred on the element mid-width (mx)
+    expect(box.y + box.h / 2).toBeCloseTo(200 + 620 * DIM_POS_F_DEFAULT - 6 - 10 * 0.32, 6); // baseline-offset centre
+  });
+
+  it("rotation is applied to the ANCHOR about the element centre; the glyph box stays upright (same w/h)", () => {
+    const flat = dimNumberBox({ ...base, rot: 0 });
+    const rot = dimNumberBox({ ...base, rot: 90 });
+    const fcx = flat.x + flat.w / 2, fcy = flat.y + flat.h / 2;
+    const dx = fcx - base.cx, dy = fcy - base.cy;                 // rotate the flat centre 90° about (cx,cy)
+    const exX = base.cx + dx * Math.cos(Math.PI / 2) - dy * Math.sin(Math.PI / 2);
+    const exY = base.cy + dx * Math.sin(Math.PI / 2) + dy * Math.cos(Math.PI / 2);
+    expect(rot.x + rot.w / 2).toBeCloseTo(exX, 6);
+    expect(rot.y + rot.h / 2).toBeCloseTo(exY, 6);
+    expect(rot.w).toBeCloseTo(flat.w, 6);                        // upright glyphs → unchanged footprint
+    expect(rot.h).toBeCloseTo(flat.h, 6);
+  });
+
+  it("the along-slide offset shifts the box by (ox, oy)", () => {
+    const noOff = dimNumberBox({ ...base, rot: 0 });
+    const off = dimNumberBox({ ...base, rot: 0, ox: 20, oy: 15 });
+    expect(off.x - noOff.x).toBeCloseTo(20, 6);
+    expect(off.y - noOff.y).toBeCloseTo(15, 6);
   });
 });

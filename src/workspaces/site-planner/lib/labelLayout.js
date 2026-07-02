@@ -83,7 +83,24 @@ export const layoutLabels = (items, opts = {}) => {
       lines = lines.slice(0, lines.length - 1); // drop the lowest-priority remaining line, retry
     }
     if (!chosen) chosen = overflow;             // nothing fit inside → controlled overflow in place (noLeader)
-    if (chosen) { placed.push(chosen.box); out.set(it.id, { lines: chosen.lines, x: chosen.x, y: chosen.y, leader: chosen.leader, rot }); }
+    // `box` (the committed screen rect) is returned too so the dimension-callout layer (B121 r3) can
+    // test itself against the placed labels and hide any red dimension that would overprint one.
+    if (chosen) { placed.push(chosen.box); out.set(it.id, { lines: chosen.lines, x: chosen.x, y: chosen.y, leader: chosen.leader, rot, box: chosen.box }); }
+  }
+  return out;
+};
+
+// B121 (round 3) — fold the red per-edge dimension callouts into the label collision pool. The
+// dimension NUMBER is the lowest label tier: it must never overprint a committed centred name/area
+// label. Given each dimension's screen box (dimNumberBox, lib/dimSlide) and the boxes of the labels
+// already placed by layoutLabels this frame, return the SET of element ids whose dimension should be
+// HIDDEN (it overlaps a label). We only HIDE — never move the dimension off its footprint (B592 pins
+// it there). Lowest-tier, so it yields to ANY committed label box. Pure + tested.
+export const suppressedDimIds = (dimItems, labelBoxes, pad = 2) => {
+  const out = new Set();
+  for (const d of (dimItems || [])) {
+    if (!d || !d.box) continue;
+    if ((labelBoxes || []).some((lb) => lb && boxesOverlap(d.box, lb, pad))) out.add(d.id);
   }
   return out;
 };
@@ -95,7 +112,8 @@ export const layoutLabels = (items, opts = {}) => {
 // survives far longer than it did when the whole label just shrank. The parenthetical
 // line appears only when the building actually has bump-outs.
 export const buildingLabelLines = ({ name, sqft, bumpCount = 0, dims }) => {
-  const out = [name, sqft];
+  const out = [name];
+  if (sqft) out.push(sqft); // B121: omitted when the "Show areas" toggle is off (sqft passed null)
   if (bumpCount > 0) out.push(`(incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""})`);
   if (dims) out.push(dims);
   return out;
