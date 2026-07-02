@@ -122,6 +122,10 @@ export default function ProjectBreadcrumb({
   // Cross-project mode (Work Item A): the file tree spans ALL of the user's projects, so
   // the project crumb reads "All projects" instead of a single name. Off by default.
   cross = false,
+  // Optional trailing crumb rendered right after the project crumb, with the SAME "/"
+  // separator as the crumbs above it. The Site Planner passes its plan switcher here so the
+  // project name stays in exactly one place and the plan sits beside it: Map / Project / Plan.
+  planSlot = null,
 }) {
   const controlled = Array.isArray(controlledProjects);
   const [open, setOpen] = useState(false);
@@ -222,7 +226,15 @@ export default function ProjectBreadcrumb({
     setEditingId(null);
     if (!v) return; // reject empty/whitespace-only — keep the prior name
     if (onRenameProject) onRenameProject(id, v);
-    else { storeRename(id, v); refresh(); notifyStoreChange(); }
+    else storeRename(id, v);
+    // Reflect the new name immediately. Uncontrolled mode owns the local `internalProjects`
+    // list, and a same-tab store write does NOT fire the native 'storage' event — so without an
+    // explicit refresh the just-edited row (and every other planarfit:sites surface) keeps the
+    // OLD name and the rename reads as if it reverted. This must run for BOTH branches: the Site
+    // Planner supplies onRenameProject yet is still UNcontrolled, and the old code only refreshed
+    // in the bare `else`, so that path never updated. Controlled mode (Schedule) gets its list
+    // pushed back through the bridge prop, so skip it there. (rename-revert)
+    if (!controlled) { refresh(); notifyStoreChange(); }
   };
   const doDelete = (id) => {
     const wasCurrent = id === currentProject?.id;
@@ -289,6 +301,15 @@ export default function ProjectBreadcrumb({
         <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
       </button>
 
+      {/* Trailing crumb (e.g. the Site Planner's plan switcher). Same "/" separator + crumb
+          geometry as the Map/project crumbs, so the three segments read as one breadcrumb. */}
+      {planSlot && (
+        <>
+          <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
+          {planSlot}
+        </>
+      )}
+
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}
         placement="below-left" width={304} gap={8} panelStyle={panel}>
         {/* Search */}
@@ -306,7 +327,8 @@ export default function ProjectBreadcrumb({
 
         {atRisk(saveState) && (
           <div style={{ display: "flex", gap: 7, alignItems: "flex-start", padding: "7px 9px", marginBottom: 4,
-            borderRadius: 7, background: "#fef3c7", color: "#92400e", fontSize: 11.5, lineHeight: 1.4 }}>
+            borderRadius: 7, background: "var(--surface-page)", border: "1px solid var(--warn-text)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.4 }}>
+            {/* B525: token-themed warn row (was a hardcoded light-amber box that became a light slab in dark mode) */}
             <span aria-hidden>⚠</span>
             <span>This project's latest changes are saved on this device — the cloud is unreachable. Switching is safe; they'll sync next time you edit or close this tab.</span>
           </div>
@@ -375,6 +397,16 @@ export default function ProjectBreadcrumb({
                         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
                           {p.name}
                         </span>
+                        {/* Cross-module connectedness (schema v9): a project that has a linked
+                            schedule shows a small calendar chip, so the connection is visible at a
+                            glance in the switcher. Site is implicit (every project IS a site). */}
+                        {p.scheduleProjectId != null && (
+                          <span
+                            title="Has a linked schedule"
+                            aria-label="Has a linked schedule"
+                            style={{ flex: "none", fontSize: 10.5, opacity: 0.85 }}
+                          >📅</span>
+                        )}
                       </button>
                       <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, paddingRight: 7 }}>
                         {canManage && active ? (
@@ -424,12 +456,14 @@ export default function ProjectBreadcrumb({
       {menuFor && createPortal(
         <>
           <div
+            role="presentation"
             onClick={() => setMenuFor(null)}
             onContextMenu={(e) => { e.preventDefault(); setMenuFor(null); }}
             style={{ position: "fixed", inset: 0, zIndex: 5000 }}
           />
           <div
             data-testid="project-manage-menu"
+            role="menu" aria-label="Project actions" /* B557 */
             style={{
               ...panel, position: "fixed", zIndex: 5001, minWidth: 180, padding: 5,
               left: Math.min(menuFor.x, window.innerWidth - 196),
@@ -441,6 +475,7 @@ export default function ProjectBreadcrumb({
                 {canRename && (
                   <button
                     data-testid="project-rename"
+                    role="menuitem"
                     onClick={() => startRename(menuFor)}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
@@ -452,6 +487,7 @@ export default function ProjectBreadcrumb({
                 {canDelete && (
                   <button
                     data-testid="project-delete"
+                    role="menuitem"
                     onClick={() => setMenuFor((m) => ({ ...m, confirm: true }))}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}

@@ -15,7 +15,12 @@
  * `kind` into their semantic meaning.
  */
 
-export const SITE_MODEL_VERSION = 8;
+import { dogEarGeom, dogEarSize, isDogEarSide } from "./dogEar.js";
+import { roadCenterline } from "./roadGeometry.js";
+import { bufferPolyline } from "./metesAndBounds.js";
+import { DEFAULT_ROAD_CLASS } from "./roadClasses.js";
+
+export const SITE_MODEL_VERSION = 10;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
@@ -41,7 +46,9 @@ const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // A record already stamped with an older schemaVersion predates the status feature,
 // so a record with NO explicit status is presumed live → "active". Records v3+ carry
 // an explicit status, so the version bump (→6 B276 delete-tombstones, →7 B362/B363
-// bump-out sizing + bonded-rotation repair, →8 team sharing teamId/ownerId) doesn't disturb it. (saveSite re-normalizes
+// bump-out sizing + bonded-rotation repair, →8 team sharing teamId/ownerId, →9 cross-module
+// schedule link hint scheduleProjectId/Name, →10 centerline road model B596 pts/vtx/
+// travelW/roadClass) doesn't disturb it. (saveSite re-normalizes
 // through this, so the status it reads back is the explicit one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
@@ -49,18 +56,32 @@ const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVer
 // Coerce every collection so one malformed record can't crash the planner on load.
 const arr = (v) => (Array.isArray(v) ? v : []);
 const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+// B559: coerce a timestamp to milliseconds for comparison. `updatedAt` is normally a number
+// (Date.now()), but createSiteModel keeps whatever it's given (p.updatedAt || Date.now()), so an
+// imported/legacy record can carry an ISO STRING — and `"2025-…" >= 1718…` is a silent false,
+// which would pick the OLDER copy as "newer" in a merge (data loss) or skip a legacy-prune.
+export const toMs = (v) => (typeof v === "string" ? (Date.parse(v) || 0) : (v || 0));
 // Cap on retained delete-tombstones (B276). Each is just an id string, so this is generous
 // headroom — a real plan deletes a handful of items, never thousands.
 const MAX_TOMBSTONES = 5000;
 
-/* ---- Bonded-child rotation invariant (B363) ----
+/* ---- Bonded-child rotation invariant (B363) + dog-ear edge re-anchor (NEW-6) ----
  * Every box element bonded to a host building (`attachedTo` set) is axis-aligned to that
  * host at a FIXED quarter-turn offset (0/90/180/270): sidewalks, truck courts, and corner
  * bump-outs share the host's angle; side-parking rows and wall trailers sit at a +90/180/270
  * turn. So a bonded child's angle is a DERIVED value — host.rot + its quarter-turn offset —
  * never an independent one. If a child's stored angle has drifted off that (the host was
  * re-angled by a path that didn't carry the child — e.g. Jacintoport: host 0°, all four
- * children 359.035°), it is repaired below. */
+ * children 359.035°), it is repaired below.
+ *
+ * A corner bump-out (`dogEar`) is bound even tighter: BOTH its angle AND its POSITION are
+ * derived — it must sit flush at the host's CURRENT corner from its {side, sign}. The B363
+ * rotation repair fixes angle drift but not a host that was RESIZED after the bump was placed,
+ * so a bump on a since-widened host straddled the OLD edge (Jacintoport Building 1: host
+ * widened ~27′; its truck court re-anchored but the bumps were skipped, leaving ~13.5′ of each
+ * bump INSIDE the building). The dog-ear branch re-derives the whole box via dogEarGeom against
+ * the host's current footprint so the record self-heals on load. dogEarGeom IS the placement
+ * function, so a correctly-anchored bump re-derives to itself (idempotent, no churn). */
 const norm360 = (a) => ((a % 360) + 360) % 360;
 // The quarter turn (0/90/180/270) a child sits at relative to its host — its fixed offset
 // with any sub-90° drift rounded away.
@@ -87,6 +108,26 @@ function normalizeBondedRotations(list) {
     const host = byId.get(e.attachedTo);
     if (!host || host.points ||
         typeof host.rot !== "number" || typeof host.cx !== "number" || typeof host.cy !== "number") return e;
+    // Corner bump-out (dog-ear): re-flush its WHOLE box to the host's CURRENT edge + angle
+    // (NEW-6). Guard the side (a malformed `side` would throw in dogEarGeom's SIDE_N destructure
+    // and blank the planner) and require finite host/child w·h (dogEarGeom reads them; a NaN box
+    // would never compare equal → churn every load). The stored span (along/proj) is honored when
+    // the tag carries it (preserving a user resize + its clamp/spring-back); a bare tag recovers
+    // its current rendered size from the box so ONLY the position moves — recovery stays LOCAL to
+    // `desc`, the tag is never rewritten (a bare tag stays bare, so a box clamped at save time can
+    // still spring back later). Tolerance compare returns the SAME object when nothing moves.
+    if (e.dogEar && isDogEarSide(e.dogEar.side) &&
+        Number.isFinite(host.w) && Number.isFinite(host.h) &&
+        Number.isFinite(e.w) && Number.isFinite(e.h)) {
+      const de = e.dogEar;
+      const desc = de.along != null && de.proj != null ? de : { ...de, ...dogEarSize(de, e.w, e.h) };
+      const g = dogEarGeom(host, desc);
+      const near = (a, b) => Math.abs(a - b) <= 1e-6;
+      if (near(g.cx, e.cx) && near(g.cy, e.cy) && near(g.w, e.w) && near(g.h, e.h) &&
+          near(norm360(g.rot), norm360(e.rot))) return e;
+      changed = true;
+      return { ...e, cx: g.cx, cy: g.cy, w: g.w, h: g.h, rot: g.rot };
+    }
     const offset = quarterOffset(e.rot, host.rot);
     const wantRot = norm360(host.rot + offset);
     // delta = how far the host has moved since the child was placed (the stale skew), as a
@@ -122,6 +163,17 @@ export function createSiteModel(p = {}) {
     // flat + back-compatible: an old record has neither → both null → behaves exactly as before.
     teamId: p.teamId || null,
     ownerId: p.ownerId || null,
+    // cross-module connection hint (B-cross-module, schema v9; additive). A project (= site
+    // group) and a Schedule (Sequence Planyr) project live in SEPARATE cloud backends that
+    // can't read each other, so the canonical pairing is stored on the schedule record
+    // (`linkedSiteId`). This is a lightweight MIRROR of that pairing kept on the site so the
+    // Site Planner can answer "does this site have a schedule?" instantly — without booting the
+    // hidden Schedule iframe. `scheduleProjectId` = the schedule's numeric project id;
+    // `scheduleProjectName` = its name cached for display. Both null = no linked schedule
+    // (every existing record). Never the source of truth — the Shell re-mirrors it whenever the
+    // schedule reports a link change, so a stale hint self-heals on the next visit.
+    scheduleProjectId: p.scheduleProjectId != null ? p.scheduleProjectId : null,
+    scheduleProjectName: p.scheduleProjectName || null,
     // geo anchor + jurisdiction
     origin: p.origin || null,
     county: p.county || null,
@@ -141,9 +193,10 @@ export function createSiteModel(p = {}) {
     // page,pageCount,intrinsic:{w,h},src(local raster dataURL),markups:[],createdAt,updatedAt}.
     parcelDrawings: arr(p.parcelDrawings),
     settings: obj(p.settings),
-    // drawn layout + shapes (kept flat; selectors classify markups). Bonded children are
-    // re-anchored to their host's angle (B363) — idempotent, only touches drifted records.
-    els: normalizeBondedRotations(Array.isArray(p.els) ? p.els : arr(p.elements)),
+    // drawn layout + shapes (kept flat; selectors classify markups). Legacy rect roads are
+    // upgraded to the centerline model (B596), then bonded children are re-anchored to their
+    // host's angle (B363) — both idempotent, only touching records that need it.
+    els: normalizeBondedRotations(migrateRoads(Array.isArray(p.els) ? p.els : arr(p.elements))),
     markups: arr(p.markups),
     measures: arr(p.measures),
     callouts: arr(p.callouts),
@@ -214,7 +267,7 @@ function healSrc(chosen, other) {
 export function mergeSiteContent(a, b) {
   const A = createSiteModel(a || {});
   const B = createSiteModel(b || {});
-  const newer = (A.updatedAt || 0) >= (B.updatedAt || 0) ? A : B;
+  const newer = toMs(A.updatedAt) >= toMs(B.updatedAt) ? A : B; // B559: type-safe (ISO string OR ms number)
   const older = newer === A ? B : A;
   // Union the tombstones from BOTH copies, then drop any tombstoned id from every unioned
   // collection so a deleted item can't be resurrected by the copy that still holds it.
@@ -275,6 +328,64 @@ export const buildingNumbers = (els) => {
 // Derived live from w/h so a road's dimension callout always tracks a resize — it used to
 // read a frozen `travelW` snapshot that went stale when the road was dragged bigger.
 export const roadTravelWidth = (w, h, curb) => Math.max(0, Math.min(w, h) - 2 * curb);
+
+/* ---- Centerline road model (B596 / NEW-1) ----
+ * A road evolves from a rotated rectangle to a CENTERLINE polyline:
+ *   { type:"road", pts:[{x,y}…], travelW, curb, roadClass, vtx:[{treatment,radius?}…] }
+ * The surface, curbs and dimension all derive from `pts` (B598); per-vertex curve
+ * treatments come from `vtx` (B597). A 2-point road is the old straight road. */
+
+// Endpoints A/B of a legacy rotated-rect road from its cx,cy,w,h,rot. The LONG axis
+// (max(w,h)) is the centerline; the cross axis carries travelW + a curb each side. So a
+// migrated straight road's centerline is exactly the old rectangle's midline.
+export function rectRoadEndpoints(el) {
+  const w = +el.w || 0, h = +el.h || 0;
+  const rot = ((+el.rot || 0) * Math.PI) / 180;
+  const lengthAlongW = w >= h;                       // which axis is the road's length
+  const halfLen = (lengthAlongW ? w : h) / 2;
+  const ang = lengthAlongW ? rot : rot + Math.PI / 2; // direction of the length axis
+  const dx = Math.cos(ang) * halfLen, dy = Math.sin(ang) * halfLen;
+  return [{ x: el.cx - dx, y: el.cy - dy }, { x: el.cx + dx, y: el.cy + dy }];
+}
+
+// AABB (rot:0) bounding box of a centerline road's strip, kept synced on the element so
+// every GENERIC geometry consumer (zoom-to-fit, flush-snap, group bbox, ring tests) keeps
+// working unchanged — while the road-specific render/area/handles read `pts`. The box is
+// the AABB of the actual pavement+curb strip ring (bufferPolyline of the tessellated
+// centerline at travelW + 2 curbs), so a straight road's box is tight (== the old rect).
+export function roadStripBBox(pts, vtx, travelW, curb, opts = {}) {
+  const dense = roadCenterline(pts, vtx, opts);
+  if (!dense.length) return { cx: 0, cy: 0, w: 1, h: 1, rot: 0 };
+  const ring = bufferPolyline(dense, Math.max(0, (+travelW || 0) + 2 * (+curb || 0))) || dense;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of ring) {
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+  }
+  return {
+    cx: (minX + maxX) / 2, cy: (minY + maxY) / 2,
+    w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY), rot: 0,
+  };
+}
+
+// Convert a legacy rotated-rect road into the centerline model. Idempotent (skips a road
+// that already carries `pts`) and additive (keeps cx/cy/w/h/rot as the tight bbox of the
+// straight road, so it renders identically). A BONDED dock-layer road (attachedTo set) is
+// left as a rect — the relayout engine still owns its geometry.
+function migrateRoad(el) {
+  if (!el || el.type !== "road" || el.attachedTo != null) return el;
+  if (Array.isArray(el.pts) && el.pts.length >= 2) return el; // already a centerline
+  if (!Number.isFinite(el.cx) || !Number.isFinite(el.cy) ||
+      !Number.isFinite(el.w) || !Number.isFinite(el.h)) return el;
+  const curb = Number.isFinite(el.curb) ? el.curb : 0.5;
+  const travelW = Math.max(1, roadTravelWidth(el.w, el.h, curb));
+  return { ...el, pts: rectRoadEndpoints(el), vtx: [], travelW, curb, roadClass: el.roadClass || DEFAULT_ROAD_CLASS };
+}
+function migrateRoads(els) {
+  let changed = false;
+  const out = (els || []).map((e) => { const m = migrateRoad(e); if (m !== e) changed = true; return m; });
+  return changed ? out : (els || []);
+}
 // Placed site-plan overlays (B72) — immutable backdrop sheets over the map.
 export const sheetOverlaysOf = (m) => m.sheetOverlays || [];
 // Parcel-attached drawings (B67) — immutable backdrop + pixel-relative markup, per parcel.

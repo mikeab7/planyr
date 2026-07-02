@@ -154,7 +154,13 @@ export function classifyDiscipline(text, sheetNumber = "") {
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
-const valid = (y, m, d) => y >= 1990 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+// B514: reject impossible calendar days (Feb 30, Apr 31, non-leap Feb 29) — a day<=31 cap for
+// every month let a garbage date become the auto-named filing date. Real days-in-month + leap rule.
+const valid = (y, m, d) => {
+  if (!(y >= 1990 && y <= 2100 && m >= 1 && m <= 12 && d >= 1)) return false;
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  return d <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1];
+};
 const y4 = (y) => (y < 100 ? (y > 70 ? 1900 + y : 2000 + y) : y);
 
 /* Every date we can find on the sheet, with its character offset, as { iso, index }. Drawings carry
@@ -254,7 +260,11 @@ export function parseRevision(text) {
   // separator, so the heading "REVISIONS" can't be read as "Rev S" (B360 — Mesa title blocks
   // print "SUBMITTALS / REVISIONS"), and the value must be a lone number/letter (\b) so
   // "revision label" isn't read as "Rev L".
-  const rev = s.match(/\b(?:revision|rev)\b[\s.:#-]+([0-9]{1,2}|[A-Z])\b/i);
+  // B513: allow an optional NO./NUMBER/# label between the rev-word and the value — the very
+  // common "REVISION NO. 3" / "REV. NO. 5" / "REVISION NUMBER 4" forms were dropping their value.
+  // The rev-word keeps its \b (so the "REVISIONS" heading still can't read as "Rev S") and the
+  // value keeps its trailing \b (so "revision label" can't read as "Rev L").
+  const rev = s.match(/\b(?:revision|rev)\b\.?[\s.:#-]*(?:no\.?|number|#)?[\s.:#-]*([0-9]{1,2}|[A-Z])\b/i);
   return rev ? `Rev ${rev[1]}`.toUpperCase() : "";
 }
 

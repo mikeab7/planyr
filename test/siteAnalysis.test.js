@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   ANALYSIS_SOURCES, simplifyRing, ringsBBox, ringCentroid, representativeRing,
   ringsSignature, buildAnalysisParams, buildQueryUrl, normalizeAttrs, zoneSummary, wetlandSummary,
-  pipelineSummary, classifyStatus, analyzeSource, runSiteAnalysis,
+  pipelineSummary, classifyStatus, classifyFlood, isSFHA, analyzeSource, runSiteAnalysis,
   buildJurisdictionFinding, buildRoadFinding, deriveZoning,
 } from "../src/workspaces/site-planner/lib/siteAnalysis.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
@@ -94,6 +94,10 @@ describe("summarizers", () => {
   it("pipelineSummary counts + names operators (RRC layer-13 field OPERATOR, B368)", () => {
     expect(pipelineSummary([{ OPERATOR: "Kinder Morgan" }, { OPERATOR: "Kinder Morgan" }])).toMatch(/2 pipeline segments.*Kinder/);
   });
+  it("pipelineSummary uses the EXACT total when given, not the capped sample length", () => {
+    const sample = Array.from({ length: 30 }, () => ({ OPERATOR: "Kinder Morgan" }));
+    expect(pipelineSummary(sample, 3207)).toMatch(/3207 pipeline segments/);
+  });
 });
 
 describe("normalizeAttrs — joined-layer field qualifier (B189)", () => {
@@ -126,6 +130,42 @@ describe("classifyStatus — the silent-error guard", () => {
   });
 });
 
+describe("classifyFlood — Zone X is the all-clear, not a constraint (B147 false-positive fix)", () => {
+  it("isSFHA: A*/V* are SFHA; X / D / blank / open-water are not", () => {
+    for (const z of ["A", "AE", "AH", "AO", "AR", "A99", "V", "VE", "A12", "V30"]) expect(isSFHA(z)).toBe(true);
+    for (const z of ["X", "x", "D", "", null, "OPEN WATER", "AREA NOT INCLUDED"]) expect(isSFHA(z)).toBe(false);
+  });
+  it("an SFHA zone (AE) is PRESENT with a zone summary", () => {
+    const c = classifyFlood([{ FLD_ZONE: "AE", STATIC_BFE: 92 }]);
+    expect(c.status).toBe("present");
+    expect(c.summary).toBe("Zone AE");
+  });
+  it("only unshaded Zone X (minimal) → ABSENT, never present (the live bug)", () => {
+    const c = classifyFlood([{ FLD_ZONE: "X", ZONE_SUBTY: "AREA OF MINIMAL FLOOD HAZARD" }],
+      { absentLabel: "No mapped Special Flood Hazard Area (Zone X / minimal risk)" });
+    expect(c.status).toBe("absent");
+    expect(c.summary).toMatch(/No mapped Special Flood Hazard/);
+  });
+  it("shaded Zone X (0.2% / 500-yr) → INFO (moderate), not present and not a green all-clear", () => {
+    const c = classifyFlood([{ FLD_ZONE: "X", ZONE_SUBTY: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" }]);
+    expect(c.status).toBe("info");
+    expect(c.summary).toMatch(/0\.2%|500-yr/);
+  });
+  it("a mix of SFHA + X reports PRESENT and summarizes only the SFHA zone", () => {
+    const c = classifyFlood([{ FLD_ZONE: "X" }, { FLD_ZONE: "AE" }]);
+    expect(c.status).toBe("present");
+    expect(c.summary).toBe("Zone AE");
+  });
+  it("Zone D (undetermined) → UNKNOWN, never absent (not an all-clear)", () => {
+    expect(classifyFlood([{ FLD_ZONE: "D" }]).status).toBe("unknown");
+  });
+  it("empty result → ABSENT with the source's none-found label", () => {
+    const c = classifyFlood([], { absentLabel: "none here" });
+    expect(c.status).toBe("absent");
+    expect(c.summary).toBe("none here");
+  });
+});
+
 describe("analyzeSource — rides the cache, honest on failure", () => {
   const flood = ANALYSIS_SOURCES.find((s) => s.id === "flood");
   it("present + summary when the SFHA layer returns a zone", async () => {
@@ -143,6 +183,20 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     const f = await analyzeSource(flood, [SQUARE], { cache, fetchJson });
     expect(f.status).toBe("absent");
     expect(f.summary).toMatch(/No mapped Special Flood Hazard/);
+  });
+  it("flood: an intersecting Zone X reads ABSENT, not present (B147 live false-positive)", async () => {
+    const cache = freshCache();
+    const fetchJson = fakeFetch({ "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "X", ZONE_SUBTY: "AREA OF MINIMAL FLOOD HAZARD" } }] });
+    const f = await analyzeSource(flood, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("absent");
+    expect(f.summary).toMatch(/No mapped Special Flood Hazard/);
+  });
+  it("flood: shaded Zone X (0.2%) reads INFO (moderate) and keeps its map layer", async () => {
+    const cache = freshCache();
+    const fetchJson = fakeFetch({ "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "X", ZONE_SUBTY: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" } }] });
+    const f = await analyzeSource(flood, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("info");
+    expect(f.mapLayer).toBe("fema");
   });
   it("error → unavailable, surfaced not thrown (honest, not 'CORS' — B366)", async () => {
     const cache = freshCache();
@@ -252,6 +306,46 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
   });
 });
 
+describe("exact counts — returnCountOnly bypasses the page cap (count-mode sources)", () => {
+  it("pipelines is a count-mode source", () => {
+    expect(ANALYSIS_SOURCES.find((s) => s.id === "pipelines").countMode).toBe(true);
+  });
+  it("shows the EXACT pipeline count from returnCountOnly, not the capped feature sample", async () => {
+    const cache = freshCache();
+    const pipe = ANALYSIS_SOURCES.find((s) => s.id === "pipelines");
+    const sample = Array.from({ length: 30 }, () => ({ attributes: { OPERATOR: "Kinder Morgan" } }));
+    const fetchJson = async (url) => {
+      if (/returnCountOnly=true/i.test(url)) return { count: 3207 };       // exact total
+      return { features: sample, exceededTransferLimit: true };            // capped page
+    };
+    const f = await analyzeSource(pipe, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("present");
+    expect(f.summary).toMatch(/3207 pipeline segments/);
+    expect(f.summary).toMatch(/Kinder Morgan/);
+  });
+  it("shows the EXACT well count from returnCountOnly", async () => {
+    const cache = freshCache();
+    const wells = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
+    const fetchJson = async (url) => {
+      if (/returnCountOnly=true/i.test(url)) return { count: 7291 };
+      return { features: [{ attributes: { API: "42-000" } }] };
+    };
+    const f = await analyzeSource(wells, [SQUARE], { cache, fetchJson });
+    expect(f.summary).toMatch(/7291 wells/);
+  });
+  it("falls back to the fetched sample size when the count query fails (never throws)", async () => {
+    const cache = freshCache();
+    const wells = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
+    const fetchJson = async (url) => {
+      if (/returnCountOnly=true/i.test(url)) throw new Error("count failed");
+      return { features: [{ attributes: { API: "1" } }, { attributes: { API: "2" } }] };
+    };
+    const f = await analyzeSource(wells, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("present");
+    expect(f.summary).toMatch(/2 wells/);
+  });
+});
+
 describe("derived jurisdiction findings", () => {
   const baseJ = { county: ["Harris"], city: [], etj: [], unincorporated: true, straddle: false, ages: {}, sources: [] };
   it("buildJurisdictionFinding rows out county/city/ETJ", () => {
@@ -271,9 +365,33 @@ describe("derived jurisdiction findings", () => {
     expect(f.summary).toMatch(/Katy/);
     expect(f.summary).toMatch(/zoning likely/i);
   });
-  it("buildRoadFinding: unknown when no authority", () => {
-    expect(buildRoadFinding({ authorities: [] }).status).toBe("unknown");
-    expect(buildRoadFinding({ authorities: ["County"], nearest: { route: "CR 123" } }).rows[0][1]).toMatch(/County.*CR 123/);
+  it("buildRoadFinding: unknown + honest note when no roads matched", () => {
+    expect(buildRoadFinding({ roads: [] }).status).toBe("unknown");
+    expect(buildRoadFinding({ roads: [], note: "No roads matched within 40 m — screening only." }).summary).toMatch(/no roads matched/i);
+    expect(buildRoadFinding({ roads: [] }).rows).toBeNull();
+  });
+  it("buildRoadFinding: per-road rows, mixed roll-up, map toggle (B94 + B571)", () => {
+    const f = buildRoadFinding({ ageMs: 500, roads: [
+      { name: "IH 45", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 },
+      { name: "Greens Rd", route: "g1", authority: { label: "City" }, funcClass: 4 },
+    ] });
+    expect(f.status).toBe("info");
+    expect(f.mapLayer).toBe("jur_road_authority"); // lifts B190 suppression → the card gets a "◍ Map" toggle
+    expect(f.rows[0]).toEqual(["Maintained by", "Mixed — 2 roads", 500]);
+    expect(f.rows[1][0]).toBe("IH 45");
+    expect(f.rows[1][1]).toBe("State (TxDOT)");
+    expect(f.detail[0]).toMatch(/IH 45.*State \(TxDOT\).*Interstate.*route h1/);
+  });
+  it("buildRoadFinding: one authority across every road rolls up to 'all roads'", () => {
+    const f = buildRoadFinding({ roads: [
+      { name: "IH 45", authority: { label: "State (TxDOT)" } },
+      { name: "Frontage Rd", authority: { label: "State (TxDOT)" } },
+    ] });
+    expect(f.rows[0][1]).toBe("State (TxDOT) (all roads)");
+  });
+  it("buildRoadFinding: an unclassified road shows explicit Unknown, never a guess", () => {
+    const f = buildRoadFinding({ roads: [{ name: "Mystery Ln", authority: { label: "Unknown" } }] });
+    expect(f.rows[1]).toEqual(["Mystery Ln", "Unknown", null]);
   });
 });
 
@@ -286,7 +404,7 @@ describe("runSiteAnalysis — orchestration", () => {
   it("assembles every category in display order with injected sources", async () => {
     const cache = freshCache();
     const fetchJson = fakeFetch({
-      "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "X" } }],
+      "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "AE" } }], // SFHA → a real present constraint
       "Wetlands_gdb_split": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/1/query": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/13/query": () => [],
@@ -295,13 +413,15 @@ describe("runSiteAnalysis — orchestration", () => {
       county: ["Harris"], city: ["Houston"], etj: [], unincorporated: false, straddle: false,
       ages: { county: 1000 }, sources: [],
     });
-    const identifyRoadAuthority = async () => ({ authorities: ["State (TxDOT)"], nearest: { route: "IH 10" }, ageMs: 500, note: "ok" });
+    const identifyRoadAuthority = async () => ({ roads: [{ name: "IH 10", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 }], authorities: ["State (TxDOT)"], ageMs: 500, note: "ok" });
     const { findings } = await runSiteAnalysis([SQUARE], { cache, fetchJson, identifyJurisdiction, identifyRoadAuthority });
     const ids = findings.map((f) => f.id);
     expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "contamination", "jurisdiction", "road", "zoning"]);
     expect(findings.find((f) => f.id === "flood").status).toBe("present");
     expect(findings.find((f) => f.id === "zoning").summary).toMatch(/NO zoning/i);
-    expect(findings.find((f) => f.id === "road").rows[0][1]).toMatch(/TxDOT.*IH 10/);
+    const road = findings.find((f) => f.id === "road");
+    expect(road.rows[0][1]).toMatch(/TxDOT.*all roads/); // single-authority roll-up
+    expect(road.rows[1]).toEqual(["IH 10", "State (TxDOT)", null]); // per-road row
   });
   it("survives a jurisdiction-engine throw (keeps arcgis findings, no zoning crash)", async () => {
     const cache = freshCache();

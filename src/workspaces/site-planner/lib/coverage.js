@@ -61,7 +61,11 @@ export const isRegional = (id) => layerScope(id) === "regional";
 // Anything else → null, and the caller fails open.
 // ---------------------------------------------------------------------------
 const WEBMERC = new Set([3857, 102100, 102113, 900913]);
-const STATEPLANE_2278 = new Set([2278, 102740, 102739]);
+// B515: 102739 is ESRI Texas CENTRAL (FIPS 4203, EPSG:2277) — a DIFFERENT projection from
+// 2278/102740 (South Central). Aliasing it here ran a Central-zone extent through the 2278 math
+// and produced a garbage bbox, marking the layer out-of-coverage across all of Texas (failing
+// CLOSED, against this module's fail-open guarantee). Dropped — an unknown SR now returns null.
+const STATEPLANE_2278 = new Set([2278, 102740]);
 const WGS84 = new Set([4326]);
 const MERC_R = 6378137;
 

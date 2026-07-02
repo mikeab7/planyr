@@ -88,6 +88,8 @@ export const TOOL_MATRIX = [
     category: "mode", drawMode: "mode", closed: false, measureOutput: null, properties: [], workspaces: ["site", "doc", "stitch"] },
   { id: "pan", label: "Pan", hint: "Drag to move around the canvas. (Hold Space in any tool to pan; wheel / Ctrl+scroll to zoom toward the cursor.)",
     category: "mode", drawMode: "mode", closed: false, measureOutput: null, properties: [], workspaces: ["site", "doc", "stitch"] },
+  { id: "marquee", label: "Marquee", hint: "Drag a box on empty canvas to select everything it touches. In the default pointer use Ctrl/⌘-click to toggle one object, Shift-click to add; Esc or a click on empty canvas clears.",
+    category: "mode", drawMode: "mode", closed: false, measureOutput: null, properties: [], workspaces: ["site", "doc"] },
   { id: "calibrate", label: "Calibrate", hint: "Click two points a known distance apart, then type the real length to set the scale.",
     category: "mode", drawMode: "calibrate", closed: false, measureOutput: null, properties: [], workspaces: ["site", "doc", "stitch"] },
 

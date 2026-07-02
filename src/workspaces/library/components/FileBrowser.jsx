@@ -1,4 +1,5 @@
-/* FileBrowser (Work Item B) — the Document Review landing surface.
+/* FileBrowser — the Library workspace's main surface (was the Document Review landing
+ * surface before file browsing moved into its own Library tab).
  *
  * The old flat chip row jammed three axes (what kind / what state / how used) into one
  * list, so nothing nested. This separates them:
@@ -20,11 +21,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   listProjects, listReviews, listFileFacts, fileNewReview, refileReview,
   upsertFileFacts, deleteReview, DISCIPLINES,
-} from "../lib/reviewStore.js";
-import { toFactsRow, mergeFactsIntoReviews } from "../lib/fileIndex.js";
-import { fileWarn } from "../lib/sourceState.js";
+} from "../../doc-review/lib/reviewStore.js";
+import { toFactsRow, mergeFactsIntoReviews } from "../../doc-review/lib/fileIndex.js";
+import { fileWarn } from "../../doc-review/lib/sourceState.js";
 import { buildFilingPlan } from "../../../shared/files/disciplineSplit.js";
-import { splitPdfByPlan } from "../lib/pdfSplit.js";
+import { splitPdfByPlan } from "../../doc-review/lib/pdfSplit.js";
 import {
   buildFileFacts, deriveTree, browseFiles, holdingArea, CATEGORIES,
   categoryOf, subcategoryOf, stateOf, FILE_STATES, FACETS, onMap, isReference, isSpatial,
@@ -39,9 +40,9 @@ const fmtDate = (f) => { const s = f.docDate || f.updatedAt; try { return s ? ne
 const chip = (active, accent) => ({
   fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999,
   padding: "4px 11px", whiteSpace: "nowrap",
-  border: `1px solid ${active ? "var(--accent-review)" : "var(--border-default)"}`,
-  background: active ? "var(--accent-review)" : "var(--surface-raised)",
-  color: active ? "var(--on-accent)" : "var(--text-secondary)",
+  border: `1px solid ${active ? "var(--accent-library)" : "var(--border-default)"}`,
+  background: active ? "var(--accent-library)" : "var(--surface-raised)",
+  color: active ? "var(--on-accent-library)" : "var(--text-secondary)",
 });
 const Badge = ({ children, tone = "neutral", title }) => {
   const tones = {
@@ -348,7 +349,7 @@ export default function FileBrowser({
         <input ref={fileInputRef} type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={onPick} />
         <button onClick={() => fileInputRef.current?.click()}
           style={{ flex: "none", margin: "0 12px 12px", padding: "9px 12px", borderRadius: 9, textAlign: "center", cursor: "pointer", fontFamily: "inherit",
-            border: `1.5px dashed ${dropOver ? "var(--accent-review)" : "var(--border-default)"}`,
+            border: `1.5px dashed ${dropOver ? "var(--accent-library)" : "var(--border-default)"}`,
             background: dropOver ? "var(--hover-ghost)" : "var(--surface-raised)", color: "var(--text-secondary)" }}>
           <span style={{ fontSize: 12, fontWeight: 600 }}>Drop, paste, or click to add PDFs</span>
           <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>
@@ -359,7 +360,7 @@ export default function FileBrowser({
 
       {/* drop-anywhere overlay hint */}
       {dropOver && (
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", border: "2.5px dashed var(--accent-review)", borderRadius: 4, background: "rgba(239,159,39,0.06)", display: "grid", placeItems: "center" }}>
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", border: "2.5px dashed var(--accent-library)", borderRadius: 4, background: "rgba(14,116,144,0.06)", display: "grid", placeItems: "center" }}>
           <span style={{ background: "var(--surface-raised)", color: "var(--text-primary)", fontWeight: 700, fontSize: 13, padding: "8px 16px", borderRadius: 999, border: "1px solid var(--border-default)" }}>Drop to file into {cross ? "the matched project" : (projName(projectId) || "this project")}</span>
         </div>
       )}
@@ -397,7 +398,7 @@ function RefileRow({ value = {}, discipline, onChange, onFile }) {
       <input list="dr-disciplines" value={value.discipline ?? discipline ?? ""} placeholder="Discipline…"
         onChange={(e) => onChange({ ...value, discipline: e.target.value })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
       <datalist id="dr-disciplines">{DISCIPLINES.map((d) => <option key={d} value={d} />)}</datalist>
-      <button onClick={onFile} title="File this document" style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 6, border: "1px solid var(--accent-review)", background: "var(--accent-review)", color: "var(--on-accent)", padding: "3px 11px" }}>File</button>
+      <button onClick={onFile} title="File this document" style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 6, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>File</button>
     </div>
   );
 }

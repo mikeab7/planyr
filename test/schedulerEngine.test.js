@@ -76,6 +76,26 @@ describe("rollupParentDates — orphaned parentId must not crash the recompute",
   });
 });
 
+describe("B501 — deleting a task must recompute parent roll-ups (no stale summary span)", () => {
+  it("recomputeAfterStructureChange after removing a child shrinks the parent to the survivor", () => {
+    // Durations drive the cascade (06-22 is a Monday): child 2 = 1 BD → ends 06-22;
+    // child 3 = 5 BD → ends 06-26 (Fri). recompute = rollupParentDates(cascadeDates(...)).
+    const tasks = [
+      T(1, { parentId: null }),
+      T(2, { parentId: 1, start: "2026-06-22", duration: 1 }),
+      T(3, { parentId: 1, start: "2026-06-22", duration: 5 }),
+    ];
+    // Parent spans both children.
+    expect(E.rollupParentDates(E.cascadeDates(tasks)).find((t) => t.id === 1).end).toBe("2026-06-26");
+    // Delete the later child (id 3). The fix wraps the filtered list with the same recompute
+    // the indent/outdent handlers use; without it the parent would keep the stale 06-26 end.
+    const afterDelete = tasks.filter((t) => t.id !== 3);
+    const recomputed = E.rollupParentDates(E.cascadeDates(afterDelete)).find((t) => t.id === 1);
+    expect(recomputed.end).toBe("2026-06-22");   // shrunk to the surviving child
+    expect(recomputed.start).toBe("2026-06-22");
+  });
+});
+
 describe("parseFlexDate — reject garbage and impossible calendar dates", () => {
   it("accepts real flexible dates", () => {
     expect(E.parseFlexDate("6/22/26")).toBe("2026-06-22");
@@ -243,8 +263,90 @@ describe("rebuildHealthMaps — corrupt custom-status settings must not crash re
   });
 });
 
+describe("B550 — a parentId cycle in loaded data can't hang the scheduler", () => {
+  // True acyclicity check: every task's parent chain must terminate (no loop).
+  const isAcyclic = (tasks) => {
+    const byId = {}; tasks.forEach(t => { byId[t.id] = t; });
+    return tasks.every(t => {
+      const seen = new Set([t.id]); let p = t.parentId;
+      while (p != null && byId[p]) { if (seen.has(p)) return false; seen.add(p); p = byId[p].parentId; }
+      return true;
+    });
+  };
+
+  it("normalizeIds breaks a 3-task parentId cycle (1→3→2→1) instead of leaving it", () => {
+    const d = { projects: { 1: { id: 1, name: "P", tasks: [
+      T(1, { parentId: 3 }), T(2, { parentId: 1 }), T(3, { parentId: 2 }),
+    ] } }, nTid: {} };
+    let out;
+    expect(() => { out = E.normalizeIds(d); }).not.toThrow();
+    expect(isAcyclic(out.projects[1].tasks)).toBe(true); // cycle broken → safe for every downstream walk
+    expect(out.projects[1].tasks.length).toBe(3);        // no task lost
+  });
+
+  it("normalizeIds leaves a valid hierarchy unchanged in shape (no-op on clean data)", () => {
+    const d = { projects: { 1: { id: 1, name: "P", tasks: [
+      T(1, { parentId: null }), T(2, { parentId: 1 }), T(3, { parentId: 1 }),
+    ] } }, nTid: {} };
+    const out = E.normalizeIds(d);
+    expect(isAcyclic(out.projects[1].tasks)).toBe(true);
+    // renumber compacts ids 1..n but the parent/child SHAPE is preserved: two children under the root.
+    const tasks = out.projects[1].tasks;
+    const root = tasks.find(t => t.parentId == null);
+    expect(tasks.filter(t => t.parentId === root.id).length).toBe(2);
+  });
+
+  it("the cycle-break is what protects the arbitrary-root operation walks (getSubtreeIds etc.)", () => {
+    // A descendant walk that STARTS at a node inside a cycle (e.g. outdent's getSubtreeIds) would
+    // infinite-loop; after normalizeIds breaks the cycle, any such walk over the result terminates.
+    const d = { projects: { 1: { id: 1, name: "P", tasks: [
+      T(1, { parentId: 2 }), T(2, { parentId: 1 }), // a 2-cycle, both reachable as each other's child
+    ] } }, nTid: {} };
+    const out = E.normalizeIds(d);
+    expect(isAcyclic(out.projects[1].tasks)).toBe(true);
+    expect(out.projects[1].tasks.length).toBe(2);
+  });
+});
+
+describe("B568: renumberTasks resolves a duplicate id to the FIRST occurrence (original wins)", () => {
+  it("a predecessor pointing at a duplicated id remaps to the first occurrence, not the last", () => {
+    // Corrupt/legacy input: id=100 appears twice (the app once minted dup ids before addTask used
+    // maxId+1). A third task depends on id=100. The original (first in visual order) is the true target.
+    const tasks = [
+      { id: 100, name: "A (original)", parentId: null, predecessors: [] },
+      { id: 200, name: "B", parentId: null, predecessors: [] },
+      { id: 100, name: "A-dup (stray paste)", parentId: null, predecessors: [] },
+      { id: 300, name: "C depends on 100", parentId: null, predecessors: [{ id: 100, type: "FS", lag: 0 }] },
+    ];
+    const out = E.renumberTasks(tasks);
+    // ids compact to 1..n by position
+    expect(out.map((t) => t.id)).toEqual([1, 2, 3, 4]);
+    // C's predecessor must point at the FIRST occurrence of old-id 100 → new id 1, never the dup at 3
+    const c = out.find((t) => t.name === "C depends on 100");
+    expect(c.predecessors).toEqual([{ id: 1, type: "FS", lag: 0 }]);
+  });
+  it("clean unique-id data is unaffected (parent + predecessor remap unchanged)", () => {
+    const tasks = [
+      { id: 10, name: "P", parentId: null, predecessors: [] },
+      { id: 20, name: "child", parentId: 10, predecessors: [{ id: 10, type: "FS", lag: 0 }] },
+    ];
+    const out = E.renumberTasks(tasks);
+    expect(out[1].parentId).toBe(1);
+    expect(out[1].predecessors).toEqual([{ id: 1, type: "FS", lag: 0 }]);
+  });
+});
+
 describe("anti-drift: the guards still exist in the real source (public/sequence/index.html)", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  it("B568: renumberTasks first-occurrence guard exists in BOTH source and the engine mirror", () => {
+    const mirror = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+    expect(src).toMatch(/tasks\.forEach\(\(t, i\) => \{ if \(!\(t\.id in map\)\) map\[t\.id\] = i \+ 1; \}\)/);
+    expect(mirror).toMatch(/tasks\.forEach\(\(t, i\) => \{ if \(!\(t\.id in map\)\) map\[t\.id\] = i \+ 1; \}\)/);
+  });
+  it("B550: normalizeIds breaks a parentId cycle on load (protects every downstream tree-walk)", () => {
+    expect(src).toMatch(/break any parentId cycle on load/);                          // the comment marking the fix
+    expect(src).toMatch(/if \(seen\.has\(p\)\) return \{\.\.\.t, parentId: null\}/);  // the actual break
+  });
   it("addBD coerces + bounds its step count (MAX_BD_STEPS)", () => {
     expect(src).toMatch(/MAX_BD_STEPS/);
     expect(src).toMatch(/if \(isNaN\(d\)\) return s;/);
@@ -282,6 +384,16 @@ describe("anti-drift: the guards still exist in the real source (public/sequence
   it("rebuildHEALTH guards corrupt custom-status settings", () => {
     expect(src).toMatch(/\(Array\.isArray\(custom\) \? custom : \[\]\)\.forEach/);
     expect(src).toMatch(/skip a null\/garbage custom status/);
+  });
+  it("B501: both delete handlers recompute roll-ups (renumberTasks(recomputeAfterStructureChange(...filter)))", () => {
+    const calls = src.match(/renumberTasks\(recomputeAfterStructureChange\([^)]*\.filter\(t => !del\.has\(t\.id\)\)\)\)/g) || [];
+    expect(calls.length).toBeGreaterThanOrEqual(2);   // deleteTask + deleteTasks
+  });
+  it("B502: InlineDate seeds its display with toShortDate (keeps the year)", () => {
+    expect(src).toMatch(/const disp = value \? toShortDate\(value\) : "";/);
+  });
+  it("B503: MasterView fmtDate guards a non-ISO value before formatting", () => {
+    expect(src).toMatch(/if \(!y\|\|!m\|\|!d\) return "";\s*\/\/ B503/);
   });
 });
 
@@ -386,5 +498,312 @@ describe("anti-drift: the schedule-input fixes still exist in the real source", 
   });
   it("the engine mirror carries validatePredEdit verbatim", () => {
     expect(sjsx).toMatch(/export const validatePredEdit = \(tasks, id, parsed\) =>/);
+  });
+});
+
+// ── Schedule OUTPUT hardening (2026-06-27) ─────────────────────────────────
+// Bugs in what the scheduler PRODUCES / EXPORTS / DISPLAYS.
+
+describe("computeRolledHealth — a parent reflects the worst of its descendants", () => {
+  const T = (id, health, parentId = null) => ({ id, name: "t" + id, health, parentId });
+  it("rolls a red child up to its parent (and grandparent)", () => {
+    const map = E.computeRolledHealth([
+      T(1, "gray"), T(2, "gray", 1), T(3, "red", 2), T(4, "green", 1),
+    ]);
+    expect(map[1]).toBe("red");   // worst across the whole subtree
+    expect(map[2]).toBe("red");   // direct parent of the red task
+    expect(map[3]).toBeUndefined(); // a leaf gets no rolled entry
+    expect(map[4]).toBeUndefined();
+  });
+  it("worst-wins ordering: red > yellow > paused > green > gray", () => {
+    const map = E.computeRolledHealth([T(1, "gray"), T(2, "yellow", 1), T(3, "green", 1), T(4, "paused", 1)]);
+    expect(map[1]).toBe("yellow");
+  });
+  it("a parent whose children are all green rolls up green, not its own stale gray", () => {
+    const map = E.computeRolledHealth([T(1, "gray"), T(2, "green", 1), T(3, "green", 1)]);
+    expect(map[1]).toBe("green");
+  });
+  it("never throws and terminates on a parentId cycle", () => {
+    expect(() => E.computeRolledHealth([T(1, "gray", 2), T(2, "red", 1)])).not.toThrow();
+  });
+  it("matches the prior inline grid algorithm on a random tree", () => {
+    // reference = the original App rolledHealthMap logic
+    const ref = (all) => {
+      const PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
+      const rollup = id => {
+        const kids = all.filter(t => t.parentId === id);
+        if (!kids.length) return all.find(t => t.id === id)?.health || "";
+        let best = "", bestP = 0;
+        for (const c of kids) { const h = rollup(c.id); const p = PRIO[h] || 0; if (p > bestP) { bestP = p; best = h; } }
+        return best;
+      };
+      const m = {}; all.forEach(t => { if (all.some(c => c.parentId === t.id)) m[t.id] = rollup(t.id); });
+      return m;
+    };
+    const H = ["red", "yellow", "paused", "green", "gray"];
+    let s = 7; const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const tasks = [];
+    for (let i = 1; i <= 50; i++) tasks.push({ id: i, name: "t" + i, health: H[Math.floor(rnd() * H.length)], parentId: i === 1 ? null : (rnd() < 0.6 ? 1 + Math.floor(rnd() * (i - 1)) : null) });
+    expect(E.computeRolledHealth(tasks)).toEqual(ref(tasks));
+  });
+});
+
+describe("anti-drift: the schedule-output fixes still exist in the real source", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const sjsx = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("the web/JSON/PDF exports use the Site-Planner filename format, not Hillwood/planar", () => {
+    expect(src).not.toMatch(/Hillwood Schedule/);
+    expect(src).not.toMatch(/hillwood-schedule/);
+    expect(src).not.toMatch(/<title>planar<\/title>/);
+    // all three exports route their name through scheduleExportName (Site-Planner format)
+    expect(src).toMatch(/`\$\{scheduleExportName\(Object\.values\(data\.projects\)\)\}\.html`/);
+    expect(src).toMatch(/`\$\{scheduleExportName\(Object\.values\(data\.projects\)\)\}\.json`/);
+    expect(src).toMatch(/<title>\$\{escapeHtml\(scheduleExportName\(selProjs\)\)\}<\/title>/);
+  });
+  it("the web snapshot guards percent/duration and escapes the status color", () => {
+    expect(src).toMatch(/const pct = t\.health==="green" \? 100 : \(t\.percentComplete\|\|0\)/);
+    expect(src).toMatch(/\$\{Number\(t\.duration\)\|\|0\}d/);
+    expect(src).toMatch(/style="color:\$\{escapeHtml\(h\.dot\)\}"/);
+  });
+  it("buildGanttSVG skips an unscheduled task's bar and tags it instead of drawing NaN", () => {
+    expect(src).toMatch(/const blank = !t\.start \|\| !t\.end \|\| isNaN\(pd\(t\.start\)\) \|\| isNaN\(pd\(t\.end\)\);/);
+    expect(src).toMatch(/if\(blank\)\{\s*barSvg="";/);
+    expect(src).toMatch(/>Unscheduled<\/text>/);
+  });
+  it("buildGanttSVG draws a summary bracket before a milestone diamond + normalizes preds for arrows", () => {
+    expect(src).toMatch(/\}else if\(isParent\)\{[\s\S]*?\}else if\(isMilestone\)\{/);
+    expect(src).toMatch(/const preds=normPreds\(t\.predecessors\);/);
+  });
+  it("the on-screen Gantt renders a duration-0 parent as a bracket, not a diamond", () => {
+    expect(src).toMatch(/\(isMilestone && !isSummary\) \? \(<>/);
+  });
+  it("the exhibit table %Done matches the green→100 bar convention", () => {
+    expect(src).toMatch(/return `\$\{t\.health==="green" \? 100 : \(t\.percentComplete\|\|0\)\}%`/);
+  });
+  it("MasterView uses rolled health for parents (shared helper) and live deps", () => {
+    expect(src).toMatch(/const computeRolledHealth = \(all\) =>/);
+    expect(src).toMatch(/const rolled = computeRolledHealth\(p\.tasks\);/);
+    expect(src).toMatch(/_disp: dispOf\(t, !isLeaf, rolled\)/);
+    expect(src).toMatch(/\}, \[data\.projects, masterHealthFilter, data\.settings, NOW\]\);/);
+    expect(src).toMatch(/const rolledHealthMap = useMemo\(\(\) => proj \? computeRolledHealth\(proj\.tasks\) : \{\}/);
+  });
+  it("the overdue rule no longer fires on a 100%-complete task", () => {
+    expect(src).toMatch(/cf\.overdueRed && task\.end && task\.end < NOW && \(task\.percentComplete\|\|0\) < 100/);
+  });
+  it("the engine mirror carries computeRolledHealth verbatim", () => {
+    expect(sjsx).toMatch(/export const computeRolledHealth = \(all\) =>/);
+  });
+  it("the schedule export name uses the Site-Planner format helper (mirrored)", () => {
+    expect(src).toMatch(/const scheduleExportName = \(projects, date = new Date\(\)\) =>/);
+    expect(sjsx).toMatch(/export const scheduleExportName = \(projects, date = new Date\(\)\) =>/);
+  });
+});
+
+describe("scheduleExportName — matches the Site Planner PDF filename format", () => {
+  const D = new Date(2026, 5, 27); // 2026-06-27 (local), date injectable for determinism
+  it("single project: 'YYYY.MM.DD {Project} - Schedule'", () => {
+    expect(E.scheduleExportName([{ id: 1, name: "Goose Creek" }], D)).toBe("2026.06.27 Goose Creek - Schedule");
+  });
+  it("zero-pads month/day to match the Site Planner stamp", () => {
+    expect(E.scheduleExportName([{ name: "X" }], new Date(2026, 0, 3))).toBe("2026.01.03 X - Schedule");
+  });
+  it("multiple projects collapse to the Planyr brand", () => {
+    expect(E.scheduleExportName([{ name: "A" }, { name: "B" }], D)).toBe("2026.06.27 Planyr - Schedule");
+  });
+  it("no/blank projects fall back to the Planyr brand", () => {
+    expect(E.scheduleExportName([], D)).toBe("2026.06.27 Planyr - Schedule");
+    expect(E.scheduleExportName([{ name: "" }], D)).toBe("2026.06.27 Planyr - Schedule");
+  });
+  it("strips filesystem-illegal chars but KEEPS letters/digits/spaces (the regex isn't a bad range)", () => {
+    expect(E.scheduleExportName([{ name: 'A/B: C* <x>|2' }], D)).toBe("2026.06.27 A B C x 2 - Schedule");
+  });
+});
+
+// ── Scheduler bug-batch (2026-06-30) — "find and debug and ship fixes" ──────────────────────────
+// Twenty real bugs found by an adversarial bug hunt over public/sequence/index.html + the React
+// shell. Runtime tests for the engine-level fixes (parseFlexDate); anti-drift source-presence
+// assertions for the App-level fixes (same style as the blocks above — the App code isn't
+// importable, so we assert the fix still exists in the real source).
+
+describe("parseFlexDate — ISO fast-path must reject impossible calendar dates (bug-batch #1)", () => {
+  it("rejects impossible ISO dates the same way the slash path does", () => {
+    expect(E.parseFlexDate("2026-02-30")).toBeNull(); // was returned verbatim → pd() rolled it to Mar 2
+    expect(E.parseFlexDate("2026-04-31")).toBeNull();
+    expect(E.parseFlexDate("2026-13-01")).toBeNull();
+    expect(E.parseFlexDate("2026-00-15")).toBeNull();
+    expect(E.parseFlexDate("2026-06-00")).toBeNull();
+  });
+  it("still accepts real ISO dates unchanged", () => {
+    expect(E.parseFlexDate("2026-02-28")).toBe("2026-02-28");
+    expect(E.parseFlexDate("2026-06-22")).toBe("2026-06-22");
+    expect(E.parseFlexDate("2024-02-29")).toBe("2024-02-29"); // leap day
+  });
+});
+
+describe("anti-drift: the scheduler bug-batch fixes still exist in the real source", () => {
+  const src  = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs  = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("#1 parseFlexDate ISO fast-path round-trips through the calendar check (source + mirror)", () => {
+    expect(src).toMatch(/const isoM = s\.match\(/);
+    expect(src).toMatch(/chk\.getMonth\(\) \+ 1 === Mo && chk\.getDate\(\) === Da/);
+    expect(mjs).toMatch(/const isoM = s\.match/);
+  });
+  it("#2 concurrency guard treats an unknown base rev as 0 (no stale overwrite on the seed/offline path)", () => {
+    expect(src).toMatch(/cloudRev > \(knownRev\[k\] \|\| 0\)/);
+  });
+  it("#3 grid zoom is adopted from persisted data after the async load", () => {
+    expect(src).toMatch(/if \(data && typeof data\.gridZoom === "number"\) setGridZoom\(data\.gridZoom\);/);
+  });
+  it("#4 a narrow viewport NEVER mutates the persisted view (render-time gating only)", () => {
+    expect(src).not.toMatch(/d\.view = "grid"/);          // all three load-path mutations removed
+    expect(src).toMatch(/\(isMobile\?"grid":data\.view\)==="split"/);
+  });
+  it("#5 undo/redo push the LIVE current state (dataRef.current), not the stale closure", () => {
+    expect(src).toMatch(/future\.current = \[\.\.\.future\.current, dataRef\.current\]/);
+    expect(src).toMatch(/history\.current = \[\.\.\.history\.current, dataRef\.current\]/);
+  });
+  it("#6 cut+paste rewires every remaining task's predecessors onto the moved subtree's new ids", () => {
+    expect(src).toMatch(/idMap\[p\.id\] !== undefined \? \{ \.\.\.p, id: idMap\[p\.id\] \} : p/);
+  });
+  it("#7 commit() still commits the focused name/notes/predecessors cell under a range selection", () => {
+    expect(src).toMatch(/never range-filled \(filling one name across many rows is destructive\)/);
+  });
+  it("#8 autoSizeCol measures an empty date as nothing, not 'NaN/NaN/'", () => {
+    expect(src).toMatch(/case 'start': case 'end': \{ if\(!t\[colKey\]\)\{ val=''; break; \}/);
+  });
+  it("#9 the on-screen Gantt axis is anchored to today + positions clamped (R3: supersedes the R1 span cap)", () => {
+    // Round 3 replaced the R1 totD=Math.min(...,MAX_SPAN_DAYS) cap (which froze→desynced bars/today line)
+    // with a today-anchored window + clamped xOf, so an outlier date pins to the chart edge.
+    expect(src).toMatch(/const hardBack = addD\(NOW, -365 \* 30\), hardFwd = addD\(NOW, 365 \* 50\);/);
+    expect(src).toMatch(/const xOf = d => Math\.max\(0, Math\.min\(totalW, dif\(minD, d\) \* ppd\)\);/);
+    expect(src).not.toMatch(/Math\.min\(dif\(mn, mx\), MAX_SPAN_DAYS\)/); // old incomplete cap is gone
+  });
+  it("#10 the dependency y-helpers test the summary case before the milestone case (both paths)", () => {
+    expect(src).toMatch(/test this BEFORE the milestone case/);     // on-screen depYCenter
+    expect(src).toMatch(/test summary BEFORE milestone/);           // export edgeYOf
+  });
+  it("#11 on-screen dependency connectors skip unparseable-date endpoints (mirrors the export)", () => {
+    expect(src).toMatch(/isNaN\(pd\(pred\.start\)\) \|\| isNaN\(pd\(pred\.end\)\) \|\| isNaN\(pd\(task\.start\)\)/);
+  });
+  it("#12 the PDF split-Gantt slices are guarded on a non-null svgEl", () => {
+    expect(src).toMatch(/if\(pr\.svgEl\)\{/);
+    expect(src).toMatch(/a project filtered to zero rows yields an empty Gantt/);
+  });
+  it("#13 the @page size uses explicit orientation-swapped dimensions (valid for Tabloid too)", () => {
+    expect(src).toMatch(/@page\{size:\$\{pgW\}in \$\{pgR\}in;/);
+    expect(src).not.toMatch(/@page\{size:\$\{ps\.css\} \$\{cfg\.orientation\}/);
+  });
+  it("#16 approving a suggestion only attaches a note when the reviewer typed one", () => {
+    expect(src).toMatch(/const noteTxt = String\(noteText \|\| ""\)\.trim\(\);/);
+  });
+  it("#17 the owner ContactPicker only ghost-accepts on Enter when the typed text is a NEW name", () => {
+    expect(src).toMatch(/else if \(ghostText && prediction && isNewName\) onCommit\(prediction\.name\);/);
+  });
+  it("#18 the grid uses rolled child health for every parent (collapsed or expanded)", () => {
+    expect(src).toMatch(/A parent ALWAYS reflects rolled-up child health/);
+    expect(src).toMatch(/const displayHealth = task\.hasChildren\s*\n\s*\? \(rolledHealthMap/);
+  });
+  it("#15 MasterView keys cell selection to the RENDERED columns (displayCols)", () => {
+    expect(src).toMatch(/const ci = displayCols\.indexOf\(col\);/);
+  });
+  it("#14 MasterView shows the empty-state row whenever NOTHING is displayed (filtered or empty)", () => {
+    expect(src).toMatch(/\{sortedRows\.length===0 && \(/);
+  });
+  it("#19 floating (nth-weekday) holidays serialize with the local-calendar formatter (source + mirror)", () => {
+    expect(src).not.toMatch(/fd\(nthWeekday\(/);            // all converted to fdLocal
+    expect(src).toMatch(/fdLocal\(nthWeekday\(y,11,4,4\)\)/);
+    expect(mjs).not.toMatch(/fd\(nthWeekday\(/);
+    expect(mjs).toMatch(/fdLocal\(nthWeekday\(y,5,-1,1\)\)/);
+  });
+  it("#20 the nav-request handshake reply carries the cross-module link fields (≥2 emit sites)", () => {
+    const hits = src.match(/linkedSiteId: p\.linkedSiteId \?\? null/g) || [];
+    expect(hits.length).toBeGreaterThanOrEqual(2); // primary data-change emit + nav-request reply
+  });
+});
+
+// ── Round-2 scheduler bug-batch (2026-06-30) — anti-drift guards for the App-level fixes ──
+describe("anti-drift: the round-2 scheduler fixes still exist in the real source", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const fjs = readFileSync(fileURLToPath(new URL("../src/shared/formula/formula.js", import.meta.url)), "utf8");
+
+  it("TH1: renameProject guards a stale/non-existent project id (no ghost project)", () => {
+    expect(src).toMatch(/setData\(d => \(d\.projects && d\.projects\[id\]\) \?/);
+  });
+  it("TH2: duplicateProject spreads ...src and deep-copies formulaCols (keeps column layout)", () => {
+    expect(src).toMatch(/\{\.\.\.src, id: newId, name: src\.name \+ " \(Copy\)", tasks: newTasks,/);
+    expect(src).toMatch(/formulaCols: Array\.isArray\(src\.formulaCols\) \? src\.formulaCols\.map\(fc => \(\{\.\.\.fc\}\)\)/);
+  });
+  it("TH3: the nav-delete bridge only routes home when a delete actually happens", () => {
+    expect(src).toMatch(/if \(wasActive && projCount > 1\) setData\(d => \(\{ \.\.\.d, section: "reports" \}\)\);/);
+  });
+  it("S1: previewProject clears the pin on a predecessors patch (preview matches apply)", () => {
+    expect(src).toMatch(/if \('predecessors' in patch\) delete u\.pinnedStart;/);
+  });
+  it("S2: cleanPatchFor structurally compares objects/arrays (predecessor patches aren't dropped)", () => {
+    expect(src).toMatch(/JSON\.stringify\(x\) === JSON\.stringify\(y\)/);
+  });
+  it("S3: the holiday recascade recomputes from the live `d`, not a stale closure", () => {
+    expect(src).toMatch(/Recompute from the LIVE/);
+    expect(src).toMatch(/setData\(d => \{\s*const newProjects = \{\};\s*Object\.entries\(d\.projects\)/);
+  });
+  it("G1: a health-dot click preserves a covering multi-row range (mouse fill works)", () => {
+    expect(src).toMatch(/const inSpan = selRange && ri >= Math\.min\(selRange\.r1, selRange\.r2\)/);
+    expect(src).toMatch(/if \(!inSpan\) setSelRange\(\{r1:ri, r2:ri, c1:ci, c2:ci\}\);/);
+  });
+  it("G2: the parent-lock guards lock the whole cost FAMILY by type (col.t), not just col.k", () => {
+    expect((src.match(/col\.k==="duration"\|\|col\.t==="cost"/g) || []).length).toBeGreaterThanOrEqual(3);
+    expect(src).toMatch(/c\.k==="duration"\|\|c\.t==="cost"/);
+    expect(src).not.toMatch(/col\.k==="duration"\|\|col\.k==="cost"/); // the buggy key-only check is gone
+  });
+  it("G3: the range-fill loop skips a parent's rolled cost/budget/actual columns", () => {
+    expect(src).toMatch(/col==="cost"\|\|col==="budget"\|\|col==="actualCost"\)\)\) applyUpdate\(t\.id, col, val\)/);
+  });
+  it("F1+F2: the INLINE formula copy carries the blank-equals-empty + date-overflow guards", () => {
+    expect(src).toMatch(/if \(isBlank\(a\) && typeof b === "string"\) return b === "" \? 0 : -1;/);
+    expect(src).toMatch(/Math\.abs\(s\) > MAX_DATE_SERIAL/);
+    // ...and the source-of-truth engine matches (so the two can't drift)
+    expect(fjs).toMatch(/if \(isBlank\(a\) && typeof b === "string"\) return b === "" \? 0 : -1;/);
+    expect(fjs).toMatch(/Math\.abs\(s\) > MAX_DATE_SERIAL/);
+  });
+});
+
+// ── Round-3 scheduler bug-batch (2026-06-30) — anti-drift guards ──
+describe("anti-drift: the round-3 scheduler fixes still exist in the real source", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+
+  it("E1: the Gantt window is anchored to today + xOf is clamped (axis-clamp regression fixed)", () => {
+    expect(src).toMatch(/const hardBack = addD\(NOW, -365 \* 30\), hardFwd = addD\(NOW, 365 \* 50\);/);
+    expect(src).toMatch(/const xOf = d => Math\.max\(0, Math\.min\(totalW, dif\(minD, d\) \* ppd\)\);/);
+    expect(src).toMatch(/const bw  = isBlankDates \? 0 : Math\.max\(6, xOf\(task\.end\) - bx\);/);
+  });
+  it("C1: the global key handler bails while any blocking overlay is open", () => {
+    expect(src).toMatch(/const overlayOpenRef = useRef\(false\);/);
+    expect(src).toMatch(/if \(overlayOpenRef\.current\) return;/);
+  });
+  it("C2: Delete blanks the whole multi-cell selection", () => {
+    expect(src).toMatch(/Multi-cell range delete/);
+    expect(src).toMatch(/if \(Object\.keys\(patch\)\.length\) updateTask\(t\.id, patch\);/);
+  });
+  it("C3: a date/dependency commit clears the now-stale selRange", () => {
+    expect(src).toMatch(/if \(col === "start" \|\| col === "end" \|\| col === "duration" \|\| col === "predecessors"\) setSelRange\(null\);/);
+  });
+  it("B1+import: a shared applyLoadedData pipeline feeds load / import / restore", () => {
+    expect(src).toMatch(/const applyLoadedDataRef = useRef\(null\);/);
+    expect(src).toMatch(/applyLoadedDataRef\.current = \(parsed\) =>/);
+    expect(src).toMatch(/if \(applyLoadedDataRef\.current\) applyLoadedDataRef\.current\(parsed\);/);   // importJSON (was a ReferenceError)
+    expect(src).toMatch(/if \(applyLoadedData\) applyLoadedData\(parsed\); else setData\(parsed\);/);    // doRestore
+  });
+  it("D1: a contact rename/delete propagates to tasks' responsibleParty", () => {
+    expect(src).toMatch(/t\.responsibleParty === oldName \? \{\.\.\.t, responsibleParty: nm\}/);
+    expect(src).toMatch(/t\.responsibleParty === goneName \? \{\.\.\.t, responsibleParty: ""\}/);
+  });
+  it("D2: free-text notes match existing notes by TEXT, not array index", () => {
+    expect(src).toMatch(/const mi = prev\.findIndex\(n => n && n\.text === text\);/);
+  });
+  it("D3: cost/budget/actual rollups include the node's OWN value (no stranded parent value)", () => {
+    expect(src).toMatch(/\(Number\(byId\[id\]\?\.cost\) \|\| 0\) \+ kids\.reduce\(\(s, c\) => s \+ costOf\(c\.id\), 0\)/);
+    expect(src).toMatch(/\(Number\(byId\[id\]\?\.\[field\]\) \|\| 0\) \+ kids\.reduce/);
   });
 });

@@ -47,7 +47,12 @@ export async function onRequestGet(context) {
 
   let body = {};
   try { body = await resp.json(); } catch (_) { /* non-JSON upstream */ }
-  if (!resp.ok) return json({ error: `Mapillary HTTP ${resp.status}`, data: [] }, resp.status);
+  if (!resp.ok) {
+    // B522: never forward a no-body status (204/304/1xx) into the Response constructor — it
+    // throws → an uncaught platform 500, the exact hard error this graceful proxy must avoid.
+    const st = (resp.status >= 200 && resp.status <= 599 && resp.status !== 204 && resp.status !== 304) ? resp.status : 502;
+    return json({ error: `Mapillary HTTP ${resp.status}`, data: [] }, st);
+  }
 
   // Never reflect the token; return only Mapillary's JSON, with a short cache window.
   const out = json(body, 200, { "cache-control": "public, max-age=300" });

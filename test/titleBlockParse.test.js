@@ -60,6 +60,30 @@ describe("findDates / latestDate — 'search all dates and date itself' (owner)"
     expect(findDates("DEGREES AT 5-29/32")).toEqual([]);
     expect(latestDate("ISSUED 10/08/2024  BEVEL 5-29/32")).toBe("2024-10-08");
   });
+  it("B514: rejects impossible calendar days (Feb 30, Apr 31, non-leap Feb 29)", () => {
+    expect(findDates("ISSUED 02/30/2025")).toEqual([]);
+    expect(findDates("ISSUED 04/31/2025")).toEqual([]);
+    expect(findDates("ISSUED 02/29/2025")).toEqual([]);   // 2025 is not a leap year
+    expect(findDates("ISSUED 02/29/2024")).toEqual(["2024-02-29"]); // 2024 is — still valid
+    expect(findDates("ISSUED 06/15/2025")).toEqual(["2025-06-15"]); // a real date is untouched
+  });
+});
+
+describe("parseRevision — read the revision tag off the title block", () => {
+  it("reads the plain forms", () => {
+    expect(parseRevision("REVISION 2")).toBe("REV 2");
+    expect(parseRevision("REV: A")).toBe("REV A");
+  });
+  it("B513: reads the common 'NO.'/'NUMBER'/'#' label between the rev-word and value", () => {
+    expect(parseRevision("REVISION NO. 3")).toBe("REV 3");
+    expect(parseRevision("REV. NO. 5")).toBe("REV 5");
+    expect(parseRevision("REVISION NUMBER 4")).toBe("REV 4");
+    expect(parseRevision("REV #6")).toBe("REV 6");
+  });
+  it("B513: still ignores the 'REVISIONS' heading and a 'revision label' phrase (B360 guard)", () => {
+    expect(parseRevision("SUBMITTALS / REVISIONS:")).toBe("");
+    expect(parseRevision("revision label")).toBe("");
+  });
 });
 
 describe("issueDate — prefer the issue/revision date over a base date (B411b)", () => {

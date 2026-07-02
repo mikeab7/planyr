@@ -22,6 +22,7 @@ import { supabase, supabaseRest, currentAccessToken } from "../../site-planner/l
 import { getUser } from "../../site-planner/lib/auth.js";
 import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { STATUSES, STATUS_META, statusOf } from "../../site-planner/lib/siteModel.js";
 
 export const BUCKET = "doc-review-files";
@@ -82,7 +83,18 @@ const storageKeyFor = (uid, projectId, discipline, srcId) =>
 const reviewVersions = {};
 export function clearReviewVersions() { for (const k of Object.keys(reviewVersions)) delete reviewVersions[k]; }
 
-export async function upsertReview(record) {
+// B528: serialize cloud writes per review id so a tab can't race ITSELF (debounced autosave +
+// a visibility/unmount/manual flush firing together) into a false self-conflict that locks out
+// autosave. A second write for an id waits for the in-flight one, so it reads the version that
+// write threaded back into `reviewVersions` → the CAS succeeds. Cross-device conflicts are
+// unaffected (the genuine guard in casUpsert is untouched).
+const serializeReviewWrite = makeWriteSerializer();
+export function upsertReview(record) {
+  if (!record || !record.id) return upsertReviewCore(record); // no id → nothing to serialize on; core returns the error
+  return serializeReviewWrite(record.id, () => upsertReviewCore(record));
+}
+
+async function upsertReviewCore(record) {
   if (!supabase) return { ok: false, error: "Cloud not configured." };
   const uid = await currentUid();
   if (!uid) return { ok: false, error: "Sign in to save." };
@@ -238,10 +250,14 @@ export async function deleteReview(id) {
       if (files && files.length) await supabase.storage.from(BUCKET).remove(files.map((f) => `${uid}/${id}/${f.name}`));
     }
   } catch (_) {}
-  if (uid) clearDraft(uid, id);
   // Scope by id only; RLS decides (own review OR team-admin on a shared one). A user_id filter
   // would block an admin from deleting a teammate's shared review, which the policy permits.
   const { error } = await supabase.from("doc_reviews").delete().eq("id", id);
+  // B579: clear the localStorage mirror only AFTER the cloud delete succeeds. Clearing it first
+  // (the old order) meant a failed delete (network/auth) left the cloud row alive but the local
+  // mirror gone → the row stayed in the library yet could no longer auto-resume; keep them in
+  // step so a failed delete leaves a fully consistent, retry-able state.
+  if (!error && uid) clearDraft(uid, id);
   return { ok: !error, error: error ? error.message : null };
 }
 

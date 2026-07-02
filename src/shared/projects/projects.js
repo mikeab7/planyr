@@ -13,7 +13,7 @@
 import { loadSitesList, renameSiteGroup, deleteSiteGroup, pullCloud, isCloudActive, activeUid } from "../../workspaces/site-planner/lib/storage.js";
 import { groupProjects } from "./projectModel.js";
 
-export { groupProjects, filterProjects, relTime } from "./projectModel.js";
+export { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName } from "./projectModel.js";
 
 export function listProjects() {
   try {

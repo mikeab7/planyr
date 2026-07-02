@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolvePageDiscipline, smoothDisciplines, splitByDiscipline } from "../src/shared/files/disciplineSplit.js";
+import { resolvePageDiscipline, smoothDisciplines, splitByDiscipline, buildFilingPlan } from "../src/shared/files/disciplineSplit.js";
 
 // A per-page record as readTitleBlockText / readSheetMeta produce it.
 const pg = (n, o = {}) => ({ pageNum: n, hasText: true, discipline: "Other", item: "Document", sheetNumber: "", ...o });
@@ -104,5 +104,21 @@ describe("splitByDiscipline", () => {
     const r = splitByDiscipline([]);
     expect(r.multiDiscipline).toBe(false);
     expect(r.sets).toEqual([]);
+  });
+});
+
+describe("buildFilingPlan — B537: tolerates a set missing pageNums (malformed input, no crash)", () => {
+  it("degrades a pageNums-less set in split.sets to 0 instead of throwing 'not iterable'", () => {
+    const split = { multiDiscipline: false, dominant: { discipline: "Civil", item: "Civil Set" },
+      sets: [{ discipline: "Civil" /* pageNums missing */ }], standaloneSets: [] };
+    expect(() => buildFilingPlan(split, 3)).not.toThrow();
+    const plan = buildFilingPlan(split, 3);
+    expect(plan[0].pageNums).toEqual([1, 2, 3]); // falls back to totalPages
+  });
+  it("a multi-discipline split with a pageNums-less standalone set does not throw", () => {
+    const split = { multiDiscipline: true, dominant: { discipline: "Civil" },
+      standaloneSets: [{ discipline: "Civil", pageNums: [1, 2] }, { discipline: "Survey" /* no pageNums */ }],
+      sets: [{ discipline: "Civil", pageNums: [1, 2] }, { discipline: "Survey" }] };
+    expect(() => buildFilingPlan(split, 4)).not.toThrow();
   });
 });

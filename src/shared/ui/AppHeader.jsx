@@ -50,8 +50,8 @@ const LINE   = "var(--chrome-divider)";
 const TAB_IDLE = "var(--chrome-tab-inactive)";
 // Per-module accent: the FILL (the 2px underline) is fixed in both themes; the active
 // tab TEXT uses the -text token, which swaps by theme (sits on chrome). (B318)
-const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)" };
-const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)" };
+const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)", "library": "var(--accent-library)" };
+const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)", "library": "var(--accent-library-text)" };
 
 // The Light/Dark/System picker now lives in the account → Settings panel (B389, AuthPanel)
 // for signed-in users. The row-1 gear below is kept ONLY when signed out, so a logged-out
@@ -137,6 +137,17 @@ const MODULES = [
       <>
         <path d="M3.5 12.5l7-7 3 3-7 7H3.5v-3z" />
         <line x1="9.5" y1="6.5" x2="11.5" y2="8.5" />
+      </>
+    ),
+  },
+  {
+    id: "library",
+    label: "Library",
+    // simplified ti-folders / stacked-files outline (16×16 viewBox)
+    icon: (
+      <>
+        <path d="M2.5 5.5l2-1.5h3l1 1.5h4.5v7.5a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1z" />
+        <line x1="2.5" y1="8" x2="13.5" y2="8" />
       </>
     ),
   },
@@ -243,6 +254,10 @@ export default function AppHeader({
   currentProject = null,
   onSelectProject,
   onNewProject,
+  // Optional trailing breadcrumb crumb rendered right after the project crumb (e.g. the
+  // Site Planner's plan switcher). Keeps the project name in ONE place — the breadcrumb —
+  // while a workspace-specific sub-selector (the plan) sits beside it: Map / Project / Plan.
+  planSlot,
   saveState,
   // Cloud-sync badge (NEW-1): the workspace hands the badge an optional retry action and a
   // custom popover message (e.g. "reload to merge" for a conflict). Both are optional — the
@@ -367,6 +382,7 @@ export default function AppHeader({
                 projects={projects}
                 homeLabel={homeLabel}
                 cross={cross}
+                planSlot={planSlot}
               />
             </>
           )}
@@ -460,7 +476,7 @@ export default function AppHeader({
     {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
         Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}
     {accountActive && multiTab.conflictRisk && (
-      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: 660, display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
+      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(660px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
         <span>⧉ This project is open in <b>another tab</b>. Only one tab can edit at a time; the others are <b>read-only</b> until you take over editing there or close them.</span>
       </div>
     )}

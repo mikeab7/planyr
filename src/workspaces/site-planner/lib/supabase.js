@@ -37,11 +37,16 @@ export function currentAccessToken() {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k || !/^sb-.*-auth-token$/.test(k)) continue;
-      const v = JSON.parse(localStorage.getItem(k) || "null");
-      const tok = v && (v.access_token || (v.currentSession && v.currentSession.access_token));
-      if (tok) return tok;
+      // B539: parse PER ENTRY — a single corrupt/truncated auth-token blob must not abort the whole
+      // scan (the old loop-wide try/catch returned null on the first bad key, missing a later valid
+      // session → a signed-in user looked signed-out to the keepalive push). Skip the bad one, keep going.
+      try {
+        const v = JSON.parse(localStorage.getItem(k) || "null");
+        const tok = v && (v.access_token || (v.currentSession && v.currentSession.access_token));
+        if (tok) return tok;
+      } catch (_) { /* corrupt entry — skip and keep scanning */ }
     }
-  } catch (_) { /* storage blocked / malformed — treat as no token */ }
+  } catch (_) { /* storage blocked — treat as no token */ }
   return null;
 }
 

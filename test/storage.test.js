@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, saveSite, loadSite, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, saveSite, loadSite, renameSiteGroup, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
 
@@ -231,6 +231,41 @@ describe("version history — every save backs up the prior version (B126)", () 
   });
 });
 
+// B511 — pruneMigratedLegacy must NOT drop a NEWER on-device (logged-out) site just because an
+// OLDER copy already exists in the cloud. Pruning by id-exists alone was silent data loss (edit
+// while signed out → sign back in → newer local work deleted before the migration modal saw it).
+describe("B511 — pruneMigratedLegacy compares timestamps before deleting", () => {
+  const SITES_KEY = "planarfit:sites:v1";
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+  it("keeps a legacy site that is NEWER than the cloud copy", () => {
+    localStorage.setItem(SITES_KEY, JSON.stringify({ x: { id: "x", updatedAt: 200, els: [bld("new")] } }));
+    pruneMigratedLegacy({ x: { id: "x", updatedAt: 100 } }); // cloud has an OLDER x
+    const left = JSON.parse(localStorage.getItem(SITES_KEY));
+    expect(left.x).toBeTruthy();              // newer local work survives
+    expect(left.x.els[0].id).toBe("new");
+  });
+  it("prunes a legacy site the cloud has at the same or newer timestamp (B473 reclamation)", () => {
+    localStorage.setItem(SITES_KEY, JSON.stringify({ x: { id: "x", updatedAt: 100 }, y: { id: "y", updatedAt: 100 } }));
+    pruneMigratedLegacy({ x: { id: "x", updatedAt: 100 }, y: { id: "y", updatedAt: 250 } });
+    expect(JSON.parse(localStorage.getItem(SITES_KEY))).toEqual({}); // both reclaimed (cloud same/newer)
+  });
+  it("keeps a legacy site the cloud doesn't have at all", () => {
+    localStorage.setItem(SITES_KEY, JSON.stringify({ z: { id: "z", updatedAt: 50 } }));
+    pruneMigratedLegacy({});                  // empty cloud
+    expect(JSON.parse(localStorage.getItem(SITES_KEY)).z).toBeTruthy();
+  });
+});
+
 // B458 — the autosave splits into an IMMEDIATE per-edit local-mirror write (so a reload within the
 // 400ms cloud-push debounce can't lose the edit) + a debounced cloud push. The immediate write keeps
 // DEFAULT history (it owns the thinning safety net + makes the snapshot reload-safe); the debounced
@@ -366,6 +401,51 @@ describe("listVersions — rows carry a summary + de-dupe same-second/same-shape
     const rows = listVersions("s");
     expect(rows[0].summary).toContain("5 buildings");
     expect(typeof rows[0].at).toBe("number");
+  });
+});
+
+// rename-revert — renameSiteGroup must rename the WHOLE site whether it's handed the group id
+// (the header breadcrumb) OR any plan id within the group (the map's site list passes a
+// *representative* plan's id, which for a multi-plan site is often NOT the group's anchor plan).
+// Passing a non-anchor plan id used to match no plans → nothing was saved → the name "reverted".
+describe("renameSiteGroup — renames the whole site by group id OR any plan id (rename-revert)", () => {
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+
+  it("renames every plan when given the group (anchor) id — the unchanged header path", () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Old", name: "Concept A" }); // anchor plan
+    saveSite({ id: "p2", groupId: "g1", site: "Old", name: "Concept B" }); // sibling plan
+    renameSiteGroup("g1", "New Name");
+    expect(loadSite("g1").site).toBe("New Name");
+    expect(loadSite("p2").site).toBe("New Name");
+  });
+
+  it("renames the WHOLE site when given a NON-anchor plan id (the map's representative)", () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Old", name: "Concept A" }); // anchor plan
+    saveSite({ id: "p2", groupId: "g1", site: "Old", name: "Concept B" }); // sibling — the map may pick this as the row
+    renameSiteGroup("p2", "New Name"); // the map handed us the sibling plan's id, not the group id
+    expect(loadSite("g1").site).toBe("New Name"); // the whole site renamed…
+    expect(loadSite("p2").site).toBe("New Name"); // …not just the plan we were handed
+  });
+
+  it("renames a single-plan site whose own id is its group id", () => {
+    saveSite({ id: "s1", groupId: "s1", site: "Old" });
+    renameSiteGroup("s1", "Fresh");
+    expect(loadSite("s1").site).toBe("Fresh");
+  });
+
+  it("is a harmless no-op (never throws) on an unknown id", () => {
+    expect(() => renameSiteGroup("ghost", "X")).not.toThrow();
+    expect(loadSite("ghost")).toBeNull();
   });
 });
 

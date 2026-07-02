@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { pendingLegacySites, importOneSiteToCloud, discardLegacySite, isEmptySite } from "../lib/storage.js";
 
 const F = "system-ui, -apple-system, sans-serif";
@@ -48,6 +48,13 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
 
   const savedCount = Object.values(decisions).filter((v) => v === "saved").length;
   const decidedCount = Object.values(decisions).filter((v) => v === "saved" || v === "skipped" || v === "discarded").length;
+
+  // B532: dismiss with Escape (the scrim-click already closes; the keyboard path was missing).
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(savedCount); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, savedCount]);
 
   const handleSave = async (id) => {
     setDecisions((d) => ({ ...d, [id]: "saving" }));
@@ -103,7 +110,7 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(savedCount); }}
     >
-      <div style={{
+      <div role="dialog" aria-modal="true" aria-label="Review unsaved on-device sites" style={{
         background: "#181f35", color: "#e4ecff",
         border: "1px solid #273560", borderRadius: 14,
         width: "100%", maxWidth: 520,

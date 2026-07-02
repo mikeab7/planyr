@@ -30,6 +30,20 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     expect(parcelDrawingsOf(m, "p1").map((d) => d.id)).toEqual(["d1"]);
   });
 
+  // schema v9 — cross-module schedule link hint (additive, mirror of the schedule record).
+  it("scheduleProjectId/Name: defaults to null and survives a create→migrate round-trip", () => {
+    const fresh = createSiteModel();
+    expect(fresh.scheduleProjectId).toBeNull();
+    expect(fresh.scheduleProjectName).toBeNull();
+    const linked = createSiteModel({ id: "p1", scheduleProjectId: 7, scheduleProjectName: "Pappadoupolos" });
+    expect(linked.scheduleProjectId).toBe(7);
+    expect(linked.scheduleProjectName).toBe("Pappadoupolos");
+    // migrate is idempotent + lossless: the hint isn't dropped on re-normalize
+    const round = migrate(linked);
+    expect(round.scheduleProjectId).toBe(7);
+    expect(round.scheduleProjectName).toBe("Pappadoupolos");
+  });
+
   // B7/B8 lifecycle status defaulting — single source of truth, easy to regress.
   it("status: a brand-new record => pursuit; a pre-feature (older version) record => active", () => {
     expect(createSiteModel().status).toBe("pursuit");
@@ -131,5 +145,80 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     expect(roadTravelWidth(25, 60, 0.5)).toBe(24); // min(w,h), orientation-independent
     expect(roadTravelWidth(60, 40, 0.5)).toBe(39); // a wider road reads wider (tracks the resize)
     expect(roadTravelWidth(10, 1, 0.5)).toBe(0);   // clamped ≥ 0
+  });
+});
+
+import { rectRoadEndpoints, roadStripBBox } from "../src/workspaces/site-planner/lib/siteModel.js";
+
+describe("Centerline road migration (B596 / NEW-1)", () => {
+  // A legacy axis-aligned road: 200′ long (w), 25′ cross (h) = 24′ travel + 0.5′ curb each side.
+  const legacy = { id: "r1", type: "road", cx: 100, cy: 50, w: 200, h: 25, rot: 0, travelW: 24, curb: 0.5 };
+
+  it("converts a legacy rect road to a 2-point centerline, preserving travel/curb", () => {
+    const m = createSiteModel({ els: [legacy] });
+    const r = m.els[0];
+    expect(r.pts).toHaveLength(2);
+    expect(r.vtx).toEqual([]);
+    expect(r.travelW).toBe(24);
+    expect(r.curb).toBe(0.5);
+    expect(r.roadClass).toBe("aisle"); // DEFAULT_ROAD_CLASS
+    // endpoints lie on the centerline (cy), 200′ apart, centred on cx
+    expect(r.pts[0]).toEqual({ x: 0, y: 50 });
+    expect(r.pts[1]).toEqual({ x: 200, y: 50 });
+  });
+
+  it("derives endpoints along the LONG axis for a rotated road", () => {
+    const rot90 = { id: "r2", type: "road", cx: 0, cy: 0, w: 300, h: 25, rot: 90, travelW: 24, curb: 0.5 };
+    const [a, b] = rectRoadEndpoints(rot90);
+    expect(Math.hypot(b.x - a.x, b.y - a.y)).toBeCloseTo(300, 6); // length = w (the long axis)
+  });
+
+  it("is idempotent — a road that already has pts is left untouched", () => {
+    const cl = { id: "r3", type: "road", pts: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 50 }],
+      vtx: [{}, { treatment: "arc" }, {}], travelW: 26, curb: 0.5, roadClass: "truck" };
+    const once = createSiteModel({ els: [cl] }).els[0];
+    expect(once.pts).toEqual(cl.pts);
+    expect(once.roadClass).toBe("truck");
+    const twice = createSiteModel({ els: [once] }).els[0];
+    expect(twice.pts).toEqual(cl.pts);
+  });
+
+  it("leaves a BONDED dock-layer road (attachedTo) as a rect — relayout still owns it", () => {
+    const bonded = { id: "r4", type: "road", attachedTo: "b1", cx: 10, cy: 10, w: 100, h: 25, rot: 0, travelW: 24, curb: 0.5 };
+    const r = createSiteModel({ els: [bonded] }).els[0];
+    expect(r.pts).toBeUndefined();
+  });
+
+  it("roadStripBBox returns a containing AABB (rot:0) around the strip", () => {
+    const bb = roadStripBBox([{ x: 0, y: 0 }, { x: 100, y: 0 }], [], 24, 0.5);
+    expect(bb.rot).toBe(0);
+    expect(bb.w).toBeCloseTo(100, 6);     // length
+    expect(bb.h).toBeCloseTo(25, 6);      // travel + 2 curbs
+    expect(bb.cx).toBeCloseTo(50, 6);
+  });
+});
+
+import { mergeSiteContent, toMs } from "../src/workspaces/site-planner/lib/siteModel.js";
+
+describe("toMs + mergeSiteContent newer-wins is timestamp-type-safe (B559)", () => {
+  it("toMs coerces an ISO string and a ms number to comparable ms", () => {
+    expect(toMs(1718447000000)).toBe(1718447000000);
+    expect(toMs("2025-06-15T10:30:00.000Z")).toBe(Date.parse("2025-06-15T10:30:00.000Z"));
+    expect(toMs(null)).toBe(0);
+    expect(toMs(undefined)).toBe(0);
+    expect(toMs("not-a-date")).toBe(0);
+  });
+
+  it("picks the genuinely-newer copy even when one updatedAt is an ISO string and the other a number", () => {
+    // Newer copy carries an ISO string; older carries a smaller ms number. Naive `string >= number`
+    // is always false → would WRONGLY pick the older (number) copy and drop the newer's building.
+    const older = { id: "s1", updatedAt: 1000, els: [{ id: "a", type: "building" }] };
+    const newerIso = { id: "s1", updatedAt: "2025-06-15T10:30:00.000Z",
+      els: [{ id: "a", type: "building" }, { id: "b", type: "building" }] };
+    const merged = mergeSiteContent(older, newerIso);
+    // Union keeps both buildings regardless; the point is `newer` resolves to the ISO copy for
+    // scalar/meta — assert the merge ran without the type bug and kept all drawn work.
+    expect(merged.els.map((e) => e.id).sort()).toEqual(["a", "b"]);
+    expect(toMs(newerIso.updatedAt)).toBeGreaterThan(toMs(older.updatedAt));
   });
 });

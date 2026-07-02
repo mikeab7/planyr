@@ -24,6 +24,12 @@ describe("moduleLoaderTheme — reusable per-module loader theming (B224)", () =
     });
   });
 
+  it("B524: the Library workspace has its own loader caption (not the generic 'Loading…')", () => {
+    const t = resolveLoaderTheme("library");
+    expect(t.label).toBe("Opening library…");
+    expect(t.label).not.toBe("Loading…");
+  });
+
   it("falls back to a generic gantt skin + default accent for an unknown module (never blank)", () => {
     const t = resolveLoaderTheme("does-not-exist");
     expect(t.kind).toBe("gantt");

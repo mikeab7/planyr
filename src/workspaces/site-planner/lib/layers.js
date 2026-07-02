@@ -14,7 +14,7 @@
  */
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
-import { JURISDICTION_SOURCES, ETJ_SOURCES } from "./jurisdiction.js";
+import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
@@ -46,7 +46,7 @@ function reportCacheAge(lyr, k, onStatus) {
     const metaUrl = u + (u.indexOf("?") === -1 ? "?" : "&") + "meta=1";
     fetch(metaUrl)
       .then((r) => (r && r.ok ? r.json() : null))
-      .then((m) => { if (m && m.cached && typeof m.ts === "number") onStatus && onStatus(k, "loaded", null, { ts: m.ts, stale: !!m.stale }); })
+      .then((m) => { if (m && m.cached && typeof m.ts === "number" && lyr && lyr._map) onStatus && onStatus(k, "loaded", null, { ts: m.ts, stale: !!m.stale }); }) // B557: lyr._map guard — don't report age on a since-removed layer
       .catch(() => {});
   } catch (_) { /* age is optional */ }
 }
@@ -93,17 +93,21 @@ export const STATEWIDE = {
   },
   txrrc_pipe: {
     label: "Pipelines (TxRRC)",
-    // Texas Railroad Commission T-4 pipelines, mirrored on the Harris County GIS
-    // server the app already uses (reliable, keyless). Verify live — RRC moves services.
-    url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Pipelines/MapServer",
-    layers: null,
+    // B517: repointed to the AUTHORITATIVE statewide RRC service — matches the GIS source
+    // registry (sources.js `pipelines`) and the Site Analysis count path. The old Harris-County
+    // republication (www.gis.hctx.net/.../TXRRC/Pipelines) is ~99.8% incomplete outside Harris,
+    // so the MAP overlay silently under-painted (a false all-clear on Chambers/Gulf-coast sites)
+    // while the analysis panel queried the right host — they now agree.
+    url: "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer",
+    layers: [13], // Pipelines (polyline) — the registry's brief-verified sublayer
     note: "RRC T-4 permit routes — schematic, not surveyed locations.",
     opacity: 0.9,
   },
   txrrc_wells: {
     label: "Oil & gas wells (TxRRC)",
-    url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Wells/MapServer",
-    layers: null, // surface + bottom-hole + connectors; RRC symbology shows status
+    // B517: authoritative statewide RRC service (see txrrc_pipe). Was the Harris-clipped host.
+    url: "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer",
+    layers: [1], // Well Locations (point); RRC symbology shows status
     note: "Well symbols show status — active, plugged, dry hole, injection, etc.",
     opacity: 0.9,
   },
@@ -152,7 +156,13 @@ export const EVIDENCE = {
   elevation: {
     kind: "esriImage", label: "Elevation / hillshade (USGS 3DEP)",
     url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
-    rendering: "Elevation Tinted Hillshade", opacity: 0.55,
+    // B603: the rasterFunction name must EXACTLY match one of the service's published
+    // rasterFunctionInfos[].name, or exportImage returns an error tile and the overlay
+    // renders blank. The 3DEP templates are named "Hillshade <modifier>" ("Hillshade Gray",
+    // "Hillshade Multidirectional", "Hillshade Elevation Tinted"). This was "Elevation Tinted
+    // Hillshade" — the USGS press-release PROSE wording, which is NOT a valid template name,
+    // so the tinted-hillshade overlay never painted. Do NOT reorder back to the prose form.
+    rendering: "Hillshade Elevation Tinted", opacity: 0.55,
     note: "USGS 3DEP LiDAR bare-earth DEM — screening only, verify with survey. The cross-section tool samples it.",
   },
 };
@@ -197,6 +207,23 @@ export const JURISDICTIONS = {
     url: "https://harcags.harcresearch.org/arcgisserver/rest/services/Boundaries/TCEQ_Water_Districts/MapServer", layers: null, opacity: 0.55,
     note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. A boundary is a TAXING / authority district, NOT proof that water or sewer is connected to a parcel. Screening only — verify against the district / tax statement.",
   },
+  jur_road_authority: {
+    // NEW-2/B571 — the road-authority overlay: the actual fronting roads drawn and
+    // COLORED BY MAINTAINER, so the Site Analysis "Road authority" card's call can be
+    // confirmed against the map. Same TxDOT Roadway Inventory FeatureServer the identify
+    // reads (one source of truth), drawn client-side as vector features (esriFeature) so
+    // each segment is individually styled via roadAuthorityStyle — the SAME roadAuthority()
+    // decode the card uses, no parallel mapping. Dense statewide data, so it's gated to
+    // minZoom 14 (never paints at metro scale) and fetches only the two style fields;
+    // esri-leaflet does its own viewport-bbox tiled fetching on top. Display-only screening
+    // overlay on the EPSG:4326 basemap — never feeds the editable layer / measurements / the
+    // 2278 site frame.
+    kind: "esriFeature", label: "Road maintenance authority",
+    url: JURISDICTION_SOURCES.road.url, minZoom: 14, weight: 3, opacity: 0.95,
+    fields: ["OBJECTID", "RDWAY_MAINT_AGCY", "HSYS"],
+    styleFn: roadAuthorityStyle, legend: ROAD_AUTHORITY_LEGEND,
+    note: "Who maintains each road, from the TxDOT Roadway Inventory — City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Screening only — verify the access/ROW desk with the jurisdiction.",
+  },
 };
 
 // Flatten the per-jurisdiction registry into id→config (tagged with its county),
@@ -238,6 +265,7 @@ export const LAYER_VINTAGE = {
   jur_city: "TxGIO city limits — current edition",
   jur_etj: "H-GAC ETJ — current edition",
   jur_mud: "TCEQ water districts (via HARC) — current edition",
+  jur_road_authority: "TxDOT Roadway Inventory — current edition",
   // Per-county utility layers
   hcfcd_row: "HCFCD channels & ROW — current edition",
   coh_ww: "City of Houston GIS (test host) — current edition",
@@ -345,6 +373,11 @@ export async function probeService(url) {
  * up; a successful 'load' resets the counter. */
 export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   let tries = 0, timer = null;
+  // B557: clear a pending retry timer when the layer is removed (toggled off), so a backoff
+  // setTimeout can't fire refresh() on a detached layer. Wrap onRemove (Leaflet calls it on
+  // map.removeLayer) and chain the original. Matches the evidenceLayers.js onRemove cleanup pattern.
+  const origOnRemove = lyr.onRemove;
+  lyr.onRemove = function (map) { clearTimeout(timer); if (origOnRemove) return origOnRemove.call(this, map); };
   lyr.on("load", () => { tries = 0; onStatus && onStatus(k, "loaded"); });
   lyr.on("requesterror", (e) => {
     const code = e && e.error && (e.error.code ?? e.error.httpStatus);
@@ -414,7 +447,13 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           let lyr;
           if (cfg.kind === "esriFeature") {
             lyr = EL.featureLayer(featureLayerOptions(cfg, st.opacity, pane));
-            lyr.setOpacity = (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
+            // A per-feature-styled layer (road authority) must re-derive its WHOLE style on an
+            // opacity change — re-applying the style function (not a flat {opacity}) so the
+            // per-maintainer colors survive AND newly fetched tiles keep them. A flat-styled
+            // layer just merges the new opacity.
+            lyr.setOpacity = typeof cfg.styleFn === "function"
+              ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
+              : (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.

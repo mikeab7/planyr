@@ -16,16 +16,16 @@ const nthWeekday = (y, mo, n, dow) => {
 };
 const HOLIDAY_DEFS = [
   {k:"newYearsDay",          fn: y => `${y}-01-01`},
-  {k:"mlkDay",               fn: y => fd(nthWeekday(y,1,3,1))},
-  {k:"presidentsDay",        fn: y => fd(nthWeekday(y,2,3,1))},
-  {k:"memorialDay",          fn: y => fd(nthWeekday(y,5,-1,1))},
+  {k:"mlkDay",               fn: y => fdLocal(nthWeekday(y,1,3,1))},
+  {k:"presidentsDay",        fn: y => fdLocal(nthWeekday(y,2,3,1))},
+  {k:"memorialDay",          fn: y => fdLocal(nthWeekday(y,5,-1,1))},
   {k:"juneteenth",           fn: y => `${y}-06-19`},
   {k:"independence",         fn: y => `${y}-07-04`},
-  {k:"laborDay",             fn: y => fd(nthWeekday(y,9,1,1))},
-  {k:"columbusDay",          fn: y => fd(nthWeekday(y,10,2,1))},
+  {k:"laborDay",             fn: y => fdLocal(nthWeekday(y,9,1,1))},
+  {k:"columbusDay",          fn: y => fdLocal(nthWeekday(y,10,2,1))},
   {k:"veteransDay",          fn: y => `${y}-11-11`},
-  {k:"thanksgiving",         fn: y => fd(nthWeekday(y,11,4,4))},
-  {k:"dayAfterThanksgiving", fn: y => { const d=pd(fd(nthWeekday(y,11,4,4))); d.setDate(d.getDate()+1); return fd(d); }},
+  {k:"thanksgiving",         fn: y => fdLocal(nthWeekday(y,11,4,4))},
+  {k:"dayAfterThanksgiving", fn: y => { const d=pd(fdLocal(nthWeekday(y,11,4,4))); d.setDate(d.getDate()+1); return fdLocal(d); }},
   {k:"christmasEve",         fn: y => `${y}-12-24`},
   {k:"christmas",            fn: y => `${y}-12-25`},
   {k:"newYearsEve",          fn: y => `${y}-12-31`},
@@ -118,6 +118,23 @@ export const constrainedStartFrom = (pred, dep, taskDur) => {
 };
 export const calcEnd = (start, dur) => !start ? "" : dur === 0 ? start : addBD(start, Math.max(0, dur - 1));
 
+// Worst-of-descendants rolled status for each parent task (faithful copy from index.html).
+export const HEALTH_PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
+export const computeRolledHealth = (all) => {
+  const rollup = (id, stack) => {
+    const children = all.filter(t => t.parentId === id);
+    if (!children.length || stack.has(id)) return all.find(t => t.id === id)?.health || "";
+    stack.add(id);
+    let best = "", bestP = 0;
+    for (const c of children) { const h = rollup(c.id, stack); const p = HEALTH_PRIO[h] || 0; if (p > bestP) { bestP = p; best = h; } }
+    stack.delete(id);
+    return best;
+  };
+  const map = {};
+  all.forEach(t => { if (all.some(c => c.parentId === t.id)) map[t.id] = rollup(t.id, new Set()); });
+  return map;
+};
+
 export const cascadeDates = tasks => {
   const map = {};
   tasks.forEach(t => { map[t.id] = {...t, predecessors: normPreds(t.predecessors)}; });
@@ -191,9 +208,25 @@ export const rollupParentDates = tasks => {
   return tasks.map(t => map[t.id]);
 };
 
+// Export filename — matches the Site Planner's PDF/PNG naming ("YYYY.MM.DD {Project} - {Plan}");
+// here the trailing slot is "Schedule". Faithful copy from index.html (date injectable for tests).
+export const scheduleExportName = (projects, date = new Date()) => {
+  const p2 = n => String(n).padStart(2, "0");
+  const stamp = `${date.getFullYear()}.${p2(date.getMonth() + 1)}.${p2(date.getDate())}`;
+  const clean = s => String(s == null ? "" : s).replace(/[\u0000-\u001f\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+  const names = (Array.isArray(projects) ? projects : []).map(p => p && p.name).filter(Boolean);
+  const proj = clean(names.length === 1 ? names[0] : "Planyr") || "Planyr";
+  return `${stamp} ${proj} - Schedule`;
+};
 export const parseFlexDate = s => {
   if (!s) return null; s = String(s).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // ISO fast-path that still rejects impossible calendar dates (mirror of index.html).
+  const isoM = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoM) {
+    const Y = +isoM[1], Mo = +isoM[2], Da = +isoM[3];
+    const chk = new Date(s + "T12:00:00");
+    return (!isNaN(chk) && chk.getMonth() + 1 === Mo && chk.getDate() === Da && Mo >= 1 && Mo <= 12 && Y >= 2000) ? s : null;
+  }
   const parts = s.split(/[\/\-\.]/);
   if (parts.length < 2) return null;
   const m = parseInt(parts[0], 10), d = parseInt(parts[1], 10);
@@ -209,7 +242,9 @@ export const parseFlexDate = s => {
 
 export const renumberTasks = (tasks) => {
   const map = {};
-  tasks.forEach((t, i) => { map[t.id] = i + 1; });
+  // B568: first-occurrence wins on a duplicate id (see index.html) — original task in visual order
+  // keeps the reference, instead of the last occurrence silently capturing it. No-op for clean data.
+  tasks.forEach((t, i) => { if (!(t.id in map)) map[t.id] = i + 1; });
   return tasks.map((t, i) => ({
     ...t,
     id: i + 1,
@@ -266,7 +301,14 @@ export const normalizeIds = d => {
   const projects = {};
   Object.entries(d.projects).forEach(([pid, proj]) => {
     if (!proj || typeof proj !== "object") return;
-    const tasks = (Array.isArray(proj.tasks) ? proj.tasks : []).filter(t => t && typeof t === "object").map(t => (t.duration === "" || t.duration == null) ? {...t, duration: 0} : t);
+    const tasks0 = (Array.isArray(proj.tasks) ? proj.tasks : []).filter(t => t && typeof t === "object").map(t => (t.duration === "" || t.duration == null) ? {...t, duration: 0} : t);
+    // B550: break any parentId cycle on load (faithful copy of the index.html fix)
+    const byId = {}; tasks0.forEach(t => { byId[t.id] = t; });
+    const tasks = tasks0.map(t => {
+      const seen = new Set([t.id]); let p = t.parentId;
+      while (p != null && byId[p]) { if (seen.has(p)) return {...t, parentId: null}; seen.add(p); p = byId[p].parentId; }
+      return t;
+    });
     projects[pid] = {...proj, tasks: renumberTasks(sortByVisualOrder(tasks))};
   });
   const nTid = {...(d.nTid || {})};

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { wouldThinClobber } from "../src/workspaces/site-planner/lib/cloudSync.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { wouldThinClobber, noteLocalContent, _siteContent, _siteTombs, clearSiteVersions } from "../src/workspaces/site-planner/lib/cloudSync.js";
 
 // B459 — the CAS guard (B314) checks only the version NUMBER, never the content, so a tab holding a
 // stale/thin model at a matching version could silently overwrite a fuller cloud row (the 8 South
@@ -52,5 +52,62 @@ describe("wouldThinClobber — never silently shrink the cloud (B459)", () => {
     // baseline 5 = 2 parcels + 3 markups; push keeps the parcels, drops all 3 markups, no tombstones → BLOCK
     const m = { parcels: [{ id: "p1" }, { id: "p2" }], markups: [] };
     expect(wouldThinClobber(m, 5, 0)).toBe(true);
+  });
+
+  // B596 — merging parcels collapses N parcels into 1 (a net drop of N-1). For N≥3 that drop is ≥2,
+  // and the merge used to NOT tombstone the removed parcels — so the guard mistook a legitimate
+  // active-tab merge for a stale-tab clobber and blocked the save with a false "changed in another
+  // session" conflict. Adding parcels GROWS the count, so it never tripped (matching the owner's
+  // "only when I merge" report). The fix tombstones the merged-away parcels, exactly like any delete.
+  it("merging 3 parcels into 1 WITHOUT tombstones is wrongly blocked (the pre-fix bug)", () => {
+    // baseline 3 parcels; merge → 1 parcel, no tombstone → 2 unexplained lost → BLOCK (false conflict)
+    const merged = { parcels: [{ id: "pNew" }] };
+    expect(wouldThinClobber(merged, 3, 0)).toBe(true);
+  });
+  it("merging 3 parcels into 1 WITH the removed ids tombstoned is allowed (the fix)", () => {
+    // the merge now tombstones the 3 consumed parcels; the new merged parcel has a fresh id
+    const merged = { parcels: [{ id: "pNew" }], deletedIds: ["p1", "p2", "p3"] };
+    expect(wouldThinClobber(merged, 3, 0)).toBe(false);
+  });
+  it("merging just 2 parcels (a 1-item drop) was always fine, tombstoned or not", () => {
+    expect(wouldThinClobber({ parcels: [{ id: "pNew" }] }, 2, 0)).toBe(false);
+    expect(wouldThinClobber({ parcels: [{ id: "pNew" }], deletedIds: ["p1", "p2"] }, 2, 0)).toBe(false);
+  });
+});
+
+// B556 — the owner's "phantom conflict" class: a DELIBERATE local shrink (deleting a building +
+// its bonded children, OR undo of a multi-element add, OR a version Restore) drops ≥2 items with no
+// tombstone, so the thin-clobber guard mistook it for a stale-tab clobber and re-showed the "changed
+// in another session / Take over editing" prompt. Deletes now record a tombstone (see SitePlanner
+// deleteSel); undo/redo/restore can't tombstone (a redo must re-add the items), so the active tab
+// instead rebases its content baseline via noteLocalContent. This proves both halves at the data layer.
+describe("noteLocalContent — a deliberate local shrink rebases the baseline, but a stale clobber still blocks (B556)", () => {
+  const els = (n) => ({ id: "s1", els: Array.from({ length: n }, (_, i) => ({ id: "e" + i, type: "building" })) });
+  beforeEach(() => clearSiteVersions());
+
+  it("undo of a 3-element building add is no longer read as a stale clobber", () => {
+    _siteContent.s1 = 6; _siteTombs.s1 = 0;        // last synced a 6-item plan (the add brought it 3→6)
+    const afterUndo = els(3);                       // undo drops it back to 3, NO tombstone
+    expect(wouldThinClobber(afterUndo, _siteContent.s1, _siteTombs.s1)).toBe(true);   // would FALSELY block…
+    noteLocalContent("s1", afterUndo);              // …active tab declares the undo authoritative…
+    expect(wouldThinClobber(afterUndo, _siteContent.s1, _siteTombs.s1)).toBe(false);  // …now allowed
+  });
+
+  it("a version Restore to a thinner copy rebases the baseline too", () => {
+    _siteContent.s1 = 9; _siteTombs.s1 = 0;
+    const restored = els(2);
+    noteLocalContent("s1", restored);
+    expect(wouldThinClobber(restored, _siteContent.s1, _siteTombs.s1)).toBe(false);
+  });
+
+  it("never fabricates a baseline — a brand-new, never-synced site is left alone (first sync never blocked)", () => {
+    noteLocalContent("brandnew", els(1));
+    expect(_siteContent.brandnew).toBeUndefined();
+  });
+
+  it("THE 8 South protection is intact — a passive stale tab never calls this, so its thin push still BLOCKS", () => {
+    _siteContent.s1 = 6; _siteTombs.s1 = 0;         // baseline came from a cloud read (cloudList), not this tab
+    // the stale tab never undoes/restores → no noteLocalContent → its road-only push is still caught
+    expect(wouldThinClobber(els(1), _siteContent.s1, _siteTombs.s1)).toBe(true);
   });
 });

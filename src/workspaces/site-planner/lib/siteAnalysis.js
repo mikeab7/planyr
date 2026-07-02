@@ -66,6 +66,11 @@ export const ANALYSIS_SOURCES = [
     ttl: 7 * DAY, verified: true,
     absentLabel: "No mapped Special Flood Hazard Area (typically Zone X / minimal risk)",
     caveat: "FEMA's digital flood maps (NFHL). Screening only — confirm against the current effective FIRM / any LOMA and a survey before finished-floor design.",
+    // Flood is the ONE screening layer whose source also returns the ALL-CLEAR zones
+    // (Zone X) as polygons — so "a feature intersects" is NOT "a flood constraint." Classify
+    // by ZONE, not mere presence (B147 false-positive fix): only a Special Flood Hazard Area
+    // (A*/V*) is a present constraint; Zone X is none-found / (0.2% shaded) info; D is unknown.
+    classify: (rows, src) => classifyFlood(rows, src),
     summarize: (rows) => zoneSummary(rows),
     detail: (rows) => zoneDetail(rows),
   },
@@ -95,7 +100,7 @@ export const ANALYSIS_SOURCES = [
     ttl: 30 * DAY, verified: true, countMode: true,
     absentLabel: "No mapped oil & gas wells on the site",
     caveat: "RRC well points are schematic and historic locations can be inaccurate or unmapped (orphaned wells). An RRC records search — possibly a survey — is the real check.",
-    summarize: (rows) => `${rows.length} well${rows.length === 1 ? "" : "s"} on or adjacent to the site`,
+    summarize: (rows, total) => { const n = total != null ? total : rows.length; return `${n} well${n === 1 ? "" : "s"} on or adjacent to the site`; },
     detail: (rows) => uniq(rows.map((r) => (r.API ? "API " + r.API : ""))).slice(0, 8),
   },
   {
@@ -105,10 +110,10 @@ export const ANALYSIS_SOURCES = [
     // the Harris-clipped republication (B368). Fields: OPERATOR / COMMODITY_DESCRIPTION /
     // DIAMETER / STATUS / SYSTEM_NAME / COUNTY_NAME.
     ...reg("pipelines"),
-    ttl: 30 * DAY, verified: true,
+    ttl: 30 * DAY, verified: true, countMode: true,
     absentLabel: "No mapped RRC pipelines crossing the site",
     caveat: "RRC T-4 permit routes are SCHEMATIC, not surveyed alignments — and public pipeline data is deliberately low-resolution. Trigger 811 / one-call + operator outreach; never treat as a precise location.",
-    summarize: (rows) => pipelineSummary(rows),
+    summarize: (rows, total) => pipelineSummary(rows, total),
     detail: (rows) => uniq(rows.map((r) => [r.OPERATOR, r.COMMODITY_DESCRIPTION].filter(Boolean).join(" · "))).slice(0, 6),
   },
   {
@@ -247,6 +252,46 @@ function zoneDetail(rows) {
   return Array.from(seen.keys());
 }
 
+// FEMA Special Flood Hazard Area (SFHA) zone codes — the regulatory 1%-annual-chance
+// (100-yr) floodplain that triggers flood-insurance + floodplain-development rules.
+// Everything ELSE the NFHL returns (X, D, OPEN WATER, AREA NOT INCLUDED) is NOT an SFHA;
+// Zone X in particular is the MINIMAL-risk zone — the all-clear, never a constraint.
+const SFHA_ZONES = new Set(["A", "AE", "AH", "AO", "AR", "A99", "V", "VE", "VO",
+  "AR/AE", "AR/AH", "AR/AO", "AR/A", "AR/A99"]);
+export function isSFHA(zone) {
+  const z = String(zone == null ? "" : zone).trim().toUpperCase();
+  if (!z) return false;
+  if (SFHA_ZONES.has(z)) return true;
+  return /^(A|V)([1-9]|[12][0-9]|30)$/.test(z); // legacy numbered zones A1-A30 / V1-V30
+}
+// Shaded Zone X = the 0.2%-annual-chance (500-yr) area: moderate, but NOT an SFHA.
+const isShadedX = (r) => /0\.2\s*pct|0\.2\s*%|\b500[-\s]?(?:yr|year)/i.test(String(r && r.ZONE_SUBTY != null ? r.ZONE_SUBTY : ""));
+
+/* Flood status, zone-aware (B147 false-positive fix). The generic classifier marks ANY
+ * returned feature "present," but the FEMA NFHL returns Zone X (the minimal-risk all-clear)
+ * as polygons too — which wrongly flagged "constraint present" on the majority of sites.
+ * Decide by zone instead:
+ *   present — any Special Flood Hazard Area (A / AE / V / VE …): the regulatory 100-yr floodplain
+ *   info    — no SFHA, but the 0.2% (500-yr) shaded Zone X touches the site (moderate)
+ *   unknown — Zone D (flood hazard undetermined; FEMA hasn't studied the area — not clear)
+ *   absent  — empty, or only unshaded Zone X / open water (outside any mapped SFHA)
+ * Pure. */
+export function classifyFlood(rows, source = {}) {
+  const none = source.absentLabel || "No mapped Special Flood Hazard Area (Zone X / minimal risk)";
+  if (!rows || !rows.length) return { status: "absent", summary: none, detail: [] };
+  const sfha = rows.filter((r) => isSFHA(r.FLD_ZONE));
+  if (sfha.length) return { status: "present", summary: zoneSummary(sfha), detail: zoneDetail(sfha) };
+  if (rows.some(isShadedX)) {
+    return { status: "info", detail: zoneDetail(rows),
+      summary: "Outside the SFHA, but within the 0.2%-annual-chance (500-yr) shaded Zone X — moderate flood risk, not the regulatory floodplain." };
+  }
+  if (rows.some((r) => String(r && r.FLD_ZONE != null ? r.FLD_ZONE : "").trim().toUpperCase() === "D")) {
+    return { status: "unknown", detail: [],
+      summary: "Zone D — flood hazard undetermined; FEMA has not studied this area (not an all-clear)." };
+  }
+  return { status: "absent", summary: none, detail: zoneDetail(rows) };
+}
+
 export function wetlandSummary(rows) {
   const types = uniq(rows.map((r) => r.WETLAND_TYPE));
   if (!types.length) return "Mapped wetlands present";
@@ -256,9 +301,9 @@ function wetlandDetail(rows) {
   return uniq(rows.map((r) => [r.WETLAND_TYPE, r.ATTRIBUTE].filter(Boolean).join(" · "))).slice(0, 8);
 }
 
-export function pipelineSummary(rows) {
+export function pipelineSummary(rows, total) {
   const ops = uniq(rows.map((r) => r.OPERATOR));
-  const n = rows.length;
+  const n = total != null ? total : rows.length;
   const head = `${n} pipeline segment${n === 1 ? "" : "s"}`;
   return ops.length ? `${head} — ${ops.slice(0, 3).join(", ")}${ops.length > 3 ? "…" : ""}` : head;
 }
@@ -293,6 +338,19 @@ function queryLayer(source, layer, rings, fetchJson) {
     return fetchJson(buildQueryUrl(source.url, layer, {}), { body: params });
   }
   return fetchJson(getUrl);
+}
+
+// Exact intersecting-feature COUNT for a count-mode source (wells / pipelines). Uses
+// returnCountOnly so the number is the true total, NOT the page-size cap (resultRecordCount)
+// — a dense RRC corridor has thousands of segments, far past any single page. Pure.
+function countLayer(source, layer, rings, fetchJson) {
+  const params = { ...buildAnalysisParams(source, rings), returnCountOnly: true };
+  delete params.outFields; delete params.resultRecordCount; delete params.returnGeometry;
+  const getUrl = buildQueryUrl(source.url, layer, params);
+  const p = getUrl.length > GIS_MAX_GET_URL
+    ? fetchJson(buildQueryUrl(source.url, layer, {}), { body: params })
+    : fetchJson(getUrl);
+  return Promise.resolve(p).then((j) => (j && typeof j.count === "number" ? j.count : (j && j.features ? j.features.length : 0)));
 }
 
 // Log the REAL failure (status / url / ArcGIS code) so an opaque failure is debuggable
@@ -349,19 +407,57 @@ export function analyzeSource(source, rings, opts = {}) {
     throw lastErr;
   };
   const { fresh } = cache.swr(key, fetcher, { ttl: source.ttl || 0 });
-  return fresh.then((r) => {
+  // Count-mode sources (wells, pipelines) DISPLAY a count, so they need the exact number,
+  // not "however many features fit in one page." Fetch it via returnCountOnly in a SEPARATE
+  // cache entry — the feature cache stays a plain attrs array (untouched), the detail still
+  // rides the fetched sample, and the count rides the same throttled fetch pool.
+  let countFresh = null;
+  if (source.countMode) {
+    const countFetcher = async () => {
+      let lastErr = null;
+      for (const ep of endpoints) {
+        try {
+          const layers = ep.layers || (ep.layer != null ? [ep.layer] : [null]);
+          let total = 0;
+          for (const L of layers) total += await countLayer(ep, L, rings, fetchJson);
+          return total;
+        } catch (e) { lastErr = e; /* try the next mirror */ }
+      }
+      throw lastErr;
+    };
+    countFresh = cache.swr("analysiscount:" + source.id + ":" + ringsSignature(rings), countFetcher, { ttl: source.ttl || 0 }).fresh;
+  }
+  return Promise.all([fresh, countFresh]).then(([r, rc]) => {
     if (r.error) logQueryFailure(source.id, r.error);
     // A failed refresh that still carries last-good data → keep showing it (stale), not
     // a hard error. A failure with no cached copy → a hard UNAVAILABLE.
     const haveStale = !!(r.error && r.data != null);
     const hardError = r.error && !haveStale ? gisErrorMessage(r.error) : null;
     const attrs = hardError ? null : (r.data || []);
-    const status = classifyStatus(attrs, { error: hardError, verified: source.verified });
+    // A source MAY supply its own classifier for when "a feature intersects" is not the
+    // same as "a constraint" (flood: the NFHL returns the all-clear Zone X as polygons too).
+    // Otherwise fall back to the generic presence/verified classifier (the silent-error guard).
+    let status, summary, detail;
+    if (hardError) {
+      status = "unavailable"; summary = null; detail = [];
+    } else if (typeof source.classify === "function") {
+      const c = source.classify(attrs, source) || {};
+      status = c.status || "unknown";
+      summary = c.summary != null ? c.summary : null;
+      detail = c.detail || [];
+    } else {
+      status = classifyStatus(attrs, { error: hardError, verified: source.verified });
+      // Exact total for count-mode sources (returnCountOnly); falls back to the fetched
+      // sample size if the count query failed. Non-count sources ignore it.
+      const total = source.countMode
+        ? ((rc && !rc.error && typeof rc.data === "number") ? rc.data : (attrs ? attrs.length : null))
+        : (attrs ? attrs.length : null);
+      summary = status === "present" ? source.summarize(attrs, total) : status === "absent" ? source.absentLabel || "None found" : null;
+      detail = status === "present" && source.detail ? source.detail(attrs) : [];
+    }
     return {
       id: source.id, category: source.category, label: source.label,
-      status,
-      summary: status === "present" ? source.summarize(attrs) : status === "absent" ? source.absentLabel || "None found" : null,
-      detail: status === "present" && source.detail ? source.detail(attrs) : [],
+      status, summary, detail,
       rows: null,
       sourceName: source.sourceName, ageMs: r.ageMs ?? null, ts: r.ts ?? null,
       error: hardError,
@@ -389,12 +485,46 @@ export function buildJurisdictionFinding(j) {
   };
 }
 
+// FHWA functional class (F_SYSTEM) → a plain label for the per-road detail line.
+const ROAD_FUNC_CLASS = { 1: "Interstate", 2: "Freeway/expressway", 3: "Principal arterial", 4: "Minor arterial", 5: "Major collector", 6: "Minor collector", 7: "Local" };
+const funcClassLabel = (c) => ROAD_FUNC_CLASS[Number(c)] || null;
+
+// A fronting road's display name: its real name, else its (internal) route id, else
+// "Unnamed road" — never a blank cell.
+const roadRowName = (r) => r.name || (r.route ? `Route ${r.route}` : "Unnamed road");
+
+/* Road authority finding (B94, per-road). A site usually fronts several roads, each
+ * possibly maintained by a different desk (City / County / State-TxDOT / toll / private /
+ * unknown), so this is a PER-ROAD list, not one collapsed value:
+ *   • a header roll-up — "Maintained by <X> (all roads)" when every road shares one
+ *     authority, else "Mixed — N roads";
+ *   • one row per fronting road — "<road name> → <authority>" (route + class in the
+ *     expandable detail; a bare numeric inventory id isn't shown as the row's value).
+ * Rows arrive already ordered longest-frontage-first from identifyRoadAuthority. Any
+ * road that can't be classified shows an explicit "Unknown" (never a guess). With no
+ * roads matched it reads the honest zero-match note, not a blank. Carries `mapLayer` so
+ * the card gets a "◍ Map" toggle (B190) → the color-coded road overlay (NEW-2/B571). */
 export function buildRoadFinding(road) {
+  const roads = Array.isArray(road.roads) ? road.roads : [];
+  const haveRoads = roads.length > 0;
+  const authorities = uniq(roads.map((r) => (r.authority && r.authority.label) || "Unknown"));
+  const rollup = !haveRoads ? null
+    : authorities.length === 1 ? `${authorities[0]} (all roads)` : `Mixed — ${roads.length} roads`;
+  const rows = haveRoads
+    ? [["Maintained by", rollup, road.ageMs ?? null],
+       ...roads.map((r) => [roadRowName(r), (r.authority && r.authority.label) || "Unknown", null])]
+    : null;
+  const detail = haveRoads
+    ? roads.map((r) => [roadRowName(r), "— " + ((r.authority && r.authority.label) || "Unknown"),
+        funcClassLabel(r.funcClass) ? `· ${funcClassLabel(r.funcClass)}` : "",
+        r.route ? `· route ${r.route}` : ""].filter(Boolean).join(" "))
+    : [];
   return {
     id: "road", category: "Road authority", label: "Who maintains the fronting road(s)",
-    status: road.authorities && road.authorities.length ? "info" : "unknown",
-    summary: null, detail: [],
-    rows: [["Maintained by", road.authorities && road.authorities.length ? road.authorities.join(" · ") + (road.nearest?.route ? ` (${road.nearest.route})` : "") : "unknown", road.ageMs]],
+    status: haveRoads ? "info" : "unknown",
+    summary: haveRoads ? null : (road.error || road.note || "No roads matched — screening only."),
+    detail, rows,
+    mapLayer: "jur_road_authority", // NEW-2/B571: lifts the B190 suppression — the card gets a "◍ Map" toggle
     sourceName: "TxDOT Roadway Inventory", ageMs: road.ageMs ?? null, ts: road.ts ?? null,
     error: road.error || null, caveat: road.note || "Local-road coverage is patchy — an honest \"unknown\" beats a wrong guess.", verified: true,
   };

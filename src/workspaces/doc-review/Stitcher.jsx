@@ -245,8 +245,13 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     setBusy(true); setNotice("");
     try {
       const built = [];
+      const renderFailed = []; // B536: pages whose raster threw (corrupt page / worker crash)
       for (const pg of group.pages) {
-        const img = await renderPageToImage(pdf.doc, pg.pageNum, 2);
+        let img;
+        // B536: a single failed page-render used to throw past the loop, so the whole group-drop
+        // silently did NOTHING (no sheets, no message). Skip the bad page and report it instead.
+        try { img = await renderPageToImage(pdf.doc, pg.pageNum, 2); }
+        catch (_) { renderFailed.push(pg.sheetNumber || ("p" + pg.pageNum)); continue; }
         const da = pg.drawingArea && pg.drawingArea.w ? pg.drawingArea : { x: 0, y: 0, w: img.baseW, h: img.baseH };
         built.push({
           id: uid(), srcId: pdf.srcId, pageNum: pg.pageNum,
@@ -256,6 +261,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           detailRefs: pg.detailRefs || [], detailAnchors: pg.detailAnchors || [], notes: pg.notes || [],
         });
       }
+      // B536: every page failed to render → nothing to place. Tell the user (re-drop to retry)
+      // rather than leaving the drop looking like it did nothing.
+      if (!built.length) { setNotice(`Couldn’t render ${renderFailed.length === 1 ? "the page" : `any of the ${group.pages.length} pages`} — re-drop the file to retry.`); return; }
       const placeInput = built.map((s) => ({ id: s.id, sheetNumber: s.sheetNumber, drawingArea: s.drawingArea, matchLines: s.matchLines, baseW: s.baseW, baseH: s.baseH }));
       const auto = autoPlaceGroup(placeInput);
       let placements = auto.placements; const unplaced = auto.unplaced;
@@ -300,9 +308,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       // Auto-calibrate the composite from the group's stated scale, once (B339).
       let calMsg = "";
       if (!ftPerUnit && crop) { const cal = groupCalibration(group.pages); if (cal) { setFtPerUnit(cal.ftPerUnit); calMsg = ` · scale ${cal.label || "set"} from sheet`; } }
+      const failMsg = renderFailed.length ? ` · ${renderFailed.length} page${renderFailed.length > 1 ? "s" : ""} couldn’t render (re-drop to retry)` : ""; // B536
       setNotice(unplaced.length
-        ? `Auto-stitched ${placedSheets.length} of ${built.length} sheets${calMsg} — ${unplaced.length} need a quick manual Align.`
-        : built.length > 1 ? `Auto-stitched ${placedSheets.length} sheets${calMsg}.` : "");
+        ? `Auto-stitched ${placedSheets.length} of ${built.length} sheets${calMsg} — ${unplaced.length} need a quick manual Align.${failMsg}`
+        : (built.length > 1 || failMsg) ? `Auto-stitched ${placedSheets.length} sheets${calMsg}.${failMsg}` : "");
     } finally { setBusy(false); }
   };
 
@@ -374,7 +383,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       }
       return;
     }
-    if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY }; svgRef.current.setPointerCapture(e.pointerId); return; }
+    if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY, pointerId: e.pointerId }; svgRef.current.setPointerCapture(e.pointerId); return; } // B551: remember pointerId so a blur/visibility abort can release the capture
     // B313 — refuse a distance/area point that lands on a not-yet-aligned sheet (its scale
     // isn't set, so the reading would be silently wrong). Calibrate is exempt — it SETS scale.
     if ((tool === "distance" || tool === "area") && blockedOverUnaligned([w])) return;
@@ -403,7 +412,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // capture held and a frozen grab cursor that swallows clicks.
   const abortGesture = (pid) => { if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} } drag.current = null; };
   useEffect(() => {
-    const recover = () => abortGesture();
+    // B551: pass the in-flight pointerId so abortGesture actually RELEASES the capture (without it,
+    // `pid != null` was false → capture held → frozen grab cursor + swallowed clicks after alt-tab).
+    const recover = () => { if (drag.current) abortGesture(drag.current.pointerId); };
     const onVis = () => { if (document.hidden) recover(); };
     window.addEventListener("blur", recover);
     document.addEventListener("visibilitychange", onVis);
@@ -433,6 +444,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     if (r.empty) { setCalInput(null); setErr(""); return; }
     if (!r.ok) { setErr(r.message); return; }
     const u = dist(calInput.pts[0], calInput.pts[1]);
+    if (!(u >= 1)) { setErr("Points too close — recalibrate."); setCalInput(null); return; } // B546: never divide by ~0 → Infinity ftPerUnit (mirrors doCalibrate's guard; also catches NaN)
     pushHistory();
     setFtPerUnit(r.ft / u);
     setCalInput(null); setErr("");
@@ -540,7 +552,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   useEffect(() => {
     if (!loadReq || loadReq.id === loadedId.current) return;
     loadedId.current = loadReq.id;
-    loadStitch(loadReq).then(() => onConsumeLoad && onConsumeLoad());
+    // B505: a load error (corrupt/partial PDF, Drive/Storage byte error) must still CONSUME
+    // the request — else the rejection is unhandled AND pendingStitch never clears (loadedId
+    // is already set, so the effect won't re-fire), leaving the load permanently half-done.
+    loadStitch(loadReq).then(() => onConsumeLoad && onConsumeLoad()).catch(() => onConsumeLoad && onConsumeLoad());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadReq]);
   // Otherwise resume the last stitch session on mount (e.g. toggling back from single).
@@ -553,7 +568,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       if (!sid) return;
       const rec = reconcile(await loadReview(sid), readDraft(await currentUid(), sid));
       if (rec && rec.kind === "stitch") { loadedId.current = rec.id; await loadStitch(rec); }
-    })();
+    })().catch(() => {}); // B534: a resume failure (Drive/Storage/parse) must not be an unhandled
+    // rejection — loadStitch owns its own busy via finally, so swallowing here just falls to the
+    // empty stitcher instead of leaving a half-started boot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -841,8 +858,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {composite.map((s) => (
                 <div key={s.groupLabel} style={{ fontSize: 11.5, color: PAL.ink, padding: "2px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.groupLabel}>{s.groupLabel}</div>
               ))}
-              <div style={{ fontSize: 10.5, color: ftPerUnit ? "#15803d" : "#b45309", marginTop: 5, borderTop: `1px solid ${PAL.line}`, paddingTop: 4 }}>
-                {ftPerUnit ? `Scale set · 1" ≈ ${f0(ftPerUnit * 72)}'` : "Scale not set — use Calibrate once"}
+              <div style={{ fontSize: 10.5, color: (Number.isFinite(ftPerUnit) && ftPerUnit) ? "#15803d" : "#b45309", marginTop: 5, borderTop: `1px solid ${PAL.line}`, paddingTop: 4 }}>
+                {/* B546: Number.isFinite guard — a non-finite ftPerUnit (e.g. a corrupt loaded review) is truthy and would render "1\" ≈ ∞'". */}
+                {(Number.isFinite(ftPerUnit) && ftPerUnit) ? `Scale set · 1" ≈ ${f0(ftPerUnit * 72)}'` : "Scale not set — use Calibrate once"}
               </div>
               {noteCount > 0 && (
                 <div style={{ marginTop: 6, borderTop: `1px solid ${PAL.line}`, paddingTop: 5 }}>
@@ -903,7 +921,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                     onPointerDown={(e) => { detailDrag.current = { sx: e.clientX, sy: e.clientY, tx: detail.view?.tx || 0, ty: detail.view?.ty || 0 }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }}
                     onPointerMove={(e) => { const dd = detailDrag.current; if (!dd) return; setDetailPopup((d) => (d && d.view ? { ...d, view: { ...d.view, tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy) } } : d)); }}
                     onPointerUp={(e) => { detailDrag.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} }}
-                    onPointerCancel={() => { detailDrag.current = null; }}>
+                    onPointerCancel={(e) => { detailDrag.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} /* B579: release capture on interrupt (blur/tab-hide/OS gesture) too — else the popup keeps pointer capture, swallowing all events with a stuck grab cursor until closed/reopened; same class as B551 on the main canvas */ }}>
                     {detail.view && <img src={detail.href} alt={detail.title} draggable={false}
                       style={{ position: "absolute", left: 0, top: 0, width: detail.baseW, height: detail.baseH, transformOrigin: "0 0", transform: `translate(${detail.view.tx}px, ${detail.view.ty}px) scale(${detail.view.scale})`, imageRendering: "auto", userSelect: "none" }} />}
                     {detail.view && detail.anchor && (() => {
@@ -941,7 +959,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <div style={{ borderTop: `1px solid ${PAL.line}`, marginTop: 6, paddingTop: 8 }}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>Takeoff (stitched)</div>
               <div style={{ fontSize: 11, color: ftPerUnit ? "#15803d" : "#b45309", marginBottom: 6 }}>{ftPerUnit ? "Calibrated" : "Not calibrated — use Calibrate once"}</div>
-              {[["Area", `${f2(ftToAcres(totals.areaSf))} ac`], ["", `${f0(totals.areaSf)} sf`], ["Distance", `${f1(totals.distFt)} ft`], ["Measures", `${measures.length}`]].map(([k, v], i) => (
+              {/* B547: Number.isFinite guard — one degenerate/NaN measure must not propagate "NaN ac · NaN sf · NaN ft" into the rollup. */}
+              {[["Area", Number.isFinite(totals.areaSf) ? `${f2(ftToAcres(totals.areaSf))} ac` : "—"], ["", Number.isFinite(totals.areaSf) ? `${f0(totals.areaSf)} sf` : "—"], ["Distance", Number.isFinite(totals.distFt) ? `${f1(totals.distFt)} ft` : "—"], ["Measures", `${measures.length}`]].map(([k, v], i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: PAL.muted }}>{k}</span><span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span></div>
               ))}
               {/* Per-measure list with a × delete (B376): the stitched canvas has no select-and-delete,

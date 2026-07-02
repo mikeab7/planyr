@@ -54,6 +54,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
   const onCount = (obj) => Object.keys(obj).filter((k) => overlays[k]?.on).length;
   const groupHead = (g, label, count) => (
     <button onClick={() => toggleGroup(g)} title={collapsed[g] ? "Show" : "Hide"}
+      aria-expanded={!collapsed[g]} aria-label={`${collapsed[g] ? "Show" : "Hide"} ${label} layers`} /* B557 */
       style={{ ...groupHdr, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", padding: "5px 0 4px", margin: "5px 0 3px", cursor: "pointer" }}>
       <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed[g] ? "rotate(-90deg)" : "none", display: "inline-block" }}>▼</span>
       <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
@@ -81,7 +82,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
           <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{cfg.label}</span>
           {age && (ls.state === "loaded" || ls.state === "empty") && (
             <span title={`Cached copy — refreshed ${age}${ls.stale ? " · showing last-good while it refreshes" : ""}. Screening only; verify against the source.`}
-              style={{ fontSize: 9.5, color: ls.stale ? "#b45309" : MUTED, flex: "none", whiteSpace: "nowrap" }}>{age}</span>
+              style={{ fontSize: 9.5, color: ls.stale ? "var(--warn-text)" : MUTED, flex: "none", whiteSpace: "nowrap" }}>{age}</span>
           )}
           {meta && (
             <span title={meta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: meta.color,
@@ -119,6 +120,19 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             {ls.msg || meta.label}
           </div>
         )}
+        {/* NEW-2/B571: categorical legend for a per-feature-colored overlay (road
+            authority) — shown only while the layer is on, so the colors on the map are
+            named. Unknown is drawn dashed (a neutral, never a faded line). */}
+        {st.on && cfg.legend && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 10px", margin: "4px 0 1px 22px" }}>
+            {cfg.legend.map((lg) => (
+              <span key={lg.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: INK }}>
+                <span style={{ width: 16, height: 0, flex: "none", borderTop: `3px ${lg.dash ? "dashed" : "solid"} ${lg.color}` }} />
+                {lg.label}
+              </span>
+            ))}
+          </div>
+        )}
         {st.on && cfg.note && (
           <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.4, marginTop: 2 }}>{cfg.note}</div>
         )}
@@ -149,6 +163,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
           : (
             <>
               <button onClick={() => setRevealHidden((s) => ({ ...s, [groupKey]: !s[groupKey] }))}
+                aria-expanded={!!revealHidden[groupKey]} aria-label={`${revealHidden[groupKey] ? "Hide" : "Show"} ${lo.length} layer${lo.length > 1 ? "s" : ""} with no local data in the ${groupKey} group`} /* B557 */
                 style={{ background: "transparent", border: "none", color: MUTED, fontSize: 10.5, cursor: "pointer", padding: "2px 0", textAlign: "left", width: "100%" }}>
                 {revealHidden[groupKey] ? "▾ Hide" : "▸ Show"} {lo.length} layer{lo.length > 1 ? "s" : ""} with no local data here
               </button>
@@ -161,7 +176,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
 
   const segBtn = (active) => ({
     flex: 1, padding: "3px 6px", fontSize: 10.5, fontWeight: active ? 700 : 500, cursor: "pointer",
-    background: active ? "#3b3a36" : "transparent", color: active ? "#fbfaf6" : INK, border: "none",
+    background: active ? "var(--accent)" : "transparent", color: active ? "var(--on-accent)" : INK, border: "none",  // B508: theme tokens, not hardcoded warm-dark hex (was dark-on-dark in dark mode)
   });
 
   return (

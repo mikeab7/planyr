@@ -17,8 +17,6 @@ import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sa
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import FileBrowser from "./components/FileBrowser.jsx";
-import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
@@ -34,6 +32,9 @@ import MarkupRenderer from "../../shared/markup/MarkupRenderer.jsx";
 import PropertyPanel from "../../shared/markup/PropertyPanel.jsx";
 import { propsForTool, columnMeta, toolById } from "../../shared/markup/tools.matrix.js";
 import { writeProp } from "../../shared/markup/propertySchema.js";
+import { bboxOfMarkup } from "../../shared/markup/markupModel.js";
+import { pickInMarquee, selMods, nextSelection, hasSelMod } from "../../shared/markup/selection.js";
+import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -54,6 +55,7 @@ const newMeta = () => ({ title: "", projectId: null, project: "", discipline: ""
 const TOOLS = [
   { id: "select",    label: "Select",    hint: "Click a markup to select; drag to move; double-click a text note or callout to edit; Delete removes it." },
   { id: "pan",       label: "Pan",       hint: "Drag to move around the sheet. (Hold Space in any tool to pan; wheel or Ctrl+scroll to zoom toward the cursor.)" },
+  { id: "marquee",   label: "Marquee",   hint: "Box-select: drag a box over the sheet — every markup it touches is selected together to move (drag any one) or delete. In Select, Ctrl/⌘-click toggles one, Shift-click adds; Esc / click empty clears." },
   { id: "calibrate", label: "Calibrate", hint: "Click two points a known distance apart, then enter the real length." },
   { id: "distance",   label: "Distance",  hint: "Click two points to measure a distance." },
   { id: "polylength", label: "Length",    hint: "Click a path; double-click / Enter to finish. Measures the total run." },
@@ -90,6 +92,7 @@ const REGION = new Set(["eraser", "snapshot"]);
 const MK_ICONS = {
   select: <path d="M4 2.5 L12.8 8 L8.8 9 L11.2 13.6 L9.2 14.6 L6.9 9.9 L4 12.4 Z" fill="currentColor" stroke="none" />,
   pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
+  marquee: <><rect x="2.6" y="2.6" width="10.8" height="10.8" rx="0.6" strokeDasharray="2.4 1.8" /><rect x="1.7" y="1.7" width="1.8" height="1.8" fill="currentColor" stroke="none" /><rect x="12.5" y="1.7" width="1.8" height="1.8" fill="currentColor" stroke="none" /><rect x="1.7" y="12.5" width="1.8" height="1.8" fill="currentColor" stroke="none" /><rect x="12.5" y="12.5" width="1.8" height="1.8" fill="currentColor" stroke="none" /></>,
   calibrate: <><path d="M2.3 10.5 L10.5 2.3 L13.7 5.5 L5.5 13.7 Z" /><path d="M4.9 7.7 l1.5 1.5 M7.3 5.3 l1.5 1.5" /></>,
   distance: <><path d="M3 12.6 L13 3.4" /><circle cx="3" cy="12.6" r="1.5" fill="currentColor" stroke="none" /><circle cx="13" cy="3.4" r="1.5" fill="currentColor" stroke="none" /></>,
   polylength: <><path d="M3 13 L6.5 8 L10.5 11 L13.5 5" /><circle cx="3" cy="13" r="1.3" fill="currentColor" stroke="none" /><circle cx="13.5" cy="5" r="1.3" fill="currentColor" stroke="none" /></>,
@@ -200,11 +203,26 @@ export default function DocReview({
   const [openGroups, setOpenGroups] = useState({}); // groupId -> expanded? in the logical-sheet list (B348)
   const [draft, setDraft] = useState(null);         // in-progress { kind, pts:[...] }
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
-  const [sel, setSel] = useState(null);             // selected markup id
+  const [sel, setSel] = useState(null);             // PRIMARY selected markup id (property panel / vertex edit)
+  const [selSet, setSelSet] = useState([]);         // B569: the full multi-selection (markup ids, current page)
+  const [marquee, setMarquee] = useState(null);     // B570: live box-select rubber-band { a, b } in page units
+  const marqueeRef = useRef(null);                  // drag bookkeeping for the marquee gesture (no re-render churn)
+  const groupDragRef = useRef(null);                // B569: group-move snapshot { ids, start, orig:{id->pts} }
+  // Selection helpers keep `sel` (the primary, for the property panel / vertex edit) and `selSet`
+  // (the full multi-selection) in lock-step. (B569)
+  const clearSelection = () => { setSel(null); setSelSet([]); };
+  const selectOne = (id) => { setSel(id || null); setSelSet(id ? [id] : []); };
+  // Apply Ctrl/⌘-click (toggle) or Shift-click (add) to the set; the clicked id becomes primary.
+  // An empty set seeds from the current single selection so click-A then Ctrl-click-B gives {A,B}.
+  const applySelMods = (id, mods) => {
+    setSelSet((s) => nextSelection(s.length ? s : (sel ? [sel] : []), id, mods));
+    setSel(id);
+  };
   const [fitMode, setFitMode] = useState("width");  // 'width' | 'page' — how a fit (scale===0) is computed (B295)
   const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289/B329)
   const [panning, setPanning] = useState(false);    // a pan drag is in progress (grab/grabbing cursor)
   const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B293)
+  const [groupPreview, setGroupPreview] = useState(null); // B569: live { id -> pts } while dragging a multi-selection
   const [vtxPreview, setVtxPreview] = useState(null);  // live { id, pts } during vertex-grip drag (B431)
   const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
   const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
@@ -228,10 +246,6 @@ export default function DocReview({
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
-  // Work Item B: the file browser is the LANDING surface. `browsing` true = show the
-  // tree/facets/list; opening or starting a file flips to the review canvas; the 🗂 Files
-  // button (or selecting a project) brings the browser back.
-  const [browsing, setBrowsing] = useState(true);
   const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B330)
   // The project the header breadcrumb points at in Markup now comes from the URL route
   // (Work Item A) — so it survives a module switch instead of resetting to "Select a
@@ -252,6 +266,13 @@ export default function DocReview({
 
   const ftPerUnit = calByPage[page] || 0;
   const pageMarks = markups.filter((m) => m.page === page);
+  // B569 safety net: keep the multi-selection referencing only markups that still exist on the
+  // current page, so a delete (via any path) or a page change can never leave a dangling id.
+  useEffect(() => {
+    const onPage = (id) => markups.some((m) => m.id === id && m.page === page);
+    setSelSet((s) => { const f = s.filter(onPage); return f.length === s.length ? s : f; });
+    setSel((id) => (id && onPage(id) ? id : null));
+  }, [markups, page]);
 
   /* ---- undo / redo (B303) ----
    * Snapshots of the editable doc state (markups + per-sheet calibration), by reference,
@@ -263,6 +284,7 @@ export default function DocReview({
   useEffect(() => { docStateRef.current = { markups, calByPage, calInfo }; });
   const pastRef = useRef([]);
   const futureRef = useRef([]);
+  const colorSessionRef = useRef(null); // active live color-pick key, so the burst is one undo frame (B567)
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1);
   const histKey = (s) => JSON.stringify({ m: s.markups, c: s.calByPage, i: s.calInfo });
@@ -275,7 +297,7 @@ export default function DocReview({
   const clearHistory = () => { pastRef.current = []; futureRef.current = []; touchHist(); };
   const applySnapshot = (s) => {
     setMarkups(s.markups || []); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {});
-    setDraft(null); setSel(null); setCalInput(null); setDragPreview(null); setEditing(null);
+    setDraft(null); clearSelection(); setCalInput(null); setDragPreview(null); setEditing(null);
   };
   const undo = () => {
     let prev = null;
@@ -310,7 +332,7 @@ export default function DocReview({
   const goToPage = (n) => {
     const t = Math.max(1, Math.min(numPages || 1, n));
     if (t === page) return;
-    setPage(t); setDraft(null); setSel(null); setCalInput(null); setDragPreview(null);
+    setPage(t); setDraft(null); clearSelection(); setMarquee(null); marqueeRef.current = null; setCalInput(null); setDragPreview(null);
   };
 
   /* ---- load ---- */
@@ -367,7 +389,7 @@ export default function DocReview({
       const msg = `“${file.name || "that file"}” isn’t a PDF we can open — drop a .pdf file.`;
       setErr(msg); setOpenErr(msg); return;
     }
-    setBusy(true); setBusyLabel(file.name || "PDF"); setErr(""); setOpenErr(""); setBrowsing(false); // opening a PDF → show the review canvas, with a clear "Opening…" overlay
+    setBusy(true); setBusyLabel(file.name || "PDF"); setErr(""); setOpenErr(""); // opening a PDF → show the review canvas, with a clear "Opening…" overlay
     try {
       const pdf = await loadPdf(file);
       setPdfDoc(pdf);
@@ -394,8 +416,17 @@ export default function DocReview({
       // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
       // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
       // mid-upload can't strand the backdrop with an unfetchable pointer (B323).
-      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then((r) => {
+      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then(async (r) => {
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s));
+        // B579: a GENUINE store failure (BOTH Drive and Supabase rejected it — not merely `oversize`, which
+        // still saves the work layer and flags the file "re-drop on load") leaves the source permanently
+        // keyless, so buildSnapshot persists sources:[] and the markups reload with NO backdrop. That used
+        // to be silent. Surface it — but only when signed in (logged-out is by-design local-only: the bytes
+        // are cached via cacheSourceBytes and the work layer still mirrors locally, so no cloud store is owed).
+        if (!r.ok && !r.oversize && (await cloudReady())) {
+          const m = "Couldn't save this PDF to the cloud — your markups might open without their drawing next time. Check your connection and drop the file again.";
+          setErr(m); setOpenErr(m);
+        }
       }).catch(() => {}); // best-effort store; a rejection mustn't become an unhandled rejection
     } catch (e) {
       // A read failure must surface on the always-visible banner too (the canvas may already show
@@ -599,7 +630,6 @@ export default function DocReview({
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
     suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
-    setBrowsing(false); // a review is opening → leave the browser for the review canvas
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
     // B446: a clear canvas-level "Opening…" overlay covers the whole load (setPdfDoc(null) below
@@ -616,13 +646,12 @@ export default function DocReview({
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
     setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
-    setDraft(null); setSel(null); setTool("select"); setRedrop(""); setCalInput(null); clearHistory();
+    setDraft(null); clearSelection(); setTool("select"); setRedrop(""); setCalInput(null); clearHistory();
     scanTok.current++; // a programmatic load supersedes any in-flight auto-scale scan (use the saved cals)
     try { await fetchSourceBytes(src, tok); }
     finally { if (tok === loadTok.current) { setBusy(false); setBusyLabel(""); } } // only the winning load clears the overlay (B447)
   };
   const resetSingle = () => {
-    setBrowsing(false); // "New" → a fresh blank review canvas (still in the current project)
     setPdfDoc(null); sourceRef.current = null;
     setReviewId(newReviewId());
     setMeta(newMeta());
@@ -630,7 +659,7 @@ export default function DocReview({
     // under the project you're in (it does NOT drop you back to "Select a project").
     setSource(null); setRedrop("");
     setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1);
-    setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); setSel(null); setTool("select"); setCalInput(null);
+    setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); clearSelection(); setTool("select"); setCalInput(null);
     clearHistory();
     scanTok.current++; // cancel any in-flight scan from a prior file
   };
@@ -647,7 +676,6 @@ export default function DocReview({
     // mirror — and returning to that file would load the stale cloud copy and clobber it.
     try { await saveNow(); } catch (_) {}
     setBusy(true); setBusyLabel(row.title || row.item || "file"); // B446: overlay up immediately so the click visibly registers
-    setBrowsing(false); // leave the Files browser now so the "Opening…" overlay (not the file list) is what's on screen during the load
     let rec = null;
     try {
       // B447 — reconcile the cloud record with this file's local mirror, exactly as resume does,
@@ -688,10 +716,10 @@ export default function DocReview({
     // than also resuming the last one (the two are async and would race; resume could win
     // and silently replace the file the user just clicked). (NEW-1)
     if (bootDocIntentRef.current) return;
-    // Work Item B: with a project active, Markup lands on the FILE BROWSER (the last file is
-    // one click away in the list) — don't auto-open it into the canvas. Resume-into-canvas
-    // stays only for the project-less single-file workflow (e.g. a logged-out local review).
-    if (projectId) return;
+    // Browsing now lives in the Library workspace, so Review resumes the last open drawing on
+    // mount (project deep-links included) — the `wrongProject` guard below keeps it from
+    // resuming a review that belongs to a DIFFERENT project than the URL names (that lands on
+    // the empty state instead, where the Library is one click away).
     (async () => {
       let lastMode = "review", lastSingle = null, lastStitch = null;
       try {
@@ -701,8 +729,8 @@ export default function DocReview({
       } catch (_) {}
       const uid = await currentUid();
       // Respect an explicit deep link (Work Item A): if the URL named a project, don't
-      // auto-resume a review that belongs to a DIFFERENT project — show the linked
-      // project's browser instead. No URL project → resume freely (it reflects into the URL).
+      // auto-resume a review that belongs to a DIFFERENT project — show the empty state
+      // instead. No URL project → resume freely (it reflects into the URL).
       const wrongProject = (rec) => projectId && rec && rec.projectId && rec.projectId !== projectId;
       if (lastMode === "stitch" && lastStitch) {
         const rec = reconcile(await loadReview(lastStitch), readDraft(uid, lastStitch));
@@ -712,7 +740,9 @@ export default function DocReview({
         const rec = reconcile(await loadReview(lastSingle), readDraft(uid, lastSingle));
         if (rec && rec.kind === "single" && !wrongProject(rec)) await loadSingleReview(rec);
       }
-    })();
+    })().catch(() => {}); // B535: a resume failure (currentUid/loadReview/reconcile throwing) must
+    // not be an unhandled rejection — loadSingleReview owns its own "Opening…" overlay via finally,
+    // so swallowing here just falls to the empty state (the intended behavior per the comment above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -769,7 +799,7 @@ export default function DocReview({
     setDraft(null);
     // Bluebeam: a single-use tool reverts to Select after one markup and selects the new one
     // (so its properties show + you can tweak it); a locked tool stays armed.
-    if (!toolLock) { setTool("select"); setSel(id); }
+    if (!toolLock) { setTool("select"); selectOne(id); }
   };
 
   // Erase pen/highlight markups whose points overlap the given box (two corner pts).
@@ -789,9 +819,19 @@ export default function DocReview({
   // Property panel onChange (B426 + B437): patch the selected markup if one is selected, and ALWAYS
   // update the sticky style default — so the panel also works for an ARMED tool with nothing selected
   // (set color/weight/fill/font BEFORE drawing; new markups inherit it via commit()).
-  const onPropChange = (key, value) => {
+  const onPropChange = (key, value, opts = {}) => {
     if (sel) {
-      pushHistory();
+      // Live color picking (opts.live) fires `input` continuously while the palette is open — take
+      // ONE undo snapshot on the first live event of a session (keyed on `key`), then skip the rest
+      // so undo reverts the whole pick in one step instead of one frame per swatch (B567). The
+      // committed `change` (opts.live falsy) of that same session must NOT push a second frame; any
+      // other key (a normal discrete change) ends the session and pushes its own frame as before.
+      if (opts.live) {
+        if (colorSessionRef.current !== key) { pushHistory(); colorSessionRef.current = key; }
+      } else {
+        if (colorSessionRef.current !== key) pushHistory();
+        colorSessionRef.current = null;
+      }
       setMarkups((a) => a.map((m) => m.id === sel ? { ...m, ...writeProp(m, key, value) } : m));
     }
     setPropStyle((s) => ({ ...s, [key]: value }));
@@ -814,13 +854,13 @@ export default function DocReview({
       propsForTool("callout").forEach((k) => { const v = propStyle[k] ?? columnMeta(k)?.default; if (v !== undefined) style[k] = v; });
       const id = uid();
       setMarkups((a) => [...a, { id, page: ed.page, kind: "callout", pts: [ed.calloutTip, ed.pt], ...style, text }]);
-      if (!toolLock) { setTool("select"); setSel(id); }
+      if (!toolLock) { setTool("select"); selectOne(id); }
     } else {
       const style = {}; // honor the sticky text style (size/color/bold/…) set before drawing
       propsForTool("text").forEach((k) => { const v = propStyle[k] ?? columnMeta(k)?.default; if (v !== undefined) style[k] = v; });
       const id = uid();
       setMarkups((a) => [...a, { id, page: ed.page, kind: "text", pts: [ed.pt], ...style, text }]);
-      if (!toolLock) { setTool("select"); setSel(id); } // revert + select like the other tools
+      if (!toolLock) { setTool("select"); selectOne(id); } // revert + select like the other tools
     }
   };
 
@@ -840,9 +880,10 @@ export default function DocReview({
     }
     if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
     const p = toPage(e);
-    // Vertex grip hit check — when select tool + markup selected, a click within 8 screen-px
-    // of any vertex starts a single-vertex drag instead of a full-markup move. (B431)
-    if (tool === "select" && sel) {
+    // Vertex grip hit check — when select tool + a SINGLE markup selected, a click within 8
+    // screen-px of any vertex starts a single-vertex drag instead of a full-markup move. (B431)
+    // Skipped for a true multi-selection so a drag moves the whole set as one. (B569)
+    if (tool === "select" && sel && selSet.length <= 1 && !hasSelMod(e)) {
       const selM = pageMarks.find((mm) => mm.id === sel);
       if (selM?.pts?.length && selM.kind !== "pen" && selM.kind !== "highlight") {
         for (let vi = 0; vi < selM.pts.length; vi++) {
@@ -862,16 +903,32 @@ export default function DocReview({
     // empty → pan; Select-on-object → select/move; a drawing tool → draw, never pan. (B329)
     if (shouldPan({ button: e.button, spaceHeld, tool, onObject: !!hitId })) {
       e.preventDefault();
-      if (tool === "select") setSel(null); // a pan starting on empty canvas also clears the selection
+      if (tool === "select" && !hasSelMod(e)) clearSelection(); // empty-canvas Select drag pans + clears (modifier held → keep the set)
       panRef.current = { sx: e.clientX, sy: e.clientY, tx0: view.tx, ty0: view.ty };
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
       setPanning(true);
       return;
     }
     if (e.button !== 0) return; // only the left button draws / selects past here
+    if (tool === "marquee") { // B570 — dedicated box-select: drag a rubber-band, select on release
+      marqueeRef.current = { a: p };
+      setMarquee({ a: p, b: p });
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
     if (tool === "select") {
-      setSel(hitId);
-      if (hitId) { // arm a move-drag; a sub-threshold drag stays a plain click-select (B293)
+      const mods = selMods(e); // Ctrl/⌘-click = toggle, Shift-click = additive add (B569)
+      if (hitId && (mods.toggle || mods.add)) { applySelMods(hitId, mods); return; }
+      if (hitId && selSet.length > 1 && selSet.includes(hitId)) {
+        // Drag a member of the multi-selection → move the whole set together as ONE undo step.
+        const orig = {};
+        pageMarks.forEach((m) => { if (selSet.includes(m.id)) orig[m.id] = (m.pts || []).map((q) => ({ x: q.x, y: q.y })); });
+        groupDragRef.current = { ids: [...selSet], start: p, orig, moved: false };
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+        return;
+      }
+      selectOne(hitId);
+      if (hitId) { // arm a single move-drag; a sub-threshold drag stays a plain click-select (B293)
         const m = pageMarks.find((mm) => mm.id === hitId);
         if (m) { dragRef.current = { id: hitId, start: p, orig: (m.pts || []).map((q) => ({ x: q.x, y: q.y })), moved: false }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }
       }
@@ -941,6 +998,16 @@ export default function DocReview({
     }
     if (!view) return;
     const rawP = toPage(e);
+    if (marqueeRef.current) { setMarquee({ a: marqueeRef.current.a, b: rawP }); return; } // B570 live box-select
+    if (groupDragRef.current) { // B569 live group-move preview of the whole multi-selection
+      const g = groupDragRef.current, dx = rawP.x - g.start.x, dy = rawP.y - g.start.y;
+      if (!g.moved && Math.hypot(dx * view.scale, dy * view.scale) < 3) { setCursor(rawP); return; }
+      g.moved = true;
+      const pts = {};
+      for (const id of g.ids) pts[id] = (g.orig[id] || []).map((q) => ({ x: q.x + dx, y: q.y + dy }));
+      setGroupPreview(pts);
+      return;
+    }
     // Vertex drag: translate only the grabbed vertex, keep all others fixed (B431)
     if (vtxDragRef.current) {
       const dx = rawP.x - vtxDragRef.current.start.x, dy = rawP.y - vtxDragRef.current.start.y;
@@ -979,6 +1046,29 @@ export default function DocReview({
       if (touchPinchedRef.current) { touchPinchedRef.current = false; panRef.current = null; dragRef.current = null; setPanning(false); return; } // pinch ended — no stray tap
     }
     if (panRef.current) { panRef.current = null; setPanning(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
+    if (marqueeRef.current) { // B570 — resolve the box-select: every markup the box TOUCHES (crossing)
+      const a = marqueeRef.current.a, b = toPage(e); marqueeRef.current = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+      const box = { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) };
+      const ids = pickInMarquee(pageMarks, box, { bboxOf: bboxOfMarkup, refOf: (m) => m.id });
+      setMarquee(null);
+      setSelSet(ids);
+      setSel(ids.length === 1 ? ids[0] : null);
+      setTool("select"); // hand the live selection to the move tool (raw setter keeps the set)
+      return;
+    }
+    if (groupDragRef.current) { // B569 — commit the group-move as ONE undo step
+      const g = groupDragRef.current; groupDragRef.current = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (g.moved) {
+        const p = toPage(e), dx = p.x - g.start.x, dy = p.y - g.start.y;
+        const ids = new Set(g.ids);
+        pushHistory();
+        setMarkups((a) => a.map((m) => (ids.has(m.id) && g.orig[m.id]) ? { ...m, pts: g.orig[m.id].map((q) => ({ x: q.x + dx, y: q.y + dy })) } : m));
+      }
+      setGroupPreview(null);
+      return;
+    }
     if (vtxDragRef.current) { // commit a single-vertex drag (B431)
       const d = vtxDragRef.current; vtxDragRef.current = null;
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -1053,6 +1143,7 @@ export default function DocReview({
     reseedPinch();
     if (pointersRef.current.size === 0) touchPinchedRef.current = false;
     panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null); vtxDragRef.current = null; setVtxPreview(null);
+    marqueeRef.current = null; setMarquee(null); groupDragRef.current = null; setGroupPreview(null); // B569/B570 — abandon an in-flight box-select / group-move
   };
 
   const finishDraft = () => {
@@ -1201,7 +1292,7 @@ export default function DocReview({
   };
   const cutMarkup = () => {
     if (!copyMarkup()) return false;
-    pushHistory(); setMarkups((a) => a.filter((x) => x.id !== sel)); setSel(null);
+    pushHistory(); setMarkups((a) => a.filter((x) => x.id !== sel)); clearSelection();
     return true;
   };
   const pasteMarkup = () => {
@@ -1214,7 +1305,7 @@ export default function DocReview({
       ? centerOn(base, cursor)
       : base.map((q) => ({ x: q.x + 12, y: q.y + 12 }));
     const mk = { ...src, id: uid(), page, pts }; // fresh id, lands on the CURRENT sheet
-    pushHistory(); setMarkups((a) => [...a, mk]); setSel(mk.id);
+    pushHistory(); setMarkups((a) => [...a, mk]); selectOne(mk.id);
     return true;
   };
 
@@ -1241,7 +1332,7 @@ export default function DocReview({
     const hitId = hitTest(toPage(e));
     if (!hitId) return; // empty canvas → let the default context menu through
     e.preventDefault();
-    setSel(hitId);
+    if (selSet.includes(hitId)) setSel(hitId); else selectOne(hitId); // keep a multi-selection if right-clicking a member (B569)
     setCtxMenu({ x: e.clientX, y: e.clientY, id: hitId });
   };
 
@@ -1272,11 +1363,16 @@ export default function DocReview({
     if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
     else if (e.key === "Escape") {
       if (ctxMenu) { setCtxMenu(null); return; } // close the Arrange menu first, keeping the selection (B421)
-      setDraft(null); setSel(null); setDragPreview(null); dragRef.current = null; setCalInput(null);
+      setDraft(null); clearSelection(); setDragPreview(null); dragRef.current = null; setCalInput(null); setMarquee(null); marqueeRef.current = null;
     }
     else if (e.key === "Delete" || e.key === "Backspace") {
       if (removeLastVertex()) { e.preventDefault(); return; }            // trim a draft vertex first (B303)
-      if (sel) { e.preventDefault(); pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }
+      if (selSet.length > 1) { // B569: delete the whole multi-selection as ONE undo step
+        e.preventDefault(); pushHistory();
+        const ids = new Set(selSet);
+        setMarkups((a) => a.filter((m) => !ids.has(m.id)));
+        clearSelection();
+      } else if (sel) { e.preventDefault(); pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); clearSelection(); }
     }
     // Sheet paging (B306) — only when not mid-draft / mid-entry so arrows don't drop work.
     else if (!draft && !calInput && (e.key === "ArrowLeft" || e.key === "PageUp")) { e.preventDefault(); goToPage(page - 1); }
@@ -1485,12 +1581,12 @@ export default function DocReview({
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
         // Breadcrumb (B191–B193): Dashboard leaves Markup for the all-projects map;
-        // picking a project browses its files in place (the file browser, scoped to it);
-        // New project is born in the Site Planner. Save state from persistence.
+        // picking a project changes the URL project; New project is born in the Site
+        // Planner. Save state from persistence.
         onDashboard={onGoDashboard}
         currentProject={markupProject}
         cross={crossProject}
-        onSelectProject={(id) => { onNavigate?.({ projectId: id }); setBrowsing(true); }}
+        onSelectProject={(id) => onNavigate?.({ projectId: id })}
         onNewProject={onNewProject}
         // The compact Row-1 CloudSyncBadge (NEW-1) reads this normalized state; docSaveState
         // keeps the "a failed write is LOUD, never silent" contract (unit-locked).
@@ -1498,16 +1594,12 @@ export default function DocReview({
         onRetrySave={status === "conflict" ? undefined : saveNow}
         saveDetail={status === "conflict" ? "This review was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
         centerContent={
-          // The 🗂 Files button returns to the file browser landing from the review canvas
-          // (B6). It reads as active while browsing. The project name itself isn't repeated
-          // here — the Row-1 breadcrumb is its one canonical home (B357).
-          <button onClick={() => setBrowsing(true)} title="Back to the project file browser"
-            aria-pressed={browsing}
+          // Browsing files now lives in the Library workspace; this button switches there
+          // (carrying the current project, since the URL project survives a module switch).
+          <button onClick={() => onShellSwitch?.("library")} title="Open the Library to browse this project's files"
             style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px",
-              border: `1px solid ${browsing ? "var(--accent-review)" : "var(--chrome-divider)"}`,
-              background: browsing ? "var(--accent-review)" : "var(--chrome-bg-elev)",
-              color: browsing ? "var(--on-accent)" : "var(--chrome-text)" }}>
-            🗂 Files
+              border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
+            🗂 Library
           </button>
         }
         authControl={authControl}
@@ -1544,31 +1636,30 @@ export default function DocReview({
       {openErr && (
         <div role="alert" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fee2e2", color: "#991b1b", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {openErr}</span>
-          <button onClick={() => { setOpenErr(""); setBrowsing(true); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Browse Files…</button>
+          <button onClick={() => { setOpenErr(""); onShellSwitch?.("library"); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Open Library…</button>
           <button onClick={() => setOpenErr("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(0,0,0,0.06)", color: "#991b1b", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
-      {browsing ? (
-        // Work Item B — the file browser IS the landing surface (a project's tree, facets,
-        // and badged list), not an empty "drop a PDF" screen. Opening a file flips to the
-        // review canvas; the 🗂 Files button brings the browser back.
-        <FileBrowser
-          projectId={projectId}
-          projectName={markupProject?.name || ""}
-          signedIn={signedIn}
-          cross={crossProject}
-          indexProvider={autofilingProvider}
-          onOpenReview={openReview}
-          onNavigate={onNavigate}
-        />
-      ) : !pdfRef.current ? (
+      {!pdfRef.current ? (
+        // Browsing moved to the Library workspace, so Review's landing is a clean empty state:
+        // browse the Library for a filed drawing, or drop/open an ad-hoc PDF to mark up here.
         <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
           style={{ flex: 1, position: "relative", display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>Review</div>
-            <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open or drop a construction PDF to review."}</div>
-            <div style={{ fontSize: 12 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>No drawing open</div>
+            <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open a filed drawing from the Library, or drop a construction PDF to review."}</div>
+            <div style={{ fontSize: 12, marginBottom: 14 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+              <button data-testid="empty-open-library" onClick={() => onShellSwitch?.("library")}
+                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", borderRadius: 8, padding: "7px 14px", border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)" }}>
+                🗂 Browse the Library
+              </button>
+              <button onClick={() => fileRef.current?.click()}
+                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 8, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
+                Open PDF…
+              </button>
+            </div>
             {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: 12.5 }}>{err}</div>}
           </div>
           {openingOverlay}
@@ -1682,12 +1773,27 @@ export default function DocReview({
               <svg data-testid="markup-overlay" width={pageBase.w * view.scale} height={pageBase.h * view.scale} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
                 {pageMarks.map((m) => (
                   <MarkupRenderer key={m.id}
-                    markup={vtxPreview?.id === m.id ? { ...m, pts: vtxPreview.pts } : dragPreview?.id === m.id ? { ...m, pts: dragPreview.pts } : m}
-                    view={view} selected={m.id === sel} ftPerUnit={ftPerUnit} />
+                    markup={groupPreview?.[m.id] ? { ...m, pts: groupPreview[m.id] } : vtxPreview?.id === m.id ? { ...m, pts: vtxPreview.pts } : dragPreview?.id === m.id ? { ...m, pts: dragPreview.pts } : m}
+                    view={view} selected={m.id === sel || selSet.includes(m.id)} ftPerUnit={ftPerUnit} />
                 ))}
                 {drawDraft()}
-                {/* Vertex grip handles — small circles at each vertex of the selected markup (B431) */}
-                {sel && !draft && (() => {
+                {/* B569 — neutral hue-free multi-select chrome (casing + line + corner grips) on every
+                    member of a multi-selection; the single-select case keeps its grips/× treatment below. */}
+                {selSet.length > 1 && selSet.map((id) => {
+                  const m = pageMarks.find((mm) => mm.id === id); if (!m) return null;
+                  const pts = groupPreview?.[id] || m.pts;
+                  const bb = bboxOfMarkup(pts ? { ...m, pts } : m); if (!bb) return null;
+                  const x = bb.x * view.scale - 3, y = bb.y * view.scale - 3;
+                  return <SelectionChrome key={`sel${id}`} x={x} y={y} w={bb.w * view.scale + 6} h={bb.h * view.scale + 6} casing="var(--sel-casing)" line="var(--sel-line)" grips />;
+                })}
+                {/* B570 — live box-select rubber-band */}
+                {marquee && (() => {
+                  const ax = marquee.a.x * view.scale, ay = marquee.a.y * view.scale, bx = marquee.b.x * view.scale, by = marquee.b.y * view.scale;
+                  return <SelectionChrome x={Math.min(ax, bx)} y={Math.min(ay, by)} w={Math.abs(bx - ax)} h={Math.abs(by - ay)} casing="var(--sel-casing)" line="var(--sel-line)" fill />;
+                })()}
+                {/* Vertex grip handles — small circles at each vertex of the selected markup (B431).
+                    Hidden during a multi-selection (the neutral chrome above stands in). */}
+                {sel && selSet.length <= 1 && !draft && (() => {
                   const selM = pageMarks.find((mm) => mm.id === sel);
                   if (!selM?.pts?.length || selM.kind === "pen" || selM.kind === "highlight") return null;
                   const src = vtxPreview?.id === sel ? vtxPreview.pts : selM.pts;
@@ -1701,7 +1807,7 @@ export default function DocReview({
                   doesn't depend on knowing the Delete key. Lives OUTSIDE the pointerEvents:none overlay
                   (like the inline editors) so it takes its own click; stopPropagation keeps that click
                   from starting a pan/draw on the canvas underneath. Anchored at the markup's top-right. */}
-              {sel && !editing && !calInput && (() => {
+              {sel && selSet.length <= 1 && !editing && !calInput && (() => {
                 const m = pageMarks.find((mm) => mm.id === sel);
                 const src = (dragPreview && dragPreview.id === sel ? dragPreview.pts : m && m.pts) || [];
                 if (!m || !src.length) return null;
@@ -1713,7 +1819,7 @@ export default function DocReview({
                 return (
                   <button title="Delete this markup (Del)" aria-label="Delete this markup"
                     onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => { e.stopPropagation(); pushHistory(); setMarkups((a) => a.filter((mm) => mm.id !== sel)); setSel(null); }}
+                    onClick={(e) => { e.stopPropagation(); pushHistory(); setMarkups((a) => a.filter((mm) => mm.id !== sel)); clearSelection(); }}
                     style={{ position: "absolute", left: rx + 6, top: ty - 2, width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%", border: "none", background: "var(--danger-text)", color: "var(--on-accent)", cursor: "pointer", fontSize: 15, fontWeight: 800, lineHeight: 1, boxShadow: "0 2px 8px rgba(0,0,0,0.35)", zIndex: 7, padding: 0, fontFamily: "inherit" }}>×</button>
                 );
               })()}
@@ -1775,7 +1881,7 @@ export default function DocReview({
               ? <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 10 }}>Nothing on this sheet yet.</div>
               : <div style={{ marginBottom: 10 }}>{pageMarks.map((m) => (
                   <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 2px 6px", borderRadius: 6, background: m.id === sel ? "#fbf3ee" : "transparent" }}>
-                    <button onClick={() => { setTool("select"); setSel(m.id); }} title="Select this markup on the sheet"
+                    <button onClick={() => { setTool("select"); selectOne(m.id); }} title="Select this markup on the sheet"
                       style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, textAlign: "left", color: "inherit" }}>
                       <span style={{ color: PAL.muted, textTransform: "capitalize", flex: "none" }}>{m.kind}</span>
                       <span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{markRowValue(m)}</span>
@@ -1797,7 +1903,7 @@ export default function DocReview({
               {totals.uncal > 0 && <div style={{ fontSize: 10.5, color: "var(--warn-text)", marginTop: 5, lineHeight: 1.4 }}>{totals.uncal} measurement(s) on uncalibrated sheets are excluded.</div>}
               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8 }}>Areas/counts use the shared coordinate module — the seam to feed the Site Planyr's yield panel (pending the shared coordinate spine).</div>
             </div>
-            {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "var(--danger-text)" }} onClick={() => { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }}>Delete selected</button>}
+            {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "var(--danger-text)" }} onClick={() => { pushHistory(); const ids = selSet.length > 1 ? new Set(selSet) : new Set([sel]); setMarkups((a) => a.filter((m) => !ids.has(m.id))); clearSelection(); }}>{selSet.length > 1 ? `Delete ${selSet.length} selected` : "Delete selected"}</button>}
           </div>
           ) : (
             <button onClick={() => setTakeoffOpen(true)} title="Show the takeoff panel" style={{ flex: "none", width: 26, background: "#fff", borderLeft: `1px solid ${PAL.line}`, cursor: "pointer", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center" }}>

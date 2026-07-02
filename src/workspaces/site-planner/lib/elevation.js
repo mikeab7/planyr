@@ -3,7 +3,10 @@
  * depth/invert. SCREENING ONLY — bare-earth, verify with survey.
  */
 export const DEP_URL = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer";
-const M_TO_FT = 3.280839895;
+// B533: US survey foot (exact 3937/1200 ft/m), matching FT_PER_M in shared/coordinates and the
+// EPSG:2278 State Plane spine — not the international foot (3.280839895). 3DEP returns metres;
+// converting with the survey foot keeps elevation consistent with all other project geometry.
+const M_TO_FT = 3937 / 1200;
 
 /* Sample elevations along a polyline. `path` is [[lng,lat], …] (WGS84).
  * Returns an array of elevations in FEET, ordered along the line. */

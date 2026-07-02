@@ -100,6 +100,28 @@ export default defineConfig(({ command }) => ({
         });
       },
     },
+    // The standalone marketing landing page (public/landing/index.html) is a
+    // self-contained document with its own vendored GSAP/Three.js — same standalone
+    // model as /sequence/. In dev, Vite's SPA fallback would otherwise serve the main
+    // app index.html for a bare "/landing/" directory request; intercept it so the
+    // landing page renders. Its assets (/landing/vendor/*) fall through to Vite's
+    // static public/ serving. Production (Cloudflare Pages) serves it as a real static
+    // file from dist/landing/, so no preview/prod config is needed.
+    {
+      name: "serve-landing-standalone",
+      configureServer(server) {
+        const file = path.resolve("public/landing/index.html");
+        server.middlewares.use("/landing", (req, res, next) => {
+          const url = req.url ?? "";
+          if (url === "/" || url === "" || url === "/index.html") {
+            res.setHeader("Content-Type", "text/html; charset=utf-8");
+            res.end(fs.readFileSync(file));
+            return;
+          }
+          next();
+        });
+      },
+    },
   ],
   server: {
     host: true,

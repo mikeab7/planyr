@@ -8,8 +8,8 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
-import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs } from "./siteModel.js";
+import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, noteLocalContent } from "./cloudSync.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
@@ -128,13 +128,20 @@ export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cl
 // pressure that made writeSites fail → new-site data loss). Drop ONLY ids confirmed present in the cloud
 // map; an un-migrated legacy site (not in the cloud) is KEPT untouched. Runs after a SUCCESSFUL pullCloud
 // (the cloud copy is authoritative). Never throws.
-function pruneMigratedLegacy(cloudMap) {
+export function pruneMigratedLegacy(cloudMap) {
   try {
     const raw = localStorage.getItem(SITES_KEY);
     if (!raw || !cloudMap) return;
     const legacy = JSON.parse(raw) || {};
     let dropped = 0;
-    for (const id of Object.keys(legacy)) { if (cloudMap[id]) { delete legacy[id]; dropped++; } }
+    // B511: prune a migrated legacy site ONLY when the cloud copy is same-or-newer than the
+    // on-device copy. Pruning by id-exists alone silently dropped a NEWER logged-out edit
+    // (edit while signed out → sign back in → the older cloud row exists → the newer local
+    // work was deleted before the migration modal could ever surface it). Mirror the inverse
+    // of pendingLegacyCount's predicate so reclaimed duplicates still get cleaned up.
+    for (const id of Object.keys(legacy)) {
+      if (cloudMap[id] && toMs(cloudMap[id].updatedAt) >= toMs(legacy[id] && legacy[id].updatedAt)) { delete legacy[id]; dropped++; } // B559: type-safe ts compare (ISO string vs ms)
+    }
     if (dropped) localStorage.setItem(SITES_KEY, JSON.stringify(legacy));
   } catch (_) {}
 }
@@ -170,7 +177,7 @@ export async function importLegacyIntoCloud(uid) {
     const local = createSiteModel(legacy[id]);
     if (!local.id) { skipped++; continue; }
     const existing = cloud[local.id];
-    if (existing && (existing.updatedAt || 0) >= (local.updatedAt || 0)) { skipped++; continue; } // cloud already same/newer
+    if (existing && toMs(existing.updatedAt) >= toMs(local.updatedAt)) { skipped++; continue; } // cloud already same/newer (B562: toMs so an ISO-string updatedAt can't NaN the compare and copy an older local over a newer cloud)
     cloud[local.id] = local;                  // stage into the cloud cache so it's visible right away
     const r = await cloudUpsert(uid, local);  // and persist to Supabase
     if (r && r.ok) copied++; else failed++;   // failed pushes stay cached and re-push on the next edit
@@ -183,16 +190,11 @@ export async function importLegacyIntoCloud(uid) {
 // cloud cache — i.e. would be brought in by importLegacyIntoCloud. 0 when logged out.
 export function pendingLegacyCount(uid) {
   if (!uid) return 0;
-  let legacy = {}, cloud = {};
-  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
-  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  let n = 0;
-  for (const [id, rec] of Object.entries(legacy)) {
-    const cur = cloud[id];
-    const lAt = (rec && rec.updatedAt) || 0;
-    if (!cur || (cur.updatedAt || 0) < lAt) n++;
-  }
-  return n;
+  // B552: delegate to pendingLegacySites so the COUNT can't disagree with the LIST or with what
+  // importLegacyIntoCloud actually copies. The old raw-key loop counted records with a missing/
+  // falsy normalized id (which import skips), so the badge could read "3 pending" while only 2
+  // imported (the B128 symptom). pendingLegacySites already normalizes (migrate) + drops !id.
+  return pendingLegacySites(uid).length;
 }
 
 // Returns the list of on-device (legacy) sites that are not yet in (or are newer than)
@@ -310,6 +312,10 @@ export async function reconcileSiteFromCloud(id) {
   if (!activeUser || !id) return null;
   return fetchSiteForReconcile(activeUser, id);
 }
+// B556 — re-export so the planner can tell the thin-clobber baseline "this deliberately-restored
+// (possibly thinner) content is authoritative" after an undo/redo/version-restore, so the next push
+// isn't falsely rejected as a cross-session conflict. Per-tab + cloud-independent (safe logged out).
+export { noteLocalContent };
 // Synchronous best-effort cloud push for a forced reload (B452): a guarded keepalive
 // write that survives the navigation. Reads the freshly-saved local copy so the cloud
 // gets the very latest. No-op when logged out. Returns true if a request was dispatched.
@@ -662,9 +668,38 @@ export function loadSitesList() {
 export function loadPlansOfGroup(groupId) {
   return loadSitesList().filter((s) => groupOf(s) === groupId);
 }
-// Rename a whole site (location) — updates `site` on every plan in the group.
-export function renameSiteGroup(groupId, site) {
+// Rename a whole site (location) — updates `site` on every plan in the group. The id may arrive
+// as the group id OR as any plan id within it: the map's site list passes a *representative*
+// plan's id, which for a multi-plan site is often NOT the group's anchor plan. Resolve to the
+// group first — otherwise loadPlansOfGroup(planId) matches nothing, no plan is saved, and the
+// rename silently no-ops, reading as the name "reverting" to the old one. (rename-revert)
+export function renameSiteGroup(idOrGroup, site) {
+  const rec = loadSite(idOrGroup);
+  const groupId = rec ? groupOf(rec) : idOrGroup;
   loadPlansOfGroup(groupId).forEach((s) => saveSite({ id: s.id, site }));
+}
+// Mirror the cross-module schedule link onto a site group (schema v9). The canonical pairing
+// lives on the Schedule record (its `linkedSiteId`); this writes the lightweight HINT
+// (scheduleProjectId/Name) onto every plan in the group so the Site Planner can show "has a
+// schedule" without booting the Schedule iframe. Pass `{ scheduleProjectId: null }` to clear it.
+// Goes through saveSite, so it persists locally + syncs to the cloud like any other edit.
+export function setScheduleLink(groupId, { scheduleProjectId = null, name = null } = {}) {
+  if (!groupId) return;
+  const id = scheduleProjectId != null ? scheduleProjectId : null;
+  loadPlansOfGroup(groupId).forEach((s) => {
+    // No-op if the hint already matches — avoids a needless save + cloud write on every visit.
+    if ((s.scheduleProjectId ?? null) === id && (s.scheduleProjectName ?? null) === (name ?? null)) return;
+    saveSite({ id: s.id, scheduleProjectId: id, scheduleProjectName: id != null ? name : null });
+  });
+}
+// The schedule link recorded on a site group (reads the first plan; the hint is mirrored
+// identically across every plan in the group). Returns { scheduleProjectId, name } | null.
+export function scheduleLinkOf(groupId) {
+  const plans = loadPlansOfGroup(groupId);
+  for (const s of plans) {
+    if (s.scheduleProjectId != null) return { scheduleProjectId: s.scheduleProjectId, name: s.scheduleProjectName || null };
+  }
+  return null;
 }
 // Delete a whole site (group) — every plan in it, locally (instant/optimistic) AND from the
 // cloud when signed in. Returns a promise resolving { ok, removed, error? } aggregated across
