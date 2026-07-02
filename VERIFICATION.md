@@ -45,15 +45,23 @@ was never clicked" quietly ships broken.
    policy above, do **not** hand this list to Michael as his to-do; only escalate a **critical**
    (won't build / won't render / crashing) issue.
 2. **Verify it yourself in a headless browser** (see "🤖 Self-verification" above): run the
-   **Steps**, compare to **Expect**, then record the outcome — flip ⏳→✅ (or ❌ with a note),
-   set `Last checked`, and bump `Next check` by the `Cadence`. Prefer doing this in the same session
-   that shipped the change.
-3. **Only if no browser is reachable:** leave the item logged here and move on — don't block on
+   **Steps**, compare to **Expect**, then record the outcome.
+3. **⛔ CLEAR OUT what you finish — don't leave passed items piling up here (owner rule, 2026-07-02).**
+   This is the #1 reason this file bloats. Whoever runs a check (usually Claude Cowork on the live app —
+   NOT Michael) archives it the SAME session, by item type:
+   - **One-off item** (`Cadence: once` — a bug/feature acceptance check): once it **fully passes with
+     nothing pending**, **MOVE its whole block to `VERIFICATION-DONE.md`** — do not just mark it ✅ and
+     leave it here. (Same archiving discipline as `BACKLOG.md → BACKLOG-DONE.md`.) If it only *partly*
+     passes (some steps still owed), it **stays** with the passed parts noted and the remainder ⏳.
+   - **Recurring item** (`🌐` endpoint-liveness / any `Cadence: every N days`): it **stays here** —
+     don't archive it. Just record the run: flip the status, set `Last checked`, bump `Next check` by
+     the `Cadence`. These are meant to be re-run forever.
+   - A **❌** stays ❌ (with the date + what broke) until it's re-fixed and re-run — never archive a fail.
+4. **Only if no browser is reachable:** leave the item logged here and move on — don't block on
    Michael. Do **not** mark anything ✅ from reading the code — confirming-in-the-running-app is the
    entire point of this file.
-4. **Endpoint-liveness items (tagged 🌐) are the exception** — a `curl`/REST probe, runnable
-   without a browser. Run those when due.
-5. Keep it honest: a ❌ stays ❌ with the date and what broke until it's re-fixed and re-run.
+5. **Endpoint-liveness items (tagged 🌐) are the exception to "needs a browser"** — a `curl`/REST
+   probe, runnable without a browser. Run those when due (and per rule 3 they stay, they don't archive).
 
 `CLAUDE.md` points every session here, so this list is consulted automatically.
 
@@ -1099,11 +1107,6 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 - **Note:** the auto-filing index (title-block read → placement facts), the NEW-3 rung-1/2 geometry, and the NEW-4 auto-probe data source all wait on the backend tranche by design (stubbed behind `createIndexProvider`); this V45 covers only the shipped browser-first tranche.
 
 ## ✅ Verified / ❌ Failed — history
-_Move items here with the date and who/what checked them._
 
-### V41 — Grab an unfilled markup shape by its INTERIOR, not just the border line (B155 increment 1) ✅
-- **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (fix acceptance)
-- **Why:** owner-reported — selecting a markup rectangle was "kinda difficult, you have to grab exactly on the line." Cause: closed shape markups (`rect`/`ellipse`/`polygon`) rendered `fill:"none"` with selection on the element's own `onPointerDown`, so only the painted 2px stroke was a click target. Fix: `pointerEvents:"all"` on those shapes (same technique B142 used for text/callout boxes) so the **whole interior** is a hit target even when unfilled. Applied in `SitePlanner.jsx` and `components/ParcelDrawing.jsx` (the Box tool).
-- **Steps (Site Planner):** "Start blank" → **Rectangle** tool (R) → dragged an unfilled box → **Escape** (deselect) → clicked the rectangle's **interior centre** (not the border).
-- **Result ✅:** the drawn `<rect>` carries `pointer-events="all"` with `fill="none"` (interior is a hit target). Selection handles (the rotate `circle[r="6"]`) read **1 after draw → 0 after Escape → 1 after the interior click** — i.e. clicking inside the empty box re-selected it; the "MARKUP · RECT" panel opened (Fill opacity at 0, confirming it's unfilled). Screenshot `/tmp/b150-after-interior-click.png` shows the selected unfilled box with grips. lint 0 errors · **230 tests** · build green; `SitePlannerApp` / `DocReview` lazy chunks intact.
-- **Not covered:** **ParcelDrawing's** identical one-attribute change (the Box on a parcel drawing) wasn't separately driven — it needs a real drawing attached + rasterized (V9's flow), which is awkward logged-out; it's the same `pointerEvents="all"` edit on an analogous `fill:"none"` rect whose move handler already `stopPropagation`s, so low-risk by analogy. Doc Review's rect interior-select was already shipped under B33. The broader B155 tranche (shared `hitTest`, screen-space tolerance, forgiving line/polyline hit area, z-order tie-break, hover preview B156) is **not** in this increment — still ⏳ in BACKLOG B155/B156.
+> Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
+> Move a fully-passed item there (do not add it here).

@@ -32,8 +32,15 @@ Read `CLAUDE.md` first if anything below is unclear — its standing rules win o
 - Merge the latest `main` into the branch so you're not drifting.
 
 ### 1. Pick work (highest value first)
-- Scan `BACKLOG.md` for `🔲 Open` items (`B###`) — **bugs and improvements/features both count**.
-- Scan `VERIFICATION.md` for `⏳`/due items (`V###`) you can drive in a headless browser here.
+- **Grep, don't slurp — these files are large (hundreds of KB).** Reading a whole tracking
+  file into context to find one item is the biggest avoidable token burn in this repo.
+  - List open backlog headings only: `Grep pattern "^### B" path BACKLOG.md output_mode content`
+    (a few KB of titles) — **bugs and improvements/features both count**.
+  - List due verification headings: `Grep pattern "^### V.*⏳" path VERIFICATION.md output_mode content`
+    for the `⏳` items you can drive in a headless browser here.
+  - **Then `Read` only the ONE block** you decide to work on (use the heading's line number as
+    `offset` with a small `limit`). Never `Read` the whole `BACKLOG.md`/`VERIFICATION.md`.
+  - The `*-DONE.md` archives are write-only — never read them except to look up one past ID.
 - Choose the highest-value item that is **actionable now**. An item is NOT actionable if it is:
   blocked on an owner decision, blocked on an external dependency / owner-supplied input
   (a 2nd test account, a heavy PDF, a SQL run, a key), or genuinely too large to finish in one lap.
@@ -48,6 +55,7 @@ Read `CLAUDE.md` first if anything below is unclear — its standing rules win o
 ```
 npm run lint
 node ui-audit/gis-source-audit.mjs
+node ui-audit/doc-pointer-audit.mjs
 npm test
 npm run build
 ```
