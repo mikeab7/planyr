@@ -16,7 +16,9 @@
 -- Plain (SECURITY INVOKER) trigger: it only reads OLD/NEW + auth.uid(); no RLS bypass needed.
 
 create or replace function public.guard_team_rehome()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql
+set search_path = pg_catalog  -- lock the search path (satisfies the Supabase linter + defense-in-depth)
+as $$
 begin
   if new.team_id is distinct from old.team_id and old.user_id is distinct from auth.uid() then
     raise exception 'Only the project owner can change sharing (team_id).' using errcode = '42501';

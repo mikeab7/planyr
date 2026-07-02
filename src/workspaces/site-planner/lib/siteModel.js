@@ -55,6 +55,7 @@ const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVer
 // expected (e.g. `parcels` as a string), which then throws on `.reduce`/`.map` and blanks the app.
 // Coerce every collection so one malformed record can't crash the planner on load.
 const arr = (v) => (Array.isArray(v) ? v : []);
+
 const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 // B559: coerce a timestamp to milliseconds for comparison. `updatedAt` is normally a number
 // (Date.now()), but createSiteModel keeps whatever it's given (p.updatedAt || Date.now()), so an
@@ -146,6 +147,37 @@ function normalizeBondedRotations(list) {
   return changed ? out : els;
 }
 
+// One-time repair: snap any drifted dog-ear child to its host's CURRENT box (B487).
+// The correct position/size of a corner bump-out is a PURE function of the host box + its
+// `{side, sign, along, proj}` tag — `dogEarGeom(host, dogEar)`. The runtime resize path already
+// calls this on every host resize (SitePlanner.refitChildren), but a legacy record whose host was
+// widened via a path that missed refitChildren keeps its dog-ears at the OLD edge → they orphan
+// into the truck-court band (real Jacintoport bug, 2026-06-26 Cowork audit). We snap them back at
+// load-time; idempotent (a correctly-anchored dog-ear re-anchors to itself with no change). Only
+// touches children with a `dogEar` tag; leaves everything else alone.
+function normalizeDogEarPositions(list) {
+  const els = arr(list);
+  if (els.length < 2) return els;
+  const byId = new Map();
+  for (const e of els) if (e && e.id != null) byId.set(e.id, e);
+  let changed = false;
+  const out = els.map((e) => {
+    if (!e || !e.dogEar || e.attachedTo == null) return e;
+    // Crash-safety: a malformed `side` would blow up dogEarGeom's SIDE_N[side] destructure and blank the
+    // planner on load. Skip such records (they fall through to the rotation pass and stay as stored).
+    if (!isDogEarSide(e.dogEar.side)) return e;
+    const host = byId.get(e.attachedTo);
+    if (!host || typeof host.cx !== "number" || typeof host.cy !== "number" ||
+        typeof host.w !== "number" || typeof host.h !== "number") return e;
+    const g = dogEarGeom(host, e.dogEar);
+    if (Math.abs((e.cx || 0) - g.cx) < 1e-6 && Math.abs((e.cy || 0) - g.cy) < 1e-6 &&
+        Math.abs((e.w || 0) - g.w) < 1e-6 && Math.abs((e.h || 0) - g.h) < 1e-6) return e;
+    changed = true;
+    return { ...e, cx: g.cx, cy: g.cy, w: g.w, h: g.h, rot: g.rot };
+  });
+  return changed ? out : els;
+}
+
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
  * lossless, idempotent migration. */
@@ -193,10 +225,11 @@ export function createSiteModel(p = {}) {
     // page,pageCount,intrinsic:{w,h},src(local raster dataURL),markups:[],createdAt,updatedAt}.
     parcelDrawings: arr(p.parcelDrawings),
     settings: obj(p.settings),
-    // drawn layout + shapes (kept flat; selectors classify markups). Legacy rect roads are
-    // upgraded to the centerline model (B596), then bonded children are re-anchored to their
-    // host's angle (B363) — both idempotent, only touching records that need it.
-    els: normalizeBondedRotations(migrateRoads(Array.isArray(p.els) ? p.els : arr(p.elements))),
+    // drawn layout + shapes (kept flat; selectors classify markups). Three idempotent passes,
+    // each only touching records that need it: legacy rect roads → centerline model (B596);
+    // bonded children re-anchored to their host's angle (B363); dog-ear children snapped to
+    // their host's current edge (B487, Jacintoport orphan-bumpout).
+    els: normalizeDogEarPositions(normalizeBondedRotations(migrateRoads(Array.isArray(p.els) ? p.els : arr(p.elements)))),
     markups: arr(p.markups),
     measures: arr(p.measures),
     callouts: arr(p.callouts),
