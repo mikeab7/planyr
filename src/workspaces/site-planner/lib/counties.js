@@ -14,7 +14,8 @@
  * Endpoints found from each district's public GIS (verify in-browser — county
  * servers move occasionally):
  *   Harris   — HCAD Parcels layer 0 on the Harris County GIS server
- *   Fort Bend— FBCAD public map service (parcels layer auto-detected)
+ *   Fort Bend— FBCAD parcels served from Esri's ArcGIS Online cloud (reliable +
+ *              CORS-open), NOT FBCAD's chronically-down self-hosted gis.fbcad.org
  *   Chambers — TxGIO (Texas Geographic Information Office) statewide parcels. The
  *              old CCAD-only hosted test layer went private (499 Token Required), so
  *              we use the public all-Texas service and scope searches to Chambers.
@@ -36,11 +37,21 @@ export const COUNTIES = {
   },
   fortbend: {
     label: "Fort Bend · FBCAD",
-    serviceUrl:
-      "https://gis.fbcad.org/serverarcgis2/rest/services/Public/MapServer",
-    idField: null,
-    addrField: null,
-    help: "FBCAD public service — the parcels layer is auto-selected.",
+    // FBCAD's OWN parcel data, served from Esri's ArcGIS Online cloud (services*.
+    // arcgis.com) — reliable, CORS-open, no key — instead of FBCAD's self-hosted
+    // gis.fbcad.org server, which is chronically down (503s / TLS resets — the whole
+    // Fort Bend trouble history B137/B244/B382) and has already migrated servers once
+    // ("serverarcgis2"). This hosted "FBCAD Public Parcel Data" layer carries all ~385k
+    // county parcels, is refreshed daily, is natively EPSG:2278 (State Plane feet, our
+    // coordinate spine), and has the full appraisal schema (owner, land/imp/total value,
+    // situs, legal, acreage, land use). The statewide TxGIO layer stays the automatic
+    // outage fallback (statewideFallbackFor). Old self-hosted URL retired as primary:
+    //   https://gis.fbcad.org/serverarcgis2/rest/services/Public/MapServer
+    layerUrl:
+      "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
+    idField: "QUICKREFID",
+    addrField: "SITUS",
+    help: "FBCAD public parcels (Esri-hosted). Search by account (R-number / QuickRef ID) or a site address.",
   },
   chambers: {
     label: "Chambers County · CCAD",
@@ -211,8 +222,12 @@ export const COUNTIES_MAP = {
     center: [29.53, -95.77],
     zoom: 11,
     bbox: [29.25, -96.13, 29.85, -95.51],
-    mapServer: "https://gis.fbcad.org/serverarcgis2/rest/services/Public/MapServer",
-    layerUrl: null,
+    // Hosted FBCAD parcels (see COUNTIES.fortbend) — a single queryable Esri
+    // FeatureServer layer that BOTH renders the outlines and answers a click, so there's
+    // no separate MapServer to resolve.
+    mapServer: null,
+    layerUrl:
+      "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
   },
   chambers: {
     center: [29.7, -94.66],
