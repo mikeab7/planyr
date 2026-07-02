@@ -303,4 +303,15 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     const src = read("../src/workspaces/doc-review/DocReview.jsx");
     expect(src).toMatch(/if \(!r\.ok && !r\.oversize && \(await cloudReady\(\)\)\)/);
   });
+
+  it("NEW-4: a failed key↔id mapping write rolls the just-saved bytes back (no phantom 'saved')", () => {
+    const adapter = read("../server/storage/adapter.js");
+    expect(adapter).toMatch(/const bound = await idMap\.bind\(/);
+    expect(adapter).toMatch(/if \(bound && bound\.ok === false\)/);
+    expect(adapter).toMatch(/backend\.remove\(r\.backendId\)/);
+    const resumable = read("../functions/api/files/resumable.js");
+    // the large-file COMMIT rolls the Drive file back if the mapping doesn't persist
+    expect(resumable).toMatch(/if \(setRes && setRes\.ok === false\)/);
+    expect(resumable).toMatch(/client\.del\(fileId\)/);
+  });
 });

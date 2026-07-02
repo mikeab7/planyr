@@ -73,6 +73,32 @@ describe("storage adapter — no silent failures (B209/NEW-4)", () => {
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/quota exceeded/);
   });
+
+  it("rolls the bytes back and fails honestly when the mapping write fails (NEW-4)", async () => {
+    const removed = [];
+    const backend = {
+      name: "stub",
+      put: async () => ({ ok: true, backendId: "drive_x" }),
+      remove: async (id) => { removed.push(id); return { ok: true }; },
+    };
+    // a durable store that can't persist the mapping — the file would read back as "missing"
+    const failingStore = { get: () => null, getByBackend: () => null, set: async () => ({ ok: false, error: "drive_files set 500" }), del: () => {}, all: () => [] };
+    const a = createStorageAdapter({ backend, idMap: createIdMap(failingStore) });
+    const r = await a.save({ planyrKey: "proj/x.pdf", bytes: bytes("x"), name: "x.pdf" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/couldn't record|rolled back/i);
+    expect(removed).toEqual(["drive_x"]); // the just-saved bytes were rolled back — no orphan, no phantom "saved"
+  });
+
+  it("treats a legacy store whose set() returns nothing as success (back-compat, no false rollback)", async () => {
+    const removed = [];
+    const backend = { name: "stub", put: async () => ({ ok: true, backendId: "d1" }), remove: async (id) => { removed.push(id); return { ok: true }; } };
+    const legacyStore = { get: () => null, getByBackend: () => null, set: () => undefined, del: () => {}, all: () => [] };
+    const a = createStorageAdapter({ backend, idMap: createIdMap(legacyStore) });
+    const r = await a.save({ planyrKey: "p/x.pdf", bytes: bytes("x") });
+    expect(r.ok).toBe(true);
+    expect(removed).toEqual([]); // no explicit {ok:false} → no rollback
+  });
 });
 
 describe("storage adapter — backend is swappable with zero consumer changes (B206/NEW-1 acceptance)", () => {
@@ -124,6 +150,13 @@ describe("link provider — one place to switch link kinds (B208/NEW-3)", () => 
     const r = await createLinkProvider({ kind: "planyr" }).link("k", "b");
     expect(r.ok).toBe(false);
   });
+  it("adapter.shareLink round-trips a mapped file to its link (what /api/files/share exposes)", async () => {
+    const a = createStorageAdapter({ backend: memoryBackend() });
+    await a.save({ planyrKey: "proj/civil/grading.pdf", bytes: bytes("g"), name: "grading.pdf" });
+    const r = await a.shareLink("proj/civil/grading.pdf");
+    expect(r.ok).toBe(true);
+    expect(r.url).toMatch(/^memory:\/\/share\//);
+  });
 });
 
 describe("drive backend — scaffold reports 'not connected' until creds (B207/NEW-2)", () => {
@@ -146,6 +179,13 @@ describe("drive backend — scaffold reports 'not connected' until creds (B207/N
     const r = await d.put({ bytes: bytes("x"), name: "x.pdf", folder: "proj/civil" });
     expect(r.ok).toBe(true);
     expect(r.backendId).toBe("drive_abc");
+  });
+  it("with a stub client, shareLink returns Drive's native webViewLink (B208 default)", async () => {
+    const client = { permitAnyoneReader: async (id) => ({ webViewLink: `https://drive.google.com/file/d/${id}/view` }) };
+    const d = driveBackend({ client });
+    const r = await d.shareLink("drive_abc");
+    expect(r.ok).toBe(true);
+    expect(r.url).toBe("https://drive.google.com/file/d/drive_abc/view");
   });
 });
 

@@ -17,7 +17,7 @@ export function memoryIdStore() {
   return {
     get: (planyrKey) => fwd.get(planyrKey) || null,
     getByBackend: (backendId) => rev.get(backendId) || null,
-    set: (planyrKey, backendId) => { fwd.set(planyrKey, backendId); rev.set(backendId, planyrKey); },
+    set: (planyrKey, backendId) => { fwd.set(planyrKey, backendId); rev.set(backendId, planyrKey); return { ok: true }; },
     del: (planyrKey) => { const b = fwd.get(planyrKey); if (b != null) rev.delete(b); fwd.delete(planyrKey); },
     all: () => [...fwd.entries()].map(([planyrKey, backendId]) => ({ planyrKey, backendId })),
   };
@@ -32,7 +32,13 @@ export function createIdMap(store = memoryIdStore()) {
     // backend id → Planyr key (used to translate a backend listing back to Planyr keys;
     // a backend object with no Planyr binding is intentionally invisible to the app).
     reverse: async (backendId) => store.getByBackend(backendId),
-    bind: async (planyrKey, backendId, meta) => store.set(planyrKey, backendId, meta),
+    // Returns { ok } so the adapter can roll back a just-saved file whose mapping didn't
+    // persist. A legacy store whose set() returns nothing is treated as success (back-compat);
+    // only an explicit { ok:false } triggers rollback.
+    bind: async (planyrKey, backendId, meta) => {
+      const r = await store.set(planyrKey, backendId, meta);
+      return r && typeof r === "object" && "ok" in r ? r : { ok: true };
+    },
     unbind: async (planyrKey) => store.del(planyrKey),
     list: async () => store.all(),
   };

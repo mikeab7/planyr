@@ -77,9 +77,14 @@ export async function onRequestPut(context) {
   const fileId = body && body.fileId;
   if (!planyrKey || !fileId) return json({ ok: false, error: "Missing planyrKey or fileId." }, 400);
 
-  // Best-effort like the multipart path's idMap.bind: the bytes are already safely in Drive; the
-  // store warns (never throws) if the mapping write fails, so this can't lose the file.
+  // Record the key↔Drive-id mapping. If it fails, the file would read back as "missing" while
+  // the upload looked like a success — the silent failure NEW-4 forbids. So delete the just-
+  // uploaded Drive file (best-effort rollback) and fail honestly; the client retries.
   const idStore = supabaseIdStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token: a.token });
-  await idStore.set(`${a.user.id}/${planyrKey}`, fileId, { name: body.name }); // mirror /api/files key scoping
+  const setRes = await idStore.set(`${a.user.id}/${planyrKey}`, fileId, { name: body.name }); // mirror /api/files key scoping
+  if (setRes && setRes.ok === false) {
+    try { const client = defaultDriveClientFactory(a.cfg.drive); if (client) await client.del(fileId); } catch (_) { /* best-effort rollback */ }
+    return json({ ok: false, error: "Uploaded to Drive but couldn't record the file; it was rolled back — please retry." }, 502);
+  }
   return json({ ok: true, planyrKey });
 }

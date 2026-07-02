@@ -60,6 +60,24 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V191 — B610: a Drive file whose key↔id mapping write FAILS reports an honest failure (not "saved ✓") and leaves no orphaned Drive copy ⏳ needs a signed-in browser + a forced mapping-write failure
+- **Added** 2026-07-02 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-07-02 (lint 0 · 2163 tests green · build green) · **Next check** — on planyr.io, signed in, with the `drive_files` write forced to fail.
+- **What was shipped:** the storage adapter's key↔Drive-id mapping write is no longer best-effort. If the `public.drive_files` write fails **after** the Drive bytes already landed, `adapter.save` rolls the bytes back (`backend.remove`) and returns a visible failure; the resumable large-file COMMIT deletes the Drive file and returns 502. Previously the upload reported success and the drawing went silently missing on next open. Can't be verified here — the whole path is auth-gated (Supabase session) + Drive-backed, and a mapping-write failure has to be induced.
+- **⏳ Steps on planyr.io (any teammate with a signed-in browser — NOT Michael's job):**
+  1. Sign in. Temporarily force the mapping write to fail — e.g. in Supabase, revoke the INSERT policy on `public.drive_files` (or rename the table) so the `drive_files` upsert returns 4xx/5xx.
+  2. In the Library (or Review), drop/file a PDF into a project. Confirm the save badge/queue shows an **honest failure** (not "saved ✓", not a silent green), and the file either falls back to Supabase or is flagged re-drop — never a phantom success.
+  3. In Google Drive, confirm **no orphaned copy** of that file was left behind (the rollback deleted it).
+  4. Restore the `drive_files` policy; re-file the same PDF; confirm it saves and a reload opens the drawing (mapping resolved).
+
+### V192 — B611: share-by-link mints a copyable Google Drive link from the Library (and fails honestly when there's nothing to share) ⏳ needs a signed-in browser with Drive enabled
+- **Added** 2026-07-02 · **Cadence** once (feature acceptance) · **Last checked** 2026-07-02 (lint 0 · 2163 tests green · build green · `test/driveShare.test.js` handler branches) · **Next check** — on planyr.io, signed in, Drive backend active.
+- **What was shipped:** a per-file **Share** button in the Library file list → an inline confirm ("anyone with this link can view · Google Drive link · un-share in Drive") → a copyable `drive.google.com` link, via the new `POST /api/files/share` endpoint routed through the storage adapter's link provider. Can't be verified here — logged-out, and the link is Drive-backed (auth + Drive both required).
+- **⏳ Steps on planyr.io (any teammate with a signed-in browser — NOT Michael's job):**
+  1. Sign in; open the **Library**; find a single filed drawing that's stored in Drive. Click **Share** → the confirm strip appears → **Create link**.
+  2. Confirm a `https://drive.google.com/…` link appears in a read-only field, **Copy** copies it, and opening it in an **incognito window** renders the PDF (i.e. the "anyone with the link" permission took).
+  3. On a file NOT in Drive (a Supabase-fallback / oversize file), confirm Share shows the honest **"this file isn't stored in Drive…"** message and produces no broken link.
+  4. On a multi-sheet (stitched) set, confirm Share shows the honest **"Planyr shares one drawing at a time… share the whole set from Drive"** message rather than linking a single sheet.
+
 ### V190 — B609: floating EPSG:2278 coordinate chip shows live easting/northing while the cursor moves ⏳ needs a located site in a real browser
 - **Added** 2026-07-02 · **Cadence** once (feature acceptance) · **Last checked** 2026-07-02 (lint 0 · 2148 tests green · build green)
 - **What was shipped:** the full-width bottom status bar in the Site Planner was removed and replaced with a floating dark glass chip (`left:10, bottom:8`, `pointerEvents:none`) that shows the cursor's EPSG:2278 (NAD83 / Texas State Plane South Central, US survey feet) easting and northing in real time. Uses `projectToGrid(origin.lat, origin.lon)` memoised as `gridOrigin`, then adds the local-feet `cursor.x / cursor.y` offset on every pointer move. The chip only renders when both `cursor` and `gridOrigin` are non-null (i.e. the site has a located origin and the cursor is over the canvas). Cannot be verified here — needs a plan with a set origin in a live browser, no auth required.
