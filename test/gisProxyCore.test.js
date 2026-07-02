@@ -70,6 +70,15 @@ describe("parseUpstream — the esri-appended path round-trips", () => {
     }
     expect(ALLOWED_GIS_HOST_RE.test("notfema.gov.evil.com")).toBe(false);
   });
+  it("B518: allows the raster-overlay hosts that were 400'ing at the proxy", () => {
+    for (const h of ["www.gis.hctx.net", "elevation.nationalmap.gov", "harcags.harcresearch.org"]) {
+      expect(ALLOWED_GIS_HOST_RE.test(h)).toBe(true);
+    }
+    // anti-spoof still holds for the new entries
+    for (const h of ["hctx.net.evil.com", "nationalmap.gov.attacker.com", "harcresearch.org.evil.com"]) {
+      expect(ALLOWED_GIS_HOST_RE.test(h)).toBe(false);
+    }
+  });
 });
 
 // B469/NEW-6 — the Fort Bend FLOODZONE host (arcgisweb.fortbendcountytx.gov) sends no CORS headers,

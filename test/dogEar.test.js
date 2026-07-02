@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize } from "../src/workspaces/site-planner/lib/dogEar.js";
+import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, bumpSidewalkSide, sidewalkSpanForBumps } from "../src/workspaces/site-planner/lib/dogEar.js";
 
 // A square host building centred at the origin, axis-aligned, 100×100.
 const host = (over = {}) => ({ cx: 0, cy: 0, w: 100, h: 100, rot: 0, ...over });
@@ -57,5 +57,51 @@ describe("dogEar — corner bump-out geometry (B362)", () => {
   it("carries the host's rotation (the box turns with the building)", () => {
     const g = dogEarGeom(host({ rot: 30 }), { side: "bottom", sign: 1 });
     expect(g.rot).toBe(30);
+  });
+});
+
+describe("bumpSidewalkSide — which perpendicular wall a corner bump lengthens (B492)", () => {
+  it("maps a top/bottom dock corner to the left/right wall by sign", () => {
+    expect(bumpSidewalkSide("top", -1)).toBe("left");
+    expect(bumpSidewalkSide("top", 1)).toBe("right");
+    expect(bumpSidewalkSide("bottom", -1)).toBe("left");
+    expect(bumpSidewalkSide("bottom", 1)).toBe("right");
+  });
+  it("maps a left/right dock corner to the top/bottom wall by sign", () => {
+    expect(bumpSidewalkSide("left", -1)).toBe("top");
+    expect(bumpSidewalkSide("right", 1)).toBe("bottom");
+  });
+});
+
+describe("sidewalkSpanForBumps — sidewalk spans the FULL building side incl. bump-outs (B492)", () => {
+  const b = { cx: 0, cy: 0, w: 600, h: 300, rot: 0 }; // docks on top/bottom
+
+  it("with no bumps the run is just the wall length, no shift", () => {
+    expect(sidewalkSpanForBumps(b, "left", [])).toEqual({ run: 300, alongShift: 0 });
+    expect(sidewalkSpanForBumps(b, "top", [])).toEqual({ run: 600, alongShift: 0 });
+  });
+
+  it("a single bump on the perpendicular wall extends the run by its projection and shifts the centre", () => {
+    // top-left bump (side=top, sign=-1) lengthens the LEFT wall at its top (−Y) end
+    const bumps = [{ side: "top", sign: -1, proj: 60 }];
+    const { run, alongShift } = sidewalkSpanForBumps(b, "left", bumps);
+    expect(run).toBe(360);          // 300 + 60
+    expect(alongShift).toBe(-30);   // centre shifts toward −Y (the extended top end) by 60/2
+  });
+
+  it("bumps at BOTH ends of a wall add up and re-centre by the difference", () => {
+    const bumps = [
+      { side: "top", sign: -1, proj: 60 },     // extends left wall at −Y end
+      { side: "bottom", sign: -1, proj: 40 },  // extends left wall at +Y end
+    ];
+    const { run, alongShift } = sidewalkSpanForBumps(b, "left", bumps);
+    expect(run).toBe(400);            // 300 + 60 + 40
+    expect(alongShift).toBe(-10);     // (40 − 60)/2 = −10 → net toward the bigger (top) bump end
+  });
+
+  it("ignores bumps that don't land on this wall", () => {
+    // a right-end (top, sign=+1) bump affects the RIGHT wall, not the left
+    expect(sidewalkSpanForBumps(b, "left", [{ side: "top", sign: 1, proj: 60 }]))
+      .toEqual({ run: 300, alongShift: 0 });
   });
 });

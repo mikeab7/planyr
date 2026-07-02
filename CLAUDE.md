@@ -181,6 +181,15 @@ server/                   # placeholder README only — NOT built or deployed; b
   build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
   involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
   of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
+  **⚠ One nudge is often NOT enough, and a PR never merges itself — BABYSIT it to `merged:true`
+  (learned 2026-06-27 on PR #379).** Automation-token pushes (PR-open + a single nudge) frequently
+  still don't fire the `pull_request` build — recent PRs have needed **two** `Nudge CI` commits — so
+  after nudging, **verify a run actually appeared** (`actions_list list_workflow_runs` for the branch
+  / `pull_request_read get_status`) and **nudge again** if not. Separately, `main` moves fast (many
+  concurrent sessions) so a PR often goes `mergeable_state:dirty` on `BACKLOG*.md`/`VERIFICATION*.md`
+  — resolve by merging `origin/main` in (keep both sides' done-entries; renumber only a genuinely
+  colliding new B#/V#), re-run the gate, push. **Poll every ~150s while a PR is open** (webhooks do
+  NOT deliver CI-success / merge / conflict transitions — always re-fetch), never on a 20-min idle tick.
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
@@ -232,6 +241,26 @@ server/                   # placeholder README only — NOT built or deployed; b
 ### Multi-workspace foundation
 - Monorepo restructure via **PR #3** (clean `main`): shell, workspace folders, coordinate stub,
   `/server` placeholder; Site Planner moved in unchanged. Build passes; real lazy-chunk split.
+- **Cross-module project connections — a schedule linked to a site (B493; also CLOSED B477).** A
+  project = a Site Planner **site group** (`group_id`); Site↔Review already share it. This wires the
+  **Schedule** in too: the canonical pairing lives on the schedule project (`linkedSiteId`/`Name`,
+  free in the `hs-v1` blob), mirrored as a lightweight HINT onto the Site Model
+  (`scheduleProjectId`/`Name`, **schema v9**, additive) so the Site Planner sees "has a schedule"
+  without booting the iframe (the two live in **separate backends** — the Shell brokers the mirror).
+  **Payoff = the top-header tabs carry the project:** `Scheduler.jsx` honors the routed `projectId`
+  (`planar:nav-select-by-site` activates the linked schedule; the active schedule pushes its
+  `linkedSiteId` back via `onProjectChange`). Land on an unlinked site → `LinkSchedulePanel`
+  resolution card (**suggest-and-confirm**, never auto-links: same-named suggestion + manual pick +
+  "Create a schedule for this site"). Bridge: `public/sequence/index.html` (nav-state carries the
+  link; inbound `nav-select-by-site`/`nav-link`/`nav-create-linked`; outbound `link-changed`),
+  `scheduler/lib/navState.js` (`findBySiteId`), `shared/projects/projectModel.js` (`suggestNameMatch`),
+  `storage.js` (`setScheduleLink`/`scheduleLinkOf`), 📅 chip in `ProjectBreadcrumb.jsx`. Headless
+  `verify-cross-module-link.mjs` (wrapper path); the live cross-iframe round-trip (Schedule's own
+  Supabase, unreachable in the sandbox) is **V152**. **Follow-up fix B561** removed a Site→Schedule
+  switch regression (flashing/placeholder/raw-id/false-conflict) by making the route↔iframe sync
+  directional (the iframe→route push-up only adopts into an *empty* route; user picks carry up via a
+  one-shot `selectSchedule`), holding the routed name as last-known-good, never surfacing the raw
+  `group_id`, and no-opping the carry-in when the schedule is already active. Harness now 11/11; V172.
 
 ### Document Review — cloud persistence
 - Persists to the **existing Supabase backend** (reuses the anon client + auth session, no new
@@ -378,6 +407,15 @@ All tools in both workspaces (and the Stitcher) flow through one shared engine i
   DocReview parity tools (Line/Polyline/Polygon/Ellipse/Arc/Dimension/Pen/Highlight/Eraser/
   Snapshot), property-set completion, Count in Site Planner, vtx-drag handles, Shift snap,
   ParcelDrawing inline calibrate. B432 (NEW-9) closes the umbrella.
+- **Shared SELECTION layer (B587/B588; in-code labels read the provisional B569/B570).** On top of the engine sits one shared selection model:
+  `shared/markup/selection.js` (pure — `pickInMarquee` crossing/window box-test, `nextSelection`
+  with Ctrl/⌘=toggle · Shift=add · plain=replace, `cornerGrips`) + `shared/markup/SelectionChrome.jsx`
+  (the ONE neutral hue-free chrome — light casing under a dark line + grips, tokens `--sel-casing`/
+  `--sel-line`). Both workspaces consume it for multi-select (Ctrl/⌘ + Shift-click), the **Marquee**
+  rail tool (a `mode` row in `tools.matrix.js`, `data-testid="tool-marquee"`), multi-move, and
+  multi-delete. Selection STATE/wiring stays per-host (different coordinate spaces); only the
+  logic/visual is shared. Site Planner covers els+markups+measures; **parcels keep their merge
+  interaction** (the one sanctioned divergence). Single-select keeps its resize/rotate handles.
 
 ## KEY DECISIONS (must persist)
 - **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
@@ -433,10 +471,22 @@ All tools in both workspaces (and the Stitcher) flow through one shared engine i
   empty-state heading, and the error-boundary label all say "Review". The **internal id stays `doc-review`**,
   the folder is `src/workspaces/doc-review/`, the route is `/markup`, and the data-model field is `markups` —
   none of those change (renaming them would orphan routes/storage). The module accent token is
-  **`--accent-review`** (JS mirror `accentReview`), amber **#EF9F27** (B419). Historical names **"Markup"**,
-  **"Document Review"**, and **"Library"** ALL mean this same module — don't treat them as separate features.
-  Distinct from this: the in-module **🗂 Files** drawer (the `FileBrowser` / `ProjectLibrary` file explorer)
-  and the Site Planner's **"Markup line/rect"** drawing tools are their own things — leave their labels alone.
+  **`--accent-review`** (JS mirror `accentReview`), amber **#EF9F27** (B419). Historical names **"Markup"**
+  and **"Document Review"** mean this same Review module — don't treat them as separate features.
+  Distinct from this: the Site Planner's **"Markup line/rect"** drawing tools are their own thing — leave
+  their labels alone.
+  - **⚠ UPDATE (B496, 2026-06-27): "Library" is now its OWN top-level workspace, NOT the Review module.**
+    The file browser (`FileBrowser`, was Review's landing screen) was lifted into a dedicated **Library** tab
+    (`src/workspaces/library/`, internal id `library`, route `#/library`, teal accent `--accent-library`
+    **#0E7490** / JS `accentLibrary`). Review is now purely "open one drawing + mark it up" — with nothing
+    open it shows a "No drawing open" empty state with a **Browse the Library** button. Clicking a file in
+    Library opens it in Review via the existing Shell `onOpenReviewInDocReview` intent. The file-storage
+    **data layer (`reviewStore`/`autofiling`/`fileIndex`) stays in `doc-review/lib`** (project-scoped,
+    canvas-independent) and Library imports it cross-workspace — no new backend/tables/keys. So pre-B496
+    text below that calls `FileBrowser` "the Document Review landing surface" now means the **Library**
+    tab. **(B542 update:)** the Site Planner's old slide-over `ProjectFilesDrawer` + its row-1
+    **🗂 Files** button were **removed as redundant** once the Library tab shipped — `ProjectFilesDrawer.jsx`
+    is deleted and the Library tab is the one and only file browser now.
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
 - **No admin / cross-user data access.** Deliberately omitted, for customer trust and

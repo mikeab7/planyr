@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  DOCK_ZONES, MAX_DOCK_ZONES, zoneDepthDefaults, zoneDepthDefault, layoutZone, layoutStack,
-  dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones,
+  DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, zoneDepthDefault, catalogDepthDefault,
+  layoutZone, layoutZoneByKind, layoutStack,
+  usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones,
 } from "../src/workspaces/site-planner/lib/dockZones.js";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -27,6 +28,25 @@ describe("zoneDepthDefaults — user-configurable, not hardcoded", () => {
   });
   it("ignores non-positive / non-numeric overrides", () => {
     expect(zoneDepthDefaults({ truckCourtD: 0, trailerParkD: -5, bufferD: "x" })).toEqual([135, 50, 15]);
+  });
+});
+
+describe("usableCourtSpan — court trims to the clear face between bump-outs (B492/B504 premise)", () => {
+  it("with no bumps the court keeps the full wall length, no shift", () => {
+    expect(usableCourtSpan(600, 0, 0)).toEqual({ along: 600, shift: 0 });
+  });
+  it("two corner bumps shorten the span by their combined projection (court excludes the bump)", () => {
+    // This is exactly why the yield loop must NOT also subtract the bump footprint (B504):
+    // the court's along-span is already trimmed past the bumps, so its area excludes them.
+    expect(usableCourtSpan(600, 55, 55)).toEqual({ along: 490, shift: 0 });
+  });
+  it("an asymmetric bump shifts the court centre toward the clear side", () => {
+    const { along, shift } = usableCourtSpan(300, 60, 0);
+    expect(along).toBe(240);
+    expect(shift).toBe(30);   // (60 - 0) / 2
+  });
+  it("never collapses below 1 ft even if bumps exceed the wall", () => {
+    expect(usableCourtSpan(100, 80, 80).along).toBe(1);
   });
 });
 
@@ -82,6 +102,138 @@ describe("layoutZone — flush-outward stacking on each side", () => {
     // bottom normal (0,1) rotated 90° → (-1, 0); centre at distance 150+67.5 along it
     expect(near(g.cx, -(150 + 135 / 2))).toBe(true);
     expect(near(g.cy, 0)).toBe(true);
+  });
+});
+
+describe("usableCourtSpan — truck court pulls in between corner bump-outs (B492)", () => {
+  it("with no bumps the court keeps the full wall, no shift", () => {
+    expect(usableCourtSpan(600, 0, 0)).toEqual({ along: 600, shift: 0 });
+  });
+  it("subtracts both corner bump spans and re-centres toward the smaller bump", () => {
+    // 55′ bump at the −end, 35′ at the +end → 600−55−35 = 510, shift = (55−35)/2 = +10
+    expect(usableCourtSpan(600, 55, 35)).toEqual({ along: 510, shift: 10 });
+  });
+  it("never collapses below 1′ even if bumps exceed the wall", () => {
+    expect(usableCourtSpan(100, 80, 80).along).toBe(1);
+  });
+});
+
+describe("layoutZone opts — the court AND the outward stack pull in together (trailer-bumpout fix)", () => {
+  const b = { cx: 0, cy: 0, w: 600, h: 300, rot: 0 }; // docks top/bottom
+  const depths = [135, 50, 15];
+
+  it("court honours opts.along + opts.alongShift; full wall when omitted (back-compat)", () => {
+    expect(layoutZone(b, "bottom", 0, depths).w).toBe(600);            // 4-arg → unchanged
+    const g = layoutZone(b, "bottom", 0, depths, { along: 510, alongShift: 10 });
+    expect(g.w).toBe(510);                                             // pulled in
+    expect(g.cx).toBeCloseTo(10, 6);                                   // shifted +X along the wall
+    expect(g.cy).toBeCloseTo(150 + 135 / 2, 6);                        // depth/position unchanged
+  });
+
+  it("trailer (zone 1) ALSO pulls in with the override, so it tracks the court span + shift", () => {
+    const t = layoutZone(b, "bottom", 1, depths, { along: 510, alongShift: 10 });
+    expect(t.w).toBe(510);                                             // matches the court, not full 600
+    expect(t.cx).toBeCloseTo(10, 6);                                   // shares the court's centre shift
+    expect(t.cy).toBeCloseTo(150 + 135 + 50 / 2, 6);                   // depth/position unchanged
+  });
+
+  it("buffer (zone 2) ALSO pulls in with the override — the whole stack stays aligned", () => {
+    const bf = layoutZone(b, "bottom", 2, depths, { along: 510, alongShift: 10 });
+    expect(bf.w).toBe(510);
+    expect(bf.cx).toBeCloseTo(10, 6);
+  });
+
+  it("with NO override every zone keeps the full wall (un-bumped sides are unchanged)", () => {
+    expect(layoutZone(b, "bottom", 1, depths).w).toBe(600);
+    expect(layoutZone(b, "bottom", 2, depths).w).toBe(600);
+  });
+
+  it("on a vertical dock side the court AND trailer pull in along Y", () => {
+    const tall = { cx: 0, cy: 0, w: 300, h: 600, rot: 0 }; // docks left/right
+    const g = layoutZone(tall, "right", 0, depths, { along: 520, alongShift: -10 });
+    expect(g.h).toBe(520);                 // court (strip) lays `along` on its h axis
+    expect(g.cy).toBeCloseTo(-10, 6);      // shifted −Y
+    const t = layoutZone(tall, "right", 1, depths, { along: 520, alongShift: -10 });
+    expect(t.w).toBe(520);                 // trailer is rotated 90° → `along` is its w; matches the court
+    expect(t.rot).toBe(90);
+    expect(t.cy).toBeCloseTo(-10, 6);      // shares the court's centre shift along the wall
+  });
+});
+
+describe("ZONE_CATALOG — the appendable-layer catalog (B495)", () => {
+  it("has the four owner-requested layer types plus the dock-sequence members", () => {
+    for (const k of ["court", "trailer", "buffer", "sidewalk", "parking", "road"]) expect(ZONE_CATALOG[k]).toBeTruthy();
+  });
+  it("a road is TERMINAL (nothing stacks behind it); trailer/court are dock-only", () => {
+    expect(ZONE_CATALOG.road.terminal).toBe(true);
+    expect(ZONE_CATALOG.buffer.terminal).toBe(false);
+    expect(ZONE_CATALOG.trailer.sides).toBe("dock");
+    expect(ZONE_CATALOG.court.sides).toBe("dock");
+    expect(ZONE_CATALOG.parking.sides).toBe("nondock");
+    expect(ZONE_CATALOG.buffer.sides).toBe("any");
+    expect(ZONE_CATALOG.road.sides).toBe("any");
+  });
+  it("a landscape buffer is the SAME element type tagged buffer (one concept, not two)", () => {
+    expect(ZONE_CATALOG.buffer.elType).toBe("landscape");
+    expect(ZONE_CATALOG.buffer.tag).toEqual({ buffer: true });
+  });
+  it("catalogDepthDefault honours a per-plan override, else the built-in fallback", () => {
+    expect(catalogDepthDefault("buffer", {})).toBe(15);
+    expect(catalogDepthDefault("buffer", { bufferD: 30 })).toBe(30);
+    expect(catalogDepthDefault("road", {})).toBe(24);      // a road's default is its TRAVEL width
+    expect(catalogDepthDefault("sidewalk", {})).toBe(5);
+  });
+});
+
+describe("layoutZoneByKind — generalized chain layout (B495)", () => {
+  const b = { cx: 0, cy: 0, w: 600, h: 300, rot: 0 }; // docks top/bottom
+  const near = (a, c, eps = 1e-6) => Math.abs(a - c) < eps;
+
+  it("is byte-identical to layoutZone for the default [strip,trailer,strip] dock sequence", () => {
+    const depths = [135, 50, 15];
+    const kinds = ["strip", "trailer", "strip"];
+    for (const i of [0, 1, 2]) {
+      expect(layoutZoneByKind(b, "bottom", i, depths, kinds)).toEqual(layoutZone(b, "bottom", i, depths));
+      expect(layoutZoneByKind(b, "left", i, depths, kinds)).toEqual(layoutZone(b, "left", i, depths));
+    }
+  });
+
+  it("lays a heterogeneous chain court→trailer→buffer→road flush + gap-free on a horizontal wall", () => {
+    const depths = [135, 50, 15, 25];                    // road depth = 24 travel + 2×0.5 curb
+    const kinds = ["strip", "trailer", "strip", "strip"];
+    const g = [0, 1, 2, 3].map((i) => layoutZoneByKind(b, "bottom", i, depths, kinds));
+    expect(g.map((z) => z.w)).toEqual([600, 600, 600, 600]); // every layer spans the full wall
+    expect(g.map((z) => z.h)).toEqual([135, 50, 15, 25]);
+    const far = (z) => z.cy + z.h / 2, near0 = (z) => z.cy - z.h / 2;
+    expect(near(near0(g[0]), 150)).toBe(true);            // court hugs the wall face
+    expect(near(near0(g[1]), far(g[0]))).toBe(true);      // each sits flush beyond the prior
+    expect(near(near0(g[2]), far(g[1]))).toBe(true);
+    expect(near(near0(g[3]), far(g[2]))).toBe(true);      // the road sits flush beyond the buffer
+    expect(g[3].rot).toBe(0);
+  });
+
+  it("on a vertical wall the trailer rotates 90° and the road runs along the wall", () => {
+    const tall = { cx: 0, cy: 0, w: 300, h: 600, rot: 0 }; // docks left/right
+    const depths = [135, 50, 15, 25];
+    const kinds = ["strip", "trailer", "strip", "strip"];
+    const road = layoutZoneByKind(tall, "right", 3, depths, kinds);
+    expect(road.h).toBe(600);   // full wall length along the tall axis
+    expect(road.w).toBe(25);    // its depth out from the wall
+    expect(road.rot).toBe(0);
+    expect(near(road.cx, 150 + 135 + 50 + 15 + 25 / 2)).toBe(true); // flush beyond court+trailer+buffer
+  });
+});
+
+describe("strandedZoneIds — cascades onto prevZone-appended layers (B495)", () => {
+  it("a stranded court drags its appended road off the wrong side", () => {
+    // built wide (docks top/bottom) with a court+road appended on top, then reshaped tall
+    const tall = { id: "b1", type: "building", w: 580, h: 664, dock: "cross" }; // docks now left/right
+    const els = [
+      tall,
+      { id: "c", type: "paving", attachedTo: "b1", truckCourt: { side: "top" }, zd: 135 },
+      { id: "r", type: "road", attachedTo: "b1", prevZone: "c", stackSide: "top", zd: 25 },
+    ];
+    expect(strandedZoneIds(els, tall).sort()).toEqual(["c", "r"]);
   });
 });
 
@@ -142,6 +294,37 @@ describe("footprintDepth — building depth is the dock-normal span, never the f
     const els = [b, ...stackOn("b1", "left"), ...stackOn("b1", "right")];
     // even with 135′ courts bonded on, the building's depth is its own 580′ footprint span
     expect(footprintDepth(els.find((e) => e.id === "b1"))).toBe(580);
+  });
+});
+
+describe("footprintAxes / footprintLength — the dock-parallel counterpart of depth (B548)", () => {
+  it("resolves depth and length to the two perpendicular footprint axes, dock-relative", () => {
+    // The EXACT reported case — el.w 328 × el.h 1159: h>w → docks ride left/right → depth is the
+    // horizontal (w) span = 328, length the vertical (h) span = 1159. The panel must read
+    // Length 1159 / Depth 328, never the old transposed Depth 1159.
+    const tall = { w: 328, h: 1159, dock: "single" };
+    expect(footprintAxes(tall)).toEqual({ depth: "w", length: "h" });
+    expect(footprintDepth(tall)).toBe(328);
+    expect(footprintLength(tall)).toBe(1159);
+    // Same footprint laid the other way — el.w 1159 × el.h 328: w>h → docks ride top/bottom →
+    // depth is the vertical (h) span = 328, length the horizontal (w) span = 1159.
+    const wide = { w: 1159, h: 328, dock: "single" };
+    expect(footprintAxes(wide)).toEqual({ depth: "h", length: "w" });
+    expect(footprintDepth(wide)).toBe(328);
+    expect(footprintLength(wide)).toBe(1159);
+  });
+  it("length is the dock-parallel (long) wall in both cross-dock orientations", () => {
+    expect(footprintLength({ w: 580, h: 664, dock: "cross" })).toBe(664);
+    expect(footprintLength({ w: 664, h: 580, dock: "cross" })).toBe(664);
+  });
+  it("depth and length are exactly the element's two axes — no value invented, area preserved", () => {
+    const b = { w: 328, h: 1159, dock: "cross" };
+    expect(footprintDepth(b) * footprintLength(b)).toBe(328 * 1159);
+  });
+  it("single-load: length runs along the dock wall, depth dock-wall→rear", () => {
+    const b = { w: 664, h: 580, dock: "single", dockSide: "bottom" }; // docks on the bottom (long, horizontal) wall
+    expect(footprintLength(b)).toBe(664); // the frontage the doors array along
+    expect(footprintDepth(b)).toBe(580);  // dock-wall → rear-wall
   });
 });
 

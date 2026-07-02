@@ -41,15 +41,30 @@ describe("geocodeAddress (B384) — shared Esri-first, Nominatim-fallback geocod
     expect(hit).toEqual({ lat: 30.0, lon: -95.0, label: "Fallback" });
   });
 
-  it("returns null when both services miss", async () => {
+  it("returns null when both services were REACHED but miss (genuinely not found)", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url) =>
       url.includes("geocode.arcgis.com") ? ok({ candidates: [] }) : ok([])));
     expect(await geocodeAddress("???", center)).toBeNull();
   });
 
-  it("returns null and never throws when fetch rejects outright", async () => {
+  it("B540: returns { error } (not null) when NO service is reachable — never throws", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down"); }));
-    expect(await geocodeAddress("anything", center)).toBeNull();
+    const r = await geocodeAddress("anything", center);
+    expect(r).not.toBeNull();
+    expect(typeof r.error).toBe("string");
+    expect(r.error.length).toBeGreaterThan(0);
+  });
+
+  it("B540: a non-OK from BOTH providers is 'unreachable' ({ error }), not 'not found'", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => bad()));
+    const r = await geocodeAddress("x", center);
+    expect(r && r.error).toBeTruthy();
+  });
+
+  it("B540: reached one provider (Esri OK, empty) then the other threw → null (authoritatively not found)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url) =>
+      url.includes("geocode.arcgis.com") ? ok({ candidates: [] }) : (() => { throw new Error("nom down"); })()));
+    expect(await geocodeAddress("???", center)).toBeNull();
   });
 
   it("works without a centre (no bias params)", async () => {

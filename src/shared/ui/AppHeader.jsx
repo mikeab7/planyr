@@ -50,8 +50,8 @@ const LINE   = "var(--chrome-divider)";
 const TAB_IDLE = "var(--chrome-tab-inactive)";
 // Per-module accent: the FILL (the 2px underline) is fixed in both themes; the active
 // tab TEXT uses the -text token, which swaps by theme (sits on chrome). (B318)
-const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)" };
-const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)" };
+const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)", "library": "var(--accent-library)" };
+const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)", "library": "var(--accent-library-text)" };
 
 // The Light/Dark/System picker now lives in the account → Settings panel (B389, AuthPanel)
 // for signed-in users. The row-1 gear below is kept ONLY when signed out, so a logged-out
@@ -140,6 +140,17 @@ const MODULES = [
       </>
     ),
   },
+  {
+    id: "library",
+    label: "Library",
+    // simplified ti-folders / stacked-files outline (16×16 viewBox)
+    icon: (
+      <>
+        <path d="M2.5 5.5l2-1.5h3l1 1.5h4.5v7.5a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1z" />
+        <line x1="2.5" y1="8" x2="13.5" y2="8" />
+      </>
+    ),
+  },
 ];
 
 // One module tab. Inactive tabs are full-opacity and legible (never dimmed/disabled);
@@ -205,6 +216,25 @@ function useMultiTab(projectId) {
   return state;
 }
 
+// Phone-width gate (B113 amendment, V11). Mirrors the planner's own `narrow` breakpoint
+// (max-width 760px) so the shared header and the planner body flip to mobile together.
+// On a phone the two-row header overran 390px and CLIPPED its controls (the project/plan
+// switcher, the save badge, and the whole Row-2 toolbar — only "…cels" + "File ▾" survived):
+// the flex zones compressed to slivers under `overflow:hidden`, hiding reachable controls.
+// Below the breakpoint we let each row SCROLL SIDEWAYS instead (the owner's explicit ask:
+// "scroll sideways, not wrap onto two lines"), so nothing is lost — you swipe to reach it.
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } });
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
+  return narrow;
+}
+
 export default function AppHeader({
   module = "site-planner",
   onSwitch,
@@ -224,6 +254,10 @@ export default function AppHeader({
   currentProject = null,
   onSelectProject,
   onNewProject,
+  // Optional trailing breadcrumb crumb rendered right after the project crumb (e.g. the
+  // Site Planner's plan switcher). Keeps the project name in ONE place — the breadcrumb —
+  // while a workspace-specific sub-selector (the plan) sits beside it: Map / Project / Plan.
+  planSlot,
   saveState,
   // Cloud-sync badge (NEW-1): the workspace hands the badge an optional retry action and a
   // custom popover message (e.g. "reload to merge" for a conflict). Both are optional — the
@@ -251,6 +285,12 @@ export default function AppHeader({
   const [fullscreen, setFullscreen] = useState(false);
   const { resolved } = useTheme();
   const multiTab = useMultiTab(accountActive && currentProject ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only)
+  const narrow = useNarrow(); // V11 — phone-width header: scroll each row sideways instead of clipping its controls
+  // On a phone, let a header row scroll horizontally and keep its zones at natural width
+  // (no flex-shrink → no clipped slivers). On desktop these are no-ops, so the layout is
+  // byte-identical above the breakpoint.
+  const rowScroll = narrow ? { overflowX: "auto", overflowY: "hidden" } : null;
+  const zoneFixed = narrow ? { flex: "0 0 auto" } : null; // don't let a zone compress its content away
 
   useEffect(() => {
     const handle = (e) => {
@@ -306,10 +346,10 @@ export default function AppHeader({
       }}
     >
       {/* ── Row 1 — 35px (−20% from 44 per B169; contents stay vertically centered) ── */}
-      <div style={{ height: 35, display: "flex", alignItems: "center" }}>
+      <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 35, display: "flex", alignItems: "center", ...rowScroll }}>
 
         {/* Left zone */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0 }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...zoneFixed }}>
           {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
               Also a secondary route to the Dashboard (the labeled crumb is primary, B192). */}
           <button
@@ -322,7 +362,8 @@ export default function AppHeader({
               padding: "2px 4px", borderRadius: 6,
             }}
           >
-            <BrandMark size={20} tile={false} wordmark surface={resolved === "dark" ? "dark" : "light"} />
+            {/* Phone: just the mark (no wordmark) — reclaims width so the breadcrumb + switcher fit. */}
+            <BrandMark size={20} tile={false} wordmark={!narrow} surface={resolved === "dark" ? "dark" : "light"} />
           </button>
 
           {/* Project breadcrumb / switcher (B191–B193) — immediately right of the wordmark */}
@@ -341,25 +382,30 @@ export default function AppHeader({
                 projects={projects}
                 homeLabel={homeLabel}
                 cross={cross}
+                planSlot={planSlot}
               />
             </>
           )}
         </div>
 
-        {/* Center zone — project name */}
+        {/* Center zone — project name. On desktop it's capped at 40% so it stays optically
+            centered; on a phone that cap squeezes the site/plan switcher, so let it take its
+            natural width and ride the row's sideways scroll instead. */}
         <div
           style={{
             display: "flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0, maxWidth: "40%", padding: "0 8px",
+            flexShrink: 0, maxWidth: narrow ? "none" : "40%", padding: "0 8px",
           }}
         >
           {centerContent}
         </div>
 
-        {/* Right zone — cloud-sync badge · settings · auth */}
+        {/* Right zone — cloud-sync badge · settings · auth. On narrow use `1 0 auto`: still
+            GROWS to pin the auth pill rightward when the row has slack, but never SHRINKS its
+            controls into clipped slivers when it overflows (then the row scrolls instead). */}
         <div
           style={{
-            flex: 1, display: "flex", alignItems: "center",
+            flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
             justifyContent: "flex-end", gap: 6, paddingRight: 12,
           }}
         >
@@ -382,36 +428,44 @@ export default function AppHeader({
            overlapping — never absolute positioning. With NO center slot (Site/Review) the
            original 2-zone tabs|toolbar layout renders unchanged. */}
       {toolbarCenter ? (
-        <div style={{ minHeight: 44, display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 2, borderTop: `1px solid ${LINE}` }}>
+        // On narrow, scroll sideways (nowrap) instead of wrapping to a 2nd line — the owner's
+        // explicit ask. Above the breakpoint the original wrap layout is untouched.
+        <div className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 44, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", rowGap: 2, borderTop: `1px solid ${LINE}`, ...rowScroll }}>
           {/* Left zone — module tabs (flex:1, basis 0 — mirrors Row 1 so the center is
               TRULY centered regardless of how wide the tabs vs the toolbar are) */}
-          <div style={{ display: "flex", alignItems: "stretch", alignSelf: "stretch", paddingLeft: 4, flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "stretch", alignSelf: "stretch", paddingLeft: 4, flex: narrow ? "0 0 auto" : 1, minWidth: 0 }}>
             {moduleTabButtons}
           </div>
-          {/* Center zone — workspace-supplied center group (shrink-to-content) */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "0 1 auto", minWidth: 0, gap: 4, padding: "0 8px" }}>
+          {/* Center zone — workspace-supplied center group (shrink-to-content). Narrow: don't
+              shrink (ride the row scroll); desktop keeps its original shrinkable `0 1 auto`. */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: narrow ? "0 0 auto" : "0 1 auto", minWidth: 0, gap: 4, padding: "0 8px" }}>
             {toolbarCenter}
           </div>
-          {/* Right zone — toolbar slot (flex:1 end, mirrors Row 1's right zone) */}
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: 0, gap: 4, overflow: "hidden" }}>
+          {/* Right zone — toolbar slot (flex:1 end, mirrors Row 1's right zone). Narrow: keep
+              natural width + show overflow so the row scrolls rather than clipping the tools. */}
+          <div style={{ flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: narrow ? "auto" : 0, gap: 4, overflow: narrow ? "visible" : "hidden" }}>
             {toolbarContent}
           </div>
         </div>
       ) : (
-        <div style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}` }}>
+        <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}`, ...rowScroll }}>
 
           {/* Module tabs */}
           <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
             {moduleTabButtons}
           </div>
 
-          {/* Toolbar slot */}
+          {/* Toolbar slot. On a phone the workspace toolbar (undo/redo/snap/select/File…) is
+              wider than the screen; desktop clips it with overflow:hidden + flex-shrink, which
+              hid every control left of "File ▾". On narrow we instead let the row scroll: the
+              slot keeps natural width (flex 1 0 auto — grows to pin right with slack, never
+              shrinks) and shows its overflow so swiping reveals the hidden tools. */}
           <div
             style={{
-              flex: 1, display: "flex", alignItems: "center",
+              flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
               justifyContent: "flex-end", paddingRight: 6,
-              minWidth: 0, gap: 4,
-              overflow: "hidden",
+              minWidth: narrow ? "auto" : 0, gap: 4,
+              overflow: narrow ? "visible" : "hidden",
             }}
           >
             {toolbarContent}
@@ -422,7 +476,7 @@ export default function AppHeader({
     {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
         Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}
     {accountActive && multiTab.conflictRisk && (
-      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: 660, display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
+      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(660px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
         <span>⧉ This project is open in <b>another tab</b>. Only one tab can edit at a time; the others are <b>read-only</b> until you take over editing there or close them.</span>
       </div>
     )}

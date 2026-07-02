@@ -6,4 +6,5 @@ export const MODULE_ACCENT = {
   "site-planner": "#1D9E75",
   "scheduler":    "#7F77DD",
   "doc-review":   "#EF9F27",
+  "library":      "#0E7490",
 };

@@ -27,10 +27,13 @@ export const canCommitMeasure = (kind, n) => (n || 0) >= (MIN_MEASURE_PTS[kind] 
 export function measureValue(m, ftPerUnit) {
   const cal = !!ftPerUnit;
   const pts = (m && m.pts) || []; // guard degenerate/empty point sets
-  if (m.kind === "distance") {
-    if (pts.length < 2) return { kind: "distance", calibrated: false, lengthFt: null, raw: 0 };
+  if (m.kind === "distance" || m.kind === "dimension") {
+    // `dimension` is distance + witness ticks (a Bluebeam-style annotation): same length
+    // calc as distance, but keep its own kind so callers still render the ticked variant.
+    // (B510 — without this branch a Dimension fell through and its label read "—".)
+    if (pts.length < 2) return { kind: m.kind, calibrated: false, lengthFt: null, raw: 0 };
     const u = dist(pts[0], pts[1]);
-    return { kind: "distance", calibrated: cal, lengthFt: cal ? u * ftPerUnit : null, raw: u };
+    return { kind: m.kind, calibrated: cal, lengthFt: cal ? u * ftPerUnit : null, raw: u };
   }
   if (m.kind === "polylength") {
     const u = pathLength(pts, false);

@@ -11,6 +11,7 @@
 // interior point of the new ground farthest from any edge. A coarse grid finds the deepest
 // cell, then a local grid refines it. Pure (world-feet in / world-feet out), no React/DOM,
 // so it unit-tests without a browser. Screening-grade placement, not survey geometry.
+import { offsetInward, ringsArea, maxInwardOffset } from "./pondOffset.js";
 
 // Even-odd ray cast: is point `pt` inside ring `ring` (array of {x,y})?
 export const pointInRing = (pt, ring) => {
@@ -77,4 +78,92 @@ export function addedAreaLabelPoint(expanded, baseline, opts = {}) {
   const r = search(c.x - cw, c.y - ch, c.x + cw, c.y + ch, fine);
   const best = r && r.d >= c.d ? r : c;
   return { x: best.x, y: best.y };
+}
+
+// ---------------------------------------------------------------------------
+// Stage contour lines (the "topographic" depth rings drawn inside a detention
+// pond). A pond is drawn TOP-OF-BANK and tapers inward at `slope`:1, so the ring
+// at depth `down` below the top is the footprint offset INWARD by slope*down. That
+// offset must be a ROBUST topology op — clipper-lib's offsetInward (pondOffset.js) —
+// not a per-edge miter, so acute corners don't spike, a narrowing tail pinches off,
+// and a split basin returns multiple rings. Pure: world-feet in, world-feet out.
+// ---------------------------------------------------------------------------
+
+const ringCentroidAvg = (r) => { let x = 0, y = 0; for (const p of r) { x += p.x; y += p.y; } return { x: x / r.length, y: y / r.length }; };
+
+// Smart contour interval (ft): aim for ~4–6 rings across the basin depth so a shallow
+// pond gets 1-ft lines and a deep one doesn't crowd. User-overridable via det.contourInterval.
+export function autoContourInterval(depth) {
+  const d = depth > 0 ? depth : 8;
+  if (d <= 6) return 1;
+  if (d <= 12) return 2;
+  return 3;
+}
+
+// Build the stack of stage contours for a pond footprint `ring` (top-of-bank, world feet).
+// Returns levels top→bottom; each level carries `rings` — an ARRAY of result rings, since a
+// robust inward offset can split the basin (multiple pools) or pinch it off (none). Stops
+// the moment the offset returns nothing, and reports feasibility: a footprint can only grade
+// to `maxDepth = maxInwardOffset(ring)/slope` before opposing slopes meet.
+export function pondContours(ring, det = {}, opts = {}) {
+  const depth = det.depth != null ? det.depth : 8;
+  const freeboard = det.freeboard != null ? det.freeboard : 1;
+  const slope = det.slope != null ? det.slope : 3;
+  const interval = Math.max(0.5, det.contourInterval || autoContourInterval(depth));
+  const tobElev = det.tobElev;
+  const hasElev = tobElev != null && isFinite(tobElev);
+  const EPS = 0.05;
+  const maxDepth = slope > 0 ? maxInwardOffset(ring) / slope : 0;
+  const out = { levels: [], collapsedAt: null, feasible: depth <= maxDepth + EPS, maxDepth, meta: { depth, freeboard, slope, interval } };
+  if (!Array.isArray(ring) || ring.length < 3) return out;
+
+  // Depths below top to draw: the interval grid, plus the water surface and the bottom
+  // always (they carry the emphasis), de-duped within EPS so they don't double a grid line.
+  const downs = [0];
+  for (let d = interval; d < depth - EPS; d += interval) downs.push(d);
+  if (freeboard > EPS && freeboard < depth - EPS) downs.push(freeboard);
+  downs.push(depth);
+  downs.sort((a, b) => a - b);
+  const uniq = [];
+  for (const d of downs) { if (d < -EPS) continue; if (!uniq.length || d - uniq[uniq.length - 1] > EPS) uniq.push(d); }
+
+  const elevOf = (down) => (hasElev ? tobElev - down : undefined);
+  for (const down of uniq) {
+    if (down <= EPS) {
+      out.levels.push({ down: 0, rings: [ring], area: ringsArea([ring]), isWater: freeboard <= EPS, isBottom: depth <= EPS, elev: elevOf(0) });
+      continue;
+    }
+    const rings = offsetInward(ring, slope * down);
+    // Pinch-off: the side slopes have met — nothing exists at this depth or deeper. Stop.
+    if (!rings.length) { out.collapsedAt = down; break; }
+    out.levels.push({
+      down,
+      rings,
+      area: ringsArea(rings),
+      isWater: Math.abs(down - freeboard) <= EPS,
+      isBottom: Math.abs(down - depth) <= EPS,
+      elev: elevOf(down),
+    });
+  }
+  return out;
+}
+
+// Where to seat a contour's depth/elevation label: the ring's extreme vertex on the chosen
+// side (top/bottom/left/right), nudged a hair inward so it sits just inside the line. Anchoring
+// the water ring to the TOP and the bottom ring to the BOTTOM keeps the two callouts apart and
+// reads intuitively (water surface high, floor low), clear of the centred pond name. Returns
+// {x,y} (world feet) or null.
+export function contourLabelPoint(contourRing, anchor = "top") {
+  if (!Array.isArray(contourRing) || contourRing.length < 3) return null;
+  const c = ringCentroidAvg(contourRing);
+  let best = contourRing[0];
+  for (const p of contourRing) {
+    if (anchor === "bottom") { if (p.y > best.y) best = p; }
+    else if (anchor === "left") { if (p.x < best.x) best = p; }
+    else if (anchor === "right") { if (p.x > best.x) best = p; }
+    else if (p.y < best.y) best = p; // "top" (default)
+  }
+  const dx = c.x - best.x, dy = c.y - best.y, L = Math.hypot(dx, dy) || 1;
+  const n = Math.min(10, L * 0.4);
+  return { x: best.x + (dx / L) * n, y: best.y + (dy / L) * n };
 }

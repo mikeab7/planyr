@@ -31,6 +31,23 @@ export function hitMarkup(m, p, tol, markerTol = tol) {
   const kind = m.kind;
   if (kind === "count") return pts.some((q) => dist(p, q) <= markerTol);
   if (pts.length === 1) return dist(p, pts[0]) <= markerTol;       // text / callout anchor
+  // B521: a closed box (rect/ellipse/cloud/snapshot) is commonly stored as two OPPOSITE corners
+  // (the Document Review form). With only 2 pts the ring branches below were skipped, leaving just
+  // the diagonal segment hittable — the rendered shape was almost entirely un-clickable. Expand it
+  // to its real geometry: the axis-aligned box interior + outline (ellipse via its own equation).
+  if (isClosed(kind) && pts.length === 2) {
+    const x0 = Math.min(pts[0].x, pts[1].x), x1 = Math.max(pts[0].x, pts[1].x);
+    const y0 = Math.min(pts[0].y, pts[1].y), y1 = Math.max(pts[0].y, pts[1].y);
+    if (kind === "ellipse") {
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      const rx = Math.max(1e-9, (x1 - x0) / 2), ry = Math.max(1e-9, (y1 - y0) / 2);
+      return Math.hypot((p.x - cx) / rx, (p.y - cy) / ry) <= 1 + tol / Math.min(rx, ry); // interior + screen-space outline band
+    }
+    const box = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+    if (pointInPoly(p, box)) return true;
+    for (let i = 0; i < 4; i++) if (projToSeg(p, box[i], box[(i + 1) % 4]).d <= tol) return true;
+    return false;
+  }
   const closed = isClosed(kind) && pts.length >= 3;
   if (closed && pointInPoly(p, pts)) return true;                  // interior of a filled ring
   for (let i = 1; i < pts.length; i++) if (projToSeg(p, pts[i - 1], pts[i]).d <= tol) return true;

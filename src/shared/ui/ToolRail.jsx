@@ -13,7 +13,10 @@
  */
 import { Fragment } from "react";
 
-const CHROME = "#191613", INK = "#ece7db", MUTED = "#9b9482";
+// B526: theme tokens, not a permanently-dark slab — a fixed dark rail between light chrome in
+// light mode is the eye-strain case B318 forbids. (Active-button text stays near-black: it sits
+// on the light amber module accent, where near-black reads well in both themes.)
+const CHROME = "var(--surface-raised)", INK = "var(--text-primary)", MUTED = "var(--text-secondary)";
 
 export function RailButton({ icon, label, title, active, accent, onClick, onDoubleClick, disabled, "data-testid": testId }) {
   return (
@@ -35,10 +38,10 @@ export function RailButton({ icon, label, title, active, accent, onClick, onDoub
 
 export default function ToolRail({ items = [], accent = "#EF9F27", width = 64, style, "data-testid": testId }) {
   return (
-    <div data-testid={testId} style={{ flex: "none", width, background: CHROME, borderLeft: "1px solid #2e2a23", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 2, padding: "6px 5px", overflowY: "auto", ...style }}>
+    <div data-testid={testId} style={{ flex: "none", width, background: CHROME, borderLeft: "1px solid var(--border-default)", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 2, padding: "6px 5px", overflowY: "auto", ...style }}>
       {items.map((it, i) => {
         if (!it) return null;
-        if (it.kind === "divider") return <div key={i} style={{ height: 1, background: "rgba(255,255,255,0.10)", margin: "4px 4px" }} />;
+        if (it.kind === "divider") return <div key={i} style={{ height: 1, background: "var(--border-default)", margin: "4px 4px" }} />;
         if (it.kind === "spacer") return <div key={i} style={{ flex: 1, minHeight: 6 }} />;
         if (it.kind === "header") return <div key={i} style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: MUTED, textAlign: "center", padding: "3px 0 1px" }}>{it.label}</div>;
         if (it.kind === "node") return <Fragment key={i}>{it.render}</Fragment>;

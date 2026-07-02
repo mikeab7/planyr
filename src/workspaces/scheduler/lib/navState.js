@@ -31,7 +31,14 @@ export function sanitizeProjects(list) {
   if (!Array.isArray(list)) return [];
   return list
     .filter((p) => p && typeof p === "object")
-    .map((p) => ({ id: p.id ?? null, name: p.name }));
+    // linkedSiteId/Name (cross-module link) ride along ONLY when the schedule is actually linked,
+    // so the shell can map a schedule project ↔ a Site Planner project (group_id). An unlinked
+    // schedule keeps the exact prior {id,name} shape — no null-field noise, existing tests green.
+    .map((p) => {
+      const out = { id: p.id ?? null, name: p.name };
+      if (p.linkedSiteId != null) { out.linkedSiteId = p.linkedSiteId; out.linkedSiteName = p.linkedSiteName ?? null; }
+      return out;
+    });
 }
 
 // Parse an inbound window message into the shell's nav state, or null when it isn't
@@ -54,4 +61,13 @@ export function deriveCurrentProject(projects, activeId, section) {
   if (section === "reports") return null;
   if (!Array.isArray(projects)) return null;
   return projects.find((p) => p && p.id === activeId) || null;
+}
+
+// The schedule project linked to a given Site Planner project (group_id), or null. Drives the
+// project-aware header tabs: when the route carries #/project/<gid>/schedule, this finds which
+// schedule to activate. Pure + null-safe; returns the single match (a group_id maps to at most
+// one schedule), or null when nothing is linked yet → the shell shows the "create / link" panel.
+export function findBySiteId(projects, siteId) {
+  if (siteId == null || !Array.isArray(projects)) return null;
+  return projects.find((p) => p && p.linkedSiteId != null && p.linkedSiteId === siteId) || null;
 }

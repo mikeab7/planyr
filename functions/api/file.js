@@ -53,5 +53,10 @@ export async function onRequestPost(context) {
 
   let body = {};
   try { body = await resp.json(); } catch (_) { /* non-JSON */ }
-  return json(body && Object.keys(body).length ? body : { ok: false, error: `Auto-filing service HTTP ${resp.status}` }, resp.status);
+  // B523: clamp the forwarded status — a no-body upstream status (204/304/1xx) would throw in the
+  // Response constructor (uncaught → platform 500). An empty body is itself a failure, so report it
+  // as 502 rather than a self-contradicting "ok:false … HTTP 200".
+  const hasBody = body && Object.keys(body).length;
+  const st = (resp.status >= 200 && resp.status <= 599 && resp.status !== 204 && resp.status !== 304 && hasBody) ? resp.status : 502;
+  return json(hasBody ? body : { ok: false, error: `Auto-filing service HTTP ${resp.status}` }, st);
 }

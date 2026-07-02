@@ -10,8 +10,12 @@ import { supabase } from "./supabase.js";
 
 // Where Supabase sends the user back after email confirmation / password reset.
 // Must be allow-listed in Supabase → Auth → URL Configuration → Redirect URLs.
+// Pin to the bare origin root ("https://planyr.io/") rather than the live pathname:
+// the app always boots from "/" and reads the auth params client-side, so a stable,
+// allow-listed target avoids ever sending the callback to a path the front-door
+// redirect (index.html) doesn't special-case.
 const redirectTo = (() => {
-  try { return window.location.origin + window.location.pathname; } catch (_) { return undefined; }
+  try { return window.location.origin + "/"; } catch (_) { return undefined; }
 })();
 
 const errMsg = (e) => (e && e.message) || null;

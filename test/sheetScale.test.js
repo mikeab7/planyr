@@ -21,6 +21,18 @@ describe("parseSheetScale — Document Review stated-scale auto-calibration (B26
     expect(parseSheetScale("1 : 100").ftPerInch).toBeCloseTo(8.333, 2);
   });
 
+  // B512: a rise:run SLOPE/grade callout or a clock time on the sheet body must NOT be misread
+  // as the drawing scale (it silently mis-calibrated the whole stitched group).
+  it("does NOT read a slope/grade ratio or a clock time as the drawing scale (B512)", () => {
+    expect(parseSheetScale("MAX SLOPE 1:4")).toBeNull();
+    expect(parseSheetScale("1:3 TYP")).toBeNull();
+    expect(parseSheetScale("GRADE 1:50")).toBeNull();
+    expect(parseSheetScale("MEETING AT 1:30 PM")).toBeNull();
+    // a real stated scale still parses, even with the word SCALE in front
+    expect(parseSheetScale("SCALE 1:200").ftPerInch).toBeCloseTo(16.667, 2);
+    expect(parseSheetScale("1:100").ftPerInch).toBeCloseTo(8.333, 2);
+  });
+
   it("flags an explicit NOT TO SCALE / NTS / AS NOTED (distinct from no-scale)", () => {
     expect(parseSheetScale("SCALE: NOT TO SCALE")).toEqual({ explicit: "nts", label: "NOT TO SCALE" });
     expect(parseSheetScale("N.T.S.")).toMatchObject({ explicit: "nts" });

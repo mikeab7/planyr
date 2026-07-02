@@ -13,6 +13,10 @@ export const DOGEAR_W = 55; // default span along the dock wall
 export const DOGEAR_D = 60; // default projection out from the dock face
 
 const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
+// True only for a real dock-wall side. The model layer guards on this before re-anchoring a
+// dog-ear on load (NEW-6): a tampered/partial record with a missing or typo `side` must NOT
+// reach dogEarGeom's `SIDE_N[side]` destructure (which would throw and blank the planner).
+export const isDogEarSide = (s) => Object.prototype.hasOwnProperty.call(SIDE_N, s);
 const rot2 = (x, y, deg) => {
   const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
   return { x: x * c - y * s, y: x * s + y * c };
@@ -41,3 +45,30 @@ export function dogEarGeom(bx, de) {
 // The along-wall span + outward projection of a dog-ear's BOX (w/h), resolved by which wall it
 // hugs — the inverse of the w/h packing in dogEarGeom. Used to remember a user resize.
 export const dogEarSize = (de, w, h) => (SIDE_N[de.side][1] !== 0 ? { along: w, proj: h } : { along: h, proj: w });
+
+// Which perpendicular wall a corner bump-out lengthens (B492). A bump at the END of a dock wall
+// projects out past the dock face, so it extends the building's PERPENDICULAR wall by its
+// projection — and a sidewalk on that wall should span the full extended side. Shared with
+// SitePlanner so the canvas + the geometry never disagree.
+export function bumpSidewalkSide(side, sign) {
+  const horiz = side === "top" || side === "bottom"; // dock wall runs along X
+  return horiz ? (sign < 0 ? "left" : "right") : (sign < 0 ? "top" : "bottom");
+}
+
+// The full run (length along the wall) + along-axis centre shift of a sidewalk on `swSide` of
+// building box `b`, once the corner bump-outs that lengthen that wall are folded in (B492). `bumps`
+// is the building's dog-ears as [{side, sign, proj}] (proj = the bump's projection out from its dock
+// face). Returns {run, alongShift} in building-LOCAL feet: alongShift is +X for a top/bottom strip,
+// +Y for a left/right strip. PURE so the full-side span is unit-testable apart from the canvas.
+export function sidewalkSpanForBumps(b, swSide, bumps = []) {
+  const isVert = swSide === "left" || swSide === "right"; // run is along local Y
+  const base = isVert ? b.h : b.w;
+  let extNeg = 0, extPos = 0;                              // extension at the −axis / +axis ends
+  bumps.forEach((bp) => {
+    if (bumpSidewalkSide(bp.side, bp.sign) !== swSide) return;
+    const endSign = SIDE_N[bp.side][isVert ? 1 : 0];       // bump dock-side normal along the run axis
+    if (endSign < 0) extNeg += Math.max(0, bp.proj || 0);
+    else extPos += Math.max(0, bp.proj || 0);
+  });
+  return { run: base + extNeg + extPos, alongShift: (extPos - extNeg) / 2 };
+}

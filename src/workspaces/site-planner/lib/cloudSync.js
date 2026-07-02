@@ -6,6 +6,7 @@
  */
 import { supabase, supabaseRest, currentAccessToken } from "./supabase.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { contentCount } from "./siteModel.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
@@ -48,6 +49,20 @@ function rememberContent(model) {
   siteContent[model.id] = contentCount(model);
   siteTombs[model.id] = arr(model.deletedIds).length;
 }
+// B556 — let the ACTIVE tab deliberately SHRINK its own plan (undo of a multi-element add, or a
+// version Restore to a thinner copy) without the thin-clobber guard (B459) mistaking it for a
+// stale-tab clobber. A delete records a tombstone that already explains the drop; undo/redo/restore
+// can't (a redo must re-add the items, so they can't stay tombstoned), so instead the caller tells
+// THIS tab "the content I just restored is authoritative" and we move the content baseline onto it.
+// Only ADJUSTS an existing baseline (never fabricates one — a first sync is never blocked anyway).
+// Safe vs the 8 South stale-clobber: a passive stale tab never undoes/restores, so it never calls
+// this and its baseline stays at the cloud's fuller count; the cross-session CAS version guard also
+// still rejects a genuine concurrent change.
+export function noteLocalContent(id, model) {
+  if (id == null || !model || siteContent[id] == null) return;
+  siteContent[id] = contentCount(model);
+  siteTombs[id] = arr(model.deletedIds).length;
+}
 
 // Don't push a huge embedded screenshot dataURL into a DB row — keep the underlay
 // placement but drop the inline image (map-sourced underlays use a URL, not a
@@ -70,7 +85,18 @@ function slimForCloud(model) {
   return m;
 }
 
-export async function cloudUpsert(uid, model) {
+// B529: serialize cloud writes per site id so a tab can't race ITSELF (debounced autosave + a
+// visibility/unmount/manual flush firing together) into a false self-conflict. A second write
+// for an id waits for the in-flight one, so it reads the version that write threaded back into
+// `siteVersions` (and the content baseline rememberContent() set) → the CAS + thin-clobber guard
+// both see fresh state. The genuine cross-device guard in casUpsert is untouched.
+const serializeSiteWrite = makeWriteSerializer();
+export function cloudUpsert(uid, model) {
+  if (!model || !model.id) return cloudUpsertCore(uid, model); // no id → nothing to serialize on; core returns the error
+  return serializeSiteWrite(model.id, () => cloudUpsertCore(uid, model));
+}
+
+async function cloudUpsertCore(uid, model) {
   if (!supabase || !uid || !model || !model.id) return { ok: false, error: "not ready" };
   const m = slimForCloud(model);
   // B459 — refuse to silently overwrite a fuller cloud row with a stale/thin model (the CAS below

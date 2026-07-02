@@ -6,6 +6,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange, signOut } from "../workspaces/site-planner/lib/auth.js";
+import { setScheduleLink } from "../workspaces/site-planner/lib/storage.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
@@ -19,6 +20,7 @@ import { useHashRoute, INITIAL_HASH_EMPTY } from "./route.js";
 const WORKSPACES = [
   { id: "site-planner", label: "Site Planyr",     Comp: lazy(() => import("../workspaces/site-planner/SitePlannerApp.jsx")) },
   { id: "doc-review",   label: "Review", Comp: lazy(() => import("../workspaces/doc-review/DocReview.jsx")) },
+  { id: "library",      label: "Library", Comp: lazy(() => import("../workspaces/library/Library.jsx")) },
   { id: "scheduler",    label: "Sequence Planyr",  Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
 ];
 
@@ -114,6 +116,14 @@ export default function Shell() {
     setDocIntent({ kind: "open-review", row, token: Date.now() });
     navigate({ module: "doc-review", projectId: pid || null, cross: false });
   };
+  // Cross-module schedule link (the Schedule + the Site Planner live in SEPARATE cloud backends
+  // and can't read each other). When the embedded Schedule app reports a link set/created, mirror
+  // the lightweight hint onto the Site Planner side so the Site dashboard can show "has a schedule"
+  // without booting the iframe. The Schedule record stays the source of truth; this is the copy.
+  const scheduleLinkChanged = (groupId, info) => {
+    if (!groupId) return; // a clear with no group can't be mirrored; the stale hint self-heals on relink
+    try { setScheduleLink(groupId, info || {}); } catch (_) {}
+  };
 
   useEffect(() => {
     if (!supabaseConfigured()) return;
@@ -126,7 +136,7 @@ export default function Shell() {
   // B223 — once boot is idle, quietly warm the non-active workspaces (chunk +,
   // for Schedule, the heavy /sequence/ iframe doc) so switching to them feels
   // instant. Lazy-loading still gates the first paint; this only runs after.
-  useEffect(() => { prefetchOnIdle(["scheduler", "doc-review"]); }, []);
+  useEffect(() => { prefetchOnIdle(["scheduler", "doc-review", "library"]); }, []);
 
   // B279 — tag telemetry rows with the workspace the user is in, so a reported error
   // says WHERE it happened (site-planner / doc-review / scheduler).
@@ -154,7 +164,7 @@ export default function Shell() {
           onClick={() => setAcctOpen((o) => !o)}
           aria-haspopup="menu"
           aria-expanded={acctOpen}
-          title={`Signed in as ${user.email}`}
+          title={`Signed in as ${user?.email || "(no email)"}`}
           style={pill}
         >
           <span style={avatar(true)}>{profileApi.initial}</span>
@@ -176,7 +186,7 @@ export default function Shell() {
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</div>
               {profileApi.org && <div style={{ fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profileApi.org}</div>}
-              <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.email || ""}</div>
             </div>
           </div>
           <div style={acctDivider} />
@@ -281,6 +291,7 @@ export default function Shell() {
               onGoDashboard={goDashboard}
               onNewProject={newProject}
               onOpenReviewInDocReview={openReviewInDocReview}
+              onScheduleLinkChanged={scheduleLinkChanged}
             />
           </Suspense>
         </ErrorBoundary>
