@@ -60,6 +60,16 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V190 — B609: floating EPSG:2278 coordinate chip shows live easting/northing while the cursor moves ⏳ needs a located site in a real browser
+- **Added** 2026-07-02 · **Cadence** once (feature acceptance) · **Last checked** 2026-07-02 (lint 0 · 2148 tests green · build green)
+- **What was shipped:** the full-width bottom status bar in the Site Planner was removed and replaced with a floating dark glass chip (`left:10, bottom:8`, `pointerEvents:none`) that shows the cursor's EPSG:2278 (NAD83 / Texas State Plane South Central, US survey feet) easting and northing in real time. Uses `projectToGrid(origin.lat, origin.lon)` memoised as `gridOrigin`, then adds the local-feet `cursor.x / cursor.y` offset on every pointer move. The chip only renders when both `cursor` and `gridOrigin` are non-null (i.e. the site has a located origin and the cursor is over the canvas). Cannot be verified here — needs a plan with a set origin in a live browser, no auth required.
+- **⏳ Steps on planyr.io (any teammate — NOT Michael's job):**
+  1. Open the Site Planner on any plan that has an origin set (Houston/Katy-area — the coordinate display is most meaningful there).
+  2. Move the cursor over the canvas — confirm a **dark glass pill** appears at the **bottom-left corner** of the canvas showing two numbers like `2368412 E   657809 N` (exact values vary by site; both should be 7-digit values in the Houston area).
+  3. Move the cursor around — confirm both numbers update smoothly.
+  4. Confirm the old full-width bottom bar (pixel ratio, acreage, ?) is **gone** and that the calibration badge and north/scalebar plates are still visible at their usual positions (bottom-centre area).
+  5. On a plan with **no origin set** (a brand-new empty plan), confirm the chip is **absent** (should be no coordinate display at all).
+
 ### V189 — B603: the "Elevation / hillshade (USGS 3DEP)" map overlay actually paints (tinted hillshade) ✅ source-guarded + unit-locked; ⏳ live paint owed (the 3DEP host is egress-blocked in the sandbox)
 - **Added** 2026-07-01 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-07-01 (lint + unit + build ✅) · **Next check** — on planyr.io, toggle the elevation overlay and confirm it paints. **Not auth-gated** (the overlay works logged-out); it's pending only because `elevation.nationalmap.gov` is blocked by the sandbox egress policy (403), so no headless browser here can fetch the tiles.
 - **Root cause / fix:** the overlay sent `renderingRule={"rasterFunction":"Elevation Tinted Hillshade"}` — the USGS press-release PROSE wording. ArcGIS ImageServer `exportImage` errors on any name that isn't an exact `rasterFunctionInfos[].name`, so it returned an error tile and the overlay painted **blank/failed**. The real 3DEP template name is **`Hillshade Elevation Tinted`** (its siblings are `Hillshade Gray`, `Hillshade Multidirectional`, `Slope Map` — all `Hillshade/…` order; confirmed against a working USGS 3DEP WMS config). One-line fix in `lib/layers.js`.

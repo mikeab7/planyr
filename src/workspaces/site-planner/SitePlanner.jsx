@@ -33,6 +33,7 @@ import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { pickInMarquee, selMods, nextSelection } from "../../shared/markup/selection.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
+import { projectToGrid } from "../../shared/coordinates/index.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -199,7 +200,7 @@ const TOOLS = [
   { id: "mpolyline", label: "Polyline", hint: "Markup polyline (Shift+N): click points, double-click / Enter to finish. Shift for 45° segments" },
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
-const MARKUP_TOOLS = ["mline", "mrect", "mellipse", "mpolygon", "mpolyline"];
+const MARKUP_TOOLS = ["mpolyline", "mline", "mrect", "mellipse", "mpolygon"];
 // Measure-mode display names — Bluebeam's terms (Length / Polylength / Area). The
 // internal mode value stays line/polyline/area (persisted in localStorage), so this is
 // label-only; "Polylength" also disambiguates the measurement from the markup "Polyline".
@@ -1305,6 +1306,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Geographic basemap + shared overlay layers under the canvas (Phase 1). Only
   // meaningful for a located site (one with a real-world origin).
   const origin = restored?.origin || null;
+  // EPSG:2278 grid origin for the coordinate HUD chip (B609).
+  const gridOrigin = useMemo(() => (origin ? projectToGrid(origin.lat, origin.lon) : null), [origin?.lat, origin?.lon]); // eslint-disable-line react-hooks/exhaustive-deps
   // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
   const [basemapOn, setBasemapOn] = useState(!!origin);
   const [layersOpen, setLayersOpen] = useState(false); // planner Layers control expanded
@@ -6431,7 +6434,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // right-side tool-rail buttons (dark chrome, icon + label, active = ember)
   const rbtn = (active) => ({
     display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
-    padding: "6px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
+    padding: "8px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
     border: "1px solid transparent", fontFamily: "inherit",
     background: active ? PAL.ember : "transparent",
     color: active ? PAL.onAccent : PAL.chromeInk,
@@ -8122,7 +8125,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
-          {/* calibration / accuracy badge (bottom-left, above the status bar) */}
+          {/* calibration / accuracy badge (bottom-left; B609 removed the status bar so the badge now floats 40px above the canvas edge) */}
           {(() => {
             const cfg = {
               georef: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · county GIS", sub: null },
@@ -8316,17 +8319,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
-          {/* status bar — chrome (themes with the app, B318/B341) */}
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", padding: "0 16px", height: 30, fontSize: 11.5, color: PAL.chromeMuted, background: PAL.chrome, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderTop: `1px solid ${PAL.chromeLine}`, zIndex: 5 }}>
-            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 124, fontVariantNumeric: "tabular-nums", color: PAL.chromeInk }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
-            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 96 }}>{underlay ? `1 px = ${f2(underlay.ftPerPx)} ft` : `${Math.round(view.ppf * 100) / 100} px/ft`}</span>
-            <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 14px" }} />
-            <span style={{ color: (attachFor || alignFor) ? PAL.ember : PAL.chromeMuted, fontWeight: (attachFor || alignFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {attachFor ? "Click a host to bond to · Esc cancels" : alignFor ? "Click an edge to align to · Esc cancels" : identifyMode ? "Click lit-up lots to add them — one or many · Esc when done" : curHint}
-            </span>
-            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: PAL.chromeMuted, marginLeft: 14 }}>{f2(siteSqft / SQFT_PER_ACRE)} ac site</span>
-            <button className="dbtn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={() => setShowShortcuts(true)} style={{ marginLeft: 12, width: 20, height: 20, borderRadius: 99, border: `1px solid ${PAL.chromeLine}`, background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontSize: 11, fontWeight: 700, lineHeight: 1 }}>?</button>
-          </div>
+          {/* EPSG:2278 coordinate HUD — floating chip bottom-left (B609; replaces the full status bar) */}
+          {cursor && gridOrigin && (
+            <div style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums" }}>
+              {f0(gridOrigin.x + cursor.x)}&thinsp;E&nbsp;&nbsp;&nbsp;{f0(gridOrigin.y + cursor.y)}&thinsp;N
+            </div>
+          )}
         </div>
 
         {/* phone-only floating button to summon the tool rail (B113) */}
@@ -8339,7 +8337,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {/* right-side tool rail — dark chrome. On phones it overlays the canvas
             (slide-in from the right) instead of permanently eating 168px (B113). */}
         {narrow && mobileTools && <div onClick={() => setMobileTools(false)} style={{ position: "absolute", inset: 0, order: 2, zIndex: 1200, background: "rgba(20,18,15,0.35)" }} />}
-        <div className="dark-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px",
+        <div className="dark-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "4px 11px 13px",
           overflowY: "auto", minHeight: 0,
           position: narrow ? "absolute" : "relative", right: 0, top: 0, bottom: narrow ? 0 : undefined,
           zIndex: narrow ? 1205 : 30,
@@ -8370,18 +8368,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
+          {railHdr("Measure")}
+
+          {/* measure with line / polyline / area / count modes — promoted to sit just below Tools (B605) */}
+          <div ref={measureAnchor} style={{ position: "relative" }}>
+            <div style={{ display: "flex", gap: 2 }}>
+              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), flex: 1 }} onClick={() => selectTool("measure")}>
+                <ToolIcon id="measure" /> Measure
+              </button>
+              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-label="Measure modes">▾</button>
+            </div>
+            <AnchoredMenu open={measureMenu} onClose={() => setMeasureMenu(false)} anchorRef={measureAnchor} placement="left" width={230} panelStyle={menuPanel}>
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
+              {MEASURE_MODES.map(([k, label]) => (
+                <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
+              ))}
+            </AnchoredMenu>
+          </div>
+
           {railHdr("Site elements")}
 
           {DRAW_TYPES.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
             if (id === "building") {
-              const dockLabel = { single: "single-load", cross: "cross-dock", none: "no docks" }[buildingDock];
               return (
                 <div key={id} ref={buildingAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("building")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="building" /> Building</span>
-                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{dockLabel}</span>
+                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), flex: 1 }} onClick={() => selectTool("building")}>
+                      <ToolIcon id="building" /> Building
                     </button>
                     <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-label="Dock layout">▾</button>
                   </div>
@@ -8399,9 +8413,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={id} ref={parkingAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("parking")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="parking" /> Car Parking</span>
-                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{parkingRows === "free" ? "free draw" : parkingRows === "double" ? "double row" : "single row"}</span>
+                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1 }} onClick={() => selectTool("parking")}>
+                      <ToolIcon id="parking" /> Car Parking
                     </button>
                     <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-label="Parking presets">▾</button>
                   </div>
@@ -8418,9 +8431,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={id} ref={roadAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("road")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="road" /> Road</span>
-                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel · click points`}</span>
+                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), flex: 1 }} onClick={() => selectTool("road")}>
+                      <ToolIcon id="road" /> Road
                     </button>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-label="Road presets">▾</button>
                   </div>
@@ -8434,24 +8446,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
               );
             }
-            // B93: give the preset-less site-element rows (paving/trailer/pond) the same
-            // two-line anatomy as Building/Road/Car Parking, so the rail reads as one
-            // uniform column (these just have no "▾" preset menu).
-            const sub = { paving: "drive / court", trailer: "back-in storage", pond: "detention basin" }[id];
+            // paving / trailer / pond — single-line buttons; sub-label in tooltip (B604)
+            const sub = { paving: "Drive / Court", trailer: "Back-in Storage", pond: "Detention Basin" }[id];
             return (
-              <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={{ ...rbtn(tool === id), flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool(id)}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id={id} /> {t.label}</span>
-                {sub && <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{sub}</span>}
+              <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} title={sub || undefined}>
+                <ToolIcon id={id} /> {t.label}
               </button>
             );
           })}
 
-          {railHdr("Easement")}
+          {/* Easement — folded into Site elements (B606); was its own section */}
           <div ref={easeAnchor} style={{ position: "relative" }}>
             <div style={{ display: "flex", gap: 2 }}>
-              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("easement")}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="easement" /> Easement</span>
-                <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{{ centerline: `centerline · ${easeWidth}′`, boundary: "boundary", parceledge: `parcel edge · ${easeWidth}′` }[easeMode]}</span>
+              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement"), flex: 1 }} onClick={() => selectTool("easement")}>
+                <ToolIcon id="easement" /> Easement
               </button>
               <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setEaseMenu((o) => !o)} aria-label="Easement options">▾</button>
             </div>
@@ -8480,45 +8488,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
-          {railHdr("Shapes")}
+          {/* Draw section — Shapes + Annotate merged; Polyline before Line (B605/B607) */}
+          {railHdr("Draw")}
           {MARKUP_TOOLS.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
             const sc = { mline: "L", mrect: "R", mellipse: "E", mpolygon: "⇧P", mpolyline: "⇧N" }[id];
             return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)}><ToolIcon id={id} /> {t.label} <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>{sc}</span></button>;
           })}
-
-          {railHdr("Measure")}
-
-          {/* measure with line / polyline / area modes */}
-          <div ref={measureAnchor} style={{ position: "relative" }}>
-            <div style={{ display: "flex", gap: 2 }}>
-              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("measure")}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="measure" /> Measure</span>
-                <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{measureModeLabel(measureMode)}</span>
-              </button>
-              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-label="Measure modes">▾</button>
-            </div>
-            <AnchoredMenu open={measureMenu} onClose={() => setMeasureMenu(false)} anchorRef={measureAnchor} placement="left" width={230} panelStyle={menuPanel}>
-              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
-              {MEASURE_MODES.map(([k, label]) => (
-                <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
-              ))}
-            </AnchoredMenu>
-          </div>
-
-          {railHdr("Annotate")}
           <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")}><ToolIcon id="callout" /> Callout <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>Q</span></button>
           <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")}><ToolIcon id="text" /> Text <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>T</span></button>
 
           <div style={{ flex: 1 }} />
           {tool === "measure" && calibrationState === "uncalibrated" && (
             <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, padding: "8px 6px 0", fontWeight: 600 }}>⚠ Underlay isn't calibrated — distances may be wrong.</div>
-          )}
-          {curHint && (
-            <div style={{ fontSize: 10.5, color: PAL.chromeMuted, lineHeight: 1.5, padding: "8px 6px 2px", borderTop: `1px solid ${PAL.chromeLine}` }}>
-              <span style={{ color: PAL.ember, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 9.5 }}>{TOOLS.find((t) => t.id === tool)?.label}</span>
-              <div style={{ marginTop: 3 }}>{curHint.split("•")[0].trim()}</div>
-            </div>
           )}
         </div>
 
