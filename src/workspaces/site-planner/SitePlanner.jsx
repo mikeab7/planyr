@@ -2163,25 +2163,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
       const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
       const measIds = new Set(multi.filter((m) => m.kind === "measure").map((m) => m.id)); // B569: measures join the multi-delete
-      // B556 — tombstone exactly what the filter removes (selected els, their bonded children, and markups).
+      // B556 — tombstone exactly what the filter removes (selected els, their bonded children, markups,
+      // AND measures — measures carry a stable uid() id and count in contentCount, so a multi-measure
+      // delete otherwise trips the thin-clobber guard and resurrects on merge, same as any other item).
       const removedEls = stateRef.current.els.filter((e) => elIds.has(e.id) || elIds.has(e.attachedTo)).map((e) => e.id);
       setEls((a) => a.filter((e) => !elIds.has(e.id) && !elIds.has(e.attachedTo)));
       setMarkups((a) => a.filter((m) => !mkIds.has(m.id)));
       if (measIds.size) setMeasures((a) => a.filter((m) => !measIds.has(m.id)));
       setMulti([]); setSel(null);
-      tombstone([...removedEls, ...mkIds]);
+      tombstone([...removedEls, ...mkIds, ...measIds]);
       return;
     }
     if (!sel) return;
     pushHistory();
-    // B556 — every branch that drops a drawn item leaves a tombstone (measures are index-keyed with no
-    // stable id and a lone measure delete can't reach the thin-clobber ≥2 bar, so they're left as-is).
+    // B556/NEW-1 — every branch that drops a drawn item leaves a tombstone so a cloud/cross-tab union-
+    // merge can't resurrect it (and the drop is "explained" to the thin-clobber guard). Measures are
+    // index-keyed in single-selection (sel.i) but DO carry a stable uid() id, so resolve it and tombstone.
     if (sel.kind === "el") {
       const removed = stateRef.current.els.filter((e) => e.id === sel.id || e.attachedTo === sel.id).map((e) => e.id);
       setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
       tombstone(removed); // a building drops with its bonded children — tombstone all of them
     }
-    else if (sel.kind === "measure") setMeasures((a) => a.filter((_, i) => i !== sel.i));
+    else if (sel.kind === "measure") { const gid = (stateRef.current.measures[sel.i] || {}).id; setMeasures((a) => a.filter((_, i) => i !== sel.i)); if (gid) tombstone(gid); }
     else if (sel.kind === "callout") { setCallouts((a) => a.filter((c) => c.id !== sel.id)); tombstone(sel.id); }
     else if (sel.kind === "markup") { setMarkups((a) => a.filter((m) => m.id !== sel.id)); tombstone(sel.id); }
     else { setParcels((a) => a.filter((p) => p.id !== sel.id)); tombstone(sel.id); }
@@ -2582,6 +2585,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
         const made = pieces.map((ring) => ({ id: uid(), points: ring, locked: true, ...inherit }));
         setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? made : [p])));
+        tombstone(pc.id); // NEW-1 — the source parcel is replaced by fresh-uid pieces; tombstone it so a merge can't resurrect the whole lot overlapping the split (twin of splitParkingRows)
         setSel({ kind: "parcel", id: made[0].id });
         return;
       }
@@ -2663,6 +2667,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!text.trim()) { // blank → discard (a brand-new callout's creation already pushed a frame)
       if (cur && !isNew) pushHistory();
       setCallouts((a) => a.filter((c) => c.id !== id));
+      if (cur && !isNew) tombstone(id); // NEW-1 — blanking an existing (already-synced) callout deletes it; tombstone so a merge can't resurrect it
     } else if (text.trim() !== orig.trim()) { // only a REAL text change adds an undo frame (B32)
       if (!isNew) pushHistory(); // new callouts already pushed history at creation
       setCallout(id, { text });
@@ -4067,6 +4072,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // trailer's buffer); then re-lay the host building's dock stack so what's left stays flush.
   const removeFeature = (id) => {
     pushHistory();
+    const killed = killSetWithChildren(stateRef.current.els, [id]); // B556/NEW-1 — tombstone the WHOLE cascade (court → its trailer → its buffer), not just `id`
     setEls((a) => {
       const el = a.find((x) => x.id === id);
       let next = removeWithChildren(a, [id]);
@@ -4074,6 +4080,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (b && b.type === "building") next = relayoutAllSides(next, b);
       return next;
     });
+    tombstone([...killed]);
   };
   // Add a single row of parking + drive aisle flush against a building side, the
   // wall's full length, oriented so it grows OUTWARD (drive on the building side).
@@ -4231,15 +4238,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Remove ids + anything bonded to them (legacy forCourt/forTrailer + the generic prevZone chain, so
   // appended road/landscape peel with their host — LIFO preserved by removing the outermost first).
-  const removeWithChildren = (arr, ids) => {
+  // Pure — the FULL transitive set of ids a removeWithChildren() drop takes out: the seed ids plus
+  // everything bonded OUTWARD of them (a court's trailer, a trailer's buffer, any prevZone chain).
+  // Surfaced separately so a delete handler can TOMBSTONE the whole cascade, not just the clicked
+  // element (B556/NEW-1). Without tombstoning every killed id, two things break: (1) a cloud /
+  // cross-tab / cross-device union-merge (mergeSiteContent) RESURRECTS the bonded children — the
+  // truck-court→trailer-parking-comes-back the owner hit; (2) dropping ≥2 items with no tombstone to
+  // explain them trips the B459 thin-clobber guard, which the caller surfaces as a FALSE "changed in
+  // another session" conflict (the phantom "Take over editing" re-prompt → resurrect → re-prompt loop).
+  const killSetWithChildren = (arr, ids) => {
     const kill = new Set(ids);
     let grew = true;
     while (grew) {
       grew = false;
       arr.forEach((x) => { if (!kill.has(x.id) && ((x.forCourt && kill.has(x.forCourt)) || (x.forTrailer && kill.has(x.forTrailer)) || (x.prevZone && kill.has(x.prevZone)))) { kill.add(x.id); grew = true; } });
     }
-    return arr.filter((x) => !kill.has(x.id));
+    return kill;
   };
+  const removeWithChildren = (arr, ids) => { const kill = killSetWithChildren(arr, ids); return arr.filter((x) => !kill.has(x.id)); };
   // Zone element factories (final geometry is set by relayoutSide).
   const baseZone = (b, extra) => ({ id: uid(), cx: b.cx, cy: b.cy, w: 1, h: 1, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, ...extra });
   const makeCourtZone = (b, side) => baseZone(b, { type: "paving", truckCourt: { side }, zd: zoneDepthDefaults(settings)[0] });
@@ -4287,15 +4303,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { dockSides } = dockSidesOf(b);
     if (!dockSides.some((s) => stackCountIn(els, b, s) > 0)) return;
     pushHistory();
+    const src = stateRef.current.els;
+    const rm = [];
+    // Peel the OUTERMOST element of each side's chain — an appended road/landscape goes before the
+    // buffer → trailer → court (true LIFO, B495).
+    dockSides.forEach((side) => { const chain = dockChainOnSide(src, b, side); if (chain.length) rm.push(chain[chain.length - 1].id); });
+    const killed = killSetWithChildren(src, rm); // B556/NEW-1 — tombstone each peeled zone + its bonded children
     setEls((a) => {
-      const rm = [];
-      // Peel the OUTERMOST element of each side's chain — an appended road/landscape goes before the
-      // buffer → trailer → court (true LIFO, B495).
-      dockSides.forEach((side) => { const chain = dockChainOnSide(a, b, side); if (chain.length) rm.push(chain[chain.length - 1].id); });
       let next = removeWithChildren(a, rm);
       dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
       return next;
     });
+    tombstone([...killed]);
     setSel({ kind: "el", id: b.id });
   };
   // Remove the outermost zone on ONE dock side (the on-canvas per-side "−"): peel the LAST element of
@@ -4448,12 +4467,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const des = els.filter((x) => x.attachedTo === b.id && x.dogEar);
     if (!des.length) return;
     pushHistory();
+    const ids = new Set(des.map((de) => de.id));
+    // B556/NEW-1 — tombstone every removed bump-out AND any zone bonded to it (the same set the
+    // filter below drops) so a merge can't resurrect them and the ≥2 drop doesn't trip the guard.
+    const killed = els.filter((x) => ids.has(x.id) || ids.has(x.forCourt)).map((x) => x.id);
     setEls((a) => {
-      const ids = new Set(des.map((de) => de.id));
       let next = relayoutBumpSidewalks(a.filter((x) => !ids.has(x.id) && !ids.has(x.forCourt)), b);
       new Set(des.map((de) => de.dogEar.side)).forEach((side) => { next = relayoutSide(next, b, side); });
       return next;
     });
+    tombstone(killed);
   };
 
   // Re-fit every feature bonded to a resized building so the whole assembly stays
@@ -5139,6 +5162,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         identifyAddedRef.current.delete(key);
         pushHistory();
         setParcels((a) => a.filter((p) => !ids.includes(p.id)));
+        tombstone(ids); // NEW-1 — the toggled-off identify lot(s) stay gone across a merge + a multipart lot's ≥2 drop doesn't trip the thin-clobber guard
         setSel(null); setIdentAdded(identifyAddedRef.current.size);
         setIdentifyRes({ removed: true, addr });
         return;
@@ -6168,6 +6192,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       y += p.depth;
     }
     setEls((a) => [...a.filter((x) => x.id !== el.id), ...newEls]);
+    tombstone(el.id); // B556/NEW-1 — the source field is gone (replaced by fresh-uid pieces); tombstone it so a merge can't resurrect it overlapping the split
     setSel({ kind: "el", id: newEls[0].id });
   };
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
@@ -6724,12 +6749,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const changeBuildingDock = (newDock) => {
     if (!selEl) return;
     pushHistory();
-    setEls((a) => {
-      const b = a.find((x) => x.id === selEl.id);
-      let next = a.map((e) => e.id === selEl.id ? { ...e, dock: newDock } : e);
-      if (b) { const stranded = strandedZoneIds(next, { ...b, dock: newDock }); if (stranded.length) next = next.filter((x) => !stranded.includes(x.id)); }
-      return next;
-    });
+    const src = stateRef.current.els;
+    const b = src.find((x) => x.id === selEl.id);
+    let next = src.map((e) => e.id === selEl.id ? { ...e, dock: newDock } : e);
+    let stranded = [];
+    if (b) { stranded = strandedZoneIds(next, { ...b, dock: newDock }); if (stranded.length) next = next.filter((x) => !stranded.includes(x.id)); }
+    setEls(next);
+    // B556/NEW-1 — a preset change that orphans a side's apron (cross→single/none) genuinely deletes
+    // those zones; tombstone them so they stay gone across a merge and the ≥2 drop doesn't false-conflict.
+    if (stranded.length) tombstone(stranded);
   };
   // Rotate the selected element to an absolute angle, carrying its whole bonded
   // assembly (sidewalks, truck court, trailer parking, dog-ears) around its centre.
@@ -7759,7 +7787,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
                             );
                           })}
-                          <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); setMeasures((arr) => arr.filter((_, idx) => idx !== i)); setSel(null); }}>
+                          <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); const gid = (measures[i] || {}).id; setMeasures((arr) => arr.filter((_, idx) => idx !== i)); if (gid) tombstone(gid); setSel(null); }}>
                             <circle cx={lastPt.x} cy={lastPt.y - 26} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
                             <text x={lastPt.x} y={lastPt.y - 26} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
                           </g>
@@ -7808,7 +7836,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           );
                         })}
                         {/* delete the whole measurement */}
-                        <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); setMeasures((arr) => arr.filter((_, idx) => idx !== i)); setSel(null); }}>
+                        <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); const gid = (measures[i] || {}).id; setMeasures((arr) => arr.filter((_, idx) => idx !== i)); if (gid) tombstone(gid); setSel(null); }}>
                           <circle cx={anchor.x} cy={anchor.y - 22} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
                           <text x={anchor.x} y={anchor.y - 22} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
                         </g>
