@@ -300,6 +300,29 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const border = st\.stroke;/);
   });
 
+  it("B620: inline labels ride the line (auto-flip, own color+halo, non-sticky, exported)", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the pure placement helper exists and auto-flips the angle into [-90,90] (never upside-down)
+    expect(src).toMatch(/function inlineLabelPlaces\(/);
+    expect(src).toMatch(/ang = \(\(ang % 180\) \+ 180\) % 180; if \(ang > 90\) ang -= 180;/);
+    // per-feature repeat spacing (sewer dense → road sparse)
+    expect(src).toMatch(/const INLINE_LABEL_SPACING = \{ line: 150, polyline: 150, easement: 350, road: 700 \};/);
+    // the label <text> carries a white halo (paintOrder stroke) and is NOT export-skipped
+    expect(src).toMatch(/paintOrder: "stroke", stroke: "#fff", strokeWidth: haloW/);
+    expect(src).not.toMatch(/inlineLabelEls[\s\S]{0,400}data-export="skip"/);
+    // the inline-label writers are NON-STICKY — never the sticky setSelMarkup/liveMarkup (which push into
+    // mkStyle and would bleed the typed text into the next drawn shape)
+    expect(src).not.toMatch(/setSelMarkup\(\{ inlineLabel/);
+    expect(src).not.toMatch(/liveMarkup\(\{ inlineLabel/);
+    // panel fields push ONE undo frame per edit (onFocus), not one per keystroke; the in-place editor commits once
+    expect(src).toMatch(/onFocus=\{\(\) => pushHistory\(\)\}[\s\S]{0,180}inlineLabel: e\.target\.value/);
+    expect(src).toMatch(/const commitEditInline = \(\) => \{/);
+    // all three render sites are wired: markup line/polyline, easement (centerline/ring), road centerline
+    expect(src).toMatch(/inlineLabelEls\(mkPts\(m\), m\.inlineLabel/);
+    expect(src).toMatch(/inlineLabelEls\(easePathFeet, m\.inlineLabel/);
+    expect(src).toMatch(/inlineLabelEls\(roadDenseCenterline\(el, settings\), el\.inlineLabel/);
+  });
+
   it("B567: shared ColorControl fires live on input + Doc Review coalesces it to one undo frame", () => {
     const pp = read("../src/shared/markup/PropertyPanel.jsx");
     expect(pp).toMatch(/onInput=\{\(e\) => onChange\(e\.target\.value, \{ live: true \}\)\}/);
