@@ -265,6 +265,12 @@ input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus, sele
 }
 input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 
+/* B156 — pre-click hover preview on a markup (Site Planner + Document Review). A soft two-tone
+   glow (light halo under a darker halo, mirroring the selection chrome's casing/line) so the
+   "this is what a click will grab" cue stays visible on BOTH a light sheet and a dark aerial,
+   without recolouring the markup or touching the immutable drawing backdrop underneath. */
+.mk-hover { filter: drop-shadow(0 0 1.5px var(--sel-casing)) drop-shadow(0 0 2.5px var(--sel-line)); }
+
 /* light ghost buttons (over light panels) */
 .gbtn:hover:not(:disabled) { background: var(--hover-ghost) !important; filter: none; }
 .gbtn-danger:hover:not(:disabled) { background: var(--hover-ghost-danger) !important; filter: none; }
