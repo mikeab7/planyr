@@ -68,13 +68,55 @@ export function statedCalibration(meta = {}) {
   return ftPerPointForScale(sc.ftPerInch);
 }
 
+/* Is this sheet PROVEN not-to-scale (B631 / NEW-2)? A sheet with no plan scale — a schedule,
+ * legend, general-notes, code-summary, or explicit "NOT TO SCALE" sheet — can never be measured,
+ * so the Stitcher's "Align before measuring" gate is a demand it can never satisfy and that serves
+ * no purpose. This is DISTINCT from "merely unlabeled": a real plan sheet whose printed scale text
+ * we couldn't read still gets Calibrate + Align (statedCalibration returns 0 for it too, but it is
+ * NOT not-to-scale). Only two signals prove not-to-scale:
+ *   • the sheet explicitly declares it (scale.explicit === "nts" — a title-block "NOT TO SCALE"), or
+ *   • it's a text-dense non-drawing sheet (B379 — general notes / specs / legend / schedule prose).
+ * Fail closed: when unsure, return false (keep the align path). */
+export function isNotToScale(meta = {}) {
+  if (!meta) return false;
+  const sc = meta.scale;
+  if (sc && sc.explicit === "nts") return true;
+  if (meta.textDense) return true;
+  return false;
+}
+
+/* Feet-per-unit from a DRAWN scale bar (B340 tail #1 / B339's CV remainder). The graphic scale-bar
+ * READER is the pure engine in shared/files/scaleBarRead.js; the browser extractor that finds the
+ * bar + tick labels on a real sheet is a DORMANT injectable seam (like OCR/APS) — until it runs, a
+ * page carries no `scaleBar` fact and this returns 0, so behavior is unchanged (fail open). The
+ * fact must be stored in the SAME coordinate space statedCalibration works in (feet per page point)
+ * so the two are interchangeable. GEOMETRY-BEATS-PRINTED-SCALE holds: this is only consulted when
+ * there's no trusted stated scale, and only on a high-confidence read — a wrong auto-scale silently
+ * poisons every measurement. A scale bar is resize-invariant, so — unlike a stated scale — it is
+ * NOT gated on a standard plot size; but a text-dense non-drawing sheet still never auto-calibrates. */
+export const SCALE_BAR_MIN_CONFIDENCE = 0.6;
+export function scaleBarCalibration(meta = {}) {
+  if (!meta || meta.textDense) return 0;
+  const sb = meta.scaleBar;
+  if (!sb || !sb.present) return 0;
+  if (!(sb.drawnLenPx > 0) || !(sb.realLenFt > 0)) return 0;
+  if (Number.isFinite(sb.confidence) && sb.confidence < SCALE_BAR_MIN_CONFIDENCE) return 0;
+  const ftPerUnit = sb.realLenFt / sb.drawnLenPx;
+  return Number.isFinite(ftPerUnit) && ftPerUnit > 0 ? ftPerUnit : 0;
+}
+
 /* The calibration to auto-apply to a whole grouped composite: the first page in the group that
- * carries a trustworthy stated scale. Returns { ftPerUnit, label } or null (→ stay manual).
- * One scale for the group is correct — a stitched plan set shares a single scale. */
+ * carries a trustworthy stated scale, else the first with a confidently-read scale bar (B340).
+ * Returns { ftPerUnit, label, src } or null (→ stay manual). One scale for the group is correct —
+ * a stitched plan set shares a single scale. Stated scale is preferred; the bar is the fallback. */
 export function groupCalibration(pages = []) {
   for (const meta of pages) {
     const ftPerUnit = statedCalibration(meta);
-    if (ftPerUnit) return { ftPerUnit, label: (meta.scale && meta.scale.label) || "" };
+    if (ftPerUnit) return { ftPerUnit, label: (meta.scale && meta.scale.label) || "", src: "stated" };
+  }
+  for (const meta of pages) {
+    const ftPerUnit = scaleBarCalibration(meta);
+    if (ftPerUnit) return { ftPerUnit, label: (meta.scaleBar && meta.scaleBar.label) || "scale bar", src: "scalebar" };
   }
   return null;
 }
