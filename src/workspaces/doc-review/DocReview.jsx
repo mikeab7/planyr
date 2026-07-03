@@ -14,7 +14,7 @@ import { backingScale, backdropDensity, visibleRegion, tileCovers } from "./lib/
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
 import { groupSheets, markAdjacentDuplicateNumbers } from "../../shared/files/sheetGroups.js";
 import { statedCalibration } from "./lib/sheetRead.js";
-import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups, pointInPoly } from "./lib/takeoff.js";
+import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
@@ -36,6 +36,7 @@ import { propsForTool, columnMeta, toolById } from "../../shared/markup/tools.ma
 import { writeProp } from "../../shared/markup/propertySchema.js";
 import { bboxOfMarkup } from "../../shared/markup/markupModel.js";
 import { pickInMarquee, selMods, nextSelection, hasSelMod } from "../../shared/markup/selection.js";
+import { pickMarkup } from "../../shared/markup/hitTest.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
@@ -233,6 +234,7 @@ export default function DocReview({
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // PRIMARY selected markup id (property panel / vertex edit)
   const [selSet, setSelSet] = useState([]);         // B569: the full multi-selection (markup ids, current page)
+  const [hoverId, setHoverId] = useState(null);     // B156: markup under the cursor in Select mode (pre-click hover preview)
   const [marquee, setMarquee] = useState(null);     // B570: live box-select rubber-band { a, b } in page units
   const marqueeRef = useRef(null);                  // drag bookkeeping for the marquee gesture (no re-render churn)
   const groupDragRef = useRef(null);                // B569: group-move snapshot { ids, start, orig:{id->pts} }
@@ -917,6 +919,7 @@ export default function DocReview({
       }
     }
     if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
+    setHoverId(null);     // B156: a press starts a click/drag/draw — drop the hover glow until the pointer idles again
     const p = toPage(e);
     // Vertex grip hit check — when select tool + a SINGLE markup selected, a click within 8
     // screen-px of any vertex starts a single-vertex drag instead of a full-markup move. (B431)
@@ -1073,6 +1076,9 @@ export default function DocReview({
       p = { x: o.x + Math.cos(snapped) * len, y: o.y + Math.sin(snapped) * len };
     }
     setCursor(p);
+    // B156: highlight the markup a click would land on, using the SAME picker as the click (rawP,
+    // pre-snap) so the hover preview always matches what selection actually grabs. Select mode only.
+    setHoverId(tool === "select" ? hitTest(rawP) : null);
   };
 
   const onUp = (e) => {
@@ -1248,73 +1254,12 @@ export default function DocReview({
     setCalInput(null); setErr("");
   };
 
-  const hitTest = (p) => {
-    const Z = view ? view.scale : 1;
-    const tol = 10 / Z; // page-unit click tolerance
-    const segDist = (a, b) => { // distance from p to segment a–b (page units)
-      const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
-      if (!L2) return dist(p, a);
-      let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2; t = Math.max(0, Math.min(1, t));
-      return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
-    };
-    const bboxArea = (pts) => { // tie-break for interior hits (the smaller shape wins)
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
-      return (x1 - x0) * (y1 - y0);
-    };
-    // Among interior (d===0) hits, prefer the SMALLEST shape so a small markup sitting on top of a
-    // big filled area stays selectable instead of being swallowed by the area underneath it (B374).
-    let best = null, bd = Infinity, bArea = Infinity;
-    for (const m of pageMarks) {
-      const pts = m.pts || [];
-      let d = Infinity, interior = false;
-      if (m.kind === "rect" || m.kind === "cloud") {
-        // shape-aware: a box is selectable across its whole body, not just its 2 corners (B33)
-        const a = pts[0], b = pts[1]; if (!a || !b) continue;
-        const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
-        if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) { d = 0; interior = true; }
-      } else if (m.kind === "ellipse") {
-        const a = pts[0], b = pts[1]; if (!a || !b) continue;
-        const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
-        const rx = Math.abs(b.x - a.x) / 2 + tol, ry = Math.abs(b.y - a.y) / 2 + tol;
-        if (rx > 0 && ry > 0 && ((p.x - cx) * (p.x - cx)) / (rx * rx) + ((p.y - cy) * (p.y - cy)) / (ry * ry) <= 1) { d = 0; interior = true; }
-      } else if (m.kind === "text") {
-        // the text box (offsets mirror the render; screen px → page units via /scale) (B33)
-        const q = pts[0]; if (!q) continue;
-        const w = ((m.text || "").length * 6.5 + 6) / Z, h = 16 / Z;
-        if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) { d = 0; interior = true; }
-      } else if (m.kind === "callout") {
-        const tip = pts[0], box = pts[1];
-        if (!tip) continue;
-        const anchor = box || tip;
-        const fs = (m.fontSize || 14) / Z;
-        const textW = Math.max(60 / Z, (m.text || "").length * fs * 0.58 + 8 / Z);
-        const textH = fs + 8 / Z;
-        // Hit the text box body
-        if (p.x >= anchor.x && p.x <= anchor.x + textW && p.y >= anchor.y && p.y <= anchor.y + textH) { d = 0; interior = true; }
-        // Hit the leader line (if both pts present)
-        else if (box) { d = Math.min(d, dist(p, tip), dist(p, box), segDist(tip, box)); }
-      } else if (m.kind === "snapshot") {
-        const a = pts[0], b = pts[1]; if (!a || !b) continue;
-        const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
-        if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) { d = 0; interior = true; }
-      } else if (m.kind === "area" || m.kind === "polygon") {
-        // Filled interior is grabbable (B374); edge+vertex fallback for thin/degenerate shapes.
-        if (pts.length >= 3 && pointInPoly(p, pts)) { d = 0; interior = true; }
-        else {
-          for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
-          if (pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0]));
-        }
-      } else {
-        // distance / perimeter / count / line / polyline: nearest vertex OR segment
-        for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
-        if ((m.kind === "perimeter") && pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0]));
-      }
-      const a = interior ? bboxArea(pts) : Infinity;
-      if (d < bd - 1e-6 || (d <= bd + 1e-6 && a < bArea)) { bd = d; best = m.id; bArea = a; }
-    }
-    return bd <= tol ? best : null;
-  };
+  // Selection picking is the ONE shared engine now (B155). Document Review's per-kind interior-grab
+  // + smallest-area tie-break (B33/B374) moved into `pickMarkup`, so this surface, the Stitcher and
+  // the shared tests all pick markups by identical rules — and the B156 hover preview can reuse the
+  // exact same call so what highlights is always what a click selects. `tolPx: 10` keeps Document
+  // Review's forgiving 10-px grab (the shared default is 6). Returns the markup id under `p`, or null.
+  const hitTest = (p) => pickMarkup(pageMarks, p, view, { tolPx: 10 })?.id ?? null;
 
   // Copy / cut / paste a single selected markup (B417). Markups live on the editable SVG
   // overlay — the PDF backdrop is never touched. Paste drops the copy CENTERED under the
@@ -1809,7 +1754,7 @@ export default function DocReview({
               direction and zooms toward the cursor (no scroll box). The wheel + pointer handlers
               live on the viewport itself, so a pan can begin anywhere — even off the sheet. */}
           <div ref={attachWrap}
-            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => setCursor(null)}
+            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => { setCursor(null); setHoverId(null); }}
             onContextMenu={onContextMenu}
             onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
             style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden", background: "var(--canvas-mat)", touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
@@ -1829,11 +1774,18 @@ export default function DocReview({
                 width: detailTile ? detailTile.rw * view.scale : 0, height: detailTile ? detailTile.rh * view.scale : 0,
                 display: detailTile ? "block" : "none", pointerEvents: "none" }} />
               <svg data-testid="markup-overlay" width={pageBase.w * view.scale} height={pageBase.h * view.scale} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                {pageMarks.map((m) => (
-                  <MarkupRenderer key={m.id}
-                    markup={groupPreview?.[m.id] ? { ...m, pts: groupPreview[m.id] } : vtxPreview?.id === m.id ? { ...m, pts: vtxPreview.pts } : dragPreview?.id === m.id ? { ...m, pts: dragPreview.pts } : m}
-                    view={view} selected={m.id === sel || selSet.includes(m.id)} ftPerUnit={ftPerUnit} />
-                ))}
+                {pageMarks.map((m) => {
+                  const isSel = m.id === sel || selSet.includes(m.id);
+                  const isHov = m.id === hoverId && !isSel; // B156: hover glow, never on the already-selected markup
+                  const el = (
+                    <MarkupRenderer key={m.id}
+                      markup={groupPreview?.[m.id] ? { ...m, pts: groupPreview[m.id] } : vtxPreview?.id === m.id ? { ...m, pts: vtxPreview.pts } : dragPreview?.id === m.id ? { ...m, pts: dragPreview.pts } : m}
+                      view={view} selected={isSel} ftPerUnit={ftPerUnit} />
+                  );
+                  // Only the ONE hovered markup gets a wrapping <g> for the glow — so the overlay DOM
+                  // is unchanged (markups stay direct children) whenever nothing is hovered (B156).
+                  return isHov ? <g key={m.id} className="mk-hover" data-hover="1">{el}</g> : el;
+                })}
                 {drawDraft()}
                 {/* B569 — neutral hue-free multi-select chrome (casing + line + corner grips) on every
                     member of a multi-selection; the single-select case keeps its grips/× treatment below. */}

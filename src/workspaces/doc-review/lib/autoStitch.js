@@ -10,6 +10,7 @@
  * when we at least know the seam side. Manual align stays the fallback, never the primary path.
  */
 import { solveM, fwd, alignBaselinesDegenerate } from "./stitchGeom.js";
+import { fitEdgeLine, orderEndpoints } from "../../../shared/files/edgeGeomMatch.js";
 
 const normNum = (s) => (s || "").toString().toUpperCase().replace(/[^A-Z0-9]/g, "");
 const OPP = { left: "right", right: "left", top: "bottom", bottom: "top" };
@@ -98,6 +99,21 @@ function pickAnchor(sheets, adj) {
 
 const ID = { A: 1, B: 0, e: 0, f: 0 };
 
+/* The seam endpoints to feed the similarity solve for `sheet` on `side` (B340 tail #2). Prefers the
+ * DRAWN match line's geometry when it was extracted for this side (sheet.seamGeom[side] = candidate
+ * vector segments) — landing the seam on the true, possibly-inset line — and falls back to the
+ * drawing-area RECTANGLE edge (the label-based default, detectedEndpointsFor). Improve-only + fail
+ * open: a missing or low-confidence geometry fit silently keeps the rectangle edge, so this is a
+ * DORMANT enhancement until the vector extractor populates seamGeom (verified live). */
+export function seamEndpointsFor(sheet, side) {
+  const segs = sheet && sheet.seamGeom && sheet.seamGeom[side];
+  if (segs && segs.length) {
+    const fit = fitEdgeLine(segs);
+    if (fit && fit.straightness >= 0.985 && fit.span >= 40) return orderEndpoints(fit.p1, fit.p2);
+  }
+  return detectedEndpointsFor(sheet && sheet.drawingArea, side);
+}
+
 // B350 — sheets in one real plan set are the SAME plot size, so a seam-to-seam fit should place a
 // neighbor at ~1× scale (the anchor is identity, both endpoints are page points). A similarity fit
 // from two endpoints, though, will happily RESCALE a sheet to make the seams meet — so a half-size
@@ -128,8 +144,8 @@ export function autoPlaceGroup(sheets = []) {
     for (const link of adj.get(a.id) || []) {
       const b = link.other;
       if (seen.has(b.id)) continue;
-      const aEnds = detectedEndpointsFor(a.drawingArea, link.side);
-      const bEnds = detectedEndpointsFor(b.drawingArea, link.otherSide);
+      const aEnds = seamEndpointsFor(a, link.side);       // B340 tail #2 — drawn-geometry seam when present, else the rectangle edge
+      const bEnds = seamEndpointsFor(b, link.otherSide);
       if (!aEnds || !bEnds) continue;
       const wA1 = fwd(Ma, aEnds[0]), wA2 = fwd(Ma, aEnds[1]);
       if (alignBaselinesDegenerate(bEnds[0], bEnds[1], wA1, wA2)) continue;
