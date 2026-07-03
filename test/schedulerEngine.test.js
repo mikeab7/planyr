@@ -576,7 +576,7 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
   });
   it("buildGanttSVG draws a summary bracket before a milestone diamond + normalizes preds for arrows", () => {
     expect(src).toMatch(/\}else if\(isParent\)\{[\s\S]*?\}else if\(isMilestone\)\{/);
-    expect(src).toMatch(/const preds=normPreds\(t\.predecessors\);/);
+    expect(src).toMatch(/normPreds\(t\.predecessors\)/);   // arrows tolerate plain-number preds (B629 inlined this into the fan-collection loop)
   });
   it("the on-screen Gantt renders a duration-0 parent as a bracket, not a diamond", () => {
     expect(src).toMatch(/\(isMilestone && !isSummary\) \? \(<>/);
@@ -683,9 +683,11 @@ describe("anti-drift: the scheduler bug-batch fixes still exist in the real sour
     expect(src).toMatch(/const xOf = d => Math\.max\(0, Math\.min\(totalW, dif\(minD, d\) \* ppd\)\);/);
     expect(src).not.toMatch(/Math\.min\(dif\(mn, mx\), MAX_SPAN_DAYS\)/); // old incomplete cap is gone
   });
-  it("#10 the dependency y-helpers test the summary case before the milestone case (both paths)", () => {
-    expect(src).toMatch(/test this BEFORE the milestone case/);     // on-screen depYCenter
-    expect(src).toMatch(/test summary BEFORE milestone/);           // export edgeYOf
+  it("#10 the dependency edge-helpers test the summary case before the milestone case (both paths)", () => {
+    // Both glyphEdges helpers (on-screen + export) branch on summary BEFORE milestone, so a
+    // duration-0 parent anchors to its bracket, not a phantom diamond (B396/B402, shared in B629).
+    expect(src).toMatch(/summary bracket \(test before milestone/);   // on-screen glyphEdges
+    expect(src).toMatch(/summary bracket \(before milestone/);         // export glyphEdges
   });
   it("#11 on-screen dependency connectors skip unparseable-date endpoints (mirrors the export)", () => {
     expect(src).toMatch(/isNaN\(pd\(pred\.start\)\) \|\| isNaN\(pd\(pred\.end\)\) \|\| isNaN\(pd\(task\.start\)\)/);
