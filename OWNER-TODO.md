@@ -42,6 +42,21 @@ _Last updated: 2026-06-27._
 - [x] ~~**(2-min dashboard check) Confirm "Confirm email" is ON** in Supabase → Authentication → Providers → Email.~~ — **DONE (Cowork verified 2026-07-01).** Supabase Dashboard → Authentication → Sign In / Providers → Email shows **Confirm email: Enabled**. Email is the only enabled sign-in provider (Phone, SAML 2.0, Web3 Wallet, Apple, Azure, etc. all Disabled; no third-party OAuth or magic-link providers on). (B491 tail check.)
 
 ## Things Claude needs FROM Michael to finish/verify
+- [ ] **Drainage-manual PDFs for the exact-number transcription pass (B629 tail).** The detention rules engine
+      shipped with the verified rates (HCFCD 0.65; Houston's brand-new June-2026 flat 0.8 under 20 acres) but three
+      authorities still carry "screening band — exact table pending" flags because their numbers live in chart
+      figures inside PDFs this sandbox can't download (the network proxy blocks the county/city sites). When
+      convenient, drop into the chat: **City of Houston IDM Chapter 9** (the current June-2026 edition), the
+      **Fort Bend County Drainage District** criteria manual (the Interim Atlas-14 revisions — figures 7-1-1
+      through 7-1-16 hold the under-50-acre detention rates), and the **Montgomery County** Drainage Criteria
+      Manual (adopted Aug 2025, the ≤20-acre simplified tables). Claude transcribes them page-by-page (same as
+      the Goose Creek pass) and the bands become exact numbers.
+- [ ] **Add the six drainage-authority websites to the periodic Cowork re-verification checklist.** Every
+      detention rule record now carries a "verified on" date so staleness is visible; a recurring Cowork pass
+      over hcfcd.org, houstonpermittingcenter.org, fortbendcountytx.gov, the Montgomery DCM page, the Chambers
+      (Mont Belvieu-hosted) DCM, and Waller's subdivision regs is the refresh mechanism. (Houston already changed
+      its rules once — June 2026 — between the owner's verification and this build; the engine caught it because
+      records are versioned.)
 - [x] **Reference drawings — DONE (2026-06-30, found in Google Drive, defaults validated).** Measured the
       **Grand Port** approved arch set (1,005,560 SF cross-dock, 40′ clear): the **56′** typical bay is the
       single dominant grid dimension (~130 callouts) and the slab plan literally labels a **60′ SPEED BAY** —

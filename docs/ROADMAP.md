@@ -9,8 +9,12 @@ Two parallel tracks now.
 1. **GIS layer caching** — next immediate item. Stale-while-revalidate: load
    last-known-good copy instantly, refresh in background, always show data age,
    screening-only. Makes layers fast and resilient.
-2. Tier 1 "site-killer" features: storm outfall, then sanitary sewer, fire flow,
-   finished-floor-vs-base-flood, environmental screen (TCEQ LPST / EPA),
+2. Tier 1 "site-killer" features: storm outfall *(split 2026-07-03: the detention
+   rate-rules half shipped as **B629–B633** — versioned rules engine, required-vs-provided
+   yield readout, DIA-tier, hydraulic regime, pond auto-size — plus watershed overlays
+   **B635**; the flowline/design-tailwater sourcing half is **B634** in the backlog
+   Later/Roadmap, its LiDAR-screening slice already shipped)*, then sanitary sewer,
+   fire flow, finished-floor-vs-base-flood, environmental screen (TCEQ LPST / EPA),
    entitlement/zoning status.
 3. Tier 2: earthwork / cut-fill, soils.
 4. Tier 3: swept-path, driveway access.
