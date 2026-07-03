@@ -35,15 +35,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ### B495 — Schedule module: instant first paint (stale-while-revalidate local cache) `[Scheduler / perf]` (enhancement, follow-on to B494)  *(surfaced fixing B494 2026-06-27; minted **B495** — renumbered from a provisional B494 after a concurrent `main` took B493 for the cross-module-link feature)*
 `[ ]` The embedded scheduler's boot does `await window.storage.get("hs-v1")` — a pure Supabase round-trip with NO local cache (`public/sequence/index.html`) — and `data` stays null (so the shell loader shows) until it resolves. B494 made the loader's READY signal reliable + bounded, but the genuine first-load still waits on that network call. Stale-while-revalidate would make repeat loads near-instant: cache the last-loaded `hs-v1` in localStorage (write it on every successful `get`/`set`), paint from it synchronously on boot so `data` is available immediately, then reconcile against the authoritative cloud read. **Care required (why deferred):** the scheduler has load-bearing concurrency/version guards (`__rev`/`knownRev`/stale-block) and a documented two-tab-fight sensitivity, and it's under active concurrent development — only replace the local view with the cloud read when the user hasn't edited yet (guard the reconcile), and verify it can't lose an in-progress edit or confuse the save guard. Own focused pass.
 
-### B489 — PDF viewer crispness: remaining render-engine refinements (sub-pixel seam, continuous-pan re-raster, useSystemFonts) `[Doc Review / Markup]` (task — quality, follow-on to B488)  *(surfaced by the B488 PDF-viewer-quality audit 2026-06-27; minted **B489** — renumbered from a provisional B487 a concurrent `main` (#374) took)*
-`[ ]` Lower-priority polish on the B415 two-layer renderer from the B488 audit. (B488 already shipped the high-value, low-risk set: asset wiring + detail supersampling + snappier settle + deeper zoom + **backdrop-floor budget 8e6→16e6 + pan margin 0.25→0.40 + retina density cap 2→2.5**.) The three below were deliberately held back — each is subtle/medium-risk and wants its own focused pass; verify each headlessly:
-- **Sub-pixel detail/backdrop seam** *(highest-value remaining)* — the sharp detail tile is placed at the *unrounded* page origin while its pixels were rendered at the *rounded* device origin, so it can sit ≤0.5 CSS-px off the backdrop beneath it → faint ghosting on thin lines/text on every detail re-raster. Fix = snap the tile to whole device pixels (in `pdf.js renderInto` return `region: {rx: ox/S, ry: oy/S, rw: bw/S, rh: bh/S}`; in `DocReview` build the tile from `d.region`, not `reg.rect`). Touches displayed geometry → needs a real before/after pixel diff (a hairline crossing the seam should be one band, not a doubled echo), which the existing interaction harness (markup overlay only) won't catch — hence held for a focused pass.
-- **Continuous-pan leading-edge re-raster** — the 90 ms settle still holds the soft backdrop during a long *continuous* flick; a leading-edge / rAF-throttled detail re-raster during a slow pan would keep it sharp mid-motion.
-- **useSystemFonts:false** — with the standard fonts now wired (B488), forcing pdf.js's bundled metric-compatible substitutes over `local()` system fonts would render text identically across devices (a drawings-review tool wants that consistency), at the cost of not matching a font the user actually has installed. Low impact; a deliberate product call for Michael.
-
-### B490 — PDF viewer: optional-content (OCG) layer toggle `[Doc Review / Markup]` (feature)  *(surfaced by the B488 PDF-viewer-quality audit 2026-06-27; minted **B490** — renumbered from a provisional B488)*
-`[ ]` CAD-exported surveys/civil sheets often carry optional-content layers (OCGs). pdf.js honours the document's *default* visibility (off-by-default layers stay hidden — correct), but there's no way to turn a hidden layer ON. Add a small Layers control: after `loadPdf`, call `pdf.getOptionalContentConfig()`; if it has groups, list them with checkboxes and pass the edited config into render via `optionalContentConfigPromise` on `page.render`. Net-new UI + render wiring — sized as its own item, not part of B488.
-
 ### B483 — A 100%-full localStorage boots the app signed-out (auth-token refresh write fails) `[Auth / Storage]` (bug — hardening; low real-world risk post-B474)  *(Cowork signed-in verification 2026-06-26, "NEW-4"; minted **B483** = highest real B# (B482) + 1)*
 `[ ]` **Repro:** fill localStorage to a literal ~100% (Cowork's snippet B + a fine-grained top-up), then reload → the app boots **signed-out** (header "Sign in", empty site list) because Supabase's session-token refresh can't write to a full localStorage. Self-heals once space is freed; data intact.
 - **Why low real-world risk now:** B474 moved the heavy rasters off localStorage into IndexedDB, so in real use localStorage sits ~700 KB even with big images — a literal 100%-full localStorage is essentially only reachable by an artificial fill. B473's amber "saved to your account" path itself behaved correctly throughout.
@@ -1072,13 +1063,6 @@ Both are walled-off compute (Cloud Run); keys server-side only. Scope: provision
 ### B163 — Project `progress_pct` field on data model `[Site Planner]` (task)
 `[ ]` Follow-on to B161 (Path A). Add `progress_pct SMALLINT NOT NULL DEFAULT 0 CHECK (progress_pct BETWEEN 0 AND 100)` to the projects/sites data model and wire it to the building marker's arc. Exact storage: either a column on the `sites` Supabase table via migration, or a field in the `Site Model` `data` jsonb. UI for editing (slider or inline input on the map pin or site list) TBD — scope separately. Until then, the arc continues to derive from status (Path B, B161).
 
-### B159 — Task-names visibility toggle on PDF/Print export `[Scheduler / UI]` (feature)  *(arrived as "NEW-1"; minted B159 — highest B# across both files is B158, so this is the real next free ID)*
-`[ ]` On the PDF/Print Exhibit export panel, task names in the Gantt preview are currently not shown (or shown inconsistently). **Target:** task names visible by default on export, with a toggle in the export sidebar to suppress them.
-- **Default on.** Task names should render on the exported Gantt bars/rows by default — the toggle starts checked.
-- **Toggle placement.** Add a labeled control (e.g. "Task names") in the export sidebar alongside the existing controls (Gantt, Today line, Dep. arrows). On = names visible; off = names suppressed from the exported output only. The live schedule display is never affected.
-- **Persistence.** Toggle state persists for the session (or per-project export preference if that pattern already exists in the codebase).
-- **Acceptance:** default export includes task names; unchecking the toggle produces an export with names removed; the live Gantt is unchanged in both states.
-
 ### B155 — Markup selection hit-testing: grab unfilled shapes by their interior, consistently at any zoom `[Document Review + Site Planner / UI]` (bug)  *(arrived as "NEW-1"; minted B155 — `main` concurrently took B147–B154 (easement tool, multipart parcel, Delete-key fix), so this is the real next free ID; provisionally B150 then B154 in earlier drafts — both numbers were taken by `main` while this was in flight)*
 `[ ]` **Repro (owner-reported 2026-06-18):** drawing markups are too finicky to select — an **unfilled rectangle only selects when you click its border stroke** (the thin line), not its interior, so you have to "grab exactly on the line." At low zoom even the stroke is hard to land. **Expected:** forgiving, predictable selection for **every** markup type — clicking anywhere inside a closed shape grabs it, and the "grab feel" is the same whether zoomed way in or out.
 - **Rendering approach (inspected — fix differs by surface, all THREE confirmed SVG):**
@@ -1310,26 +1294,6 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
                 synchronously, NO badge. Column width keeps riding data.exportColWidths (B392).
      B160 (the whole-split table-vs-chart divider ratio) left Open by design — distinct from B361's
      in-chart time axis; B392's per-column drag-resize already covers most of the need. -->
-
----
-
-### B160 — Gantt horizontal width control on PDF/Print Exhibit export `[Scheduler]` (feature)
-
-- [ ] Add a control to the PDF/Print Exhibit export sidebar that lets the user adjust how much of the total page width the Gantt chart occupies vs. the task name/info columns.
-- Recommended implementation: a **horizontal split slider** or a **numeric percentage field** (e.g., "Gantt width: 60%") that shifts the column-to-chart ratio.
-- Preview updates in real time as the user drags/adjusts.
-- **Interacts with B361 (time scale):** wider Gantt + finer time scale = more bars visible; narrower + coarser = summary view. Both controls must co-exist without conflict.
-- Export-only; live schedule layout unaffected.
-- **Amended-NEW-1 boundary (2026-06-22):** the owner's corrected NEW-1 explicitly keeps this item DISTINCT from the in-chart time-axis controls (timescale zoom + pan) — those live in **B361**. B160 is purely the **panel divider** (one ratio handle for the whole table-vs-chart split). The per-column drag-resize (**B392**, shipped) already lets a user trade table width against chart width column-by-column; B160 remains the single whole-split ratio handle if still wanted.
-
-<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B361 (related but distinct control). Annotated 2026-06-22 with the amended-NEW-1 boundary (time-axis controls → B361; divider → here). -->
-<!-- RECONCILE w/ B392 (DONE 2026-06-22, PR #293): B392 shipped per-column drag-resize in the exhibit.
-     Because the table block is now exactly the sum of its (content-fit or dragged) column widths and
-     the Gantt auto-takes the remainder (never < EXHIBIT_MIN_GANTT=240px), dragging columns already
-     shifts the column-block-vs-Gantt ratio — so B392 PARTIALLY covers this item's user need without a
-     slider. B160 remains a distinct control (one ratio handle for the whole split). If built, implement
-     it as the OVERALL budget that B392's per-column widths fit within (don't fight: B392 already clamps
-     the table total so the Gantt keeps its floor). Not a duplicate; reconciled, left Open. -->
 
 ---
 
