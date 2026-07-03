@@ -13,12 +13,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToImage, renderPageToImageData } from "./lib/pdf.js";
 import { dist, polyArea, pathLength, centroidOf } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
-import { fwd, inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo } from "./lib/stitchGeom.js";
+import { fwd, inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo, alignBadgeMetrics, isReferenceSet } from "./lib/stitchGeom.js";
 import { autoPlaceGroup, detectedEndpointsFor } from "./lib/autoStitch.js";
 import { binarizeImageData, refineGroupPlacements } from "./lib/matchLineRefine.js";
-import { readAndGroup, groupCalibration } from "./lib/sheetRead.js";
+import { readAndGroup, groupCalibration, isNotToScale } from "./lib/sheetRead.js";
+import { dedupePlaced, isPlaced } from "./lib/stitchDedupe.js";
 import { normSheet } from "../../shared/files/detailRefs.js";
 import { aggregateNotes } from "../../shared/files/sheetNotes.js";
+import { legendFromPlaced } from "../../shared/files/legendUnion.js";
 import { createOcrRunner } from "./lib/ocr.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
@@ -66,7 +68,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [showRefs, setShowRefs] = useState(true);          // show clickable detail-callout hotspots (B350)
   const [detail, setDetailPopup] = useState(null);         // open detail "cloud" popup (B350)
   const [notice, setNotice] = useState("");                // transient auto-stitch result line
+  const [steerDismissed, setSteerDismissed] = useState(false); // B630/NEW-1: dismissed the "reference set (not to scale)" steer
+  const [metaScanning, setMetaScanning] = useState(false); // B631: a post-load not-to-scale re-scan is in flight — hold the align nag until we've read the sheets
   const drag = useRef(null);
+  const dedupeResaveRef = useRef(false); // B633/NEW-4: a load collapsed duplicate sheets → re-persist the cleaned array once
 
   /* ---- undo / redo (B303) — measures + the composite calibration ---- */
   const editRef = useRef({ measures: [], ftPerUnit: 0 });
@@ -219,17 +224,24 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
   const addSheet = async (pdf, pageNum) => {
     if (loadingRef.current) return; // a load is rebuilding placed[]; its blind setPlaced would clobber this sheet (B51)
+    // B633/NEW-4 — adding a page that's already on the canvas is a no-op, never a stacked duplicate.
+    if (isPlaced(placedRef.current, pdf.srcId, pageNum)) { setNotice("That sheet is already placed."); return; }
     setBusy(true);
     try {
       const img = await renderPageToImage(pdf.doc, pageNum, 2);
       const pm = pageMetaOf(pdf, pageNum);
       setPlaced((arr) => {
+        if (isPlaced(arr, pdf.srcId, pageNum)) return arr; // re-entrant guard: a second in-flight add for the same page (B633)
         let M = { ...ID };
         if (arr.length) { const right = Math.max(...arr.map((s) => sheetBBox(s).maxX)); M = { ...ID, e: right + 40 }; }
         // The first sheet IS the world frame (auto-aligned). Every later sheet drops at
         // identity scale offset to the right and must be Aligned before its measurements
         // can be trusted — track that per sheet so we can flag + warn until it is (B301).
+        // B631/NEW-2: carry the not-to-scale flag (a schedule/legend sheet is never measurable, so
+        // it needs no align gate) and the read seam metadata so a single-added sheet has the same
+        // furniture a grouped add does (drawingArea/matchLines feed seeded Align + the reference-set steer).
         return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false, aligned: arr.length === 0,
+          notToScale: isNotToScale(pm), matchLines: pm.matchLines || [], drawingArea: pm.drawingArea || null,
           sheetNumber: pm.sheetNumber || "", detailRefs: pm.detailRefs || [], detailAnchors: pm.detailAnchors || [], notes: pm.notes || [] }];
       });
     } finally { setBusy(false); }
@@ -242,6 +254,13 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
    * pre-seeded with their detected seam endpoints. The drawing-area edge is the seam reference. */
   const addGroup = async (pdf, group) => {
     if (loadingRef.current) return;
+    // B633/NEW-4 — drop pages already on the canvas so re-clicking a group can't stack duplicates.
+    // If every page is already placed, it's a no-op with a quiet notice. (Only the not-yet-placed
+    // pages stitch among themselves — a partial re-add never duplicates the existing sheets.)
+    const already = new Set(placedRef.current.map((s) => s.srcId + " " + s.pageNum));
+    const pages = (group.pages || []).filter((pg) => !already.has(pdf.srcId + " " + pg.pageNum));
+    if (!pages.length) { setNotice(group.pages && group.pages.length > 1 ? "Those sheets are already placed." : "That sheet is already placed."); return; }
+    group = { ...group, pages };
     setBusy(true); setNotice("");
     try {
       const built = [];
@@ -258,6 +277,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           name: `${pdf.name.replace(/\.pdf$/i, "")} · ${pg.sheetNumber || "p" + pg.pageNum}`,
           href: img.href, baseW: img.baseW, baseH: img.baseH,
           drawingArea: da, sheetNumber: pg.sheetNumber || "", matchLines: pg.matchLines || [], missing: false,
+          notToScale: isNotToScale(pg), // B631/NEW-2 — a schedule/legend/notes sheet needs no align gate
           detailRefs: pg.detailRefs || [], detailAnchors: pg.detailAnchors || [], notes: pg.notes || [],
         });
       }
@@ -304,7 +324,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         newSheets.push({ ...s, M: { ...ID, e: off }, aligned: false, grouped: false, groupLabel: group.label });
         off += s.baseW + GAP;
       }
-      setPlaced((arr) => [...arr, ...newSheets]);
+      // B633/NEW-4 — re-check inside the updater against the FRESHEST arr (the top-of-function
+      // placedRef check can be stale under a rapid double-click); drop any page already placed so a
+      // concurrent group add can't double-place. Mirrors addSheet's in-updater guard.
+      setPlaced((arr) => {
+        const have = new Set(arr.map((s) => s.srcId + " " + s.pageNum));
+        const add = newSheets.filter((s) => !have.has(s.srcId + " " + s.pageNum));
+        return add.length ? [...arr, ...add] : arr;
+      });
       // Auto-calibrate the composite from the group's stated scale, once (B339).
       let calMsg = "";
       if (!ftPerUnit && crop) { const cal = groupCalibration(group.pages); if (cal) { setFtPerUnit(cal.ftPerUnit); calMsg = ` · scale ${cal.label || "set"} from sheet`; } }
@@ -337,7 +364,11 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // the act of SETTING the scale, not reading one off.
   const blockedOverUnaligned = (pts) => {
     if (measureOverUnaligned(placed, pts)) {
-      setErr("Align that sheet before measuring on it — its scale isn't set yet, so the length/area would be wrong.");
+      // B630/NEW-1 — on a reference set (schedules/legends, not to scale) the block isn't about
+      // alignment at all; steer to single-sheet Review rather than demand an impossible Align.
+      setErr(referenceSet
+        ? "These sheets aren’t to scale — open them as single sheets to view them; there’s nothing to measure here."
+        : "Align that sheet before measuring on it — its scale isn't set yet, so the length/area would be wrong.");
       return true;
     }
     return false;
@@ -478,7 +509,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: pdfs.filter(isStoredSource).map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, driveKey: p.driveKey || null, oversize: !!p.oversize })),
     stitch: {
-      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned !== false, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [], sheetNumber: s.sheetNumber || "", detailRefs: s.detailRefs || [], detailAnchors: s.detailAnchors || [], notes: s.notes || [] })),
+      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned !== false, notToScale: !!s.notToScale, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [], sheetNumber: s.sheetNumber || "", detailRefs: s.detailRefs || [], detailAnchors: s.detailAnchors || [], notes: s.notes || [] })),
       view, measures, ftPerUnit,
     },
   }), [reviewId, meta, pdfs, placed, view, measures, ftPerUnit]);
@@ -491,14 +522,58 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   });
   useEffect(() => { try { localStorage.setItem("planyr:docreview:lastStitchId", reviewId); } catch (_) {} }, [reviewId]);
 
+  // B633/NEW-4 — after a load collapsed duplicate sheets, persist the cleaned array once. This runs
+  // post-commit, so buildSnapshot reads the deduped `placed`; saveNow writes both the local mirror
+  // (the resume source, via reconcile) and the cloud. A ref gate keeps it to the dedupe-load only —
+  // ordinary edits already autosave. reconcile picks the newer copy wholesale (it never merges the
+  // two arrays), so a cleaned save can't be re-inflated with the old duplicates on the next open.
+  useEffect(() => {
+    if (!dedupeResaveRef.current) return;
+    dedupeResaveRef.current = false;
+    saveNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placed]);
+
   const resetStitch = () => {
     setReviewId(newReviewId());
     setMeta(newMeta());
     setPdfs([]); setPlaced([]); setMeasures([]); setFtPerUnit(0);
-    setView({ panX: 40, panY: 40, zoom: 0.4 }); setAlign(null); setDraft(null); setTool("pan"); setErr(""); setCalInput(null); setNotice(""); setShowAllPages(false);
+    setView({ panX: 40, panY: 40, zoom: 0.4 }); setAlign(null); setDraft(null); setTool("pan"); setErr(""); setCalInput(null); setNotice(""); setShowAllPages(false); setSteerDismissed(false); setMetaScanning(false);
     closeDetail();
     clearHistory();
+    dedupeResaveRef.current = false;
     pdfsRef.current = []; placedRef.current = [];
+  };
+
+  // B631 — recover the per-sheet not-to-scale flag for a resumed set whose save predates B631 (the
+  // flag wasn't persisted). Re-reads each source's page metadata (the SAME reader the drop path
+  // uses) and back-fills notToScale so a schedule/legend set is classified as a reference set by
+  // isReferenceSet. Best-effort + token-guarded; only ever UPGRADES a sheet to not-to-scale (never
+  // downgrades a persisted true), and a real plan set's sheets read not-to-scale:false so this can
+  // never misclassify one. Background — the sheets are already on-screen before it resolves.
+  const backfillNotToScale = async (srcEntries, tok) => {
+    setMetaScanning(true); // hold the align nag until we've read the sheets (avoids a resume flash)
+    try {
+      const flag = new Map(); // "srcId pageNum" -> boolean
+      for (const src of srcEntries) {
+        if (!src.doc) continue;
+        const { pages } = await readAndGroup(src.doc);
+        if (tok !== loadTok.current) return;
+        for (const pg of pages) flag.set(src.srcId + " " + pg.pageNum, isNotToScale(pg));
+      }
+      if (tok !== loadTok.current || !flag.size) return;
+      setPlaced((arr) => {
+        let changed = false;
+        const next = arr.map((s) => {
+          const key = s.srcId + " " + s.pageNum;
+          if (!s.notToScale && flag.get(key)) { changed = true; return { ...s, notToScale: true }; }
+          return s;
+        });
+        if (changed) placedRef.current = next;
+        return changed ? next : arr;
+      });
+    } catch (_) { /* best-effort; a read failure just leaves the persisted flags as-is */ }
+    finally { if (tok === loadTok.current) setMetaScanning(false); } // token-guarded so a superseded scan can't clear a newer one's flag
   };
 
   const loadStitch = async (rec) => {
@@ -511,7 +586,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       const st = rec.stitch || {};
       setMeasures(st.measures || []); setFtPerUnit(st.ftPerUnit || 0);
       if (st.view) setView(st.view);
-      setAlign(null); setDraft(null); setTool("pan"); setCalInput(null); clearHistory();
+      setAlign(null); setDraft(null); setTool("pan"); setCalInput(null); clearHistory(); setSteerDismissed(false);
       // Re-fetch each source PDF; render placed sheets back from the bytes + saved M.
       const srcEntries = [];
       for (const src of rec.sources || []) {
@@ -537,12 +612,21 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         // First placed sheet is always the world frame; older saves predate the `aligned`
         // flag, so treat the rest as aligned (they were saved with a real transform) — only
         // genuinely unaligned new sheets carry aligned:false, so we never falsely flag. (B301)
-        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [], sheetNumber: s.sheetNumber || "", detailRefs: s.detailRefs || [], detailAnchors: s.detailAnchors || [], notes: s.notes || [] });
+        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false, notToScale: !!s.notToScale, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [], sheetNumber: s.sheetNumber || "", detailRefs: s.detailRefs || [], detailAnchors: s.detailAnchors || [], notes: s.notes || [] });
         idx++;
       }
       if (tok !== loadTok.current) return; // superseded before committing the placed sheets (B52)
       suspendSave(); // re-park before the final commit so a slow load's setPlaced isn't re-saved (B19)
-      setPlaced(out); placedRef.current = out;
+      // B633/NEW-4 — collapse any exact (srcId,pageNum) duplicates persisted before the add-time
+      // guard existed (the owner's JACINTOPORT draft was 14 entries / 8 unique). Keeping the FIRST
+      // instance preserves the index-0 world frame + its transform. Re-persist the cleaned array
+      // once (the effect below) so the duplicates can't return on the next open.
+      const { placed: cleaned, removed } = dedupePlaced(out);
+      dedupeResaveRef.current = removed > 0;
+      setPlaced(cleaned); placedRef.current = cleaned;
+      // B631 — pre-B631 saves didn't persist notToScale; recover it in the background so a resumed
+      // schedule/legend set is classified as a reference set. Only when some sheet lacks the flag.
+      if (cleaned.some((s) => !s.notToScale)) backfillNotToScale(srcEntries, tok);
       setErr(srcEntries.some((e) => e.missing) ? "Some source PDFs weren't available (too large to store) — drop the files to fill in the placeholders." : "");
     } finally { if (tok === loadTok.current) { loadingRef.current = false; setBusy(false); } }
   };
@@ -586,11 +670,25 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // any zoom instead of being baked into the raster.
   const composite = [...new Map(placed.filter((s) => s.groupLabel).map((s) => [s.groupLabel, s])).values()];
 
+  // B630/NEW-1 — is this a REFERENCE SET (schedules/legends/notes), not a plan to stitch? The
+  // JACINTOPORT mechanical set is the canonical case. For such a set the "Align before measuring"
+  // gate is a false demand, so we drop the align nag/overlay entirely (NEW-2 also drops it per
+  // NOT-TO-SCALE sheet). The classifier is pure (isReferenceSet, stitchGeom) and reads only data
+  // that PERSISTS, so a resumed save is classified with no re-scan.
+  const referenceSet = isReferenceSet(placed, ftPerUnit);
+
   // B350 — pull EVERY placed sheet's notes/legend into one pinned model, deduped, with the
   // sheets each note appeared on, so a note that changes page to page is captured (not lost
   // behind the title-block crop). Keyed by sheet number when known, else the placement order.
   const notesModel = aggregateNotes(placed.map((s, i) => ({ sheet: s.sheetNumber || `#${i + 1}`, notes: s.notes || [] })));
   const noteCount = notesModel.reduce((n, g) => n + g.lines.length, 0);
+
+  // B340 tail #3 — union every sheet's graphical LEGEND entries (symbol → meaning) into one deduped
+  // key for the Composite panel, the graphic complement to the notes aggregation above. Dormant
+  // (empty) until the symbol extractor populates each placed sheet's `legendEntries`, so the
+  // Composite key is unchanged today; rendered only when non-empty (fail open). Verified live.
+  const legendEntries = legendFromPlaced(placed);
+  const hasKey = composite.length > 0 || noteCount > 0 || legendEntries.length > 0;
 
   // B350 — resolve a detail callout's target sheet to something we can show in the popup:
   // an already-placed sheet's rendered image first (instant), else a page from a loaded PDF
@@ -752,7 +850,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <g transform={G}>
               {placed.map((s) => {
                 const aligning = align && align.sheetId === s.id;
-                const unaligned = s.aligned === false && !aligning; // not yet aligned — flag it (B301)
+                // B630/NEW-1 + B631/NEW-2 — only flag "Not aligned" when alignment actually matters.
+                // Never on a reference set (no seams + no scale) or a NOT-TO-SCALE sheet: there the
+                // gate is a demand that can't be satisfied and reads as "broken." (B301 otherwise.)
+                const unaligned = s.aligned === false && !aligning && !referenceSet && !s.notToScale && !metaScanning;
                 const xf = `matrix(${s.M.A} ${s.M.B} ${-s.M.B} ${s.M.A} ${s.M.e} ${s.M.f})`;
                 if (!s.href) { // source bytes unavailable (too large / not yet re-dropped) — placeholder
                   return <g key={s.id} transform={xf} opacity={aligning ? 0.6 : 1}>
@@ -771,10 +872,20 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                   <image href={s.href} x={0} y={0} width={s.baseW} height={s.baseH} preserveAspectRatio="none"
                     clipPath={cropped ? `url(#${clipId})` : undefined}
                     opacity={aligning ? 0.6 : 1} style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />
-                  {unaligned && <>
-                    <rect x={0} y={0} width={s.baseW} height={s.baseH} fill="#f59e0b14" stroke="#b45309" strokeWidth={ls(2.5)} strokeDasharray={`${ls(12)} ${ls(8)}`} pointerEvents="none" />
-                    <text x={s.baseW / 2} y={ls(30)} fontSize={ls(22)} textAnchor="middle" fill="#b45309" fontWeight="700" pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(5) }}>⚠ Not aligned — click “Align”</text>
-                  </>}
+                  {unaligned && (() => {
+                    // B632/NEW-3 — clamp the badge to the sheet's ON-SCREEN footprint so it can't
+                    // balloon over a small sheet at low zoom. `lc` converts a desired on-screen px
+                    // into THIS sheet's local (image) units, accounting for both the view zoom and
+                    // the sheet's own placement scale.
+                    const sScale = Math.hypot(s.M.A, s.M.B) || 1;
+                    const screenMin = Math.min(s.baseW, s.baseH) * view.zoom * sScale;
+                    const bm = alignBadgeMetrics(screenMin);
+                    const lc = (px) => px / (view.zoom * sScale || 1);
+                    return <>
+                      <rect x={0} y={0} width={s.baseW} height={s.baseH} fill="#f59e0b14" stroke="#b45309" strokeWidth={lc(bm.borderPx)} strokeDasharray={`${lc(bm.borderPx * 5)} ${lc(bm.borderPx * 3)}`} pointerEvents="none" />
+                      {bm.showText && <text x={s.baseW / 2} y={lc(bm.fontPx * 1.4)} fontSize={lc(bm.fontPx)} textAnchor="middle" fill="#b45309" fontWeight="700" pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: lc(bm.fontPx * 0.22) }}>{bm.text}</text>}
+                    </>;
+                  })()}
                   {/* B350 — clickable detail-callout hotspots: ring the printed bubble; click pulls
                       up that detail in a popup. Interactive only in Pan mode so measure/align clicks
                       aren't swallowed; stopPropagation keeps a click from also starting a pan. */}
@@ -849,7 +960,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               floated over the canvas so it stays readable at any zoom (not baked into the raster).
               B350 — also carries every sheet's NOTES/LEGEND, aggregated + deduped, so a note that
               changes page to page is still shown (cropping the title block can't lose it). */}
-          {(composite.length > 0 || noteCount > 0) && legendOpen && (
+          {hasKey && legendOpen && (
             <div style={{ position: "absolute", top: 10, left: 10, zIndex: 4, width: 230, maxHeight: "calc(100% - 20px)", overflowY: "auto", background: "rgba(255,255,255,0.97)", border: `1px solid ${PAL.line}`, borderRadius: 8, padding: "8px 10px", boxShadow: "0 4px 14px rgba(0,0,0,0.16)", fontFamily: "system-ui, sans-serif" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                 <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted }}>Composite key</span>
@@ -886,14 +997,41 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                   ))}
                 </div>
               )}
+              {/* B340 tail #3 — the unioned graphical legend (symbol → meaning), deduped across all
+                  placed sheets. Empty (hidden) until the symbol extractor populates legendEntries. */}
+              {legendEntries.length > 0 && (
+                <div style={{ marginTop: 6, borderTop: `1px solid ${PAL.line}`, paddingTop: 5 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted, marginBottom: 3 }}>Legend · {legendEntries.length}</div>
+                  {legendEntries.map((e, ei) => (
+                    <div key={ei} style={{ display: "flex", alignItems: "baseline", gap: 5, fontSize: 10.5, color: PAL.ink, lineHeight: 1.4, padding: "1px 0" }}>
+                      {e.symbol && <span style={{ flex: "none", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{typeof e.symbol === "string" ? e.symbol : "◆"}</span>}
+                      <span>{e.text}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-          {(composite.length > 0 || noteCount > 0) && !legendOpen && (
+          {hasKey && !legendOpen && (
             <button onClick={() => setLegendOpen(true)} style={{ position: "absolute", top: 10, left: 10, zIndex: 4, ...btn(false), fontSize: 11 }}>▣ Key{noteCount > 0 ? ` · ${noteCount} notes` : ""}</button>
           )}
           {/* Auto-stitch result line (B337) — what just happened, dismissable. */}
           {notice && (
             <div style={{ position: "absolute", top: 10, right: 10, zIndex: 4, maxWidth: 320, background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 12px", borderRadius: 8, fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.25)", cursor: "pointer" }} onClick={() => setNotice("")} title="Dismiss">{notice}</div>
+          )}
+          {/* B630/NEW-1 — a reference set (schedules/legends, not to scale) has nothing to stitch or
+              measure; steer to single-sheet Review instead of leaving a wall of impossible Align gates.
+              Dismissible so it never becomes a nag itself. */}
+          {referenceSet && !steerDismissed && (
+            <div style={{ position: "absolute", left: "50%", top: 12, transform: "translateX(-50%)", zIndex: 5, display: "flex", alignItems: "center", gap: 10, maxWidth: "min(92%, 600px)", background: "rgba(25,22,19,0.92)", color: "#fff", padding: "8px 14px", borderRadius: 10, fontSize: 12, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 20px rgba(0,0,0,0.3)" }}>
+              {/* The sheets ARE placed + viewable here; there's just nothing to stitch/measure. The
+                  button is an honest mode switch to single-sheet Review (where the Library is one
+                  click away) — not a promise these sheets auto-open there (a saved stitch can't be
+                  re-opened as single sheets). (B630 review finding.) */}
+              <span style={{ lineHeight: 1.4 }}>These look like reference sheets (not to scale) — placed here for viewing; there’s nothing to stitch or measure.</span>
+              <button onClick={() => { setSteerDismissed(true); onReview && onReview(); }} style={{ ...btn(true), flex: "none", padding: "4px 10px", fontSize: 11.5, whiteSpace: "nowrap" }}>‹ Single sheet</button>
+              <button onClick={() => setSteerDismissed(true)} title="Dismiss" style={{ flex: "none", border: "none", background: "none", color: "#fff", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
+            </div>
           )}
           {!placed.length && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", color: "#5a554a", fontFamily: "system-ui, sans-serif", textAlign: "center" }}><div><div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Drop a whole set — it stitches itself</div><div style={{ fontSize: 12.5 }}>Drop a multi-page PDF → it groups the pages into logical sheets → click a grouped plan to add it auto-stitched, cropped, and scaled. Manual add &amp; Align stay as the safety net.</div></div></div>}
         </div>
@@ -943,7 +1081,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 6 }}>Placed sheets · {placed.length}</div>
           {placed.map((s, i) => {
             const isAligning = align && align.sheetId === s.id;
-            const needsAlign = i > 0 && s.aligned === false; // not aligned yet (B301)
+            // B301 nag, suppressed by B630/NEW-1 (reference set) + B631/NEW-2 (NOT-TO-SCALE sheet)
+            // + while a post-load not-to-scale re-scan is still in flight (B631).
+            const needsAlign = i > 0 && s.aligned === false && !referenceSet && !s.notToScale && !metaScanning;
             return (
             <div key={s.id} style={{ border: `1px solid ${isAligning ? PAL.accent : needsAlign ? "#d6a64a" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "#fffbeb" : "#fff" }}>
               <div style={{ fontSize: 11, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>{i + 1}. {s.name}</div>

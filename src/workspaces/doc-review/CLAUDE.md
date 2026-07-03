@@ -12,7 +12,9 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
   `usePersistence.js` — the data-loss hook (first-edit save, honest badge, flush on unload).
 - `localRead.js` / `autofiling.js` / `fileIndex.js` — Tier-1 plain-code title-block read +
   auto-filing (never auto-guesses). `sheetRead.js` / `autoStitch.js` / `ocr.js` — drop-a-set
-  auto-group/stitch/crop/calibrate pipeline (Tesseract OCR for scanned sheets). `takeoff.js` — measure rollup.
+  auto-group/stitch/crop/calibrate pipeline (Tesseract OCR for scanned sheets). `stitchGeom.js` —
+  pure stitch geometry + the align-gate classifiers (`isReferenceSet`/`alignBadgeMetrics`, B630/B632);
+  `stitchDedupe.js` — collapse duplicate placed sheets (B633). `takeoff.js` — measure rollup.
 - `components/ReviewsBar.jsx` — project/discipline/item/revision filing UI. The file *browser* is
   now its own **Library** workspace (`/src/workspaces/library/`, B496); the storage data layer
   (`reviewStore`/`autofiling`/`fileIndex`) stays here and Library imports it cross-workspace.
