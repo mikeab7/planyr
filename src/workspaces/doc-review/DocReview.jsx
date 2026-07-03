@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
+import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
 import { reorderWithinPage, arrangeFlags } from "./lib/arrange.js";
 import { backingScale, backdropDensity, visibleRegion, tileCovers } from "./lib/renderBudget.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
@@ -25,6 +26,7 @@ import { onAuthChange } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
+import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
@@ -153,12 +155,36 @@ export default function DocReview({
   const backdropTok = useRef(0);
   const backdropTaskRef = useRef(null); // current BACKDROP RenderTask, cancellable (B40)
   const detailTileRef = useRef(null);   // {rx,ry,rw,rh,scale} of the rastered detail tile (coverage check, B415)
+  const ocgConfigRef = useRef(null);    // B490: retained OptionalContentConfig — renderInto reads it for PDF-layer visibility
+  const layersBtnRef = useRef(null);    // B490: anchor for the Layers popover (portaled — escapes the toolbar row's overflow clip)
+  const lastDetailBumpRef = useRef(0);  // B489b: last mid-gesture detail re-raster time (leading-edge throttle)
   // Destroy the previous PDF document before swapping in a new one — frees the worker
   // + retained ArrayBuffer; without this every re-open leaks the prior doc (B39).
   const setPdfDoc = (next) => {
     const prev = pdfRef.current;
     if (prev && prev !== next) { try { prev.destroy(); } catch (_) {} }
     pdfRef.current = next;
+    ocgConfigRef.current = null; setOcgLayers([]); setLayersOpen(false); // B490: drop the old doc's layers; readOcg repopulates
+  };
+  // B490: read a freshly-loaded doc's optional-content (OCG) groups for the Layers panel. Guarded on
+  // pdfRef so a superseded load can't attach its layers to whichever doc won the race; a doc with no
+  // optional content (the common case) leaves the list empty, so no Layers control shows.
+  const readOcg = async (pdf) => {
+    try {
+      const cfg = await pdf.getOptionalContentConfig();
+      if (pdfRef.current !== pdf) return; // a newer doc loaded while we awaited
+      ocgConfigRef.current = cfg;
+      setOcgLayers(ocgLayerList(cfg));
+    } catch (_) { /* older pdf / no OCGs — leave the Layers panel empty */ }
+  };
+  // B490: show/hide one PDF layer, re-read every row's visibility (a radio-button group flips its
+  // siblings), then re-raster BOTH layers against the mutated config. View filter only — never the markups.
+  const toggleLayer = (id, visible) => {
+    const cfg = ocgConfigRef.current;
+    if (!cfg) return;
+    cfg.setVisibility(id, visible);
+    setOcgLayers((rows) => deriveLayerVisibility(cfg, rows));
+    setBackdropReq((n) => n + 1); setDetailReq((n) => n + 1);
   };
 
   // A fresh (unconsumed) cross-workspace "open this review" request handed down by the Shell
@@ -185,6 +211,8 @@ export default function DocReview({
   const [detailTile, setDetailTile] = useState(null); // {rx,ry,rw,rh,scale} placing the sharp detail canvas (B415)
   const [backdropReq, setBackdropReq] = useState(0);  // bump → re-raster the whole-page backdrop (page/load only)
   const [detailReq, setDetailReq] = useState(0);      // bump → re-raster the viewport detail (page/load + settle)
+  const [ocgLayers, setOcgLayers] = useState([]);     // B490: PDF optional-content layers [{id,name,visible}] (empty = no Layers control)
+  const [layersOpen, setLayersOpen] = useState(false); // B490: Layers popover open?
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState(""); // file name shown in the "Opening…" overlay (B446)
   const [err, setErr] = useState("");
@@ -393,6 +421,7 @@ export default function DocReview({
     try {
       const pdf = await loadPdf(file);
       setPdfDoc(pdf);
+      readOcg(pdf); // B490: populate the Layers panel from the new doc's optional content
       setFileName(file.name || "document.pdf");
       setNumPages(pdf.numPages);
       setPage(1);
@@ -471,9 +500,17 @@ export default function DocReview({
   // tileCovers check inside renderDetail makes a settle that didn't move the window a no-op. (B415)
   useEffect(() => {
     if (!view) return;
-    const id = setTimeout(() => setDetailReq((n) => n + 1), 90); // settle delay: short enough that the
-    // sharp detail re-appears almost immediately after a pan/zoom stops (the soft CSS-scaled backdrop
-    // shows for less time), still long enough to coalesce a continuous gesture into one re-raster
+    // B489b: leading-edge throttle — re-raster the crisp detail window DURING a continuous pan/zoom
+    // (not only on settle), at most once per ~140ms, so a long drag stays sharp near its leading edge.
+    // Skipped during a pinch (touch GPUs are weakest and scale changes every frame → tileCovers never
+    // covers → every tick would raster). Self-limiting: renderDetail's tileCovers guard no-ops a bump
+    // while the tile still covers, and a superseded render is cancelled — so ticks can't pile up.
+    if (!pinchRef.current) {
+      const now = performance.now();
+      if (now - lastDetailBumpRef.current >= 140) { lastDetailBumpRef.current = now; setDetailReq((n) => n + 1); }
+    }
+    const id = setTimeout(() => { lastDetailBumpRef.current = performance.now(); setDetailReq((n) => n + 1); }, 90); // trailing settle: sharp
+    // detail re-appears almost immediately after a pan/zoom stops (the soft CSS-scaled backdrop shows for less time)
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view && view.scale, view && view.tx, view && view.ty]);
@@ -488,7 +525,7 @@ export default function DocReview({
     if (backdropTaskRef.current) { try { backdropTaskRef.current.cancel(); } catch (_) {} backdropTaskRef.current = null; }
     try {
       await renderInto(pdf, pageRef.current, canvas, {
-        scale: 1, density: backdropDensity(base.w, base.h, deviceDpr()),
+        scale: 1, density: backdropDensity(base.w, base.h, deviceDpr()), optionalContentConfig: ocgConfigRef.current,
         onTask: (t) => { backdropTaskRef.current = t; }, isStale: () => tok !== backdropTok.current });
     } catch (e) { if (!(e && e.name === "RenderingCancelledException")) { /* keep the prior frame */ } }
   }, []);
@@ -508,10 +545,10 @@ export default function DocReview({
     try {
       const density = backingScale(reg.rect.rw, reg.rect.rh, v.scale, deviceDpr());
       const d = await renderInto(pdf, pageRef.current, canvas, {
-        scale: v.scale, density, region: reg.rect,
+        scale: v.scale, density, region: reg.rect, optionalContentConfig: ocgConfigRef.current,
         onTask: (t) => { renderTaskRef.current = t; }, isStale: () => tok !== renderTok.current });
       if (!d || tok !== renderTok.current) return; // superseded mid-render (B40), or a newer render won
-      const tile = { ...reg.rect, scale: v.scale };
+      const tile = { ...d.region, scale: v.scale }; // B489a: place the tile on the DEVICE-ROUNDED region → seam-free vs the backdrop
       detailTileRef.current = tile; setDetailTile(tile);
     } catch (e) { if (!(e && e.name === "RenderingCancelledException")) { /* keep the prior frame */ } }
   }, []);
@@ -623,6 +660,7 @@ export default function DocReview({
     const pdf = await loadPdf(blob);
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
+    readOcg(pdf); // B490: populate the Layers panel from the new doc's optional content
     setRedrop(""); // bytes came back (from cache or cloud) — clear any stale "re-drop" banner (B448)
     setNumPages(pdf.numPages); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1); // refit on load (B329)
     scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B348); won't override saved cals
@@ -1621,6 +1659,26 @@ export default function DocReview({
               <span style={tbDiv} />
               <button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button>
               <button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>
+              {/* B490 — Layers: show/hide the PDF's optional-content groups (e.g. Electrical). Only when the
+                  drawing carries layers; visibility is a view filter (in-memory), never the markups. The popover
+                  is portaled (AnchoredMenu) so the toolbar row's overflow:hidden can't clip it. */}
+              {ocgLayers.length > 0 && (
+                <>
+                  <button ref={layersBtnRef} style={iconBtn(false)} onClick={() => setLayersOpen((o) => !o)} title="Layers — show/hide parts of the drawing" aria-expanded={layersOpen} aria-haspopup="menu">▤</button>
+                  <AnchoredMenu open={layersOpen} onClose={() => setLayersOpen(false)} anchorRef={layersBtnRef} placement="below-right" width={200} className=""
+                    panelStyle={{ padding: "8px 10px", borderRadius: 10, background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, boxShadow: "0 6px 24px rgba(0,0,0,0.18)", color: PAL.ink, fontFamily: "system-ui, sans-serif" }}>
+                    <div data-testid="layers-menu">
+                      <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted, margin: "0 0 6px" }}>Layers</div>
+                      {ocgLayers.map((r) => (
+                        <label key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 2px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                          <input type="checkbox" checked={r.visible} onChange={(e) => toggleLayer(r.id, e.target.checked)} />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </AnchoredMenu>
+                </>
+              )}
             </>}
           </>
         }

@@ -71,6 +71,16 @@ export function backingPixels(baseW, baseH, scale, devicePixelRatio = 1) {
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
+/* The exact device-pixel rectangle a page-unit region maps to at S device-px-per-page-unit — the
+ * integer origin + size a raster fills. The ORIGIN and the FAR edge are rounded INDEPENDENTLY (not
+ * origin + a rounded size), so re-expressing the tile back to page units (ox/S, bw/S, …) lands the
+ * detail canvas on the backdrop with NO sub-pixel seam (B489a): page→CSS becomes exactly 1/density
+ * at origin ox/density, matching the backdrop's own page→CSS map. Pure; shared by renderInto + tests. */
+export function deviceRect({ rx, ry, rw, rh }, S) {
+  const ox = Math.round(rx * S), oy = Math.round(ry * S);
+  return { ox, oy, bw: Math.max(1, Math.round((rx + rw) * S) - ox), bh: Math.max(1, Math.round((ry + rh) * S) - oy) };
+}
+
 export const BACKDROP_PX_BUDGET = 16e6; // ≈ 64 MB RGBA (one bitmap, off the gesture path) — keeps the
 // whole-page "soft floor" the user stares at DURING a gesture ~1.4× sharper on a large E-size sheet at
 // retina (≈73→103 dpi); no-op on a 1× monitor (the backdrop already caps at the device ratio there).
