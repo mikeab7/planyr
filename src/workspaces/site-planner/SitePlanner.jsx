@@ -65,8 +65,8 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
-import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
-import { offsetInward, ringsArea, maxInwardOffset } from "./lib/pondOffset.js";
+import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage } from "./lib/pondGeom.js";
+import { ringsArea } from "./lib/pondOffset.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
@@ -519,41 +519,9 @@ const pointInRing = (pt, ring) => {
   return inside;
 };
 
-/* Detention storage for a pond whose drawn footprint is TOP-OF-BANK, with
- * `slope`:1 (H:V) interior side slopes — so the basin tapers inward with depth
- * (not a vertical-wall box). Water surface sits `freeboard` below top of bank.
- * Stage areas come from a ROBUST inward offset (clipper-lib offsetInward, B500) —
- * offset = slope × (depth below top of bank) — which pinches off cleanly when the
- * opposing slopes meet (no bogus inverted-ring area). Stored volume is the
- * average-end-area method over the water column, integrated only over the slabs
- * that actually exist, so a basin that daylights before full depth never inflates
- * the number. `feasible`/`maxDepth` report whether the footprint can hold the
- * design depth at this slope (maxDepth = max inscribed reach / slope). */
-let _detCache = null; // 1-entry memo: panel + label + chip all call this with the same args per frame
-function detentionStorage(ring, depth, freeboard, slope) {
-  const sig = `${depth}|${freeboard}|${slope}|${ring.length}|${ring[0] ? `${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}` : ""}|${polyArea(ring).toFixed(1)}`;
-  if (_detCache && _detCache.sig === sig) return _detCache.val;
-  const areaAt = (down) => (down <= 0 ? polyArea(ring) : ringsArea(offsetInward(ring, slope * down)));
-  const maxDepth = slope > 0 ? maxInwardOffset(ring) / slope : 0;
-  const aTop = polyArea(ring);
-  const dw = Math.max(0, depth - freeboard);       // design water depth
-  const aWater = areaAt(freeboard);                 // water surface
-  const aBottom = areaAt(depth);                    // basin floor (0 if it daylights first)
-  // Average-end-area over the column from the water surface to the achievable floor
-  // (min of design depth and what the footprint can actually grade to), ~1-ft slabs.
-  const floor = Math.min(depth, maxDepth);
-  let vol = 0;
-  if (floor > freeboard) {
-    const step = 1;
-    for (let d = freeboard; d < floor - 1e-9; d += step) {
-      const h = Math.min(step, floor - d);
-      vol += ((areaAt(d) + areaAt(d + h)) / 2) * h;
-    }
-  }
-  const val = { aTop, aWater, aBottom, dw, vol, feasible: depth <= maxDepth + 0.05, maxDepth };
-  _detCache = { sig, val };
-  return val;
-}
+/* detentionStorage(ring, depth, freeboard, slope) — the pond stage/volume calc —
+ * moved to lib/pondGeom.js (B630) so the yield metrics pass and the pure auto-size
+ * solver can share it. Same signature/return; imported above. */
 
 /* ------------------- utility service routing (elec/water) ------------------ */
 const _hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
