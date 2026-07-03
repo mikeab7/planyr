@@ -167,20 +167,92 @@ export function featureToParcel(feature) {
   return ring.map(([x, y]) => ({ x: x - cx, y: -(y - cy) }));
 }
 
+/* Does an ArcGIS error mean the layer's QUERY operation itself is unavailable (as
+ * opposed to a transient outage)? ArcGIS reports a disabled/unsupported operation as
+ * HTTP 400 with "…is not supported by this service." (extendedCode -2147220222). We
+ * match on that wording so the identify fallback below fires ONLY for a genuine
+ * query-capability gap — never masking a real timeout / network / other error, which
+ * must still surface as an outage. */
+export function isQueryCapabilityError(e) {
+  return (
+    e instanceof ParcelFetchError &&
+    e.kind === "arcgis" &&
+    /not supported by this service|capability is not supported|operation is not supported/i.test(e.message || "")
+  );
+}
+
+// Even-odd point-in-polygon across every ring of an esri feature (lon/lat). Holes wind
+// opposite to their outer ring, so an even-odd test across all rings correctly excludes
+// a point that falls in a hole. Pure.
+function featureContainsLngLat(feature, lng, lat) {
+  const rings = feature?.geometry?.rings;
+  if (!rings || !rings.length) return false;
+  let inside = false;
+  for (const ring of rings)
+    for (let i = 0, k = ring.length - 1; i < ring.length; k = i++) {
+      const xi = ring[i][0], yi = ring[i][1], xj = ring[k][0], yj = ring[k][1];
+      if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+  return inside;
+}
+
+/* Identify the parcel under a point via a MapServer's /identify operation — the
+ * fallback for a MapServer whose layer /query is disabled upstream (the TxGIO statewide
+ * parcels service, which backs Chambers County + every county's outage fallback, does
+ * exactly this: /query and /find 400 with "operation not supported", while /identify and
+ * /export still serve the data). Builds a small synthetic map frame around the click so
+ * identify's pixel tolerance maps to a few feet on the ground, then returns the parcel
+ * that actually CONTAINS the point (else the nearest hit) in the SAME
+ * { geometry:{rings}, attributes } shape queryAtPoint returns, geometry in lon/lat
+ * (4326), or null. Only meaningful for a /MapServer/<id> layer. */
+export async function identifyAtPoint(layerUrl, lng, lat) {
+  const m = /^(.*\/MapServer)\/(\d+)\/?$/i.exec(trim(layerUrl));
+  if (!m) return null; // identify is a MapServer op — not applicable to a FeatureServer layer
+  const [, service, id] = m;
+  const half = 0.003; // ~1000 ft: tolerance≈a few ft, yet forgiving of a click right on a boundary
+  const j = await fetchJson(service + "/identify", {
+    geometry: JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } }),
+    geometryType: "esriGeometryPoint",
+    sr: 4326,
+    layers: `all:${id}`,
+    tolerance: 2,
+    mapExtent: `${lng - half},${lat - half},${lng + half},${lat + half}`,
+    imageDisplay: "600,600,96",
+    returnGeometry: "true",
+  });
+  const feats = (j.results || [])
+    .filter((r) => r && r.geometry && r.geometry.rings)
+    .map((r) => ({ geometry: r.geometry, attributes: r.attributes || {} }));
+  if (!feats.length) return null;
+  return feats.find((f) => featureContainsLngLat(f, lng, lat)) || feats[0];
+}
+
 // Find the parcel polygon under a clicked map point. Returns the ArcGIS feature
 // with geometry in lon/lat (EPSG:4326), which every service supports, or null.
 export async function queryAtPoint(layerUrl, lng, lat) {
   const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
-  const j = await fetchJson(trim(layerUrl) + "/query", {
-    geometry,
-    geometryType: "esriGeometryPoint",
-    inSR: 4326,
-    spatialRel: "esriSpatialRelIntersects",
-    outFields: "*",
-    returnGeometry: "true",
-    outSR: 4326,
-  });
-  return (j.features || [])[0] || null;
+  try {
+    const j = await fetchJson(trim(layerUrl) + "/query", {
+      geometry,
+      geometryType: "esriGeometryPoint",
+      inSR: 4326,
+      spatialRel: "esriSpatialRelIntersects",
+      outFields: "*",
+      returnGeometry: "true",
+      outSR: 4326,
+    });
+    return (j.features || [])[0] || null;
+  } catch (e) {
+    // A MapServer that advertises Query but has the layer /query op disabled returns a
+    // capability error, not an outage. Its /identify op still serves the parcel, so fall
+    // back to it — ONLY for that specific error and ONLY on a MapServer layer, so a real
+    // timeout/network failure still surfaces as unavailable and FeatureServers are
+    // untouched. Self-heals: if the agency re-enables query, /query succeeds and this
+    // branch never runs.
+    if (isQueryCapabilityError(e) && /\/MapServer\/\d+\/?$/i.test(trim(layerUrl)))
+      return identifyAtPoint(layerUrl, lng, lat);
+    throw e;
+  }
 }
 
 /* Identify the parcel under a clicked point across several candidate counties at

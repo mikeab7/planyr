@@ -20,7 +20,7 @@ import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
-import { makeParcelLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { makeParcelDisplayLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 import { shareProject, makeProjectPrivate } from "./lib/sharing.js";
@@ -640,7 +640,12 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // universal fallback).
     if (!statewide && isSourceOpen(key)) return;
 
-    const fl = makeParcelLayer(url);
+    // The statewide TxGIO source has its /query disabled upstream, so its vector layer
+    // draws nothing; makeParcelDisplayLayer renders it as a server /export image overlay
+    // instead (real, queryable CADs stay vector — which also backs the instant click
+    // highlight). What you SEE stays == what you can SELECT (the B137 rule): the click
+    // path (queryAtPoint) has the matching /query→/identify fallback.
+    const fl = makeParcelDisplayLayer(url);
     fl.addTo(map);
     displaysRef.current[key] = fl;
     // The statewide TxGIO layer is the UNIVERSAL fallback — let it load even when it's

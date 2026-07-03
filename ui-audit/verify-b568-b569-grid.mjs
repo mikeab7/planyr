@@ -7,9 +7,10 @@
  *
  * Asserts (DOM ground truth — colors come straight from the GRID_* constants in SitePlanner):
  *   1) After zooming so the footprint clears the FEAT_BTN_MIN_PX grid gate, the interior
- *      column lines (#6b7480) and the speed-bay line(s) (#E0552E) are present in the SVG.
- *   2) Single-load shows exactly ONE speed-bay line; cross-dock shows TWO (mirror symmetry).
- *   3) Dock-door leaves (#c2c9d2) render along the dock wall.
+ *      column lines (#6b7480) are present in the SVG. The speed-bay line renders in the
+ *      SAME gray as the interior lines (owner: no orange emphasis), so it is counted within
+ *      the interior total rather than distinguished by color.
+ *   2) Dock-door leaves (#c2c9d2) render along the dock wall.
  *   4) At site-overview (zoom-to-fit, footprint below the gate) the interior grid lines are
  *      ABSENT — the grid reveals only when legible, never clutters zoomed out.
  *
@@ -23,7 +24,7 @@ const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
-const GRID_LINE = "#6b7480", GRID_SPEED = "#e0552e", DOOR = "#c2c9d2";
+const GRID_LINE = "#6b7480", DOOR = "#c2c9d2"; // speed-bay line now shares GRID_LINE gray (no orange)
 
 const mkSite = (id, name, els) => ({
   id, groupId: id, site: name, name: "Plan 1",
@@ -80,12 +81,12 @@ async function run(cur, label, expectSpeedLines, checkLOD = true) {
   await page.screenshot({ path: OUT + `b568-${cur}-zoomed.png` });
 
   console.log(`\n== ${label}: zoomed in — grid + doors should RENDER ==`);
+  // Speed-bay line(s) now render in the same gray as the interior column lines, so they are
+  // included in this count (expected: interior columns + the mirrored speed bay(s)).
   const interior = await strokeCount(page, GRID_LINE);
-  const speed = await strokeCount(page, GRID_SPEED);
   const doors = await fillCount(page, DOOR);
-  console.log(`  (interior lines ${interior} · speed lines ${speed} · door leaves ${doors})`);
-  ok(`${label}: interior column lines render`, interior >= 3);
-  ok(`${label}: ${expectSpeedLines} speed-bay line(s) render`, speed === expectSpeedLines);
+  console.log(`  (column lines incl. ${expectSpeedLines} speed bay ${interior} · door leaves ${doors})`);
+  ok(`${label}: column grid lines render (incl. ${expectSpeedLines} speed bay)`, interior >= 3 + expectSpeedLines);
   ok(`${label}: dock-door leaves render`, doors >= 3);
 
   // Zoom OUT far so the footprint drops below the grid gate — the grid must vanish.
@@ -95,10 +96,9 @@ async function run(cur, label, expectSpeedLines, checkLOD = true) {
     for (let i = 0; i < 16; i++) { await page.mouse.move(720, 450); await page.mouse.wheel(0, 300); await page.waitForTimeout(70); }
     await page.waitForTimeout(400);
     const interiorOut = await strokeCount(page, GRID_LINE);
-    const speedOut = await strokeCount(page, GRID_SPEED);
     await page.screenshot({ path: OUT + `b568-${cur}-zoomout.png` });
-    console.log(`  (zoomed OUT: interior ${interiorOut} · speed ${speedOut})`);
-    ok(`${label}: grid hidden when zoomed out below the gate (LOD)`, interiorOut === 0 && speedOut === 0);
+    console.log(`  (zoomed OUT: column lines ${interiorOut})`);
+    ok(`${label}: grid hidden when zoomed out below the gate (LOD)`, interiorOut === 0);
   }
 
   await ctx.close();
