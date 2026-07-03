@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   backingScale, backingPixels, CANVAS_PX_BUDGET,
-  backdropDensity, BACKDROP_PX_BUDGET, visibleRegion, tileCovers,
+  backdropDensity, BACKDROP_PX_BUDGET, visibleRegion, tileCovers, deviceRect,
 } from "../src/workspaces/doc-review/lib/renderBudget.js";
 
 // An E-size architectural sheet in PDF points (the exact case the bug was measured on).
@@ -136,5 +136,42 @@ describe("tileCovers — when a settle needs no re-raster (B415)", () => {
     expect(tileCovers({ rx: 50, ry: 50, rw: 400, rh: 300, scale: 1 }, visible, 2)).toBe(false); // zoom changed
     expect(tileCovers({ rx: 150, ry: 100, rw: 200, rh: 150, scale: 2 }, visible, 2)).toBe(false); // panned past left edge
     expect(tileCovers(null, visible, 2)).toBe(false);
+  });
+});
+
+describe("deviceRect — device-pixel rounding for the seam-free detail tile (B489a)", () => {
+  it("returns an integer device origin + size (≥1)", () => {
+    const r = deviceRect({ rx: 10.3, ry: 20.7, rw: 100.4, rh: 60.9 }, 1.7);
+    for (const k of ["ox", "oy", "bw", "bh"]) expect(Number.isInteger(r[k])).toBe(true);
+    expect(r.bw).toBeGreaterThanOrEqual(1);
+    expect(r.bh).toBeGreaterThanOrEqual(1);
+  });
+
+  it("the device-rounded page region re-rounds to the SAME device rect (no drift)", () => {
+    const S = 2.3, rect = { rx: 12.34, ry: 56.78, rw: 210.9, rh: 88.1 };
+    const { ox, oy, bw, bh } = deviceRect(rect, S);
+    const rounded = { rx: ox / S, ry: oy / S, rw: bw / S, rh: bh / S }; // what renderInto now returns
+    expect(deviceRect(rounded, S)).toEqual({ ox, oy, bw, bh });          // idempotent → same pixels, no drift
+  });
+
+  it("the detail tile displays at EXACTLY `density` device-px per CSS-px (no stretch → seam = 0)", () => {
+    const scale = 3, density = 2, S = scale * density; // 6 device-px per page-unit
+    const rect = { rx: 40.37, ry: 12.61, rw: 133.9, rh: 77.3 };
+    const { ox, bw } = deviceRect(rect, S);
+    const rounded = { rx: ox / S, rw: bw / S };
+    // the detail canvas has `bw` device px shown in a CSS box of width rounded.rw*scale
+    expect(bw / (rounded.rw * scale)).toBeCloseTo(density, 9);   // matches the backdrop's page→CSS map exactly
+    expect(rounded.rx * scale).toBeCloseTo(ox / density, 9);     // CSS left edge coincides with the backdrop's
+    // contrast: the OLD unrounded region (rect.rw) generally does NOT display at `density` — the visible seam
+    expect(Math.abs(bw / (rect.rw * scale) - density)).toBeGreaterThan(1e-6);
+  });
+
+  it("a tile built from the rounded region still covers an interior view (tileCovers stays true)", () => {
+    const scale = 3, S = scale * 2;
+    const view = { scale, tx: -2972, ty: -1926 };
+    const reg = visibleRegion(view, { w: E_W, h: E_H }, 1400, 900);
+    const { ox, oy, bw, bh } = deviceRect(reg.rect, S);
+    const tile = { rx: ox / S, ry: oy / S, rw: bw / S, rh: bh / S, scale };
+    expect(tileCovers(tile, reg.visible, scale)).toBe(true);
   });
 });

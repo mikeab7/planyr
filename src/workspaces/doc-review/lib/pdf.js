@@ -4,8 +4,29 @@
  * Document Review workspace is opened. */
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { deviceRect } from "./renderBudget.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+
+/* pdf.js v6's modern ESM build calls `Map.prototype.getOrInsertComputed` (a TC39 "upsert" proposal
+ * method browsers don't ship yet) in several paths — notably getOptionalContentConfig, which the
+ * PDF-layer toggle (B490) needs. Unlike the legacy build, the modern build does NOT bundle the
+ * polyfill, so main-thread construction throws "getOrInsertComputed is not a function". Install a
+ * minimal, standard-semantics polyfill (idempotent, non-enumerable) before any pdf.js call hits it.
+ * Only runs when the lazy doc-review chunk loads. */
+for (const Ctor of [Map, WeakMap]) {
+  if (typeof Ctor.prototype.getOrInsertComputed !== "function") {
+    Object.defineProperty(Ctor.prototype, "getOrInsertComputed", {
+      value: function getOrInsertComputed(key, callbackfn) {
+        if (this.has(key)) return this.get(key);
+        const value = callbackfn(key);
+        this.set(key, value);
+        return value;
+      },
+      writable: true, configurable: true, enumerable: false,
+    });
+  }
+}
 
 /* PDF.js v6 ships the support assets it needs to render correctly — substitute fonts for
  * non-embedded text, CMap tables for CID/CJK fonts, an ICC profile for colour-managed
@@ -30,7 +51,10 @@ const deviceDpr = () => (typeof window !== "undefined" && window.devicePixelRati
 
 export async function loadPdf(fileOrBuffer) {
   const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer : await fileOrBuffer.arrayBuffer();
-  return pdfjsLib.getDocument({ data, ...PDFJS_ASSETS }).promise;
+  // useSystemFonts:false — render non-embedded fonts from the shipped standardFontDataUrl substitutes
+  // instead of the viewer's local system fonts, so a construction sheet renders identically on every
+  // machine (B489c). Harmless to the text-extraction callers below (they never rasterize).
+  return pdfjsLib.getDocument({ data, useSystemFonts: false, ...PDFJS_ASSETS }).promise;
 }
 
 /* Pull a page's embedded text as one string (for stated-scale / title-block reads, B267).
@@ -130,21 +154,22 @@ export async function extractPageItems(pdf, pageNum) {
  * rest. The visible canvas's CSS box is driven by the caller (page box × view.scale), so the
  * markup SVG overlay — page-units × scale — lines up exactly as before. Returns the rastered
  * region + base size, or null if superseded. */
-export async function renderInto(pdf, pageNum, canvas, { scale = 1, density = 1, region = null, onTask, isStale } = {}) {
+export async function renderInto(pdf, pageNum, canvas, { scale = 1, density = 1, region = null, optionalContentConfig, onTask, isStale } = {}) {
   const page = await pdf.getPage(pageNum);
   if (isStale && isStale()) return null; // superseded during getPage — don't touch the canvas (B40)
   const base = page.getViewport({ scale: 1 });
   const S = scale * density;                                   // device-px per page-unit
   const rx = region ? region.rx : 0, ry = region ? region.ry : 0;
   const rw = region ? region.rw : base.width, rh = region ? region.rh : base.height;
-  const ox = Math.round(rx * S), oy = Math.round(ry * S);
-  const bw = Math.max(1, Math.round((rx + rw) * S) - ox);     // exact integer region in device px
-  const bh = Math.max(1, Math.round((ry + rh) * S) - oy);
+  const { ox, oy, bw, bh } = deviceRect({ rx, ry, rw, rh }, S); // exact integer region in device px (B489a)
   const off = document.createElement("canvas");              // off-screen buffer (never shown blank)
   off.width = bw; off.height = bh;
   const viewport = page.getViewport({ scale: S });
   const params = { canvasContext: off.getContext("2d"), viewport };
   if (region) params.transform = [1, 0, 0, 1, -ox, -oy];     // bring the region's top-left to (0,0); canvas clips the rest
+  // B490: apply the retained OptionalContentConfig so hidden PDF layers stay hidden in this raster.
+  // Omitted (undefined) → pdf.js uses the doc's authored default, identical to the pre-B490 behaviour.
+  if (optionalContentConfig) params.optionalContentConfigPromise = Promise.resolve(optionalContentConfig);
   const task = page.render(params);
   if (onTask) onTask(task); // expose the RenderTask so the caller can cancel a superseded render (B40)
   await task.promise;
@@ -152,7 +177,9 @@ export async function renderInto(pdf, pageNum, canvas, { scale = 1, density = 1,
   if (canvas.width !== bw) canvas.width = bw;   // guard skips a needless clear when dims are unchanged
   if (canvas.height !== bh) canvas.height = bh;
   canvas.getContext("2d").drawImage(off, 0, 0); // same synchronous tick as the resize → no visible blank (B414)
-  return { baseW: base.width, baseH: base.height, w: bw, h: bh, region: { rx, ry, rw, rh }, density: S };
+  // B489a: return the DEVICE-ROUNDED region (back in page units) so the caller sizes/places the detail
+  // tile on exact device-pixel edges — the detail canvas then aligns to the backdrop with no sub-pixel seam.
+  return { baseW: base.width, baseH: base.height, w: bw, h: bh, region: { rx: ox / S, ry: oy / S, rw: bw / S, rh: bh / S }, density: S };
 }
 
 /* Rasterize a page to a PNG data URL (for the stitcher — placed as an <image> and
