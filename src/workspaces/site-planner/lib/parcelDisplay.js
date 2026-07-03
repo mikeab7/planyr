@@ -14,7 +14,9 @@
  * whole county at once); click-to-add still works at any zoom because that's a point
  * query, not a draw. */
 import * as EL from "esri-leaflet";
+import L from "leaflet";
 import { STATEWIDE_PARCEL_LAYER } from "./counties.js";
+import { getSnapshot, featuresForView, onSnapshotChange } from "./parcelSnapshot.js";
 
 // Low enough to outline big rural/industrial tracts from further out, high enough to
 // avoid drawing a whole dense-urban county at once.
@@ -68,6 +70,44 @@ export function makeParcelImageLayer(url) {
  * vector layer (which also backs the instant client-side click highlight). */
 export function makeParcelDisplayLayer(url) {
   return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url) : makeParcelLayer(url);
+}
+
+/* Draw a county's outlines from its Drive PARCEL SNAPSHOT (B629) as a styleable vector layer —
+ * the same magenta `L.geoJSON` shape as `makeParcelLayer`, so the existing `optimisticHitAt`
+ * hit-test (which iterates `eachFeature`) selects a lot from it with NO new click logic, and it
+ * renders + clicks even when the live county server is fully down. Only the viewport's parcels are
+ * drawn (bbox-filtered) so a whole county never paints at once, and it re-fills on pan/zoom and
+ * when a fresher snapshot loads. Empty until `ensureSnapshot(county)` has warmed the data. */
+export function makeSnapshotLayer(county) {
+  const layer = L.geoJSON(null, {
+    interactive: false, // purely visual; clicks fall through to the map/canvas (like makeParcelLayer)
+    style: () => ({ color: "#a21caf", weight: 1.3, opacity: 0.95, fillOpacity: 0 }),
+  });
+  layer._isSnapshot = true;
+  layer._snapshotCounty = county;
+  let mapRef = null, unsub = null;
+  const refresh = () => {
+    if (!mapRef) return;
+    layer.clearLayers();
+    if (mapRef.getZoom() < PARCEL_MINZOOM) return; // too many to draw across a whole county at once
+    const snap = getSnapshot(county);
+    if (!snap || !snap.features) return;
+    const b = mapRef.getBounds();
+    const feats = featuresForView(snap.features, { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() });
+    if (feats.length) layer.addData({ type: "FeatureCollection", features: feats });
+  };
+  layer.on("add", () => {
+    mapRef = layer._map;
+    if (mapRef) mapRef.on("moveend zoomend", refresh);
+    unsub = onSnapshotChange((c) => { if (c === county) refresh(); });
+    refresh();
+  });
+  layer.on("remove", () => {
+    if (mapRef) mapRef.off("moveend zoomend", refresh);
+    if (unsub) unsub();
+    mapRef = null; unsub = null;
+  });
+  return layer;
 }
 
 // Custom cursors so it's obvious you're adding (+) or removing (−) a parcel.

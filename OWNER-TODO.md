@@ -42,6 +42,17 @@ _Last updated: 2026-06-27._
 - [x] ~~**(2-min dashboard check) Confirm "Confirm email" is ON** in Supabase → Authentication → Providers → Email.~~ — **DONE (Cowork verified 2026-07-01).** Supabase Dashboard → Authentication → Sign In / Providers → Email shows **Confirm email: Enabled**. Email is the only enabled sign-in provider (Phone, SAML 2.0, Web3 Wallet, Apple, Azure, etc. all Disabled; no third-party OAuth or magic-link providers on). (B491 tail check.)
 
 ## Things Claude needs FROM Michael to finish/verify
+- [ ] **Turn on the parcel-cache builder (B629) — add 3 GitHub Actions secrets (one-time, ~2 min).** The new
+      feature that keeps a fresh copy of Chambers/Waller/Fort Bend parcels in your Google Drive (so the map keeps
+      working when the county server goes down) has all its code shipped + tested, but the nightly copy-maker can't
+      run until it can log into your Drive. It reuses the **same Google login Planyr already uses** — nothing new to
+      create. In GitHub → the `mikeab7/planyr` repo → Settings → Secrets and variables → Actions, add three secrets
+      with the **exact same values** already in Cloudflare: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+      `GOOGLE_REFRESH_TOKEN`. **⛔ Do NOT create a new/refreshed Google token — copy the existing one** (a new one
+      would knock your Drive file-storage offline). Claude can't read your Cloudflare secrets, so this copy-paste is
+      the one bit only you can do. Once they're in, Claude triggers the builder and confirms the first snapshots
+      land. (If the Chambers/Waller data source needs a tweak, the builder just files a note and your live map is
+      unaffected in the meantime.)
 - [x] **Reference drawings — DONE (2026-06-30, found in Google Drive, defaults validated).** Measured the
       **Grand Port** approved arch set (1,005,560 SF cross-dock, 40′ clear): the **56′** typical bay is the
       single dominant grid dimension (~130 callouts) and the slab plan literally labels a **60′ SPEED BAY** —
