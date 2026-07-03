@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   outerRingsLngLat, queryAtPoint, identifyParcelDetailed, identifyParcelEager,
   ParcelFetchError, PARCEL_FETCH_TIMEOUT_MS, humanizeError, geoJsonToEsriFeature,
+  identifyAtPoint, isQueryCapabilityError,
 } from "../src/workspaces/site-planner/lib/arcgis.js";
 
 const LAYER = "https://example.test/MapServer/0";
@@ -134,6 +135,74 @@ describe("queryAtPoint — body validation + typed failures (B245)", () => {
     expect(err).toBeInstanceOf(ParcelFetchError);
     expect(err.kind).toBe("timeout");
     vi.useRealTimers();
+  });
+});
+
+// The TxGIO statewide parcels MapServer (Chambers County's source + every county's
+// outage fallback) had its layer /query + /find ops DISABLED upstream (they 400 with
+// "operation is not supported"), while /identify + /export still serve the data — which
+// broke every click on a Chambers lot ("can't click / GIS is down"). queryAtPoint now
+// transparently retries the MapServer /identify op for exactly that capability error.
+describe("queryAtPoint → /identify fallback when the layer /query op is disabled (Chambers/TxGIO)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const CAP_ERR = { error: { message: "Requested operation is not supported by this service.", code: 400 } };
+  // A rectangle around (-95, 29.002); the click at (-95, 29.002) is inside it.
+  const box = { rings: [[[-95.001, 29.001], [-94.999, 29.001], [-94.999, 29.003], [-95.001, 29.003], [-95.001, 29.001]]] };
+
+  it("classifies the ArcGIS 'operation is not supported' body as a query-capability error", () => {
+    expect(isQueryCapabilityError(new ParcelFetchError("arcgis", "Requested operation is not supported by this service.", 400))).toBe(true);
+    expect(isQueryCapabilityError(new ParcelFetchError("arcgis", "Token Required", 499))).toBe(false);
+    expect(isQueryCapabilityError(new ParcelFetchError("timeout", "no response"))).toBe(false);
+  });
+
+  it("retries /identify and returns the parcel under the point when /query is unsupported", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      calls.push(String(url));
+      if (String(url).includes("/query")) return ok(CAP_ERR);
+      if (String(url).includes("/identify")) return ok({ results: [{ geometry: box, attributes: { PROP_ID: "55173", county: "CHAMBERS" } }] });
+      return ok({});
+    }));
+    const feat = await queryAtPoint(LAYER, -95, 29.002);
+    expect(feat).toBeTruthy();
+    expect(feat.attributes.PROP_ID).toBe("55173");
+    expect(feat.geometry.rings).toHaveLength(1);
+    expect(calls.some((u) => u.includes("/query"))).toBe(true);   // tried the fast path first
+    expect(calls.some((u) => u.includes("/identify"))).toBe(true); // then fell back
+  });
+
+  it("from several identify hits, picks the polygon that actually CONTAINS the click", async () => {
+    // A far-away box first, then the true container — the fallback must not just take [0].
+    const far = { rings: [[[-96.0, 30.0], [-95.99, 30.0], [-95.99, 30.01], [-96.0, 30.01], [-96.0, 30.0]]] };
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      if (String(url).includes("/query")) return ok(CAP_ERR);
+      return ok({ results: [
+        { geometry: far, attributes: { PROP_ID: "999" } },
+        { geometry: box, attributes: { PROP_ID: "55173" } },
+      ] });
+    }));
+    const feat = await queryAtPoint(LAYER, -95, 29.002);
+    expect(feat.attributes.PROP_ID).toBe("55173");
+  });
+
+  it("does NOT fall back for a non-capability ArcGIS error (a real outage still surfaces)", async () => {
+    const fetchMock = vi.fn(async () => ok({ error: { message: "Token Required", code: 499 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(queryAtPoint(LAYER, -95, 29)).rejects.toMatchObject({ kind: "arcgis", status: 499 });
+    expect(fetchMock.mock.calls.every(([u]) => !String(u).includes("/identify"))).toBe(true); // never tried identify
+  });
+
+  it("does NOT fall back on a FeatureServer layer (identify is a MapServer-only op)", async () => {
+    const FS = "https://example.test/FeatureServer/0";
+    const fetchMock = vi.fn(async () => ok(CAP_ERR));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(queryAtPoint(FS, -95, 29)).rejects.toMatchObject({ kind: "arcgis" });
+    expect(fetchMock.mock.calls.every(([u]) => !String(u).includes("/identify"))).toBe(true);
+  });
+
+  it("identifyAtPoint resolves null when identify finds nothing", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ok({ results: [] })));
+    await expect(identifyAtPoint(LAYER, -95, 29)).resolves.toBeNull();
   });
 });
 

@@ -45,7 +45,7 @@ import {
   humanizeError,
 } from "./lib/arcgis.js";
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
-import { makeParcelLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
+import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
@@ -5324,9 +5324,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } finally { setAddrBusy(false); }
   };
   // Light up the county parcel outlines on the basemap while identify mode is armed
-  // (B383) — the SAME magenta featureLayer the map's Select-parcels tool uses. Turn the
-  // aerial on so there's context to see them over; pull the layer + reset the session
-  // toggle-set when identify mode ends.
+  // (B383) — the SAME parcel-outline layer the map's Select-parcels tool uses
+  // (makeParcelDisplayLayer: magenta vector lines for a queryable CAD, a server /export
+  // image for the query-disabled statewide source). Turn the aerial on so there's
+  // context to see them over; pull the layer + reset the session toggle-set when
+  // identify mode ends.
   useEffect(() => {
     if (!origin) return;
     const dropOutline = () => { if (parcelOutlineRef.current) { try { geoMapRef.current?.removeLayer(parcelOutlineRef.current); } catch (_) {} parcelOutlineRef.current = null; } };
@@ -5336,7 +5338,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     resolveCountyLayer().then((url) => {
       const map = geoMapRef.current;
       if (cancelled || !url || !map || parcelOutlineRef.current) return;
-      try { const fl = makeParcelLayer(url); fl.addTo(map); parcelOutlineRef.current = fl; } catch (_) {}
+      try { const fl = makeParcelDisplayLayer(url); fl.addTo(map); parcelOutlineRef.current = fl; } catch (_) {}
     }).catch(() => {});
     return () => { cancelled = true; dropOutline(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps

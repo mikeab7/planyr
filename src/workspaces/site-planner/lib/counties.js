@@ -59,6 +59,14 @@ export const COUNTIES = {
     // Texas counties. The old CCAD-only hosted layer went private (499 Token Required).
     // Because this layer is statewide, ID/address searches are confined to Chambers via
     // `scopeWhere`; click-to-select is a point query so it can only ever hit one parcel.
+    // OUTAGE NOTE (2026-07-03): TxGIO DISABLED the layer /query + /find ops on this
+    // service — both 400 with "operation is not supported" — while /identify and /export
+    // still serve the data. So parcel OUTLINES render via the MapServer /export image
+    // (makeParcelImageLayer) and CLICK-to-select routes through the MapServer /identify op
+    // (arcgis.js queryAtPoint → identifyAtPoint) instead of /query. Both self-heal: if
+    // TxGIO re-enables /query, the vector display + query path resume automatically.
+    // ID/address text SEARCH stays down until then (no text-query op survives) — the app
+    // degrades to "search unavailable; click the lot on the map", which works.
     layerUrl:
       "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
     idField: "prop_id",
