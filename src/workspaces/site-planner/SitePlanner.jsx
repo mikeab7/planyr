@@ -67,6 +67,11 @@ import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage } from "./lib/pondGeom.js";
 import { ringsArea } from "./lib/pondOffset.js";
+import {
+  computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
+  solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt,
+  resolveDrainageContext, ruleBadge,
+} from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
@@ -5093,6 +5098,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const siteSqft = parcels.reduce((s, p) => s + (p.active !== false ? polyArea(p.points) : 0), 0);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
+  let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // B630: provided detention across ALL ponds (cubic feet; pondGeom's Map memo keeps this cheap per render)
   els.forEach((e) => {
     const a = isCenterlineRoad(e) ? roadStripArea(e, settings) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598)
     const curb = curbAreaOf(e, els); // derived curbs count in the SF / impervious math (0 for non-paved types; a road's curb is already inside its strip area)
@@ -5108,7 +5114,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a + curb;
     else if (e.type === "parking") { parkArea += a + curb; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "trailer") { trailArea += a + curb; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
-    else if (e.type === "pond") pondArea += a;
+    else if (e.type === "pond") {
+      pondArea += a;
+      // Provided storage = the same stage/volume calc the pond panel shows, summed
+      // site-wide. Collapsing side-slopes (daylighting) cap the integral at maxDepth
+      // inside detentionStorage — the slabs that DO exist still count (never a silent 0).
+      const det = e.det || {};
+      providedDetCf += detentionStorage(ringOf(e), det.depth ?? 8, det.freeboard ?? 1, det.slope ?? 3).vol;
+      pondCount++;
+      maxPondDepthFt = Math.max(maxPondDepthFt, det.depth ?? 8);
+    }
   });
   // B504: no bump/court de-double-count any more. Since B492 the truck court's wall-length
   // span is trimmed (usableCourtSpan) to the clear face BETWEEN the corner bump-outs, so the
@@ -5132,6 +5147,84 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const easeArea = easeAll.reduce((s, e) => s + easementArea(e), 0);
   const easeBldgArea = easeAll.reduce((s, e) => s + (e.restrictsBuildings !== false ? easementArea(e) : 0), 0);
   const easePaveArea = easeAll.reduce((s, e) => s + (e.restrictsPaving === true ? easementArea(e) : 0), 0);
+
+  /* ---- B629–B632: drainage criteria (required detention / tier / regime) ----
+   * GIS facts are fetched on EXPLICIT request only (the "Check drainage criteria"
+   * button — same house rule as the jurisdiction identify: never auto-fire network
+   * queries on a parcel edit). Once checked, everything below re-derives PURE per
+   * render from the stored context + live metrics, so pond/acreage edits update the
+   * readout with zero refetch. A boundary change surfaces as an honest "re-check"
+   * hint (sig mismatch), the old answer stays visible with its age. */
+  const [drainCtx, setDrainCtx] = useState(null); // null | {busy} | {error} | {ctx, sig, multiParcel}
+  const drainTok = useRef(0);
+  const drainSigNow = parcels.filter((p) => p.active !== false).length + ":" + Math.round(siteSqft);
+  const checkDrainage = async () => {
+    if (!origin) { setDrainCtx({ error: "This plan isn't georeferenced — bring the parcel in from the map first." }); return; }
+    const act = parcels.filter((p) => p.active !== false && p.points && p.points.length >= 3);
+    if (!act.length) { setDrainCtx({ error: "No parcel boundary on the plan yet." }); return; }
+    const tok = ++drainTok.current; // a later click / boundary change supersedes this one
+    const sig = drainSigNow;
+    setDrainCtx({ busy: true });
+    try {
+      // The identify takes ONE ring — use the largest active parcel (flagged when several).
+      const largest = act.reduce((b, p) => (polyArea(p.points) > polyArea(b.points) ? p : b), act[0]);
+      const ring = largest.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; });
+      const c = ring.reduce((s, [x, y]) => [s[0] + x / ring.length, s[1] + y / ring.length], [0, 0]);
+      // Ground elevation: median of a short 3DEP line through the parcel centroid
+      // (bare-earth NAVD88 feet; median shrugs off a stray no-data sample).
+      const sampleGround = async ({ lng, lat }) => {
+        const elev = await sampleProfile([[lng - 0.0004, lat], [lng + 0.0004, lat]], 9);
+        const vals = (elev || []).filter((v) => v != null && isFinite(v)).sort((a, b) => a - b);
+        return vals.length ? vals[Math.floor(vals.length / 2)] : null;
+      };
+      const ctx = await resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround });
+      if (tok !== drainTok.current) return;
+      setDrainCtx({ ctx, sig, multiParcel: act.length > 1 });
+    } catch (e) {
+      if (tok === drainTok.current) setDrainCtx({ error: String((e && e.message) || e) });
+    }
+  };
+  const drainCtxData = drainCtx && drainCtx.ctx ? drainCtx.ctx : null;
+  const drainAuthorityId = drainCtxData?.authority?.primaryReviewer?.authorityId ?? null;
+  const drainFloodOk = !!drainCtxData?.flood && drainCtxData.flood.state !== "failed";
+  const acresActive = siteSqft / SQFT_PER_ACRE;
+  const drainCityCount = drainCtxData?.authority?.jurisdiction?.city?.length ?? 0;
+  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainCityCount > 0, drainsToHcfcdChannel: drainCtxData?.channel?.near ?? null };
+  const detReq = drainCtxData && siteSqft > 0 && drainAuthorityId
+    ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
+    : null;
+  // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
+  const detReqCandidates = drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
+    ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
+    : null;
+  // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
+  const detTier = drainCtxData && siteSqft > 0 && drainFloodOk
+    ? assessAnalysisTier({ acres: acresActive, authorityId: drainAuthorityId, floodZones: drainCtxData.flood.zones, channel: drainCtxData.channel })
+    : null;
+  const detRegime = drainCtxData && siteSqft > 0 && drainFloodOk
+    ? assessHydraulicRegime({ floodZones: drainCtxData.flood.zones, groundElevFt: drainCtxData.groundElevFt, groundDatum: drainCtxData.groundDatum, pondDepthFt: maxPondDepthFt || 8 })
+    : null;
+  // B634 tier-2 slice: in Regime A, the outfall value-of-information line. If the user
+  // has run a cross-section across the receiving ditch, its LiDAR stats feed in.
+  const outfallNote = detRegime && detRegime.regime === "A"
+    ? screenOutfall({ channel: drainCtxData.channel, ditch: xsec?.stats || null, siteGradeFt: drainCtxData.groundElevFt })
+    : null;
+  const drainage = siteSqft > 0 && origin ? {
+    status: !drainCtx ? "idle" : drainCtx.busy ? "busy" : drainCtx.error ? "error" : "ready",
+    error: drainCtx?.error || null,
+    providedCf: providedDetCf, pondCount,
+    req: detReq, reqCandidates: detReqCandidates,
+    tier: detTier, regime: detRegime, outfall: outfallNote,
+    watersheds: drainCtxData?.watershedOverlays || [],
+    mudDistricts: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "mud"),
+    ambiguous: drainCtxData?.authority?.ambiguous || [],
+    authorityFlags: drainCtxData?.authority?.flags || [],
+    floodFailed: !!drainCtxData && !drainFloodOk,
+    channelFailed: drainCtxData?.channel?.state === "failed",
+    stale: !!(drainCtx?.sig && drainCtx.sig !== drainSigNow),
+    multiParcel: !!drainCtx?.multiParcel,
+    onCheck: checkDrainage,
+  } : null;
 
   // Building properties (B198): clear height + slab thickness, auto-assigned from each
   // building's footprint sf via an editable per-plan rule (`settings.buildingRules`),
@@ -9798,6 +9891,78 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div style={{ marginTop: 11 }}>
                         <button style={{ width: "100%", padding: "9px 10px", border: "none", borderRadius: 8, background: PAL.accent, color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }} onClick={startExpand}>Expand this pond</button>
                         <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>See how much more detention you'd gain by enlarging this pond — it snapshots today's size, then you push the banks out or dig deeper.</div>
+                        {/* B633 — auto-size: solve the expand offset that closes the SITE's
+                            detention shortfall (B630's required-vs-provided), then land the
+                            user in the normal expand mode (baseline + ghost + overlap /
+                            property-line warnings) to review and press Done. */}
+                        {(() => {
+                          if (!detReq || detReq.kind !== "point" || !(detReq.requiredAcFt > 0)) return null;
+                          const requiredCf = detReq.requiredAcFt * 43560;
+                          // Regime B (B632): the permanent pool below the static water surface
+                          // stores nothing — its volume is added back to the target. Unknown
+                          // pool depth → REFUSE to size against a fabricated usable volume.
+                          const poolDepthFt = detRegime && detRegime.regime === "B"
+                            ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: depth, freeboardFt: fb })
+                            : 0;
+                          const deadCf = poolDepthFt ? detentionStorage(ring, depth, depth - poolDepthFt, slope).vol : 0;
+                          const shortfallCf = requiredCf + deadCf - providedDetCf;
+                          if (shortfallCf <= 0) return null; // site already covered — nothing to size
+                          const authDefaults = drainAuthorityId ? pondDefaultsFor(drainAuthorityId) : null;
+                          const defaultsDiffer = authDefaults && (authDefaults.sideSlope !== slope || authDefaults.freeboardFt !== fb);
+                          const sizeForRequired = () => {
+                            if (detRegime && detRegime.regime === "B" && poolDepthFt == null) {
+                              flashWarn("In this floodplain the permanent-pool depth can't be established (missing BFE or ground elevation) — refusing to size against an unknown usable volume.", 7500);
+                              return;
+                            }
+                            // This pond absorbs the whole site shortfall on top of what it holds now.
+                            const target = r.vol + shortfallCf;
+                            const volumeAt = (N) => {
+                              if (selEl.points) {
+                                const g = N > 0 ? expandPolygon(ring, N) : ring;
+                                if (!g || polySelfIntersects(g)) return null;
+                                return detentionStorage(g, depth, fb, slope);
+                              }
+                              return detentionStorage(elCorners({ ...selEl, w: selEl.w + 2 * N, h: selEl.h + 2 * N }), depth, fb, slope);
+                            };
+                            const s = solvePondExpansion({ requiredCf: target, volumeAt });
+                            if (s.ok) {
+                              pushHistory();
+                              const baseline = { ring: ring.map((p) => ({ x: p.x, y: p.y })), geom: snapshotGeom(), depth, freeboard: fb, slope };
+                              const detNext = { ...det, depth, freeboard: fb, slope, expandFt: s.expandFt, baseline };
+                              if (selEl.points) setSelEl({ points: expandPolygon(ring, s.expandFt), det: detNext });
+                              else setSelEl({ w: selEl.w + 2 * s.expandFt, h: selEl.h + 2 * s.expandFt, det: detNext });
+                              flashWarn(`Sized for required detention: banks pushed out ${s.expandFt}′ (+${f2((s.achievedCf - r.vol) / 43560)} ac-ft). Review the ghost, then press Done to keep it.`, 7000);
+                            } else if (s.reason === "already-sufficient") {
+                              flashWarn("This pond already covers the site's required detention.", 4000);
+                            } else {
+                              const dAlt = solvePondDepth({ requiredCf: target, volumeAtDepth: (dd) => detentionStorage(ring, dd, fb, slope), startDepthFt: depth });
+                              flashWarn(
+                                s.reason === "geometry-failed"
+                                  ? `Can't push the banks out cleanly past ${s.atFt}′ on this shape.${dAlt.ok ? ` Alternative: dig to ${f1(dAlt.depthFt)}′ deep (now ${f1(depth)}′).` : ""}`
+                                  : dAlt.ok
+                                    ? `Pushing the banks out isn't enough — but digging to ${f1(dAlt.depthFt)}′ deep (now ${f1(depth)}′) gets there. Use "Expand this pond" → Dig deeper.`
+                                    : `This pond can't reach the required volume: at ${slope}:1 the side slopes meet at ${f1(dAlt.maxUsableDepthFt ?? r.maxDepth)}′ before enough storage exists. Enlarge the footprint or flatten the slopes.`,
+                                8500
+                              );
+                            }
+                          };
+                          return (
+                            <div style={{ marginTop: 8 }}>
+                              <button style={{ width: "100%", padding: "8px 10px", border: `1.5px solid ${PAL.accent}`, borderRadius: 8, background: "transparent", color: PAL.accent, fontWeight: 700, fontSize: 12, cursor: "pointer" }} onClick={sizeForRequired}>
+                                ⇱ Size for required detention ({f2(shortfallCf / 43560)} ac-ft short)
+                              </button>
+                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
+                                Solves how far to push the banks out so the site meets its required volume{deadCf > 0 ? ` (incl. ${f2(deadCf / 43560)} ac-ft of unusable permanent pool — Regime B)` : ""}, then lets you review before keeping it.
+                              </div>
+                              {defaultsDiffer && (
+                                <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                  <span>{(detReq.rule?.authorityLabel || "Authority")} defaults: {authDefaults.sideSlope}:1 slopes · {authDefaults.freeboardFt}′ freeboard.</span>
+                                  <button style={{ ...chip, padding: "1px 8px", fontSize: 10 }} onClick={() => setDet({ slope: authDefaults.sideSlope, freeboard: authDefaults.freeboardFt })}>Apply</button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     ) : (() => {
                       const baseVol = detentionStorage(base.ring, base.depth, base.freeboard, base.slope).vol;
@@ -10238,6 +10403,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
             inactiveCount={parcels.filter((p) => p.active === false).length}
             easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
+            drainage={drainage}
           />
           {(() => {
             // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
@@ -11434,6 +11600,7 @@ const YIELD_PAL = {
 function YieldPanel({
   siteSqft, bldg, cov, far, stalls, ratio, trailers, impPct, pondArea, detPct, open,
   bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
+  drainage, // B630–B632: required-vs-provided detention + tier + regime (null until a site exists)
 }) {
   const [openPanel, setOpenPanel] = useState(!collapsed);
   const Y = YIELD_PAL;
@@ -11567,6 +11734,105 @@ function YieldPanel({
           {row("Impervious", `${f0(impPct)}%`)}
           {row("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
           {row("Detention %", `${f0(detPct)}%`)}
+          {/* B630–B632: required-vs-provided detention, analysis tier, hydraulic regime.
+              GIS facts load on the explicit button (house rule); every number carries its
+              rule record via ruleBadge — a bare number here is a defect. */}
+          {drainage && (() => {
+            const d = drainage;
+            const warnNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "3px 0 0", fontStyle: "italic" }}>{text}</div>;
+            const keyedNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
+            if (d.status === "idle" || d.status === "busy" || d.status === "error") {
+              return (
+                <div style={{ marginTop: 7 }}>
+                  <button
+                    disabled={d.status === "busy"}
+                    onClick={d.onCheck}
+                    style={{ width: "100%", padding: "7px 10px", border: `1px solid ${Y.border}`, borderRadius: 8, background: Y.cardBg, color: Y.text, fontWeight: 700, fontSize: 11.5, cursor: d.status === "busy" ? "default" : "pointer" }}
+                  >{d.status === "busy" ? "Checking drainage criteria…" : "⛆ Check drainage criteria"}</button>
+                  {d.status === "error"
+                    ? warnNote(`Couldn't resolve the drainage authority — ${d.error}. Try again.`)
+                    : note("Resolves who reviews this site's drainage and the required detention volume — screening only.")}
+                </div>
+              );
+            }
+            const req = d.req;
+            const providedAcFt = d.providedCf / 43560;
+            const out = [];
+            if (req && (req.kind === "point" || req.kind === "none")) {
+              out.push(row("Detention required", `${f2(req.requiredAcFt ?? 0)} ac-ft`, req.governing ? "greater-of" : ""));
+              out.push(keyedNote(ruleBadge(req.rule, req.rateAcFtPerAc), "badge"));
+              if (req.governing?.candidates?.length > 1) {
+                out.push(keyedNote(`Greater-of: ${req.governing.candidates.map((c) => `${c.rule?.authorityLabel || c.authorityId} ${f2(c.acFt)} ac-ft`).join(" vs ")} — more restrictive governs.`, "gov"));
+              }
+              if (req.flags.includes("channel-adjacency-unknown")) out.push(warnNote("Whether the site drains directly to an HCFCD channel is unknown — the stricter reading is shown.", "chan-unk"));
+              if (req.flags.includes("curve-approximate")) out.push(warnNote("Rate read from an approximate Fig. 9.2 curve — exact breakpoints pending transcription.", "curve"));
+              if (req.flags.includes("secondary-source")) out.push(warnNote("June-2026 Houston rate verified against secondary coverage — manual PDF confirmation pending.", "sec-src"));
+            } else if (req && req.kind === "band") {
+              // Band authorities NEVER render a single number.
+              out.push(row("Detention required", `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`, "screening band"));
+              out.push(keyedNote(ruleBadge(req.rule), "badge"));
+              out.push(warnNote(req.flags.includes("verify-with-county-engineer")
+                ? "No published flat rate for this county — verify the requirement with the county engineer."
+                : "Exact criteria tables pending transcription — treat as a screening band only.", "band"));
+            } else if (req && req.kind === "unknown") {
+              out.push(row("Detention required", "unknown"));
+              out.push(warnNote(req.basis, "unk"));
+              if (req.governing?.candidates?.length) {
+                for (const c of req.governing.candidates) out.push(row(`· if ${c.rule?.authorityLabel || c.authorityId}`, c.result?.kind === "band" ? `${f2(c.result.bandAcFt[0])}–${f2(c.result.bandAcFt[1])} ac-ft` : `${f2(c.acFt)} ac-ft`, "", true));
+              }
+            } else if (d.reqCandidates) {
+              // Boundary straddle: every candidate labeled — never a silent default.
+              out.push(row("Detention required", "straddle"));
+              for (const { aid, r } of d.reqCandidates) {
+                out.push(row(`· if ${r.rule?.authorityLabel || aid}`, r.kind === "band" ? `${f2(r.bandAcFt[0])}–${f2(r.bandAcFt[1])} ac-ft` : r.kind === "point" ? `${f2(r.requiredAcFt)} ac-ft` : "unknown", "", true));
+              }
+              if (d.ambiguous[0]) out.push(warnNote(d.ambiguous[0].detail, "straddle"));
+            } else if (d.authorityFlags.includes("no-criteria-modeled")) {
+              out.push(row("Detention required", "—"));
+              out.push(warnNote("No detention criteria modeled for this county yet — verify locally.", "nocrit"));
+            }
+            out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
+            if (req && req.kind === "point" && req.requiredAcFt > 0) {
+              const diff = providedAcFt - req.requiredAcFt;
+              out.push(
+                <div key="deficit" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: Y.rowLabel }}>{diff >= 0 ? "Surplus" : "Shortfall"}</span>
+                  <span style={{ fontFamily: YMONO, fontSize: 13, fontWeight: 750, fontVariantNumeric: "tabular-nums", color: diff >= 0 ? Y.green : "var(--danger)" }}>
+                    {diff >= 0 ? "+" : "−"}{f2(Math.abs(diff))} ac-ft
+                  </span>
+                </div>
+              );
+            }
+            if (d.tier) {
+              out.push(row("Analysis tier", d.tier.tier === "dia" ? "Full DIA" : "Rate method"));
+              if (d.tier.triggers.length) out.push(keyedNote(`Triggers: ${d.tier.triggers.map((t) => t.label).join(" · ")}`, "trig"));
+              if (d.tier.unknowns.length) out.push(keyedNote(`Unknown: ${d.tier.unknowns.map((u) => u.label).join(" · ")}`, "trig-unk"));
+            }
+            if (d.floodFailed) out.push(warnNote("Flood-zone data is unavailable right now — analysis tier and hydraulic regime can't be assessed (an outage is never an all-clear).", "floodfail"));
+            if (d.regime) {
+              out.push(
+                <div key="regime" style={{ marginTop: 7, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: d.regime.regime === "B" ? "var(--warn-text)" : Y.rowLabel }}>{d.regime.label}</div>
+                  {d.regime.reasons.map((rr, i) => <div key={i} style={{ fontSize: 10.5, color: Y.rowLabel, lineHeight: 1.45, marginTop: 3 }}>{rr}</div>)}
+                  <div style={{ fontSize: 10.5, color: Y.text, lineHeight: 1.45, marginTop: 3, fontWeight: 600 }}>{d.regime.consequence}</div>
+                  {d.regime.wetBottomWarning && <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 3 }}>Wet-bottom note: permanent pool below the static water surface does not count toward detention.</div>}
+                  {d.outfall && <div style={{ fontSize: 10.5, color: Y.rowLabel, lineHeight: 1.45, marginTop: 5, borderTop: `1px solid ${Y.hairline}`, paddingTop: 5 }}>{d.outfall.headline} {d.outfall.detail}</div>}
+                </div>
+              );
+            }
+            for (const w of d.watersheds) out.push(warnNote(`${w.authorityLabel}: ${w.note}`, w.id));
+            if (d.mudDistricts.length) out.push(keyedNote(`In ${d.mudDistricts.map((m) => m.name).join(", ")} — district drainage criteria may also apply; verify with the district's engineer.`, "mud"));
+            if (d.channelFailed) out.push(warnNote("HCFCD channel data is unavailable — channel adjacency unknown.", "chanfail"));
+            if (d.multiParcel) out.push(keyedNote("Checked against the largest active parcel.", "multi"));
+            if (d.stale) out.push(warnNote("Site boundary changed since this check — re-check drainage criteria.", "stale"));
+            out.push(
+              <div key="recheck" style={{ marginTop: 5 }}>
+                <button onClick={d.onCheck} style={{ padding: "3px 9px", border: `1px solid ${Y.border}`, borderRadius: 7, background: "transparent", color: Y.muted, fontSize: 10.5, cursor: "pointer" }}>↻ Re-check</button>
+              </div>
+            );
+            out.push(keyedNote("Screening estimate — confirm with your engineer and the reviewing authority.", "caveat"));
+            return out;
+          })()}
 
           {easeAll.length > 0 && (<>
             {groupHead(Y.faint, "Easements")}
