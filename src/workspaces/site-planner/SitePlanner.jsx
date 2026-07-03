@@ -121,11 +121,10 @@ const FEAT_BTN_MIN_PX = 72;
 // Structural column-grid drawing (B568/B569). Subtle gray for the column lines (drafting
 // grid, explicitly allowed a subtle gray by the theme rule) — proven legible on both the
 // light paper and the dark canvas, like the existing dock-apron literals. The speed-bay
-// line gets a literal drafting-coral emphasis (a fixed hue, deliberately NOT pulled from
-// the `--status-*` / `--accent-*` palette, so it never reads as a deal-stage or module color).
-const GRID_LINE = "#6b7480";       // interior column line (solid 0.5px)
+// line renders the same subtle gray as the other interior column lines (owner: no orange
+// emphasis) — so it reads as one uniform structural grid, not a highlighted bay.
+const GRID_LINE = "#6b7480";       // interior column line (solid 0.5px) — also the speed-bay line
 const GRID_FLEX = "#6b7480";       // end/rear/centre flex boundary (dashed)
-const GRID_SPEED = "#E0552E";      // speed-bay line (stronger, solid)
 const GRID_WALL = "#4a525e";       // dock wall — the heaviest edge
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 // B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
@@ -10998,11 +10997,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // zoom-gated on the rendered footprint px (the FEAT_BTN_MIN_PX precedent) so it reveals
     // when legible and never clutters at site-overview zoom.
     if (settings.showGrid && !el.dogEar && grid.summary && Math.min(w, h) >= FEAT_BTN_MIN_PX) {
-      const lineStyle = (role) => role === "speed"
-        ? { stroke: GRID_SPEED, strokeWidth: 1.25 }                                  // speed bay — solid emphasis
-        : role === "flex"
-          ? { stroke: GRID_FLEX, strokeWidth: 0.6, strokeDasharray: "5 4", opacity: 0.85 } // end/rear/centre flex boundary
-          : { stroke: GRID_LINE, strokeWidth: 0.5, opacity: 0.8 };                   // interior column line
+      const lineStyle = (role) => role === "flex"
+        ? { stroke: GRID_FLEX, strokeWidth: 0.6, strokeDasharray: "5 4", opacity: 0.85 } // end/rear/centre flex boundary
+        : { stroke: GRID_LINE, strokeWidth: 0.5, opacity: 0.8 };                     // interior column line (speed bay renders the same — no orange emphasis)
       // Dock wall = the heaviest edge (one per dock face) — the validated dock sides.
       dockSides.forEach((s) => {
         const edge = s === "bottom" ? [tl.x, tl.y + h, tl.x + w, tl.y + h]
