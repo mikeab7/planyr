@@ -74,7 +74,28 @@ export const COUNTIES = {
     scopeWhere: "county='CHAMBERS'",
     help: "Texas statewide parcels (TxGIO) — searches are limited to Chambers County.",
   },
+  waller: {
+    label: "Waller County · WCAD",
+    // Waller CAD publishes no public parcel GIS of its own, so — like Chambers — it rides the
+    // statewide TxGIO layer scoped to WALLER. Same OUTAGE NOTE as Chambers applies (TxGIO
+    // /query+/find disabled 2026-07-03 → outlines via /export, clicks via /identify). Waller is
+    // one of the B629 snapshot-cached counties (SNAPSHOT_COUNTIES), so a Drive snapshot backs it
+    // when TxGIO is down.
+    layerUrl:
+      "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+    idField: "prop_id",
+    addrField: "situs_addr",
+    scopeWhere: "county='WALLER'",
+    help: "Texas statewide parcels (TxGIO) — searches are limited to Waller County.",
+  },
 };
+
+/* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
+ * working when the live county server is down. Chambers + Waller ride the flaky State/TxGIO service
+ * (the actual pain); Fort Bend is included as reliable-source insurance (Phase 2, tiled). Harris is
+ * deliberately EXCLUDED (1.5M parcels — too big for the browser). Kept in lockstep with the
+ * parcel-cache Function's allowlist (functions/api/parcel-cache/_handler.js). */
+export const SNAPSHOT_COUNTIES = new Set(["chambers", "waller", "fortbend"]);
 
 const ID_RE =
   /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$)/i;
@@ -254,6 +275,18 @@ export const COUNTIES_MAP = {
     layerUrl:
       "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
   },
+  waller: {
+    center: [30.0, -95.86],
+    zoom: 11,
+    bbox: [29.75, -96.05, 30.20, -95.62],
+    mapServer: null,
+    // Like Chambers, Waller has no CAD of its own, so the statewide TxGIO layer is its live source
+    // (outlines via /export, clicks via /identify). Its B629 Drive snapshot backs it when TxGIO is
+    // down. NOT flagged `statewide` — Chambers is already the single universal fallback source, and
+    // two statewide keys would just double the TxGIO query on every click.
+    layerUrl:
+      "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+  },
 };
 
 // Which configured CAD county/counties could contain a clicked point — used to
@@ -305,7 +338,7 @@ export const STATEWIDE_PARCEL_LAYER = COUNTIES.chambers.layerUrl;
 // name can't match a like-named parcel in another county (the Chambers caveat applied
 // to every county that falls back, B244). Click-to-select is a point query and needs no
 // scope (it can only hit one lot).
-const TXGIO_COUNTY_NAME = { harris: "HARRIS", fortbend: "FORT BEND", chambers: "CHAMBERS" };
+const TXGIO_COUNTY_NAME = { harris: "HARRIS", fortbend: "FORT BEND", chambers: "CHAMBERS", waller: "WALLER" };
 
 /* The statewide-backup parcel source for a county whose primary CAD is unavailable,
  * or null when there's no stand-in. Returns null for a county that has NO statewide
