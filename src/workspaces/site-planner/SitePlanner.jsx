@@ -61,10 +61,10 @@ import { roadCenterline, roadMinRadius } from "./lib/roadGeometry.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds } from "./lib/labelLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
-import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD } from "./lib/dimSlide.js";
+import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
 import { offsetInward, ringsArea, maxInwardOffset } from "./lib/pondOffset.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
@@ -355,6 +355,74 @@ const projToSeg = (p, a, b) => {
   return { x, y, d: Math.hypot(p.x - x, p.y - y) };
 };
 const pathLen = (pts) => { let t = 0; for (let i = 1; i < pts.length; i++) t += dist(pts[i - 1], pts[i]); return t; };
+
+// B620 — inline labels that ride ALONG a line/polyline/road/easement (e.g. "18\" SANITARY SEWER"
+// sitting on the line). The label REPEATS along the path at a per-feature spacing (feet): a utility
+// line is small and wants MANY references, a road is big and wants FAR FEWER, an easement is in
+// between (owner rule, 2026-07-02). Spacing is tunable.
+const INLINE_LABEL_SPACING = { line: 150, polyline: 150, easement: 350, road: 700 };
+// Longest-segment midpoint (feet) — the primary anchor for the in-place editor.
+function inlineLabelAnchorFeet(ptsFeet) {
+  if (!ptsFeet || ptsFeet.length < 2) return null;
+  let bi = 1, bl = -1;
+  for (let i = 1; i < ptsFeet.length; i++) { const d = dist(ptsFeet[i - 1], ptsFeet[i]); if (d > bl) { bl = d; bi = i; } }
+  const A = ptsFeet[bi - 1], B = ptsFeet[bi];
+  return { fx: (A.x + B.x) / 2, fy: (A.y + B.y) / 2 };
+}
+// Repeat placements along a feet-space OPEN path every `spacingFt` (always ≥1, centered, when the
+// path is shorter than the spacing). Returns SCREEN anchors with an auto-flipped rotation (never
+// upside-down) + a perpendicular offset to the visual "up" side + the segment's on-screen px length
+// (for the fit/LOD gate). Mirrors the centerline dir/nrm walk + the strip-label flip math.
+function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p) {
+  if (!ptsFeet || ptsFeet.length < 2) return [];
+  const segs = []; let total = 0;
+  for (let i = 1; i < ptsFeet.length; i++) {
+    const L = dist(ptsFeet[i - 1], ptsFeet[i]);
+    if (L > 0) { segs.push({ a: ptsFeet[i - 1], b: ptsFeet[i], L, s0: total }); total += L; }
+  }
+  if (total < 1e-3 || !segs.length) return [];
+  const sp = Math.max(1, spacingFt), positions = [];
+  if (total <= sp) positions.push(total / 2);
+  else for (let d = sp / 2; d < total; d += sp) positions.push(d);
+  const out = [];
+  for (const d of positions) {
+    let seg = segs[segs.length - 1];
+    for (const s of segs) { if (d <= s.s0 + s.L) { seg = s; break; } }
+    const t = seg.L > 0 ? (d - seg.s0) / seg.L : 0;
+    const pf = { x: seg.a.x + (seg.b.x - seg.a.x) * t, y: seg.a.y + (seg.b.y - seg.a.y) * t };
+    const A = f2p(seg.a), B = f2p(seg.b), P = f2p(pf);
+    const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
+    const dir = { x: dx / len, y: dy / len };
+    let ang = Math.atan2(dir.y, dir.x) * 180 / Math.PI;
+    ang = ((ang % 180) + 180) % 180; if (ang > 90) ang -= 180;      // never upside-down → [-90,90]
+    let nrm = { x: -dir.y, y: dir.x };                              // perpendicular
+    if (nrm.y > 0) nrm = { x: -nrm.x, y: -nrm.y };                  // force screen-"up" (y grows down)
+    else if (nrm.y === 0 && nrm.x < 0) nrm = { x: 1, y: 0 };        // vertical → one consistent side
+    out.push({ x: P.x + nrm.x * offsetPx, y: P.y + nrm.y * offsetPx, angle: ang, segLenPx: len });
+  }
+  return out;
+}
+// Render the repeating inline-label <text> nodes for a feature. Pure + module-level so BOTH the
+// component markup render AND renderElPx (a module fn) share it. Own color + white halo, gentle
+// zoom-clamped font, LOD-gated per instance, and NO data-export="skip" (so it lands in PNG/PDF).
+function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix) {
+  const label = (text || "").trim();
+  if (!label || !ptsFeet || ptsFeet.length < 2) return [];
+  const k = Math.max(0.34, Math.min(1, ppf / 0.45));               // gentle, capped at 1 (matches the road-dim clamp)
+  const fs = 11 * k, haloW = Math.max(2, fs * 0.3), offsetPx = fs * 1.05;
+  const minSegPx = label.length * fs * 0.6;                        // LOD: the on-screen segment must fit the text (CW_RATIO 0.6)
+  const out = [];
+  inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p).forEach((pl, i) => {
+    if (pl.segLenPx < minSegPx) return;
+    out.push(
+      <text key={`${keyPrefix}${i}`} x={pl.x} y={pl.y} textAnchor="middle" dominantBaseline="middle"
+        transform={`rotate(${pl.angle} ${pl.x} ${pl.y})`}
+        fontFamily="Inter, system-ui, sans-serif" fontSize={fs} fill={color} pointerEvents="none"
+        style={{ fontWeight: 600, paintOrder: "stroke", stroke: "#fff", strokeWidth: haloW }}>{label}</text>,
+    );
+  });
+  return out;
+}
 
 function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
   const d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
@@ -882,6 +950,10 @@ const DEFAULT_SETTINGS = {
   // grid reads as evenly-spaced columns; the speed bay is the only different bay). Dock
   // doors at doorOC o.c., doorWidth wide. Per-building overrides live on the element.
   showGrid: true,
+  // B121 label-legibility toggles (default ON): the red edge-dimension callouts, and the sf/acreage
+  // line on centred element labels — let a crowded layout shed either tier. Read via `!== false` so a
+  // project saved before these keys existed still shows both.
+  showDims: true, showAreas: true,
   speedBay: 60, bayLengthTarget: 56, bayDepthTarget: 50, bayMin: 50, bayMax: 58,
   doorWidth: 9, doorOC: 12,
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
@@ -965,6 +1037,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [combineSel, setCombineSel] = useState([]);   // parcel ids picked for the Combine tool
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
+  const [editInline, setEditInline] = useState(null);     // B620: {kind:'markup'|'el', id, text} while typing a feature's inline label in place
   const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit} — inline numeric edit, NEVER a dialog box
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
   const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
@@ -1836,7 +1909,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
   // background storage event never yanks the canvas out from under an active edit.
   const busyRef = useRef(false);
-  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft || numEdit); });
+  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || editInline || calloutDraft || numEdit); });
   // When ANOTHER tab saves this site, fold its content into our canvas (union — never drops
   // either tab's work) so two open tabs agree without a reload. Idle-only + only-if-changed
   // (avoids churn / ping-pong). `storage` events fire only in OTHER tabs, never the writer.
@@ -2154,7 +2227,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
@@ -2697,6 +2770,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEditCallout(null);
   };
   const cancelEditCallout = () => { if (editCallout?.isNew) setCallouts((a) => a.filter((c) => c.id !== editCallout.id)); setEditCallout(null); };
+  // B620 — inline-label editor: double-click a line/polyline/road/easement to type its rides-along
+  // label in place. Writes `inlineLabel` DIRECTLY onto the ONE feature (non-sticky — never through
+  // mkStyle/typeStyles, so a typed label can't bleed into the next drawn shape).
+  const beginEditInline = (kind, id) => {
+    const feat = kind === "el" ? els.find((x) => x.id === id) : markups.find((x) => x.id === id);
+    if (!feat) return;
+    setSel({ kind, id });
+    setEditInline({ kind, id, text: feat.inlineLabel || "" });
+  };
+  const commitEditInline = () => {
+    if (!editInline) return;
+    const { kind, id, text } = editInline;
+    const cur = (kind === "el" ? els : markups).find((x) => x.id === id);
+    const orig = (cur && cur.inlineLabel) || "";
+    if (cur && text.trim() !== orig.trim()) {
+      pushHistory();
+      const patch = (x) => (x.id === id ? { ...x, inlineLabel: text.trim() } : x);
+      if (kind === "el") setEls((a) => a.map(patch)); else setMarkups((a) => a.map(patch));
+    }
+    setEditInline(null);
+  };
+  const cancelEditInline = () => setEditInline(null);
   // Click 1 sets the tip (what it points at); click 2 drops the box and starts typing.
   const placeCallout = (fp) => {
     if (!calloutDraft) { setCalloutDraft({ tip: fp }); return; }
@@ -4957,6 +5052,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = els.find((x) => x.id === id);
     if (!el) return;
     if (el.groupId) { setMulti([]); setDrillId(id); setSel({ kind: "el", id }); return; }
+    // B620: double-click a (centerline) road → edit its inline label in place (right-click still opens
+    // the type/actions menu via onElContext). Legacy bonded rect roads keep the type menu.
+    if (isCenterlineRoad(el)) { beginEditInline("el", id); return; }
     setSel({ kind: "el", id });
     setTypeMenu({ id, x: e.clientX, y: e.clientY });
   };
@@ -5826,6 +5924,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // dodge a neighbour, and hides it only as a last resort; bigger elements and buildings
   // win the space. Zoomed in, shapes are large and spread out, so all lines show as before.
   const seenLabels = new Set(); // suppress duplicate overlapping callouts (e.g. two stacked sidewalks)
+  const showAreas = settings.showAreas !== false; // B121: drop the sf/acreage line when the user turns areas off (name + dimension lines stay)
   const labelCands = [];
   for (const el of els) {
     if (NO_LABEL.includes(el.type) || el.noLabel) continue;
@@ -5865,11 +5964,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // Seat the EXISTING-area label over the existing basin (baseline centroid), not the
         // whole-pond centre — so it reads over the old pond and clears the "+added" label.
         fc = centroid(base.ring);
-        lines = ["Existing Detention Pond", `${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`];
+        lines = ["Existing Detention Pond"];
+        if (showAreas) lines.push(`${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`);
         if (pt) pondAdd = { pt, addA };
-        else { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`); }
+        else if (showAreas) { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`); }
       } else {
-        lines = ["Detention Pond", `${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`];
+        lines = ["Detention Pond"];
+        if (showAreas) lines.push(`${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`);
         // Stage-storage line, seated on the pond with its name (rides the same LOD/collision
         // pool). Same detentionStorage() the side panel reads, so the two can never disagree.
         // Gated on the contours toggle (default on) AND the same zoom floor as the depth-ring
@@ -5900,7 +6001,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // when the building has bump-outs (whose area is folded into the on-plan sf).
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
-        lines = buildingLabelLines({ name, sqft: `${f0(area + ba)} sf`, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} sf` : null, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
       } else if (el.type === "trailer") {
         // B194: the trailer-parking label is TWO lines — "<stall depth>′ Trailer Parking" then
         // the trailer count. The stall depth is the per-stall trailer LENGTH (the depth a trailer
@@ -5911,8 +6012,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         lines = [`${f0(tc.trailerL)}′ ${name}`, `${f0(count)} trailers${poly ? " (est)" : ""}`];
       } else {
         lines = [name];
-        lines.push(`${f0(area)} sf`);
-        lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
+        if (showAreas) lines.push(`${f0(area)} sf`);        // sf is an AREA line — drop with areas off
+        // A rect's "W × H" is a DIMENSION line (kept); a polygon's only size line IS its acreage
+        // (an AREA line — dropped with areas off, leaving just the name).
+        if (!poly) lines.push(`${f0(el.w)}′ × ${f0(el.h)}′`);
+        else if (showAreas) lines.push(`${f2(area / SQFT_PER_ACRE)} ac`);
       }
     }
     // Shape's on-screen bounding half-extents (rotation-aware for rects). halfH drives the
@@ -5939,13 +6043,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true });
+        lines: showAreas ? ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`] : ["Additional Detention"], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true });
     }
   }
   const labelShow = layoutLabels(
     labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader })),
     { pad: 2 },
   );
+  // B121 (round 3): fold the red per-edge dimension callouts into the collision pool. The dimension
+  // number is the lowest tier — if its screen box would overprint a committed centred name/area
+  // label, HIDE it (never move it: B592 pins it on the footprint). Iterate ELS (not labelCands — a
+  // deduped / LOD-dropped label still draws its dimension), mirroring renderElPx's visibility gate
+  // (:10866/:10887) and number geometry so the collision test and the render can't disagree.
+  const committedLabelBoxes = [...labelShow.values()].map((p) => p.box).filter(Boolean);
+  const dimItems = [];
+  for (const el of els) {
+    if (!(el.type === "building" || el.type === "paving" || el.type === "road") || el.points || el.noLabel) continue;
+    const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB))
+      : el.type === "building" ? footprintDepth(el) : Math.min(el.w, el.h);
+    const dimVisible = el.type === "building" ? dimCalloutVisible(view.ppf) : detailLabelVisible(dimW, view.ppf);
+    if (!dimVisible) continue;
+    const tl = f2p({ x: el.cx - el.w / 2, y: el.cy - el.h / 2 });
+    const c = f2p({ x: el.cx, y: el.cy });
+    const dimOff = clampDimOffset(el.dimOffset, dimSlideFor(el, els));
+    dimItems.push({
+      id: el.id,
+      box: dimNumberBox({
+        tlx: tl.x, tly: tl.y, w: el.w * view.ppf, h: el.h * view.ppf, cx: c.x, cy: c.y,
+        rot: el.rot || 0, horizLong: el.w >= el.h,
+        posF: el.type === "road" ? DIM_POS_F_ROAD : DIM_POS_F_DEFAULT,
+        ox: dimOff.x * view.ppf, oy: dimOff.y * view.ppf,
+        textLen: `${f0(dimW)}′`.length, fz: 11 * Math.max(0.34, Math.min(1, view.ppf / 0.45)),
+      }),
+    });
+  }
+  const dimSuppressed = suppressedDimIds(dimItems, committedLabelBoxes, 2);
   const labelEls = labelCands.map((d) => {
     const place = labelShow.get(d.lid);
     if (!place) return null; // hidden this frame to avoid overprinting a higher-priority label
@@ -7566,7 +7698,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext))}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext, dimSuppressed, editInline && editInline.kind === "el" ? editInline.id : null))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) */}
               {markups.map((m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
@@ -7654,13 +7786,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const cen = (m.centerline && m.mode !== "boundary") ? m.centerline.map(f2p) : [];
                   const cp = f2p(centroid(m.pts));
                   const area = easementArea(m);
+                  // B620 — inline label rides the easement's centerline (strip) or its CLOSED ring (boundary — append
+                  // the first point so the label walks the closing edge too, not just 3 of 4 sides).
+                  const easePathFeet = (m.centerline && m.mode !== "boundary" && m.centerline.length >= 2)
+                    ? m.centerline
+                    : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
                       <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? "7 5" : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
+                      {editInline?.id !== m.id && inlineLabelEls(easePathFeet, m.inlineLabel, ecol, INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`)}
                     </g>
                   );
                 }
@@ -7673,18 +7811,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "line") {
                   const a = f2p(m.a), b = f2p(m.b);
                   return (
-                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
+                      {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
+                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`)}
                     </g>
                   );
                 }
                 if (m.kind === "polyline") {
                   const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   return (
-                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
                       <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
+                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`)}
                     </g>
                   );
                 }
@@ -7934,6 +8075,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onPointerDown={(e) => e.stopPropagation()}
                       onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitNumEdit(); } else if (e.key === "Escape") { e.preventDefault(); cancelNumEdit(); } }}
                       style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: "var(--surface-raised)", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                  </foreignObject>
+                );
+              })()}
+
+              {/* B620 — inline-label editor (double-click a line/road/easement → type in place). NEVER a dialog box. */}
+              {editInline && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitEditInline(); }} />}
+              {editInline && (() => {
+                const feat = editInline.kind === "el" ? els.find((x) => x.id === editInline.id) : markups.find((x) => x.id === editInline.id);
+                if (!feat) return null;
+                const ptsFeet = editInline.kind === "el"
+                  ? (isCenterlineRoad(feat) ? feat.pts : rectRoadEndpoints(feat))
+                  : (feat.kind === "easement" ? ((feat.centerline && feat.mode !== "boundary" && feat.centerline.length >= 2) ? feat.centerline : feat.pts) : mkPts(feat));
+                const anchor = inlineLabelAnchorFeet(ptsFeet);
+                if (!anchor) return null;
+                const bp = f2p({ x: anchor.fx, y: anchor.fy });
+                const W = 220, H = 30;
+                return (
+                  <foreignObject x={bp.x - W / 2} y={bp.y - H - 8} width={W} height={H} style={{ overflow: "visible" }}>
+                    <input autoFocus value={editInline.text}
+                      onChange={(e) => setEditInline((s) => ({ ...s, text: e.target.value }))}
+                      onBlur={commitEditInline}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitEditInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelEditInline(); } }}
+                      placeholder={'e.g. 18" SANITARY SEWER'}
+                      maxLength={120}
+                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 8px", fontSize: 13, fontFamily: "Inter, system-ui, sans-serif", fontWeight: 600, color: PAL.ink, background: "var(--surface-raised)", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -8992,6 +9159,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {check("Restricts paving", e.restrictsPaving === true, "restrictsPaving")}
                 </div>
                 <Field label="Label"><input value={e.labelOverride || ""} onChange={(ev) => setSelEasement({ labelOverride: ev.target.value })} placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} /></Field>
+                {/* B620 — inline label riding the easement (distinct from the centroid caption above; double-click the
+                    easement also opens this in place). inlineLabel doesn't touch the ring, so a plain spread is safe;
+                    onFocus pushes one undo frame per edit. */}
+                <Field label="Inline label"><input value={e.inlineLabel || ""} maxLength={120}
+                  onFocus={() => pushHistory()}
+                  onChange={(ev) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: ev.target.value } : m)))}
+                  placeholder='e.g. 20&#39; DRAINAGE ESMT' style={txt} /></Field>
                 <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} sf</b> · {(area / SQFT_PER_ACRE).toFixed(2)} ac</div>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
@@ -9016,6 +9190,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
                   </select>
                 </Field>
+                {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in
+                    place). NON-sticky (direct setMarkups, never setMkStyle) so the text can't bleed into the next
+                    drawn shape; onFocus pushes ONE undo frame per edit (not one per keystroke). */}
+                {(selMarkup.kind === "line" || selMarkup.kind === "polyline") && (
+                  <Field label="Inline label"><input value={selMarkup.inlineLabel || ""} maxLength={120}
+                    onFocus={() => pushHistory()}
+                    onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: e.target.value } : m)))}
+                    placeholder={'e.g. 18" SANITARY SEWER'} style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
+                )}
                 {closed && <>
                   <Field label="Fill"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} onChange={(e) => setSelMarkup({ fillOpacity: +e.target.value })} /></Field>
@@ -9121,6 +9304,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(roadLengthOf(selEl))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
                       <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                      {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
+                          setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
+                      {cl && (
+                        <Field label="Inline label"><input value={selEl.inlineLabel || ""} maxLength={120}
+                          onFocus={() => pushHistory()}
+                          onChange={(e) => setSelEl({ inlineLabel: e.target.value })}
+                          placeholder="e.g. MAIN STREET" style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
+                      )}
                       {cl && (
                         <Field label="Road class">
                           <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
@@ -10086,6 +10277,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 next to the object it acts on — see B164. Not duplicated here. */}
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showGrid} onChange={(e) => setSettings((s) => ({ ...s, showGrid: e.target.checked }))} /> Show column grid</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }} title="Show the red footprint dimension callouts (building depth, road width, strip width)"><input type="checkbox" checked={settings.showDims !== false} onChange={(e) => setSettings((s) => ({ ...s, showDims: e.target.checked }))} /> Show dimensions</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }} title="Show the square-footage / acreage line on element labels"><input type="checkbox" checked={settings.showAreas !== false} onChange={(e) => setSettings((s) => ({ ...s, showAreas: e.target.checked }))} /> Show areas</label>
           </Section>
 
           {/* Structural column grid (B568): speed bay + flex-to-band typical bays + dock doors.
@@ -10710,7 +10903,7 @@ function dimSlideFor(el, allEls) {
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext, dimSuppressed, editInlineId) {
   // B617 — zoom multiplier (px/ft ÷ the default 0.35) so a road's curb/edge stroke holds constant
   // relative to the drawing across zoom, exactly like the in-component markup/utility strokes.
   const zk = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x) / 0.35;
@@ -10815,7 +11008,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       const numHandlers = dimSel
         ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id, e); } }
         : {};
-      if (dimVisible || dimSel) {
+      if (settings.showDims !== false && (dimVisible || dimSel)) { // B121: "Show dimensions" gates the centerline-road width callout too
         const dim = [];
         if (moved) dim.push(<line key="lead" x1={M.x} y1={M.y} x2={anchorPx.x} y2={anchorPx.y} stroke={RED} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />);
         dim.push(<line key="dl" x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={RED} strokeWidth={1.25} />);
@@ -10832,6 +11025,8 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         );
       }
     }
+    // B620 — inline label riding the road centerline (own color + white halo; sparse spacing).
+    if (editInlineId !== el.id) rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`));
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
@@ -11048,7 +11243,11 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // dimVisible (B149) drops a detail-tier paving/road width at site-overview zoom. A SELECTED
     // paving/road keeps its dimension so the click-to-edit / drag-to-reposition handle never
     // vanishes mid-edit; buildings keep their exact prior behaviour (site tier, no select exception).
-    if (dimVisible || (dimSel && el.type !== "building")) parts.push(
+    // B121 r3: the red dimension draws when its zoom tier is visible AND it isn't collision-suppressed
+    // (its number would overprint a higher-priority centred label) — a selected non-building keeps its
+    // dimension so the drag/edit handle never vanishes mid-edit. The "Show dimensions" toggle (B121)
+    // gates the whole layer. We only HIDE here; B592 keeps the dimension pinned on the footprint.
+    if (settings.showDims !== false && ((dimVisible && !dimSuppressed?.has(el.id)) || (dimSel && el.type !== "building"))) parts.push(
       <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
         onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
         {dim}
