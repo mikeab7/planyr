@@ -321,12 +321,15 @@ export function governingRequirement(candidates) {
 }
 
 const round2 = (n) => Math.round(n * 100) / 100;
+// Carrier values keep 4 decimals (a 6,000-sf lot owes ~0.10 ac-ft — 2-decimal
+// rounding would distort it); DISPLAY formatting is the UI's job.
+const round4 = (n) => Math.round(n * 10000) / 10000;
 
 /* Internal: a point-estimate carrier. */
 function pointResult(acFt, rate, basis, rule, flags = [], governing = null) {
   return {
     kind: "point",
-    requiredAcFt: round2(acFt),
+    requiredAcFt: round4(acFt),
     bandAcFt: null,
     rateAcFtPerAc: rate,
     basis,
@@ -340,7 +343,7 @@ function bandResult(loHi, basis, rule, flags = []) {
   return {
     kind: "band",
     requiredAcFt: null,
-    bandAcFt: [round2(loHi[0]), round2(loHi[1])],
+    bandAcFt: [round4(loHi[0]), round4(loHi[1])],
     rateAcFtPerAc: null,
     basis,
     rule,

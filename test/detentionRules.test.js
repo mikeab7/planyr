@@ -1,0 +1,243 @@
+// B629/B630 — the detention rules engine: versioned records, the rate method,
+// the greater-of conflict rule, band discipline, overlays. Pure — no fetch.
+import { describe, it, expect } from "vitest";
+import {
+  DETENTION_RULES,
+  MUNICIPAL_OVERLAYS,
+  WATERSHED_OVERLAYS,
+  ruleFor,
+  interpolateCurve,
+  governingRequirement,
+  computeRequiredDetention,
+  ruleBadge,
+  pondDefaultsFor,
+} from "../src/workspaces/site-planner/lib/detentionRules.js";
+
+describe("rule records — integrity sweep", () => {
+  it("every record carries id / authority / ruleType / dates / source{name,url} / params", () => {
+    for (const [auth, recs] of Object.entries(DETENTION_RULES)) {
+      for (const r of recs) {
+        expect(r.id, auth).toBeTruthy();
+        expect(r.authority).toBe(auth);
+        expect(["rate", "tiered", "table-band", "policy-band", "overlay"]).toContain(r.ruleType);
+        expect(r.effectiveDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(r.verifiedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(r.source?.name).toBeTruthy();
+        expect(r.source?.url).toMatch(/^https:\/\//);
+        expect(r.params).toBeTruthy();
+      }
+    }
+    for (const r of Object.values(MUNICIPAL_OVERLAYS)) {
+      expect(r.ruleType).toBe("overlay");
+      expect(r.verifiedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(r.source?.name).toBeTruthy();
+    }
+    for (const r of WATERSHED_OVERLAYS) {
+      expect(r.id).toBeTruthy();
+      expect(r.match).toBeInstanceOf(RegExp);
+      expect(r.params.transcribed).toBe(false); // flag-and-band until transcribed exactly
+      expect(r.note).toMatch(/verify/i);
+    }
+  });
+
+  it("per-authority arrays are newest-first (the ruleFor scan depends on it)", () => {
+    for (const recs of Object.values(DETENTION_RULES)) {
+      for (let i = 0; i + 1 < recs.length; i++) {
+        expect(recs[i].effectiveDate >= recs[i + 1].effectiveDate).toBe(true);
+      }
+    }
+  });
+});
+
+describe("ruleFor — the versioning seam", () => {
+  it("Houston: today picks the June-2026 rewrite; a 2024 date picks the 2019 IDM", () => {
+    expect(ruleFor("coh").id).toBe("coh-idm9-2026");
+    expect(ruleFor("coh", "2024-01-01").id).toBe("coh-idm9-2019");
+    expect(ruleFor("coh", "2026-06-01").id).toBe("coh-idm9-2026"); // effective ON the date
+  });
+  it("a date before the oldest record → honest null (no guess), unknown authority → null", () => {
+    expect(ruleFor("coh", "2019-06-01")).toBeNull();
+    expect(ruleFor("kendall")).toBeNull();
+  });
+});
+
+describe("computeRequiredDetention — HCFCD (the Goose Creek merge gate)", () => {
+  it("276 ac × 0.65 ac-ft/ac (entire tract) = 179.4 ac-ft — matches the DIA", () => {
+    // Source check (owner-verified 2026-07-03): the Goose Creek drainage impact
+    // analysis states a MINIMUM REQUIRED detention of 179.38 ac-ft for the
+    // ~276-ac tract under the HCFCD Atlas-14 rate; 276 × 0.65 = 179.40. The
+    // 0.02 delta is the DIA's exact surveyed acreage vs the rounded 276.
+    const r = computeRequiredDetention({ acres: 276, authorityId: "hcfcd" });
+    expect(r.kind).toBe("point");
+    expect(r.requiredAcFt).toBeCloseTo(179.4, 1);
+    expect(r.rateAcFtPerAc).toBe(0.65);
+    // The carrier invariant: no volume ever travels without its rule record.
+    expect(r.rule.id).toBe("hcfcd-pcpm-atlas14-2021");
+    expect(r.rule.source.name).toMatch(/HCFCD/);
+    expect(r.rule.effectiveDate).toBe("2021-03-31");
+    expect(r.rule.verifiedOn).toBe("2026-07-03");
+    expect(r.caveat).toMatch(/screening/i);
+  });
+});
+
+describe("computeRequiredDetention — COH tiers (2026 record)", () => {
+  it("<20 ac: flat 0.8 ac-ft/ac, flagged secondary-source until the manual PDF lands", () => {
+    const r = computeRequiredDetention({ acres: 10, impPct: 80, authorityId: "coh" });
+    expect(r.kind).toBe("point");
+    expect(r.requiredAcFt).toBeCloseTo(8.0, 2);
+    expect(r.rule.id).toBe("coh-idm9-2026");
+    expect(r.flags).toContain("secondary-source");
+  });
+  it("redevelopment credit: 0.4 ac-ft/ac of removed impervious, applied before the 0.8 calc", () => {
+    const r = computeRequiredDetention({ acres: 10, authorityId: "coh", removedImperviousAcres: 5 });
+    expect(r.requiredAcFt).toBeCloseTo(0.8 * 10 - 0.4 * 5, 2); // 6.0
+    expect(r.basis).toMatch(/removed impervious/);
+  });
+  it("single-family lot <7,500 sf: exempt at ≤65% impervious, 0.75 above", () => {
+    const acres = 6000 / 43560;
+    const exempt = computeRequiredDetention({ acres, impPct: 60, authorityId: "coh", singleFamily: true, lotSf: 6000 });
+    expect(exempt.kind).toBe("none");
+    expect(exempt.requiredAcFt).toBe(0);
+    expect(exempt.rule.id).toBe("coh-idm9-2026"); // even "none" carries its rule
+    const above = computeRequiredDetention({ acres, impPct: 70, authorityId: "coh", singleFamily: true, lotSf: 6000 });
+    expect(above.kind).toBe("point");
+    expect(above.requiredAcFt).toBeCloseTo(0.75 * acres, 2);
+  });
+});
+
+describe("computeRequiredDetention — COH 2019 record (grandfathered dates)", () => {
+  const onDate = "2024-01-01";
+  it("<1 ac non-single-family: 0.75 ac-ft/ac", () => {
+    const r = computeRequiredDetention({ acres: 0.5, impPct: 90, authorityId: "coh", onDate });
+    expect(r.requiredAcFt).toBeCloseTo(0.375, 3);
+    expect(r.rule.id).toBe("coh-idm9-2019");
+  });
+  it("1–20 ac: Fig 9.2 curve interpolation, flagged curve-approximate until transcribed", () => {
+    // 87.5% impervious sits halfway between the published worked-example anchors
+    // (85% → 0.95, 90% → 0.98) → 0.965 ac-ft/ac.
+    const r = computeRequiredDetention({ acres: 10, impPct: 87.5, authorityId: "coh", onDate });
+    expect(r.kind).toBe("point");
+    expect(r.requiredAcFt).toBeCloseTo(9.65, 2);
+    expect(r.flags).toContain("curve-approximate");
+  });
+  it("curve clamps at both ends; missing impervious → conservative top + flag", () => {
+    expect(interpolateCurve([[20, 0.55], [100, 1.0]], 5)).toBe(0.55);
+    expect(interpolateCurve([[20, 0.55], [100, 1.0]], 100)).toBe(1.0);
+    const r = computeRequiredDetention({ acres: 10, authorityId: "coh", onDate });
+    expect(r.rateAcFtPerAc).toBe(1.0);
+    expect(r.flags).toContain("impervious-unknown");
+  });
+});
+
+describe("computeRequiredDetention — the >20-ac greater-of conflict rule", () => {
+  it("in city limits, draining to an HCFCD channel: max(0.65×tract, 0.75×impervious) — HCFCD wins at low impervious", () => {
+    // 30 ac at 85% impervious → HCFCD 0.65×30 = 19.5 vs COH 0.75×25.5 = 19.125.
+    const r = computeRequiredDetention({ acres: 30, impPct: 85, authorityId: "coh", inCityLimits: true, drainsToHcfcdChannel: true });
+    expect(r.kind).toBe("point");
+    expect(r.requiredAcFt).toBeCloseTo(19.5, 2);
+    expect(r.governing.picked).toBe("hcfcd");
+    expect(r.governing.reason).toMatch(/restrictive/);
+    expect(r.governing.candidates).toHaveLength(2);
+  });
+  it("…and COH wins when impervious is high enough (both directions of the max)", () => {
+    // 30 ac at 90% → COH 0.75×27 = 20.25 > HCFCD 19.5.
+    const r = computeRequiredDetention({ acres: 30, impPct: 90, authorityId: "coh", inCityLimits: true, drainsToHcfcdChannel: true });
+    expect(r.requiredAcFt).toBeCloseTo(20.25, 2);
+    expect(r.governing.picked).toBe("coh");
+  });
+  it("channel adjacency UNKNOWN → still both candidates, flagged — never silently resolved", () => {
+    const r = computeRequiredDetention({ acres: 30, impPct: 90, authorityId: "coh", inCityLimits: true, drainsToHcfcdChannel: null });
+    expect(r.flags).toContain("channel-adjacency-unknown");
+    expect(r.governing.candidates).toHaveLength(2);
+  });
+  it("NOT draining to an HCFCD channel → plain HCFCD PCPM deferral (no greater-of)", () => {
+    const r = computeRequiredDetention({ acres: 30, impPct: 90, authorityId: "coh", inCityLimits: true, drainsToHcfcdChannel: false });
+    expect(r.requiredAcFt).toBeCloseTo(19.5, 2);
+    expect(r.governing).toBeNull();
+    expect(r.rule.id).toBe("hcfcd-pcpm-atlas14-2021"); // the governing record travels
+  });
+});
+
+describe("computeRequiredDetention — band authorities can NEVER emit a point", () => {
+  it.each(["fortbend", "montgomery", "chambers", "waller"])("%s → band + flags, requiredAcFt null", (auth) => {
+    for (const acres of [0.5, 5, 45, 150, 500]) {
+      const r = computeRequiredDetention({ acres, impPct: 85, authorityId: auth });
+      expect(r.kind, `${auth} @ ${acres} ac`).toBe("band");
+      expect(r.requiredAcFt).toBeNull();
+      expect(r.bandAcFt[0]).toBeLessThan(r.bandAcFt[1]);
+      expect(r.flags).toContain("screening-band");
+      expect(r.rule.authority).toBe(auth);
+    }
+  });
+  it("Chambers & Waller carry the mandatory verify-with-county-engineer flag", () => {
+    for (const auth of ["chambers", "waller"]) {
+      const r = computeRequiredDetention({ acres: 20, authorityId: auth });
+      expect(r.flags).toContain("verify-with-county-engineer");
+    }
+  });
+  it("the band basis is honest about WHY (screening band / untranscribed figures)", () => {
+    const r = computeRequiredDetention({ acres: 20, authorityId: "fortbend" });
+    expect(r.basis).toMatch(/screening band/i);
+    expect(r.basis).toMatch(/7-1-1/); // names the exact untranscribed figures
+    expect(r.flags).toContain("table-unverified");
+  });
+});
+
+describe("computeRequiredDetention — municipal overlays", () => {
+  it("Missouri City <20 ac with known added impervious: 0.75 × ADDED impervious", () => {
+    const r = computeRequiredDetention({ acres: 15, authorityId: "missouricity", addedImperviousAcres: 10 });
+    expect(r.kind).toBe("point");
+    expect(r.requiredAcFt).toBeCloseTo(7.5, 2);
+    expect(r.flags).toContain("municipal-overlay");
+  });
+  it("Missouri City <20 ac, added impervious unknown → screening fallback, flagged", () => {
+    const r = computeRequiredDetention({ acres: 15, impPct: 80, authorityId: "missouricity" });
+    expect(r.kind).toBe("point");
+    expect(r.flags).toContain("added-impervious-unknown");
+  });
+  it("Missouri City ≥20 ac: parent depends on watershed — surfaced, not guessed", () => {
+    const r = computeRequiredDetention({ acres: 25, impPct: 85, authorityId: "missouricity" });
+    expect(r.kind).toBe("unknown");
+    expect(r.flags).toContain("overlay-parent-ambiguous");
+    const ids = r.governing.candidates.map((c) => c.authorityId);
+    expect(ids).toEqual(["hcfcd", "fortbend"]);
+  });
+  it("Magnolia dispatches through the Montgomery band + carries the 10% runoff-reduction note", () => {
+    const r = computeRequiredDetention({ acres: 10, authorityId: "magnolia" });
+    expect(r.kind).toBe("band");
+    expect(r.rule.authority).toBe("montgomery");
+    expect(r.flags).toContain("municipal-overlay");
+    expect(r.basis).toMatch(/10% runoff-reduction/);
+    expect(r.overlayRule.id).toBe("magnolia-adopt");
+  });
+});
+
+describe("edges + helpers", () => {
+  it("no area / unknown authority → none / unknown, never a number", () => {
+    expect(computeRequiredDetention({ acres: 0, authorityId: "hcfcd" }).kind).toBe("none");
+    const u = computeRequiredDetention({ acres: 10, authorityId: "galveston-nope" });
+    expect(u.kind).toBe("unknown");
+    expect(u.flags).toContain("no-criteria-modeled");
+    expect(u.requiredAcFt).toBeNull();
+  });
+  it("governingRequirement picks the larger and says why", () => {
+    const g = governingRequirement([
+      { authorityId: "a", acFt: 10 },
+      { authorityId: "b", acFt: 12 },
+    ]);
+    expect(g.picked).toBe("b");
+    expect(g.reason).toBe("more restrictive governs");
+  });
+  it("ruleBadge formats authority · rate · eff · verified from the record", () => {
+    const b = ruleBadge(ruleFor("hcfcd"));
+    expect(b).toMatch(/Harris County Flood Control District/);
+    expect(b).toMatch(/0\.65 ac-ft\/ac/);
+    expect(b).toMatch(/eff\. Mar 2021/);
+    expect(b).toMatch(/verified Jul 2026/);
+  });
+  it("pondDefaultsFor reads authority pond params (HCFCD 3:1, 1 ft freeboard), safe fallback", () => {
+    expect(pondDefaultsFor("hcfcd").sideSlope).toBe(3);
+    expect(pondDefaultsFor("nowhere").sideSlope).toBe(3);
+    expect(pondDefaultsFor("nowhere").freeboardFt).toBe(1);
+  });
+});
