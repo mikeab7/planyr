@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS } from "./lib/counties.js";
-import { recordSourceResult, filterHealthyCandidates, isSourceOpen } from "./lib/sourceHealth.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
+import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint } from "./lib/parcelSnapshot.js";
+import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
@@ -20,7 +21,7 @@ import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
-import { makeParcelDisplayLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { makeParcelDisplayLayer, makeSnapshotLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 import { shareProject, makeProjectPrivate } from "./lib/sharing.js";
@@ -298,6 +299,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const skipRenameBlurRef = useRef(false);            // Esc cancels without the trailing blur committing
   const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
   const [backupNotice, setBackupNotice] = useState(null); // {county} — set when a click was answered by the statewide backup because the county's own server was down (B244)
+  const [cachedNotice, setCachedNotice] = useState(null); // {county, asOf} — set when a click was answered by the Drive PARCEL SNAPSHOT because the live county server was unreachable (B629)
   // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
   const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer (this map's instances)
   const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
@@ -632,8 +634,22 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   // outline layer still covers that area. Idempotent per county.
   const addDisplay = (key) => {
     const map = mapRef.current;
+    if (!map || displaysRef.current[key]) return;
+
+    // B629 — prefer the Drive PARCEL SNAPSHOT when this county's cached copy is loaded: a reliable
+    // local vector layer that renders outlines AND (via optimisticHitAt, which iterates its
+    // eachFeature) selects a lot even with the county server fully down. Served from the browser,
+    // so no network + no hang-guard. This is what makes Chambers/Waller keep working during a TxGIO
+    // outage. (Fort Bend, Tier B, is tiled — Phase 2 — and has no whole-county snapshot loaded.)
+    if (SNAPSHOT_COUNTIES.has(key) && getSnapshot(key)) {
+      const snapLayer = makeSnapshotLayer(key);
+      snapLayer.addTo(map);
+      displaysRef.current[key] = snapLayer;
+      return;
+    }
+
     const url = layerUrlsRef.current[key];
-    if (!map || !url || displaysRef.current[key]) return;
+    if (!url) return;
     const statewide = STATEWIDE_KEYS.includes(key);
     // A county we already know is down: don't add a layer that will only spin — the
     // statewide outlines cover it. Never skip the statewide source itself (the
@@ -684,6 +700,31 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     Object.values(displaysRef.current).forEach((fl) => { try { map && map.removeLayer(fl); } catch (_) {} });
     displaysRef.current = {};
   };
+  const removeDisplay = (key) => {
+    const map = mapRef.current;
+    const fl = displaysRef.current[key];
+    if (fl) { try { map && map.removeLayer(fl); } catch (_) {} delete displaysRef.current[key]; }
+  };
+
+  // B629 — the Phase-1 client-loaded (whole-county) snapshot counties. Chambers + Waller ride the
+  // flaky State/TxGIO service and are small enough to hold whole in the browser. Fort Bend (Tier B)
+  // is tiled — Phase 2 — so it is NOT warmed/whole-loaded here.
+  const CLIENT_SNAPSHOT_COUNTIES = ["chambers", "waller"];
+
+  /* When a county's Drive snapshot finishes loading/refreshing (first IndexedDB hydrate or a fresh
+     nightly copy), swap its on-map display to the snapshot vector layer so outlines + clicks come
+     from the reliable local copy. If it's already the snapshot layer, it self-refreshes. */
+  useEffect(() => {
+    const off = onSnapshotChange((county) => {
+      if (!selectModeRef.current || !mapRef.current) return;
+      const cur = displaysRef.current[county];
+      if (cur && cur._isSnapshot) return; // already the snapshot layer (self-refreshing)
+      removeDisplay(county);
+      addDisplay(county);
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* enter/leave select mode: show all counties' outlines, set the +/− cursor,
      enable click-to-identify. */
@@ -692,6 +733,9 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const map = mapRef.current;
     if (!map) return;
     if (selectMode) {
+      // Warm the cached parcel snapshots (instant from IndexedDB, SWR-refresh from Drive) so a
+      // county whose live server is down still draws + clicks from the local copy (B629).
+      CLIENT_SNAPSHOT_COUNTIES.forEach((c) => { ensureSnapshot(c).catch(() => {}); });
       Object.keys(layerUrlsRef.current).forEach(addDisplay);
       map.getContainer().style.cursor = ADD_CURSOR;
     } else {
@@ -806,6 +850,20 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   // ("FORT BEND"); title-case it for the badge, or fall back to a generic phrase.
   const titleCase = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
   const backupCountyLabel = (attrs) => { const c = findAttr(attrs, /^county$/i); return c ? titleCase(c) : "This county"; };
+  // " · as of Jul 3, 2026" from a snapshot's generatedAt ISO string, or "" when unknown. Pure.
+  const fmtAsOf = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? ` · as of ${d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}` : ""; };
+
+  // B629 — the parcel under a point from any LOADED Drive snapshot, shaped like an identify hit
+  // ({county, feature}), or null. The last-resort answer when every live source is unreachable.
+  const snapshotHitAt = (lng, lat) => {
+    for (const c of SNAPSHOT_COUNTIES) {
+      const snap = getSnapshot(c);
+      if (!snap) continue;
+      const feature = featureAtPoint(snap.features, lng, lat);
+      if (feature) return { county: c, feature };
+    }
+    return null;
+  };
 
   const handleClick = async (latlng) => {
     // Auto-route: figure out which configured county/counties could contain this
@@ -815,7 +873,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // down), or a primary whose breaker is open, are skipped this click.
     const { candidates, realPrimaries } = resolveCandidates(latlng);
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
-    setErr(""); setBackupNotice(null);
+    setErr(""); setBackupNotice(null); setCachedNotice(null);
 
     // Instant local toggle-off: a click inside an already-highlighted parcel deselects
     // it with zero network round-trip — we already have its geometry (B441).
@@ -850,12 +908,18 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       const res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok)),
       });
-      // The authoritative answer always wins: drop the optimistic outline and rebuild
-      // from the identified geometry (full-res + real account/address attrs), so the
-      // IMPORTED parcel is never the simplified display outline. No flash — the
-      // remove+re-add happen in this one synchronous turn (B441).
-      if (optKey) rollbackHit(optKey);
       if (!res.hits.length) {
+        // Live returned nothing. If the optimistic highlight came from a loaded Drive snapshot
+        // (the county server is down but our cached copy HAS this lot), KEEP it as the selection —
+        // that's the B629 cache doing its job — and badge it "cached". Only fall back to the cache
+        // when live truly didn't answer (responded === 0), so a genuine "no parcel here" from a
+        // healthy server still reads as empty. Otherwise roll the optimistic outline back + report.
+        if (res.responded === 0 && opt && optKey && SNAPSHOT_COUNTIES.has(opt.county) && getSnapshot(opt.county) && hilitesRef.current[optKey]) {
+          const v = snapshotVintage(opt.county);
+          setCachedNotice({ county: backupCountyLabel(opt.feature.attributes || {}), asOf: v && v.asOf });
+          return; // the optimistic addParcelHit already added it to the selection — leave it in place
+        }
+        if (optKey) rollbackHit(optKey);
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
         setErr(res.responded === 0
@@ -863,10 +927,16 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           : "No parcel right there — zoom in and click directly on a lot.");
         return;
       }
+      // The authoritative live answer always wins: drop the optimistic outline and rebuild
+      // from the identified geometry (full-res + real account/address attrs), so the
+      // IMPORTED parcel is never the simplified display outline. No flash — the
+      // remove+re-add happen in this one synchronous turn (B441).
+      if (optKey) rollbackHit(optKey);
       const hit = res.hits[0]; // first county that answered owns the lot
-      // A hit FROM the statewide layer while a real CAD existed for this spot means
-      // TxGIO stood in for a county whose own server was down/skipped — flag it.
-      const viaBackup = STATEWIDE_KEYS.includes(hit.county) && realPrimaries.length > 0;
+      // A statewide-layer hit is a genuine "backup" only when the county's OWN CAD was
+      // unavailable this click (breaker open → dropped from the query) — NOT when a
+      // healthy CAD was queried but statewide merely won the parallel race (B630).
+      const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
       const rings = outerRingsLngLat(hit.feature);
       if (!rings.length) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const key = parcelKey(hit.county, rings, hit.feature.attributes || {});
@@ -907,12 +977,29 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     }
     if (!live()) return; // a newer search superseded this one — don't add a stale parcel or info
     if (!res.hits.length) {
+      // Live gave nothing. If NO service responded, try the Drive snapshot for a cached lot before
+      // reporting unavailable (B629); a real "no parcel here" from a healthy server stays empty.
+      const cached = res.responded === 0 ? snapshotHitAt(latlng.lng, latlng.lat) : null;
+      if (cached) {
+        const added = addParcelHit(cached, latlng);
+        if (added) {
+          const v = snapshotVintage(cached.county);
+          setParcelInfo({
+            status: "found", label, key: added.key, county: cached.county, attrs: added.attrs,
+            addr: findAttr(added.attrs, ADDR_RE), acct: findAttr(added.attrs, ID_RE), acres: ringsAcres(added.rings),
+            cached: { asOf: v ? v.asOf : null },
+          });
+          return;
+        }
+      }
       // Nothing matched: if NO service even responded, the source is unavailable;
       // if one answered with no parcel, the point is genuinely empty (a road/ROW).
       setParcelInfo({ status: res.responded === 0 ? "unavailable" : "none", label }); return;
     }
     const hit = res.hits[0];
-    const viaBackup = STATEWIDE_KEYS.includes(hit.county) && realPrimaries.length > 0;
+    // See handleClick (B630): a statewide answer flags a "backup" only when the real CAD
+    // was actually unavailable, not when it lost the parallel race to a faster TxGIO.
+    const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
     const added = addParcelHit(hit, latlng);
     if (!added) { setParcelInfo({ status: "none", label }); return; }
     setParcelInfo({
@@ -945,7 +1032,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     }
   };
 
-  const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); };
+  const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
   // Always capture the planner underlay from Esri: it supports image `export`
   // (USGS tiles render on the map but its export op returns no image). The
   // boundary aligns to either source, so the planner aerial stays reliable.
@@ -1179,6 +1266,11 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                     Statewide backup — {parcelInfo.backup} county’s server is unavailable; shown from TxGIO and may lag county updates.
                   </div>
                 )}
+                {parcelInfo.cached && (
+                  <div style={{ marginBottom: 8, padding: "6px 8px", background: "#fdf6e7", border: "1px solid #e6c478", borderRadius: 6, fontSize: 11, color: "#8a5a00", lineHeight: 1.4 }}>
+                    Cached copy{fmtAsOf(parcelInfo.cached.asOf)} — the county server is unavailable, so this lot came from Planyr’s saved snapshot. Accurate for selection; may lag recent county updates.
+                  </div>
+                )}
                 {parcelInfo.acct && infoRow("Account / ID", parcelInfo.acct)}
                 {parcelInfo.acres != null && infoRow("Acreage (measured)", `${parcelInfo.acres.toFixed(2)} ac`)}
                 {apprRows(parcelInfo.attrs)
@@ -1327,6 +1419,14 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         {backupNotice && !err && (
           <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: 8, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
             <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
+          </div>
+        )}
+        {/* cached-snapshot notice (bottom-left) — the clicked lot came from Planyr's saved Drive
+            snapshot because the live county server was unreachable (B629). Same honesty as the
+            statewide-backup notice: a possibly-staler local copy is never mistaken for a live record. */}
+        {cachedNotice && !err && !backupNotice && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: 8, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
+            <b>Cached copy{fmtAsOf(cachedNotice.asOf)}.</b> {cachedNotice.county} county’s live parcel server is unavailable, so this lot came from Planyr’s saved snapshot — accurate for selection, but it may lag recent county updates.
           </div>
         )}
         {/* contextual selection guidance — only while actively selecting (not a persistent fixture) */}

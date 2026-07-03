@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   fwd, inv, solveM, sheetBBox,
-  MIN_ALIGN_BASE, alignBaselinesDegenerate, sheetContains, measureOverUnaligned, panTo,
+  MIN_ALIGN_BASE, alignBaselinesDegenerate, sheetContains, measureOverUnaligned, panTo, alignBadgeMetrics, isReferenceSet,
 } from "../src/workspaces/doc-review/lib/stitchGeom.js";
 
 const ID = { A: 1, B: 0, e: 0, f: 0 };
@@ -107,5 +107,96 @@ describe("stitcher geometry (doc-review)", () => {
       dragRef.current = null;                          // the abort that used to crash the stitcher
       expect(() => oldUpdater(view)).toThrow(/panX/);
     });
+  });
+});
+
+describe("alignBadgeMetrics — clamp the 'Not aligned' badge to the sheet (B632/NEW-3)", () => {
+  it("uses the full label + capped 22px font on a large on-screen sheet", () => {
+    const bm = alignBadgeMetrics(800);
+    expect(bm.fontPx).toBe(22);         // capped, not 800*0.11
+    expect(bm.borderPx).toBe(2.5);      // capped
+    expect(bm.showText).toBe(true);
+    expect(bm.text).toMatch(/click/);   // full call-to-action
+  });
+
+  it("scales the font DOWN with the sheet so it can't blanket a small sheet at low zoom", () => {
+    // At ~15% zoom on a 100px sheet the badge would previously be a fixed 22px over a 100px sheet.
+    const bm = alignBadgeMetrics(100);
+    expect(bm.fontPx).toBeCloseTo(11, 5); // 100 * 0.11, well under the sheet's width
+    expect(bm.fontPx).toBeLessThan(22);
+    expect(bm.showText).toBe(true);
+    expect(bm.text).toBe("⚠ Not aligned"); // shortened below 150px
+  });
+
+  it("collapses to an outline-only chip (no text) once the sheet is tiny", () => {
+    const bm = alignBadgeMetrics(30);
+    expect(bm.showText).toBe(false);    // text would overflow — outline only
+    expect(bm.fontPx).toBeGreaterThanOrEqual(7); // floored, never 0
+    expect(bm.borderPx).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it("never returns a font larger than a fraction of the sheet's on-screen size", () => {
+    for (const m of [10, 40, 90, 150, 300, 1000]) {
+      const bm = alignBadgeMetrics(m);
+      expect(bm.fontPx).toBeLessThanOrEqual(Math.max(7, m * 0.11) + 1e-9);
+      expect(bm.fontPx).toBeLessThanOrEqual(22);
+    }
+  });
+
+  it("is defensive against a non-finite / negative on-screen size", () => {
+    expect(alignBadgeMetrics(NaN).fontPx).toBe(7);
+    expect(alignBadgeMetrics(-50).showText).toBe(false);
+    expect(alignBadgeMetrics(undefined).fontPx).toBe(7);
+  });
+});
+
+describe("isReferenceSet — classify a non-tileable, scale-less REFERENCE set (B630/NEW-1)", () => {
+  // FIXTURE A — the JACINTOPORT mechanical set: schedule/legend sheets, no match lines, uncalibrated,
+  // and (once notToScale is populated at add-time or back-filled on load) at least one NOT-TO-SCALE sheet.
+  const JACINTOPORT = Array.from({ length: 8 }, (_, i) => ({
+    id: "s" + i, srcId: "jp", pageNum: i + 1, matchLines: [], aligned: i === 0, notToScale: true,
+  }));
+  // FIXTURE B — a real plan set: sheets carry match-line seams (auto-stitch's input).
+  const PLAN_SET = [
+    { id: "a", srcId: "gp", pageNum: 1, matchLines: [{ target: "C-6", side: "right" }], aligned: true },
+    { id: "b", srcId: "gp", pageNum: 2, matchLines: [{ target: "C-5", side: "left" }], aligned: false },
+  ];
+  // FIXTURE C — the B630-review false-positive guard: TWO real to-scale plan sheets added individually
+  // (addSheet never auto-calibrates), aligned by a shared property corner → no seams, uncalibrated,
+  // but NONE not-to-scale. Must NOT be misclassified (keeps the manual-Align affordance).
+  const CORNER_ALIGN_PLANS = [
+    { id: "a", srcId: "s", pageNum: 1, matchLines: [], aligned: true, notToScale: false },
+    { id: "b", srcId: "s", pageNum: 2, matchLines: [], aligned: false, notToScale: false },
+  ];
+
+  it("flags the JACINTOPORT reference set (no seams, uncalibrated, ≥1 not-to-scale sheet)", () => {
+    expect(isReferenceSet(JACINTOPORT, 0)).toBe(true);
+    // A mixed reference set where only some sheets read not-to-scale still qualifies.
+    const mixed = JACINTOPORT.map((s, i) => ({ ...s, notToScale: i < 2 }));
+    expect(isReferenceSet(mixed, 0)).toBe(true);
+  });
+
+  it("does NOT flag a real plan set that carries match-line seams", () => {
+    expect(isReferenceSet(PLAN_SET, 0)).toBe(false);
+  });
+
+  it("does NOT flag two real plan sheets aligned by corner (no seams, uncalibrated, none NTS) — B630 review guard", () => {
+    expect(isReferenceSet(CORNER_ALIGN_PLANS, 0)).toBe(false);
+    // even before notToScale is known (undefined) it must not misclassify a plan set
+    expect(isReferenceSet(CORNER_ALIGN_PLANS.map((s) => ({ ...s, notToScale: undefined })), 0)).toBe(false);
+  });
+
+  it("does NOT flag a scale-less set once it's been calibrated (a real plan the user scaled)", () => {
+    expect(isReferenceSet(JACINTOPORT, 40 / 72)).toBe(false);
+  });
+
+  it("needs ≥2 sheets — a lone world frame is not a reference set", () => {
+    expect(isReferenceSet(JACINTOPORT.slice(0, 1), 0)).toBe(false);
+    expect(isReferenceSet([], 0)).toBe(false);
+  });
+
+  it("treats a non-finite ftPerUnit as uncalibrated (fails open to reference when NTS sheets exist)", () => {
+    expect(isReferenceSet(JACINTOPORT, undefined)).toBe(true);
+    expect(isReferenceSet(JACINTOPORT, NaN)).toBe(true);
   });
 });

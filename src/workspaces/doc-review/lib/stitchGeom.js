@@ -57,6 +57,50 @@ export const sheetContains = (s, w) => {
 export const measureOverUnaligned = (placed, pts) =>
   (pts || []).some((w) => (placed || []).some((s) => s.aligned === false && sheetContains(s, w)));
 
+// B630 / NEW-1 — is this a REFERENCE SET (a stack of schedule/legend/notes sheets), not a plan to
+// stitch? Such a set has NOTHING to tile — no match-line seam on any sheet — was never calibrated
+// (no composite scale), AND carries at least one sheet we can POSITIVELY tell is not to scale (a
+// legend / notes / schedule / explicit-"NTS" sheet, via the persisted `notToScale` flag). For it
+// the "Align before measuring" gate is a demand that can never be satisfied, so we drop the nag.
+//
+// The `some(notToScale)` requirement is the guard against a real plan set: two genuine to-scale
+// plan sheets aligned by a shared property corner are also seam-less and (until Calibrate)
+// scale-less, but NONE of their sheets reads not-to-scale — so they are NEVER misclassified and
+// keep the manual-Align affordance (B630 review finding). A resumed save is classified from
+// persisted fields (matchLines + notToScale + ftPerUnit); loadStitch back-fills notToScale for
+// pre-B631 saves so the owner's JACINTOPORT set (whose legend/notes sheets read not-to-scale) is
+// still caught. Needs ≥2 sheets. Fail open: any seam OR any calibration OR no not-to-scale sheet ⇒
+// treated as a real plan. Pure so it's unit-locked against reference + plan-set fixtures.
+export function isReferenceSet(placed = [], ftPerUnit = 0) {
+  const arr = placed || [];
+  if (arr.length < 2) return false;
+  if (Number.isFinite(ftPerUnit) && ftPerUnit) return false;                     // calibrated ⇒ a real plan
+  if (arr.some((s) => s && s.matchLines && s.matchLines.length)) return false;   // any seam ⇒ a real plan
+  return arr.some((s) => s && s.notToScale);                                     // at least one positively not-to-scale sheet
+}
+
+// B632 / NEW-3 — size the "⚠ Not aligned" badge to the sheet's ON-SCREEN footprint so it can
+// never balloon over a small sheet at low zoom. The overlay lives inside the zoomed world group,
+// where a constant on-screen size (n / zoom) means the warning text + dashed border stay a fixed
+// pixel size regardless of how tiny the sheet has become — so at the ~1–15% zoom needed to see a
+// whole set, the badge blankets each sheet and reads as "broken" rather than as a to-do. Given the
+// sheet's smaller on-screen side in px, return the on-screen font/border px (capped to a fraction
+// of the sheet) and whether to show text at all: below a floor the badge collapses to an
+// outline-only chip (a dashed border with no text still says "to-do" without covering the drawing).
+// Pure so the clamp is unit-locked. `text` shortens before it would overflow a small sheet.
+export function alignBadgeMetrics(screenMin) {
+  const m = Math.max(0, Number.isFinite(screenMin) ? screenMin : 0);
+  // Font never exceeds ~11% of the sheet's on-screen min side (so it can't dominate the sheet),
+  // and never exceeds the previous fixed 22px on a large sheet. Floor keeps it from vanishing to 0.
+  const fontPx = Math.max(7, Math.min(22, m * 0.11));
+  const borderPx = Math.max(0.75, Math.min(2.5, m * 0.02));
+  // Below this the full label can't fit inside the sheet's width, so drop the text (outline only).
+  const showText = m >= 54;
+  // A short label for a small sheet, the full call-to-action once there's room for it.
+  const text = m < 150 ? "⚠ Not aligned" : "⚠ Not aligned — click “Align”";
+  return { fontPx, borderPx, showText, text };
+}
+
 // B325 — pan the view from a CAPTURED drag origin {sx,sy,panX,panY} + the live pointer
 // position. Pure (and kept here) so the capture contract is unit-testable: the caller MUST
 // snapshot the drag ref into a local and pass it in — never let the deferred setView updater
