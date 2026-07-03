@@ -49,6 +49,7 @@ import { makeParcelLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid as deedCentroid, describeRotation } from "./lib/deedAlign.js";
 import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
@@ -1361,6 +1362,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mbText, setMbText] = useState("");          // legal description to plot
   const [mbWidth, setMbWidth] = useState(20);        // corridor width (ft) for open traverses
   const [pobMode, setPobMode] = useState(null);      // { tracts } awaiting a POB click on the canvas
+  const [deedAlignHint, setDeedAlignHint] = useState(null); // { id, rotDeg, residualFt, confident, msg } — offer to snap a rotated deed onto the parcel
   const [deedBusy, setDeedBusy] = useState(false);   // reading a dropped deed file
   const [deedErr, setDeedErr] = useState("");        // deed-file read error
   const [deedName, setDeedName] = useState("");      // last-read deed file name
@@ -6716,6 +6718,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const main = tracts[0];
     if (!main || !main.calls.length) { setTitleErr("No bearing/distance calls found. Drop a deed (.docx) or paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
     setTitleErr("");
+    setDeedAlignHint(null); // a fresh plot supersedes any pending align suggestion
     setPobMode({ tracts, asEasement });
     setTitleOpen(false);
     setSel(null); setTool("select");
@@ -6726,7 +6729,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Build a polygon encumbrance markup from a traverse anchored at `pob`. A tract
   // boundary is ALWAYS a polygon — if the calls don't close, the last→first edge
   // carries the gap (shown honestly) rather than being redrawn as a corridor.
-  const buildEncumbranceMarkup = (calls, pob, { label, except }) => {
+  const buildEncumbranceMarkup = (calls, pob, { label, except, group }) => {
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
     const ring = closed ? path.slice(0, -1) : path;
@@ -6737,6 +6740,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         pts: ring, centerline: path, closed,
         calls: calls.map((c) => ({ label: c.label, az: c.az, distFt: c.distFt })),
         label,
+        // A deed + its save-and-except holes share one `deedGroup` so "Align to parcel"
+        // (deedAlign.js) rotates/moves the whole tract as one rigid body — the holes stay
+        // seated in the boundary. `except` marks a carved hole vs the main boundary.
+        deedGroup: group || null, except: !!except,
         // exception holes read in a muted dashed red so they're clearly "carved out"
         stroke: except ? "#b91c1c" : "#7c3aed", fill: except ? "#b91c1c" : "#7c3aed",
         fillOpacity: except ? 0.1 : 0.14, weight: 2, dash: except ? "6 4" : "solid",
@@ -6762,7 +6769,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (tracts.length > 1) flashWarn(`Plotted the main tract as an easement — its ${tracts.length - 1} save-and-except exception(s) were not carved. Use “Plot on canvas” to include the holes.`, 8000);
       return;
     }
-    const built = buildEncumbranceMarkup(main.calls, pob, { label: (main.label && main.label !== "Boundary") ? main.label : "Tract boundary" });
+    const groupId = uid(); // links the boundary + its holes so Align moves them as one
+    const built = buildEncumbranceMarkup(main.calls, pob, { label: (main.label && main.label !== "Boundary") ? main.label : "Tract boundary", group: groupId });
     if (!built) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
     // SAVE-AND-EXCEPT holes: position each from its commencing tie off the same POB.
     const exMarks = [];
@@ -6772,7 +6780,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // (a curved tie tessellates to many points, so don't index by call count).
       const tiePath = t.tie && t.tie.length ? callsToPath(t.tie, pob) : null;
       const exPob = tiePath ? tiePath[tiePath.length - 1] : pob;
-      const eb = buildEncumbranceMarkup(t.calls, exPob, { label: t.label || "Save & except", except: true });
+      const eb = buildEncumbranceMarkup(t.calls, exPob, { label: t.label || "Save & except", except: true, group: groupId });
       if (eb) exMarks.push(eb.mk);
     }
     pushHistory();
@@ -6786,13 +6794,97 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? ` ⚠ Traverse does NOT close (gap ≈ ${gap.toFixed(1)}′) — plotted as drawn; verify the calls.`
       : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "");
     const exNote = exMarks.length ? ` +${exMarks.length} save-and-except hole${exMarks.length > 1 ? "s" : ""}.` : "";
+    let overlapNote = "";
     if (hits.length) {
       const b = hits.filter((e) => e.type === "building").length, p = hits.length - b;
       const parts = [b && `${b} building${b > 1 ? "s" : ""}`, p && `${p} paving area${p > 1 ? "s" : ""}`].filter(Boolean).join(" and ");
-      flashWarn(`⚠ Boundary overlaps ${parts}.${closeNote}${exNote}`, 9000);
-    } else {
-      flashWarn(`Boundary placed${exMarks.length ? " with its exception(s)" : ""}.${closeNote}${exNote}`, 9000);
+      overlapNote = ` ⚠ Boundary overlaps ${parts}.`;
     }
+    // Basis-of-bearings check (deedAlign.js): a deed is drawn on the survey's grid/record
+    // north but the county parcel + aerial are true north, so a raw plot lands rotated
+    // ~1–2° (≈90 ft over a long line near Houston). If a parcel is loaded and the deed sits
+    // meaningfully off it, offer a one-click snap instead of silently leaving it misaligned.
+    const best = bestDeedFit(built.ring);
+    const foldedRot = best ? Math.abs(((best.fit.rotDeg + 180) % 360 + 360) % 360 - 180) : 0;
+    if (best && foldedRot > 0.25) {
+      flashWarn(""); // clear the sticky "click the POB" prompt so the hint banner reads clean
+      setDeedAlignHint({
+        id: built.mk.id, rotDeg: best.fit.rotDeg, residualFt: best.fit.residualFt, confident: best.fit.confident,
+        msg: `This deed sits about ${foldedRot.toFixed(2)}° off the county parcel${best.fit.confident ? "" : " (loose match)"} — its bearings are likely on State Plane grid north, not true north.${closeNote}${exNote}${overlapNote}`,
+      });
+    } else {
+      flashWarn(`Boundary placed${exMarks.length ? " with its exception(s)" : ""}.${closeNote}${exNote}${overlapNote}`, 9000);
+    }
+  };
+
+  /* ── Deed ↔ parcel alignment (basis-of-bearings fix) ───────────────────────────
+   * A plotted metes-and-bounds deed is drawn on the survey's bearing basis — Texas
+   * State Plane GRID north (or an old record bearing) — but the county parcel and the
+   * aerial are TRUE north. They differ by the meridian convergence (~1.5° near Houston),
+   * so a raw plot lands rotated: up to ~90 ft off over a long boundary. These snap it on. */
+  const activeParcelRings = () => parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
+  // Best rigid (rotation+translation, never scaled) fit of a deed ring over every drawn
+  // parcel — the lowest landing residual wins, so a stray neighbour parcel can't hijack it.
+  const bestDeedFit = (deedRing) => {
+    let best = null;
+    for (const pc of activeParcelRings()) {
+      const fit = solveDeedAlignment(deedRing, pc.points);
+      if (fit.ok && (!best || fit.residualFt < best.fit.residualFt)) best = { fit, parcel: pc };
+    }
+    return best;
+  };
+  // Every markup in a deed's tract group (boundary + its save-and-except holes).
+  const deedGroupMembers = (m) => (m && m.deedGroup ? markups.filter((x) => x.deedGroup === m.deedGroup && x.kind === "encumbrance") : (m ? [m] : []));
+  const deedMainOf = (members, fallback) => members.find((x) => !x.except) || fallback;
+  const mapDeedGeom = (m, apply) => ({ ...m, pts: (m.pts || []).map(apply), centerline: (m.centerline || []).map(apply) });
+  // Snap a plotted deed onto the held county parcel (empirical fit). With no parcel,
+  // fall back to the theoretical State Plane grid-north correction for this location.
+  const alignDeedToParcel = (id) => {
+    const m = markups.find((x) => x.id === id && x.kind === "encumbrance");
+    if (!m || !(m.pts && m.pts.length >= 3)) { flashWarn("Select a plotted deed boundary first.", 5000); return; }
+    const members = deedGroupMembers(m);
+    const main = deedMainOf(members, m);
+    const memberIds = new Set(members.map((x) => x.id));
+    const best = bestDeedFit(main.pts);
+    if (best) {
+      const { fit } = best;
+      pushHistory();
+      setMarkups((a) => a.map((x) => memberIds.has(x.id)
+        ? { ...mapDeedGeom(x, fit.apply), rotApplied: x.id === main.id ? normalizeDeg((x.rotApplied || 0) + fit.rotDeg) : x.rotApplied }
+        : x));
+      setDeedAlignHint(null);
+      flashWarn(`Rotated the deed ${describeRotation(fit.rotDeg)} to match the county parcel — the two outlines now agree to within ${fit.residualFt.toFixed(1)}′.${fit.confident ? "" : " ⚠ The fit is loose (the deed and the county outline differ in shape) — verify, or nudge by hand."}`, 9000);
+      return;
+    }
+    // No parcel to fit → grid-convergence correction about the deed centroid.
+    if (!origin) { flashWarn("No county parcel to align to. Add the parcel (Add parcel → Identify from county GIS), or rotate the deed by hand to match the aerial.", 8000); return; }
+    const c = deedCentroid(main.pts);
+    const [lat, lon] = feetToLatLng(c, origin.lat, origin.lon);
+    const conv = gridConvergenceDeg(lat, lon);
+    if (Math.abs(conv) < 0.01) { flashWarn("No county parcel to align to, and this site sits on the State Plane meridian (no grid rotation to correct). Nudge the deed by hand if it needs it.", 8000); return; }
+    pushHistory();
+    setMarkups((a) => a.map((x) => memberIds.has(x.id)
+      ? { ...rotateDeedRigid(x, conv, c), rotApplied: x.id === main.id ? normalizeDeg((x.rotApplied || 0) + conv) : x.rotApplied }
+      : x));
+    setDeedAlignHint(null);
+    flashWarn(`No county parcel to fit — rotated the deed ${describeRotation(conv)} for the State Plane grid convergence here (this assumes the survey's bearings are grid north). Verify against the aerial, or nudge by hand.`, 9000);
+  };
+  const rotateDeedRigid = (m, deg, pivot) => ({ ...m, pts: rotatePointsAbout(m.pts, deg, pivot), centerline: rotatePointsAbout(m.centerline || [], deg, pivot) });
+  // Manual fallback: turn a deed to an absolute "applied since plotting" angle (panel stepper),
+  // rotating the whole tract group about the boundary's centroid so holes stay seated.
+  const rotateDeedTo = (id, targetDeg) => {
+    const sel0 = markups.find((x) => x.id === id && x.kind === "encumbrance");
+    if (!sel0 || !sel0.pts) return;
+    const members = deedGroupMembers(sel0);
+    const main = deedMainOf(members, sel0);
+    const memberIds = new Set(members.map((x) => x.id));
+    const delta = normalizeDeg(targetDeg) - (main.rotApplied || 0);
+    if (Math.abs(delta) < 1e-6) return;
+    const c = deedCentroid(main.pts);
+    pushHistory();
+    setMarkups((a) => a.map((x) => memberIds.has(x.id)
+      ? { ...rotateDeedRigid(x, delta, c), rotApplied: x.id === main.id ? normalizeDeg(targetDeg) : x.rotApplied }
+      : x));
   };
 
   // Manual quick-trace of an overhead power line on the aerial: click points,
@@ -7673,7 +7765,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
-                      <polygon points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} />
+                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* centerline + per-call bearing/distance labels */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.12 && (m.calls || []).map((c, i) => {
@@ -9120,12 +9212,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onCommit={(deg) => setSelMarkupGeom({ rot: deg })}
                     onStep={(d) => setSelMarkupGeom({ rot: normalizeDeg((selMarkup.rot || 0) + d) })} /></Field>
                 </>}
+                {selMarkup.kind === "encumbrance" && (() => {
+                  const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
+                  const dm = deedMainOf(deedGroupMembers(selMarkup), selMarkup);
+                  return (
+                    <div style={{ marginTop: 6, paddingTop: 8, borderTop: `1px solid var(--border-default)` }}>
+                      <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
+                        onClick={() => alignDeedToParcel(dm.id)}>
+                        📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}
+                      </button>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>
+                        {hasParcel
+                          ? "Surveys state bearings on State Plane grid north; the parcel and aerial are true north. This spins the deed onto the county parcel to cancel that ~1–2° tilt (which fans out to tens of feet over a long line)."
+                          : "No county parcel loaded to fit to — this applies the State Plane grid-north correction for this location. Load the parcel (Add parcel → Identify) for an exact fit, or nudge below."}
+                      </div>
+                      <Field label="Rotate°"><RotationStepper value={dm.rotApplied || 0} disabled={!!selMarkup.locked} disabledReason="Unlock this deed to rotate it"
+                        onCommit={(deg) => rotateDeedTo(dm.id, deg)}
+                        onStep={(d) => rotateDeedTo(dm.id, normalizeDeg((dm.rotApplied || 0) + d))} /></Field>
+                    </div>
+                  );
+                })()}
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
                   {MK_BOX_KINDS.includes(selMarkup.kind)
                     ? "Drag the corner/edge grips to resize, the top handle to rotate."
-                    : selMarkup.kind === "line"
-                      ? "Drag either end dot to move it."
-                      : "Drag a dot to reshape; ＋ adds a point; Shift-click a dot removes it."}
+                    : selMarkup.kind === "encumbrance"
+                      ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
+                      : selMarkup.kind === "line"
+                        ? "Drag either end dot to move it."
+                        : "Drag a dot to reshape; ＋ adds a point; Shift-click a dot removes it."}
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}>{selMarkup.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
@@ -10511,12 +10625,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
-      {(pobMode || routeMode || overlapWarn) && (
+      {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
         <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-          background: overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
+          background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
           color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
-          <span>{pobMode ? "Click the point of beginning on the plan to anchor the description (Esc to cancel)." : overlapWarn}</span>
+          <span>{pobMode ? "Click the point of beginning on the plan to anchor the description (Esc to cancel)." : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
           {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
+          {deedAlignHint && !pobMode && !routeMode && <>
+            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "#fff", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>
+            <button onClick={() => setDeedAlignHint(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Dismiss</button>
+          </>}
         </div>
       )}
 
