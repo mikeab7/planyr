@@ -1339,7 +1339,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [splitNote, setSplitNote] = useState(null); // transient "couldn't explode that field" notice (B472) — loud, never a silent no-op
   const [ovMenu, setOvMenu] = useState(null);     // {id, x, y} site-plan overlay right-click menu (B461)
   const [ovAlignBase, setOvAlignBase] = useState(null); // overlay id armed for "Align to base edge" — next parcel-edge click sets its rotation (B462)
-  const [parcelMenu, setParcelMenu] = useState(null); // {x,y} right-click parcel menu (merge)
+  const [parcelMenu, setParcelMenu] = useState(null); // {x,y,id} right-click parcel menu (merge / delete)
+  const [mapMenu, setMapMenu] = useState(null);   // {x,y,kind:'markup'|'empty',id?} — dedicated canvas right-click menu (never the browser's)
   // B230 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
   // element, measure, markup poly/line, easement). `selVtx` = the active control point (the
   // Delete-key target + emphasis); `vtxMenu` = the portal-mounted Add/Delete-control-point
@@ -4841,10 +4842,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the same pc.id (opens the parcel menu + arms it for merge), matching the old fill behaviour.
   const onParcelContext = (e, id) => {
     if (tool !== "select") return;
-    e.preventDefault();
+    e.preventDefault(); e.stopPropagation();
     setCombineSel((s) => (s.includes(id) ? s : [...s, id]));
     setSel({ kind: "parcel", id });
-    setParcelMenu({ x: e.clientX, y: e.clientY });
+    setParcelMenu({ x: e.clientX, y: e.clientY, id });
+  };
+  // Delete a parcel with a tombstone (B556/B612 — a delete without one resurrects on a cloud/tab merge).
+  const deleteParcelById = (id) => {
+    pushHistory();
+    setParcels((a) => a.filter((p) => p.id !== id));
+    setCombineSel((s) => s.filter((x) => x !== id));
+    if (sel?.kind === "parcel" && sel.id === id) setSel(null);
+    tombstone(id);
+  };
+  /* ------------ dedicated canvas right-click menu (B627) ------------
+   * A right-click anywhere on the map opens OUR menu, never the browser's. On a markup
+   * (deed/encumbrance, easement, utility/traced line, neutral shape) it offers Delete (+ for a
+   * plotted deed, Align to parcel); on empty canvas, Zoom to fit / Paste. Parcels + overlays +
+   * elements keep their own menus (each stops propagation before this). */
+  const onMarkupContext = (e, id) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!markups.some((m) => m.id === id)) return;
+    setSel({ kind: "markup", id }); setLeftPanel("props");
+    setParcelMenu(null); setOvMenu(null);
+    setMapMenu({ x: e.clientX, y: e.clientY, kind: "markup", id });
+  };
+  // Delete a markup — and, for a plotted deed, its whole save-and-except group — with a tombstone.
+  const deleteMarkupById = (id) => {
+    const m = markups.find((x) => x.id === id);
+    if (!m) return;
+    pushHistory();
+    const ids = m.deedGroup ? markups.filter((x) => x.deedGroup === m.deedGroup).map((x) => x.id) : [id];
+    const idset = new Set(ids);
+    setMarkups((a) => a.filter((x) => !idset.has(x.id)));
+    setSel(null); setMapMenu(null);
+    tombstone(ids);
   };
 
   /* ------------ align rotation to a target (parcel edge / element) ------------ */
@@ -7489,7 +7521,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onContextMenuCapture={onCanvasVtxContextCapture}
             onPointerMoveCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxMoveCapture(e); }}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
-            onContextMenu={(e) => { if (draftRoadPts) { e.preventDefault(); setDraftRoadPts(null); } }}>
+            onContextMenu={(e) => {
+              e.preventDefault(); // a right-click on the map ALWAYS opens our menu, never the browser's (B627)
+              if (draftRoadPts) { setDraftRoadPts(null); return; } // cancel an in-progress road draw
+              // during a placement/draw mode a right-click just eats the native menu (each mode has its own Esc/exit)
+              if ((tool !== "select" && tool !== "pan") || routeMode || traceMode || xsecMode || pobMode || ovCalib || identifyMode || attachFor || alignFor) return;
+              setParcelMenu(null); setOvMenu(null);
+              setMapMenu({ x: e.clientX, y: e.clientY, kind: "empty" });
+            }}>
 
             <defs>
               <filter id="bldgShadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -7684,7 +7723,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // vertex handles carry the selection. B617: the boundary weight holds constant relative
                 // to the drawing across zoom (dominant property outline → scaled, not fixed pixels).
                 return <g key={pc.id}>
-                  <polygon points={ring}
+                  <polygon data-testid="parcel-outline" points={ring}
                     fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
                     stroke={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.stroke || PAL.parcel)} strokeWidth={strokeZoom(removeHover || picked || isSel ? 3 : 2, zk)}
                     strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
@@ -7712,7 +7751,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const nStroke = m.stroke;
                 const nsw = sw + (isSel ? 1 : 0);
                 const vsw = strokeZoom(nsw, zk); // B617: on-screen weight held constant relative to the drawing
-                const common = { stroke: nStroke, strokeWidth: vsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
+                const common = { stroke: nStroke, strokeWidth: vsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id), onContextMenu: (e) => onMarkupContext(e, m.id) };
                 // Closed shapes (rect/ellipse/polygon) get an always-on pointer target so the WHOLE
                 // body selects + drags, not just the painted border. pointerEvents:"all" makes the
                 // interior a hit target even when the shape is UNFILLED (fill:"none" is otherwise dead
@@ -7731,7 +7770,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const clW = strokeZoom(2.2, zk); // B617
                   const padC = f2p(centroid(m.pad)), mid = { x: (cl[0].x + cl[cl.length - 1].x) / 2, y: (cl[0].y + cl[cl.length - 1].y) / 2 };
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
                       {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
                       <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? "5 4" : undefined} />
@@ -7749,7 +7788,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const col = m.stroke; // B619: keep the traced line's own color when selected
                   const tw = strokeZoom(m.weight ?? 2.4, zk); // B617
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polyline points={s} fill="none" stroke={SEL_BLUE} strokeWidth={tw + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
                       <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
                       {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
@@ -7763,7 +7802,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const cen = (m.centerline || []).map(f2p);
                   const ctr = centroid(m.pts), cp = f2p(ctr);
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
                       <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* centerline + per-call bearing/distance labels */}
@@ -7792,7 +7831,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     ? m.centerline
                     : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
                       <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? "7 5" : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
@@ -10669,10 +10708,63 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div className="menu" style={{ ...menuPanel, position: "fixed", left: Math.min(parcelMenu.x, window.innerWidth - 206), top: Math.min(parcelMenu.y, window.innerHeight - 130), zIndex: 1999, width: 196 }}>
             <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
             <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+            <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { if (parcelMenu.id) deleteParcelById(parcelMenu.id); setParcelMenu(null); }}>Delete parcel</button>
             <div style={{ fontSize: 10.5, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.4, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Shift-click parcels to add more, then Merge.</div>
           </div>
         </>
       )}
+
+      {mapMenu && (() => {
+        const MW = 214, GAP = 8, vw = window.innerWidth, vh = window.innerHeight;
+        const left = Math.max(GAP, Math.min(mapMenu.x + 6, vw - MW - GAP));
+        const spaceBelow = vh - mapMenu.y - GAP, spaceAbove = mapMenu.y - GAP;
+        const openUp = spaceBelow < spaceAbove;
+        const maxH = Math.max(140, openUp ? spaceAbove : spaceBelow);
+        const vEdge = openUp ? { bottom: vh - mapMenu.y + 6 } : { top: mapMenu.y + 6 };
+        const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
+        const close = () => setMapMenu(null);
+        const row = ({ text, on, danger, dis, hint, title }) => (
+          <button title={title} disabled={!!dis}
+            style={{ ...menuItem(false), ...(danger ? { color: PAL.danger } : {}), opacity: dis ? 0.45 : 1, cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+            onClick={dis ? undefined : on}>
+            <span>{text}</span>{hint && <span style={{ fontSize: 11, color: PAL.muted, fontWeight: 400 }}>{hint}</span>}
+          </button>
+        );
+        let header = "", body = null;
+        if (mapMenu.kind === "markup") {
+          const m = markups.find((x) => x.id === mapMenu.id);
+          if (!m) return null;
+          const isDeed = m.kind === "encumbrance";
+          const dm = isDeed ? deedMainOf(deedGroupMembers(m), m) : m;
+          const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
+          const groupN = m.deedGroup ? markups.filter((x) => x.deedGroup === m.deedGroup).length : 1;
+          header = isDeed ? "Deed (metes & bounds)" : m.kind === "easement" ? "Easement" : "Markup";
+          const delText = isDeed ? `Delete deed${groupN > 1 ? " + exceptions" : ""}` : `Delete ${m.kind === "easement" ? "easement" : "markup"}`;
+          body = <>
+            {isDeed && row({ text: hasParcel ? "Align to county parcel" : "Rotate to grid north", dis: !!m.locked, title: m.locked ? "Unlock this deed first" : "", on: () => { alignDeedToParcel(dm.id); close(); } })}
+            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMarkupLock(m.id); close(); } })}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+            {row({ text: delText, hint: "Del", danger: true, on: () => { deleteMarkupById(m.id); } })}
+          </>;
+        } else {
+          const hasClip = !!(clip.current || overlayClip.current);
+          header = "Map";
+          body = <>
+            {row({ text: "Zoom to fit", on: () => { fit(); close(); } })}
+            {row({ text: "Paste", hint: `${MOD}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (clip.current) pasteClip(); else if (overlayClip.current) pasteOverlay(); close(); } })}
+          </>;
+        }
+        return (
+          <>
+            <div onClick={close} onContextMenu={(e) => { e.preventDefault(); close(); }} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
+            <div className="menu" style={{ ...menuPanel, position: "fixed", left, ...vEdge, zIndex: 1999, width: MW, maxHeight: maxH, overflowY: "auto" }}>
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 8px 6px" }}>{header}</div>
+              {body}
+            </div>
+          </>
+        );
+      })()}
 
       {typeMenu && (() => {
         const MW = 200, GAP = 8, vw = window.innerWidth, vh = window.innerHeight;
