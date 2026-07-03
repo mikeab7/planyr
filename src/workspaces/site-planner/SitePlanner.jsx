@@ -11790,6 +11790,10 @@ function YieldPanel({
             } else if (d.authorityFlags.includes("no-criteria-modeled")) {
               out.push(row("Detention required", "—"));
               out.push(warnNote("No detention criteria modeled for this county yet — verify locally.", "nocrit"));
+            } else if (d.authorityFlags.includes("jurisdiction-unavailable")) {
+              // County/city lookup failed — an outage is an unknown, never "no requirement".
+              out.push(row("Detention required", "unknown"));
+              out.push(warnNote("The county/city lookup is unavailable right now — the reviewing authority couldn't be resolved. Re-check in a moment.", "jurfail"));
             }
             out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
             if (req && req.kind === "point" && req.requiredAcFt > 0) {

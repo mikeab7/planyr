@@ -135,6 +135,17 @@ describe("resolveDrainageAuthority — jurisdiction + the QUERIED MUD layer", ()
     expect(out.mud.state).toBe("failed");
     expect(out.flags).not.toContain("mud-district-present");
   });
+  it("a FAILED county lookup flags jurisdiction-unavailable — an outage is never 'no requirement'", async () => {
+    const routes = baseRoutes({});
+    routes[COUNTY] = () => { throw new Error("service down"); };
+    const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(routes));
+    expect(out.primaryReviewer).toBeNull();
+    expect(out.flags).toContain("jurisdiction-unavailable");
+    // …but a REAL unmapped county (query succeeded) is a different, honest case:
+    const out2 = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(baseRoutes({ county: "Galveston" })));
+    expect(out2.flags).toContain("no-criteria-modeled");
+    expect(out2.flags).not.toContain("jurisdiction-unavailable");
+  });
   it("a parcel ring straddling two counties surfaces in ambiguous", async () => {
     const ring = [[-95.4, 29.7], [-95.4, 29.8], [-95.3, 29.8], [-95.3, 29.7]];
     const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT, ring }, optsFor(baseRoutes({ county: ["Harris", "Fort Bend"] })));

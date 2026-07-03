@@ -925,6 +925,12 @@ export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, o
     }
     if (districts.length) out.flags.push("mud-district-present");
   }
+  // The county lookup FAILING (outage) with no authority resolved is an unknown, not
+  // an unincorporated-nowhere: flag it so the UI can say "couldn't resolve" instead
+  // of silently showing no requirement at all (the silent-failure class).
+  if (!out.primaryReviewer && !out.ambiguous.length && jur.sources.some((s) => s.id === "county" && s.state === "failed")) {
+    out.flags.push("jurisdiction-unavailable");
+  }
   return out;
 }
 
