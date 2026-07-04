@@ -841,7 +841,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
      a statewide answer can be honestly flagged as a "backup". */
   const resolveCandidates = (latlng) => {
     const all = candidateCountiesForPoint(latlng.lat, latlng.lng)
-      .map((county) => ({ county, url: layerUrlsRef.current[county] }))
+      .map((county) => ({ county, url: layerUrlsRef.current[county], statewide: STATEWIDE_KEYS.includes(county) }))
       .filter((c) => c.url);
     const realPrimaries = all.filter((c) => !STATEWIDE_KEYS.includes(c.county));
     return { candidates: filterHealthyCandidates(all, STATEWIDE_KEYS), realPrimaries };
@@ -935,7 +935,9 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       const hit = res.hits[0]; // first county that answered owns the lot
       // A statewide-layer hit is a genuine "backup" only when the county's OWN CAD was
       // unavailable this click (breaker open → dropped from the query) — NOT when a
-      // healthy CAD was queried but statewide merely won the parallel race (B630).
+      // healthy CAD was queried but statewide merely won the parallel race (B630). And
+      // with B643's eager preference, a healthy CAD normally WINS the race, so hit.county
+      // is the CAD itself here and this is false.
       const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
       const rings = outerRingsLngLat(hit.feature);
       if (!rings.length) { setErr("That record has no polygon shape — try an adjacent lot."); return; }

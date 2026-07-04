@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   outerRingsLngLat, queryAtPoint, identifyParcelDetailed, identifyParcelEager,
+  BACKUP_GRACE_MS,
   ParcelFetchError, PARCEL_FETCH_TIMEOUT_MS, humanizeError, geoJsonToEsriFeature,
   identifyAtPoint, isQueryCapabilityError,
 } from "../src/workspaces/site-planner/lib/arcgis.js";
@@ -305,6 +306,54 @@ describe("identifyParcelEager — first hit wins, never waits on a hung source (
       -95, 29
     );
     expect(res.hits[0].county).toBe("harris");
+  });
+});
+
+// B634 — the statewide TxGIO fallback frequently RACES AHEAD of a county's own CAD.
+// Pre-fix, a Fort Bend click resolved on whichever answered first, so TxGIO often won and
+// the lot got mislabeled "Fort Bend county's server is unavailable" though FBCAD was up.
+// Candidates now carry `statewide`, and the eager resolver prefers a healthy real CAD
+// within a bounded grace (never the full 8s), so the authoritative source wins.
+describe("identifyParcelEager — a healthy real CAD wins over a faster statewide fallback (B634)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const FBCAD = { county: "fortbend", url: "https://x.test/fbcad/FeatureServer/0", statewide: false };
+  const TXGIO = { county: "chambers", url: "https://x.test/txgio/MapServer/0", statewide: true };
+  const hit = (id) => ok({ features: [{ geometry: { rings: [] }, attributes: { OBJECTID: id } }] });
+
+  it("takes the real CAD's parcel even when the statewide layer answered first (within the grace)", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn((url) => {
+      if (url.includes("/txgio/")) return Promise.resolve(hit(99));           // statewide — instant
+      return new Promise((r) => setTimeout(() => r(hit(1)), 400));            // FBCAD — 400ms, well under the grace
+    }));
+    const p = identifyParcelEager([FBCAD, TXGIO], -95, 29);
+    await vi.advanceTimersByTimeAsync(450);                                   // past FBCAD's 400ms, still under BACKUP_GRACE_MS
+    const res = await p;
+    expect(res.hits[0].county).toBe("fortbend");                             // the authoritative CAD won the race
+    vi.useRealTimers();
+  });
+
+  it("falls back to the statewide hit after ONLY the bounded grace when the CAD is hung (not the full 8s)", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn((url, { signal }) => {
+      if (url.includes("/txgio/")) return Promise.resolve(hit(99));
+      return new Promise((_r, rej) => { signal.addEventListener("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; rej(e); }); });
+    }));
+    const p = identifyParcelEager([FBCAD, TXGIO], -95, 29);
+    await vi.advanceTimersByTimeAsync(BACKUP_GRACE_MS + 10);                  // ONLY the grace — not PARCEL_FETCH_TIMEOUT_MS
+    const res = await p;
+    expect(res.hits.map((h) => h.county)).toEqual(["chambers"]);             // statewide stands in for the hung CAD
+    vi.useRealTimers();
+  });
+
+  it("resolves on the statewide hit as soon as the CAD honestly reports no parcel (ROW)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url) => (url.includes("/txgio/") ? hit(99) : ok({ features: [] }))));
+    const res = await identifyParcelEager([FBCAD, TXGIO], -95, 29);          // real timers: FBCAD returns 0 features fast
+    expect(res.hits.map((h) => h.county)).toEqual(["chambers"]);
+    // FBCAD answered (just no polygon at a ROW point) — its source outcome stays ok:true, so the
+    // label helper (isStatewideBackup, tested in sourceHealth.test.js) reads this as "not an outage".
+    expect(res.sources.find((s) => s.county === "fortbend").ok).toBe(true);
   });
 });
 
