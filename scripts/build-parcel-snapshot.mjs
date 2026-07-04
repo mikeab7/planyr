@@ -102,22 +102,28 @@ export function queryParamsFor(provider, rings, bbox) {
 /* Page every feature from one provider as GeoJSON (outSR 4326). A county-poly provider POSTs (the
  * polygon is too big for a URL); a plain query GETs. `maxPages` caps the pull for a dry-run.
  * Throws on any HTTP/ArcGIS error so the caller falls through to the next candidate. */
-async function pageProvider(provider, { bbox, maxPages = Infinity } = {}) {
+export async function pageProvider(provider, { bbox, maxPages = Infinity, fetchImpl = fetch, ringsFetcher = fetchCountyPolygon } = {}) {
   const base = `${provider.url.replace(/\/+$/, "")}/query`;
-  const rings = provider.kind === "county-poly" ? await fetchCountyPolygon(provider.county) : null;
+  const rings = provider.kind === "county-poly" ? await ringsFetcher(provider.county) : null;
   const usePost = provider.kind === "county-poly";
   const feats = [];
+  let offset = 0;
   for (let page = 0; page < maxPages; page++) {
-    const params = { ...queryParamsFor(provider, rings, bbox), resultOffset: String(page * PAGE), resultRecordCount: String(PAGE) };
+    const params = { ...queryParamsFor(provider, rings, bbox), resultOffset: String(offset), resultRecordCount: String(PAGE) };
     let res;
-    if (usePost) res = await fetch(base, { method: "POST", headers: { ...UA, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(params) });
-    else res = await fetch(`${base}?${new URLSearchParams(params)}`, { headers: UA });
-    if (!res.ok) throw new Error(`HTTP ${res.status} paging ${provider.url} @page${page}`);
+    if (usePost) res = await fetchImpl(base, { method: "POST", headers: { ...UA, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(params) });
+    else res = await fetchImpl(`${base}?${new URLSearchParams(params)}`, { headers: UA });
+    if (!res.ok) throw new Error(`HTTP ${res.status} paging ${provider.url} @${offset}`);
     const j = await res.json();
     if (j.error) throw new Error(`ArcGIS error paging ${provider.url}: ${j.error.message || JSON.stringify(j.error)}`);
-    const batch = (j.features || []).filter((f) => f && f.geometry);
-    feats.push(...batch);
-    if (batch.length < PAGE) break; // last page
+    const raw = j.features || [];
+    for (const f of raw) if (f && f.geometry) feats.push(f);
+    // Advance by the rows ACTUALLY returned (not a fixed PAGE) and page by the server's OWN
+    // "there's more" flag — a transient short page must NOT end the pull (the Waller 26k-vs-49k
+    // bug: `batch.length < PAGE` stopped early when a mid-pull page came back <2000).
+    offset += raw.length;
+    const more = !!(j.exceededTransferLimit || (j.properties && j.properties.exceededTransferLimit));
+    if (!more || raw.length === 0) break;
   }
   return feats;
 }
