@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-06-27._
+_Last updated: 2026-07-04._
 
 ## Decisions only Michael can make
 - [ ] **Which big feature to build next.** In progress: he picked **Team Workspaces** (find/fix bugs) on 2026-06-27.
@@ -40,6 +40,15 @@ _Last updated: 2026-06-27._
 - [x] ~~Run `db/team_rehome_guard.sql`~~ — **DONE 2026-06-26.** Closed a gap where a teammate on two teams could
       move your shared project to their other team. (B486)
 - [x] ~~**(2-min dashboard check) Confirm "Confirm email" is ON** in Supabase → Authentication → Providers → Email.~~ — **DONE (Cowork verified 2026-07-01).** Supabase Dashboard → Authentication → Sign In / Providers → Email shows **Confirm email: Enabled**. Email is the only enabled sign-in provider (Phone, SAML 2.0, Web3 Wallet, Apple, Azure, etc. all Disabled; no third-party OAuth or magic-link providers on). (B491 tail check.)
+
+## Run this SQL (one-click in Supabase) — turns on the new project **Folders** feature (B645)
+> **One file, for the main app project `lyeqzkuiwngunutlkkmi`; safe + idempotent (re-run the whole file
+> anytime). This creates the table that stores each project's folder tree. Until it's run, the Folders tab
+> just shows an empty tree — nothing breaks, the feature simply isn't on. Claude hands you the file.**
+- [ ] **Run `project_folders.sql`.** After this, every project gets the standard 12-category folder tree
+      (01. Hillwood … 12. Bldg Acq) that you can edit in **Library → Folders**, and it mirrors one-way into
+      your Google Drive. Nothing else needed from you — the Drive credentials are already set. (The live
+      Drive click-through is the Claude cohort's job — `VERIFICATION.md` V205/V206, not yours.)
 
 ## Things Claude needs FROM Michael to finish/verify
 - [ ] **Drainage-manual PDFs for the exact-number transcription pass (B636 tail — the detention engine, code-labeled B629).** The detention rules engine

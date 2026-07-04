@@ -287,6 +287,12 @@ export default function App({
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
     saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
     pushSiteToCloud(id).catch(() => {}); // mirror to cloud when logged in (no-op otherwise)
+    // Seed this new project's standard folder tree + mirror it to Google Drive (B645). Idempotent
+    // and graceful (no-op signed-out / Drive off); a dynamic import keeps the folder code off the
+    // planner chunk, and folder rows are independent of the sites row so ordering doesn't matter.
+    import("../library/lib/folders.js")
+      .then((m) => m.ensureSeeded(id).then((r) => { if (r && r.ok && r.seeded) m.syncFoldersToDrive(id); }))
+      .catch(() => {});
     refreshSites();
     goPlan(id);
   };

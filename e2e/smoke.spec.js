@@ -20,4 +20,13 @@ test.describe("app shell smoke (logged out)", () => {
     await openModule(page, "site-planner");
     await expect(page.getByTestId("module-tab-site-planner")).toHaveAttribute("aria-current", "page");
   });
+
+  // B645: the Library's new Folders tab mounts (logged out shows the sign-in prompt, not a crash).
+  test("Library Folders tab renders the folder-tree surface", async ({ page }) => {
+    await page.goto("/");
+    await openModule(page, "library");
+    await page.getByTestId("library-tab-folders").click();
+    await expect(page.getByTestId("folder-tree")).toBeVisible();
+    await expect(page.getByText(/Sign in to use project folders/i)).toBeVisible();
+  });
 });
