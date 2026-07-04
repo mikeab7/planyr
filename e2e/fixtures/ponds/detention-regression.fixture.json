@@ -1,0 +1,42 @@
+{
+  "fixtureVersion": 1,
+  "generator": "scripts/build-fixtures.mjs",
+  "engine": "pondGeom.js",
+  "note": "Synthetic detention-basin regression (no real project). Known geometry → engine-captured volume.",
+  "cases": [
+    {
+      "name": "feasible-400x300-d8-s3",
+      "W": 400,
+      "H": 300,
+      "det": {
+        "depth": 8,
+        "freeboard": 1,
+        "slope": 3,
+        "contourInterval": 1,
+        "tobElev": 96
+      }
+    },
+    {
+      "name": "infeasible-200x40-d8-s4",
+      "W": 200,
+      "H": 40,
+      "det": {
+        "depth": 8,
+        "freeboard": 1,
+        "slope": 4,
+        "contourInterval": 1
+      }
+    },
+    {
+      "name": "interval-zero-clamp-400x400",
+      "W": 400,
+      "H": 400,
+      "det": {
+        "depth": 8,
+        "freeboard": 2,
+        "slope": 2,
+        "contourInterval": 0
+      }
+    }
+  ]
+}
