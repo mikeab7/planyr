@@ -33,9 +33,19 @@ const SOURCES = {
     minCount: 300000,
     sources: [{ url: "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0", where: "1=1" }],
   },
+  // ⚠ SOURCE UNCONFIRMED for Chambers/Waller. The first nightly run (2026-07-04) proved the guessed
+  // `feature.tnris.org` host is DEAD ("fetch failed" from CI with open egress), and TxGIO's own
+  // `feature.geographic.texas.gov` /query is still DISABLED (the B627 outage — not self-healed). So a
+  // WORKING queryable/bulk source must be found from an open-egress machine (see the Cowork brief):
+  //   • a query-enabled StratMap mirror (an ArcGIS FeatureServer whose /query works), OR
+  //   • the TxGIO/StratMap BULK parcel download (a file at the TxGIO data hub — would need this builder
+  //     to fetch + unzip + parse a shapefile/GDB instead of paging /query), OR
+  //   • Chambers/Waller CAD's own hosted layer.
+  // Until then these two counties fail loudly (the @claude issue is the correct "find the source"
+  // signal); Fort Bend's source below is confirmed working. Keep the `where` county scope on whatever
+  // statewide/mirror source is wired.
   chambers: {
     minCount: 15000,
-    // TxGIO's own copy has /query disabled; the TNRIS StratMap mirror is the same data, query-enabled.
     sources: [{ url: "https://feature.tnris.org/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0", where: "county='CHAMBERS'" }],
   },
   waller: {
@@ -114,6 +124,20 @@ async function main() {
   const dryRun = has("dry-run");
   const only = arg("county");
   const bbox = arg("bbox"); // "w,s,e,n" — dry-run pull limiter
+
+  // Pre-turn-on silence: until the owner adds the GitHub Actions Drive secrets (OWNER-TODO), this
+  // job can't upload anything, so exit CLEANLY (0) instead of paging sources + failing + filing a
+  // nightly @claude issue for a feature that simply isn't switched on yet. The workflow's
+  // "close on green" step then auto-closes any stale failure issue. Once the secrets land it runs
+  // for real. (Dry-run skips this check — it never touches Drive.)
+  if (!dryRun) {
+    const { storageConfig, defaultDriveClientFactory } = await import("../server/storage/index.js");
+    if (!defaultDriveClientFactory(storageConfig(process.env).drive)) {
+      log("Drive not configured (GitHub Actions secrets not set yet) — the parcel cache isn't turned on; nothing to do. Exiting cleanly.");
+      return;
+    }
+  }
+
   const counties = only ? [only] : Object.keys(SOURCES);
   const results = [];
   const failures = [];
