@@ -115,7 +115,15 @@ async function run() {
   expect("required = 26.00 ac-ft (40 ac × HCFCD 0.65, whole tract)", /26\.00\s*ac-ft/.test(t), t.match(/Detention required[^A-Z]*/)?.[0]?.slice(0, 80));
   expect("rule badge carries the record (eff. Mar 2021 · verified Jul 2026)", /eff\. Mar 2021/.test(t) && /verified Jul 2026/.test(t));
   expect("'Detention provided' ≈ 12.00 ac-ft · 1 pond", /Detention provided/.test(t) && /12\.0\d?\s*ac-ft/.test(t) && /1 pond/.test(t));
-  expect("Shortfall line renders (provided < required)", /Shortfall/.test(t) && /14\.0\d?\s*ac-ft/.test(t));
+  if (!LIVE) {
+    // Regime B here (BFE 95 vs ground 100): the ~3-ft permanent pool (~4.69 ac-ft dead
+    // storage) is UNCREDITED, so the honest shortfall is 26 − (12 − 4.69) ≈ 18.7 ac-ft,
+    // NOT the gross 14.0 — and the panel says so via the "usable … permanent pool" note.
+    expect("usable-volume note shows the uncredited Regime-B permanent pool", /permanent pool/i.test(t) && /Usable/.test(t));
+    expect("Shortfall reflects USABLE volume (dead pool excluded, ~18.7 ac-ft)", /Shortfall/.test(t) && /18\.\d\d?\s*ac-ft/.test(t));
+  } else {
+    expect("Shortfall line renders (provided < required)", /Shortfall/.test(t));
+  }
   if (!LIVE) {
     expect("Analysis tier = Full DIA with all four triggers", /Analysis tier/.test(t) && /Full DIA/.test(t) && /Floodplain/.test(t) && /Floodway/.test(t) && /Regulated channel/.test(t) && /Tract size/.test(t));
     expect("Regime B banner (BFE 95 within pond depth of ground 100), datum-tagged", /Regime B/i.test(t) && /NAVD88/.test(t));

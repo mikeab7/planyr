@@ -129,6 +129,25 @@ describe("computeRequiredDetention — COH 2019 record (grandfathered dates)", (
   });
 });
 
+describe("computeRequiredDetention — boundary + rate-purity fixes (review)", () => {
+  it("exactly 20.00 ac under the 2026 flat-rate record defers to HCFCD, not 'unknown'", () => {
+    const r = computeRequiredDetention({ acres: 20, impPct: 85, authorityId: "coh" });
+    expect(r.kind).toBe("point");
+    expect(r.rule.id).toBe("hcfcd-pcpm-atlas14-2021"); // >20 defers; == threshold with no mid-tract → large tract
+    expect(r.requiredAcFt).toBeCloseTo(0.65 * 20, 2);
+  });
+  it("exactly 20.00 ac under the 2019 record still uses the mid-tract curve (inclusive band)", () => {
+    const r = computeRequiredDetention({ acres: 20, impPct: 85, authorityId: "coh", onDate: "2024-01-01" });
+    expect(r.rule.id).toBe("coh-idm9-2019");
+    expect(r.flags).toContain("curve-approximate");
+  });
+  it("greater-of emits the PUBLISHED rate, never a back-computed fraction", () => {
+    const r = computeRequiredDetention({ acres: 25.5, impPct: 83, authorityId: "coh", inCityLimits: true, drainsToHcfcdChannel: true });
+    // Whichever governs, the rate is a clean published value (0.65 or 0.75), not 0.7501960…
+    expect([0.65, 0.75]).toContain(r.rateAcFtPerAc);
+  });
+});
+
 describe("computeRequiredDetention — the >20-ac greater-of conflict rule", () => {
   it("in city limits, draining to an HCFCD channel: max(0.65×tract, 0.75×impervious) — HCFCD wins at low impervious", () => {
     // 30 ac at 85% impervious → HCFCD 0.65×30 = 19.5 vs COH 0.75×25.5 = 19.125.

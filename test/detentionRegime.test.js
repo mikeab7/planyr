@@ -81,6 +81,20 @@ describe("assessHydraulicRegime", () => {
     expect(r.regime).toBe("B");
     expect(r.elevations.bfeFt).toBe(96);
   });
+  it("mixed datums: the governing BFE's datum comes from ITS OWN zone, never a neighbor's", () => {
+    // The higher BFE (96) has no datum; a lower zone does. The undatumed governing BFE
+    // must be rejected — NOT silently labeled with the other zone's NAVD88.
+    const r = assessHydraulicRegime({
+      floodZones: [
+        { zone: "AE", staticBfeFt: 90, vdatum: "NAVD88" },
+        { zone: "AE", staticBfeFt: 96, vdatum: null },
+      ],
+      groundElevFt: 100,
+      pondDepthFt: 8,
+    });
+    expect(r.regime).toBe("unknown");
+    expect(r.flags).toContain("bfe-datum-unpublished");
+  });
 });
 
 describe("screenOutfall — the B634 tier-2 LiDAR slice (value-of-information, never auto-credited)", () => {

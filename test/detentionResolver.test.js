@@ -89,10 +89,15 @@ describe("authorityForJurisdiction — the pure mapping", () => {
     expect(a.ambiguous[0].candidates).toEqual(["hcfcd", "fortbend"]);
     expect(a.ambiguous[0].detail).toMatch(/Harris \+ Fort Bend/);
   });
-  it("a city straddle is ambiguous too", () => {
+  it("a city straddle is ambiguous, and candidates are AUTHORITY ids (not raw city names)", () => {
     const a = j({ city: ["Houston", "Bellaire"], county: ["Harris"] });
     expect(a.primary).toBeNull();
     expect(a.ambiguous[0].kind).toBe("straddle");
+    // Houston → coh; an unmodeled city (Bellaire) → the containing county's authority.
+    expect(a.ambiguous[0].candidates).toEqual(["coh", "hcfcd"]);
+    // An overlay city straddling maps to its overlay id, so its candidate can be priced.
+    const b = j({ city: ["Missouri City", "Sugar Land"], county: ["Fort Bend"] });
+    expect(b.ambiguous[0].candidates).toEqual(["missouricity", "fortbend"]);
   });
 });
 
@@ -151,6 +156,35 @@ describe("resolveDrainageAuthority — jurisdiction + the QUERIED MUD layer", ()
     const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT, ring }, optsFor(baseRoutes({ county: ["Harris", "Fort Bend"] })));
     expect(out.primaryReviewer).toBeNull();
     expect(out.ambiguous[0].kind).toBe("straddle");
+  });
+
+  it("the ring is threaded into the jurisdiction identify (a POINT query can't ever straddle)", async () => {
+    // GEOMETRY-AWARE fake: a polygon query returns BOTH counties (the straddle), a point
+    // query returns only the centroid county — real ArcGIS behavior. If the resolver
+    // failed to pass the ring, the county query would be a point and the straddle would
+    // be invisible. This is the exact bug the review caught.
+    const ring = [[-95.75, 29.94], [-95.75, 29.98], [-95.63, 29.98], [-95.63, 29.94]];
+    const routes = {
+      [COUNTY]: (url) => /esriGeometryPolygon/.test(url) ? [{ attributes: { CNTY_NM: "Harris" } }, { attributes: { CNTY_NM: "Fort Bend" } }] : [{ attributes: { CNTY_NM: "Harris" } }],
+      [CITY]: () => [], [ETJ]: () => [], [MUD]: () => [],
+    };
+    const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT, ring }, optsFor(routes));
+    expect(out.jurisdiction.county.sort()).toEqual(["Fort Bend", "Harris"]);
+    expect(out.primaryReviewer).toBeNull();
+    expect(out.ambiguous[0].kind).toBe("straddle");
+    expect(out.ambiguous[0].candidates.sort()).toEqual(["fortbend", "hcfcd"]);
+  });
+
+  it("a city/ETJ outage that leaves a county authority is flagged jurisdiction-partial (could've been COH)", async () => {
+    const routes = baseRoutes({});
+    routes[CITY] = () => { throw new Error("city down"); };
+    routes[ETJ] = () => { throw new Error("etj down"); };
+    const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(routes));
+    expect(out.primaryReviewer.authorityId).toBe("hcfcd"); // county default…
+    expect(out.flags).toContain("jurisdiction-partial"); // …but honestly flagged as possibly-incomplete
+    // A Houston hit is NOT flagged (COH applies in-ETJ, so a failed ETJ can't have hidden anything worse):
+    const out2 = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(baseRoutes({ city: "Houston" })));
+    expect(out2.flags).not.toContain("jurisdiction-partial");
   });
 });
 

@@ -91,7 +91,7 @@ export const DETENTION_RULES = {
         flatRate: { maxAcres: 20, rateAcFtPerAc: 0.8, appliesTo: "tract" },
         redevelopmentCredit: { rateAcFtPerAc: 0.4, appliesTo: "removedImpervious", note: "credit applied before the 0.8 calc for qualifying redevelopment" },
         singleFamilyLot: { maxSf: 7500, imperviousPctExempt: 65, rateAbove: 0.75 },
-        largeTract: { minAcres: 20, defersTo: "hcfcd", note: "per the June-2026 IDM, >20 ac follows the current HCFCD PCPM (0.65 min + impact analysis)" },
+        largeTract: { minAcres: 20, defersTo: "hcfcd", conflictRateAcFtPerAc: 0.75, note: "per the June-2026 IDM, >20 ac follows the current HCFCD PCPM (0.65 min + impact analysis)" },
         grandfather: "projects in review before 2026-06-01 may qualify for the prior (2019) rules if approved before the deadline",
         appliesInEtj: true,
       },
@@ -127,7 +127,7 @@ export const DETENTION_RULES = {
           ],
           transcribed: false,
         },
-        largeTract: { minAcres: 20, defersTo: "hcfcd" },
+        largeTract: { minAcres: 20, defersTo: "hcfcd", conflictRateAcFtPerAc: 0.75 },
         appliesInEtj: true,
       },
     },
@@ -441,20 +441,27 @@ export function computeRequiredDetention({
       return pointResult(sf.rateAbove * acres, sf.rateAbove, `${sf.rateAbove} ac-ft/ac × ${acres.toFixed(2)} ac (single-family lot above ${sf.imperviousPctExempt}% impervious)`, rule);
     }
     const largeMin = p.largeTract?.minAcres ?? 20;
-    if (acres > largeMin) {
-      // >20 ac defers to the HCFCD PCPM. In city limits draining directly to an HCFCD
-      // channel, the codified conflict rule takes the GREATER of HCFCD 0.65 × tract
-      // vs COH 0.75 × impervious. Unknown adjacency → both candidates, labeled.
+    // >20 ac defers to HCFCD. A record with NO mid-tract band (the 2026 flat-rate
+    // record) has a gap at exactly the threshold — <20 is the flat rate, >20 defers,
+    // but 20.00 itself would fall through to "unknown"; treat == threshold as large
+    // there. The 2019 record's mid-tract curve covers 1–20 inclusive, so keep it
+    // exclusive when a mid-tract band exists.
+    if (acres > largeMin || (acres === largeMin && !p.midTract)) {
+      // In city limits draining directly to an HCFCD channel, the codified conflict
+      // rule takes the GREATER of HCFCD 0.65 × tract vs COH's impervious rate.
+      // Unknown adjacency → both candidates, labeled.
       const hcfcdRule = ruleFor("hcfcd", onDate);
       const hRate = hcfcdRule.params.rateAcFtPerAc;
       const hcfcdCand = { authorityId: "hcfcd", acFt: round2(hRate * acres), basis: `${hRate} ac-ft/ac × ${acres.toFixed(2)} ac (entire tract)`, rule: hcfcdRule };
+      const cRate = p.largeTract?.conflictRateAcFtPerAc ?? 0.75; // COH impervious rate — data-driven
       if (inCityLimits && imperviousAcres != null && drainsToHcfcdChannel !== false) {
-        const cRate = 0.75;
         const cohCand = { authorityId: "coh", acFt: round2(cRate * imperviousAcres), basis: `${cRate} ac-ft/ac × ${imperviousAcres.toFixed(2)} ac impervious`, rule };
         const gov = governingRequirement([hcfcdCand, cohCand]);
         const picked = gov.candidates.find((c) => c.authorityId === gov.picked);
         const flags = drainsToHcfcdChannel === null ? ["channel-adjacency-unknown"] : [];
-        return pointResult(picked.acFt, picked.acFt / (gov.picked === "hcfcd" ? acres : imperviousAcres),
+        if (rule.secondarySource) flags.push("secondary-source");
+        // Pass the PUBLISHED rate (not a back-computed one — that renders as 0.7501960…).
+        return pointResult(picked.acFt, gov.picked === "hcfcd" ? hRate : cRate,
           `greater-of: ${hcfcdCand.basis} vs ${cohCand.basis}`, picked.rule, flags, gov);
       }
       return pointResult(hcfcdCand.acFt, hRate, `>${largeMin} ac — ${p.largeTract?.note || "defers to HCFCD PCPM"}: ${hcfcdCand.basis}`, hcfcdRule);
@@ -599,10 +606,12 @@ export function assessHydraulicRegime({
     return out;
   }
 
-  const noDatum = withBfe.some((z) => !z.vdatum);
-  const bfeFt = Math.max(...withBfe.map((z) => z.staticBfeFt));
-  const bfeDatum = withBfe.find((z) => z.vdatum)?.vdatum || null;
-  if (noDatum && !bfeDatum) {
+  // The GOVERNING (highest) BFE drives the regime — read its datum from the SAME zone
+  // it came from, never from a different zone (a borrowed datum could mislabel feet).
+  const governingZone = withBfe.reduce((a, z) => (z.staticBfeFt > a.staticBfeFt ? z : a), withBfe[0]);
+  const bfeFt = governingZone.staticBfeFt;
+  const bfeDatum = governingZone.vdatum || null;
+  if (!bfeDatum) {
     out.regime = "unknown";
     out.label = "Regime unknown";
     out.flags.push("bfe-datum-unpublished");
@@ -689,13 +698,18 @@ export function solvePondExpansion({
 
   // Bracket by doubling. A null (self-intersecting / failed offset) mid-search is a
   // hard stop — the banks can't be pushed out cleanly past that offset on this shape.
-  let lo = 0, hi = null, best = v0;
-  for (let step = 5; step <= maxExpandFt; step *= 2) {
-    const v = at(step);
-    if (v == null) return { ok: false, reason: "geometry-failed", atFt: step, bestCf: best };
+  // The final probe is CLAMPED to maxExpandFt so the cap itself is always evaluated
+  // before declaring no-bracket (a plain `step *= 2` can leap past the cap untested).
+  let lo = 0, hi = null, best = v0, step = 5;
+  while (true) {
+    const probe = Math.min(step, maxExpandFt);
+    const v = at(probe);
+    if (v == null) return { ok: false, reason: "geometry-failed", atFt: probe, bestCf: best };
     best = Math.max(best, v);
-    if (v >= target) { hi = step; break; }
-    lo = step;
+    if (v >= target) { hi = probe; break; }
+    lo = probe;
+    if (probe >= maxExpandFt) break; // evaluated the cap and it's still short
+    step *= 2;
   }
   if (hi == null) return { ok: false, reason: "no-bracket", atFt: maxExpandFt, bestCf: best };
 
@@ -858,16 +872,20 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
     });
     return out;
   }
+  const countyAuth = counties.length ? COUNTY_AUTHORITY[counties[0]] || null : null;
   if (cities.length > 1) {
+    // Map each straddled city to its AUTHORITY id (Houston→coh, overlay cities→their
+    // overlay id, otherwise the containing county's authority) so the UI can price
+    // each candidate — raw city names would every one render "unknown".
+    const cityAuth = (c) => (c === "houston" ? "coh" : CITY_OVERLAYS[c] || countyAuth || null);
     out.ambiguous.push({
       kind: "straddle",
-      candidates: cities,
+      candidates: cities.map(cityAuth),
       detail: `Parcel straddles ${city.join(" + ")} city limits — reviewing city ambiguous.`,
     });
     return out;
   }
 
-  const countyAuth = counties.length ? COUNTY_AUTHORITY[counties[0]] || null : null;
   if (counties.length && !countyAuth) out.flags.push("no-criteria-modeled");
 
   if (cities.includes("houston") || etjs.includes("houston")) {
@@ -899,8 +917,13 @@ const shapeSourceState = (r, error) =>
  * onStatus} thread through both, exactly like the jurisdiction identify. */
 export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, opts = {}) {
   const geom = ring && ring.length >= 3 ? { ring } : { lng, lat };
+  // Thread the ring into the jurisdiction identify too — otherwise county/city/ETJ
+  // are point-at-centroid queries and a boundary straddle can NEVER be detected
+  // (authorityForJurisdiction's straddle branch needs counties.length>1, which a
+  // point query can't produce), and city/ETJ membership reads centroid-only.
+  const jurOpts = geom.ring ? { ...opts, ring: geom.ring } : opts;
   const [jur, mudRes] = await Promise.all([
-    identifyJurisdiction(lng, lat, opts),
+    identifyJurisdiction(lng, lat, jurOpts),
     identifySource(DETENTION_SOURCES.mud, geom, opts).fresh,
   ]);
   const auth = authorityForJurisdiction(jur);
@@ -928,8 +951,15 @@ export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, o
   // The county lookup FAILING (outage) with no authority resolved is an unknown, not
   // an unincorporated-nowhere: flag it so the UI can say "couldn't resolve" instead
   // of silently showing no requirement at all (the silent-failure class).
-  if (!out.primaryReviewer && !out.ambiguous.length && jur.sources.some((s) => s.id === "county" && s.state === "failed")) {
+  const roleFailed = (id) => jur.sources.some((s) => s.id === id && s.state === "failed");
+  if (!out.primaryReviewer && !out.ambiguous.length && roleFailed("county")) {
     out.flags.push("jurisdiction-unavailable");
+  }
+  // A city/ETJ layer outage while the county resolved is subtler: the authority may
+  // read as the county default only BECAUSE the city/ETJ query failed (a Houston
+  // parcel could silently downgrade to HCFCD). Flag it so the UI caveats the result.
+  if (out.primaryReviewer && !out.primaryReviewer.rule?.params?.appliesInEtj && (roleFailed("city") || roleFailed("etj"))) {
+    out.flags.push("jurisdiction-partial");
   }
   return out;
 }
@@ -970,10 +1000,12 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
         const pts = ring && ring.length ? ring : [[lng, lat]];
         for (const [plng, plat] of pts) distM = Math.min(distM, polylineDistMeters(it.geometry, plng, plat));
       }
-      if (!best || distM < best.distM) best = { unitNo: f.unitNo, name: f.name, type: f.type, distM };
+      // Retain the nearest unit's polyline so the outfall screen (B634) can check a
+      // user cross-section actually crosses THIS channel before attributing it.
+      if (!best || distM < best.distM) best = { unitNo: f.unitNo, name: f.name, type: f.type, distM, geometry: it.geometry || null };
     }
     channel = best
-      ? { near: true, unitNo: best.unitNo, name: best.name, type: best.type, distFt: best.distM === Infinity ? null : Math.round(best.distM * FT_PER_M), state: "loaded" }
+      ? { near: true, unitNo: best.unitNo, name: best.name, type: best.type, distFt: best.distM === Infinity ? null : Math.round(best.distM * FT_PER_M), geometry: best.geometry, state: "loaded" }
       : { near: false, state: "empty" };
   } else if (chanRes && chanRes.error) {
     channel = { near: null, state: "failed" }; // honest unknown — never "no channel"

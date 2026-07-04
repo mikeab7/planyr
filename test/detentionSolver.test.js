@@ -50,6 +50,17 @@ describe("solvePondExpansion", () => {
     expect(s.bestCf).toBeGreaterThan(base.vol);
   });
 
+  it("a target reachable ONLY at/near the cap is still found (the doubling bracket evaluates maxExpandFt)", () => {
+    // With a small cap, a naive `step *= 2` loop leaps 5→10→20→40→80→160 and never probes
+    // the 100-ft cap; the fixed bracket clamps the final probe so the cap itself is tested.
+    const volAt = volumeAtFor(300, 300, 8, 1, 3);
+    const capVol = volAt(100).vol;
+    const target = capVol - 1000; // reachable a hair under the cap
+    const s = solvePondExpansion({ requiredCf: target, volumeAt: volAt, maxExpandFt: 100 });
+    expect(s.ok).toBe(true);
+    expect(s.expandFt).toBeLessThanOrEqual(100);
+  });
+
   it("Regime-B dead storage strictly enlarges the solve (usable = required + dead)", () => {
     const target = base.vol * 1.3;
     const plain = solvePondExpansion({ requiredCf: target, volumeAt: volumeAtFor(300, 300, 8, 1, 3) });
