@@ -46,29 +46,37 @@ export async function listFolders(projectId) {
   return (data || []).map(toClientRow);
 }
 
-// In-tab guard so a double-mount can't fire two full seeds concurrently (cross-tab race is
-// negligible for a single user; the seed only runs when the project has zero rows).
-const seeding = new Set();
+// In-tab guard: the in-flight seed PROMISE per project, so a double-mount awaits the SAME seed
+// and gets its real result (returning a premature {seeded:false} let the caller then read zero
+// rows and render "No folders yet"). The DB unique index (project_folders.sql) is the real
+// cross-tab/device guard — this just avoids a redundant insert within one runtime.
+const seeding = new Map();
 
 /* Seed a project's tree from the canonical template — ONCE. Idempotent: if the project already
  * has any folder rows it is left untouched (so a later template edit never restructures an
  * existing project, and a re-open never duplicates the tree). Returns { ok, seeded, count }. */
 export async function ensureSeeded(projectId) {
   if (!supabase || !projectId) return { ok: false, skipped: true };
-  if (seeding.has(projectId)) return { ok: true, seeded: false };
-  seeding.add(projectId);
-  try {
+  if (seeding.has(projectId)) return seeding.get(projectId); // await the same seed, not a premature result
+  const run = (async () => {
     const { count, error } = await supabase
       .from("project_folders").select("id", { count: "exact", head: true }).eq("project_id", projectId);
     if (error) return { ok: false, error: error.message };
     if ((count || 0) > 0) return { ok: true, seeded: false };
     const rows = buildSeedRows(FOLDER_TEMPLATE, { projectId, templateVersion: TEMPLATE_VERSION, makeId });
     const { error: insErr } = await supabase.from("project_folders").insert(rows);
-    if (insErr) return { ok: false, error: insErr.message };
+    if (insErr) {
+      // A concurrent first-open (another tab/device) may have seeded first — the DB unique index
+      // then rejects this duplicate insert. Re-check: if rows now exist, treat it as "already
+      // seeded" success rather than a double tree.
+      const now = await supabase.from("project_folders").select("id", { count: "exact", head: true }).eq("project_id", projectId);
+      if (!now.error && (now.count || 0) > 0) return { ok: true, seeded: false };
+      return { ok: false, error: insErr.message };
+    }
     return { ok: true, seeded: true, count: rows.length };
-  } finally {
-    seeding.delete(projectId);
-  }
+  })();
+  seeding.set(projectId, run);
+  try { return await run; } finally { seeding.delete(projectId); }
 }
 
 // Add one folder under a parent (null = top level). `order` = next among live siblings.
@@ -140,6 +148,8 @@ export async function planFolderDelete(projectId, folderId) {
     });
     if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
-    return resp.ok && jr.ok ? { ok: true, folders: jr.folders || [], files: jr.files || [] } : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+    return resp.ok && jr.ok
+      ? { ok: true, folders: jr.folders || [], files: jr.files || [], truncated: !!jr.truncated }
+      : { ok: false, error: jr.error || `HTTP ${resp.status}` };
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }

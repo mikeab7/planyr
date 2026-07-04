@@ -108,6 +108,39 @@ describe("syncProjectFolders — rename / move / trash (B645)", () => {
   });
 });
 
+describe("syncProjectFolders — robustness fixes (B645 review)", () => {
+  it("moves an existing folder UNDER a folder created in the same sync (one pass)", async () => {
+    const store = fakeStore([
+      { id: "b", parentId: null, name: "B" }, // brand-new parent (a create)
+      { id: "a", parentId: "b", name: "A", driveFolderId: "da", driveName: "A", driveParentId: "root0" },
+    ]);
+    const client = fakeClient();
+    const r = await syncProjectFolders({ projectId: "p1", userId: "u1", client, store });
+    expect(r.ok).toBe(true);
+    expect(r.summary.created).toBe(1);
+    expect(r.summary.moved).toBe(1);
+    const upd = client.calls.updated.find((u) => u.fileId === "da");
+    expect(upd.addParents).toBe("d1"); // B's freshly-minted id
+    expect(upd.removeParents).toBe("root0");
+    expect(store.rows.find((x) => x.id === "a").driveParentId).toBe("d1");
+  });
+
+  it("rolls back (trashes) a created Drive folder whose id fails to persist — no duplicate next sync", async () => {
+    const rows = [{ id: "a", parentId: null, name: "A" }];
+    const store = {
+      rows,
+      async list() { return [{ id: "a", parentId: null, name: "A", trashed: false, driveFolderId: null, driveParentId: null, driveName: null, driveTrashed: false }]; },
+      async updateDrive() { return { ok: false, error: "supabase 503" }; }, // persist always fails
+    };
+    const client = fakeClient();
+    const r = await syncProjectFolders({ projectId: "p1", userId: "u1", client, store });
+    expect(r.ok).toBe(false); // error surfaced, never a silent success
+    expect(client.calls.created).toHaveLength(1);
+    expect(client.calls.trashed).toEqual(["d1"]); // the orphan was trashed so it can't duplicate
+    expect(r.summary.created).toBe(0);
+  });
+});
+
 describe("planDelete — enumerate what a delete removes (B645)", () => {
   it("lists subtree folders (from the index) + files (live from Drive)", async () => {
     const store = fakeStore([

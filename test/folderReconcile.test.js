@@ -56,14 +56,16 @@ describe("folderReconcilePlan — rename + move in place (B645)", () => {
     ]);
   });
 
-  it("does NOT move when the desired parent has no Drive id yet (still a pending create)", () => {
+  it("emits a move UNDER a parent created in the same pass (executor threads the new id)", () => {
     const rows = [
       row({ id: "p", parentId: null, name: "P" }), // pending create, no driveFolderId
       row({ id: "c", parentId: "p", name: "C", driveFolderId: "dc", driveName: "C", driveParentId: "old" }),
     ];
     const plan = folderReconcilePlan(rows);
     expect(plan.creates.map((c) => c.id)).toEqual(["p"]);
-    expect(plan.moves).toHaveLength(0); // wait for the parent's create first
+    // The move is NOT deferred: creates run before moves and thread p's new id, so the child
+    // re-parents in the SAME reconcile instead of sitting mis-parented until a later edit.
+    expect(plan.moves).toEqual([{ id: "c", driveFolderId: "dc", newParentId: "p", removeParent: "old" }]);
   });
 
   it("emits nothing when Drive already matches desired (idempotent no-op)", () => {

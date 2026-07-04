@@ -58,20 +58,32 @@ export async function syncProjectFolders({ projectId, userId, client, store }) {
 
   // 1) Creates — parents first (already ordered), threading each new id to its children.
   for (const c of plan.creates) {
+    let createdId = null;
     try {
       const parent = resolveParent(c.parentId);
       if (!parent) { errors.push(`create ${c.id}: parent not yet in Drive`); continue; }
       const res = await client.createSubfolder({ name: c.name, parentFolderId: parent });
       if (!res || !res.id) { errors.push(`create ${c.id}: Drive returned no id`); continue; }
+      createdId = res.id;
       driveId.set(c.id, res.id);
       const persisted = await store.updateDrive(c.id, {
         driveFolderId: res.id,
         driveParentId: c.parentId == null ? null : parent,
         driveName: c.name,
       });
-      if (persisted && persisted.ok === false) errors.push(`create ${c.id}: ${persisted.error}`);
-      else summary.created += 1;
-    } catch (e) { errors.push(`create ${c.id}: ${(e && e.message) || e}`); }
+      if (persisted && persisted.ok === false) {
+        // The Drive folder exists but its id never persisted → the next sync would RE-create it
+        // (createSubfolder is create-not-ensure), leaving a duplicate empty folder in Drive. Trash
+        // the orphan and forget it so the retry starts clean; its children defer to that retry.
+        driveId.delete(c.id);
+        try { await client.trash(createdId); } catch (_) { /* best-effort rollback */ }
+        errors.push(`create ${c.id}: ${persisted.error} (rolled back the orphaned Drive folder)`);
+      } else summary.created += 1;
+    } catch (e) {
+      // Persist (or a later step) threw AFTER the Drive folder was made → same rollback.
+      if (createdId) { driveId.delete(c.id); try { await client.trash(createdId); } catch (_) { /* best-effort */ } }
+      errors.push(`create ${c.id}: ${(e && e.message) || e}`);
+    }
   }
 
   // 2) Renames in place.
@@ -124,15 +136,20 @@ export async function planDelete({ projectId, folderId, client, store }) {
   const folders = inSubtree.map((r) => ({ id: r.id, name: r.name }));
 
   const files = [];
+  let truncated = false; // a folder returned a full page → the file list may be incomplete (>1000)
   for (const r of inSubtree) {
     if (!r.driveFolderId) continue;
     try {
       const children = await client.list({ parentFolderId: r.driveFolderId });
+      if ((children || []).length >= 1000) truncated = true;
       for (const ch of children || []) {
         if (ch.mimeType === "application/vnd.google-apps.folder") continue; // subfolders already counted
         files.push({ name: ch.name, folder: r.name });
       }
     } catch (_) { /* a listing hiccup shouldn't block the confirmation; folders are still enumerated */ }
   }
-  return { ok: true, folders, files };
+  // Under the drive.file scope the app can only SEE the files+folders it created, so anything the
+  // user added straight into Drive is trashed by the cascade but can't be itemized here — the UI
+  // surfaces that caveat. `truncated` flags a folder with >1000 children (list isn't paginated).
+  return { ok: true, folders, files, truncated };
 }

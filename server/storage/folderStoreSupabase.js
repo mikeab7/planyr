@@ -10,6 +10,9 @@
  * Mirrors idStoreSupabase.js — same REST shape, same header set, same "own-row via token" model.
  */
 const REST = (url) => `${String(url).replace(/\/+$/, "")}/rest/v1/project_folders`;
+// drive_* columns are guarded against direct client writes; the server writes them only through
+// this SECURITY DEFINER RPC (project_folders.sql), which the guard trigger allows.
+const RPC = (url) => `${String(url).replace(/\/+$/, "")}/rest/v1/rpc/folder_set_drive_meta`;
 
 // Columns the reconcile needs (structure + drive bookkeeping), mapped to the planner's shape.
 const SELECT =
@@ -47,24 +50,26 @@ export function folderStoreSupabase({ supabaseUrl, anonKey, token, fetchImpl = f
       }
     },
 
-    // Patch ONLY the drive_* bookkeeping of one row (by id; RLS enforces ownership). Returns
-    // { ok } so the reconcile can surface a persistence failure instead of pretending success.
+    // Patch ONLY the drive_* bookkeeping of one row, through the server-only SECURITY DEFINER RPC
+    // (a direct PATCH of drive_* is rejected by the guard trigger). The RPC scopes to the caller's
+    // own row via auth.uid(). Returns { ok } so the reconcile can surface a persistence failure
+    // instead of pretending success. Only present keys are written (a present null still sets null).
     async updateDrive(id, patch = {}) {
-      const body = { updated_at: new Date().toISOString() };
-      if ("driveFolderId" in patch) body.drive_folder_id = patch.driveFolderId;
-      if ("driveParentId" in patch) body.drive_parent_id = patch.driveParentId;
-      if ("driveName" in patch) body.drive_name = patch.driveName;
-      if ("driveTrashed" in patch) body.drive_trashed = patch.driveTrashed;
+      const p = {};
+      if ("driveFolderId" in patch) p.drive_folder_id = patch.driveFolderId;
+      if ("driveParentId" in patch) p.drive_parent_id = patch.driveParentId;
+      if ("driveName" in patch) p.drive_name = patch.driveName;
+      if ("driveTrashed" in patch) p.drive_trashed = patch.driveTrashed;
       try {
-        const res = await fetchImpl(`${REST(supabaseUrl)}?id=eq.${enc(id)}`, {
-          method: "PATCH",
+        const res = await fetchImpl(RPC(supabaseUrl), {
+          method: "POST",
           headers: { ...headers, prefer: "return=minimal" },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ p_id: id, p_patch: p }),
         });
-        if (!res.ok) return { ok: false, error: `project_folders update ${res.status}` };
+        if (!res.ok) return { ok: false, error: `folder_set_drive_meta ${res.status}` };
         return { ok: true };
       } catch (e) {
-        return { ok: false, error: (e && e.message) || "project_folders update failed" };
+        return { ok: false, error: (e && e.message) || "folder_set_drive_meta failed" };
       }
     },
   };

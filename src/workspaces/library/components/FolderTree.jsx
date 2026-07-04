@@ -94,7 +94,11 @@ export default function FolderTree({ projectId = null, signedIn = false, project
 
   const onAdd = async (parentId) => {
     const siblings = childrenOf(rows, parentId);
-    const name = suggestNextNumberedName(siblings, "New Folder");
+    // Keep the suggested name unique among siblings (an unnumbered parent can otherwise yield two
+    // "New Folder"s — a duplicate the rename path + Drive mirror assume can't exist).
+    const base = suggestNextNumberedName(siblings, "New Folder");
+    let name = base, n = 2;
+    while (!validateFolderName(name, siblings).ok && n < 100) name = `${base} (${n++})`;
     const r = await addFolder({ projectId, parentId, name });
     if (!r.ok) { setError(r.error || "Couldn't add the folder."); return; }
     if (parentId) setExpanded((s) => new Set(s).add(parentId));
@@ -120,6 +124,10 @@ export default function FolderTree({ projectId = null, signedIn = false, project
   const onMove = async (id, newParentId) => {
     setMoving(null);
     if (wouldCreateCycle(rows, id, newParentId)) { setError("Can’t move a folder into itself."); return; }
+    // Reject a move that would collide with a same-named folder already at the destination.
+    const movingRow = rows.find((x) => x.id === id);
+    const v = validateFolderName(movingRow ? movingRow.name : "", childrenOf(rows, newParentId), id);
+    if (!v.ok) { setError(`Can’t move here — ${v.error}`); return; }
     const r = await moveFolder(id, newParentId);
     if (!r.ok) { setError(r.error || "Move failed."); return; }
     if (newParentId) setExpanded((s) => new Set(s).add(newParentId));
@@ -130,15 +138,21 @@ export default function FolderTree({ projectId = null, signedIn = false, project
   const askDelete = async (row) => {
     const subtree = subtreeIds(rows, row.id);
     const subfolderCount = subtree.size - 1;
-    setPendingDelete({ id: row.id, name: row.name, folders: [], files: [], subfolderCount, empty: subfolderCount === 0, loading: true });
+    setPendingDelete({ id: row.id, name: row.name, folders: [], files: [], subfolderCount, empty: false, loading: true });
     const plan = await planFolderDelete(projectId, row.id); // live Drive enumeration
+    const known = !!plan.ok;                  // we actually listed Drive contents
+    const driveOff = !!plan.skipped;          // Drive mirror off → index-only, no Drive files exist
+    const failed = !plan.ok && !plan.skipped; // couldn't check (network / auth / 5xx) → UNKNOWN
     setPendingDelete((p) => (p && p.id === row.id ? {
-      ...p, loading: false,
-      folders: plan.ok ? plan.folders : [],
-      files: plan.ok ? plan.files : [],
-      // If Drive is off we can't list files; fall back to the index subfolder count.
-      empty: plan.ok ? (plan.files.length === 0 && plan.folders.length <= 1) : subfolderCount === 0,
-      driveOff: !!plan.skipped,
+      ...p, loading: false, driveOff, failed,
+      folders: known ? plan.folders : [],
+      files: known ? plan.files : [],
+      truncated: known ? !!plan.truncated : false,
+      // NEVER claim "empty" when the check FAILED — that would let a folder holding real Drive
+      // files be deleted behind a false "This folder is empty" (silent data loss). "Empty" is
+      // trustworthy only when we listed Drive (known) or Drive is legitimately off (index-only).
+      empty: known ? (plan.files.length === 0 && plan.folders.length <= 1) : driveOff ? subfolderCount === 0 : false,
+      planError: failed ? (plan.error || "Couldn’t check Google Drive contents.") : "",
     } : p));
   };
 
@@ -161,13 +175,17 @@ export default function FolderTree({ projectId = null, signedIn = false, project
     return [{ id: null, name: "— Top level —" }, ...live.filter((r) => !banned.has(r.id)).sort((a, b) => a.name.localeCompare(b.name))];
   };
 
-  const Row = ({ node, depth }) => {
+  // Rendered as a plain recursive FUNCTION (not a `<Row/>` component), so React reconciles the
+  // rows by position instead of unmounting/remounting a freshly-defined component type on every
+  // FolderTree re-render — which had torn down the inline rename <input> mid-edit (lost focus /
+  // dropped keystrokes) and churned every row on hover. The returned root <div> carries the key.
+  const renderRow = (node, depth) => {
     const kids = node.children || [];
     const open = expanded.has(node.id);
     const isEditing = editing && editing.id === node.id;
     const isMoving = moving === node.id;
     return (
-      <div>
+      <div key={node.id}>
         <div
           data-testid="folder-row"
           style={{
@@ -217,7 +235,7 @@ export default function FolderTree({ projectId = null, signedIn = false, project
             </span>
           )}
         </div>
-        {open && kids.map((c) => <Row key={c.id} node={c} depth={depth + 1} />)}
+        {open && kids.map((c) => renderRow(c, depth + 1))}
       </div>
     );
   };
@@ -241,7 +259,7 @@ export default function FolderTree({ projectId = null, signedIn = false, project
       <div style={{ flex: 1, overflow: "auto", padding: "8px 6px" }}>
         {loading ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>Loading folders…</div>
           : tree.length === 0 ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>No folders yet.</div>
-            : tree.map((n) => <Row key={n.id} node={n} depth={0} />)}
+            : tree.map((n) => renderRow(n, 0))}
       </div>
 
       {pendingDelete && (
@@ -286,12 +304,21 @@ function DeleteConfirm({ info, onCancel, onConfirm }) {
         <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>Delete “{info.name}”?</h3>
         {info.loading ? (
           <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>Checking what’s inside on Google Drive…</p>
+        ) : info.failed ? (
+          <>
+            <p style={{ color: "var(--danger-text)", fontSize: 13.5, fontWeight: 600, margin: "0 0 8px" }}>
+              ⚠ Couldn’t check what’s on Google Drive right now ({info.planError}).
+            </p>
+            <p style={{ color: "var(--text-secondary)", fontSize: 12.5 }}>
+              Deleting removes this folder and <b>everything inside it</b> — its subfolders and any files, in Planyr and its Drive mirror — but the exact contents can’t be listed at the moment. The Drive copies move to trash (recoverable ~30 days). Delete anyway?
+            </p>
+          </>
         ) : info.empty ? (
           <p style={{ color: "var(--text-secondary)", fontSize: 13.5 }}>This folder is empty. It will be removed from Planyr{!info.driveOff ? " and moved to your Google Drive trash (recoverable ~30 days)" : ""}.</p>
         ) : (
           <>
             <p style={{ color: "var(--danger-text)", fontSize: 13.5, fontWeight: 600, margin: "0 0 8px" }}>
-              This removes {folderCount} folder{folderCount === 1 ? "" : "s"}{fileCount ? ` and ${fileCount} file${fileCount === 1 ? "" : "s"}` : ""} from {info.driveOff ? "Planyr" : "Google Drive"}.
+              This removes {folderCount} folder{folderCount === 1 ? "" : "s"}{fileCount ? ` and ${fileCount}${info.truncated ? "+" : ""} file${fileCount === 1 && !info.truncated ? "" : "s"}` : ""} from {info.driveOff ? "Planyr" : "Google Drive"}.
             </p>
             {info.driveOff && <p style={{ color: "var(--warn-text)", fontSize: 12 }}>Drive mirror is off — this can’t list Drive files, only the Planyr subfolders.</p>}
             {fileCount > 0 && (
@@ -303,6 +330,8 @@ function DeleteConfirm({ info, onCancel, onConfirm }) {
                 {fileCount > 8 && <div style={{ color: "var(--text-tertiary)", marginTop: 2 }}>+{fileCount - 8} more…</div>}
               </div>
             )}
+            {info.truncated && <p style={{ color: "var(--warn-text)", fontSize: 12 }}>Some folders hold more than 1,000 files — the list above may be partial; all of them are removed.</p>}
+            {!info.driveOff && <p style={{ color: "var(--text-tertiary)", fontSize: 11.5 }}>Plus anything added straight into Google Drive (not shown — Planyr only tracks files it filed).</p>}
             {!info.driveOff && <p style={{ color: "var(--text-secondary)", fontSize: 12 }}>These move to your Google Drive trash and are recoverable for ~30 days.</p>}
           </>
         )}

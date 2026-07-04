@@ -75,15 +75,19 @@ export function folderReconcilePlan(rows = []) {
       renames.push({ id: r.id, driveFolderId: r.driveFolderId, name: r.name });
     }
 
-    // Move in place when the desired parent's Drive id differs from what we last pushed.
-    // Resolve the desired parent's Drive id; null parentId → the project root (handled by the
-    // executor as `newParentId === null`). If the desired parent has no Drive id yet (still a
-    // pending create), skip — that create will attach this row's correct parent on its own pass
-    // next reconcile; we never issue a move to an unknown target.
-    const desiredParentDrive =
-      r.parentId == null ? null : (byId.get(r.parentId) && byId.get(r.parentId).driveFolderId) || undefined;
-    const parentResolvable = r.parentId == null || desiredParentDrive !== undefined;
-    const changedParent = (desiredParentDrive ?? null) !== (r.driveParentId ?? null);
+    // Move in place when the desired parent differs from what we last pushed. Resolve the
+    // desired parent's Drive id; null parentId → the project root (executor: `newParentId ===
+    // null`). A move UNDER A FOLDER BEING CREATED IN THIS SAME PASS is still emitted: the
+    // executor runs creates before moves and threads each new id into its map, so by the time
+    // the move runs `driveId.get(newParentId)` resolves. (Skipping it — the old behaviour — left
+    // the folder mis-parented in Drive while the sync falsely reported success, until some later
+    // unrelated edit happened to re-reconcile it.)
+    const parentRow = r.parentId == null ? null : byId.get(r.parentId);
+    const parentIsPendingCreate = !!(parentRow && !parentRow.driveFolderId && !parentRow.trashed);
+    const desiredParentDrive = r.parentId == null ? null : (parentRow && parentRow.driveFolderId) || undefined;
+    const parentResolvable = r.parentId == null || desiredParentDrive !== undefined || parentIsPendingCreate;
+    // A pending-create parent always means the child sits somewhere else today, so it's a move.
+    const changedParent = parentIsPendingCreate || (desiredParentDrive ?? null) !== (r.driveParentId ?? null);
     if (parentResolvable && changedParent) {
       moves.push({
         id: r.id,
