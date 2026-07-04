@@ -936,7 +936,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       // A statewide-layer hit is a genuine "backup" only when the county's OWN CAD was
       // unavailable this click (breaker open → dropped from the query) — NOT when a
       // healthy CAD was queried but statewide merely won the parallel race (B630). And
-      // with B636's eager preference, a healthy CAD normally WINS the race, so hit.county
+      // with B643's eager preference, a healthy CAD normally WINS the race, so hit.county
       // is the CAD itself here and this is false.
       const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
       const rings = outerRingsLngLat(hit.feature);

@@ -15,6 +15,7 @@
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
+import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
@@ -204,7 +205,7 @@ export const JURISDICTIONS = {
     // allowlist since 2026-06-19; MUD tile paint verified headless from a fresh session
     // 2026-06-19 — V44 PASS, see VERIFICATION.md.)
     kind: "dynamic", label: "MUD / water districts (TCEQ, statewide)",
-    url: "https://harcags.harcresearch.org/arcgisserver/rest/services/Boundaries/TCEQ_Water_Districts/MapServer", layers: null, opacity: 0.55,
+    url: GIS_SOURCES.mud.serviceUrl, layers: null, opacity: 0.55, // registry row (B629) — render + identify share one source of truth
     note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. A boundary is a TAXING / authority district, NOT proof that water or sewer is connected to a parcel. Screening only — verify against the district / tax statement.",
   },
   jur_road_authority: {
