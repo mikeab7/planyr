@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
-import { pondContours, pondStorageVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
+import { pondContours, detentionStorage } from "../src/workspaces/site-planner/lib/pondGeom.js";
 import { createSiteModel, mergeSiteContent, contentCount, SITE_MODEL_VERSION } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { interpretCas, interpretInsert, isMissingVersionColumn } from "../src/shared/cloud/optimisticUpsert.js";
 import * as E from "../ui-audit/stress/scheduler-engine.mjs";
@@ -65,6 +65,7 @@ function pondGolden(fx) {
     fixtureVersion: fx.fixtureVersion,
     cases: fx.cases.map((c) => {
       const r = pondContours(ring(c.W, c.H), c.det);
+      const s = detentionStorage(ring(c.W, c.H), c.det.depth, c.det.freeboard, c.det.slope);
       return {
         name: c.name,
         feasible: r.feasible,
@@ -73,7 +74,7 @@ function pondGolden(fx) {
         hasBottom: r.levels.some((l) => l.isBottom),
         hasWater: r.levels.some((l) => l.isWater),
         areas: r.levels.map((l) => round(l.area, 2)),
-        storageVolumeCuFt: round(pondStorageVolume(r.levels), 2),
+        storageVolumeCuFt: round(s.vol, 2),
       };
     }),
   };

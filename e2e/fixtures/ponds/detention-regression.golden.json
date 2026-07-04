@@ -19,7 +19,7 @@
         92364,
         88704
       ],
-      "storageVolumeCuFt": 831792
+      "storageVolumeCuFt": 713874
     },
     {
       "name": "infeasible-200x40-d8-s4",
@@ -35,7 +35,7 @@
         2816,
         1344
       ],
-      "storageVolumeCuFt": 18048
+      "storageVolumeCuFt": 11648.76
     },
     {
       "name": "interval-zero-clamp-400x400",
@@ -51,7 +51,7 @@
         141376,
         135424
       ],
-      "storageVolumeCuFt": 1180416
+      "storageVolumeCuFt": 866704
     }
   ]
 }

@@ -2,7 +2,7 @@
  * concurrency/multi-writer LIVE-VERIFY class, deterministic CAS half in the sandbox). Drives the
  * optimistic compare-and-swap interpreters with a synthetic base/writerA/writerB race and asserts the
  * stale writer is rejected as a conflict (no silent clobber) and the un-migrated DB degrades — the
- * genuine two-signed-in-tabs race is auth/live-only and tracked as VERIFICATION.md V204. */
+ * genuine two-signed-in-tabs race is auth/live-only and tracked as VERIFICATION.md V205. */
 import { describe, it, expect } from "vitest";
 import { loadFixture, loadGolden } from "../e2e/fixtures/index.js";
 import { interpretCas, interpretInsert, isMissingVersionColumn } from "../src/shared/cloud/optimisticUpsert.js";

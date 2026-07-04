@@ -1,6 +1,6 @@
-# PERSISTENCE.md — the canonical save/sync write-path map (B639)
+# PERSISTENCE.md — the canonical save/sync write-path map (B648)
 
-> **Part of the Persistence & Sync epic (B639).** This is the single place that answers "what writes
+> **Part of the Persistence & Sync epic (B648).** This is the single place that answers "what writes
 > user data, when, and what protects it from loss." It was built **AUDIT-FIRST** — every row and finding
 > below was read out of the **current code** (not comments or backlog notes), and where a comment or a
 > prior `B#` claim disagreed with the code, the **code reality is recorded and the discrepancy flagged**.
@@ -9,10 +9,10 @@
 > generated file — when you change a write path, update its row + the affected invariant finding here in
 > the same commit, and (per the epic's triage rule) **every new save/sync bug must name the invariant it
 > violates**; if none fits, the invariant list is incomplete → amend it here first, then file the bug as a
-> member of B639.
+> member of B648.
 >
 > Related: `docs/REFERENCE.md` (persistence internals), `PERSISTENCE_TEST_SCRIPT.md` (manual live script),
-> `docs/test-data-loss.md`. Members of B639: B124, B125, B126, B134, B276, B314, B595, B596, B612.
+> `docs/test-data-loss.md`. Members of B648: B124, B125, B126, B134, B276, B314, B595, B596, B612.
 
 ---
 
@@ -139,4 +139,4 @@ Legend: ✅ satisfied · ⚠️ partial / by-design gap · ❌ violated on this 
 > read-back verified, loud, full-cascade tombstoned. The **weaker edges** are the fire-and-forget *heal
 > re-push* inside `pullCloud`, the *`persistDrawings`* parallel writer, and the *unload/keepalive* flushes
 > — all backstopped by the synchronous local mirror + next-load boot merge, but each has a silent-no-op or
-> non-loud branch. Those edges, plus the un-migrated-DB **degrade** mode, are the highest-value B639 targets.
+> non-loud branch. Those edges, plus the un-migrated-DB **degrade** mode, are the highest-value B648 targets.

@@ -21,7 +21,7 @@ loader `e2e/fixtures/index.js` (`loadFixture` / `loadGolden` / `loadManifest`), 
 
 | Fixture | Repro it stands in for | Golden holds |
 |---|---|---|
-| `ponds/detention-regression` | Goose-Creek-class detention: known geometry → known volume | contour areas + `pondStorageVolume` (average-end-area) per case |
+| `ponds/detention-regression` | Goose-Creek-class detention: known geometry → known volume | contour areas + `detentionStorage` (average-end-area) per case |
 | `schedules/dense-project` | Pappadoupolos-scale dense Gantt (~119 tasks / ~103 deps), ~33% zoom | task/dep counts, parent rollup dates, export filename |
 | `sites/dense-testfit` | Dense industrial test-fit (building + bonded children + truck courts + bump-outs) | yield counts, tombstone-delete survivors, merge-no-resurrect |
 | `cloud/two-writer` | Two writers over one row (stale must conflict; un-migrated degrades) | `interpretCas`/`interpretInsert` outcomes |
@@ -34,11 +34,11 @@ gate over time. Most are deterministic **sandbox** vitest; genuinely live paths 
 
 | LIVE-VERIFY class | Sandbox spec (runs now) | Live companion |
 |---|---|---|
-| PDF/export parity | `test/scheduleDensityFixture.test.js` | `e2e/gantt-density.spec.js` (V206) |
-| zoom-/data-density rendering | — | `e2e/gantt-density.spec.js` (V206) · `e2e/site-testfit.spec.js` |
+| PDF/export parity | `test/scheduleDensityFixture.test.js` | `e2e/gantt-density.spec.js` (V207) |
+| zoom-/data-density rendering | — | `e2e/gantt-density.spec.js` (V207) · `e2e/site-testfit.spec.js` |
 | real-project-data repros | `test/pondVolumeFixture.test.js` · `test/siteFitFixture.test.js` | — |
-| concurrency / multi-writer | `test/twoWriterFixture.test.js` | `VERIFICATION.md` V204 (two signed-in tabs) |
-| timing / race bugs | `test/scheduleDensityFixture.test.js` (no throw/hang) | `VERIFICATION.md` V205 (post-sign-in toast race) |
+| concurrency / multi-writer | `test/twoWriterFixture.test.js` | `VERIFICATION.md` V205 (two signed-in tabs) |
+| timing / race bugs | `test/scheduleDensityFixture.test.js` (no throw/hang) | `VERIFICATION.md` V206 (post-sign-in toast race) |
 | GIS endpoint behavior | `test/coverage.test.js` · `test/gisFetch.test.js` | `.github/workflows/gis-drift.yml` |
 
 ## Seeding the DB fixture

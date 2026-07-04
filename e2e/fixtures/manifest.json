@@ -9,7 +9,7 @@
       "fixture": "ponds/detention-regression.fixture.json",
       "golden": "ponds/detention-regression.golden.json",
       "kind": "pure-geometry",
-      "engine": "src/workspaces/site-planner/lib/pondGeom.js (pondContours + pondStorageVolume)",
+      "engine": "src/workspaces/site-planner/lib/pondGeom.js (pondContours + detentionStorage)",
       "repro": "Goose-Creek-class detention: known geometry -> engine-captured contour areas + storage volume."
     },
     {
@@ -62,17 +62,17 @@
     },
     {
       "class": "concurrency / multi-writer",
-      "specs": ["test/twoWriterFixture.test.js", "VERIFICATION.md:V204"],
+      "specs": ["test/twoWriterFixture.test.js", "VERIFICATION.md:V205"],
       "fixture": "concurrency-two-writer",
       "sandbox": "test/twoWriterFixture.test.js (CAS conflict + degrade)",
-      "live": "VERIFICATION.md V204 — genuine two-signed-in-tabs race on planyr.io"
+      "live": "VERIFICATION.md V205 — genuine two-signed-in-tabs race on planyr.io"
     },
     {
       "class": "timing / race bugs",
-      "specs": ["test/scheduleDensityFixture.test.js", "VERIFICATION.md:V205"],
+      "specs": ["test/scheduleDensityFixture.test.js", "VERIFICATION.md:V206"],
       "fixture": "dense-gantt-project",
       "sandbox": "test/scheduleDensityFixture.test.js (hostile rows never throw/hang — addBD cap, cycle-break)",
-      "live": "VERIFICATION.md V205 — post-sign-in cloud-on toast racing the module tabs"
+      "live": "VERIFICATION.md V206 — post-sign-in cloud-on toast racing the module tabs"
     },
     {
       "class": "GIS endpoint behavior",

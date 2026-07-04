@@ -9,7 +9,7 @@
  * render assertion is a live/deploy check driven through the served Schedule app. It runs where the app
  * exposes the function (a deploy / a full local preview) and test.skips cleanly otherwise — never a
  * false failure. The deterministic engine half (rollup/exportName parity) is the sandbox vitest
- * test/scheduleDensityFixture.test.js; the live ~33%-zoom render sign-off is VERIFICATION.md V206.
+ * test/scheduleDensityFixture.test.js; the live ~33%-zoom render sign-off is VERIFICATION.md V207.
  * The fixture-density pre-check below always runs, so this spec is never a no-op. */
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
@@ -33,7 +33,7 @@ test.describe("dense-Gantt density + parity", () => {
     await page.goto("/sequence/index.html").catch(() => {});
     // The Schedule app is an in-browser Babel build; buildGanttSVG is exposed only on some builds.
     const hasFn = await page.evaluate(() => typeof window.buildGanttSVG === "function").catch(() => false);
-    test.skip(!hasFn, "buildGanttSVG not exposed on this build — live ~33%-zoom render sign-off is VERIFICATION.md V206");
+    test.skip(!hasFn, "buildGanttSVG not exposed on this build — live ~33%-zoom render sign-off is VERIFICATION.md V207");
 
     const probe = await page.evaluate((fx) => {
       // ~33% zoom: a small px-per-day. buildGanttSVG signature: (projects, svgWidth, orientation, opts).

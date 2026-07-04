@@ -66,7 +66,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > B# = highest `B#` across **both** files + 1. (Product backlog; distinct from the "Deferred / maintenance
 > backlog" near the end of this file.)
 >
-> **⏳ THREE-STATE LIFECYCLE (B636): items move 🔲 Open → ⏳ Verify → ✅ Done, not straight to Done.** A
+> **⏳ THREE-STATE LIFECYCLE (B645): items move 🔲 Open → ⏳ Verify → ✅ Done, not straight to Done.** A
 > `Verify: sandbox` item (green build + the right unit/headless self-test proves it) goes straight to Done. A
 > **`Verify: live`** item — the **LIVE-VERIFY** classes: timing/race, concurrency / multi-writer, GIS endpoint
 > behavior, zoom-/data-density-dependent rendering, PDF/export parity, or a real-project-data repro — is
@@ -247,7 +247,7 @@ server/                   # placeholder README only — NOT built or deployed; b
 - End commit messages with the session link the harness provides. Don't include the
   model identifier in commits/PRs/code.
 
-## Engineering rules (invoke by name) + Definition of Done (B640)
+## Engineering rules (invoke by name) + Definition of Done (B649)
 
 A chat brief may reference any rule below **by name** ("apply PDF-PARITY, LOUD-FAILURE") — treat a
 named rule as if its full text were pasted into the brief. This is the **session contract**: named

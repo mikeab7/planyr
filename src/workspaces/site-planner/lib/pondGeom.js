@@ -12,6 +12,7 @@
 // cell, then a local grid refines it. Pure (world-feet in / world-feet out), no React/DOM,
 // so it unit-tests without a browser. Screening-grade placement, not survey geometry.
 import { offsetInward, ringsArea, maxInwardOffset } from "./pondOffset.js";
+import { polyArea } from "./polygonSplit.js";
 
 // Even-odd ray cast: is point `pt` inside ring `ring` (array of {x,y})?
 export const pointInRing = (pt, ring) => {
@@ -148,27 +149,59 @@ export function pondContours(ring, det = {}, opts = {}) {
   return out;
 }
 
+/* Detention storage for a pond whose drawn footprint is TOP-OF-BANK, with
+ * `slope`:1 (H:V) interior side slopes — so the basin tapers inward with depth
+ * (not a vertical-wall box). Water surface sits `freeboard` below top of bank.
+ * Stage areas come from a ROBUST inward offset (clipper-lib offsetInward, B500) —
+ * offset = slope × (depth below top of bank) — which pinches off cleanly when the
+ * opposing slopes meet (no bogus inverted-ring area). Stored volume is the
+ * average-end-area method over the water column, integrated only over the slabs
+ * that actually exist, so a basin that daylights before full depth never inflates
+ * the number. `feasible`/`maxDepth` report whether the footprint can hold the
+ * design depth at this slope (maxDepth = max inscribed reach / slope).
+ * Lifted from SitePlanner.jsx (B630) so the yield metrics pass and the pure
+ * auto-size solver (detentionRules.js) can share it. `vol` is CUBIC FEET.
+ *
+ * Memo: a small LRU Map (not the old 1-entry cache) — the yield metrics pass
+ * calls this for EVERY pond each render, interleaved with the selected-pond
+ * panel and map labels, so a 1-entry memo would thrash the clipper offsets. */
+const _detMemo = new Map(); // sig → result, insertion order = recency
+const DET_MEMO_MAX = 32;
+export function detentionStorage(ring, depth, freeboard, slope) {
+  const sig = `${depth}|${freeboard}|${slope}|${ring.length}|${ring[0] ? `${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}` : ""}|${polyArea(ring).toFixed(1)}`;
+  if (_detMemo.has(sig)) {
+    const hit = _detMemo.get(sig);
+    _detMemo.delete(sig); _detMemo.set(sig, hit); // refresh recency
+    return hit;
+  }
+  const areaAt = (down) => (down <= 0 ? polyArea(ring) : ringsArea(offsetInward(ring, slope * down)));
+  const maxDepth = slope > 0 ? maxInwardOffset(ring) / slope : 0;
+  const aTop = polyArea(ring);
+  const dw = Math.max(0, depth - freeboard);       // design water depth
+  const aWater = areaAt(freeboard);                 // water surface
+  const aBottom = areaAt(depth);                    // basin floor (0 if it daylights first)
+  // Average-end-area over the column from the water surface to the achievable floor
+  // (min of design depth and what the footprint can actually grade to), ~1-ft slabs.
+  const floor = Math.min(depth, maxDepth);
+  let vol = 0;
+  if (floor > freeboard) {
+    const step = 1;
+    for (let d = freeboard; d < floor - 1e-9; d += step) {
+      const h = Math.min(step, floor - d);
+      vol += ((areaAt(d) + areaAt(d + h)) / 2) * h;
+    }
+  }
+  const val = { aTop, aWater, aBottom, dw, vol, feasible: depth <= maxDepth + 0.05, maxDepth };
+  _detMemo.set(sig, val);
+  if (_detMemo.size > DET_MEMO_MAX) _detMemo.delete(_detMemo.keys().next().value); // evict oldest
+  return val;
+}
+
 // Where to seat a contour's depth/elevation label: the ring's extreme vertex on the chosen
 // side (top/bottom/left/right), nudged a hair inward so it sits just inside the line. Anchoring
 // the water ring to the TOP and the bottom ring to the BOTTOM keeps the two callouts apart and
 // reads intuitively (water surface high, floor low), clear of the centred pond name. Returns
 // {x,y} (world feet) or null.
-
-// Average-end-area storage volume (cubic feet) of a staged pond from its contour `levels`
-// (the `pondContours(...).levels` array). Volume between two successive contour levels = the mean
-// of their plan areas × the vertical step between them, summed from top-of-bank down to the deepest
-// emitted level. Pure over the ENGINE-captured areas (clipper round-joins mean a level's area is not
-// the raw rectangle formula), so a fixture golden computed from this is a deterministic
-// "known geometry → known volume" — the detention regression the B278/B280 harness exercises.
-export function pondStorageVolume(levels) {
-  const ls = (Array.isArray(levels) ? levels : [])
-    .filter((l) => l && isFinite(l.down) && isFinite(l.area))
-    .sort((a, b) => a.down - b.down);
-  let vol = 0;
-  for (let i = 1; i < ls.length; i++) vol += ((ls[i].area + ls[i - 1].area) / 2) * (ls[i].down - ls[i - 1].down);
-  return vol;
-}
-
 export function contourLabelPoint(contourRing, anchor = "top") {
   if (!Array.isArray(contourRing) || contourRing.length < 3) return null;
   const c = ringCentroidAvg(contourRing);

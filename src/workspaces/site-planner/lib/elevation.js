@@ -9,12 +9,21 @@ export const DEP_URL = "https://elevation.nationalmap.gov/arcgis/rest/services/3
 const M_TO_FT = 3937 / 1200;
 
 /* Sample elevations along a polyline. `path` is [[lng,lat], …] (WGS84).
- * Returns an array of elevations in FEET, ordered along the line. */
-export async function sampleProfile(path, sampleCount = 48) {
+ * Returns an array of elevations in FEET, ordered along the line. `timeoutMs`
+ * (default 12s) bounds the request so a hung 3DEP can't freeze a caller that
+ * awaits it (e.g. the drainage check) — it throws/aborts instead. */
+export async function sampleProfile(path, sampleCount = 48, timeoutMs = 12000) {
   const geometry = JSON.stringify({ paths: [path], spatialReference: { wkid: 4326 } });
   const u = `${DEP_URL}/getSamples?geometry=${encodeURIComponent(geometry)}&geometryType=esriGeometryPolyline` +
     `&sampleCount=${sampleCount}&interpolation=RSP_BilinearInterpolation&returnFirstValueOnly=false&f=json`;
-  const r = await fetch(u);
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  let r;
+  try {
+    r = await fetch(u, ctrl ? { signal: ctrl.signal } : undefined);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!r.ok) throw new Error(`3DEP HTTP ${r.status}`);
   const j = await r.json();
   if (j.error) throw new Error(j.error.message || "3DEP error");

@@ -4,7 +4,7 @@
  * so an offset-engine or interval-selection change surfaces as a diff, not a silent number shift. */
 import { describe, it, expect } from "vitest";
 import { loadFixture, loadGolden } from "../e2e/fixtures/index.js";
-import { pondContours, pondStorageVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
+import { pondContours, detentionStorage } from "../src/workspaces/site-planner/lib/pondGeom.js";
 
 const ring = (W, H) => [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }];
 const fx = loadFixture("ponds/detention-regression.fixture.json");
@@ -20,7 +20,8 @@ describe("detention-pond regression fixture", () => {
       expect(r.levels.length).toBe(g.levelCount);
       expect(r.levels.some((l) => l.isBottom)).toBe(g.hasBottom);
       expect(r.levels.map((l) => Math.round((l.area + Number.EPSILON) * 100) / 100)).toEqual(g.areas);
-      expect(Math.round((pondStorageVolume(r.levels) + Number.EPSILON) * 100) / 100).toBe(g.storageVolumeCuFt);
+      const s = detentionStorage(ring(c.W, c.H), c.det.depth, c.det.freeboard, c.det.slope);
+      expect(Math.round((s.vol + Number.EPSILON) * 100) / 100).toBe(g.storageVolumeCuFt);
     });
   }
 

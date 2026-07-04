@@ -4,13 +4,14 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _45 open · 0 awaiting live verification._
+> _46 open · 0 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B639 | Persistence & Sync epic: one umbrella + a canonical write-path doc | [Site Planner / Persistence] | #persistence | live |
+| B648 | Persistence & Sync epic: one umbrella + a canonical write-path doc | [Site Planner / Persistence] | #persistence | live |
+| B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) | [Scheduler / robustness] | — | — |
 | B629 | Drive-backed county PARCEL snapshot cache so outages stop breaking the map | [Site Planner / GIS] | #site-planner #gis #drive | — |
 | B553 | Surface drawn landscaping in the yield breakdown (own line, kept pervious) | [Site Planner / yield] | #site-planner #yield | — |
 | B499 | Harden the LOAD-time self-heal for the OTHER bonded children (sidewalk / dock-zone stack / side-parking) | [Site Planner / Site Model] | #site-planner #persistence | — |
@@ -72,7 +73,7 @@ _(none)_
 - **#infra** — B408, B406, B179, B63
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479
-- **#persistence** — B639, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38
+- **#persistence** — B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38
 - **#scheduler** — B495, B408, B255
 - **#site-planner** — B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95
 - **#stitching** — B413
