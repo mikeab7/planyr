@@ -20,7 +20,7 @@ import { roadCenterline } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS } from "./roadClasses.js";
 
-export const SITE_MODEL_VERSION = 10;
+export const SITE_MODEL_VERSION = 11;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
@@ -48,7 +48,7 @@ const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // an explicit status, so the version bump (→6 B276 delete-tombstones, →7 B362/B363
 // bump-out sizing + bonded-rotation repair, →8 team sharing teamId/ownerId, →9 cross-module
 // schedule link hint scheduleProjectId/Name, →10 centerline road model B596 pts/vtx/
-// travelW/roadClass) doesn't disturb it. (saveSite re-normalizes
+// travelW/roadClass, →11 parcel split lineage `parentId` B651) doesn't disturb it. (saveSite re-normalizes
 // through this, so the status it reads back is the explicit one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
@@ -342,6 +342,133 @@ export const parcelsOf = (m) => m.parcels || [];
 // Parcels counted in the yield/area math: a parcel is ACTIVE unless explicitly flagged inactive
 // (`active === false`). Missing = active, so existing sites are unaffected (B100).
 export const activeParcelsOf = (m) => (m.parcels || []).filter((p) => p.active !== false);
+
+/* ---- Parcel split lineage (B651) ----
+ * Splitting a parcel KEEPS the original as a SUPERSEDED, inactive (non-counting) parent and
+ * activates its pieces as CHILDREN, each carrying `parentId` = the parent's id. That is the
+ * ONLY new per-parcel field; it rides through createSiteModel untouched (like `active`, above).
+ * "Superseded" is DERIVED (a parcel some other parcel names as its parent) so there is one
+ * source of truth. Because a superseded parent is inactive, it drops out of every active-parcel
+ * area sum automatically — no yield-math change needed. The active set must stay spatially
+ * NON-OVERLAPPING, so a parent and its split children can never both be active (enforced at the
+ * Active toggle via `lineageConflicts`). Display names are derived + lineage-aware (below). */
+
+// parentId → [childId…] in array order. Only counts children whose parent is present in `parcels`.
+export function parcelChildrenMap(parcels) {
+  const list = arr(parcels);
+  const has = new Set(list.map((p) => p && p.id));
+  const m = new Map();
+  for (const p of list) {
+    if (p && p.parentId != null && has.has(p.parentId)) {
+      if (!m.has(p.parentId)) m.set(p.parentId, []);
+      m.get(p.parentId).push(p.id);
+    }
+  }
+  return m;
+}
+// All descendant ids of `id` (children, grandchildren, …).
+export function parcelDescendants(parcels, id) {
+  const kids = parcelChildrenMap(parcels);
+  const out = new Set();
+  const stack = [...(kids.get(id) || [])];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (out.has(cur)) continue;
+    out.add(cur);
+    for (const k of kids.get(cur) || []) stack.push(k);
+  }
+  return out;
+}
+// All ancestor ids of `id` (parent, grandparent, …), cycle-guarded.
+export function parcelAncestors(parcels, id) {
+  const byId = new Map(arr(parcels).map((p) => [p && p.id, p]));
+  const out = new Set();
+  let cur = byId.get(id), guard = 0;
+  while (cur && cur.parentId != null && byId.has(cur.parentId) && guard++ < 10000) {
+    if (out.has(cur.parentId)) break; // defend against a corrupt parentId cycle
+    out.add(cur.parentId);
+    cur = byId.get(cur.parentId);
+  }
+  return out;
+}
+// The ids that spatially overlap `id` by split lineage — its ancestors + descendants (a parent
+// covers all of its children's ground). Siblings/cousins partition the parent, so they are
+// disjoint and excluded. The mutual-exclusion guard: activating a parcel deactivates exactly these.
+export function lineageConflicts(parcels, id) {
+  const out = new Set([...parcelAncestors(parcels, id), ...parcelDescendants(parcels, id)]);
+  out.delete(id);
+  return out;
+}
+
+// Spreadsheet-style letter for a birth-order index (0→A, 25→Z, 26→AA…).
+function birthLetter(i) {
+  let s = "", n = i | 0;
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return s;
+}
+// Derived, lineage-aware display info per parcel id → { tag, depth, superseded, name, parentId }.
+// Roots number among roots in array order ("Parcel 3"); a child's tag = the parent's tag + a
+// birth-order suffix, alternating letters (odd depth) / digits (even depth) — so 3 → 3A/3B and
+// 3A → 3A1/3A2. A parcel with a street address keeps the address as its name.
+export function parcelDisplayInfo(parcels) {
+  const list = arr(parcels);
+  const byId = new Map(list.map((p) => [p && p.id, p]));
+  const kids = parcelChildrenMap(list);
+  const isRoot = (p) => !(p && p.parentId != null && byId.has(p.parentId));
+  const rootNum = new Map();
+  let rn = 0;
+  for (const p of list) if (isRoot(p)) rootNum.set(p.id, ++rn);
+  const memo = new Map();
+  const compute = (p, seen) => {
+    if (!p) return { tag: "?", depth: 0 };
+    if (memo.has(p.id)) return memo.get(p.id);
+    if (seen.has(p.id)) return { tag: "?", depth: 0 }; // cycle guard
+    seen.add(p.id);
+    let res;
+    if (isRoot(p)) res = { tag: String(rootNum.get(p.id) || "?"), depth: 0 };
+    else {
+      const pr = compute(byId.get(p.parentId), seen);
+      const idx = Math.max(0, (kids.get(p.parentId) || []).indexOf(p.id));
+      const depth = pr.depth + 1;
+      res = { tag: pr.tag + (depth % 2 === 1 ? birthLetter(idx) : String(idx + 1)), depth };
+    }
+    memo.set(p.id, res);
+    return res;
+  };
+  const out = new Map();
+  for (const p of list) {
+    const { tag, depth } = compute(p, new Set());
+    out.set(p.id, {
+      tag, depth,
+      superseded: (kids.get(p.id) || []).length > 0,
+      name: (p && p.addr) || `Parcel ${tag}`,
+      parentId: isRoot(p) ? null : p.parentId,
+    });
+  }
+  return out;
+}
+// Render-ready ordering for the Parcel panel: each root (array order) immediately followed by
+// its descendants depth-first, carrying `depth` (for indentation) + the display info — so the
+// panel shows children nested under a greyed, superseded parent.
+export function parcelOutline(parcels) {
+  const list = arr(parcels);
+  const byId = new Map(list.map((p) => [p && p.id, p]));
+  const kids = parcelChildrenMap(list);
+  const info = parcelDisplayInfo(list);
+  const isRoot = (p) => !(p && p.parentId != null && byId.has(p.parentId));
+  const order = [];
+  const seen = new Set();
+  const visit = (id) => {
+    const p = byId.get(id);
+    if (!p || seen.has(id)) return;
+    seen.add(id);
+    order.push({ pc: p, ...(info.get(id) || { tag: "?", depth: 0, superseded: false, name: "Parcel ?", parentId: null }) });
+    for (const k of kids.get(id) || []) visit(k);
+  };
+  for (const p of list) if (isRoot(p)) visit(p.id);
+  for (const p of list) if (!seen.has(p.id)) visit(p.id); // safety: any parcel orphaned by a cycle
+  return order;
+}
 export const elementsOf = (m) => m.els || [];
 // B122 — a "building" element that is an actual standalone building, excluding the
 // attached dog-ear / bump-out pieces (stored as type "building" too, flagged `dogEar`).
