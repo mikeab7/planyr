@@ -10,6 +10,7 @@ import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
   identifyParcelEager,
+  parcelViaBackup,
   outerRingsLngLat,
   geoJsonToEsriFeature,
   lngLatRingToFeet,
@@ -841,7 +842,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
      a statewide answer can be honestly flagged as a "backup". */
   const resolveCandidates = (latlng) => {
     const all = candidateCountiesForPoint(latlng.lat, latlng.lng)
-      .map((county) => ({ county, url: layerUrlsRef.current[county] }))
+      .map((county) => ({ county, url: layerUrlsRef.current[county], statewide: STATEWIDE_KEYS.includes(county) }))
       .filter((c) => c.url);
     const realPrimaries = all.filter((c) => !STATEWIDE_KEYS.includes(c.county));
     return { candidates: filterHealthyCandidates(all, STATEWIDE_KEYS), realPrimaries };
@@ -933,9 +934,10 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       // remove+re-add happen in this one synchronous turn (B441).
       if (optKey) rollbackHit(optKey);
       const hit = res.hits[0]; // first county that answered owns the lot
-      // A hit FROM the statewide layer while a real CAD existed for this spot means
-      // TxGIO stood in for a county whose own server was down/skipped — flag it.
-      const viaBackup = STATEWIDE_KEYS.includes(hit.county) && realPrimaries.length > 0;
+      // A hit FROM the statewide layer counts as a "county server unavailable" backup
+      // ONLY when a real CAD covering this spot actually failed — not when TxGIO merely
+      // out-raced a healthy FBCAD, nor when the CAD honestly had no parcel here (B634).
+      const viaBackup = parcelViaBackup(hit.county, realPrimaries.map((c) => c.county), res.sources, STATEWIDE_KEYS);
       const rings = outerRingsLngLat(hit.feature);
       if (!rings.length) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const key = parcelKey(hit.county, rings, hit.feature.attributes || {});
@@ -996,7 +998,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       setParcelInfo({ status: res.responded === 0 ? "unavailable" : "none", label }); return;
     }
     const hit = res.hits[0];
-    const viaBackup = STATEWIDE_KEYS.includes(hit.county) && realPrimaries.length > 0;
+    const viaBackup = parcelViaBackup(hit.county, realPrimaries.map((c) => c.county), res.sources, STATEWIDE_KEYS);
     const added = addParcelHit(hit, latlng);
     if (!added) { setParcelInfo({ status: "none", label }); return; }
     setParcelInfo({

@@ -295,14 +295,28 @@ export async function identifyParcelDetailed(candidates, lng, lat) {
   return { hits, responded, errors, sources };
 }
 
-/* Like identifyParcelDetailed, but resolves AS SOON AS the first parcel hit lands
- * instead of waiting for every candidate to settle — so a click selects the moment
- * the fastest source answers (≈2-3s via the statewide layer) rather than stalling on
- * a hung county server's full 8s timeout. B244 made that timeout BOUNDED; this stops
- * the GOOD answer from waiting on the BAD one (the "can't click" recurrence when FBCAD
- * went dark again, 2026-06-22). Candidates are queried in parallel; the first to come
- * back with a lot wins — and because real CADs are listed before the statewide
- * fallback, a healthy county still answers first in the common case.
+/* How long to keep waiting for a healthy real-CAD primary to answer AFTER the statewide
+ * fallback (TxGIO) has already returned a hit. The statewide layer often races slightly
+ * ahead of a county's own server; without this grace a click over a Fort Bend lot would
+ * resolve on the TxGIO copy — and get mislabeled "county server unavailable" — even
+ * though FBCAD was up and about to answer (B634). Bounded well under
+ * PARCEL_FETCH_TIMEOUT_MS so a genuinely hung primary still can't stall the click: we
+ * wait ~1.2s for the authoritative source, never the full 8s. */
+export const BACKUP_GRACE_MS = 1200;
+
+/* Like identifyParcelDetailed, but resolves AS SOON AS a parcel hit is locked in
+ * instead of waiting for every candidate to settle — so a click selects the moment the
+ * authoritative source answers rather than stalling on a hung county server's full 8s
+ * timeout (B244, recurred 2026-06-22). Candidates are queried in parallel; real CADs are
+ * listed before the statewide fallback and each candidate is tagged `statewide`, so the
+ * resolver can prefer the authoritative answer:
+ *   • a hit from a REAL CAD wins immediately (best case, fast);
+ *   • when only the STATEWIDE fallback has hit, we give any still-in-flight real CAD a
+ *     bounded grace (BACKUP_GRACE_MS) to answer first — so a healthy-but-slightly-slower
+ *     county server wins over the fallback it out-raced (B634) — but never longer, so a
+ *     truly hung/dead CAD can't reintroduce the ~8s stall the eager path removed.
+ * A real CAD still pending only because it's hung lets the grace elapse; the statewide
+ * hit is then taken (and correctly flagged a backup, since that CAD did fail).
  *
  * When NO candidate hits, it waits for all to settle and reports the same honest
  * `responded`/`errors` as identifyParcelDetailed, so "reached a server, no parcel here"
@@ -310,13 +324,12 @@ export async function identifyParcelDetailed(candidates, lng, lat) {
  * === 0) (B245).
  *
  * `onSettled(sources)` (optional) fires ONCE after every candidate finishes — even if
- * we already returned early on a hit — so the caller can feed the circuit breaker
- * (sourceHealth) the health of the slow/failed sources too, and the NEXT click skips a
- * dead host. Returns { hits:[{county,feature}], responded, errors,
- * sources:[{county,ok,hit,error}], complete }. */
-export function identifyParcelEager(candidates, lng, lat, { onSettled } = {}) {
+ * we already returned early — so the caller can feed the circuit breaker (sourceHealth)
+ * the health of the slow/failed sources too. Returns { hits:[{county,feature}],
+ * responded, errors, sources:[{county,ok,hit,error}], complete }. */
+export function identifyParcelEager(candidates, lng, lat, { onSettled, graceMs = BACKUP_GRACE_MS } = {}) {
   const list = candidates || [];
-  const st = list.map((c) => ({ county: c.county, ok: false, hit: false, error: null, feature: null, settled: false }));
+  const st = list.map((c) => ({ county: c.county, statewide: !!c.statewide, ok: false, hit: false, error: null, feature: null, settled: false }));
   const view = () => st.map((s) => ({ county: s.county, ok: s.ok, hit: s.hit, error: s.error }));
   const result = (complete) => ({
     hits: st.filter((s) => s.hit).map((s) => ({ county: s.county, feature: s.feature })),
@@ -330,16 +343,29 @@ export function identifyParcelEager(candidates, lng, lat, { onSettled } = {}) {
   const out = new Promise((r) => { resolveOuter = r; });
   let done = false;
   let settledCount = 0;
+  let graceTimer = null;
+  const clearGrace = () => { if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; } };
+  const finish = (complete) => { if (done) return; done = true; clearGrace(); resolveOuter(result(complete)); };
+
+  // A real-CAD (non-statewide) primary still in flight? Its authoritative answer should
+  // beat a statewide fallback that merely raced ahead.
+  const realPrimaryPending = () => st.some((s) => !s.statewide && !s.settled);
+  const tryResolve = () => {
+    if (done) return;
+    if (settledCount === list.length) { finish(true); return; }          // everyone settled → honest responded/errors
+    if (st.some((s) => s.hit && !s.statewide)) { finish(false); return; } // a real CAD hit → authoritative, take it now
+    if (st.some((s) => s.hit && s.statewide)) {                           // only the statewide fallback has hit so far
+      if (!realPrimaryPending()) { finish(false); return; }              // no real CAD is coming → accept the fallback
+      if (!graceTimer) graceTimer = setTimeout(() => { graceTimer = null; finish(false); }, graceMs); // wait a bounded grace for the CAD
+    }
+  };
+
   const settle = (i) => {
     st[i].settled = true; settledCount += 1;
-    const all = settledCount === list.length;
-    // Early win: a hit lets the caller proceed without waiting on a still-pending
-    // (possibly hung) sibling. With no hit, only resolve once EVERYONE has settled, so
-    // responded/errors can honestly tell "no parcel here" from "nothing responded".
-    if (!done && (st[i].hit || all)) { done = true; resolveOuter(result(all)); }
-    if (all && onSettled) onSettled(view());
+    tryResolve();
+    if (settledCount === list.length && onSettled) onSettled(view());
   };
-  if (!list.length) { resolveOuter(result(true)); if (onSettled) onSettled([]); return out; }
+  if (!list.length) { finish(true); if (onSettled) onSettled([]); return out; }
   list.forEach(({ url }, i) => {
     queryAtPoint(url, lng, lat).then(
       (feature) => { st[i].ok = true; st[i].hit = !!feature; st[i].feature = feature || null; },
@@ -347,6 +373,26 @@ export function identifyParcelEager(candidates, lng, lat, { onSettled } = {}) {
     ).finally(() => settle(i));
   });
   return out;
+}
+
+/* Decide whether a resolved parcel identify is a genuine "statewide backup — county
+ * server unavailable" situation, for the honest on-map notice (B634). It is a backup
+ * ONLY when the winning hit came FROM the statewide fallback AND a real CAD that covers
+ * this point actually FAILED — it errored, is still hung, or its breaker was already
+ * open (so it was skipped this click and never appears in `sources`). A real CAD that
+ * answered — even with 0 features because the point sits on a road/ROW — is NOT an
+ * outage, so a statewide hit that merely out-raced a healthy CAD (or stood in where the
+ * CAD honestly had nothing) must not raise a false "unavailable" alarm. Pure.
+ *   hitCounty       — county key of the winning hit (res.hits[0].county)
+ *   realPrimaryKeys — county keys of the non-statewide CADs that cover the point
+ *   sources         — res.sources ([{county,ok,hit,error}])
+ *   statewideKeys   — STATEWIDE_KEYS */
+export function parcelViaBackup(hitCounty, realPrimaryKeys, sources, statewideKeys) {
+  if (!(statewideKeys || []).includes(hitCounty)) return false;
+  return (realPrimaryKeys || []).some((county) => {
+    const s = (sources || []).find((x) => x.county === county);
+    return !s || !s.ok; // absent (breaker open → skipped) OR reached-but-not-ok (errored/hung)
+  });
 }
 
 /* Convert a lon/lat polygon feature into local feet for the planner, plus the
