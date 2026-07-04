@@ -15,12 +15,37 @@
 import { chromium } from "playwright";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
 
 const ROOT = new URL("../public/", import.meta.url).pathname;
+const NM = new URL("../node_modules/", import.meta.url).pathname;
 const OUT = new URL("./screens/", import.meta.url).pathname;
 const MIME = { ".html":"text/html",".js":"text/javascript",".css":"text/css",".svg":"image/svg+xml",".json":"application/json" };
+
+// Hermetic: the sequence app loads React/ReactDOM/Babel/Supabase from CDNs which the sandbox
+// network resets. Route those URLs to local copies (React from node_modules; Babel + Supabase
+// cached via curl through the agent proxy) so the harness never depends on live CDN access.
+const CA = "/root/.ccr/ca-bundle.crt";
+const curlCache = (file, url) => {
+  const fp = join(tmpdir(), file);
+  if (!existsSync(fp)) execFileSync("curl", ["-sSL", ...(existsSync(CA) ? ["--cacert", CA] : []), "-o", fp, url], { stdio: "ignore" });
+  return readFileSync(fp);
+};
+const LIB = {
+  "react-dom/18.2.0/umd/react-dom.production.min.js": readFileSync(join(NM, "react-dom/umd/react-dom.production.min.js")),
+  "react/18.2.0/umd/react.production.min.js": readFileSync(join(NM, "react/umd/react.production.min.js")),
+  "@babel/standalone": curlCache("planyr-babel-standalone-7.min.js", "https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"),
+  "@supabase/supabase-js": curlCache("planyr-supabase-js-2.js", "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"),
+};
+const routeCDN = async page => { await page.route("**/*", route => {
+  const u = route.request().url();
+  for (const key of Object.keys(LIB)) if (u.includes(key)) return route.fulfill({ status: 200, contentType: "text/javascript", body: LIB[key] });
+  if (/^https?:\/\/localhost/.test(u) || /127\.0\.0\.1/.test(u)) return route.continue();
+  return route.abort();
+}); };
 
 // A summary tree + milestone + an FS chain + a BACKWARD link (T7 pinned before its pred ends).
 const INJECT = `<script>(function(){try{
@@ -77,6 +102,7 @@ const seg = d => {
 async function pass(align) {
   console.log(`\n── align="${align}" ──────────────────────────────`);
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 }, deviceScaleFactor: 2 });
+  await routeCDN(page);
   const real = [];
   page.on("console", m => { if (m.type() === "error" && !BENIGN.some(r => r.test(m.text()))) real.push(m.text()); });
   page.on("pageerror", e => { if (!BENIGN.some(r => r.test(e.message))) real.push("PAGEERROR: " + e.message); });
@@ -169,14 +195,23 @@ async function pass(align) {
      `"Utilities" caption stays above the bar band (bottom ${util?.bottom} ≤ rowTop+0.7·H)`);
   ok(util && leaf && util.weight > leaf.weight, `summary "Utilities" (${util?.weight}) bolder than leaf "Submit TIA" (${leaf?.weight})`);
 
-  // On-screen deps: CURVED (owner preference) AND bound to the bar centers (the real fix, B396)
+  // On-screen deps: CURVED (owner preference, B396) AND directionally anchored (B629) — every
+  // injected link here is a forward/down link, so each EXITS the source's lower (underside) edge
+  // and ENTERS the target below it, so the entry y sits lower on the chart than the exit y.
   const segs = probe.deps.map(seg);
   const inBand = y => { const off = ((y % probe.rowH) + probe.rowH) % probe.rowH; return off > probe.rowH * 0.52; };
   ok(probe.deps.length === 4, `4 dependency connectors drawn (got ${probe.deps.length})`);
   ok(segs.every(s => s.curved), `every connector is a curve (cubic bézier), not an elbow`);
   ok(segs.every(s => !s.nan), `no NaN in any on-screen connector path`);
-  ok(segs.every(s => inBand(s.start[1]) && inBand(s.end[1])),
-     `every connector endpoint binds to the bar band (below the row mid-line) — not floating`);
+  ok(segs.every(s => inBand(s.start[1])),
+     `every down-link EXITS the source's underside (lower edge), not the 9-o'clock mid-line`);
+  ok(segs.every(s => s.end[1] > s.start[1]),
+     `every down-link ENTERS a target below its source (directional, not center-bound)`);
+  // A source with 2+ outbound links (7005 → 7006, 7007) fans its exits to distinct x (B629).
+  const byStartY = {}; segs.forEach(s => { const k = Math.round(s.start[1]); (byStartY[k] = byStartY[k] || []).push(Math.round(s.start[0])); });
+  const fanned = Object.values(byStartY).filter(g => g.length >= 2);
+  ok(fanned.length >= 1 && fanned.every(g => new Set(g).size === g.length),
+     `multi-out bars fan their exit x instead of bundling (${JSON.stringify(byStartY)})`);
 
   // B394 PDF/print path
   ok(probe.pdf.hasInk >= 6, `print SVG emits in-chart names in #1a1a1a (${probe.pdf.hasInk})`);

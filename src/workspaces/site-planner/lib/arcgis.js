@@ -375,26 +375,6 @@ export function identifyParcelEager(candidates, lng, lat, { onSettled, graceMs =
   return out;
 }
 
-/* Decide whether a resolved parcel identify is a genuine "statewide backup — county
- * server unavailable" situation, for the honest on-map notice (B634). It is a backup
- * ONLY when the winning hit came FROM the statewide fallback AND a real CAD that covers
- * this point actually FAILED — it errored, is still hung, or its breaker was already
- * open (so it was skipped this click and never appears in `sources`). A real CAD that
- * answered — even with 0 features because the point sits on a road/ROW — is NOT an
- * outage, so a statewide hit that merely out-raced a healthy CAD (or stood in where the
- * CAD honestly had nothing) must not raise a false "unavailable" alarm. Pure.
- *   hitCounty       — county key of the winning hit (res.hits[0].county)
- *   realPrimaryKeys — county keys of the non-statewide CADs that cover the point
- *   sources         — res.sources ([{county,ok,hit,error}])
- *   statewideKeys   — STATEWIDE_KEYS */
-export function parcelViaBackup(hitCounty, realPrimaryKeys, sources, statewideKeys) {
-  if (!(statewideKeys || []).includes(hitCounty)) return false;
-  return (realPrimaryKeys || []).some((county) => {
-    const s = (sources || []).find((x) => x.county === county);
-    return !s || !s.ok; // absent (breaker open → skipped) OR reached-but-not-ok (errored/hung)
-  });
-}
-
 /* Convert a lon/lat polygon feature into local feet for the planner, plus the
  * [lat,lng] ring for drawing a highlight on the Leaflet map. Uses a local
  * equirectangular projection about the parcel centroid — exact enough for a

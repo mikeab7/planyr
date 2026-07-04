@@ -3,14 +3,13 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint } from "./lib/parcelSnapshot.js";
-import { recordSourceResult, filterHealthyCandidates, isSourceOpen } from "./lib/sourceHealth.js";
+import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
   identifyParcelEager,
-  parcelViaBackup,
   outerRingsLngLat,
   geoJsonToEsriFeature,
   lngLatRingToFeet,
@@ -934,10 +933,12 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       // remove+re-add happen in this one synchronous turn (B441).
       if (optKey) rollbackHit(optKey);
       const hit = res.hits[0]; // first county that answered owns the lot
-      // A hit FROM the statewide layer counts as a "county server unavailable" backup
-      // ONLY when a real CAD covering this spot actually failed — not when TxGIO merely
-      // out-raced a healthy FBCAD, nor when the CAD honestly had no parcel here (B634).
-      const viaBackup = parcelViaBackup(hit.county, realPrimaries.map((c) => c.county), res.sources, STATEWIDE_KEYS);
+      // A statewide-layer hit is a genuine "backup" only when the county's OWN CAD was
+      // unavailable this click (breaker open → dropped from the query) — NOT when a
+      // healthy CAD was queried but statewide merely won the parallel race (B630). And
+      // with B636's eager preference, a healthy CAD normally WINS the race, so hit.county
+      // is the CAD itself here and this is false.
+      const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
       const rings = outerRingsLngLat(hit.feature);
       if (!rings.length) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const key = parcelKey(hit.county, rings, hit.feature.attributes || {});
@@ -998,7 +999,9 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       setParcelInfo({ status: res.responded === 0 ? "unavailable" : "none", label }); return;
     }
     const hit = res.hits[0];
-    const viaBackup = parcelViaBackup(hit.county, realPrimaries.map((c) => c.county), res.sources, STATEWIDE_KEYS);
+    // See handleClick (B630): a statewide answer flags a "backup" only when the real CAD
+    // was actually unavailable, not when it lost the parallel race to a faster TxGIO.
+    const viaBackup = isStatewideBackup(hit.county, { realPrimaries, queried: candidates, statewideKeys: STATEWIDE_KEYS });
     const added = addParcelHit(hit, latlng);
     if (!added) { setParcelInfo({ status: "none", label }); return; }
     setParcelInfo({

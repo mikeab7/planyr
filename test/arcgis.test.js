@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   outerRingsLngLat, queryAtPoint, identifyParcelDetailed, identifyParcelEager,
-  parcelViaBackup, BACKUP_GRACE_MS,
+  BACKUP_GRACE_MS,
   ParcelFetchError, PARCEL_FETCH_TIMEOUT_MS, humanizeError, geoJsonToEsriFeature,
   identifyAtPoint, isQueryCapabilityError,
 } from "../src/workspaces/site-planner/lib/arcgis.js";
@@ -347,37 +347,13 @@ describe("identifyParcelEager — a healthy real CAD wins over a faster statewid
     vi.useRealTimers();
   });
 
-  it("resolves on the statewide hit as soon as the CAD honestly reports no parcel (ROW) — and that is NOT an outage", async () => {
+  it("resolves on the statewide hit as soon as the CAD honestly reports no parcel (ROW)", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url) => (url.includes("/txgio/") ? hit(99) : ok({ features: [] }))));
     const res = await identifyParcelEager([FBCAD, TXGIO], -95, 29);          // real timers: FBCAD returns 0 features fast
     expect(res.hits.map((h) => h.county)).toEqual(["chambers"]);
-    // FBCAD answered (just no polygon at a ROW point) → the statewide hit is NOT a backup outage.
-    expect(parcelViaBackup("chambers", ["fortbend"], res.sources, ["chambers"])).toBe(false);
-  });
-});
-
-describe("parcelViaBackup — a statewide hit is a 'county server down' backup ONLY on a real failure (B634)", () => {
-  const SK = ["chambers"];
-  const src = (county, okv, hitv, error = null) => ({ county, ok: okv, hit: hitv, error });
-
-  it("real CAD returned the parcel → NOT a backup (statewide merely also-answered)", () => {
-    expect(parcelViaBackup("chambers", ["fortbend"], [src("fortbend", true, true), src("chambers", true, true)], SK)).toBe(false);
-  });
-  it("real CAD returned 0 features (point on a ROW) → NOT a backup", () => {
-    expect(parcelViaBackup("chambers", ["fortbend"], [src("fortbend", true, false), src("chambers", true, true)], SK)).toBe(false);
-  });
-  it("real CAD errored (a genuine outage) → IS a backup", () => {
-    const sources = [src("fortbend", false, false, new ParcelFetchError("timeout", "x")), src("chambers", true, true)];
-    expect(parcelViaBackup("chambers", ["fortbend"], sources, SK)).toBe(true);
-  });
-  it("real CAD skipped because its breaker was open (absent from sources) → IS a backup", () => {
-    expect(parcelViaBackup("chambers", ["fortbend"], [src("chambers", true, true)], SK)).toBe(true);
-  });
-  it("the winning hit came from a real CAD → never a backup, whatever the primaries did", () => {
-    expect(parcelViaBackup("fortbend", ["fortbend"], [src("fortbend", true, true), src("chambers", true, true)], SK)).toBe(false);
-  });
-  it("a pure statewide county (no real CAD covers the point) → not a backup", () => {
-    expect(parcelViaBackup("chambers", [], [src("chambers", true, true)], SK)).toBe(false);
+    // FBCAD answered (just no polygon at a ROW point) — its source outcome stays ok:true, so the
+    // label helper (isStatewideBackup, tested in sourceHealth.test.js) reads this as "not an outage".
+    expect(res.sources.find((s) => s.county === "fortbend").ok).toBe(true);
   });
 });
 
