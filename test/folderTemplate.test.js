@@ -4,7 +4,7 @@ import { flattenTemplate, countTemplate, buildSeedRows } from "../src/shared/fol
 
 const byName = (nodes, name) => (nodes || []).find((n) => n.name === name);
 
-describe("FOLDER_TEMPLATE — canonical default structure (B645)", () => {
+describe("FOLDER_TEMPLATE — canonical default structure (B650)", () => {
   it("has exactly the 12 numbered top-level categories in order", () => {
     expect(FOLDER_TEMPLATE.map((n) => n.name)).toEqual([
       "01. Hillwood",
@@ -73,7 +73,7 @@ describe("FOLDER_TEMPLATE — canonical default structure (B645)", () => {
   });
 });
 
-describe("flattenTemplate — orderable rows for seeding (B645)", () => {
+describe("flattenTemplate — orderable rows for seeding (B650)", () => {
   it("assigns a parentPath, 1-based sibling order, and depth-ascending order", () => {
     const rows = flattenTemplate(FOLDER_TEMPLATE);
     const hillwood = rows.find((r) => r.path === "01. Hillwood");
@@ -100,7 +100,7 @@ describe("flattenTemplate — orderable rows for seeding (B645)", () => {
   });
 });
 
-describe("buildSeedRows — insert rows for a new project (B645)", () => {
+describe("buildSeedRows — insert rows for a new project (B650)", () => {
   it("mints one row per template folder with resolved parent_id + snake_case columns", () => {
     let n = 0;
     const rows = buildSeedRows(FOLDER_TEMPLATE, { projectId: "grp1", templateVersion: 1, makeId: () => `id${++n}` });

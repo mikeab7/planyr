@@ -1,4 +1,4 @@
-/* Pure folder-tree operations (B645) — no ids-from-nowhere, no Drive, no Supabase, no React.
+/* Pure folder-tree operations (B650) — no ids-from-nowhere, no Drive, no Supabase, no React.
  *
  * The live tree is a FLAT list of rows: { id, parentId, name, order, trashed?, ... }.
  *   • id        — Planyr's stable folder id (a uuid minted by the store; here just opaque).
@@ -142,7 +142,7 @@ export function suggestNextNumberedName(siblings = [], label = "New Folder") {
   return `${padPrefix(Math.max(...nums) + 1)}. ${label}`;
 }
 
-/* Turn a template into the exact insert rows that seed a project (B645). Pure — the id
+/* Turn a template into the exact insert rows that seed a project (B650). Pure — the id
  * generator is injected (crypto.randomUUID in the app; deterministic in tests). Because
  * flattenTemplate is depth-ordered, a parent's id is always assigned before its children, so
  * parent_id resolves in a single pass. Column names are snake_case to match the Supabase table

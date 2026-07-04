@@ -48,7 +48,7 @@ _Last updated: 2026-07-04._
 - [ ] **Run `project_folders.sql`.** After this, every project gets the standard 12-category folder tree
       (01. Hillwood … 12. Bldg Acq) that you can edit in **Library → Folders**, and it mirrors one-way into
       your Google Drive. Nothing else needed from you — the Drive credentials are already set. (The live
-      Drive click-through is the Claude cohort's job — `VERIFICATION.md` V205/V206, not yours.)
+      Drive click-through is the Claude cohort's job — `VERIFICATION.md` V208/V209, not yours.)
 
 ## Things Claude needs FROM Michael to finish/verify
 - [ ] **Drainage-manual PDFs for the exact-number transcription pass (B636 tail — the detention engine, code-labeled B629).** The detention rules engine

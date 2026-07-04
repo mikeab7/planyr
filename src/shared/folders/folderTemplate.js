@@ -1,11 +1,11 @@
-/* Canonical default project folder template (B645).
+/* Canonical default project folder template (B650).
  *
  * Every Planyr project is scaffolded from THIS one template — the full empty folder
  * skeleton the owner uses for an industrial development deal. It is the single source of
  * truth for the default structure: scaffolding (folderStore.seedProject), the Drive
  * mirror, and the drift/"reset to template" affordance all read it here.
  *
- * ── Rules baked in (per the B645 brief) ────────────────────────────────────────────────
+ * ── Rules baked in (per the B650 brief) ────────────────────────────────────────────────
  *  • Names carry a ZERO-PADDED two-digit prefix + period + space ("01. ", … "20. "). The
  *    padding is REQUIRED, not cosmetic: Drive web/mobile sort names as plain text, so an
  *    un-padded "1., 10., 2." would sort wrong. Keep the padding when adding new levels.

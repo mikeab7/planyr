@@ -21,7 +21,7 @@ test.describe("app shell smoke (logged out)", () => {
     await expect(page.getByTestId("module-tab-site-planner")).toHaveAttribute("aria-current", "page");
   });
 
-  // B645: the Library's new Folders tab mounts (logged out shows the sign-in prompt, not a crash).
+  // B650: the Library's new Folders tab mounts (logged out shows the sign-in prompt, not a crash).
   test("Library Folders tab renders the folder-tree surface", async ({ page }) => {
     await page.goto("/");
     await openModule(page, "library");

@@ -1,4 +1,4 @@
-/* FolderTree (B645) — the in-app editor for a project's standard folder tree, mirrored one-way
+/* FolderTree (B650) — the in-app editor for a project's standard folder tree, mirrored one-way
  * into Google Drive. Structure edits write straight to Supabase (instant, authoritative); after
  * each change we ask the server to reconcile the Drive mirror. A brand-new project is seeded
  * from the canonical template on first open (idempotent).

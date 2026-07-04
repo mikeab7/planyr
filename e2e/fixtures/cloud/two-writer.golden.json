@@ -1,0 +1,36 @@
+{
+  "fixtureVersion": 1,
+  "outcomes": [
+    {
+      "name": "writerA-lands",
+      "result": {
+        "ok": true,
+        "version": 8
+      },
+      "missingVersionColumn": false
+    },
+    {
+      "name": "writerB-stale-conflict",
+      "result": {
+        "ok": false,
+        "conflict": true
+      },
+      "missingVersionColumn": false
+    },
+    {
+      "name": "insert-collision",
+      "result": {
+        "ok": false,
+        "conflict": true
+      },
+      "missingVersionColumn": false
+    },
+    {
+      "name": "unmigrated-degrade",
+      "result": {
+        "degrade": true
+      },
+      "missingVersionColumn": true
+    }
+  ]
+}

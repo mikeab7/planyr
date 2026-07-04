@@ -1,0 +1,83 @@
+# BACKLOG_OPEN.md — open + verify index
+
+> **Generated from `BACKLOG.md` by `scripts/build-backlog-index.mjs` — do NOT hand-edit.**
+> One line per Open / Verify item so project-knowledge sync indexes the live open list and a
+> chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
+> in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
+> _47 open · 0 awaiting live verification._
+
+## 🔲 Open
+
+| B# | Title | Module | Tags | Verify |
+|---|---|---|---|---|
+| B650 | Per-project standard folder tree, user-editable in-app, with continuous one-way sync to Google Drive | [Doc Review / Library / storage · drive-integration / persistence] | — | — |
+| B648 | Persistence & Sync epic: one umbrella + a canonical write-path doc | [Site Planner / Persistence] | #persistence | live |
+| B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) | [Scheduler / robustness] | — | — |
+| B629 | Drive-backed county PARCEL snapshot cache so outages stop breaking the map | [Site Planner / GIS] | #site-planner #gis #drive | — |
+| B553 | Surface drawn landscaping in the yield breakdown (own line, kept pervious) | [Site Planner / yield] | #site-planner #yield | — |
+| B499 | Harden the LOAD-time self-heal for the OTHER bonded children (sidewalk / dock-zone stack / side-parking) | [Site Planner / Site Model] | #site-planner #persistence | — |
+| B495 | Schedule module: instant first paint (stale-while-revalidate local cache) | [Scheduler / perf] | #scheduler #perf #persistence | — |
+| B483 | A 100%-full localStorage boots the app signed-out (auth-token refresh write fails) | [Auth / Storage] | #auth #persistence | — |
+| B484 | Renderer freezes (~30 s main-thread stalls) during PDF title-block reading and heavy map/parcel ops | [Doc Review + Site Planner / perf] | #doc-review #site-planner #perf | — |
+| B474 | Move the Site Planner on-device cache off the 5 MB localStorage cap onto IndexedDB | [Site Planner / Persistence] | #site-planner #persistence | — |
+| B479 | Persistence "state-of-the-art" perf refactors (the deferred tail of the B485 review) | [Site Planner / Persistence] | #site-planner #persistence #perf | — |
+| B471 | Revision compare (current vs. previous version), state-of-the-art | [Doc Review / compare] | #doc-review #compare | — |
+| B423 | Shared markup/measure tool engine + Bluebeam-parity refinement loop | [Site Planner + Doc Review / Markup] | #site-planner #doc-review #markup | — |
+| B422 | Named markup Layers (show / hide / lock / rename / reorder) | [Doc Review / Markup] | #doc-review #markup | — |
+| B413 | Auto-stitch scanned, scale-less survey sheets that carry NO match-line text | [Doc Review / stitching] | #doc-review #stitching | — |
+| B411 | Auto-filing residual gaps after the multi-discipline split (B410) | [Doc Review / auto-filing] | #doc-review #filing | — |
+| B409 | Large files (>~100 MB) now upload to Drive via a browser-direct resumable path — no more silent "oversize" | [Doc Review / storage] | #doc-review #drive | — |
+| B408 | Decide &, if chosen, consolidate the Scheduler onto the main Supabase project | [Infra / Scheduler] | #infra #scheduler | — |
+| B406 | Shared team workspaces: invite by email, share a project with a team | [Site Planner + Doc Review] | #site-planner #doc-review #infra | — |
+| B370 | Migrate the remaining MAP-DISPLAY layer endpoints into the GIS source registry | [Site Planner / Platform] | #site-planner #gis | — |
+| B364 | Enable the scanned / image-only + DWG reading path for the no-text-layer minority | [Doc Review] | #doc-review #filing | — |
+| B309 | Retire client-side Mapillary token paths once the proxy lands | [Site Planner] | #site-planner #gis | — |
+| B267 | Auto-calibrate a sheet from its stated scale callout | [Doc Review / Markup] | #doc-review #markup | — |
+| B268 | Independent scale cross-check against on-sheet geometry (verify the stated scale) | [Doc Review / Markup] | #doc-review #markup | — |
+| B269 | Remove the uploaded sample drawing PDFs from GitHub (test fixtures, not for `main`) | [Doc Review / repo hygiene] | #doc-review #testing | — |
+| B273 | Filing-workflow practice: read a dropped file's title block → propose its project / discipline / sheet / date | [Doc Review / filing] | #doc-review #filing | — |
+| B255 | Collapse the duplicate indent/outdent + column-autosize functions | [Scheduler / code health] | #scheduler | — |
+| B180 | Project Files repository as a tagged-index with saved views | [Document Review / Files] | #doc-review #files | — |
+| B181 | Capture placement-readiness flags in file facts at filing time | [Document Review / Files] | #doc-review #files | — |
+| B182 | "Place on map" auto-placement cascade | [Site Planner / Files] | #site-planner #files | — |
+| B183 | Dimension-based calibration + auto-verification probe | [Site Planner / Document Review / Files] | #site-planner #doc-review #files | — |
+| B179 | Backend per-account exact tax fetch | [server] | #infra | — |
+| B178 | Combined-rate choropleth | [Site Planner] | #site-planner #gis | — |
+| B177 | Parcel tax breakdown panel | [Site Planner] | #site-planner | — |
+| B171 | Evaluate license-clean high-res imagery sources | [Site Planner] | #site-planner #gis | — |
+| B163 | Project `progress_pct` field on data model | [Site Planner] | #site-planner #persistence | — |
+| B147 | Site Analysis tool: multi-parcel constraint & context screen | [Site Planner / Site Analysis] | #site-planner #gis | — |
+| B115 | Revisit keyboard shortcuts: memorability + let the owner remap them | [Site Planner / UI] | #site-planner #ui | — |
+| B13 | Refine B11 county resolution: precise boundaries + per-area jurisdiction | [Site Planner / map] | #site-planner #gis | — |
+| B128 | Import reported 3 sites but the account total rose by 2 — confirm all imports land | [Persistence] | #persistence | — |
+| B131 | Clip a generated parking field to the parcel boundary | [Site Planner] | #site-planner | — |
+| B134 | Edits silently lost on reload; app loads a stale earlier state | [Persistence] | #persistence | — |
+| B20 | `setProjectStatus` rewrites every plan in the group via `cloudUpsert` (strips inline underlay, heavy, clobber risk) | [Document Review] | #doc-review #persistence | — |
+| B38 | SQL/RLS & data-integrity audit (mostly clean) | [Document Review / DB] | #doc-review #persistence | — |
+| B63 | Parallel-session merge safety: branch → PR → green-build gate | [repo / workflow] | #infra #testing | — |
+| B73 | Calibrate the overlay to the drawing scale (default), with optional precise alignment | [Site Planner] | #site-planner | — |
+| B95 | Jurisdiction → development-consequence summary | [Site Planner / GIS] | #site-planner #gis | — |
+
+## ⏳ Verify — awaiting live confirmation
+
+_(none)_
+
+## By tag
+
+- **#auth** — B483
+- **#compare** — B471
+- **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38
+- **#drive** — B629, B409
+- **#files** — B180, B181, B182, B183
+- **#filing** — B411, B364, B273
+- **#gis** — B629, B370, B309, B178, B171, B147, B13, B95
+- **#infra** — B408, B406, B179, B63
+- **#markup** — B423, B422, B267, B268
+- **#perf** — B495, B484, B479
+- **#persistence** — B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38
+- **#scheduler** — B495, B408, B255
+- **#site-planner** — B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95
+- **#stitching** — B413
+- **#testing** — B269, B63
+- **#ui** — B115
+- **#yield** — B553

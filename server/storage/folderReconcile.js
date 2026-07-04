@@ -1,4 +1,4 @@
-/* One-way folder-mirror reconcile planner (B645) — pure, server-side, no network.
+/* One-way folder-mirror reconcile planner (B650) — pure, server-side, no network.
  *
  * Planyr's Supabase folder index is authoritative; Google Drive is a live mirror that
  * FOLLOWS it. This module diffs the desired tree (the project_folders rows) against what was

@@ -1,4 +1,4 @@
-/* Client folder-index store (B645) — the Library's authoritative read/write of a project's
+/* Client folder-index store (B650) — the Library's authoritative read/write of a project's
  * folder tree, straight to Supabase (own-row RLS) for instant edits, plus the trigger that
  * asks the server to reconcile the Google Drive mirror.
  *

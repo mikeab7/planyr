@@ -36,6 +36,12 @@ jobs:
         run: npm run lint
       - name: GIS source registry guard (no test/non-authoritative endpoint, no inline URLs — B369)
         run: node ui-audit/gis-source-audit.mjs
+      - name: MAP.md drift guard (regenerate with `node scripts/build-map.mjs` — B637)
+        run: node scripts/build-map.mjs --check
+      - name: BACKLOG_OPEN.md drift + tag-legend guard (regenerate with `node scripts/build-backlog-index.mjs` — B638)
+        run: node scripts/build-backlog-index.mjs --check
+      - name: e2e fixture drift guard (regenerate with `node scripts/build-fixtures.mjs` — B278/B280 harness)
+        run: node scripts/build-fixtures.mjs --check
       - name: Test (pure-logic smoke tests)
         run: npm test
       - name: Build

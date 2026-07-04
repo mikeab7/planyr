@@ -29,7 +29,7 @@ export default function Library({
   // is the all-projects browse mode, and `onNavigate` writes the hash to change either.
   projectId = null, onNavigate, crossProject = false,
 } = {}) {
-  // Files (browse/drop) vs Folders (the standard tree the user edits + mirrors to Drive, B645).
+  // Files (browse/drop) vs Folders (the standard tree the user edits + mirrors to Drive, B650).
   const [tab, setTab] = useState("files");
 
   // Cloud-readiness drives whether the browser can list files (it lives in the account).

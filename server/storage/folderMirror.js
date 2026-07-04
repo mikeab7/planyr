@@ -1,4 +1,4 @@
-/* Drive folder-mirror executor (B645) — the I/O half of the one-way Planyr → Drive sync.
+/* Drive folder-mirror executor (B650) — the I/O half of the one-way Planyr → Drive sync.
  *
  * folderReconcile.js decides WHAT to do (pure); this runs it against Google Drive and writes
  * the resulting Drive ids back into the folder index. Both the Drive `client` and the Supabase

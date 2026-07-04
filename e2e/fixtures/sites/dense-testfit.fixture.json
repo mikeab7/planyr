@@ -1,0 +1,328 @@
+{
+  "fixtureVersion": 1,
+  "generator": "scripts/build-fixtures.mjs",
+  "engine": "siteModel.js (SITE_MODEL_VERSION 10)",
+  "note": "Synthetic dense industrial test-fit (no real parcel/address). Seeds e2e-fixture-testfit.",
+  "site": {
+    "schemaVersion": 10,
+    "id": "e2e-fixture-testfit",
+    "groupId": "e2e-fixture-testfit",
+    "site": "E2E Dense Test-Fit",
+    "name": "E2E Dense Test-Fit",
+    "updatedAt": 1783000000000,
+    "teamId": null,
+    "ownerId": null,
+    "scheduleProjectId": null,
+    "scheduleProjectName": null,
+    "origin": null,
+    "county": "Harris",
+    "status": "active",
+    "parcels": [
+      {
+        "id": "e2e-parcel-1",
+        "ring": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 1320,
+            "y": 0
+          },
+          {
+            "x": 1320,
+            "y": 1320
+          },
+          {
+            "x": 0,
+            "y": 1320
+          }
+        ],
+        "active": true
+      }
+    ],
+    "underlay": null,
+    "sheetOverlays": [],
+    "parcelDrawings": [],
+    "settings": {},
+    "els": [
+      {
+        "id": "e2e-bldg-1",
+        "type": "building",
+        "x": 100,
+        "y": 100,
+        "w": 600,
+        "h": 300,
+        "rot": 0
+      },
+      {
+        "id": "e2e-dogear-2",
+        "type": "building",
+        "dogEar": true,
+        "attachedTo": "e2e-bldg-1",
+        "x": 100,
+        "y": 60,
+        "w": 90,
+        "h": 40,
+        "rot": 0
+      },
+      {
+        "id": "e2e-dogear-3",
+        "type": "building",
+        "dogEar": true,
+        "attachedTo": "e2e-bldg-1",
+        "x": 220,
+        "y": 60,
+        "w": 90,
+        "h": 40,
+        "rot": 0
+      },
+      {
+        "id": "e2e-court-4",
+        "type": "truckCourt",
+        "forCourt": "e2e-bldg-1",
+        "x": 100,
+        "y": 400,
+        "w": 600,
+        "h": 185
+      },
+      {
+        "id": "e2e-parking-5",
+        "type": "parking",
+        "forTrailer": "e2e-bldg-1",
+        "x": 100,
+        "y": 585,
+        "w": 600,
+        "h": 60,
+        "stalls": 50
+      },
+      {
+        "id": "e2e-bldg-6",
+        "type": "building",
+        "x": 800,
+        "y": 100,
+        "w": 240,
+        "h": 160,
+        "rot": 0
+      },
+      {
+        "id": "e2e-dogear-7",
+        "type": "building",
+        "dogEar": true,
+        "attachedTo": "e2e-bldg-6",
+        "x": 800,
+        "y": 60,
+        "w": 90,
+        "h": 40,
+        "rot": 0
+      },
+      {
+        "id": "e2e-dogear-8",
+        "type": "building",
+        "dogEar": true,
+        "attachedTo": "e2e-bldg-6",
+        "x": 920,
+        "y": 60,
+        "w": 90,
+        "h": 40,
+        "rot": 0
+      },
+      {
+        "id": "e2e-court-9",
+        "type": "truckCourt",
+        "forCourt": "e2e-bldg-6",
+        "x": 800,
+        "y": 260,
+        "w": 240,
+        "h": 185
+      },
+      {
+        "id": "e2e-parking-10",
+        "type": "parking",
+        "forTrailer": "e2e-bldg-6",
+        "x": 800,
+        "y": 445,
+        "w": 240,
+        "h": 60,
+        "stalls": 40
+      },
+      {
+        "id": "e2e-bldg-11",
+        "type": "building",
+        "x": 1500,
+        "y": 100,
+        "w": 200,
+        "h": 120,
+        "rot": 0
+      },
+      {
+        "id": "e2e-dogear-12",
+        "type": "building",
+        "dogEar": true,
+        "attachedTo": "e2e-bldg-11",
+        "x": 1500,
+        "y": 60,
+        "w": 90,
+        "h": 40,
+        "rot": 0
+      },
+      {
+        "id": "e2e-dogear-13",
+        "type": "building",
+        "dogEar": true,
+        "attachedTo": "e2e-bldg-11",
+        "x": 1620,
+        "y": 60,
+        "w": 90,
+        "h": 40,
+        "rot": 0
+      },
+      {
+        "id": "e2e-court-14",
+        "type": "truckCourt",
+        "forCourt": "e2e-bldg-11",
+        "x": 1500,
+        "y": 220,
+        "w": 200,
+        "h": 185
+      },
+      {
+        "id": "e2e-parking-15",
+        "type": "parking",
+        "forTrailer": "e2e-bldg-11",
+        "x": 1500,
+        "y": 405,
+        "w": 200,
+        "h": 60,
+        "stalls": 48
+      },
+      {
+        "id": "e2e-setback-16",
+        "type": "line",
+        "x": 619,
+        "y": 96,
+        "w": 0,
+        "h": 0
+      },
+      {
+        "id": "e2e-setback-17",
+        "type": "line",
+        "x": 419,
+        "y": 723,
+        "w": 0,
+        "h": 0
+      },
+      {
+        "id": "e2e-setback-18",
+        "type": "line",
+        "x": 114,
+        "y": 763,
+        "w": 0,
+        "h": 0
+      },
+      {
+        "id": "e2e-setback-19",
+        "type": "line",
+        "x": 717,
+        "y": 250,
+        "w": 0,
+        "h": 0
+      },
+      {
+        "id": "e2e-setback-20",
+        "type": "line",
+        "x": 217,
+        "y": 964,
+        "w": 0,
+        "h": 0
+      },
+      {
+        "id": "e2e-setback-21",
+        "type": "line",
+        "x": 1261,
+        "y": 843,
+        "w": 0,
+        "h": 0
+      }
+    ],
+    "markups": [
+      {
+        "id": "e2e-mk-22",
+        "kind": "polyline",
+        "pts": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 100,
+            "y": 100
+          }
+        ]
+      },
+      {
+        "id": "e2e-mk-23",
+        "kind": "easement",
+        "pts": [
+          {
+            "x": 10,
+            "y": 10
+          },
+          {
+            "x": 200,
+            "y": 10
+          }
+        ]
+      }
+    ],
+    "measures": [
+      {
+        "id": "e2e-meas-24",
+        "type": "distance",
+        "pts": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 300,
+            "y": 0
+          }
+        ]
+      }
+    ],
+    "callouts": [
+      {
+        "id": "e2e-call-25",
+        "text": "E2E note",
+        "x": 50,
+        "y": 50
+      }
+    ],
+    "deletedIds": [
+      "e2e-ghost-1",
+      "e2e-ghost-2"
+    ],
+    "elevation": {
+      "crossSections": []
+    },
+    "constraints": {
+      "liveLayers": []
+    }
+  },
+  "staleOtherCopy": {
+    "els": [
+      {
+        "id": "e2e-ghost-1",
+        "type": "building",
+        "x": 0,
+        "y": 0,
+        "w": 10,
+        "h": 10
+      }
+    ],
+    "markups": [],
+    "updatedAt": 1
+  },
+  "deleteTarget": "e2e-bldg-1"
+}

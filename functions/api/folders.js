@@ -1,4 +1,4 @@
-/* /api/folders — mirror a project's folder tree into Google Drive (B645).
+/* /api/folders — mirror a project's folder tree into Google Drive (B650).
  *
  * Cloudflare Pages Function (server-side, where the Google creds live). Planyr's Supabase
  * folder index is authoritative; this endpoint pushes structural changes one-way into Drive.

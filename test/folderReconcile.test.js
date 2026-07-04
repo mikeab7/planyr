@@ -13,7 +13,7 @@ const row = (o) => ({
   driveTrashed: o.driveTrashed ?? false,
 });
 
-describe("folderReconcilePlan — creates (B645)", () => {
+describe("folderReconcilePlan — creates (B650)", () => {
   it("emits a create for every not-yet-mirrored folder, parents before children", () => {
     const rows = [
       row({ id: "c", parentId: "b", name: "leaf" }),
@@ -33,7 +33,7 @@ describe("folderReconcilePlan — creates (B645)", () => {
   });
 });
 
-describe("folderReconcilePlan — rename + move in place (B645)", () => {
+describe("folderReconcilePlan — rename + move in place (B650)", () => {
   it("renames when the label changed since last push (same Drive id)", () => {
     const rows = [
       row({ id: "a", name: "Civil (new)", driveFolderId: "d1", driveName: "Civil", driveParentId: null }),
@@ -78,7 +78,7 @@ describe("folderReconcilePlan — rename + move in place (B645)", () => {
   });
 });
 
-describe("folderReconcilePlan — trash (delete mirror) (B645)", () => {
+describe("folderReconcilePlan — trash (delete mirror) (B650)", () => {
   it("trashes only the subtree ROOT; children ride the Drive cascade", () => {
     const rows = [
       row({ id: "a", parentId: null, name: "A", trashed: true, driveFolderId: "d1", driveName: "A" }),

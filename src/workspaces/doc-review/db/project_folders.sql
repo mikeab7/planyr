@@ -1,4 +1,4 @@
--- Per-project folder tree — Planyr's authoritative folder index (B645). Run once in the
+-- Per-project folder tree — Planyr's authoritative folder index (B650). Run once in the
 -- Supabase SQL editor; idempotent + safe to re-run. Lives alongside the existing file index
 -- (project_library.sql / file_facts.sql) — this is the SAME index auto-filing routes into,
 -- not a parallel store. Private-by-default RLS, same shape as public.drive_files.

@@ -1,0 +1,60 @@
+{
+  "fixtureVersion": 1,
+  "taskCount": 119,
+  "leafCount": 111,
+  "phaseCount": 8,
+  "milestoneCount": 3,
+  "unscheduledCount": 1,
+  "predLinkCount": 103,
+  "phaseRollup": [
+    {
+      "id": 1,
+      "name": "E2E Entitlements",
+      "start": "2026-01-05",
+      "end": "2026-02-13"
+    },
+    {
+      "id": 14,
+      "name": "E2E Civil Design",
+      "start": "2026-02-13",
+      "end": "2026-08-20"
+    },
+    {
+      "id": 28,
+      "name": "E2E Utilities",
+      "start": "2026-03-30",
+      "end": "2026-04-21"
+    },
+    {
+      "id": 41,
+      "name": "E2E Grading",
+      "start": "2026-05-08",
+      "end": "2026-06-17"
+    },
+    {
+      "id": 57,
+      "name": "E2E Building Shell",
+      "start": "2026-06-19",
+      "end": "2026-07-08"
+    },
+    {
+      "id": 70,
+      "name": "E2E Sitework / Paving",
+      "start": "2026-08-04",
+      "end": "2026-09-17"
+    },
+    {
+      "id": 87,
+      "name": "E2E MEP",
+      "start": "2026-09-16",
+      "end": "2026-10-26"
+    },
+    {
+      "id": 103,
+      "name": "E2E Closeout",
+      "start": "2026-10-28",
+      "end": "2026-11-12"
+    }
+  ],
+  "exportName": "2026.07.04 E2E Dense Program - Schedule"
+}

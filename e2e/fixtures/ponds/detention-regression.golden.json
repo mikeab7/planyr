@@ -1,0 +1,57 @@
+{
+  "fixtureVersion": 1,
+  "cases": [
+    {
+      "name": "feasible-400x300-d8-s3",
+      "feasible": true,
+      "maxDepth": 49.9983,
+      "levelCount": 9,
+      "hasBottom": true,
+      "hasWater": true,
+      "areas": [
+        120000,
+        115836,
+        111744,
+        107724,
+        103776,
+        99900,
+        96096,
+        92364,
+        88704
+      ],
+      "storageVolumeCuFt": 713874
+    },
+    {
+      "name": "infeasible-200x40-d8-s4",
+      "feasible": false,
+      "maxDepth": 4.9987,
+      "levelCount": 5,
+      "hasBottom": false,
+      "hasWater": true,
+      "areas": [
+        8000,
+        6144,
+        4416,
+        2816,
+        1344
+      ],
+      "storageVolumeCuFt": 11648.76
+    },
+    {
+      "name": "interval-zero-clamp-400x400",
+      "feasible": true,
+      "maxDepth": 99.9975,
+      "levelCount": 5,
+      "hasBottom": true,
+      "hasWater": true,
+      "areas": [
+        160000,
+        153664,
+        147456,
+        141376,
+        135424
+      ],
+      "storageVolumeCuFt": 866704
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-/* Server-side reader/writer for the project_folders index (B645), backed by Supabase REST.
+/* Server-side reader/writer for the project_folders index (B650), backed by Supabase REST.
  *
  * The Drive-mirror reconcile runs in a stateless Pages Function (functions/api/folders.js) —
  * it can't hold the tree in memory between requests, so it reads the authoritative rows here

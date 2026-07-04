@@ -76,7 +76,7 @@ export function createDriveClient({ getAccessToken, fetchImpl = fetch, appRootNa
       return parent;
     },
 
-    // Create ONE folder under a known parent Drive id and return its new id (B645 folder
+    // Create ONE folder under a known parent Drive id and return its new id (B650 folder
     // mirror). Unlike folderId(), this makes an EMPTY folder eagerly — the mirror creates the
     // scaffold up front instead of waiting for a file to land. Deliberately create-not-ensure:
     // the caller owns dedup via the stored drive id, so a rename can't be mistaken for a
@@ -86,7 +86,7 @@ export function createDriveClient({ getAccessToken, fetchImpl = fetch, appRootNa
     },
 
     // Move a folder to Google Drive's trash (recoverable ~30 days) rather than a permanent
-    // delete (B645 delete-safety). Trashing a folder cascades to its contents, so trashing a
+    // delete (B650 delete-safety). Trashing a folder cascades to its contents, so trashing a
     // subtree root removes the whole subtree — and a mistaken confirmation stays recoverable.
     async trash(fileId) {
       await api("PATCH", `${DRIVE}/files/${fileId}?fields=id`, { json: { trashed: true } });

@@ -131,7 +131,7 @@ describe("driveClient — resumable upload for large files (B409)", () => {
   });
 });
 
-describe("driveClient — folder mirror ops (B645)", () => {
+describe("driveClient — folder mirror ops (B650)", () => {
   it("createSubfolder POSTs a folder under the given parent and returns its new id", async () => {
     const f = scriptedFetch([{ method: "POST", match: "/files?fields=id", json: { id: "newfolder" } }]);
     const r = await client(f).createSubfolder({ name: "05. Civil", parentFolderId: "parent1" });

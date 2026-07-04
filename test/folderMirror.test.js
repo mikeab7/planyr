@@ -44,7 +44,7 @@ describe("slugSeg", () => {
   });
 });
 
-describe("syncProjectFolders — create pass (B645)", () => {
+describe("syncProjectFolders — create pass (B650)", () => {
   it("creates a fresh nested tree parents-first, persists drive ids, then no-ops", async () => {
     const store = fakeStore([
       { id: "c", parentId: "b", name: "C" },
@@ -71,7 +71,7 @@ describe("syncProjectFolders — create pass (B645)", () => {
   });
 });
 
-describe("syncProjectFolders — rename / move / trash (B645)", () => {
+describe("syncProjectFolders — rename / move / trash (B650)", () => {
   it("renames in place on the existing Drive id", async () => {
     const store = fakeStore([
       { id: "a", parentId: null, name: "New Name", driveFolderId: "d1", driveName: "Old Name", driveParentId: null },
@@ -108,7 +108,7 @@ describe("syncProjectFolders — rename / move / trash (B645)", () => {
   });
 });
 
-describe("syncProjectFolders — robustness fixes (B645 review)", () => {
+describe("syncProjectFolders — robustness fixes (B650 review)", () => {
   it("moves an existing folder UNDER a folder created in the same sync (one pass)", async () => {
     const store = fakeStore([
       { id: "b", parentId: null, name: "B" }, // brand-new parent (a create)
@@ -141,7 +141,7 @@ describe("syncProjectFolders — robustness fixes (B645 review)", () => {
   });
 });
 
-describe("planDelete — enumerate what a delete removes (B645)", () => {
+describe("planDelete — enumerate what a delete removes (B650)", () => {
   it("lists subtree folders (from the index) + files (live from Drive)", async () => {
     const store = fakeStore([
       { id: "a", parentId: null, name: "01. Civil", driveFolderId: "d1" },

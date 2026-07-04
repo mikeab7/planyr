@@ -14,7 +14,7 @@ function recorder(responder = () => ({ ok: true, status: 200, json: async () => 
 
 const cfg = (fetchImpl) => folderStoreSupabase({ supabaseUrl: "https://x.supabase.co", anonKey: "anon", token: "tok", fetchImpl });
 
-describe("folderStoreSupabase.list (B645)", () => {
+describe("folderStoreSupabase.list (B650)", () => {
   it("GETs project_folders scoped by project and maps to the planner row shape", async () => {
     const f = recorder(() => ({ ok: true, status: 200, json: async () => [
       { id: "a", parent_id: null, name: "A", trashed: false, drive_folder_id: "d1", drive_parent_id: null, drive_name: "A", drive_trashed: false },
@@ -32,7 +32,7 @@ describe("folderStoreSupabase.list (B645)", () => {
   });
 });
 
-describe("folderStoreSupabase.updateDrive (B645) — writes drive_* only via the guarded RPC", () => {
+describe("folderStoreSupabase.updateDrive (B650) — writes drive_* only via the guarded RPC", () => {
   it("POSTs to /rpc/folder_set_drive_meta with { p_id, p_patch } and ONLY the present keys", async () => {
     const f = recorder(() => ({ ok: true, status: 204, json: async () => null }));
     const r = await cfg(f).updateDrive("row1", { driveFolderId: "d9", driveName: "Civil" });
