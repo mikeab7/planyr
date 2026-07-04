@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import FileBrowser from "./components/FileBrowser.jsx";
+import FolderTree from "./components/FolderTree.jsx";
 import { autofilingProvider } from "../doc-review/lib/autofiling.js";
 import { cloudReady } from "../doc-review/lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
@@ -28,6 +29,9 @@ export default function Library({
   // is the all-projects browse mode, and `onNavigate` writes the hash to change either.
   projectId = null, onNavigate, crossProject = false,
 } = {}) {
+  // Files (browse/drop) vs Folders (the standard tree the user edits + mirrors to Drive, B650).
+  const [tab, setTab] = useState("files");
+
   // Cloud-readiness drives whether the browser can list files (it lives in the account).
   // Re-checks on auth changes so a sign-in/out flips the surface without a reload.
   const [signedIn, setSignedIn] = useState(false);
@@ -60,17 +64,46 @@ export default function Library({
         authControl={authControl}
         accountActive={accountActive}
       />
-      <FileBrowser
-        projectId={projectId}
-        projectName={projectName}
-        signedIn={signedIn}
-        cross={crossProject}
-        indexProvider={autofilingProvider}
-        // Click a file → open it in Review (cross-workspace). The Shell intent switches the
-        // tab AND hands Review the row, which DocReview's docIntent effect consumes on mount.
-        onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
-        onNavigate={onNavigate}
-      />
+
+      {/* Files vs Folders. Folders is per-project only (a tree belongs to one project), so it
+          hides in the all-projects browse mode. */}
+      <div style={{ display: "flex", gap: 4, padding: "6px 12px 0", borderBottom: "1px solid var(--border-default)", background: "var(--surface-page)" }}>
+        <TabBtn testid="library-tab-files" active={tab === "files"} onClick={() => setTab("files")}>Files</TabBtn>
+        {!crossProject && <TabBtn testid="library-tab-folders" active={tab === "folders"} onClick={() => setTab("folders")}>Folders</TabBtn>}
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0 }}>
+        {tab === "folders" && !crossProject ? (
+          <FolderTree projectId={projectId} signedIn={signedIn} projectName={projectName} />
+        ) : (
+          <FileBrowser
+            projectId={projectId}
+            projectName={projectName}
+            signedIn={signedIn}
+            cross={crossProject}
+            indexProvider={autofilingProvider}
+            // Click a file → open it in Review (cross-workspace). The Shell intent switches the
+            // tab AND hands Review the row, which DocReview's docIntent effect consumes on mount.
+            onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
+            onNavigate={onNavigate}
+          />
+        )}
+      </div>
     </div>
+  );
+}
+
+function TabBtn({ active, onClick, children, testid }) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid={testid}
+      style={{
+        font: "inherit", fontSize: 13, fontWeight: active ? 600 : 500, padding: "6px 12px",
+        border: "none", background: "none", cursor: "pointer",
+        color: active ? "var(--accent-library-text)" : "var(--text-secondary)",
+        borderBottom: active ? "2px solid var(--accent-library)" : "2px solid transparent", marginBottom: -1,
+      }}
+    >{children}</button>
   );
 }

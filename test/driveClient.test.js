@@ -130,3 +130,25 @@ describe("driveClient — resumable upload for large files (B409)", () => {
     await expect(client(f).createResumableSession({ name: "x" })).rejects.toThrow(/no upload URI/i);
   });
 });
+
+describe("driveClient — folder mirror ops (B650)", () => {
+  it("createSubfolder POSTs a folder under the given parent and returns its new id", async () => {
+    const f = scriptedFetch([{ method: "POST", match: "/files?fields=id", json: { id: "newfolder" } }]);
+    const r = await client(f).createSubfolder({ name: "05. Civil", parentFolderId: "parent1" });
+    expect(r.id).toBe("newfolder");
+    const post = f.calls.find((c) => c.method === "POST");
+    const body = JSON.parse(post.body);
+    expect(body.name).toBe("05. Civil");
+    expect(body.mimeType).toBe("application/vnd.google-apps.folder");
+    expect(body.parents).toEqual(["parent1"]); // created under the known parent, not re-ensured by path
+  });
+
+  it("trash PATCHes trashed:true (recoverable delete, not a permanent del)", async () => {
+    const f = scriptedFetch([{ method: "PATCH", match: "/files/fid", json: { id: "fid" } }]);
+    await client(f).trash("fid");
+    const patch = f.calls.find((c) => c.method === "PATCH");
+    expect(patch).toBeTruthy();
+    expect(JSON.parse(patch.body)).toEqual({ trashed: true });
+    expect(f.calls.every((c) => c.method !== "DELETE")).toBe(true); // never a hard delete
+  });
+});

@@ -76,6 +76,22 @@ export function createDriveClient({ getAccessToken, fetchImpl = fetch, appRootNa
       return parent;
     },
 
+    // Create ONE folder under a known parent Drive id and return its new id (B650 folder
+    // mirror). Unlike folderId(), this makes an EMPTY folder eagerly — the mirror creates the
+    // scaffold up front instead of waiting for a file to land. Deliberately create-not-ensure:
+    // the caller owns dedup via the stored drive id, so a rename can't be mistaken for a
+    // second folder of the same name.
+    async createSubfolder({ name, parentFolderId }) {
+      return { id: await createFolder(name, parentFolderId || (await ensureFolder(appRootName, "root"))) };
+    },
+
+    // Move a folder to Google Drive's trash (recoverable ~30 days) rather than a permanent
+    // delete (B650 delete-safety). Trashing a folder cascades to its contents, so trashing a
+    // subtree root removes the whole subtree — and a mistaken confirmation stays recoverable.
+    async trash(fileId) {
+      await api("PATCH", `${DRIVE}/files/${fileId}?fields=id`, { json: { trashed: true } });
+    },
+
     // Multipart create (metadata + bytes in one call). `bytes` may be a Uint8Array,
     // ArrayBuffer, or Blob — Blob assembles all of them.
     async create({ bytes, contentType = "application/octet-stream", name, parentFolderId }) {
