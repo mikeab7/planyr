@@ -1,0 +1,1583 @@
+{
+  "fixtureVersion": 1,
+  "generator": "scripts/build-fixtures.mjs",
+  "engine": "ui-audit/stress/scheduler-engine.mjs (mirror of public/sequence/index.html)",
+  "note": "Synthetic dense schedule (no real project). Load into public/sequence/index.html via loadPipeline for the ~33% zoom browser spec.",
+  "project": {
+    "id": "e2e-fixture-schedule",
+    "name": "E2E Dense Program",
+    "tasks": [
+      {
+        "id": 1,
+        "name": "E2E Entitlements",
+        "parentId": null,
+        "start": "",
+        "end": "",
+        "duration": 0,
+        "predecessors": []
+      },
+      {
+        "id": 2,
+        "name": "E2E Entitlements · task 1",
+        "parentId": 1,
+        "start": "2026-01-05",
+        "duration": 10,
+        "predecessors": []
+      },
+      {
+        "id": 3,
+        "name": "E2E Entitlements · task 2",
+        "parentId": 1,
+        "start": "",
+        "duration": 8,
+        "predecessors": [
+          {
+            "id": 2,
+            "type": "FF",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "name": "E2E Entitlements · task 3",
+        "parentId": 1,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 3,
+            "type": "FS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "name": "E2E Entitlements · task 4",
+        "parentId": 1,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 4,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "name": "E2E Entitlements · task 5",
+        "parentId": 1,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 5,
+            "type": "FF",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "name": "E2E Entitlements · task 6",
+        "parentId": 1,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 6,
+            "type": "FF",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "name": "E2E Entitlements · task 7",
+        "parentId": 1,
+        "start": "2026-01-05",
+        "duration": 0,
+        "predecessors": []
+      },
+      {
+        "id": 9,
+        "name": "E2E Entitlements · task 8",
+        "parentId": 1,
+        "start": "",
+        "duration": 10,
+        "predecessors": [
+          {
+            "id": 8,
+            "type": "SS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "name": "E2E Entitlements · task 9",
+        "parentId": 1,
+        "start": "",
+        "duration": 10,
+        "predecessors": [
+          {
+            "id": 9,
+            "type": "FS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "name": "E2E Entitlements · task 10",
+        "parentId": 1,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 10,
+            "type": "SS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "name": "E2E Entitlements · task 11",
+        "parentId": 1,
+        "start": "",
+        "duration": 6,
+        "predecessors": [
+          {
+            "id": 11,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 13,
+        "name": "E2E Entitlements · task 12",
+        "parentId": 1,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 12,
+            "type": "SS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 14,
+        "name": "E2E Civil Design",
+        "parentId": null,
+        "start": "",
+        "end": "",
+        "duration": 0,
+        "predecessors": []
+      },
+      {
+        "id": 15,
+        "name": "E2E Civil Design · task 1",
+        "parentId": 14,
+        "start": "2026-02-16",
+        "duration": 4,
+        "predecessors": []
+      },
+      {
+        "id": 16,
+        "name": "E2E Civil Design · task 2",
+        "parentId": 14,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 15,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 17,
+        "name": "E2E Civil Design · task 3",
+        "parentId": 14,
+        "start": "2026-02-16",
+        "duration": 9,
+        "predecessors": []
+      },
+      {
+        "id": 18,
+        "name": "E2E Civil Design · task 4",
+        "parentId": 14,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 17,
+            "type": "FF",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 19,
+        "name": "E2E Civil Design · task 5",
+        "parentId": 14,
+        "start": "",
+        "duration": 8,
+        "predecessors": [
+          {
+            "id": 18,
+            "type": "FF",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 20,
+        "name": "E2E Civil Design · task 6",
+        "parentId": 14,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 1,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 21,
+        "name": "E2E Civil Design · task 7",
+        "parentId": 14,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 20,
+            "type": "SS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 22,
+        "name": "E2E Civil Design · task 8",
+        "parentId": 14,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 21,
+            "type": "FS",
+            "lag": 2
+          },
+          {
+            "id": 1,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 23,
+        "name": "E2E Civil Design · task 9",
+        "parentId": 14,
+        "start": "2026-02-16",
+        "duration": 3,
+        "predecessors": []
+      },
+      {
+        "id": 24,
+        "name": "E2E Civil Design · task 10",
+        "parentId": 14,
+        "start": "",
+        "duration": 5,
+        "predecessors": [
+          {
+            "id": 23,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 25,
+        "name": "E2E Civil Design · task 11",
+        "parentId": 14,
+        "start": "",
+        "duration": 8,
+        "predecessors": [
+          {
+            "id": 24,
+            "type": "FS",
+            "lag": 1
+          },
+          {
+            "id": 1,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 26,
+        "name": "E2E Civil Design · task 12",
+        "parentId": 14,
+        "start": "",
+        "duration": 6,
+        "predecessors": [
+          {
+            "id": 25,
+            "type": "FS",
+            "lag": -1
+          },
+          {
+            "id": 1,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 27,
+        "name": "E2E Civil Design · task 13",
+        "parentId": 14,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 26,
+            "type": "FF",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 28,
+        "name": "E2E Utilities",
+        "parentId": null,
+        "start": "",
+        "end": "",
+        "duration": 0,
+        "predecessors": []
+      },
+      {
+        "id": 29,
+        "name": "E2E Utilities · task 1",
+        "parentId": 28,
+        "start": "2026-03-30",
+        "duration": 8,
+        "predecessors": []
+      },
+      {
+        "id": 30,
+        "name": "E2E Utilities · task 2",
+        "parentId": 28,
+        "start": "",
+        "duration": 5,
+        "predecessors": [
+          {
+            "id": 29,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 31,
+        "name": "E2E Utilities · task 3",
+        "parentId": 28,
+        "start": "",
+        "duration": 3,
+        "predecessors": [
+          {
+            "id": 30,
+            "type": "FS",
+            "lag": -1
+          },
+          {
+            "id": 14,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 32,
+        "name": "E2E Utilities · task 4",
+        "parentId": 28,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 14,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 33,
+        "name": "E2E Utilities · task 5",
+        "parentId": 28,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 32,
+            "type": "FF",
+            "lag": 1
+          },
+          {
+            "id": 14,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 34,
+        "name": "E2E Utilities · task 6",
+        "parentId": 28,
+        "start": "2026-03-30",
+        "duration": 10,
+        "predecessors": []
+      },
+      {
+        "id": 35,
+        "name": "E2E Utilities · task 7",
+        "parentId": 28,
+        "start": "",
+        "duration": 3,
+        "predecessors": [
+          {
+            "id": 34,
+            "type": "FS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 36,
+        "name": "E2E Utilities · task 8",
+        "parentId": 28,
+        "start": "",
+        "duration": 8,
+        "predecessors": [
+          {
+            "id": 35,
+            "type": "FF",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 37,
+        "name": "E2E Utilities · task 9",
+        "parentId": 28,
+        "start": "2026-03-30",
+        "duration": 9,
+        "predecessors": []
+      },
+      {
+        "id": 38,
+        "name": "E2E Utilities · task 10",
+        "parentId": 28,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 37,
+            "type": "FS",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 39,
+        "name": "E2E Utilities · task 11",
+        "parentId": 28,
+        "start": "",
+        "duration": 6,
+        "predecessors": [
+          {
+            "id": 38,
+            "type": "FF",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 40,
+        "name": "E2E Utilities · task 12",
+        "parentId": 28,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 14,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 41,
+        "name": "E2E Grading",
+        "parentId": null,
+        "start": "",
+        "end": "",
+        "duration": 0,
+        "predecessors": []
+      },
+      {
+        "id": 42,
+        "name": "E2E Grading · task 1",
+        "parentId": 41,
+        "start": "2026-05-11",
+        "duration": 3,
+        "predecessors": []
+      },
+      {
+        "id": 43,
+        "name": "E2E Grading · task 2",
+        "parentId": 41,
+        "start": "",
+        "duration": 10,
+        "predecessors": [
+          {
+            "id": 42,
+            "type": "FS",
+            "lag": 1
+          },
+          {
+            "id": 28,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 44,
+        "name": "E2E Grading · task 3",
+        "parentId": 41,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 43,
+            "type": "SS",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 45,
+        "name": "E2E Grading · task 4",
+        "parentId": 41,
+        "start": "",
+        "duration": 3,
+        "predecessors": [
+          {
+            "id": 44,
+            "type": "SS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 46,
+        "name": "E2E Grading · task 5",
+        "parentId": 41,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 45,
+            "type": "FS",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 47,
+        "name": "E2E Grading · task 6",
+        "parentId": 41,
+        "start": "",
+        "duration": 8,
+        "predecessors": [
+          {
+            "id": 46,
+            "type": "SS",
+            "lag": 1
+          },
+          {
+            "id": 28,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 48,
+        "name": "E2E Grading · task 7",
+        "parentId": 41,
+        "start": "",
+        "duration": 5,
+        "predecessors": [
+          {
+            "id": 47,
+            "type": "FS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 49,
+        "name": "E2E Grading · task 8",
+        "parentId": 41,
+        "start": "",
+        "duration": 0,
+        "predecessors": [
+          {
+            "id": 48,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 50,
+        "name": "E2E Grading · task 9",
+        "parentId": 41,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 49,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 51,
+        "name": "E2E Grading · task 10",
+        "parentId": 41,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 50,
+            "type": "FF",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 52,
+        "name": "E2E Grading · task 11",
+        "parentId": 41,
+        "start": "",
+        "duration": 6,
+        "predecessors": [
+          {
+            "id": 51,
+            "type": "SS",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 53,
+        "name": "E2E Grading · task 12",
+        "parentId": 41,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 52,
+            "type": "SS",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 54,
+        "name": "E2E Grading · task 13",
+        "parentId": 41,
+        "start": "",
+        "duration": 8,
+        "predecessors": [
+          {
+            "id": 53,
+            "type": "FF",
+            "lag": 1
+          },
+          {
+            "id": 28,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 55,
+        "name": "E2E Grading · task 14",
+        "parentId": 41,
+        "start": "2026-05-11",
+        "duration": 6,
+        "predecessors": []
+      },
+      {
+        "id": 56,
+        "name": "E2E Grading · task 15",
+        "parentId": 41,
+        "start": "",
+        "duration": 8,
+        "predecessors": [
+          {
+            "id": 55,
+            "type": "SS",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 57,
+        "name": "E2E Building Shell",
+        "parentId": null,
+        "start": "",
+        "end": "",
+        "duration": 0,
+        "predecessors": []
+      },
+      {
+        "id": 58,
+        "name": "E2E Building Shell · task 1",
+        "parentId": 57,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 41,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 59,
+        "name": "E2E Building Shell · task 2",
+        "parentId": 57,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 58,
+            "type": "FS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 60,
+        "name": "E2E Building Shell · task 3",
+        "parentId": 57,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 59,
+            "type": "SS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 61,
+        "name": "E2E Building Shell · task 4",
+        "parentId": 57,
+        "start": "",
+        "duration": 6,
+        "predecessors": [
+          {
+            "id": 60,
+            "type": "FS",
+            "lag": 0
+          },
+          {
+            "id": 41,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 62,
+        "name": "E2E Building Shell · task 5",
+        "parentId": 57,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 61,
+            "type": "FF",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 63,
+        "name": "E2E Building Shell · task 6",
+        "parentId": 57,
+        "start": "2026-06-23",
+        "duration": 3,
+        "predecessors": []
+      },
+      {
+        "id": 64,
+        "name": "E2E Building Shell · task 7",
+        "parentId": 57,
+        "start": "",
+        "duration": 5,
+        "predecessors": [
+          {
+            "id": 63,
+            "type": "FS",
+            "lag": -1
+          },
+          {
+            "id": 41,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 65,
+        "name": "E2E Building Shell · task 8",
+        "parentId": 57,
+        "start": "2026-06-23",
+        "duration": 8,
+        "predecessors": []
+      },
+      {
+        "id": 66,
+        "name": "E2E Building Shell · task 9",
+        "parentId": 57,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 65,
+            "type": "FF",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 67,
+        "name": "E2E Building Shell · task 10",
+        "parentId": 57,
+        "start": "",
+        "duration": 6,
+        "predecessors": [
+          {
+            "id": 66,
+            "type": "SS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 68,
+        "name": "E2E Building Shell · task 11",
+        "parentId": 57,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 67,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 69,
+        "name": "E2E Building Shell · task 12",
+        "parentId": 57,
+        "start": "",
+        "duration": 3,
+        "predecessors": [
+          {
+            "id": 68,
+            "type": "FF",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 70,
+        "name": "E2E Sitework / Paving",
+        "parentId": null,
+        "start": "",
+        "end": "",
+        "duration": 0,
+        "predecessors": []
+      },
+      {
+        "id": 71,
+        "name": "E2E Sitework / Paving · task 1",
+        "parentId": 70,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 57,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 72,
+        "name": "E2E Sitework / Paving · task 2",
+        "parentId": 70,
+        "start": "",
+        "duration": 6,
+        "predecessors": [
+          {
+            "id": 71,
+            "type": "SS",
+            "lag": 1
+          },
+          {
+            "id": 57,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 73,
+        "name": "E2E Sitework / Paving · task 3",
+        "parentId": 70,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 72,
+            "type": "FF",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 74,
+        "name": "E2E Sitework / Paving · task 4",
+        "parentId": 70,
+        "start": "2026-08-04",
+        "duration": 7,
+        "predecessors": []
+      },
+      {
+        "id": 75,
+        "name": "E2E Sitework / Paving · task 5",
+        "parentId": 70,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 74,
+            "type": "FS",
+            "lag": 0
+          },
+          {
+            "id": 57,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 76,
+        "name": "E2E Sitework / Paving · task 6",
+        "parentId": 70,
+        "start": "",
+        "duration": 3,
+        "predecessors": [
+          {
+            "id": 75,
+            "type": "FF",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 77,
+        "name": "E2E Sitework / Paving · task 7",
+        "parentId": 70,
+        "start": "2026-08-04",
+        "duration": 3,
+        "predecessors": []
+      },
+      {
+        "id": 78,
+        "name": "E2E Sitework / Paving · task 8",
+        "parentId": 70,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 77,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 79,
+        "name": "E2E Sitework / Paving · task 9",
+        "parentId": 70,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 78,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 80,
+        "name": "E2E Sitework / Paving · task 10",
+        "parentId": 70,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 79,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 81,
+        "name": "E2E Sitework / Paving · task 11",
+        "parentId": 70,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 80,
+            "type": "FS",
+            "lag": 0
+          },
+          {
+            "id": 57,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 82,
+        "name": "E2E Sitework / Paving · task 12",
+        "parentId": 70,
+        "start": "",
+        "duration": 3,
+        "predecessors": [
+          {
+            "id": 81,
+            "type": "SS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 83,
+        "name": "E2E Sitework / Paving · task 13",
+        "parentId": 70,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 57,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 84,
+        "name": "E2E Sitework / Paving · task 14",
+        "parentId": 70,
+        "start": "",
+        "duration": 6,
+        "predecessors": [
+          {
+            "id": 83,
+            "type": "FS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 85,
+        "name": "E2E Sitework / Paving · task 15",
+        "parentId": 70,
+        "start": "",
+        "duration": 10,
+        "predecessors": [
+          {
+            "id": 84,
+            "type": "FF",
+            "lag": -1
+          },
+          {
+            "id": 57,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 86,
+        "name": "E2E Sitework / Paving · task 16",
+        "parentId": 70,
+        "start": "2026-08-04",
+        "duration": 8,
+        "predecessors": []
+      },
+      {
+        "id": 87,
+        "name": "E2E MEP",
+        "parentId": null,
+        "start": "",
+        "end": "",
+        "duration": 0,
+        "predecessors": []
+      },
+      {
+        "id": 88,
+        "name": "E2E MEP · task 1",
+        "parentId": 87,
+        "start": "2026-09-16",
+        "duration": 7,
+        "predecessors": []
+      },
+      {
+        "id": 89,
+        "name": "E2E MEP · task 2",
+        "parentId": 87,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 88,
+            "type": "FF",
+            "lag": 2
+          },
+          {
+            "id": 70,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 90,
+        "name": "E2E MEP · task 3",
+        "parentId": 87,
+        "start": "",
+        "duration": 8,
+        "predecessors": [
+          {
+            "id": 89,
+            "type": "FF",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 91,
+        "name": "E2E MEP · task 4",
+        "parentId": 87,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 90,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 92,
+        "name": "E2E MEP · task 5",
+        "parentId": 87,
+        "start": "",
+        "duration": 8,
+        "predecessors": [
+          {
+            "id": 91,
+            "type": "FS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 93,
+        "name": "E2E MEP · task 6",
+        "parentId": 87,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 92,
+            "type": "SS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 94,
+        "name": "E2E MEP · task 7",
+        "parentId": 87,
+        "start": "2026-09-16",
+        "duration": 4,
+        "predecessors": []
+      },
+      {
+        "id": 95,
+        "name": "E2E MEP · task 8",
+        "parentId": 87,
+        "start": "",
+        "duration": 0,
+        "predecessors": [
+          {
+            "id": 94,
+            "type": "SS",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 96,
+        "name": "E2E MEP · task 9",
+        "parentId": 87,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 95,
+            "type": "FS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 97,
+        "name": "E2E MEP · task 10",
+        "parentId": 87,
+        "start": "2026-09-16",
+        "duration": 5,
+        "predecessors": []
+      },
+      {
+        "id": 98,
+        "name": "E2E MEP · task 11",
+        "parentId": 87,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 97,
+            "type": "FF",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 99,
+        "name": "E2E MEP · task 12",
+        "parentId": 87,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 98,
+            "type": "SS",
+            "lag": -1
+          }
+        ]
+      },
+      {
+        "id": 100,
+        "name": "E2E MEP · task 13",
+        "parentId": 87,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 99,
+            "type": "FS",
+            "lag": 0
+          },
+          {
+            "id": 70,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 101,
+        "name": "E2E MEP · task 14",
+        "parentId": 87,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 100,
+            "type": "SS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 102,
+        "name": "E2E MEP · task 15",
+        "parentId": 87,
+        "start": "2026-09-16",
+        "duration": 3,
+        "predecessors": []
+      },
+      {
+        "id": 103,
+        "name": "E2E Closeout",
+        "parentId": null,
+        "start": "",
+        "end": "",
+        "duration": 0,
+        "predecessors": []
+      },
+      {
+        "id": 104,
+        "name": "E2E Closeout · task 1",
+        "parentId": 103,
+        "start": "2026-10-28",
+        "duration": 2,
+        "predecessors": []
+      },
+      {
+        "id": 105,
+        "name": "E2E Closeout · task 2",
+        "parentId": 103,
+        "start": "2026-10-28",
+        "duration": 3,
+        "predecessors": []
+      },
+      {
+        "id": 106,
+        "name": "E2E Closeout · task 3",
+        "parentId": 103,
+        "start": "2026-10-28",
+        "duration": 4,
+        "predecessors": []
+      },
+      {
+        "id": 107,
+        "name": "E2E Closeout · task 4",
+        "parentId": 103,
+        "start": "",
+        "duration": 7,
+        "predecessors": [
+          {
+            "id": 106,
+            "type": "FS",
+            "lag": 1
+          },
+          {
+            "id": 87,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 108,
+        "name": "E2E Closeout · task 5",
+        "parentId": 103,
+        "start": "2026-10-28",
+        "duration": 3,
+        "predecessors": []
+      },
+      {
+        "id": 109,
+        "name": "E2E Closeout · task 6",
+        "parentId": 103,
+        "start": "",
+        "duration": 5,
+        "predecessors": [
+          {
+            "id": 108,
+            "type": "FS",
+            "lag": 1
+          },
+          {
+            "id": 87,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 110,
+        "name": "E2E Closeout · task 7",
+        "parentId": 103,
+        "start": "",
+        "duration": 9,
+        "predecessors": [
+          {
+            "id": 87,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 111,
+        "name": "E2E Closeout · task 8",
+        "parentId": 103,
+        "start": "",
+        "duration": 4,
+        "predecessors": [
+          {
+            "id": 110,
+            "type": "SS",
+            "lag": 1
+          }
+        ]
+      },
+      {
+        "id": 112,
+        "name": "E2E Closeout · task 9",
+        "parentId": 103,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 111,
+            "type": "FF",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 113,
+        "name": "E2E Closeout · task 10",
+        "parentId": 103,
+        "start": "2026-10-28",
+        "duration": 4,
+        "predecessors": []
+      },
+      {
+        "id": 114,
+        "name": "E2E Closeout · task 11",
+        "parentId": 103,
+        "start": "",
+        "duration": 3,
+        "predecessors": [
+          {
+            "id": 113,
+            "type": "FF",
+            "lag": 2
+          }
+        ]
+      },
+      {
+        "id": 115,
+        "name": "E2E Closeout · task 12",
+        "parentId": 103,
+        "start": "",
+        "duration": 10,
+        "predecessors": [
+          {
+            "id": 87,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 116,
+        "name": "E2E Closeout · task 13",
+        "parentId": 103,
+        "start": "2026-10-28",
+        "duration": 8,
+        "predecessors": []
+      },
+      {
+        "id": 117,
+        "name": "E2E Closeout · task 14",
+        "parentId": 103,
+        "start": "",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 87,
+            "type": "FS",
+            "lag": 0
+          }
+        ]
+      },
+      {
+        "id": 118,
+        "name": "E2E Unscheduled (blank start)",
+        "parentId": 1,
+        "start": "",
+        "end": "",
+        "duration": 3,
+        "predecessors": []
+      },
+      {
+        "id": 119,
+        "name": "E2E Backward link",
+        "parentId": 14,
+        "start": "2026-01-06",
+        "duration": 2,
+        "predecessors": [
+          {
+            "id": 79,
+            "type": "SF",
+            "lag": 0
+          }
+        ]
+      }
+    ]
+  },
+  "settings": {
+    "workingWeek": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "barLabels": true
+  }
+}

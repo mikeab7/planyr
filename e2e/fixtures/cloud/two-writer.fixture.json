@@ -1,0 +1,40 @@
+{
+  "fixtureVersion": 1,
+  "generator": "scripts/build-fixtures.mjs",
+  "engine": "optimisticUpsert.js",
+  "note": "Synthetic two-writer race over one row at version N. writerA lands, writerB (stale) must conflict, un-migrated DB degrades.",
+  "baseVersion": 7,
+  "scenarios": [
+    {
+      "name": "writerA-lands",
+      "rows": [
+        {
+          "version": 8
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "writerB-stale-conflict",
+      "rows": [],
+      "error": null
+    },
+    {
+      "name": "insert-collision",
+      "kind": "insert",
+      "rows": [],
+      "error": {
+        "code": "23505",
+        "message": "duplicate key value violates unique constraint"
+      }
+    },
+    {
+      "name": "unmigrated-degrade",
+      "rows": [],
+      "error": {
+        "code": "42703",
+        "message": "column \"version\" does not exist"
+      }
+    }
+  ]
+}

@@ -153,6 +153,22 @@ export function pondContours(ring, det = {}, opts = {}) {
 // the water ring to the TOP and the bottom ring to the BOTTOM keeps the two callouts apart and
 // reads intuitively (water surface high, floor low), clear of the centred pond name. Returns
 // {x,y} (world feet) or null.
+
+// Average-end-area storage volume (cubic feet) of a staged pond from its contour `levels`
+// (the `pondContours(...).levels` array). Volume between two successive contour levels = the mean
+// of their plan areas × the vertical step between them, summed from top-of-bank down to the deepest
+// emitted level. Pure over the ENGINE-captured areas (clipper round-joins mean a level's area is not
+// the raw rectangle formula), so a fixture golden computed from this is a deterministic
+// "known geometry → known volume" — the detention regression the B278/B280 harness exercises.
+export function pondStorageVolume(levels) {
+  const ls = (Array.isArray(levels) ? levels : [])
+    .filter((l) => l && isFinite(l.down) && isFinite(l.area))
+    .sort((a, b) => a.down - b.down);
+  let vol = 0;
+  for (let i = 1; i < ls.length; i++) vol += ((ls[i].area + ls[i - 1].area) / 2) * (ls[i].down - ls[i - 1].down);
+  return vol;
+}
+
 export function contourLabelPoint(contourRing, anchor = "top") {
   if (!Array.isArray(contourRing) || contourRing.length < 3) return null;
   const c = ringCentroidAvg(contourRing);

@@ -1,0 +1,85 @@
+{
+  "fixtureVersion": 1,
+  "generator": "scripts/build-fixtures.mjs",
+  "seededAccount": "e2e@planyr.test",
+  "note": "Versioned SYNTHETIC fixture set for the B278/B280/B281 harness. No real client data — every fixture is generated deterministically (fixed PRNG seed, fixed dates) and scrubbed to 'E2E …' placeholders. Regenerate fixtures + goldens with `node scripts/build-fixtures.mjs`; CI runs `--check` to fail on drift. The dense-testfit site is additionally seedable into the e2e account via e2e/seed/seed-fixtures.sql (id e2e-fixture-testfit).",
+  "fixtures": [
+    {
+      "name": "detention-pond-regression",
+      "fixture": "ponds/detention-regression.fixture.json",
+      "golden": "ponds/detention-regression.golden.json",
+      "kind": "pure-geometry",
+      "engine": "src/workspaces/site-planner/lib/pondGeom.js (pondContours + pondStorageVolume)",
+      "repro": "Goose-Creek-class detention: known geometry -> engine-captured contour areas + storage volume."
+    },
+    {
+      "name": "dense-gantt-project",
+      "fixture": "schedules/dense-project.fixture.json",
+      "golden": "schedules/dense-project.golden.json",
+      "kind": "scheduler-project",
+      "engine": "ui-audit/stress/scheduler-engine.mjs (mirror of public/sequence/index.html) + buildGanttSVG (browser)",
+      "repro": "Pappadoupolos-scale dense schedule (~119 tasks / ~103 deps), exercised at ~33% zoom in the browser spec."
+    },
+    {
+      "name": "dense-site-testfit",
+      "fixture": "sites/dense-testfit.fixture.json",
+      "golden": "sites/dense-testfit.golden.json",
+      "kind": "site-model",
+      "engine": "src/workspaces/site-planner/lib/siteModel.js (createSiteModel / mergeSiteContent)",
+      "seedsDbId": "e2e-fixture-testfit",
+      "repro": "Dense industrial test-fit: building + bonded children + truck courts + bump-outs + parking; tombstone-delete + merge-no-resurrect."
+    },
+    {
+      "name": "concurrency-two-writer",
+      "fixture": "cloud/two-writer.fixture.json",
+      "golden": "cloud/two-writer.golden.json",
+      "kind": "cloud-cas-scenario",
+      "engine": "src/shared/cloud/optimisticUpsert.js (interpretCas / interpretInsert / isMissingVersionColumn)",
+      "repro": "Two writers over one row: stale writer must conflict (no silent clobber); un-migrated DB degrades."
+    }
+  ],
+  "liveVerifyCoverage": [
+    {
+      "class": "PDF/export parity",
+      "specs": ["e2e/gantt-density.spec.js", "test/scheduleDensityFixture.test.js"],
+      "fixture": "dense-gantt-project",
+      "sandbox": "test/scheduleDensityFixture.test.js (engine rollup/exportName parity)",
+      "live": "e2e/gantt-density.spec.js (on-screen GanttView vs print buildGanttSVG glyph parity)"
+    },
+    {
+      "class": "zoom- or data-density-dependent rendering",
+      "specs": ["e2e/gantt-density.spec.js", "e2e/site-testfit.spec.js"],
+      "fixture": "dense-gantt-project + dense-site-testfit",
+      "sandbox": null,
+      "live": "e2e/gantt-density.spec.js (~33% zoom, no NaN arrow endpoints, no label overlap) + e2e/site-testfit.spec.js (dense canvas renders, no pageerror)"
+    },
+    {
+      "class": "real-project-data repros",
+      "specs": ["test/pondVolumeFixture.test.js", "test/siteFitFixture.test.js"],
+      "fixture": "detention-pond-regression + dense-site-testfit",
+      "sandbox": "test/pondVolumeFixture.test.js (detention volume) + test/siteFitFixture.test.js (yield/tombstone)",
+      "live": null
+    },
+    {
+      "class": "concurrency / multi-writer",
+      "specs": ["test/twoWriterFixture.test.js", "VERIFICATION.md:V204"],
+      "fixture": "concurrency-two-writer",
+      "sandbox": "test/twoWriterFixture.test.js (CAS conflict + degrade)",
+      "live": "VERIFICATION.md V204 — genuine two-signed-in-tabs race on planyr.io"
+    },
+    {
+      "class": "timing / race bugs",
+      "specs": ["test/scheduleDensityFixture.test.js", "VERIFICATION.md:V205"],
+      "fixture": "dense-gantt-project",
+      "sandbox": "test/scheduleDensityFixture.test.js (hostile rows never throw/hang — addBD cap, cycle-break)",
+      "live": "VERIFICATION.md V205 — post-sign-in cloud-on toast racing the module tabs"
+    },
+    {
+      "class": "GIS endpoint behavior",
+      "specs": ["test/coverage.test.js", "test/gisFetch.test.js", ".github/workflows/gis-drift.yml"],
+      "fixture": "reuses the existing coverage.test.js published-extent fixtures (no new client data)",
+      "sandbox": "test/coverage.test.js + test/gisFetch.test.js (error taxonomy + reproject-intersect math)",
+      "live": ".github/workflows/gis-drift.yml (scheduled live host-liveness probe)"
+    }
+  ]
+}

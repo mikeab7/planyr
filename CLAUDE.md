@@ -27,6 +27,18 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > This is machine-enforced: `node ui-audit/doc-pointer-audit.mjs` (in the `/improve` gate +
 > `test/docPointers.test.js`) fails CI if a pointer names a code file that no longer exists.
 > Keep pointers short — signposts, never duplicated detail — so they don't drift.
+>
+> **🗺 Two generated, committed indexes save you from cold-searching — regenerate each in the SAME
+> commit that changes its inputs (machine-enforced, like the pointers).**
+> - **`MAP.md`** (repo root) — every source file → its module owner, one-line responsibility, and
+>   exported symbols. **Grep `MAP.md` to find a path or symbol** instead of sweeping `src/`. Regenerate
+>   with `node scripts/build-map.mjs` whenever you add/remove/rename a file or change a primary export;
+>   `--check` fails CI on drift (`test/mapDrift.test.js`). Descriptions are preserved across regens; a
+>   new file arrives as `TODO — describe` and the check stays red until you fill in its one-liner.
+> - **`BACKLOG_OPEN.md`** (repo root) — one line per Open / ⏳ Verify item (B#, title, module, `#tags`,
+>   Verify status) + a by-tag rollup so a theme's members are visible at a glance. Regenerate with
+>   `node scripts/build-backlog-index.mjs` in the same commit as any `BACKLOG.md` edit; `--check` fails
+>   CI on drift (`test/backlogIndex.test.js`).
 
 > **⛔ STANDING RULE #1 — when Michael drops in a problem, FIX IT AND SHIP IT this session. Never log-and-defer.**
 > A bug report or change request = **fix it, verify it, and merge it live this same session.** Parking it in
@@ -53,6 +65,16 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > session — never mark it done in place** (marking-done-in-place is exactly what bloated this file). The next
 > B# = highest `B#` across **both** files + 1. (Product backlog; distinct from the "Deferred / maintenance
 > backlog" near the end of this file.)
+>
+> **⏳ THREE-STATE LIFECYCLE (B636): items move 🔲 Open → ⏳ Verify → ✅ Done, not straight to Done.** A
+> `Verify: sandbox` item (green build + the right unit/headless self-test proves it) goes straight to Done. A
+> **`Verify: live`** item — the **LIVE-VERIFY** classes: timing/race, concurrency / multi-writer, GIS endpoint
+> behavior, zoom-/data-density-dependent rendering, PDF/export parity, or a real-project-data repro — is
+> implemented this session but then **parks in the new `## ⏳ Verify` section** (with a matching `V###` in
+> `VERIFICATION.md`) until a live check confirms it; moving it straight to Done is a protocol violation. A
+> **recurring** report re-opens the ORIGINAL `B#` (`Recurrence:` line + `(×N)` in the title) — never a new
+> number (**DEDUPE-FIRST**). Every item carries a `Verify:` field and one or more `#tags` from the legend at
+> the top of `BACKLOG.md`.
 >
 > **🔍 `VERIFICATION.md` = the live-browser test checklist — KEEP IT LEAN too.** Every run, scan it and
 > **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the environment — see
@@ -224,6 +246,51 @@ server/                   # placeholder README only — NOT built or deployed; b
   Actions concern.)
 - End commit messages with the session link the harness provides. Don't include the
   model identifier in commits/PRs/code.
+
+## Engineering rules (invoke by name) + Definition of Done (B640)
+
+A chat brief may reference any rule below **by name** ("apply PDF-PARITY, LOUD-FAILURE") — treat a
+named rule as if its full text were pasted into the brief. This is the **session contract**: named
+rules are binding shorthand, not optional style. (Full-text home so briefs stay short.)
+
+### Named rules
+- **LOUD-FAILURE** — No silent failure path. Every write / fetch / parse that can fail must surface the
+  failure visibly (a banner, a telemetry event, a thrown error) — never a silent no-op or a swallowed
+  `catch` that reads as success. When in doubt, crash loudly over degrading quietly. (The B209 / B595 /
+  B610 class: a "saved ✓" that didn't save is exactly the bug this rule exists to prevent.)
+- **AUDIT-FIRST** — Before patching, instrument and reconcile the prior `B#` claims against the ACTUAL
+  code. Build understanding from what the code does now, not from what a comment / backlog note says it
+  does. Where they disagree, record the code reality and **flag the discrepancy**. (Stops you "fixing" a
+  bug a prior B# already fixed, or trusting a stale claim.)
+- **PDF-PARITY** — Any change to an on-screen render must be mirrored and verified in the export / print
+  path, and vice-versa; the two must not drift. Scheduler `GanttView` ↔ `buildGanttSVG`
+  (`public/sequence/index.html`); the Site Planner canvas ↔ its PDF / print export pipeline. A render fix
+  that skips the export path is half-done. (This is a mandatory **LIVE-VERIFY** class.)
+- **MODULE-SCOPE-COMPONENTS** — Define React components at module scope, **never inside another
+  component's render body**. An inner-defined component is a brand-new type every render → React
+  remounts it → focus loss, lost input state, thrashing. (The remount / focus-loss regression class.)
+- **DEDUPE-FIRST** — Search **Open, ⏳ Verify, AND Done** (`^### B` headings + `#tags` + symbols; grep
+  `BACKLOG_OPEN.md` for the live set) before minting a `B#`. A matching prior item gets the recurrence
+  treatment (back to Open, `Recurrence:` line, `(×N)` title) — never a fresh number.
+- **TOMBSTONE-DELETES** — Every removal path records tombstones for its **FULL cascade set** before the
+  next flush, so a merge / sync can't resurrect the deleted item (or raise a false "changed in another
+  session" conflict). Applies to every delete handler, not just the obvious one. (B276 / B556 / B596 / B612.)
+- **LIVE-VERIFY** — These classes can only be *confirmed* live, so they file `Verify: live` and park in
+  `## ⏳ Verify` until seen working: timing / race bugs · concurrency / multi-writer · GIS endpoint
+  behavior · zoom- or data-density-dependent rendering · PDF / export parity · anything whose repro
+  cites real project data. Each class maps to ≥1 e2e harness spec (`e2e/`, B278/B280/B281) so the manual
+  live gate shrinks over time.
+
+### Definition of Done (every item)
+1. **Implemented** — the whole job, including the hard / real part (STANDING RULE #1). No diagnosis-only.
+2. **Unit tests** for any pure library touched.
+3. Every **applicable named rule** above is satisfied.
+4. `BACKLOG.md` updated **and** `BACKLOG_OPEN.md` regenerated (`node scripts/build-backlog-index.mjs`).
+5. `MAP.md` regenerated (`node scripts/build-map.mjs`) **if** files were added / removed / renamed or a
+   primary export changed.
+6. The `Verify:` field is honoured — a sandbox note appended (→ Done), or the item parked in `## ⏳ Verify`
+   with the pending live steps **and** a `V###` logged in `VERIFICATION.md`.
+7. **Committed and merged** ("commit" = shipped live via PR + merge — see Workflow & deploy).
 
 ## What's already built — see `docs/SHIPPED.md`
 
