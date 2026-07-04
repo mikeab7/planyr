@@ -45,6 +45,31 @@ export function sourceCooldownMs(key, now = Date.now()) {
   return s && s.openUntil > now ? s.openUntil - now : 0;
 }
 
+/* Decide whether a statewide (TxGIO) answer genuinely stood in for an UNAVAILABLE
+ * county CAD — the only case the honest "statewide backup" badge should fire (B244/B630).
+ *
+ * The click path races the county CAD and the statewide layer IN PARALLEL and takes the
+ * FIRST to answer (identifyParcelEager). So a statewide hit can mean either (a) the
+ * county's own server was skipped/failed and TxGIO truly stood in [a real backup], or
+ * (b) the county server is perfectly healthy and WAS queried, but statewide merely WON
+ * THE RACE [NOT a backup]. Keying the badge off "the winner was statewide" alone cried
+ * "Fort Bend county's server is unavailable" on every healthy Fort Bend click, because
+ * FBCAD's Esri layer is a touch slower than TxGIO's identify (B630). The honest signal is
+ * the county CAD's own availability: a backup only when NO real CAD for this point was
+ * healthy enough to be queried (all had their breaker open and were dropped), so TxGIO was
+ * the only source left to answer.
+ *
+ * `hitCounty` — the answering source's key. `realPrimaries` — the real-CAD candidates that
+ * COULD cover this point (pre-breaker-filter). `queried` — the candidates actually queried
+ * this click (post-filter). Both are arrays of `{ county }`. `statewideKeys` — the statewide
+ * source keys. Pure. */
+export function isStatewideBackup(hitCounty, { realPrimaries = [], queried = [], statewideKeys = [] } = {}) {
+  const isStatewide = (k) => statewideKeys.includes(k);
+  if (!isStatewide(hitCounty)) return false;             // a real CAD answered directly — not a backup
+  if (!realPrimaries.length) return false;               // area is statewide-only — a plain answer, not a "backup"
+  return !queried.some((c) => !isStatewide(c.county));   // backup ⇔ no real CAD was queryable this click
+}
+
 /* Drop candidates whose breaker is open — EXCEPT any key in `alwaysKeep` (the
  * statewide fallback), which must never be filtered out or a click could lose all
  * coverage. Returns a new array, order preserved. Each candidate is { county, ... }. */

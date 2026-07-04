@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickMarkup, pickMarkupIndex, hitEditPath, hitMarkup } from "../src/shared/markup/hitTest.js";
+import { pickMarkup, pickMarkupIndex, hitEditPath, hitMarkup, scoreMarkup } from "../src/shared/markup/hitTest.js";
 
 /* B423 / B155 — the shared hit-test. Tolerances are screen px ÷ view.scale; tests use
  * scale 1 so px == world units for legibility. Markups are seeded in BOTH host forms:
@@ -50,11 +50,58 @@ describe("hitMarkup — per-kind rules", () => {
   });
 });
 
-describe("pickMarkup — top-most wins", () => {
-  it("returns the LAST drawn markup when two overlap", () => {
+describe("scoreMarkup — distance + interior flag (the reference feel)", () => {
+  it("reports an interior grab as distance 0", () => {
+    expect(scoreMarkup(sq, { x: 50, y: 50 }, 6, 10)).toMatchObject({ d: 0, interior: true });
+  });
+  it("reports an outline hit with its real distance and returns null beyond tolerance", () => {
+    const s = scoreMarkup(openLine, { x: 50, y: 4 }, 6, 10);
+    expect(s.interior).toBe(false);
+    expect(s.d).toBeCloseTo(4, 6);
+    expect(scoreMarkup(openLine, { x: 50, y: 40 }, 6, 10)).toBe(null);
+  });
+  it("hits the full text BOX (needs scale), not just the anchor point", () => {
+    // "hello world" is 11 chars → box ≈ (11*6.5+6)=77.5 wide from x-2; far end is selectable.
+    const longNote = { id: "t", kind: "text", pts: [{ x: 200, y: 200 }], text: "hello world" };
+    expect(scoreMarkup(longNote, { x: 260, y: 200 }, 6, 10, 1)).toMatchObject({ d: 0, interior: true });
+    // with no scale it degrades to the anchor + markerTol (far end then misses)
+    expect(scoreMarkup(longNote, { x: 260, y: 200 }, 6, 10, 0)).toBe(null);
+  });
+  it("hits a callout on its text-box body AND its leader line", () => {
+    const call = { id: "co", kind: "callout", pts: [{ x: 300, y: 300 }, { x: 400, y: 350 }], text: "hi" };
+    expect(scoreMarkup(call, { x: 430, y: 360 }, 6, 10, 1)).toMatchObject({ d: 0, interior: true }); // body box
+    const leader = scoreMarkup(call, { x: 350, y: 325 }, 6, 10, 1); // midpoint of the leader
+    expect(leader).not.toBe(null);
+    expect(leader.interior).toBe(false);
+    expect(scoreMarkup(call, { x: 300, y: 250 }, 6, 10, 1)).toBe(null); // nowhere near either
+  });
+  it("gives a closed perimeter loop an interior grab (a closed shape selects from inside)", () => {
+    const perim = { id: "pm", kind: "perimeter", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }] };
+    expect(scoreMarkup(perim, { x: 50, y: 50 }, 6, 10)).toMatchObject({ d: 0, interior: true });
+  });
+});
+
+describe("pickMarkup — nearest, then smallest-area, then top-most", () => {
+  it("returns the smaller shape when two overlap (top-most is smaller here)", () => {
     const under = { id: "under", kind: "area", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }] };
     const over = { id: "over", kind: "area", pts: [{ x: 40, y: 40 }, { x: 60, y: 40 }, { x: 60, y: 60 }, { x: 40, y: 60 }] };
     expect(pickMarkup([under, over], { x: 50, y: 50 }, view).id).toBe("over");
+  });
+  it("SMALLEST-area wins even when the small shape is UNDERNEATH the big one (B374)", () => {
+    // small drawn FIRST (bottom), big unfilled-style area drawn OVER it. A click in the overlap
+    // must still grab the small one, not be swallowed by the big shape painted on top.
+    const small = { id: "small", kind: "area", pts: [{ x: 40, y: 40 }, { x: 60, y: 40 }, { x: 60, y: 60 }, { x: 40, y: 60 }] };
+    const big = { id: "big", kind: "area", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }] };
+    expect(pickMarkup([small, big], { x: 50, y: 50 }, view).id).toBe("small");
+  });
+  it("an exact tie (same distance + same area) goes to the top-most / last-drawn", () => {
+    const a1 = { id: "a1", kind: "area", pts: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }] };
+    const a2 = { id: "a2", kind: "area", pts: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }] };
+    expect(pickMarkup([a1, a2], { x: 10, y: 10 }, view).id).toBe("a2");
+  });
+  it("honours a tolerance override (Document Review selects within 10 px, not the 6 px default)", () => {
+    expect(pickMarkup([openLine], { x: 50, y: 8 }, view)).toBe(null);                    // 8 px off, default 6 px → miss
+    expect(pickMarkup([openLine], { x: 50, y: 8 }, view, { tolPx: 10 }).id).toBe("b");    // within 10 px → hit
   });
   it("returns null when nothing is under the point; index variant returns -1", () => {
     expect(pickMarkup([sq, openLine], { x: 999, y: 999 }, view)).toBe(null);

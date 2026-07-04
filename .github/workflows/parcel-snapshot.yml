@@ -1,0 +1,94 @@
+name: Parcel snapshot cache
+
+# Nightly builder for the county PARCEL snapshot cache (B629). Pages each in-scope county's whole
+# parcel set from a reachable source, shrinks + gzips it, validates a minimum parcel count, and
+# uploads it to the shared Planyr/parcelcache Google Drive folder that functions/api/parcel-cache
+# serves — so a lot still draws + selects in the app when the county's live GIS server is down.
+#
+# Keep-last-good by construction: a county whose source is down / fails its min-count is skipped
+# (the existing Drive snapshot stays in place) and the job exits non-zero → a single @claude
+# "parcel-snapshot" issue is opened/bumped so a broken source URL gets fixed. The app is never
+# affected by a failed build — with no fresh snapshot it simply keeps using the live source.
+#
+# Runs from main only (scheduled workflows always do). Trigger manually via Actions → Run workflow.
+#
+# REQUIRES repo Actions secrets (same values as the Cloudflare Pages env — do NOT re-mint the
+# refresh token): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN.
+on:
+  schedule:
+    - cron: "0 8 * * *" # 08:00 UTC nightly (~2-3am US Central) — parcels change slowly
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+      PLANYR_STORAGE_BACKEND: drive
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build + upload parcel snapshots
+        id: build
+        run: |
+          set +e
+          node scripts/build-parcel-snapshot.mjs > parcel-snapshot-report.txt 2>&1
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          echo "--- report ---"
+          cat parcel-snapshot-report.txt
+      - name: Open or bump a @claude issue on failure
+        if: steps.build.outputs.code != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const owner = context.repo.owner, repo = context.repo.repo;
+            let report = "";
+            try { report = fs.readFileSync("parcel-snapshot-report.txt", "utf8"); } catch (_) {}
+            if (report.length > 5000) report = report.slice(-5000);
+            const body = [
+              "@claude — the nightly **parcel snapshot** build failed for one or more counties (B629).",
+              "A build source URL likely moved/renamed, went query-disabled, or returned too few parcels",
+              "(a silently county-clipped/empty pull — the last-good Drive copy was KEPT, so the app is",
+              "unaffected and still uses the live source).",
+              "",
+              "Please check the SOURCES urls in `scripts/build-parcel-snapshot.mjs` (esp. the Chambers/",
+              "Waller TNRIS StratMap mirror) and re-run: Actions → Parcel snapshot cache → Run workflow.",
+              "",
+              "```",
+              report.trim() || "(no report captured)",
+              "```",
+            ].join("\n");
+            const { data: open } = await github.rest.issues.listForRepo({ owner, repo, state: "open", labels: "parcel-snapshot", per_page: 1 });
+            if (open.length) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: open[0].number, body: "⏰ Still failing —\n\n" + body });
+              core.info(`Bumped existing issue #${open[0].number}`);
+            } else {
+              const { data: created } = await github.rest.issues.create({ owner, repo, title: "🗺️ Parcel snapshot build failed", labels: ["parcel-snapshot"], body });
+              core.info(`Opened issue #${created.number}`);
+            }
+      - name: Close the issue when green
+        if: steps.build.outputs.code == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner, repo = context.repo.repo;
+            const { data: open } = await github.rest.issues.listForRepo({ owner, repo, state: "open", labels: "parcel-snapshot", per_page: 10 });
+            for (const iss of open) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: iss.number, body: "✅ Parcel snapshots built + uploaded successfully — closing." });
+              await github.rest.issues.update({ owner, repo, issue_number: iss.number, state: "closed" });
+              core.info(`Closed issue #${iss.number}`);
+            }

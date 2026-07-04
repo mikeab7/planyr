@@ -10,10 +10,11 @@ Two parallel tracks now.
    last-known-good copy instantly, refresh in background, always show data age,
    screening-only. Makes layers fast and resilient.
 2. Tier 1 "site-killer" features: storm outfall *(split 2026-07-03: the detention
-   rate-rules half shipped as **B629–B633** — versioned rules engine, required-vs-provided
+   rate-rules half shipped as **B636–B640** — versioned rules engine, required-vs-provided
    yield readout, DIA-tier, hydraulic regime, pond auto-size — plus watershed overlays
-   **B635**; the flowline/design-tailwater sourcing half is **B634** in the backlog
-   Later/Roadmap, its LiDAR-screening slice already shipped)*, then sanitary sewer,
+   **B642**; the flowline/design-tailwater sourcing half is **B641** in the backlog
+   Later/Roadmap, its LiDAR-screening slice already shipped. Code/tests/branch keep the
+   provisional B629–B635 labels — see the B636 note in BACKLOG-DONE.md)*, then sanitary sewer,
    fire flow, finished-floor-vs-base-flood, environmental screen (TCEQ LPST / EPA),
    entitlement/zoning status.
 3. Tier 2: earthwork / cut-fill, soils.

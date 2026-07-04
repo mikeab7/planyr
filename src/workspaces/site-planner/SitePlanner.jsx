@@ -1107,6 +1107,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [size, setSize] = useState({ w: 800, h: 560 });
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
+  const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
 
   // parcel drafting + draw drafting + measure
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
@@ -7862,6 +7863,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const fillProps = (m.fillOpacity > 0)
                   ? { fill: m.fill, fillOpacity: m.fillOpacity, pointerEvents: "all" }
                   : { pointerEvents: "all" };
+                // B156: render the markup exactly as before, then wrap the whole subtree so it
+                // carries its own pointer enter/leave. Because that rides the markup's OWN hit
+                // geometry (the browser decides what the pointer is over — the same pointerEvents
+                // that decide a click), the pre-click hover glow always matches what a click grabs;
+                // there is no second, separate hit-test that could disagree with the selection.
+                const node = (() => {
                 if (m.kind === "utilRoute") {
                   const col = m.stroke; // B619: keep the route's own color when selected
                   const cor = m.corridor.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
@@ -7973,6 +7980,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
                 if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
                 return <rect key={m.id} x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
+                })();
+                if (!node) return null; // e.g. an easement hidden with its inactive parcel (B213)
+                const isHov = hoverMkId === m.id && !isSel && tool === "select"; // never glow the already-selected markup, and Select mode only
+                return (
+                  <g key={m.id}
+                     className={isHov ? "mk-hover" : undefined} data-hover={isHov ? "1" : undefined}
+                     onPointerEnter={() => { if (tool === "select") setHoverMkId(m.id); }}
+                     onPointerLeave={() => setHoverMkId((h) => (h === m.id ? null : h))}>
+                    {node}
+                  </g>
+                );
               })}
               {/* ditch cross-section line (in-progress + last result) */}
               {(xsecMode && xsecPts.length === 1 && cursor) && (() => { const a = f2p(xsecPts[0]), b = f2p(cursor); return <line data-export="skip" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />; })()}
