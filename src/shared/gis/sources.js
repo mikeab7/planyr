@@ -55,7 +55,7 @@ export const GIS_SOURCES = {
     serviceUrl: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
     layerId: 28, // Flood Hazard Zones (S_Fld_Haz_Ar) — the canonical queryable SFHA polygons
     geometryType: "polygon",
-    fields: { zone: "FLD_ZONE", subtype: "ZONE_SUBTY", elev: "STATIC_BFE" },
+    fields: { zone: "FLD_ZONE", subtype: "ZONE_SUBTY", elev: "STATIC_BFE", vdatum: "V_DATUM" },
     coverage: "national",
     tier: "production",
     lastVerified: "2026-06-21",
@@ -232,11 +232,76 @@ export const GIS_SOURCES = {
     lastVerified: "2026-06-17",
     fixtures: [],
   },
+
+  // ---- Drainage / detention resolver sources (B629) ----
+  mud: {
+    key: "mud",
+    label: "MUD / water districts (TCEQ)",
+    provider: "TCEQ Water Districts (hosted by HARC)",
+    serviceUrl: "https://harcags.harcresearch.org/arcgisserver/rest/services/Boundaries/TCEQ_Water_Districts/MapServer",
+    layerId: 0,
+    geometryType: "polygon",
+    fields: { name: "NAME", type: "TYPE", typeDesc: "TYPE_DESCRIPTION", county: "COUNTY", status: "STATUS_DESCRIPTION", districtId: "DISTRICT_ID" },
+    coverage: "statewide",
+    tier: "production",
+    lastVerified: "2026-07-03",
+    fixtures: [
+      // Bridgeland/Cypress — dense MUD country; ≥1 district polygon at any envelope here.
+      { label: "Cypress-area water districts", point: [-95.69, 29.97], expectMinCount: 1 },
+    ],
+    notes:
+      "District BOUNDARY, not proof of service. NB the layer also carries county-blanket " +
+      "authorities (Coastal Water Authority, Port of Houston, river authorities) — consumers " +
+      "must filter TYPE to the parcel-review district kinds (MUD/WCID/LID/DD/FWSD/SUD/WID) " +
+      "or every Harris point reads as 'in a district'. detentionRules.js owns that filter. " +
+      "Same service the jur_mud map overlay renders (layers.js reads this row).",
+  },
+  hcfcdChannels: {
+    key: "hcfcdChannels",
+    label: "HCFCD channels",
+    provider: "Harris County Flood Control District (via Harris County GIS)",
+    serviceUrl: "https://www.gis.hctx.net/arcgishcpid/rest/services/HCFCD/Channels/MapServer",
+    layerId: 0,
+    geometryType: "line",
+    fields: { unitNo: "UNIT_NO", name: "CHAN_NAME", type: "TYPE", ditType: "DIT_TYPE" },
+    coverage: "county",
+    tier: "production",
+    lastVerified: "2026-07-03",
+    fixtures: [
+      // Buffalo Bayou through downtown — unit W100-00-00, multiple segments in any 1-km envelope.
+      { label: "Buffalo Bayou downtown", point: [-95.37, 29.76], expectMinCount: 1 },
+    ],
+    notes:
+      "HCFCD unit centerlines (UNIT_NO like 'W100-00-00'). Harris County only. Used by the " +
+      "detention resolver as a nearest-channel ADJACENCY screen — proximity to a unit, never " +
+      "a traced discharge path (that upgrade is B634).",
+  },
+  hcfcdWatersheds: {
+    key: "hcfcdWatersheds",
+    label: "HCFCD watershed boundaries",
+    provider: "Harris County Flood Control District (via Harris County GIS)",
+    serviceUrl: "https://www.gis.hctx.net/arcgishcpid/rest/services/HCFCD/Watershed/MapServer",
+    layerId: 1, // 1 = Watershed polygons (0 = the finer Catchment sub-basins)
+    geometryType: "polygon",
+    fields: { name: "WTSHNAME", unit: "WTSHUNIT" },
+    coverage: "county",
+    tier: "production",
+    lastVerified: "2026-07-03",
+    fixtures: [
+      { label: "Buffalo Bayou watershed", point: [-95.37, 29.76], expectMinCount: 1 },
+    ],
+    notes:
+      "The 22 HCFCD watershed polygons (WTSHNAME e.g. 'BUFFALO BAYOU', WTSHUNIT 'W'). Feeds " +
+      "the B635 watershed-keyed overlay rules (Addicks/Barker + Upper Cypress retention " +
+      "context). The precise Upper-Cypress overflow boundary is a separate service " +
+      "(HCFCD/CypressCreekOverflow) — flagged in detentionRules.js as the exact-boundary follow-up.",
+  },
 };
 
 // Keys grouped by the surface that consumes them (handy for the audit + tests).
 export const ANALYSIS_KEYS = ["flood", "wetlands", "oilgas", "pipelines"];
 export const JURISDICTION_KEYS = ["county", "city", "road", "etj_hgac", "etj_austin", "etj_fortworth"];
+export const DETENTION_KEYS = ["mud", "hcfcdChannels", "hcfcdWatersheds"]; // B629 drainage resolver
 
 /* Look a row up by key (throws on a typo so a bad reference fails fast, not silently). */
 export function gisSource(key) {

@@ -15,6 +15,10 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; `gisCache.js` — screening cache.
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `labelLayout.js` — LOD label tiering. `roadGeometry.js` — centerline road curves (pure).
+- `detentionRules.js` — Houston-MSA detention criteria as versioned rule records + the
+  drainage-authority resolver, tier/regime assessors, pond auto-size solvers (B636–B642,
+  code-labeled B629–B635; pure, injectable fetch/cache — mirror of `jurisdiction.js`). `pondGeom.js` holds
+  `detentionStorage` (the pond stage/volume calc shared by panel, yield metrics, solver).
 
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.

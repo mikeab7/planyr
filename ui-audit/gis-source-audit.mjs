@@ -28,6 +28,7 @@ const ROOT = join(HERE, "..");
 const ANALYSIS_PATH_FILES = [
   "src/workspaces/site-planner/lib/siteAnalysis.js",
   "src/workspaces/site-planner/lib/jurisdiction.js",
+  "src/workspaces/site-planner/lib/detentionRules.js", // B629 drainage resolver
 ];
 
 // A quoted ArcGIS service URL literal — what an inline endpoint looks like in code.
