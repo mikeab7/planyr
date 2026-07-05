@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _51 open · 2 awaiting live verification._
+> _51 open · 3 awaiting live verification._
 
 ## 🔲 Open
 
@@ -66,6 +66,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B658 | Replace landing-page copy with the approved buyer-voice deck | [Landing / marketing] | #ui | ⏳ live — awaiting |
 | B651 | Parcel split double-counts acreage; make split REPLACE the parent (parent + children can never both be active) | [Site Planner] | #site-planner #yield #selection | ⏳ live — awaiting |
 | B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) (×2) | [Scheduler / robustness] | #scheduler | ⏳ live — awaiting |
 
@@ -88,5 +89,5 @@
 - **#site-planner** — B653, B654, B655, B656, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95, B651
 - **#stitching** — B413
 - **#testing** — B269, B63
-- **#ui** — B653, B654, B656, B657, B115
+- **#ui** — B653, B654, B656, B657, B115, B658
 - **#yield** — B655, B553, B651
