@@ -18,7 +18,7 @@ import { verifySupabaseUser } from "../../server/auth/supabaseAuth.js";
 import { storageConfig, defaultDriveClientFactory } from "../../server/storage/index.js";
 import { folderStoreSupabase } from "../../server/storage/folderStoreSupabase.js";
 import { supabaseIdStore } from "../../server/storage/idStoreSupabase.js";
-import { syncProjectFolders, planDelete, migrateFilesToTree } from "../../server/storage/folderMirror.js";
+import { syncProjectFolders, planDelete, migrateFilesToTree, moveKeyToTree } from "../../server/storage/folderMirror.js";
 
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -43,10 +43,19 @@ export async function onRequestPost(context) {
 
   let body = {};
   try { body = await request.json(); } catch (_) { return json({ ok: false, error: "Expected a JSON body." }, 400); }
-  const { action, projectId, folderId, offset } = body || {};
+  const { action, projectId, folderId, offset, planyrKey, discipline } = body || {};
   if (!projectId) return json({ ok: false, error: "Missing projectId." }, 400);
 
   try {
+    if (action === "file-move") {
+      // Move ONE file's Drive bytes to the tree folder of an EXPLICIT discipline — the refile
+      // flow, where the user just confirmed what a "needs filing" document actually is.
+      if (!planyrKey) return json({ ok: false, error: "Missing planyrKey." }, 400);
+      const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+      const idStore = supabaseIdStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token });
+      const r = await moveKeyToTree({ userId: c.user.id, projectId, planyrKey, discipline, client: c.client, store: c.store, idStore });
+      return json(r, r.ok ? 200 : 502);
+    }
     if (action === "migrate-files") {
       // One-time migration (B660): move this project's already-uploaded Drive files into the
       // standard tree — one small batch per request (same chunking rule as sync); the client

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { syncProjectFolders, planDelete, slugSeg, treeParentForUpload, parseFiledKey, migrateFilesToTree } from "../server/storage/folderMirror.js";
+import { syncProjectFolders, planDelete, slugSeg, treeParentForUpload, parseFiledKey, migrateFilesToTree, moveKeyToTree } from "../server/storage/folderMirror.js";
 
 // A fake project_folders store: holds rows, applies drive_* patches like Supabase would.
 function fakeStore(initial) {
@@ -245,6 +245,61 @@ describe("treeParentForUpload — server-side tree targeting for uploads (B650)"
   });
 });
 
+describe("null-index guards — a failed read is LOUD, never an empty-tree lookalike (B659 review #1)", () => {
+  const nullStore = { async list() { return null; } };
+  it("syncProjectFolders fails honestly instead of reporting 'mirrored' on a blipped read", async () => {
+    const r = await syncProjectFolders({ projectId: "p1", userId: "u1", client: fakeClient(), store: nullStore });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/folder index/i);
+    expect(r.remaining).toBeGreaterThan(0); // never a clean "done"
+  });
+  it("planDelete fails honestly instead of enumerating 'nothing will be deleted'", async () => {
+    const r = await planDelete({ projectId: "p1", folderId: "f1", client: fakeClient(), store: nullStore });
+    expect(r.ok).toBe(false);
+  });
+  it("migrateFilesToTree fails honestly and does not advance past unprocessed keys", async () => {
+    const idStore = { async listByPrefix() { return [{ planyrKey: "u1/project-p1/civil/a.pdf", driveId: "f1" }]; } };
+    const r = await migrateFilesToTree({ userId: "u1", projectId: "p1", client: fakeClient(), store: nullStore, idStore });
+    expect(r.ok).toBe(false);
+    expect(r.done).toBe(false);
+  });
+  it("treeParentForUpload degrades to the legacy path (null) — an upload is never blocked", async () => {
+    expect(await treeParentForUpload({ store: nullStore, projectId: "p1", discipline: "Civil" })).toBe(null);
+  });
+});
+
+describe("moveKeyToTree — refile moves the Drive bytes to the CONFIRMED discipline (B659 review #3)", () => {
+  const treeRows = [
+    { id: "design", parentId: null, name: "02. Design", trashed: false, driveFolderId: "d-design" },
+    { id: "drawings", parentId: "design", name: "01. Drawings", trashed: false, driveFolderId: "d-drawings" },
+    { id: "civil", parentId: "drawings", name: "05. Civil", trashed: false, driveFolderId: "d-civil" },
+    { id: "cur", parentId: "civil", name: "01. Current", trashed: false, driveFolderId: "d-cur" },
+  ];
+  const store = { async list() { return treeRows; } };
+  const idStore = { async get(k) { return k === "u1/project-p1/other/plan.pdf" ? "f1" : null; } };
+
+  it("moves the file in place to the confirmed discipline's Current folder", async () => {
+    const client = fakeClient({ parents: { f1: ["d-drawings"] } }); // sat at the Other→Drawings fallback
+    const r = await moveKeyToTree({ userId: "u1", projectId: "p1", planyrKey: "project-p1/other/plan.pdf", discipline: "Civil", client, store, idStore });
+    expect(r).toEqual({ ok: true, moved: true });
+    expect(client.calls.updated).toEqual([{ fileId: "f1", addParents: "d-cur", removeParents: "d-drawings" }]);
+  });
+
+  it("skips gracefully when the file isn't Drive-stored or the tree isn't mirrored", async () => {
+    const client = fakeClient();
+    expect((await moveKeyToTree({ userId: "u1", projectId: "p1", planyrKey: "project-p1/other/missing.pdf", discipline: "Civil", client, store, idStore })).skipped).toBe(true);
+    const bare = { async list() { return [{ id: "x", parentId: null, name: "Misc", trashed: false }]; } };
+    expect((await moveKeyToTree({ userId: "u1", projectId: "p1", planyrKey: "project-p1/other/plan.pdf", discipline: "Civil", client, store: bare, idStore })).skipped).toBe(true);
+  });
+
+  it("is a no-op when the file already sits in the confirmed folder", async () => {
+    const client = fakeClient({ parents: { f1: ["d-cur"] } });
+    const r = await moveKeyToTree({ userId: "u1", projectId: "p1", planyrKey: "project-p1/other/plan.pdf", discipline: "Civil", client, store, idStore });
+    expect(r).toEqual({ ok: true, moved: false });
+    expect(client.calls.updated).toHaveLength(0);
+  });
+});
+
 describe("parseFiledKey — stored-key coordinates (B660)", () => {
   it("parses <uid>/project-<pid>/<discipline>/<name>", () => {
     expect(parseFiledKey("u1/project-abc/civil/plan.pdf", "u1", "abc"))
@@ -300,6 +355,15 @@ describe("migrateFilesToTree — one-time move of existing files into the tree (
     const client = fakeClient({ parents: { f1: ["d-cur"] } });
     const r = await migrateFilesToTree({ userId: "u1", projectId: "p1", client, store, idStore });
     expect(r.moved).toBe(0);
+    expect(r.already).toBe(1);
+    expect(client.calls.updated).toHaveLength(0);
+  });
+
+  it("respects a manual/refile placement: a file in ANY tree folder is never yanked to its key-derived spot", async () => {
+    // Key says "civil" but the user refiled it under Site Plans — the migration must not undo that.
+    const idStore = idStoreOf([{ planyrKey: "u1/project-p1/civil/plat.pdf", driveId: "f1" }]);
+    const client = fakeClient({ parents: { f1: ["d-sp-cur"] } });
+    const r = await migrateFilesToTree({ userId: "u1", projectId: "p1", client, store, idStore });
     expect(r.already).toBe(1);
     expect(client.calls.updated).toHaveLength(0);
   });

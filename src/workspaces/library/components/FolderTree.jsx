@@ -385,7 +385,7 @@ function DeleteConfirm({ info, onCancel, onConfirm }) {
             )}
             {info.truncated && <p style={{ color: "var(--warn-text)", fontSize: 12 }}>Some folders hold more than 1,000 files — the list above may be partial; all of them are removed.</p>}
             {!info.driveOff && <p style={{ color: "var(--text-tertiary)", fontSize: 11.5 }}>Plus anything added straight into Google Drive (not shown — Planyr only tracks files it filed).</p>}
-            {!info.driveOff && <p style={{ color: "var(--text-secondary)", fontSize: 12 }}>These move to your Google Drive trash and are recoverable for ~30 days.</p>}
+            {!info.driveOff && <p style={{ color: "var(--text-secondary)", fontSize: 12 }}>These move to your Google Drive trash and are recoverable for ~30 days. Their entries stay in your file list (they re-shelve under Drawings) until you delete them individually.</p>}
           </>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>

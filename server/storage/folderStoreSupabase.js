@@ -15,13 +15,16 @@ const REST = (url) => `${String(url).replace(/\/+$/, "")}/rest/v1/project_folder
 const RPC = (url) => `${String(url).replace(/\/+$/, "")}/rest/v1/rpc/folder_set_drive_meta`;
 
 // Columns the reconcile needs (structure + drive bookkeeping), mapped to the planner's shape.
+// sort_order rides along so the server-side resolver orders siblings EXACTLY like the client
+// (duplicate-ish labels must resolve to the same folder on both sides).
 const SELECT =
-  "id,parent_id,name,trashed,drive_folder_id,drive_parent_id,drive_name,drive_trashed";
+  "id,parent_id,name,sort_order,trashed,drive_folder_id,drive_parent_id,drive_name,drive_trashed";
 
 const toRow = (r) => ({
   id: r.id,
   parentId: r.parent_id ?? null,
   name: r.name,
+  order: r.sort_order ?? 0,
   trashed: !!r.trashed,
   driveFolderId: r.drive_folder_id ?? null,
   driveParentId: r.drive_parent_id ?? null,
@@ -34,7 +37,11 @@ export function folderStoreSupabase({ supabaseUrl, anonKey, token, fetchImpl = f
   const enc = encodeURIComponent;
 
   return {
-    // All of a project's folder rows (RLS scopes to the caller), in planner shape.
+    /* All of a project's folder rows (RLS scopes to the caller), in planner shape. Returns
+     * NULL on a failed read — callers MUST treat that as "couldn't read the index", never as
+     * "the project has no folders": an empty-array lookalike made a blipped read report
+     * "Mirrored to Google Drive" with most of the tree unmirrored (the classic silent
+     * false-success; LOUD-FAILURE / B209 class — caught by the B659 adversarial review). */
     async list(projectId) {
       try {
         const res = await fetchImpl(
@@ -46,7 +53,7 @@ export function folderStoreSupabase({ supabaseUrl, anonKey, token, fetchImpl = f
         return (rows || []).map(toRow);
       } catch (e) {
         console.warn("project_folders list failed:", e && e.message);
-        return [];
+        return null; // a failed read is a FAILURE, not an empty tree
       }
     },
 

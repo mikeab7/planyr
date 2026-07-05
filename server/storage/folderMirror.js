@@ -53,6 +53,9 @@ function subtreeRowIds(rows, id) {
 export async function syncProjectFolders({ projectId, userId, client, store, maxOps = 0 }) {
   if (!projectId) return { ok: false, error: "Missing projectId." };
   const rows = await store.list(projectId);
+  // A failed index read must be a LOUD failure — treating it as an empty tree made the sync
+  // report "Mirrored ✓" with the tree unmirrored (B659 review, finding #1).
+  if (!rows) return { ok: false, error: "Couldn't read the folder index — try Sync now again.", remaining: 1, total: 0, summary: { created: 0, renamed: 0, moved: 0, trashed: 0 }, errors: ["folder index read failed"] };
   const plan = folderReconcilePlan(rows);
   const summary = { created: 0, renamed: 0, moved: 0, trashed: 0 };
   const errors = [];
@@ -185,6 +188,11 @@ export async function migrateFilesToTree({ userId, projectId, client, store, idS
   if (!keys.length) return out;
 
   const rows = await store.list(projectId); // the project's folder tree, once per chunk
+  if (!rows) return { ...out, ok: false, error: "Couldn't read the folder index.", done: false };
+  // Any mirrored tree folder counts as "already filed": a file the user (or a refile) placed
+  // in a DIFFERENT tree folder than its stored key suggests must be respected, not yanked
+  // back to the key-derived spot (the key keeps its original discipline forever).
+  const treeFolderIds = new Set(rows.filter((r) => !r.trashed && r.driveFolderId).map((r) => r.driveFolderId));
   for (const k of keys) {
     try {
       const parsed = parseFiledKey(k.planyrKey, userId, projectId);
@@ -193,7 +201,7 @@ export async function migrateFilesToTree({ userId, projectId, client, store, idS
       const targetId = target && target.driveFolderId;
       if (!targetId) { out.skipped += 1; continue; } // tree/discipline not mirrored → leave in place
       const parents = await client.parentsOf(k.driveId);
-      if (parents.includes(targetId)) { out.already += 1; continue; } // idempotent skip
+      if (parents.some((p) => treeFolderIds.has(p))) { out.already += 1; continue; } // in the tree already (anywhere) — respect it
       await client.update(k.driveId, {
         addParents: targetId,
         ...(parents.length ? { removeParents: parents.join(",") } : {}),
@@ -206,6 +214,32 @@ export async function migrateFilesToTree({ userId, projectId, client, store, idS
   out.ok = out.errors.length === 0;
   out.error = out.errors[0];
   return out;
+}
+
+/* Move ONE stored file to the tree folder of an EXPLICIT discipline (B659 review #3: the
+ * refile flow — a "needs filing" PDF confirmed as Civil must have its Drive bytes follow the
+ * decision; the stored key keeps the original discipline forever, so the caller passes the
+ * confirmed one). In place by file id — name/share/read-back untouched. Never throws. */
+export async function moveKeyToTree({ userId, projectId, planyrKey, discipline, client, store, idStore } = {}) {
+  if (!projectId || !planyrKey) return { ok: false, error: "Missing projectId or planyrKey." };
+  try {
+    const rows = await store.list(projectId);
+    if (!rows) return { ok: false, error: "Couldn't read the folder index." };
+    const target = resolveDrawingTarget(rows, discipline);
+    const targetId = target && target.driveFolderId;
+    if (!targetId) return { ok: true, skipped: true }; // tree not mirrored yet → nothing to move to
+    const driveId = await idStore.get(`${userId}/${planyrKey}`);
+    if (!driveId) return { ok: true, skipped: true }; // not Drive-stored (Supabase copy / oversize)
+    const parents = await client.parentsOf(driveId);
+    if (parents.includes(targetId)) return { ok: true, moved: false };
+    await client.update(driveId, {
+      addParents: targetId,
+      ...(parents.length ? { removeParents: parents.join(",") } : {}),
+    });
+    return { ok: true, moved: true };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || "Couldn't move the file." };
+  }
 }
 
 /* The Drive parent folder id a new UPLOAD should land in, per the project's standard tree:
@@ -233,6 +267,9 @@ export async function treeParentForUpload({ store, projectId, discipline } = {})
 export async function planDelete({ projectId, folderId, client, store }) {
   if (!folderId) return { ok: false, error: "Missing folderId." };
   const rows = await store.list(projectId);
+  // A blipped index read must NOT produce an empty "nothing will be deleted" enumeration —
+  // the client's failed-check state ("couldn't verify — delete anyway?") handles ok:false.
+  if (!rows) return { ok: false, error: "Couldn't read the folder index." };
   const ids = subtreeRowIds(rows, folderId);
   const inSubtree = rows.filter((r) => ids.has(r.id) && !r.trashed);
   const folders = inSubtree.map((r) => ({ id: r.id, name: r.name }));

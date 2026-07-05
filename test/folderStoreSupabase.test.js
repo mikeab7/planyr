@@ -23,12 +23,23 @@ describe("folderStoreSupabase.list (B650)", () => {
     expect(f.calls[0].url).toMatch(/\/rest\/v1\/project_folders\?/);
     expect(f.calls[0].url).toMatch(/project_id=eq\.proj1/);
     expect(f.calls[0].headers.authorization).toBe("Bearer tok");
-    expect(rows[0]).toEqual({ id: "a", parentId: null, name: "A", trashed: false, driveFolderId: "d1", driveParentId: null, driveName: "A", driveTrashed: false });
+    expect(rows[0]).toEqual({ id: "a", parentId: null, name: "A", order: 0, trashed: false, driveFolderId: "d1", driveParentId: null, driveName: "A", driveTrashed: false });
   });
 
-  it("returns [] on a query error instead of throwing", async () => {
+  it("returns NULL on a query error — a failed read must never look like an empty tree", async () => {
+    // An [] here once made a blipped Supabase read report "Mirrored to Google Drive" with the
+    // whole tree unmirrored (B659 review #1 — the LOUD-FAILURE class).
     const f = recorder(() => ({ ok: false, status: 500, json: async () => ({}) }));
-    expect(await cfg(f).list("proj1")).toEqual([]);
+    expect(await cfg(f).list("proj1")).toBe(null);
+  });
+
+  it("carries sort_order → order so the server resolver sorts siblings like the client", async () => {
+    const f = recorder(() => ({ ok: true, status: 200, json: async () => [
+      { id: "a", parent_id: null, name: "A", sort_order: 7, trashed: false, drive_folder_id: null, drive_parent_id: null, drive_name: null, drive_trashed: false },
+    ] }));
+    const rows = await cfg(f).list("proj1");
+    expect(f.calls[0].url).toContain("sort_order");
+    expect(rows[0].order).toBe(7);
   });
 });
 

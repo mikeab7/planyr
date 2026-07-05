@@ -70,6 +70,11 @@ export const newSourceId = () => "src" + Math.random().toString(36).slice(2, 9);
 // requested project/discipline structure. srcId is the object name (unique, safe); the
 // human filename lives in the index/metadata.
 const slug = (s) => (s || "").toString().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
+// Header values must be printable ASCII — fetch() THROWS on non-Latin-1 header bytes, which
+// would kill the whole upload over a free-typed discipline like "Landscaping (北)". The server
+// match is fuzzy (slug-tolerant) and unknown disciplines fall back to the Drawings folder, so
+// a stripped value degrades gracefully instead of failing loudly-in-the-wrong-place.
+const headerSafe = (s) => String(s || "").replace(/[^\x20-\x7E]/g, "-").trim() || "Other";
 const storageKeyFor = (uid, projectId, discipline, srcId) =>
   `${uid}/project-${projectId ? slug(projectId) : "unfiled"}/${discipline ? slug(discipline) : "other"}/${srcId}.pdf`;
 
@@ -380,7 +385,7 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
         // standard folder tree (Design → Drawings → discipline → Current) when it's mirrored;
         // the flat x-planyr-folder path above stays the fallback, so nothing regresses.
         ...(projectId ? { "x-planyr-project": String(projectId) } : {}),
-        "x-planyr-discipline": discipline || "Other" },
+        "x-planyr-discipline": headerSafe(discipline) },
       body: file,
     });
     if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
@@ -414,7 +419,7 @@ export async function uploadLargeToDrive(file, { projectId = null, discipline = 
         "x-planyr-name": name, "x-planyr-content-type": contentType, "x-planyr-size": String(file.size || 0),
         // Tree targeting (B650 follow-on) — same as pushFileToDrive; flat path stays the fallback.
         ...(projectId ? { "x-planyr-project": String(projectId) } : {}),
-        "x-planyr-discipline": discipline || "Other" },
+        "x-planyr-discipline": headerSafe(discipline) },
     });
     if (initResp.status === 404 || initResp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
     let init = {}; try { init = await initResp.json(); } catch (_) { /* ignore */ }

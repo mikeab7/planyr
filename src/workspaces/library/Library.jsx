@@ -70,6 +70,15 @@ export default function Library({
   // Selection is per project — switching projects resets to "All files".
   useEffect(() => { setSelectedFolderId(null); setFolderRows([]); setFolderCounts(null); }, [projectId]);
 
+  // A selection must never point at a deleted/vanished folder (B659 review #6): deleting the
+  // selected folder — or an ancestor — republishes rows without it; fall back to "All files"
+  // instead of filtering the list by a ghost.
+  useEffect(() => {
+    if (selectedFolderId == null || !folderRows.length) return;
+    const row = folderRows.find((r) => r.id === selectedFolderId);
+    if (!row || row.trashed) setSelectedFolderId(null);
+  }, [folderRows, selectedFolderId]);
+
   // ── One-time migration (B660, owner-requested): organize EVERY existing project into the
   // standard tree + move its already-uploaded files into the right Drive folders. Runs once
   // per account (marker), automatically, the first time the Library opens signed-in; honest

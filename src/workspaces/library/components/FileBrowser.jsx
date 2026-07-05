@@ -31,6 +31,7 @@ import {
   categoryOf, subcategoryOf, stateOf, FILE_STATES, FACETS, onMap, isReference, isSpatial,
 } from "../../../shared/files/fileFacts.js";
 import { resolveDrawingTarget, subtreeIds } from "../../../shared/folders/folderTree.js";
+import { moveDriveFileToFolder } from "../lib/folders.js";
 import {
   QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
 } from "../../../shared/files/uploadQueue.js";
@@ -93,8 +94,18 @@ export default function FileBrowser({
   const [pendingDel, setPendingDel] = useState(null);
   const [share, setShare] = useState({});                  // fileId -> { status, url, error }
   const [delNotice, setDelNotice] = useState(null);        // { orphaned } after a delete left bytes behind
+  const [moveNotice, setMoveNotice] = useState(null);      // refile moved metadata but not the Drive copy (B659 #3)
   const fileInputRef = useRef(null);
   const reqRef = useRef(0);
+  const prevFolderRef = useRef(selectedFolderId);
+
+  // Folder-rail navigation exits the "Needs filing" view (parity with the classic tree —
+  // clicking a folder means "show me that folder", not "stay on the holding area").
+  useEffect(() => {
+    if (prevFolderRef.current === selectedFolderId) return;
+    prevFolderRef.current = selectedFolderId;
+    if (folderMode) setShowHolding(false);
+  }, [selectedFolderId, folderMode]);
 
   const refresh = async () => {
     if (!signedIn) return;
@@ -269,10 +280,28 @@ export default function FileBrowser({
   const doRefile = async (f) => {
     const sel = refileSel[f.id] || {};
     const discipline = sel.discipline || f.discipline || "Civil";
-    const res = await refileReview(f.id, { projectId: f.projectId || projectId, project: projName(f.projectId || projectId), discipline });
+    const pid = f.projectId || projectId;
+    const res = await refileReview(f.id, { projectId: pid, project: projName(pid), discipline });
     // Update the index row's category/state too so the tree moves it immediately.
-    try { await upsertFileFacts(toFactsRow({ projectId: f.projectId || projectId, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.title })); } catch (_) {}
-    if (res.ok) { setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; }); refresh(); }
+    try { await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.title })); } catch (_) {}
+    if (res.ok) {
+      // Move the Drive BYTES to match the confirmed discipline (B659 review #3): the upload
+      // landed where the ORIGINAL read pointed (often the Drawings fallback for "Other");
+      // filing is only done when the physical copy follows the decision. Failure is loud —
+      // the metadata is filed either way, so the notice says exactly what's still pending.
+      try {
+        const rec = await loadReview(f.id);
+        const keys = ((rec && rec.sources) || []).map((s) => s && s.driveKey).filter(Boolean);
+        for (const k of keys) {
+          const mv = await moveDriveFileToFolder(pid, k, discipline);
+          if (mv && mv.ok === false) { setMoveNotice(`Filed as ${discipline}, but the Google Drive copy couldn't be moved (${mv.error || "move failed"}) — it stays in its old folder.`); break; }
+        }
+      } catch (_) {
+        setMoveNotice(`Filed as ${discipline}, but the Google Drive copy couldn't be moved — it stays in its old folder.`);
+      }
+      setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; });
+      refresh();
+    }
   };
 
   // ---- empty / no-project states ------------------------------------------
@@ -372,6 +401,15 @@ export default function FileBrowser({
             ⚑ Needs filing{holdingCount ? ` · ${holdingCount}` : ""}
           </button>
         </div>
+
+        {/* refile moved the metadata but not the Drive copy — surface it (LOUD-FAILURE) */}
+        {moveNotice && (
+          <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
+            border: "1px solid var(--warn-border, #d6a64a)", background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
+            <span style={{ flex: 1 }}>{moveNotice}</span>
+            <button onClick={() => setMoveNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
+          </div>
+        )}
 
         {/* delete left bytes behind — surface it (never a silent cleanup failure, NEW-4) */}
         {delNotice && (
