@@ -10,9 +10,10 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   renderers `MarkupRenderer.jsx`, `PropertyPanel.jsx`, `SelectionChrome.jsx`.
 - `coordinates/` — the EPSG:2278 ↔ WGS84 projection (shared coordinate spine). Read-only
   screening use today; grow additively, not a planner rewrite.
-- `files/` — pure PDF/sheet parsers: `titleBlockParse.js`, `sheetMeta.js`, `sheetGroups.js`,
-  `sheetNotes.js`, `detailRefs.js`, `matchProject.js`, `sheetScale.js`, `matchLineFit.js`,
-  `ocrMatchLines.js`. The B340 auto-assembly CV engines (pure; the browser extraction seam is
+- `files/` — pure PDF/sheet parsers: `titleBlockParse.js`, `sheetMeta.js`, `sheetTitleSet.js`
+  (set-aware sheet-title refinement — cross-page boilerplate + known-project demotion, B653),
+  `sheetGroups.js`, `sheetNotes.js`, `detailRefs.js`, `matchProject.js`, `sheetScale.js`,
+  `matchLineFit.js`, `ocrMatchLines.js`. The B340 auto-assembly CV engines (pure; the browser extraction seam is
   dormant, verified live): `scaleBarRead.js` (graphic scale-bar → ft/unit), `edgeGeomMatch.js`
   (vector match-line edge fit), `legendUnion.js` (union sheet legends into the composite key).
 - `theme/palette.js` — JS mirror of the CSS theme tokens (keep in sync; SVG/canvas can't use

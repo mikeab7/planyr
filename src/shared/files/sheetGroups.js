@@ -40,34 +40,72 @@ export function consecutiveCodes(a, b) {
   return false; // mixed levels or a major rollover — don't chain
 }
 
-/* The grouping key — what makes two consecutive sheets "the same plan." Prefer the
- * deterministic discipline `item` (e.g. "Grading Plan", stable across the run); fall back to
- * the read sheet title; "" when neither is usable (→ never groups, stays standalone). */
+/* Strip a trailing TILE designator from a read title so the tiles of one plan share a key:
+ * "TOPO SURVEY III" / "GRADING PLAN AREA 2" / "OVERALL PLAN (1 OF 4)" → "topo survey" /
+ * "grading plan" / "overall plan". Only a TRAILING counter is stripped — "PHASE 1 EROSION
+ * CONTROL" keeps its phase (it's mid-title, part of the name). Returns normalized text. */
+export function tileBaseTitle(s) {
+  let t = norm(s);
+  t = t.replace(/\(?\b(\d{1,3}|[ivxl]{1,6})\s+of\s+\d{1,3}\)?$/, "").trim();          // "(1 of 4)"
+  t = t.replace(/\b(area|phase|part|zone|segment|sector)\s*[-#]?\s*(\d{1,3}|[a-z]|[ivxl]{1,6})$/, "").trim();
+  t = t.replace(/\b[ivxl]{1,6}$/, "").trim();                                          // "… iii"
+  t = t.replace(/[-–—#]?\s*\b\d{1,3}$/, "").trim();                                    // "… 2"
+  return t;
+}
+
+/* The grouping key — what makes two consecutive sheets "the same plan." The READ TITLE is
+ * primary (B653): two tiles of one plan print the same title; two DIFFERENT sheets print
+ * different ones — an arch set's A201/A202/… ("ELEVATIONS" vs "PARAPET DETAILS") must NOT
+ * collapse just because both classify as item "Architectural" (the old item-first key turned a
+ * 44-sheet set into "4 sheets"). The coarse discipline `item` is only the fallback for pages
+ * with no readable title (sheetTitle empty or just the item echo). "" → never groups. */
 export function groupKey(meta = {}) {
   const item = (meta.item || "").trim();
   const disc = (meta.discipline || "").trim();
+  const rawTitle = (meta.sheetTitle || "").trim();
+  const hasRealTitle = rawTitle && rawTitle.toLowerCase() !== item.toLowerCase() && rawTitle.toLowerCase() !== "document";
+  if (hasRealTitle) {
+    const t = tileBaseTitle(rawTitle) || norm(rawTitle);
+    return ("title|" + disc + "|" + t).toLowerCase();
+  }
   if (item && item.toLowerCase() !== "document") return ("type|" + disc + "|" + item).toLowerCase();
-  const t = norm(meta.sheetTitle);
-  return t ? "title|" + t : "";
+  return "";
 }
 
-// A clean human label for the logical sheet: the discipline item ("Grading Plan") when we
-// have it, else the read title, else "Sheet".
+// A clean human label for the logical sheet: the sheet's OWN read title when we have one
+// (specific — "TILTWALL PARAPET COPING DETAILS"), else the coarse discipline item ("Grading
+// Plan"), else "Sheet". (Pre-B653 this preferred the item, which labeled every arch sheet
+// "Architectural".)
 function displayTitle(meta = {}) {
+  const t = (meta.sheetTitle || "").trim();
+  if (t && t.toLowerCase() !== "document") return t;
   const item = (meta.item || "").trim();
   if (item && item.toLowerCase() !== "document") return item;
-  const t = (meta.sheetTitle || "").trim();
-  return t || "Sheet";
+  return "Sheet";
+}
+
+// The display-cased twin of tileBaseTitle: trim a trailing tile counter off a GROUP's label
+// ("TOPO SURVEY I" heading a 3-tile group reads "TOPO SURVEY"). Falls back to the input when
+// stripping would empty it. Singles keep their full title untouched.
+function stripTileSuffixDisplay(s) {
+  const before = (s || "").trim();
+  let t = before;
+  t = t.replace(/\(?\b(\d{1,3}|[IVXLivxl]{1,6})\s+of\s+\d{1,3}\)?\s*$/i, "").trim();
+  t = t.replace(/\b(area|phase|part|zone|segment|sector)\s*[-#]?\s*(\d{1,3}|[A-Za-z]|[IVXLivxl]{1,6})\s*$/i, "").trim();
+  t = t.replace(/\b[IVXLivxl]{1,6}\s*$/, "").trim();
+  t = t.replace(/[-–—#]?\s*\b\d{1,3}\s*$/, "").trim();
+  return t || before;
 }
 
 function toLogical(run) {
   const pages = run.pages;
   const head = pages[0];
-  const title = displayTitle(head);
   if (pages.length < 2) {
+    const title = displayTitle(head);
     const num = head.sheetNumber ? ` · ${head.sheetNumber}` : "";
     return { kind: "single", title, label: `${title}${num}`, discipline: head.discipline || "Other", pages, sheetRange: head.sheetNumber || "" };
   }
+  const title = stripTileSuffixDisplay(displayTitle(head));
   const first = pages[0].sheetNumber, last = pages[pages.length - 1].sheetNumber;
   const range = first && last ? `${first}–${last}` : "";
   return {

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-05 @ `2c45f7d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-05 @ `7344f2e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_183 source files mapped._
+_184 source files mapped._
 
 ## infra
 
@@ -55,7 +55,7 @@ _183 source files mapped._
 - **`src/shared/files/edgeGeomMatch.js`** — Vector match-line seam fitter: PCA line-fit of drawn linework across two adjacent sheets returning ordered endpoint pairs for the similarity solve, fail-open
   - _exports_: `fitEdgeLine`, `matchSeamEdges`, `orderEndpoints`
 - **`src/shared/files/fileFacts.js`** — Pure file-fact view-model: normalizes review rows, classifies spatial vs reference doc class, and drives the Library category tree, saved views, facets and needs-filing holding area
-  - _exports_: `browseFiles`, `buildFileFacts`, `CATEGORIES`, `categoryFor`, `categoryOf`, `classifyDocClass`, `createIndexProvider`, `deriveTree`, `DOC_CLASS`, `FACETS`, `FILE_STATE`, `FILE_STATES`, `fileState`, `getSavedView`, `groupByDiscipline`, `holdingArea`, `isReference`, `isSpatial`, `needsFiling`, `nodeMatch`, `onMap`, `runView`, `SAVED_VIEWS`, `stateOf`, `stubIndexProvider`, `subcategoryOf`, `toFileFact`
+  - _exports_: `browseFiles`, `buildFileFacts`, `CATEGORIES`, `categoryFor`, `categoryOf`, `classifyDocClass`, `createIndexProvider`, `deriveTree`, `DOC_CLASS`, `docRecency`, `FACETS`, `FILE_STATE`, `FILE_STATES`, `fileState`, `getSavedView`, `groupByDiscipline`, `holdingArea`, `isReference`, `isSpatial`, `needsFiling`, `nodeMatch`, `onMap`, `runView`, `SAVED_VIEWS`, `stateOf`, `stubIndexProvider`, `subcategoryOf`, `toFileFact`
 - **`src/shared/files/legendUnion.js`** — Unions per-sheet legend symbol entries into one deduped composite key (dedupe by normalized meaning, keep first symbol, track source sheets)
   - _exports_: `legendFromPlaced`, `unionLegendEntries`
 - **`src/shared/files/matchLineFit.js`** — Pixel-accurate raster match-line fitter for scanned sheets: 1-D morphology to isolate dashed line then RANSAC near-horizontal fit plus cross-correlation slide-refine, fail-safe
@@ -73,13 +73,15 @@ _183 source files mapped._
 - **`src/shared/files/scaleBarRead.js`** — Pure graphic scale-bar reader: clusters horizontal bar segments + nearby numeric ticks into a feet-per-unit calibration when no scale text exists
   - _exports_: `clusterBars`, `readScaleBar`, `tickLinearity`, `ticksNearBar`
 - **`src/shared/files/sheetGroups.js`** — Pure auto-grouping of pages into logical sheets by contiguous sheet-code runs + shared plan type, with adjacent-duplicate-number cleanup
-  - _exports_: `consecutiveCodes`, `groupKey`, `groupSheets`, `markAdjacentDuplicateNumbers`, `parseSheetCode`
+  - _exports_: `consecutiveCodes`, `groupKey`, `groupSheets`, `markAdjacentDuplicateNumbers`, `parseSheetCode`, `tileBaseTitle`
 - **`src/shared/files/sheetMeta.js`** — Pure positional sheet reader: reconstructs text lines to extract title-block band, sheet title/number, match-lines, notes, detail refs for grouping/stitching/calibration
-  - _exports_: `detectTitleBlock`, `drawingAreaOf`, `edgeOf`, `parseMatchLines`, `readSheetMeta`, `readSheetTitle`, `reconstructLines`
+  - _exports_: `detectTitleBlock`, `drawingAreaOf`, `edgeOf`, `parseMatchLines`, `readSheetMeta`, `readSheetTitle`, `reconstructLines`, `titleCandidates`
 - **`src/shared/files/sheetNotes.js`** — Pure notes/legend block reader plus multi-sheet aggregateNotes that pins every note once and flags ones that vary by sheet
   - _exports_: `aggregateNotes`, `parseNotes`
 - **`src/shared/files/sheetScale.js`** — Pure stated-scale parser reading engineer/architectural/ratio/NTS callouts from sheet text into feet-per-paper-inch
   - _exports_: `parseSheetScale`
+- **`src/shared/files/sheetTitleSet.js`** — Set-aware sheet-title refinement: demotes cross-page boilerplate (project/client/firm stamps) and known project names so each page keeps its own title; tiled-run titles protected by drawing-type words
+  - _exports_: `candidateFrequency`, `DRAWING_TYPE_WORD`, `isStopText`, `projectStopTexts`, `refineSheetTitles`
 - **`src/shared/files/titleBlockParse.js`** — Pure deterministic title-block field reader: discipline/item classification, sheet number, issue date, revision, stated scale for free auto-filing
   - _exports_: `classifyDiscipline`, `disciplineFromSheetNumber`, `DISCIPLINES`, `findDates`, `issueDate`, `latestDate`, `parseRevision`, `parseSheetNumber`, `readTitleBlockText`
 - **`src/shared/files/uploadQueue.js`** — Pure upload-queue model for the Project Files drop-zone: per-file status lifecycle, active/recently-filed split, and a bounded concurrency pool

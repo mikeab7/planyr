@@ -19,6 +19,8 @@ import { binarizeImageData, refineGroupPlacements } from "./lib/matchLineRefine.
 import { readAndGroup, groupCalibration, isNotToScale } from "./lib/sheetRead.js";
 import { dedupePlaced, isPlaced } from "./lib/stitchDedupe.js";
 import { normSheet } from "../../shared/files/detailRefs.js";
+import { projectStopTexts } from "../../shared/files/sheetTitleSet.js";
+import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import { aggregateNotes } from "../../shared/files/sheetNotes.js";
 import { legendFromPlaced } from "../../shared/files/legendUnion.js";
 import { createOcrRunner } from "./lib/ocr.js";
@@ -176,7 +178,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     setReading(true); setOcrRunning(false);
     const ocr = createOcrRunner({ onOcrStart: () => setOcrRunning(true) });
     try {
-      const { groups } = await readAndGroup(doc, { ocr: ocr.run });
+      // Known project names/aliases = certain not-a-title texts for the set-level title pass (B653).
+      let stopTexts = []; try { stopTexts = projectStopTexts(listLocalProjects()); } catch (_) { /* fine — frequency still works */ }
+      const { groups } = await readAndGroup(doc, { ocr: ocr.run, stopTexts });
       setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, groups } : x)));
     } catch (_) { setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, groups: [] } : x))); }
     finally { ocr.dispose(); setReading(false); setOcrRunning(false); }

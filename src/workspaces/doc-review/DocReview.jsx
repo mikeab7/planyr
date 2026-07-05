@@ -12,6 +12,7 @@ import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
 import { reorderWithinPage, arrangeFlags } from "./lib/arrange.js";
 import { backingScale, backdropDensity, visibleRegion, tileCovers } from "./lib/renderBudget.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
+import { refineSheetTitles, projectStopTexts } from "../../shared/files/sheetTitleSet.js";
 import { groupSheets, markAdjacentDuplicateNumbers } from "../../shared/files/sheetGroups.js";
 import { statedCalibration } from "./lib/sheetRead.js";
 import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups } from "./lib/takeoff.js";
@@ -400,9 +401,17 @@ export default function DocReview({
   // The read pages in order, with duplicate adjacent sheet numbers cleared (cross-reference
   // misreads — B378). This ONE cleaned array feeds both the grouping and every per-page label
   // lookup, so the sidebar never shows the same wrong number on several rows. `metaOf(n)` reads it.
+  // Known project names/aliases — CERTAIN not-a-sheet-title texts for the set-level title pass
+  // (B653). Recomputed per document open (fileName changes on open), not per scanned page —
+  // listLocalProjects reads the on-device store, too heavy to run on every rail render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const titleStops = useMemo(() => { try { return projectStopTexts(listLocalProjects()); } catch (_) { return []; } }, [fileName]);
   const orderedMeta = useMemo(
-    () => markAdjacentDuplicateNumbers(Array.from({ length: numPages }, (_, i) => ({ pageNum: i + 1, ...(sheetMeta[i + 1] || {}) }))),
-    [sheetMeta, numPages]
+    () => refineSheetTitles(
+      markAdjacentDuplicateNumbers(Array.from({ length: numPages }, (_, i) => ({ pageNum: i + 1, ...(sheetMeta[i + 1] || {}) }))),
+      { stopTexts: titleStops }
+    ),
+    [sheetMeta, numPages, titleStops]
   );
   const metaOf = (n) => orderedMeta[n - 1] || sheetMeta[n] || null;
   const groups = useMemo(() => groupSheets(orderedMeta), [orderedMeta]);
