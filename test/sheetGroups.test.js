@@ -77,6 +77,25 @@ describe("groupKey / groupSheets — the read TITLE is primary (B659)", () => {
     expect(tileBaseTitle("OVERALL PLAN (1 OF 4)")).toBe(tileBaseTitle("OVERALL PLAN (2 OF 4)"));
     expect(tileBaseTitle("PHASE 1 EROSION CONTROL")).not.toBe(tileBaseTitle("PHASE 2 EROSION CONTROL")); // mid-title stays
   });
+  it("a PARTIAL title read does not orphan a page from its own run (B664 — the live A302 case)", () => {
+    // On the owner's real set, A302's wrapped-title join fell short ("WALL SECTIONS") while
+    // A303–A305 read the full cell ("WALL SECTIONS AND DETAILS") — same run, one group.
+    const pages = [
+      sheet("A302", "Architectural", "Architectural", "WALL SECTIONS"),
+      sheet("A303", "Architectural", "Architectural", "WALL SECTIONS AND DETAILS"),
+      sheet("A304", "Architectural", "Architectural", "WALL SECTIONS AND DETAILS"),
+      sheet("A305", "Architectural", "Architectural", "WALL SECTIONS AND DETAILS"),
+    ];
+    const groups = groupSheets(pages);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ kind: "group", sheetRange: "A302–A305", title: "WALL SECTIONS AND DETAILS" }); // longest read wins the label
+    // …but a merely shared FIRST WORD is not a match ("WALL TYPES" is a different sheet)
+    const other = groupSheets([
+      sheet("A302", "Architectural", "Architectural", "WALL SECTIONS"),
+      sheet("A303", "Architectural", "Architectural", "WALL TYPES"),
+    ]);
+    expect(other).toHaveLength(2);
+  });
   it("a group's label drops the tile counter; a single keeps its full title", () => {
     const tiles = [
       sheet("C-2", "Topographic Survey", "Survey", "TOPO SURVEY I"),
