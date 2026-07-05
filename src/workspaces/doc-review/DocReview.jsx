@@ -230,6 +230,7 @@ export default function DocReview({
   const [calByPage, setCalByPage] = useState({});   // pageNum -> ftPerUnit
   const [calInfo, setCalInfo] = useState({});       // pageNum -> { src:'auto'|'manual'|'nts', label } (B267)
   const [sheetMeta, setSheetMeta] = useState({});   // pageNum -> readSheetMeta facts (sheet #, title, …) for the labeled, grouped sidebar (B266/B348)
+  const [ocrScan, setOcrScan] = useState(null);     // { total, done } while the scanned-sheet OCR pass runs (B364) — visible, never a silent stall
   const [openGroups, setOpenGroups] = useState({}); // groupId -> expanded? in the logical-sheet list (B348)
   const [draft, setDraft] = useState(null);         // in-progress { kind, pts:[...] }
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
@@ -373,24 +374,62 @@ export default function DocReview({
   // via the SAME shared reader the Stitcher uses (sheetMeta.readSheetMeta), so the single-sheet
   // sidebar can show real labels + collapse into logical sheets instead of "Sheet N" (B266). Also
   // pre-fills the per-sheet stated-scale calibration (B267) via the shared statedCalibration (which
-  // gates on a standard plot size), never overwriting a user/loaded cal. A page with no text layer
-  // reads hasText:false — the OCR seam (shared with B267/B336). Superseded if another file opens.
+  // gates on a standard plot size), never overwriting a user/loaded cal. Superseded if another file opens.
+  //
+  // SCANNED pages (B364): a page with no text layer reads hasText:false. After the text pass, the
+  // no-text pages go through the SAME shared OCR runner the Stitcher (B352) and the filing path
+  // (B411a) use — lazy (the Tesseract worker spins up only if a scanned page actually exists),
+  // capped like the filing read, token-guarded, and every recovered page re-enters the identical
+  // meta/calibration pipeline, so a scanned set gets real rail labels instead of "Sheet N". A page
+  // OCR can't read stays an honest no-text record — never a guess. `ocrScan` drives the visible
+  // "reading scanned sheets…" note (a silent multi-second stall would read as a hang).
+  const RAIL_MAX_OCR_PAGES = 24; // matches localRead's filing cap — OCR is heavy; the rest stay "Sheet N"
   const scanTok = useRef(0);
   const scanSheets = useCallback(async (pdf, pages) => {
     const tok = ++scanTok.current;
-    for (let p = 1; p <= pages; p++) {
-      if (tok !== scanTok.current) return;             // a newer open superseded this scan
-      const page = await extractPageItems(pdf, p);
-      if (tok !== scanTok.current) return;
-      const meta = { ...readSheetMeta(page), width: page.width, height: page.height };
+    const applyMeta = (p, meta) => {
       setSheetMeta((m) => ({ ...m, [p]: meta }));
       const sc = meta.scale;
-      if (sc && sc.explicit === "nts") { setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "nts", label: sc.label } })); continue; }
+      if (sc && sc.explicit === "nts") { setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "nts", label: sc.label } })); return; }
       const ft = statedCalibration(meta); // 0 unless a trustworthy stated scale on a standard plot size
       if (ft) {
         setCalByPage((c) => (c[p] ? c : { ...c, [p]: ft }));
         setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "auto", label: (sc && sc.label) || "" } }));
       }
+    };
+    const noText = [];
+    for (let p = 1; p <= pages; p++) {
+      if (tok !== scanTok.current) return;             // a newer open superseded this scan
+      const page = await extractPageItems(pdf, p);
+      if (tok !== scanTok.current) return;
+      const meta = { ...readSheetMeta(page), width: page.width, height: page.height };
+      if (!meta.hasText) noText.push(p);
+      applyMeta(p, meta);
+    }
+    if (!noText.length || tok !== scanTok.current) return;
+    // OCR pass — only now does the (lazy, CDN-pinned) Tesseract worker load. Best-effort: any
+    // failure leaves the page as its no-text record and the note clears; never blocks the viewer.
+    const capped = noText.slice(0, RAIL_MAX_OCR_PAGES);
+    setOcrScan({ total: capped.length, done: 0 });
+    let runner = null, recovered = 0;
+    try {
+      const { createOcrRunner } = await import("./lib/ocr.js");
+      runner = createOcrRunner();
+      for (const p of capped) {
+        if (tok !== scanTok.current) return;
+        let o = null;
+        try { o = await runner.run(pdf, p); } catch (_) { o = null; }
+        if (tok !== scanTok.current) return;
+        if (o && (o.items || []).length) { recovered++; applyMeta(p, { ...readSheetMeta(o), ocr: true, width: o.width, height: o.height }); }
+        setOcrScan((s) => (s ? { ...s, done: s.done + 1 } : s));
+      }
+    } catch (_) { /* import/worker init failure — handled by the recovered===0 note below */ }
+    finally {
+      if (runner) { try { runner.dispose(); } catch (_) { /* best-effort */ } }
+      // LOUD-FAILURE: the runner fails soft per page (null), so a dead engine (offline CDN,
+      // worker blocked) looks like "no page recovered". Say so instead of silently leaving
+      // every label "Sheet N" — the user should know recognition didn't run, not wonder.
+      if (tok === scanTok.current) setOcrScan(recovered === 0 ? { total: capped.length, done: capped.length, failed: true } : null);
     }
   }, []);
 
@@ -1695,6 +1734,14 @@ export default function DocReview({
                   replace "Sheet N" (B266). The same shared engine (sheetGroups/sheetMeta) the Stitcher
                   uses; the count reads "logical sheets · pages" so the collapse is visible. */}
               <div data-testid="sheet-count" style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{groups.length} sheet{groups.length === 1 ? "" : "s"} · {numPages} pages</div>
+              {/* B364 — the scanned-sheet OCR pass is visibly in progress (labels fill in as pages
+                  read), and a pass that recovered NOTHING says so instead of silently leaving
+                  "Sheet N" everywhere. */}
+              {ocrScan && (
+                <div data-testid="ocr-scan-note" style={{ fontSize: 10, color: "var(--warn-text)", fontWeight: 700, marginBottom: 6 }}>
+                  {ocrScan.failed ? "Couldn’t read the scanned sheets (text recognition unavailable) — labels stay generic" : `Reading scanned sheets… ${ocrScan.done}/${ocrScan.total}`}
+                </div>
+              )}
               {groups.map((g, gi) => {
                 const gid = `${gi}:${g.pages[0]?.pageNum}`;
                 if (g.kind === "single") {
