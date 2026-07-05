@@ -222,7 +222,11 @@ export default function FileBrowser({
   };
   const doRefile = async (f) => {
     const sel = refileSel[f.id] || {};
-    const discipline = sel.discipline || f.discipline || "Civil";
+    // Normalize a typed discipline onto the canonical list case-insensitively ("civil" →
+    // "Civil") so a typo/case variant can't mint a duplicate subcategory node in the tree;
+    // a genuinely new name still passes through untouched (B659).
+    const typed = (sel.discipline || f.discipline || "Civil").trim();
+    const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const res = await refileReview(f.id, { projectId: f.projectId || projectId, project: projName(f.projectId || projectId), discipline });
     // Update the index row's category/state too so the tree moves it immediately.
     try { await upsertFileFacts(toFactsRow({ projectId: f.projectId || projectId, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.title })); } catch (_) {}
@@ -344,6 +348,7 @@ export default function FileBrowser({
                       </span>
                       <span style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
                         <Badge title="Subcategory (discipline)">{subcategoryOf(f)}</Badge>
+                        {f.sheetNumber && <Badge title="Sheet number / range read off the title block">{f.sheetNumber}</Badge>}
                         {st === FILE_STATES.SUPERSEDED && <Badge tone="old" title="Replaced by a newer revision">superseded</Badge>}
                         {needs && <Badge title="Couldn’t classify confidently">needs filing</Badge>}
                         {mapped && <Badge tone="map" title="Placed on the shared map">on the map</Badge>}

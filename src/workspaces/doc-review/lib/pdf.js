@@ -119,15 +119,45 @@ export async function extractPageItems(pdf, pageNum) {
     const page = await pdf.getPage(pageNum);
     const vp = page.getViewport({ scale: 1 });
     const tc = await page.getTextContent();
+    // Map every run through the VIEWPORT transform (B659). pdf.js reports text transforms in raw
+    // PDF user space, but real CAD exports routinely store the sheet ROTATED (/Rotate 90/180/270 —
+    // the owner's GPL set is saved upside-down, Mesa at 270°) and/or with a shifted MediaBox
+    // origin (Jacintoport starts at −1296,−864). Every viewer displays through the viewport, so
+    // reading raw coordinates put the title block on the wrong edge and broke band/zone/title
+    // logic on MOST real files. Composing with vp.transform yields coordinates that match what a
+    // human sees: top-left origin, y down — for any rotation and origin.
+    const V = vp.transform; // [a,b,c,d,e,f]: user space → viewport (y-down) space
     const items = [];
     for (const it of tc.items) {
       const str = it.str;
       if (!str || !str.trim()) continue;
       const t = it.transform || [1, 0, 0, 1, 0, 0];
-      const h = it.height || Math.hypot(t[2], t[3]) || 0;
-      const w = it.width || 0;
-      // f = baseline from the bottom; the glyph box top in top-left coords is height − (f + h).
-      items.push({ str, x: t[4], y: Math.max(0, vp.height - t[5] - h), w, h });
+      // M = V · t (pdf.js matrix convention: apply([a,b,c,d,e,f],(x,y)) = (ax+cy+e, bx+dy+f)).
+      const M = [
+        V[0] * t[0] + V[2] * t[1], V[1] * t[0] + V[3] * t[1],
+        V[0] * t[2] + V[2] * t[3], V[1] * t[2] + V[3] * t[3],
+        V[0] * t[4] + V[2] * t[5] + V[4], V[1] * t[4] + V[3] * t[5] + V[5],
+      ];
+      const bl = Math.hypot(M[0], M[1]) || 1;                 // baseline scale (1 at scale-1 viewports)
+      const fontH = Math.hypot(M[2], M[3]) || it.height || 0; // visual type size
+      const len = (it.width || 0) * (bl / (Math.hypot(t[0], t[1]) || 1)); // run length on screen
+      const ux = M[0] / bl, uy = M[1] / bl;                   // baseline direction (viewport)
+      const vx = fontH ? M[2] / fontH : 0, vy = fontH ? M[3] / fontH : -1; // glyph-up direction
+      // The run's axis-aligned box from its 4 corners: baseline start, +len along the baseline,
+      // +fontH along glyph-up, and both.
+      const xs = [M[4], M[4] + len * ux, M[4] + vx * fontH, M[4] + len * ux + vx * fontH];
+      const ys = [M[5], M[5] + len * uy, M[5] + vy * fontH, M[5] + len * uy + vy * fontH];
+      const x = Math.min(...xs), y = Math.min(...ys);
+      const box = { str, x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+      if (Math.abs(uy) > Math.abs(ux)) {
+        // VERTICAL run (rotated ±90° relative to the VIEW — e.g. a title running up the block's
+        // edge). `up` = reads bottom→top on screen; `fontH` = the visual type size, since for a
+        // vertical run `h` is its LENGTH. The line reconstruction joins multi-run vertical titles
+        // in true reading order using these.
+        items.push({ ...box, vert: true, up: uy < 0, fontH });
+      } else {
+        items.push(box);
+      }
     }
     return { items, width: vp.width, height: vp.height };
   } catch (_) {

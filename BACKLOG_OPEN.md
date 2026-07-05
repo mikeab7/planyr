@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _51 open · 3 awaiting live verification._
+> _51 open · 4 awaiting live verification._
 
 ## 🔲 Open
 
@@ -68,18 +68,20 @@
 |---|---|---|---|---|
 | B658 | Replace landing-page copy with the approved buyer-voice deck | [Landing / marketing] | #ui | ⏳ live — awaiting |
 | B651 | Parcel split double-counts acreage; make split REPLACE the parent (parent + children can never both be active) | [Site Planner] | #site-planner #yield #selection | ⏳ live — awaiting |
+| B659 | Sheet reader + file organizer revamp: rotated/offset pages, set-aware titles, left-edge & vertical title blocks, title-first grouping, date-first names | [Doc Review / Library] | #doc-review #library #files #filing | ⏳ live — awaiting |
 | B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) (×2) | [Scheduler / robustness] | #scheduler | ⏳ live — awaiting |
 
 ## By tag
 
 - **#auth** — B483
 - **#compare** — B471
-- **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38
+- **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B659
 - **#drive** — B629, B409
-- **#files** — B180, B181, B182, B183
-- **#filing** — B411, B364, B273
+- **#files** — B180, B181, B182, B183, B659
+- **#filing** — B411, B364, B273, B659
 - **#gis** — B629, B370, B309, B178, B171, B147, B13, B95
 - **#infra** — B408, B406, B179, B63
+- **#library** — B659
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479
 - **#persistence** — B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSheetCode, consecutiveCodes, groupKey, groupSheets, markAdjacentDuplicateNumbers } from "../src/shared/files/sheetGroups.js";
+import { parseSheetCode, consecutiveCodes, groupKey, groupSheets, markAdjacentDuplicateNumbers, tileBaseTitle } from "../src/shared/files/sheetGroups.js";
 
 const sheet = (sheetNumber, item, discipline = "Civil", sheetTitle = "") => ({ sheetNumber, item, discipline, sheetTitle });
 
@@ -45,6 +45,45 @@ describe("markAdjacentDuplicateNumbers — clear cross-reference misreads (B378)
   it("ignores empty numbers (two un-numbered pages are not 'duplicates')", () => {
     const out = markAdjacentDuplicateNumbers([{ sheetNumber: "" }, { sheetNumber: "" }]);
     expect(out.every((p) => !p.dupNumber)).toBe(true);
+  });
+});
+
+describe("groupKey / groupSheets — the read TITLE is primary (B659)", () => {
+  it("does NOT collapse distinct arch sheets that merely share a discipline item (the '4 SHEETS · 44 PAGES' bug)", () => {
+    const pages = [
+      sheet("A201", "Architectural", "Architectural", "OVERALL ELEVATION - EAST"),
+      sheet("A202", "Architectural", "Architectural", "BUILDING ELEVATIONS - SOUTH"),
+      sheet("A203", "Architectural", "Architectural", "TILTWALL PARAPET COPING DETAILS"),
+      sheet("A204", "Architectural", "Architectural", "VERTICAL TILTWALL PANEL DETAILS"),
+    ];
+    const groups = groupSheets(pages);
+    expect(groups).toHaveLength(4);
+    expect(groups.every((g) => g.kind === "single")).toBe(true);
+    expect(groups[1].title).toBe("BUILDING ELEVATIONS - SOUTH"); // the label shows the sheet's OWN title
+  });
+  it("still groups consecutive sheets that share the SAME read title", () => {
+    const pages = [
+      sheet("A303", "Architectural", "Architectural", "WALL SECTIONS AND DETAILS"),
+      sheet("A304", "Architectural", "Architectural", "WALL SECTIONS AND DETAILS"),
+      sheet("A305", "Architectural", "Architectural", "WALL SECTIONS AND DETAILS"),
+    ];
+    const groups = groupSheets(pages);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ kind: "group", sheetRange: "A303–A305" });
+  });
+  it("tileBaseTitle strips only a TRAILING tile designator for the key", () => {
+    expect(tileBaseTitle("TOPO SURVEY III")).toBe(tileBaseTitle("TOPO SURVEY I"));
+    expect(tileBaseTitle("GRADING PLAN AREA 2")).toBe(tileBaseTitle("GRADING PLAN AREA 1"));
+    expect(tileBaseTitle("OVERALL PLAN (1 OF 4)")).toBe(tileBaseTitle("OVERALL PLAN (2 OF 4)"));
+    expect(tileBaseTitle("PHASE 1 EROSION CONTROL")).not.toBe(tileBaseTitle("PHASE 2 EROSION CONTROL")); // mid-title stays
+  });
+  it("a group's label drops the tile counter; a single keeps its full title", () => {
+    const tiles = [
+      sheet("C-2", "Topographic Survey", "Survey", "TOPO SURVEY I"),
+      sheet("C-3", "Topographic Survey", "Survey", "TOPO SURVEY II"),
+    ];
+    expect(groupSheets(tiles)[0].label).toBe("TOPO SURVEY · C-2–C-3 · 2 sheets");
+    expect(groupSheets([tiles[0]])[0].label).toBe("TOPO SURVEY I · C-2");
   });
 });
 
