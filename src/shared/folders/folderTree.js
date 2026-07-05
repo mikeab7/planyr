@@ -151,16 +151,22 @@ export function suggestNextNumberedName(siblings = [], label = "New Folder") {
 export const stripPrefix = (name) =>
   String(name ?? "").replace(/^\s*\d{1,3}\.\s*/, "").trim().toLowerCase();
 
-// Loose label equality: exact after prefix-strip, or singular/plural off-by-an-s
+// Word-normalize for comparison: any run of non-alphanumerics becomes one space, so
+// "Site Plans" ≡ "site-plans" ≡ "site_plans" — the stored Drive keys carry SLUGGED
+// discipline segments while folder labels carry spaces; both must resolve to one folder.
+const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+// Loose label equality on normalized forms, plus singular/plural off-by-an-s
 // ("Exhibits" folder ↔ "Exhibit" discipline).
 const labelEq = (a, b) => {
-  if (!a || !b) return false;
-  if (a === b) return true;
-  return a.replace(/s$/, "") === b.replace(/s$/, "");
+  const na = norm(a), nb = norm(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  return na.replace(/s$/, "") === nb.replace(/s$/, "");
 };
 
 const childByLabel = (rows, parentId, label) =>
-  childrenOf(rows, parentId).find((r) => labelEq(stripPrefix(r.name), String(label || "").trim().toLowerCase())) || null;
+  childrenOf(rows, parentId).find((r) => labelEq(stripPrefix(r.name), label)) || null;
 
 /* Where a drawing of `discipline` files in the standard tree:
  * 02. Design → 01. Drawings → <discipline match> → 01. Current (or 02. Archive when

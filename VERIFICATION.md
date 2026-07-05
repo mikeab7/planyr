@@ -68,6 +68,15 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V213 — B660: the ONE-TIME all-projects organizer (SIGNED-IN + LIVE DRIVE) — first signed-in Library open runs the banner ("Organizing <project> (n of N)…"), EVERY existing project ends with the 133-folder tree in Planyr + Drive, and the pre-existing files (e.g. Grand Port's 3 drawings) physically move into `02. Design/01. Drawings/<discipline>/01. Current` in Drive with share links + open-in-Review still working ⏳ **auth-only + needs a real connected Drive account**
+- **Added** 2026-07-05 · **Cadence** once (migration acceptance) · **Last checked** 2026-07-05 (lint 0 · **2,561 tests** — parseFiledKey key parsing incl. unfiled-rejection, migrateFilesToTree move/already-skip/chunk-paging/slug-discipline-match/fallback-to-Drawings/per-file-error collection, listByPrefix request shape · build green).
+- **Why not verified here:** same auth-only + live-Drive gate as V208/V209/V212.
+- **⏳ Steps on planyr.io (teammate with the Drive-connected account — NOT Michael's job):**
+  1. Sign in fresh (or clear the `planyr:treeMigrateV1:<uid>` localStorage marker) → open **Library** → the organizer banner runs to "All N projects organized ✓".
+  2. In Google Drive, confirm EVERY project folder now holds the 12 categories, and Grand Port's PDFs sit in `02. Design/01. Drawings/03. Architectural|05. Civil/01. Current` (no copies left in the flat `project-…/<discipline>` folders).
+  3. Open one migrated file in Review (read-back by id) and mint a Share link — both must still work post-move.
+  4. Re-open the Library → no second migration run (marker set); the unified view's counts match the moved files.
+
 ### V212 — B659: the UNIFIED Library + files-in-the-tree + the 502 fix (SIGNED-IN + LIVE DRIVE) — one per-project view (folder tree rail + file list), a dropped PDF's bytes land in `Planyr/<uid>/project-<id>/02. Design/01. Drawings/<discipline>/01. Current` in Drive AND the file shows under that same folder on screen, and a fresh 133-folder seed mirrors to completion with live progress (no 502) ⏳ **auth-only + needs a real connected Drive account**
 - **Added** 2026-07-05 · **Cadence** once (feature acceptance) · **Last checked** 2026-07-05 (lint 0 · **2,551 tests** — chunked-`maxOps` rounds finish a 12-folder tree with zero duplicate creates, parents-first across chunk boundaries, deferred-not-errored out-of-chunk moves, `error` carries real text; `resolveDrawingTarget` routes discipline→Current, archive→Archive, unknown→Drawings, no-tree→null; `treeParentForUpload` falls back null on empty/missing/throwing store · build green · logged-out E2E smoke asserts the unified surface).
 - **Why not verified here:** same auth-only + live-Drive gate as V208/V209. The 502 itself WAS reproduced live (owner screenshot, GREENS BAYOU: 65/133 mirrored then killed) and its production data confirmed the diagnosis from this sandbox via Supabase.

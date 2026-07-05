@@ -17,7 +17,9 @@ via the Shell `onOpenReviewInDocReview` intent.
   per-folder counts, publishes rows up).
 - `lib/folders.js` — the folder-index store: reads/writes the tree in Supabase (`project_folders`,
   own-row RLS) and triggers the one-way Google Drive mirror via `/api/folders` (loops the server's
-  20-op chunks with progress — the B659 502 fix).
+  20-op chunks with progress — the B659 502 fix). Also the B660 one-time organizer
+  (`migrateAllProjects`/`migrateProjectFiles`): seeds every existing project + moves pre-tree
+  Drive files into their tree folders; auto-runs once per account from `Library.jsx` (banner).
 
 **Data layer:** file browsing imports `reviewStore` / `autofiling` / `fileIndex` from
 `/src/workspaces/doc-review/lib/` cross-workspace. The **folder tree (B650)** adds its own index:

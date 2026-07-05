@@ -155,6 +155,59 @@ export async function syncProjectFolders({ projectId, userId, client, store, max
   return { ok: errors.length === 0, summary, errors, error: errors[0], remaining, total };
 }
 
+/* Parse a stored drive_files key into its filing coordinates (B660 migration). Keys are
+ * `<uid>/project-<pid>/<discipline-slug>/<name>` (see reviewStore pushFileToDrive). Returns
+ * { discipline, name } or null for anything that isn't a filed project document (e.g. the
+ * `project-unfiled/…` holding area — those are deliberately NOT migrated: no auto-guess). */
+export function parseFiledKey(planyrKey, userId, projectId) {
+  const prefix = `${userId}/project-${slugSeg(projectId)}/`;
+  const s = String(planyrKey || "");
+  if (!s.startsWith(prefix)) return null;
+  const rest = s.slice(prefix.length);
+  const slash = rest.indexOf("/");
+  if (slash <= 0) return null; // no discipline segment → not a filed doc key
+  return { discipline: rest.slice(0, slash), name: rest.slice(slash + 1) };
+}
+
+/* One chunk of the ONE-TIME file migration (B660): move this project's already-uploaded Drive
+ * files INTO the standard tree (Design → Drawings → <discipline> → 01. Current), in place by
+ * file id — names, share links, and read-back keys are untouched (downloads resolve by id).
+ * Idempotent: a file already parented in its tree folder is skipped, so re-running is safe
+ * and cheap. Chunked exactly like syncProjectFolders (one small batch per request; the client
+ * loops on `done`). Returns { ok, moved, already, skipped, errors, error?, done, nextOffset }. */
+export async function migrateFilesToTree({ userId, projectId, client, store, idStore, offset = 0, limit = 10 } = {}) {
+  if (!projectId) return { ok: false, error: "Missing projectId." };
+  const out = { ok: true, moved: 0, already: 0, skipped: 0, errors: [], done: true, nextOffset: offset };
+  const prefix = `${userId}/project-${slugSeg(projectId)}/`;
+  const keys = await idStore.listByPrefix(prefix, { limit, offset });
+  out.done = keys.length < limit;
+  out.nextOffset = offset + keys.length;
+  if (!keys.length) return out;
+
+  const rows = await store.list(projectId); // the project's folder tree, once per chunk
+  for (const k of keys) {
+    try {
+      const parsed = parseFiledKey(k.planyrKey, userId, projectId);
+      if (!parsed || !k.driveId) { out.skipped += 1; continue; }
+      const target = resolveDrawingTarget(rows, parsed.discipline);
+      const targetId = target && target.driveFolderId;
+      if (!targetId) { out.skipped += 1; continue; } // tree/discipline not mirrored → leave in place
+      const parents = await client.parentsOf(k.driveId);
+      if (parents.includes(targetId)) { out.already += 1; continue; } // idempotent skip
+      await client.update(k.driveId, {
+        addParents: targetId,
+        ...(parents.length ? { removeParents: parents.join(",") } : {}),
+      });
+      out.moved += 1;
+    } catch (e) {
+      out.errors.push(`${k.planyrKey}: ${(e && e.message) || e}`);
+    }
+  }
+  out.ok = out.errors.length === 0;
+  out.error = out.errors[0];
+  return out;
+}
+
 /* The Drive parent folder id a new UPLOAD should land in, per the project's standard tree:
  * 02. Design → 01. Drawings → <discipline> → 01. Current (shared resolver — the same one the
  * Library uses for display, so server filing and on-screen placement can never disagree).

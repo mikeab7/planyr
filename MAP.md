@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-05 @ `2388557` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-05 @ `9c4f9bc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -397,7 +397,7 @@ _183 source files mapped._
 - **`src/workspaces/library/components/FolderTree.jsx`** — Library per-project folder-tree editor (B650): add / inline-rename / move / delete + the enumerated delete-safety modal + Drive-mirror status.
   - _exports_: `default (FolderTree)`
 - **`src/workspaces/library/lib/folders.js`** — Client folder-index store (B650): Supabase tree CRUD (own-row RLS) + idempotent template seed + the one-way Drive-mirror trigger via /api/folders.
-  - _exports_: `addFolder`, `ensureSeeded`, `listFolders`, `moveFolder`, `planFolderDelete`, `renameFolder`, `syncFoldersToDrive`, `trashSubtree`
+  - _exports_: `addFolder`, `ensureSeeded`, `listFolders`, `migrateAllProjects`, `migrateProjectFiles`, `moveFolder`, `planFolderDelete`, `renameFolder`, `syncFoldersToDrive`, `trashSubtree`
 - **`src/workspaces/library/Library.jsx`** — Library workspace root: AppHeader chrome + FileBrowser wired to project route/auth, opening a clicked file into Review via the Shell onOpenReviewInDocReview intent
   - _exports_: `default (Library)`
 

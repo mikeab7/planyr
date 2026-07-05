@@ -60,5 +60,18 @@ export function supabaseIdStore({ supabaseUrl, anonKey, token, fetchImpl = fetch
     async del(planyrKey) {
       try { await fetchImpl(`${REST(supabaseUrl)}?planyr_key=eq.${enc(planyrKey)}`, { method: "DELETE", headers }); } catch (_) { /* best-effort */ }
     },
+
+    /* Page through the caller's Drive-stored files under a key prefix (B660 one-time
+     * migration: every filed key starts `<uid>/project-<id>/…`, so a prefix scan finds exactly
+     * one project's files — RLS scopes rows to the caller anyway). Ordered + offset so a
+     * chunked caller walks the set deterministically. Returns [{ planyrKey, driveId }]; [] on
+     * trouble (the round then honestly reports nothing processed — never a crash). */
+    async listByPrefix(prefix, { limit = 10, offset = 0 } = {}) {
+      try {
+        const pattern = enc(String(prefix || "") + "*");
+        const rows = await query(`select=planyr_key,drive_id&planyr_key=like.${pattern}&order=planyr_key.asc&limit=${limit}&offset=${offset}`);
+        return (rows || []).map((r) => ({ planyrKey: r.planyr_key, driveId: r.drive_id }));
+      } catch (_) { return []; }
+    },
   };
 }

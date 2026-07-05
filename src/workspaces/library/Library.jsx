@@ -22,14 +22,21 @@
  * persistence) and the Library (browsing/filing) legitimately share it. Lazy-loaded by
  * the shell, so opening Review never pulls the Library in and vice-versa.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import FileBrowser from "./components/FileBrowser.jsx";
 import FolderTree from "./components/FolderTree.jsx";
 import { autofilingProvider } from "../doc-review/lib/autofiling.js";
-import { cloudReady } from "../doc-review/lib/reviewStore.js";
-import { onAuthChange } from "../site-planner/lib/auth.js";
+import { cloudReady, listProjects as listCloudProjects } from "../doc-review/lib/reviewStore.js";
+import { onAuthChange, getUser } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
+import { migrateAllProjects } from "./lib/folders.js";
+
+// One-time account migration marker (B660): "this account's existing projects were organized
+// into the standard tree on this device". Everything the migration does is idempotent server-
+// side, so a fresh device re-running it is harmless — the marker only avoids wasted work.
+const MIGRATE_KEY = (uid) => `planyr:treeMigrateV1:${uid}`;
+let migrationStartedThisSession = false; // StrictMode double-mount / remount guard
 
 export default function Library({
   shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject,
@@ -61,6 +68,51 @@ export default function Library({
   // Selection is per project — switching projects resets to "All files".
   useEffect(() => { setSelectedFolderId(null); setFolderRows([]); setFolderCounts(null); }, [projectId]);
 
+  // ── One-time migration (B660, owner-requested): organize EVERY existing project into the
+  // standard tree + move its already-uploaded files into the right Drive folders. Runs once
+  // per account (marker), automatically, the first time the Library opens signed-in; honest
+  // progress + a Retry on failure (LOUD-FAILURE — never a silent half-migration).
+  const [migrate, setMigrate] = useState({ status: "idle", text: "" });
+  const migrateRanRef = useRef(false);
+  const runMigration = useCallback(async () => {
+    let uid = null;
+    try { const u = await getUser(); uid = u && u.id; } catch (_) { /* keep null */ }
+    if (!uid) return;
+    setMigrate({ status: "running", text: "Organizing your projects into folders…" });
+    let projects = [];
+    try { projects = await listCloudProjects(); } catch (_) { projects = []; }
+    const r = await migrateAllProjects(projects, {
+      onProgress: ({ index, total, project, phase, mirrorDone, mirrorTotal, moved }) => {
+        const step = `${index + 1} of ${total}`;
+        const detail = phase === "mirror" && mirrorTotal ? ` — mirroring folders ${mirrorDone} of ${mirrorTotal}`
+          : phase === "files" ? ` — moving files${moved ? ` (${moved})` : "…"}` : "";
+        setMigrate({ status: "running", text: `Organizing ${project} (${step})${detail}` });
+      },
+    });
+    if (r.ok) {
+      try { localStorage.setItem(MIGRATE_KEY(uid), new Date().toISOString()); } catch (_) { /* full/blocked storage just means a harmless re-run later */ }
+      setMigrate({ status: "done", text: `All ${r.projects} project${r.projects === 1 ? "" : "s"} organized${r.movedFiles ? ` · ${r.movedFiles} file${r.movedFiles === 1 ? "" : "s"} moved into folders` : ""}.` });
+    } else {
+      setMigrate({ status: "error", text: r.errors[0] || "The one-time folder organization hit a problem." });
+    }
+  }, []);
+  useEffect(() => {
+    if (!signedIn || migrateRanRef.current || migrationStartedThisSession) return;
+    let live = true;
+    (async () => {
+      let uid = null;
+      try { const u = await getUser(); uid = u && u.id; } catch (_) { /* keep null */ }
+      if (!live || !uid) return;
+      let done = null;
+      try { done = localStorage.getItem(MIGRATE_KEY(uid)); } catch (_) { done = null; }
+      if (done) return;
+      migrateRanRef.current = true;
+      migrationStartedThisSession = true;
+      runMigration();
+    })();
+    return () => { live = false; };
+  }, [signedIn, runMigration]);
+
   // The breadcrumb project name resolves from the local site list (instant; the per-user
   // cloud cache feeds it), falling back to the id. { id, name } | null.
   let projectName = "";
@@ -86,6 +138,24 @@ export default function Library({
         authControl={authControl}
         accountActive={accountActive}
       />
+
+      {migrate.status !== "idle" && (
+        <div role={migrate.status === "error" ? "alert" : "status"} style={{
+          flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 12,
+          borderBottom: "1px solid var(--border-default)",
+          color: migrate.status === "error" ? "var(--danger-text)" : migrate.status === "done" ? "var(--text-secondary)" : "var(--text-secondary)",
+          background: "var(--surface-raised)",
+        }}>
+          <span>{migrate.status === "running" ? "↻" : migrate.status === "done" ? "✓" : "⚠"}</span>
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{migrate.text}</span>
+          {migrate.status === "error" && (
+            <button onClick={runMigration} style={{ flex: "none", border: "none", background: "none", color: "var(--accent-library-text)", cursor: "pointer", font: "inherit", fontWeight: 700 }}>Retry</button>
+          )}
+          {migrate.status === "done" && (
+            <button onClick={() => setMigrate({ status: "idle", text: "" })} title="Dismiss" style={{ flex: "none", border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 13 }}>✕</button>
+          )}
+        </div>
+      )}
 
       <div data-testid={folderMode ? "library-unified" : undefined} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <FileBrowser

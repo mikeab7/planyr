@@ -149,6 +149,67 @@ export async function syncFoldersToDrive(projectId, { onProgress } = {}) {
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error.", summary }; }
 }
 
+/* One project's chunk-looped FILE migration (B660): asks the server to move this project's
+ * already-uploaded Drive files into the standard tree, batch by batch, until done. Idempotent
+ * server-side (already-in-place files skip), so an interrupted run just resumes. */
+export async function migrateProjectFiles(projectId, { onProgress } = {}) {
+  if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
+  const token = await authToken();
+  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
+  const totals = { moved: 0, already: 0, skipped: 0 };
+  let offset = 0;
+  const MAX_ROUNDS = 60; // 60 × 8 files = 480 files/project — a hard runaway stop
+  try {
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const resp = await fetch("/api/folders", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ action: "migrate-files", projectId, offset }),
+      });
+      if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
+      let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
+      if (!(resp.ok && jr.ok)) return { ok: false, error: jr.error || `HTTP ${resp.status}`, ...totals };
+      totals.moved += jr.moved || 0; totals.already += jr.already || 0; totals.skipped += jr.skipped || 0;
+      offset = jr.nextOffset ?? offset;
+      onProgress?.({ ...totals });
+      if (jr.done) return { ok: true, ...totals };
+    }
+    return { ok: false, error: "File move didn't finish — run it again.", ...totals };
+  } catch (e) { return { ok: false, error: (e && e.message) || "Network error.", ...totals }; }
+}
+
+/* THE one-time account migration (B660, owner-requested 2026-07-05): give EVERY existing
+ * project the standard folder tree and move its already-uploaded files into the right tree
+ * folders in Drive. Per project: idempotent seed → chunked Drive mirror → chunked file moves.
+ * Everything inside is resumable/idempotent, so a failure mid-way is safe to re-run; the
+ * caller records completion (a local marker) and shows honest progress + errors. */
+export async function migrateAllProjects(projects = [], { onProgress } = {}) {
+  const result = { ok: true, projects: projects.length, seeded: 0, mirrored: 0, movedFiles: 0, errors: [] };
+  for (let i = 0; i < projects.length; i++) {
+    const p = projects[i];
+    const label = p.name || p.id;
+    onProgress?.({ index: i, total: projects.length, project: label, phase: "folders" });
+    const seed = await ensureSeeded(p.id);
+    if (seed.ok && seed.seeded) result.seeded += 1;
+    if (seed.ok === false && !seed.skipped) { result.errors.push(`${label}: ${seed.error || "couldn't set up folders"}`); continue; }
+    const sync = await syncFoldersToDrive(p.id, {
+      onProgress: ({ done, total }) => onProgress?.({ index: i, total: projects.length, project: label, phase: "mirror", mirrorDone: done, mirrorTotal: total }),
+    });
+    if (sync.skipped) { result.errors.push("Google Drive isn't connected — folders saved in Planyr only."); break; }
+    if (!sync.ok) { result.errors.push(`${label}: ${sync.error || "Drive mirror failed"}`); continue; }
+    result.mirrored += 1;
+    onProgress?.({ index: i, total: projects.length, project: label, phase: "files" });
+    const mig = await migrateProjectFiles(p.id, {
+      onProgress: ({ moved }) => onProgress?.({ index: i, total: projects.length, project: label, phase: "files", moved }),
+    });
+    if (mig.skipped) continue;
+    if (!mig.ok) { result.errors.push(`${label}: ${mig.error || "file move failed"}`); continue; }
+    result.movedFiles += mig.moved;
+  }
+  result.ok = result.errors.length === 0;
+  return result;
+}
+
 // Pre-flight: what a delete of this folder's subtree would remove from Drive (folders + files),
 // so the confirmation can enumerate it. Falls back to { skipped } when Drive isn't enabled.
 export async function planFolderDelete(projectId, folderId) {
