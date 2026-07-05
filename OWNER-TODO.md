@@ -51,15 +51,16 @@ _Last updated: 2026-07-05._
       Drive click-through is the Claude cohort's job — `VERIFICATION.md` V208/V209, not yours.)
 
 ## Things Claude needs FROM Michael to finish/verify
-- [ ] **Drainage-manual PDFs for the exact-number transcription pass (B636 tail — the detention engine, code-labeled B629).** The detention rules engine
-      shipped with the verified rates (HCFCD 0.65; Houston's brand-new June-2026 flat 0.8 under 20 acres) but three
-      authorities still carry "screening band — exact table pending" flags because their numbers live in chart
-      figures inside PDFs this sandbox can't download (the network proxy blocks the county/city sites). When
-      convenient, drop into the chat: **City of Houston IDM Chapter 9** (the current June-2026 edition), the
-      **Fort Bend County Drainage District** criteria manual (the Interim Atlas-14 revisions — figures 7-1-1
-      through 7-1-16 hold the under-50-acre detention rates), and the **Montgomery County** Drainage Criteria
-      Manual (adopted Aug 2025, the ≤20-acre simplified tables). Claude transcribes them page-by-page (same as
-      the Goose Creek pass) and the bands become exact numbers.
+- [x] **Drainage-manual transcription (B636 tail) — DONE (Cowork pulled the PDFs itself 2026-07-05; nothing needed from you).**
+      Cowork reached the signed manuals directly (the sandbox couldn't, but Cowork can), so you never had to drop them
+      in. It replaced the placeholder "screening band" values with primary-sourced numbers for **City of Houston**,
+      **Fort Bend**, **Montgomery**, and **Chambers**, and caught two real corrections the trade press had blurred:
+      Houston's flat **0.8 ac-ft/ac applies to the paved/roofed (impervious) area, not the whole tract** — so required
+      detention on a Houston site is meaningfully lower than the first build showed — and the single-family cutoff is
+      **15,000 SF**, not 7,500. Fort Bend & Montgomery now give an exact number (not a range) once a test-fit sets
+      impervious %. Shipped + verified (2,577 tests green). **One loose end, and it's the cohort's job not yours:**
+      **Waller** likely publishes rates too, but the web PDF reader kept cutting off before the rate section, so it was
+      left as an honest range pending a clean read (tracked in `VERIFICATION.md` V204).
 - [ ] **Add the six drainage-authority websites to the periodic Cowork re-verification checklist.** Every
       detention rule record now carries a "verified on" date so staleness is visible; a recurring Cowork pass
       over hcfcd.org, houstonpermittingcenter.org, fortbendcountytx.gov, the Montgomery DCM page, the Chambers

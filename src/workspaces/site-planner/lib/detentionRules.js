@@ -80,18 +80,28 @@ export const DETENTION_RULES = {
       authorityLabel: "City of Houston",
       ruleType: "tiered",
       effectiveDate: "2026-06-01",
-      verifiedOn: "2026-07-03",
-      secondarySource: true, // multi-source corroborated (Quiddity, JRH Eng., Houston BOMA, houstoncivil.com); manual PDF pending — OWNER-TODO
+      verifiedOn: "2026-07-05",
+      // PRIMARY-SOURCE VERIFIED 2026-07-05 against the City's own signed document — the
+      // IDM Supplement IDMS-2025-01 (Houston Public Works; City Engineer O. McFoy, P.E.;
+      // eff. 2025-05-15; carried into the 2026 IDM edition). The flat-rate rewrite is real,
+      // but the primary text corrected two things the trade coverage had blurred:
+      //   (1) the 0.8 ac-ft/ac rate applies to PROPOSED IMPERVIOUS AREA (Table 9.5),
+      //       NOT the gross tract — the engine used to multiply by tract acres; and
+      //   (2) the single-family threshold is 15,000 SF (Tables 9.3/9.4), not 7,500 SF, and
+      //       0.75 ac-ft/ac applies to impervious area IN EXCESS of the exemption.
+      // effectiveDate kept at the 2026 mandatory-compliance date (the supplement allowed
+      // early use from 2025-05-15). Verified from the signed PDF at
+      // https://reduceflooding.com/wp-content/uploads/2025/05/Ch-9-IDM-Supplement-IDMS-2025.pdf
       source: {
-        name: "City of Houston Infrastructure Design Manual Ch. 9 (June 2026 update)",
-        section: "Stormwater detention — flat rate under 20 ac",
-        url: "https://www.houstonpermittingcenter.org/",
+        name: "City of Houston IDM Ch. 9 — Stormwater Detention (Supplement IDMS-2025-01, signed by the City Engineer 2025-05-15; carried into the 2026 IDM edition)",
+        section: "§9.2.01.H.3, Table 9.5 (Detention Criteria 3); Tables 9.3/9.4 (single-family); §9.1.02.G (receiving jurisdiction governs)",
+        url: "https://www.houstonpermittingcenter.org/office-city-engineer/design-and-construction-standards",
       },
       params: {
-        flatRate: { maxAcres: 20, rateAcFtPerAc: 0.8, appliesTo: "tract" },
-        redevelopmentCredit: { rateAcFtPerAc: 0.4, appliesTo: "removedImpervious", note: "credit applied before the 0.8 calc for qualifying redevelopment" },
-        singleFamilyLot: { maxSf: 7500, imperviousPctExempt: 65, rateAbove: 0.75 },
-        largeTract: { minAcres: 20, defersTo: "hcfcd", conflictRateAcFtPerAc: 0.75, note: "per the June-2026 IDM, >20 ac follows the current HCFCD PCPM (0.65 min + impact analysis)" },
+        flatRate: { maxAcres: 20, rateAcFtPerAc: 0.8, appliesTo: "impervious", note: "Table 9.5: 0.8 ac-ft/ac × PROPOSED impervious area of the tract (≤20 ac)" },
+        redevelopmentCredit: { rateAcFtPerAc: 0.4, appliesTo: "removedImpervious", note: "Table 9.5 formula: Detention = (Ap × 0.8) − (Ae × 0.4); Ap = proposed impervious, Ae = existing impervious removed" },
+        singleFamilyLot: { maxSf: 15000, imperviousPctExempt: 65, rateAbove: 0.75, appliesTo: "excessImpervious", note: "Tables 9.3/9.4: SFR tract ≤15,000 SF exempt at ≤65% impervious, else 0.75 ac-ft/ac × impervious IN EXCESS of 65% of tract" },
+        largeTract: { minAcres: 20, defersTo: "hcfcd", conflictRateAcFtPerAc: 0.75, note: "Table 9.5: >20 ac follows the current HCFCD PCPM (0.65 min + impact analysis); COH minimum rate 0.75 ac-ft/ac" },
         grandfather: "projects in review before 2026-06-01 may qualify for the prior (2019) rules if approved before the deadline",
         appliesInEtj: true,
       },
@@ -104,9 +114,9 @@ export const DETENTION_RULES = {
       effectiveDate: "2019-07-09",
       verifiedOn: "2026-07-03",
       source: {
-        name: "City of Houston Infrastructure Design Manual Ch. 9 (2019, Atlas 14 Vol 11)",
-        section: "Stormwater detention tiers",
-        url: "https://www.houstonpermittingcenter.org/",
+        name: "City of Houston IDM Ch. 9 — Table 9.3 / Fig. 9.2 Minimum Detention Rate (pre-2026 Atlas-14 curve; values read from the 2022 IDM edition, unchanged from 2019 until Supplement IDMS-2025-01 replaced it)",
+        section: "§9.2.01.H.3, Table 9.3 — Minimum Detention Rate (1–20 ac, by % impervious)",
+        url: "https://www.houstonpermittingcenter.org/media/7596/download",
       },
       params: {
         smallTract: { maxAcres: 1, rateAcFtPerAc: 0.75, appliesTo: "tract", note: "non-single-family" },
@@ -114,18 +124,26 @@ export const DETENTION_RULES = {
         midTract: {
           minAcres: 1,
           maxAcres: 20,
-          // IDM Fig. 9.2 minimum-detention-rate curve keyed to % impervious.
-          // ONLY the 85→0.95 and 90→0.98 anchors come from published worked examples;
-          // the low-end points are screening interpolants. transcribed:false until the
-          // exact breakpoints are read from Fig. 9.2 itself (OWNER-TODO: manual PDF).
+          // IDM Table 9.3 (the tabular form of Fig. 9.2) — minimum detention rate by %
+          // impervious, TRANSCRIBED VERBATIM 2026-07-05 from the primary manual (media/7596,
+          // the 2022 IDM; this curve was unchanged from the 2019 edition until IDMS-2025-01).
+          // The published "0% – 51% → 0.75" flat floor is the clamped first point at 51%.
+          // (Correction: the prior placeholder's 85→0.95 / 90→0.98 anchors were wrong; the
+          //  manual's Table 9.3 reads 85→0.93 and 90→0.95.)
           curve: [
-            [20, 0.55],
-            [50, 0.75],
-            [85, 0.95],
-            [90, 0.98],
-            [100, 1.0],
+            [51, 0.75],
+            [55, 0.78],
+            [60, 0.81],
+            [65, 0.83],
+            [70, 0.86],
+            [75, 0.88],
+            [80, 0.91],
+            [85, 0.93],
+            [90, 0.95],
+            [95, 0.97],
+            [100, 0.98],
           ],
-          transcribed: false,
+          transcribed: true,
         },
         largeTract: { minAcres: 20, defersTo: "hcfcd", conflictRateAcFtPerAc: 0.75 },
         appliesInEtj: true,
@@ -139,24 +157,38 @@ export const DETENTION_RULES = {
       authorityLabel: "Fort Bend County Drainage District",
       ruleType: "table-band",
       effectiveDate: "2020-01-01",
-      verifiedOn: "2026-07-03",
+      verifiedOn: "2026-07-05",
+      // PRIMARY-SOURCE VERIFIED + TRANSCRIBED 2026-07-05 from the FBCDD DCM, Chapter 6
+      // (Storm Runoff Storage), §6.4.1 / Table 6-1. IMPORTANT CORRECTION: the prior note
+      // that the <50-ac rate lived in "figures 7-1-1…7-1-16" was WRONG — those figures are
+      // the Brazos River water-surface profiles (Ch. 7, leveed areas). The real rate is the
+      // numeric Table 6-1 (minimum detention rate by % impervious), read verbatim below.
       source: {
-        name: "FBCDD Drainage Criteria Manual (2011) + Interim Atlas 14 DCM (eff. 2020-01-01, upd. 2021-09)",
-        section: "Detention requirements, drainage areas <50 ac (figures 7-1-1…7-1-16)",
-        url: "https://www.fortbendcountytx.gov/government/departments/county-services/drainage-district/drainage-criteria-manual",
+        name: "FBCDD Drainage Criteria Manual, Ch. 6 Storm Runoff Storage + Interim Atlas-14 DCM (eff. 2020-01-01, rev. Sep 2021 — §4.d: the <50-ac simplified method is unchanged by Atlas-14)",
+        section: "§6.4.1 / Table 6-1 — Minimum Detention Rates for Drainage Areas Less Than 50 Acres",
+        url: "https://www.fortbendcountytx.gov/sites/default/files/document-central/document-central/drainage-district-documents/drainage-criteria-manual/60StormRunoffStorage.pdf",
       },
       params: {
-        // The <50-ac simplified path publishes CHART FIGURES (7-1-1…7-1-16), not a flat
-        // rate — structure stored now, exact transcription needs the manual pages
-        // (OWNER-TODO). Until then: a Planyr screening band, never a point.
-        table: { maxAcres: 50, figures: "7-1-1 … 7-1-16", rows: [], transcribed: false },
-        screeningBand: true,
-        bandAcFtPerAc: [0.65, 1.0], // spread of published MSA rates (HCFCD 0.65 … COH 0.8–1.0)
-        hecHmsAboveAcres: 50,
+        // FBCDD Table 6-1: minimum detention rate (ac-ft per acre of DRAINAGE AREA), keyed
+        // to % impervious. Linear: rate = 0.58 + 0.004 × %imp. Transcribed verbatim from the
+        // manual. The simplified method is mandatory <50 ac and OPTIONAL 50–640 ac; ≥640 ac
+        // requires HEC-HMS (→ pointMaxAcres). Rate × drainage area = required volume.
+        table: {
+          maxAcres: 50,
+          pointMaxAcres: 640,
+          figures: "Table 6-1 (§6.4.1)",
+          rows: [[10, 0.62], [20, 0.66], [30, 0.70], [40, 0.74], [50, 0.78], [60, 0.82], [70, 0.86], [80, 0.90], [90, 0.94], [100, 0.98]],
+          transcribed: true,
+          appliesTo: "drainageArea",
+        },
+        screeningBand: false, // resolves to a POINT when impervious % is known; band only as an impervious-unknown / large-tract fallback
+        bandAcFtPerAc: [0.62, 0.98], // Table 6-1 endpoints (10% … 100% impervious)
+        releaseRateCfsPerAc: 0.125, // §6.4.1: max 100-yr release rate
+        hecHmsAboveAcres: 640,
         tailwater: {
           convention:
             "assume tailwater at the top of the downstream end of the outlet pipe, or the depth at max release flowrate, whichever is HIGHER",
-          note: "FBCDD's codified convention — feeds the hydraulic-regime gate (B632)",
+          note: "FBCDD's codified convention (§6.4.1/§6.4.5) — feeds the hydraulic-regime gate (B632)",
         },
       },
     },
@@ -168,17 +200,31 @@ export const DETENTION_RULES = {
       authorityLabel: "Montgomery County",
       ruleType: "policy-band",
       effectiveDate: "2025-08-26",
-      verifiedOn: "2026-07-03",
+      verifiedOn: "2026-07-05",
       source: {
-        name: "Montgomery County Drainage Criteria Manual (adopted 2025-08-26)",
-        section: "Detention — contributing areas ≤20 ac / >20 ac; zero-increase peak flow + WSEL",
+        name: "Montgomery County Drainage Criteria Manual (adopted 2025-08-26; Halff Associates; Conroe NOAA Atlas-14 station)",
+        section: "§6.3.6 (≤20 ac simplified) + Eq. 6-2 / Fig. 6-1; §6.3.1 general 0.55 min; §6.3.7 (>20 ac, 0.55 min)",
         url: "https://www.mctx.org/",
       },
       params: {
-        screeningBand: true,
-        bandAcFtPerAc: [0.6, 1.0],
-        smallSiteMaxAcres: 20, // simplified path ≤20 ac — exact tables pending transcription (OWNER-TODO)
-        smallTableTranscribed: false,
+        // PRIMARY-SOURCE VERIFIED + TRANSCRIBED 2026-07-05 from the adopted DCM, §6.3.6.
+        // The ≤20-ac simplified path is Eq. 6-2 (the readable form of Fig. 6-1), applied to
+        // the CONTRIBUTING (developed) area: flat 0.35 ac-ft/ac at ≤25% impervious, else
+        // rate = 0.0073 × %imp + 0.1667. Verified PDF (county revize CMS):
+        // cms1files.revize.com/montgomerycountytx/MoCo Drainage Criteria Manual adopted 8-26-2025 Signed.pdf
+        smallSite: {
+          maxAcres: 20,
+          belowPct: { maxPct: 25, rate: 0.35 },
+          slope: 0.0073,
+          intercept: 0.1667,
+          transcribed: true,
+          appliesTo: "contributingArea",
+          note: "Eq. 6-2 (§6.3.6): rate ac-ft/ac × contributing area; flat 0.35 at ≤25% impervious",
+        },
+        screeningBand: false, // ≤20 ac resolves to a POINT when impervious % is known; band as the impervious-unknown / >20-ac fallback
+        bandAcFtPerAc: [0.35, 0.9], // Eq. 6-2 endpoints: 0.35 (≤25% imp) … 0.90 (~100% imp)
+        smallSiteMaxAcres: 20,
+        largeSiteMinRate: 0.55, // §6.3.7 / §6.3.1: >20 ac follows the modeling path, 0.55 ac-ft/ac minimum
         zeroIncrease: ["peakFlow", "wsel"],
         atlasStation: "Conroe",
       },
@@ -191,11 +237,19 @@ export const DETENTION_RULES = {
       authorityLabel: "Chambers County",
       ruleType: "policy-band",
       effectiveDate: "2005-01-01",
-      verifiedOn: "2026-07-03",
+      verifiedOn: "2026-07-05",
+      // PRIMARY-SOURCE VERIFIED 2026-07-05 (Chambers County DCM, Aug 9 2005, hosted by
+      // Mont Belvieu): CONFIRMED there is NO published flat detention rate. §1.2.1 is a
+      // strict "zero impact" policy (no downstream peak-flow or upstream WSEL increase);
+      // detention is sized by calculation — §2.3.5 / §7.3 require "calculations establishing
+      // the required detention storage volume" for <200-ac drainage areas (Exhibit 7-3), and
+      // a flood-routing analysis at ≥200 ac. No ac-ft/ac rate appears anywhere in the manual.
+      // (Ch. 7 body pp. 7-5..7-7 exceeded the text extractor; the negative rests on the
+      // zero-impact policy + the analysis-only submittal requirements.) Keep as a band.
       source: {
-        name: "Chambers County Drainage Criteria Manual (~2005, hosted via Mont Belvieu)",
-        section: "Zero-impact policy; detention analysis path ≤200 ac",
-        url: "https://www.montbelvieu.net/",
+        name: "Chambers County Drainage Criteria Manual (Aug 9, 2005; hosted via City of Mont Belvieu)",
+        section: "§1.2.1 Zero-Impact policy; §7.3 Detention Analysis (≤200 ac) / §7.4 (>200 ac); Exhibit 7-3",
+        url: "https://www.montbelvieu.net/DocumentCenter/View/53/Drainage-Criteria-Manual-8-09-05",
       },
       params: {
         screeningBand: true,
@@ -214,14 +268,23 @@ export const DETENTION_RULES = {
       ruleType: "policy-band",
       effectiveDate: "2023-12-06",
       verifiedOn: "2026-07-03",
+      // ⚠ INTENTIONALLY NOT re-verified 2026-07-05 (verifiedOn left at 2026-07-03). A research
+      // pass over the primary regs (rev. 2023-12-06, Appendix E) reported that Waller DOES
+      // publish detention rates — a "Coefficient Method" Storage = 0.65 × developed acres for
+      // small sites (<5 ac commercial / <10 ac residential) and a 0.55 ac-ft/ac FLOOR on the
+      // hydrograph (Malcom's) method — and that its TxDOT references are for materials/roadway
+      // specs, NOT the detention rate. If confirmed, this record should flip noPublishedRate→
+      // false, drop txdotDeference, and tighten the band toward 0.55–0.65. NOT applied here:
+      // the web text extractor truncated Appendix E before the rate section, so the number
+      // could NOT be read from the manual directly. OWNER-TODO: confirm & tighten.
       source: {
         name: "Waller County Subdivision & Development Regulations (rev. 2023-12-06)",
-        section: "Appendix E (drainage) — heavy TxDOT-standards deference",
+        section: "Appendix E (drainage) — zero-net-increase; §V/§VI detention (Coefficient / Malcom's) — rate section unverified, see note",
         url: "https://www.co.waller.tx.us/",
       },
       params: {
         screeningBand: true,
-        bandAcFtPerAc: [0.4, 1.2], // the thinnest criteria in the MSA → the widest band
+        bandAcFtPerAc: [0.4, 1.2], // the thinnest criteria in the MSA → the widest band (see note: likely tightens to 0.55–0.65 once confirmed)
         txdotDeference: true,
       },
     },
@@ -353,6 +416,30 @@ function bandResult(loHi, basis, rule, flags = []) {
   };
 }
 
+/* Published detention rate as a function of % impervious, for the transcribed band
+ * authorities. Fort Bend FBCDD Table 6-1 → piecewise-linear interpolation over
+ * table.rows (rate × drainage area). Montgomery DCM Eq. 6-2 → a flat 0.35 floor at
+ * ≤25% impervious, a linear equation above (rate × contributing area). Size-gated to
+ * the range where the simplified method is published; returns null outside that range,
+ * or for authorities that publish no impervious-keyed rate (Chambers/Waller). Pure. */
+export function rateFromImpervious(rule, impPct, acres = null) {
+  const p = (rule && rule.params) || {};
+  if (impPct == null) return null;
+  if (p.table && p.table.transcribed && p.table.rows && p.table.rows.length) {
+    // FBCDD Table 6-1 — simplified method published <50 ac, permitted to 640 ac; ≥640 → HEC-HMS.
+    if (acres != null && p.table.pointMaxAcres != null && acres >= p.table.pointMaxAcres) return null;
+    return round4(interpolateCurve(p.table.rows, impPct));
+  }
+  if (p.smallSite && p.smallSite.transcribed) {
+    // Montgomery Eq. 6-2 — the ≤20-ac simplified path only.
+    const s = p.smallSite;
+    if (acres != null && s.maxAcres != null && acres > s.maxAcres) return null;
+    if (s.belowPct && impPct <= s.belowPct.maxPct) return s.belowPct.rate;
+    return round4(s.slope * impPct + s.intercept);
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // computeRequiredDetention — the rate method, always carrying its rule record.
 // ---------------------------------------------------------------------------
@@ -380,13 +467,33 @@ export function computeRequiredDetention({
   const imperviousAcres = impPct != null ? (acres * impPct) / 100 : null;
   const p = rule.params || {};
 
-  // ---- band-typed records: structurally NEVER a point --------------------
+  // ---- band-typed records: a POINT when a transcribed rate applies, else a band ----
   if (rule.ruleType === "table-band" || rule.ruleType === "policy-band") {
+    // Fort Bend (Table 6-1) and Montgomery (Eq. 6-2) publish a rate keyed to % impervious:
+    // resolve to a point when impervious is known and the site is in the simplified range.
+    const rate = rateFromImpervious(rule, impPct, acres);
+    if (rate != null) {
+      const src = rule.authority === "montgomery" ? "MoCo DCM Eq. 6-2" : "FBCDD Table 6-1";
+      const basis = `${round2(rate)} ac-ft/ac (${src} at ${round2(impPct)}% impervious) × ${acres.toFixed(2)} ac`;
+      return pointResult(rate * acres, rate, basis, rule, ["from-published-" + (p.table ? "table" : "formula")]);
+    }
+    // No point available → the honest screening band (structurally never a fabricated point).
     const [lo, hi] = p.bandAcFtPerAc;
     const flags = ["screening-band"];
     if (p.noPublishedRate || p.txdotDeference) flags.push("verify-with-county-engineer");
-    if ((p.table && !p.table.transcribed) || p.smallTableTranscribed === false) flags.push("table-unverified");
-    const basis = `${lo}–${hi} ac-ft/ac (Planyr screening band — no published flat rate${p.table ? `; exact figures ${p.table.figures} pending transcription` : ""}) × ${acres.toFixed(2)} ac`;
+    const transcribed = (p.table && p.table.transcribed) || (p.smallSite && p.smallSite.transcribed);
+    let why;
+    if (transcribed && impPct == null) {
+      flags.push("impervious-unknown");
+      why = `spans the published rate range because impervious % isn't set — enter a test-fit for the exact ${p.table ? "Table 6-1" : "Eq. 6-2"} point`;
+    } else if (transcribed) {
+      flags.push("large-tract-modeling");
+      why = `simplified rate method doesn't apply at ${round2(acres)} ac — full drainage modeling required${p.largeSiteMinRate ? ` (min ${p.largeSiteMinRate} ac-ft/ac)` : ""}`;
+    } else {
+      if ((p.table && !p.table.transcribed) || p.smallTableTranscribed === false) flags.push("table-unverified");
+      why = `Planyr screening band — no published flat rate${p.table && !p.table.transcribed ? `; exact figures ${p.table.figures} pending transcription` : ""}`;
+    }
+    const basis = `${lo}–${hi} ac-ft/ac (${why}) × ${acres.toFixed(2)} ac`;
     return bandResult([lo * acres, hi * acres], basis, rule, flags);
   }
 
@@ -438,6 +545,18 @@ export function computeRequiredDetention({
       if (impPct != null && impPct <= sf.imperviousPctExempt) {
         return { kind: "none", requiredAcFt: 0, bandAcFt: null, rateAcFtPerAc: 0, basis: `single-family lot <${sf.maxSf.toLocaleString()} sf at ≤${sf.imperviousPctExempt}% impervious — no detention required`, rule, governing: null, flags: [], caveat: SCREENING_CAVEAT };
       }
+      // 2026 IDM Tables 9.3/9.4: 0.75 ac-ft/ac applies to impervious IN EXCESS of the
+      // exemption (65% of tract), not the whole tract. The 2019 record (no appliesTo) keeps
+      // the simpler whole-tract screening basis. Impervious unknown → conservative + flagged.
+      if (sf.appliesTo === "excessImpervious") {
+        const exemptFrac = sf.imperviousPctExempt / 100;
+        const excessAc = impPct != null ? Math.max(0, acres * (impPct / 100 - exemptFrac)) : acres;
+        const flags = impPct == null ? ["impervious-unknown"] : [];
+        const label = impPct != null
+          ? `${excessAc.toFixed(4)} ac impervious above ${sf.imperviousPctExempt}% of tract`
+          : `${acres.toFixed(2)} ac (impervious % unknown — conservative)`;
+        return pointResult(sf.rateAbove * excessAc, sf.rateAbove, `${sf.rateAbove} ac-ft/ac × ${label} (single-family lot <${sf.maxSf.toLocaleString()} sf)`, rule, flags);
+      }
       return pointResult(sf.rateAbove * acres, sf.rateAbove, `${sf.rateAbove} ac-ft/ac × ${acres.toFixed(2)} ac (single-family lot above ${sf.imperviousPctExempt}% impervious)`, rule);
     }
     const largeMin = p.largeTract?.minAcres ?? 20;
@@ -467,12 +586,18 @@ export function computeRequiredDetention({
       return pointResult(hcfcdCand.acFt, hRate, `>${largeMin} ac — ${p.largeTract?.note || "defers to HCFCD PCPM"}: ${hcfcdCand.basis}`, hcfcdRule);
     }
     if (p.flatRate && acres < p.flatRate.maxAcres) {
-      // June-2026 IDM: flat 0.8 <20 ac, redevelopment credit for removed impervious.
+      // 2026 IDM Table 9.5: 0.8 ac-ft/ac × PROPOSED IMPERVIOUS AREA (not the gross tract),
+      // minus a 0.4 ac-ft/ac credit for existing impervious removed on redevelopment.
       const r = p.flatRate.rateAcFtPerAc;
-      const credit = removedImperviousAcres > 0 && p.redevelopmentCredit ? p.redevelopmentCredit.rateAcFtPerAc * removedImperviousAcres : 0;
       const flags = rule.secondarySource ? ["secondary-source"] : [];
-      const basis = `${r} ac-ft/ac × ${acres.toFixed(2)} ac${credit ? ` − ${p.redevelopmentCredit.rateAcFtPerAc} × ${removedImperviousAcres.toFixed(2)} ac removed impervious` : ""}`;
-      return pointResult(Math.max(0, r * acres - credit), r, basis, rule, flags);
+      // Impervious is the base; if the test-fit hasn't set it, fall back to the tract as a
+      // conservative upper bound (impervious ≤ tract, so this never under-sizes) and flag it.
+      const baseAc = imperviousAcres != null ? imperviousAcres : acres;
+      if (imperviousAcres == null) flags.push("impervious-unknown");
+      const credit = removedImperviousAcres > 0 && p.redevelopmentCredit ? p.redevelopmentCredit.rateAcFtPerAc * removedImperviousAcres : 0;
+      const baseLabel = imperviousAcres != null ? `${baseAc.toFixed(2)} ac impervious` : `${baseAc.toFixed(2)} ac (full tract — impervious % unknown, conservative upper bound)`;
+      const basis = `${r} ac-ft/ac × ${baseLabel}${credit ? ` − ${p.redevelopmentCredit.rateAcFtPerAc} × ${removedImperviousAcres.toFixed(2)} ac removed impervious` : ""}`;
+      return pointResult(Math.max(0, r * baseAc - credit), r, basis, rule, flags);
     }
     if (p.smallTract && acres < p.smallTract.maxAcres) {
       const r = p.smallTract.rateAcFtPerAc;
