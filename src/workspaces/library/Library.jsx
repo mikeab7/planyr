@@ -36,7 +36,9 @@ import { migrateAllProjects } from "./lib/folders.js";
 // into the standard tree on this device". Everything the migration does is idempotent server-
 // side, so a fresh device re-running it is harmless — the marker only avoids wasted work.
 const MIGRATE_KEY = (uid) => `planyr:treeMigrateV1:${uid}`;
-let migrationStartedThisSession = false; // StrictMode double-mount / remount guard
+// StrictMode double-mount / remount guard — PER ACCOUNT, so signing out and into a different
+// account in the same tab still runs that account's one-time migration.
+const migrationStartedFor = new Set();
 
 export default function Library({
   shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject,
@@ -97,17 +99,17 @@ export default function Library({
     }
   }, []);
   useEffect(() => {
-    if (!signedIn || migrateRanRef.current || migrationStartedThisSession) return;
+    if (!signedIn || migrateRanRef.current) return;
     let live = true;
     (async () => {
       let uid = null;
       try { const u = await getUser(); uid = u && u.id; } catch (_) { /* keep null */ }
-      if (!live || !uid) return;
+      if (!live || !uid || migrationStartedFor.has(uid)) return;
       let done = null;
       try { done = localStorage.getItem(MIGRATE_KEY(uid)); } catch (_) { done = null; }
       if (done) return;
       migrateRanRef.current = true;
-      migrationStartedThisSession = true;
+      migrationStartedFor.add(uid);
       runMigration();
     })();
     return () => { live = false; };
