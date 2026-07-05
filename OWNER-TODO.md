@@ -66,17 +66,12 @@ _Last updated: 2026-07-04._
       (Mont Belvieu-hosted) DCM, and Waller's subdivision regs is the refresh mechanism. (Houston already changed
       its rules once — June 2026 — between the owner's verification and this build; the engine caught it because
       records are versioned.)
-- [ ] **Turn on the parcel-cache builder (B629) — add 3 GitHub Actions secrets (one-time, ~2 min).** The new
-      feature that keeps a fresh copy of Chambers/Waller/Fort Bend parcels in your Google Drive (so the map keeps
-      working when the county server goes down) has all its code shipped + tested, but the nightly copy-maker can't
-      run until it can log into your Drive. It reuses the **same Google login Planyr already uses** — nothing new to
-      create. In GitHub → the `mikeab7/planyr` repo → Settings → Secrets and variables → Actions, add three secrets
-      with the **exact same values** already in Cloudflare: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-      `GOOGLE_REFRESH_TOKEN`. **⛔ Do NOT create a new/refreshed Google token — copy the existing one** (a new one
-      would knock your Drive file-storage offline). Claude can't read your Cloudflare secrets, so this copy-paste is
-      the one bit only you can do. Once they're in, Claude triggers the builder and confirms the first snapshots
-      land. (If the Chambers/Waller data source needs a tweak, the builder just files a note and your live map is
-      unaffected in the meantime.)
+- [x] **Turn on the parcel-cache builder (B629) — 3 GitHub Actions secrets — DONE (Cowork, 2026-07-04).** The
+      `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` Actions secrets are in place (fresh
+      refresh token minted via OAuth Playground on a NEW client secret; Cloudflare untouched, original secret still
+      Enabled). The Chambers/Waller data source has since been fixed too (B650 — the state `/query` had gone dark;
+      the builder now pulls the 2025 AGO StratMap layer). Nothing left for Michael here — Claude/Cowork triggers the
+      first build + does the live click-through (V199).
 - [x] **Reference drawings — DONE (2026-06-30, found in Google Drive, defaults validated).** Measured the
       **Grand Port** approved arch set (1,005,560 SF cross-dock, 40′ clear): the **56′** typical bay is the
       single dominant grid dimension (~130 callouts) and the slab plan literally labels a **60′ SPEED BAY** —
