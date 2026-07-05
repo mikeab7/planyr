@@ -245,7 +245,7 @@ describe("treeParentForUpload — server-side tree targeting for uploads (B650)"
   });
 });
 
-describe("null-index guards — a failed read is LOUD, never an empty-tree lookalike (B659 review #1)", () => {
+describe("null-index guards — a failed read is LOUD, never an empty-tree lookalike (B662 review #1)", () => {
   const nullStore = { async list() { return null; } };
   it("syncProjectFolders fails honestly instead of reporting 'mirrored' on a blipped read", async () => {
     const r = await syncProjectFolders({ projectId: "p1", userId: "u1", client: fakeClient(), store: nullStore });
@@ -268,7 +268,7 @@ describe("null-index guards — a failed read is LOUD, never an empty-tree looka
   });
 });
 
-describe("moveKeyToTree — refile moves the Drive bytes to the CONFIRMED discipline (B659 review #3)", () => {
+describe("moveKeyToTree — refile moves the Drive bytes to the CONFIRMED discipline (B662 review #3)", () => {
   const treeRows = [
     { id: "design", parentId: null, name: "02. Design", trashed: false, driveFolderId: "d-design" },
     { id: "drawings", parentId: "design", name: "01. Drawings", trashed: false, driveFolderId: "d-drawings" },
@@ -300,7 +300,7 @@ describe("moveKeyToTree — refile moves the Drive bytes to the CONFIRMED discip
   });
 });
 
-describe("parseFiledKey — stored-key coordinates (B660)", () => {
+describe("parseFiledKey — stored-key coordinates (B663)", () => {
   it("parses <uid>/project-<pid>/<discipline>/<name>", () => {
     expect(parseFiledKey("u1/project-abc/civil/plan.pdf", "u1", "abc"))
       .toEqual({ discipline: "civil", name: "plan.pdf" });
@@ -315,7 +315,7 @@ describe("parseFiledKey — stored-key coordinates (B660)", () => {
   });
 });
 
-describe("migrateFilesToTree — one-time move of existing files into the tree (B660)", () => {
+describe("migrateFilesToTree — one-time move of existing files into the tree (B663)", () => {
   const treeRows = [
     { id: "design", parentId: null, name: "02. Design", driveFolderId: "d-design" },
     { id: "drawings", parentId: "design", name: "01. Drawings", driveFolderId: "d-drawings" },

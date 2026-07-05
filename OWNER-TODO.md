@@ -48,8 +48,8 @@ _Last updated: 2026-07-05._
       prod the same day: table + 4 RLS policies + sibling-unique index + drive_* guard trigger + SECURITY
       DEFINER RPC all present).** Every project now gets the standard 12-category folder tree in the
       unified **Library** view, mirrored one-way into Google Drive. The first live seed surfaced a 502 in
-      the mirror sync — fixed same-day (B659, chunked sync). Nothing on Michael's plate; the live Drive
-      click-through is the Claude cohort's job (`VERIFICATION.md` V208/V209/V212, not his).
+      the mirror sync — fixed same-day (B662, chunked sync). Nothing on Michael's plate; the live Drive
+      click-through is the Claude cohort's job (`VERIFICATION.md` V208/V209/V214, not his).
 
 ## Things Claude needs FROM Michael to finish/verify
 - [ ] **Drainage-manual PDFs for the exact-number transcription pass (B636 tail — the detention engine, code-labeled B629).** The detention rules engine
@@ -70,7 +70,7 @@ _Last updated: 2026-07-05._
 - [x] **Turn on the parcel-cache builder (B629) — 3 GitHub Actions secrets — DONE (Cowork, 2026-07-04).** The
       `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` Actions secrets are in place (fresh
       refresh token minted via OAuth Playground on a NEW client secret; Cloudflare untouched, original secret still
-      Enabled). The Chambers/Waller data source has since been fixed too (B658, first labeled B650 — the state `/query` had gone dark;
+      Enabled). The Chambers/Waller data source has since been fixed too (B661, first labeled B650 — the state `/query` had gone dark;
       the builder now pulls the 2025 AGO StratMap layer). Nothing left for Michael here — Claude/Cowork triggers the
       first build + does the live click-through (V199).
 - [x] **Reference drawings — DONE (2026-06-30, found in Google Drive, defaults validated).** Measured the

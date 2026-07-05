@@ -210,6 +210,123 @@ describe("readSheetMeta — bare title-block sheet code on a scanned/reference s
   });
 });
 
+/* ------------------------- B659 — the "every file misreads" revamp ------------------------- */
+
+describe("readSheetTitle — rejects title-block IDENTITY rows (B659)", () => {
+  const band = { side: "right", x: W * 0.78, y: 0, w: W * 0.22, h: H };
+  const t = (rows, fallback = "Civil") =>
+    readSheetTitle(reconstructLines(rows.map((str, i) => ({ str, x: 1950, y: 150 + i * 40, w: 300, h: 14 }))), band, fallback, { width: W, height: H });
+  it("skips firm / corporate / contact lines for the real title", () => {
+    expect(t(["POWERS BROWN ARCHITECTURE", "2100 Travis Street,", "Suite 501", "Houston, Texas 77002", "713.224.0456", "www.powersbrown.com", "GRADING PLAN"])).toBe("GRADING PLAN");
+  });
+  it("skips 'A PROJECT FOR …' / 'PREPARED FOR …' credits", () => {
+    expect(t(["A PROJECT FOR HILLWOOD", "PREPARED FOR ACME INC", "FLOOR PLAN"])).toBe("FLOOR PLAN");
+  });
+  it("skips the TX interim-review stamp (huge type on IFR sheets)", () => {
+    const lines = reconstructLines([
+      { str: "PRELIMINARY NOT FOR CONSTRUCTION, PERMIT,", x: 1950, y: 150, w: 400, h: 40 },
+      { str: "OR REGULATORY APPROVAL", x: 1950, y: 200, w: 300, h: 34 },
+      { str: "CURRENT AS OF: 6/23/2026", x: 1950, y: 250, w: 220, h: 20 },
+      { str: "REGISTRATION #25000", x: 1950, y: 290, w: 200, h: 26 },
+      { str: "WALL SECTIONS AND DETAILS", x: 1950, y: 350, w: 260, h: 19 },
+    ]);
+    expect(readSheetTitle(lines, band, "", { width: W, height: H })).toBe("WALL SECTIONS AND DETAILS");
+  });
+  it("skips a lone city/state cell and a data field row", () => {
+    expect(t(["TEXAS", "SITE AREA : 29.17 AC (1,270,657 SF)", "SITE PLAN"])).toBe("SITE PLAN");
+  });
+  it("rejects shredded vertical text (mostly single-letter tokens)", () => {
+    expect(t(["O I C I 119641 T E", "MECHANICAL DETAILS"])).toBe("MECHANICAL DETAILS");
+  });
+});
+
+describe("titleCandidates — wrapped titles & vertical (rotated) titles (B659)", () => {
+  const band = { side: "right", x: W * 0.78, y: 0, w: W * 0.22, h: H };
+  it("joins a two-line wrapped title of the same type size into one candidate", () => {
+    const lines = reconstructLines([
+      { str: "WALL SECTIONS AND", x: 2167, y: 1307, w: 200, h: 19 },
+      { str: "DETAILS", x: 2228, y: 1328, w: 79, h: 19 },
+    ]);
+    expect(readSheetTitle(lines, band, "", { width: W, height: H })).toBe("WALL SECTIONS AND DETAILS");
+  });
+  it("reaches PAST interleaved small lines to join the wrapped halves (look-back)", () => {
+    const lines = reconstructLines([
+      { str: "TAS NOTES AND", x: 2167, y: 300, w: 180, h: 19 },
+      // small unrelated cells between the halves in y-order
+      { str: "CONSTRUCTION DOCUMENTS", x: 1960, y: 306, w: 140, h: 9 },
+      { str: "OWNERSHIP DATA", x: 1960, y: 316, w: 110, h: 9 },
+      { str: "DETAILS", x: 2200, y: 322, w: 79, h: 19 },
+    ]);
+    expect(readSheetTitle(lines, band, "", { width: W, height: H })).toBe("TAS NOTES AND DETAILS");
+  });
+  it("joins a rotated (bottom→top) vertical title's runs in true reading order", () => {
+    // Two vertical CCW runs: reading order is bottom-up within a column, and the next line of the
+    // title is the column to the LEFT. fontH is the type size; h is the run LENGTH.
+    const items = [
+      { str: "DETAILS", x: 201, y: 218, w: 19, h: 80, vert: true, up: true, fontH: 19 },
+      { str: "WALL SECTIONS AND", x: 262, y: 200, w: 19, h: 170, vert: true, up: true, fontH: 19 },
+    ];
+    const lines = reconstructLines(items);
+    const leftBand = { side: "left", x: 0, y: 0, w: W * 0.22, h: H };
+    expect(readSheetTitle(lines, leftBand, "", { width: W, height: H })).toBe("WALL SECTIONS AND DETAILS");
+  });
+  it("fuses a glyph-stacked pseudo-vertical string into one readable line", () => {
+    // Single-character unrotated items stacked on one x-center — some CAD exporters draw
+    // vertical labels this way; row-bucketing used to read one glyph per row (gibberish).
+    const items = "M201-A".split("").map((ch, i) => ({ str: ch, x: 60, y: 1300 + i * 40, w: 30, h: 36 }));
+    const lines = reconstructLines(items);
+    const stacked = lines.find((l) => l.text === "M201-A");
+    expect(stacked).toBeTruthy();
+    expect(stacked.vert).toBe(true);
+  });
+  it("sheds a leading sheet-code token glued onto the title cell", () => {
+    const lines = reconstructLines([{ str: "C-2 TOPO SURVEY I", x: 100, y: 1340, w: 230, h: 20 }]);
+    expect(readSheetTitle(lines, null, "", { width: W, height: H })).toBe("TOPO SURVEY I");
+  });
+});
+
+describe("detectTitleBlock — left-edge band (B659)", () => {
+  it("detects a dense LEFT-edge title block and keeps the drawing area to its right", () => {
+    const items = [{ str: "PLAN LABEL", x: 1200, y: 700, w: 120, h: 12 }];
+    for (let i = 0; i < 18; i++) items.push({ str: "TITLE BLOCK ROW " + i, x: 60, y: 120 + i * 70, w: 300, h: 14 });
+    const band = detectTitleBlock(items, { width: W, height: H });
+    expect(band).toMatchObject({ side: "left" });
+    const da = drawingAreaOf({ width: W, height: H }, band);
+    expect(da.x).toBeCloseTo(W * 0.22, 0);
+  });
+});
+
+describe("readSheetMeta — spatial label-anchored sheet number (B659)", () => {
+  function stampSheet() {
+    const items = [
+      // right-edge title block, dense
+      { str: "WALL SECTIONS AND DETAILS", x: 2160, y: 1307, w: 220, h: 19 },
+      { str: "SHEET NUMBER", x: 2271, y: 1391, w: 77, h: 10 },
+      { str: "A305", x: 2200, y: 1420, w: 100, h: 38 },
+      // the plot timestamp that follows the label in CONTENT order — must NOT read as "6"
+      { str: "6/23/2026", x: 2209, y: 1491, w: 90, h: 10 },
+      { str: "7:55:20 PM", x: 2305, y: 1491, w: 80, h: 10 },
+    ];
+    for (let i = 0; i < 16; i++) items.push({ str: "GENERAL NOTE " + i, x: 1950, y: 200 + i * 40, w: 230, h: 12 });
+    return { items, width: W, height: H };
+  }
+  it("reads the code item NEAREST the 'SHEET NUMBER' caption, not the timestamp after it", () => {
+    const meta = readSheetMeta(stampSheet());
+    expect(meta.sheetNumber).toBe("A305");
+  });
+  it("whole-page last resort: a clearly-largest lone code wins even outside every strip", () => {
+    const items = [
+      { str: "A303", x: 1100, y: 57, w: 100, h: 38 },       // mid-page, 2× any other type
+      { str: "DRAWING CONTENT", x: 900, y: 700, w: 200, h: 14 },
+      { str: "MORE CONTENT HERE FOR TEXT", x: 700, y: 800, w: 260, h: 14 },
+    ];
+    expect(readSheetMeta({ items, width: W, height: H }).sheetNumber).toBe("A303");
+    // …but NOT when other text is comparably large (a body grid-ref can't win by accident)
+    const noisy = items.concat([{ str: "BIG BANNER TEXT", x: 400, y: 300, w: 500, h: 36 }]);
+    expect(readSheetMeta({ items: noisy, width: W, height: H }).sheetNumber).toBe("");
+  });
+});
+
 describe("readSheetTitle — rejects drawing annotations & field-label rows (B412)", () => {
   it("does NOT pick a large MATCH LINE annotation in the drawing area over the title block", () => {
     const lines = reconstructLines([

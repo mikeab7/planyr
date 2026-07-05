@@ -41,7 +41,7 @@ export function folderStoreSupabase({ supabaseUrl, anonKey, token, fetchImpl = f
      * NULL on a failed read — callers MUST treat that as "couldn't read the index", never as
      * "the project has no folders": an empty-array lookalike made a blipped read report
      * "Mirrored to Google Drive" with most of the tree unmirrored (the classic silent
-     * false-success; LOUD-FAILURE / B209 class — caught by the B659 adversarial review). */
+     * false-success; LOUD-FAILURE / B209 class — caught by the B662 adversarial review). */
     async list(projectId) {
       try {
         const res = await fetchImpl(

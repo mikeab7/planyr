@@ -32,7 +32,7 @@ import { onAuthChange, getUser } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import { migrateAllProjects } from "./lib/folders.js";
 
-// One-time account migration marker (B660): "this account's existing projects were organized
+// One-time account migration marker (B663): "this account's existing projects were organized
 // into the standard tree on this device". Everything the migration does is idempotent server-
 // side, so a fresh device re-running it is harmless — the marker only avoids wasted work.
 const MIGRATE_KEY = (uid) => `planyr:treeMigrateV1:${uid}`;
@@ -70,7 +70,7 @@ export default function Library({
   // Selection is per project — switching projects resets to "All files".
   useEffect(() => { setSelectedFolderId(null); setFolderRows([]); setFolderCounts(null); }, [projectId]);
 
-  // A selection must never point at a deleted/vanished folder (B659 review #6): deleting the
+  // A selection must never point at a deleted/vanished folder (B662 review #6): deleting the
   // selected folder — or an ancestor — republishes rows without it; fall back to "All files"
   // instead of filtering the list by a ghost.
   useEffect(() => {
@@ -79,13 +79,13 @@ export default function Library({
     if (!row || row.trashed) setSelectedFolderId(null);
   }, [folderRows, selectedFolderId]);
 
-  // ── One-time migration (B660, owner-requested): organize EVERY existing project into the
+  // ── One-time migration (B663, owner-requested): organize EVERY existing project into the
   // standard tree + move its already-uploaded files into the right Drive folders. Runs once
   // per account (marker), automatically, the first time the Library opens signed-in; honest
   // progress + a Retry on failure (LOUD-FAILURE — never a silent half-migration).
   const [migrate, setMigrate] = useState({ status: "idle", text: "" });
   const runMigration = useCallback(async () => {
-    // Pin the identity for the whole run (B660 review #9): the walk stops — and the done-
+    // Pin the identity for the whole run (B663 review #9): the walk stops — and the done-
     // marker is never written — if a different account signs in mid-run.
     let uid = null;
     try { const u = await getUser(); uid = u && u.id; } catch (_) { /* keep null */ }
@@ -98,7 +98,7 @@ export default function Library({
     try { projects = await listCloudProjects(); } catch (_) { projects = []; }
     // Zero projects = either a truly empty account or a FAILED listing (listProjects swallows
     // errors into []). Either way there is nothing safe to celebrate and nothing was done —
-    // do NOT write the permanent marker, do NOT claim success (B660 review #2). The next
+    // do NOT write the permanent marker, do NOT claim success (B663 review #2). The next
     // Library open re-checks cheaply.
     if (!projects.length) { setMigrate({ status: "idle", text: "" }); return; }
     const r = await migrateAllProjects(projects, {
@@ -126,7 +126,7 @@ export default function Library({
       let uid = null;
       try { const u = await getUser(); uid = u && u.id; } catch (_) { /* keep null */ }
       // Per-ACCOUNT session guard (not per component instance): a second account signing in
-      // on the same mounted Library still gets its own one-time run (B660 review #6).
+      // on the same mounted Library still gets its own one-time run (B663 review #6).
       if (!live || !uid || migrationStartedFor.has(uid)) return;
       let done = null;
       try { done = localStorage.getItem(MIGRATE_KEY(uid)); } catch (_) { done = null; }

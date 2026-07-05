@@ -140,7 +140,7 @@ describe("B352 stress — OCR → readSheetMeta → grouping integration on mess
     expect(pages.every((p) => Number.isFinite(p.confidence))).toBe(true);
     const groups = groupSheets(pages);
     expect(groups).toHaveLength(1);
-    expect(groups[0]).toMatchObject({ kind: "group", title: "Grading Plan", sheetRange: "C-5–C-7" });
+    expect(groups[0]).toMatchObject({ kind: "group", title: "GRADING PLAN", sheetRange: "C-5–C-7" });
     expect(pages[0].matchLines.find((m) => m.target === "C-6")).toBeTruthy();
   });
 

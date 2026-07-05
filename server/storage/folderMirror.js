@@ -54,7 +54,7 @@ export async function syncProjectFolders({ projectId, userId, client, store, max
   if (!projectId) return { ok: false, error: "Missing projectId." };
   const rows = await store.list(projectId);
   // A failed index read must be a LOUD failure — treating it as an empty tree made the sync
-  // report "Mirrored ✓" with the tree unmirrored (B659 review, finding #1).
+  // report "Mirrored ✓" with the tree unmirrored (B662 review, finding #1).
   if (!rows) return { ok: false, error: "Couldn't read the folder index — try Sync now again.", remaining: 1, total: 0, summary: { created: 0, renamed: 0, moved: 0, trashed: 0 }, errors: ["folder index read failed"] };
   const plan = folderReconcilePlan(rows);
   const summary = { created: 0, renamed: 0, moved: 0, trashed: 0 };
@@ -158,7 +158,7 @@ export async function syncProjectFolders({ projectId, userId, client, store, max
   return { ok: errors.length === 0, summary, errors, error: errors[0], remaining, total };
 }
 
-/* Parse a stored drive_files key into its filing coordinates (B660 migration). Keys are
+/* Parse a stored drive_files key into its filing coordinates (B663 migration). Keys are
  * `<uid>/project-<pid>/<discipline-slug>/<name>` (see reviewStore pushFileToDrive). Returns
  * { discipline, name } or null for anything that isn't a filed project document (e.g. the
  * `project-unfiled/…` holding area — those are deliberately NOT migrated: no auto-guess). */
@@ -172,7 +172,7 @@ export function parseFiledKey(planyrKey, userId, projectId) {
   return { discipline: rest.slice(0, slash), name: rest.slice(slash + 1) };
 }
 
-/* One chunk of the ONE-TIME file migration (B660): move this project's already-uploaded Drive
+/* One chunk of the ONE-TIME file migration (B663): move this project's already-uploaded Drive
  * files INTO the standard tree (Design → Drawings → <discipline> → 01. Current), in place by
  * file id — names, share links, and read-back keys are untouched (downloads resolve by id).
  * Idempotent: a file already parented in its tree folder is skipped, so re-running is safe
@@ -184,7 +184,7 @@ export async function migrateFilesToTree({ userId, projectId, client, store, idS
   const prefix = `${userId}/project-${slugSeg(projectId)}/`;
   const keys = await idStore.listByPrefix(prefix, { limit, offset });
   // A failed page read must be LOUD — an empty-page lookalike made the one-time migration
-  // report COMPLETE (and write its permanent done-marker) with files never moved (B660
+  // report COMPLETE (and write its permanent done-marker) with files never moved (B663
   // review #1, the same class as the store.list guard below).
   if (!keys) return { ...out, ok: false, error: "Couldn't list the project's files — try again.", done: false };
   out.done = keys.length < limit;
@@ -223,7 +223,7 @@ export async function migrateFilesToTree({ userId, projectId, client, store, idS
       out.errors.push(`${k.planyrKey}: ${msg}`);
     }
   }
-  // Per-file errors do NOT fail the chunk (B660 review: one poisoned file must not abort the
+  // Per-file errors do NOT fail the chunk (B663 review: one poisoned file must not abort the
   // rest of the walk forever) — the chunk was processed, the cursor advances, and the errors
   // ride along for the caller's final report. ok:false is reserved for CHUNK-level failures
   // (the index/page reads above), which are positional and must stop the walk.
@@ -231,7 +231,7 @@ export async function migrateFilesToTree({ userId, projectId, client, store, idS
   return out;
 }
 
-/* Move ONE stored file to the tree folder of an EXPLICIT discipline (B659 review #3: the
+/* Move ONE stored file to the tree folder of an EXPLICIT discipline (B662 review #3: the
  * refile flow — a "needs filing" PDF confirmed as Civil must have its Drive bytes follow the
  * decision; the stored key keeps the original discipline forever, so the caller passes the
  * confirmed one). In place by file id — name/share/read-back untouched. Never throws. */

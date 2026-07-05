@@ -29,16 +29,16 @@ describe("filingConfig — env parsing, key dormant by default (B299)", () => {
   });
 });
 
-describe("naming — '<Project> - <Item> - YYYY.MM.DD' (mirrors reviewStore.composeTitle)", () => {
+describe("naming — 'YYYY.MM.DD <Project> - <Item>' — date-first, the owner's convention (B659; mirrors reviewStore.composeTitle)", () => {
   it("formats a date", () => {
     expect(fmtDocDate("2026-06-20")).toBe("2026.06.20");
     expect(fmtDocDate("nonsense")).toBe("");
   });
   it("composes the canonical name, dropping empty pieces", () => {
-    expect(composeFiledName({ project: "Katy Grand", item: "Grading Plan", docDate: "2026-06-20" })).toBe("Katy Grand - Grading Plan - 2026.06.20");
-    expect(composeFiledName({ item: "Survey", docDate: "2026-06-20" })).toBe("Survey - 2026.06.20");
+    expect(composeFiledName({ project: "Katy Grand", item: "Grading Plan", docDate: "2026-06-20" })).toBe("2026.06.20 Katy Grand - Grading Plan");
+    expect(composeFiledName({ item: "Survey", docDate: "2026-06-20" })).toBe("2026.06.20 Survey");
     // No date defaults to today (matches reviewStore.fmtDocDate); head falls back to "Untitled".
-    expect(composeFiledName({})).toMatch(/^Untitled - \d{4}\.\d{2}\.\d{2}$/);
+    expect(composeFiledName({})).toMatch(/^\d{4}\.\d{2}\.\d{2} Untitled$/);
     expect(composeFiledName({ item: "Survey", docDate: "nope" })).toBe("Survey"); // unparseable date drops out
   });
 });
@@ -179,7 +179,7 @@ describe("fileDocument — read → match → decision (B299)", () => {
     expect(r.ok).toBe(true);
     expect(r.decision.matched).toBe(true);
     expect(r.decision.projectId).toBe("g1");
-    expect(r.decision.suggestedName).toBe("Katy Grand - GRADING PLAN - 2026.06.20");
+    expect(r.decision.suggestedName).toBe("2026.06.20 Katy Grand - GRADING PLAN");
     expect(r.facts).toMatchObject({ projectId: "g1", discipline: "Civil", needsFiling: false });
     expect(r.facts.placement.captured).toBe(true);
   });
@@ -198,7 +198,7 @@ describe("fileDocument — read → match → decision (B299)", () => {
 // Drive the real HTTP server with an injected service (no key / network needed).
 describe("filing HTTP server — routes + honest status codes (B299)", () => {
   const listen = (server) => new Promise((res) => { server.listen(0, "127.0.0.1", () => res(`http://127.0.0.1:${server.address().port}`)); });
-  const decision = { matched: true, projectId: "g1", project: "Katy Grand", discipline: "Civil", item: "GRADING PLAN", suggestedName: "Katy Grand - GRADING PLAN - 2026.06.20", needsFiling: false, reason: "matched" };
+  const decision = { matched: true, projectId: "g1", project: "Katy Grand", discipline: "Civil", item: "GRADING PLAN", suggestedName: "2026.06.20 Katy Grand - GRADING PLAN", needsFiling: false, reason: "matched" };
 
   it("GET /health → 200 with configured flag", async () => {
     const server = createFilingServer(filingConfig({}));

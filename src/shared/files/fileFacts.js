@@ -78,6 +78,10 @@ export function toFileFact(row = {}) {
     revision: row.revision || "",
     docDate: row.docDate || row.doc_date || null,
     updatedAt: row.updatedAt || row.updated_at || null,
+    // The engineer's own sheet identity, captured by the filing index (B659) — the Library list
+    // shows the range/code badge so a 40-sheet set isn't an opaque row.
+    sheetNumber: row.sheetNumber || row.sheet_number || "",
+    sheetTitle: row.sheetTitle || row.sheet_title || "",
     kind: row.kind || "single",
     docClass: classifyDocClass(discipline, item, title),
     // Work Item B IA fields. `category` (canonical top-level) + `state` are written by the
@@ -121,15 +125,25 @@ export const SAVED_VIEWS = [
 
 export const getSavedView = (id) => SAVED_VIEWS.find((v) => v.id === id) || SAVED_VIEWS[0];
 
+/* Newest-first by the DOCUMENT's own date — the issue/revision date read off the sheet — falling
+ * back to upload time only when no docDate was captured (B659). Sorting on upload time alone put
+ * an old drawing uploaded yesterday above last week's newer revision ("latest on top" lied).
+ * Upload time still breaks ties between same-day documents. */
+export function docRecency(a, b) {
+  const ad = a.docDate || a.updatedAt || 0, bd = b.docDate || b.updatedAt || 0;
+  const d = new Date(bd) - new Date(ad);
+  return d || (new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+}
+
 /* Run a saved view over the facts. `projectId` scopes "project" views to one project
  * unless `crossProject` is set (then the same predicate runs over every project). Always
- * sorted newest-first so a discipline folder shows the latest revision on top. */
+ * sorted newest-first (document date) so a discipline folder shows the latest revision on top. */
 export function runView(facts, viewId, { projectId = null, crossProject = false } = {}) {
   const view = getSavedView(viewId);
   let out = facts.filter(view.match);
   if (view.scope === "project" && !crossProject && projectId != null)
     out = out.filter((f) => f.projectId === projectId);
-  return out.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+  return out.sort(docRecency);
 }
 
 /* Group facts by discipline, newest-first within each group — the drawer's default
@@ -143,7 +157,7 @@ export function groupByDiscipline(facts) {
   return [...byDisc.entries()]
     .map(([discipline, files]) => ({
       discipline,
-      files: files.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)),
+      files: files.sort(docRecency),
     }))
     .sort((a, b) => a.discipline.localeCompare(b.discipline));
 }
@@ -263,11 +277,11 @@ export function browseFiles(facts, { category = null, subcategory = null, facet 
   const facetFn = (FACETS.find((x) => x.id === facet) || FACETS[0]).match;
   return facts
     .filter((f) => inTree(f, includeSuperseded) && nodeMatch(f, { category, subcategory }) && facetFn(f))
-    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+    .sort(docRecency);
 }
 
 // The project's needs-filing holding area (a loud, truthful to-do — a stuck/invisible
-// needs-filing item is a silent failure).
+// needs-filing item is a silent failure). Upload-time order here: the user's to-do queue.
 export const holdingArea = (facts) => facts.filter((f) => stateOf(f) === FILE_STATES.NEEDS_FILING)
   .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 

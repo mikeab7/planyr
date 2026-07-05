@@ -92,7 +92,7 @@ export function createDriveClient({ getAccessToken, fetchImpl = fetch, appRootNa
       await api("PATCH", `${DRIVE}/files/${fileId}?fields=id`, { json: { trashed: true } });
     },
 
-    // A file's current parent folder ids (B660 migration: decide whether a file already sits
+    // A file's current parent folder ids (B663 migration: decide whether a file already sits
     // in its tree folder — skip — or needs an in-place re-parent).
     async parentsOf(fileId) {
       const r = await api("GET", `${DRIVE}/files/${fileId}?fields=parents`);

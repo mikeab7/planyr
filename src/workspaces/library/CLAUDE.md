@@ -5,7 +5,7 @@ The one and only file browser (B496). Internal id `library`, route `#/library`, 
 via the Shell `onOpenReviewInDocReview` intent.
 
 **Files**
-- `Library.jsx` — workspace root (lazy chunk). Since B659 the per-project surface is ONE unified
+- `Library.jsx` — workspace root (lazy chunk). Since B662 the per-project surface is ONE unified
   view (no Files/Folders tabs): the folder tree as the left rail + the file list on the right.
 - `components/FileBrowser.jsx` — the filing machinery (facets, list, drop zone, upload tray,
   needs-filing, refile/share/delete). `folderMode` swaps its left column for the real folder tree
@@ -17,7 +17,7 @@ via the Shell `onOpenReviewInDocReview` intent.
   per-folder counts, publishes rows up).
 - `lib/folders.js` — the folder-index store: reads/writes the tree in Supabase (`project_folders`,
   own-row RLS) and triggers the one-way Google Drive mirror via `/api/folders` (loops the server's
-  20-op chunks with progress — the B659 502 fix). Also the B660 one-time organizer
+  20-op chunks with progress — the B662 502 fix). Also the B663 one-time organizer
   (`migrateAllProjects`/`migrateProjectFiles`): seeds every existing project + moves pre-tree
   Drive files into their tree folders; auto-runs once per account from `Library.jsx` (banner).
 

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { supabaseIdStore } from "../server/storage/idStoreSupabase.js";
 
-// Request-shape lock for listByPrefix (B660 migration): prefix scan of the caller's
+// Request-shape lock for listByPrefix (B663 migration): prefix scan of the caller's
 // drive_files rows, ordered + paged, mapped to { planyrKey, driveId }.
-describe("supabaseIdStore.listByPrefix (B660)", () => {
+describe("supabaseIdStore.listByPrefix (B663)", () => {
   const recorder = (responder) => {
     const calls = [];
     const fn = async (url, opts = {}) => { calls.push({ url, opts }); return responder(url, opts); };
@@ -28,7 +28,7 @@ describe("supabaseIdStore.listByPrefix (B660)", () => {
 
   it("returns NULL on failure — a failed page must never look like the end of the list", async () => {
     // An [] here made a blipped page read report the one-time migration COMPLETE and write
-    // the permanent done-marker (B660 review #1).
+    // the permanent done-marker (B663 review #1).
     const f = recorder(() => ({ ok: false, status: 500, json: async () => ({}) }));
     const store = supabaseIdStore({ supabaseUrl: "https://x.supabase.co", anonKey: "anon", token: "tok", fetchImpl: f });
     expect(await store.listByPrefix("u1/")).toBe(null);

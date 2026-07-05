@@ -94,7 +94,7 @@ export default function FileBrowser({
   const [pendingDel, setPendingDel] = useState(null);
   const [share, setShare] = useState({});                  // fileId -> { status, url, error }
   const [delNotice, setDelNotice] = useState(null);        // { orphaned } after a delete left bytes behind
-  const [moveNotice, setMoveNotice] = useState(null);      // refile moved metadata but not the Drive copy (B659 #3)
+  const [moveNotice, setMoveNotice] = useState(null);      // refile moved metadata but not the Drive copy (B662 #3)
   const fileInputRef = useRef(null);
   const reqRef = useRef(0);
   const prevFolderRef = useRef(selectedFolderId);
@@ -279,13 +279,17 @@ export default function FileBrowser({
   };
   const doRefile = async (f) => {
     const sel = refileSel[f.id] || {};
-    const discipline = sel.discipline || f.discipline || "Civil";
+    // Normalize a typed discipline onto the canonical list case-insensitively ("civil" →
+    // "Civil") so a typo/case variant can't mint a duplicate subcategory node in the tree;
+    // a genuinely new name still passes through untouched (concurrent sheet-title batch).
+    const typed = (sel.discipline || f.discipline || "Civil").trim();
+    const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const pid = f.projectId || projectId;
     const res = await refileReview(f.id, { projectId: pid, project: projName(pid), discipline });
     // Update the index row's category/state too so the tree moves it immediately.
     try { await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.title })); } catch (_) {}
     if (res.ok) {
-      // Move the Drive BYTES to match the confirmed discipline (B659 review #3): the upload
+      // Move the Drive BYTES to match the confirmed discipline (B662 review #3): the upload
       // landed where the ORIGINAL read pointed (often the Drawings fallback for "Other");
       // filing is only done when the physical copy follows the decision. Failure is loud —
       // the metadata is filed either way, so the notice says exactly what's still pending.
@@ -444,6 +448,7 @@ export default function FileBrowser({
                       </span>
                       <span style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
                         <Badge title="Subcategory (discipline)">{subcategoryOf(f)}</Badge>
+                        {f.sheetNumber && <Badge title="Sheet number / range read off the title block">{f.sheetNumber}</Badge>}
                         {st === FILE_STATES.SUPERSEDED && <Badge tone="old" title="Replaced by a newer revision">superseded</Badge>}
                         {needs && <Badge title="Couldn’t classify confidently">needs filing</Badge>}
                         {mapped && <Badge tone="map" title="Placed on the shared map">on the map</Badge>}

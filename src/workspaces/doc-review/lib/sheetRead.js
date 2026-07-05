@@ -14,6 +14,7 @@
  * tested without pdf.js (mirrors the project's DI test style).
  */
 import { readSheetMeta } from "../../../shared/files/sheetMeta.js";
+import { refineSheetTitles } from "../../../shared/files/sheetTitleSet.js";
 import { groupSheets, markAdjacentDuplicateNumbers } from "../../../shared/files/sheetGroups.js";
 import { detectSheet, ftPerPointForScale } from "../../site-planner/lib/overlayScale.js";
 
@@ -27,7 +28,7 @@ async function defaultExtractItems(doc, p) {
 /* Read every page's metadata. Returns [{ pageNum, width, height, ...meta }] in page order.
  * `extractItems(doc, p) → { items, width, height }` and `ocr(doc, p) → { items, width, height }`
  * are injectable. A page with no text layer (and no OCR) keeps hasText:false. */
-export async function readSheets(doc, { extractItems = defaultExtractItems, ocr = null, maxPages = 0 } = {}) {
+export async function readSheets(doc, { extractItems = defaultExtractItems, ocr = null, maxPages = 0, stopTexts = [] } = {}) {
   const total = doc && doc.numPages ? doc.numPages : 0;
   const n = maxPages ? Math.min(maxPages, total) : total;
   const out = [];
@@ -43,8 +44,10 @@ export async function readSheets(doc, { extractItems = defaultExtractItems, ocr 
     out.push({ pageNum: p, width: page.width || 0, height: page.height || 0, ...meta });
   }
   // Drop duplicate adjacent sheet numbers (cross-reference misreads) so they don't read as a run
-  // of identical sheets (B378).
-  return markAdjacentDuplicateNumbers(out);
+  // of identical sheets (B378), then fix per-page titles with the whole set in hand — the
+  // project-name stamp that outprints the real title on EVERY sheet is only identifiable
+  // cross-page (B659). `stopTexts` = the caller's known project names/aliases.
+  return refineSheetTitles(markAdjacentDuplicateNumbers(out), { stopTexts });
 }
 
 /* Read a PDF and collapse it into the logical sheet list (B335). Each logical entry's `pages`

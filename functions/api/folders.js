@@ -57,7 +57,7 @@ export async function onRequestPost(context) {
       return json(r, r.ok ? 200 : 502);
     }
     if (action === "migrate-files") {
-      // One-time migration (B660): move this project's already-uploaded Drive files into the
+      // One-time migration (B663): move this project's already-uploaded Drive files into the
       // standard tree — one small batch per request (same chunking rule as sync); the client
       // loops on `done`. Idempotent (already-in-place files skip), so re-running is safe.
       const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");

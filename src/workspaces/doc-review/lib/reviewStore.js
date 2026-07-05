@@ -45,9 +45,12 @@ export function fmtDocDate(d) {
   return `${dt.getFullYear()}.${pad(dt.getMonth() + 1)}.${pad(dt.getDate())}`;
 }
 export function composeTitle({ project, item, docDate } = {}) {
+  // DATE-FIRST — the owner's own filing convention ("2026.06.23 GPL - Arch IFR"): every file he
+  // names starts with the document date, so auto-named files sort and read the same way his do
+  // (B659; was "<Project> - <Item> - date"). Keep server/filing/naming.js in lockstep.
   const head = [project, item].map((s) => (s || "").trim()).filter(Boolean).join(" - ") || "Untitled";
   const date = fmtDocDate(docDate);
-  return date ? `${head} - ${date}` : head;
+  return date ? `${date} ${head}` : head;
 }
 
 export const cloudConfigured = () => !!supabase;

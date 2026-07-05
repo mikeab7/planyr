@@ -144,7 +144,7 @@ async function syncRounds(projectId, emit) {
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error.", summary }; }
 }
 
-// Per-project single-flight for the mirror (B659 review #2): two overlapping sync loops both
+// Per-project single-flight for the mirror (B662 review #2): two overlapping sync loops both
 // plan the same not-yet-mirrored creates and DOUBLE-create folders in Drive (create is
 // deliberately create-not-ensure). One loop runs at a time per project in this tab; an edit
 // arriving mid-loop flags a trailing re-run so it's never lost. (Same pattern as `seeding`.)
@@ -198,7 +198,7 @@ export async function moveDriveFileToFolder(projectId, planyrKey, discipline) {
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }
 
-/* One project's chunk-looped FILE migration (B660): asks the server to move this project's
+/* One project's chunk-looped FILE migration (B663): asks the server to move this project's
  * already-uploaded Drive files into the standard tree, batch by batch, until done. Idempotent
  * server-side (already-in-place files skip), so an interrupted run just resumes. */
 export async function migrateProjectFiles(projectId, { onProgress } = {}) {
@@ -206,7 +206,7 @@ export async function migrateProjectFiles(projectId, { onProgress } = {}) {
   const token = await authToken();
   if (!token) return { ok: false, skipped: true, error: "Not signed in." };
   const totals = { moved: 0, already: 0, skipped: 0 };
-  const fileErrors = []; // per-file failures ride along — they never stop the walk (B660 review)
+  const fileErrors = []; // per-file failures ride along — they never stop the walk (B663 review)
   let offset = 0;
   const HARD_CAP = 500; // absolute runaway backstop; the real exit is done/stall below
   try {
@@ -237,7 +237,7 @@ export async function migrateProjectFiles(projectId, { onProgress } = {}) {
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error.", ...totals, fileErrors }; }
 }
 
-/* THE one-time account migration (B660, owner-requested 2026-07-05): give EVERY existing
+/* THE one-time account migration (B663, owner-requested 2026-07-05): give EVERY existing
  * project the standard folder tree and move its already-uploaded files into the right tree
  * folders in Drive. Per project: idempotent seed → chunked Drive mirror → chunked file moves.
  * Everything inside is resumable/idempotent, so a failure mid-way is safe to re-run; the
@@ -245,7 +245,7 @@ export async function migrateProjectFiles(projectId, { onProgress } = {}) {
 export async function migrateAllProjects(projects = [], { onProgress, checkIdentity } = {}) {
   const result = { ok: true, projects: projects.length, seeded: 0, mirrored: 0, movedFiles: 0, errors: [] };
   for (let i = 0; i < projects.length; i++) {
-    // Identity pin (B660 review #9): an account switch mid-run must stop the walk — the next
+    // Identity pin (B663 review #9): an account switch mid-run must stop the walk — the next
     // project would run under the WRONG user's token/marker.
     if (checkIdentity && !(await checkIdentity())) { result.errors.push("Account changed — organization stopped."); break; }
     const p = projects[i];

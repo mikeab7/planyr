@@ -28,7 +28,7 @@ describe("folderStoreSupabase.list (B650)", () => {
 
   it("returns NULL on a query error — a failed read must never look like an empty tree", async () => {
     // An [] here once made a blipped Supabase read report "Mirrored to Google Drive" with the
-    // whole tree unmirrored (B659 review #1 — the LOUD-FAILURE class).
+    // whole tree unmirrored (B662 review #1 — the LOUD-FAILURE class).
     const f = recorder(() => ({ ok: false, status: 500, json: async () => ({}) }));
     expect(await cfg(f).list("proj1")).toBe(null);
   });

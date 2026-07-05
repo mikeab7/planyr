@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Planyr — Draw the site. Get the yield. Same instant.</title>
-<meta name="description" content="An all-in-one web suite for industrial site work — pull a live county parcel, drop buildings and parking, and watch coverage, FAR and stall counts compute as you draw." />
+<title>Planyr — know what the dirt can do</title>
+<meta name="description" content="Turn a raw parcel into a yield-tested site plan in minutes: footprint, trailers, detention, coverage — before you tie the site up." />
 <link rel="canonical" href="https://planyr.io/landing/" />
 <meta name="theme-color" content="#15171C" />
 <meta name="color-scheme" content="dark" />
@@ -12,16 +12,16 @@
 <!-- Social / link preview -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Planyr" />
-<meta property="og:title" content="Planyr — Draw the site. Get the yield. Same instant." />
-<meta property="og:description" content="Industrial site planning in the browser. Live county parcels, instant yield, auto-stitched drawings — deed → map → drawings → layout → schedule, all on one feet-accurate coordinate spine." />
+<meta property="og:title" content="Planyr — know what the dirt can do" />
+<meta property="og:description" content="Turn a raw parcel into a yield-tested site plan in minutes: footprint, trailers, detention, coverage — before you tie the site up." />
 <meta property="og:url" content="https://planyr.io/landing/" />
 <meta property="og:image" content="https://planyr.io/landing/og.png" />
 <meta property="og:image:width" content="2400" />
 <meta property="og:image:height" content="1260" />
-<meta property="og:image:alt" content="Planyr — instant industrial site yield from a drawn parcel" />
+<meta property="og:image:alt" content="Planyr — a raw parcel turned into a yield-tested industrial site plan" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Planyr — Draw the site. Get the yield. Same instant." />
-<meta name="twitter:description" content="Industrial site planning in the browser. Live county parcels, instant yield, auto-stitched drawings — all on one feet-accurate coordinate spine." />
+<meta name="twitter:title" content="Planyr — know what the dirt can do" />
+<meta name="twitter:description" content="Turn a raw parcel into a yield-tested site plan in minutes: footprint, trailers, detention, coverage — before you tie the site up." />
 <meta name="twitter:image" content="https://planyr.io/landing/og.png" />
 
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />
@@ -36,7 +36,7 @@
 
 <!-- Structured data — helps search + knowledge graphs understand what Planyr is. -->
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Planyr","applicationCategory":"BusinessApplication","operatingSystem":"Web","url":"https://planyr.io/landing/","description":"Industrial site planning in the browser — draw a site and get instant yield (coverage, FAR, parking, detention) on one feet-accurate coordinate spine.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@type":"Organization","name":"Planyr","url":"https://planyr.io/"}}
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Planyr","applicationCategory":"BusinessApplication","operatingSystem":"Web","url":"https://planyr.io/landing/","description":"Turn a raw parcel into a yield-tested site plan in minutes — building footprint, trailer counts, detention, and coverage — on one feet-accurate coordinate spine.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@type":"Organization","name":"Planyr","url":"https://planyr.io/"}}
 </script>
 
 <style>
@@ -381,6 +381,14 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: cent
 footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06em; color: var(--cream-dim); line-height: 1.7; }
 .reveal { opacity: 0; transform: translateY(22px); }
 
+/* ---- proof strip (thin tracked-caps band, no icons) ---- */
+.proof-strip { padding: clamp(30px, 4.5vh, 48px) 0; border-top: 1px solid var(--ink-3); border-bottom: 1px solid var(--ink-3); }
+.proof-strip p {
+  margin: 0; text-align: center;
+  font-family: var(--mono); font-size: 0.72rem; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--cream-dim); line-height: 1.9;
+}
+
 /* ---- responsive ---- */
 @media (max-width: 860px) {
   .topbar .tabs { display: none; }
@@ -465,20 +473,31 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     <div class="wrap">
       <div class="hero-inner">
         <span class="eyebrow reveal">Industrial real-estate site work</span>
-        <h1 class="reveal">Draw the site.<br><span class="l2">Get the yield.</span> Same instant.</h1>
-        <p class="lede reveal">An all-in-one web suite for industrial site work — pull a live county
-          parcel, drop buildings, parking, truck courts and detention, and watch coverage, FAR,
-          impervious&nbsp;% and stall counts compute the moment you draw. All on one real-world
-          coordinate spine (EPSG:2278, US survey feet).</p>
+        <h1 class="reveal">Know what the dirt can do —<span class="l2">before you tie it up.</span></h1>
+        <p class="lede reveal">Planyr turns a raw parcel into a yield-tested site plan in minutes:
+          building footprint, trailer counts, detention, coverage. The numbers that decide whether
+          you chase the deal — without waiting three weeks for a test fit.</p>
         <div class="ctas reveal">
-          <a class="btn btn-primary" href="/?app">Start a site — free in your browser</a>
-          <a class="btn btn-ghost" href="#how">See the deed-to-schedule flow</a>
+          <a class="btn btn-primary" href="/?app">Plan a site free</a>
         </div>
         <div class="proof-row reveal">
           <span>Runs in the browser</span>
           <span>Cloud sync across devices</span>
           <span>Private by default</span>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PROBLEM (one short block, directly under hero) ============ -->
+  <section class="problem" id="problem" style="padding: clamp(40px,6vh,84px) 0 0;">
+    <div class="wrap">
+      <div class="sec-head" style="margin-bottom:0">
+        <span class="eyebrow reveal">The feasibility gap</span>
+        <h2 class="reveal">Feasibility is where deals die slowly.</h2>
+        <p class="lede reveal">You send the survey to a civil. You wait. The test fit comes back, the
+          detention eats the site, and the deal you could have killed in an hour took three weeks and
+          a consultant invoice. Meanwhile the good site went to whoever answered the broker first.</p>
       </div>
     </div>
   </section>
@@ -514,11 +533,12 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
        <div class="site-left">
         <div class="stage-copy">
           <span class="eyebrow"><span style="color:var(--site)">●</span>&nbsp;Site Planner</span>
-          <h2>Instant site yield,<br>the moment you draw.</h2>
-          <p class="lede">Pull the live county parcel, drop a warehouse, truck court, trailer storage
-            and detention pond — and the right rail computes coverage, FAR, impervious&nbsp;%, car and
-            trailer stalls, detention volume and open space in real time. Feet-accurate. No
-            Web-Mercator stretch.</p>
+          <h2>From flyer to test fit before lunch.</h2>
+          <p class="lede">Pull the parcel straight from county records, drop a building at real
+            industrial geometry — speed bays, truck courts, trailer storage — and size the detention
+            pond against your jurisdiction's actual rules, not a rule of thumb. Floodplain, wetlands,
+            and pipelines overlay right on the plan, so the site-killers surface on day one, not in
+            third-party reports on day sixty.</p>
           <div class="dim-readout" id="site-readout">parcel 18.4 ac · truck-court depth 130 ft</div>
         </div>
         <div class="yield" aria-hidden="true">
@@ -548,10 +568,10 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
       <div class="wrap">
         <div class="stage-copy">
           <span class="eyebrow"><span style="color:var(--review)">●</span>&nbsp;Review</span>
-          <h2>Drop a set. It stitches,<br>calibrates and files itself.</h2>
-          <p class="lede">Auto-stitch multi-sheet drawings along their match-lines, auto-calibrate to
-            the stated scale, and auto-file by title block — discipline, sheet, revision, date. Then
-            measure, redline and overlay it dead-on your layout.</p>
+          <h2>The civil set, the ALTA, and the survey — one screen, measured and marked.</h2>
+          <p class="lede">Take off quantities, redline sheets, and stitch match-lines without leaving
+            the browser. Overlay two versions and see exactly what the engineer changed since the last
+            submittal.</p>
           <div class="dim-readout">C-5 · C-6 · C-7 → stitched · 1″ = 40 ft</div>
         </div>
         <div>
@@ -573,9 +593,10 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
       <div class="stage .nostick" style="min-height:auto; display:block; position:static;">
         <div class="sec-head" style="max-width:680px">
           <span class="eyebrow reveal"><span style="color:var(--schedule)">●</span>&nbsp;Schedule</span>
-          <h2 class="reveal">The schedule, wired to the site.</h2>
-          <p class="lede reveal">A development timeline linked to the same project — click the site,
-            see its sequence: entitlement, grading, foundations, tilt-up, TI, CO. One spine, every phase.</p>
+          <h2 class="reveal">A schedule your lender reads without squinting.</h2>
+          <p class="lede reveal">Build the construction sequence in the same place you planned the site,
+            and export something that actually looks like it came from a developer — not a spreadsheet
+            with borders.</p>
         </div>
         <div class="gantt" id="gantt">
           <div class="row"><span class="lbl">Entitlement</span><div class="bartrack"><div class="bar" style="left:0%;width:22%"></div></div></div>
@@ -585,6 +606,18 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
           <div class="row"><span class="lbl">TI</span><div class="bartrack"><div class="bar" style="left:66%;width:22%"></div></div></div>
           <div class="row"><span class="lbl">CO</span><div class="bartrack"><div class="bar" style="left:86%;width:12%"></div></div></div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COST ESTIMATING ============ -->
+  <section id="cost" style="padding: clamp(60px,9vh,120px) 0;">
+    <div class="wrap">
+      <div class="sec-head" style="max-width:720px">
+        <span class="eyebrow reveal"><span style="color:var(--coral-mid)">●</span>&nbsp;Cost Estimating</span>
+        <h2 class="reveal">A number you can defend in the investment committee.</h2>
+        <p class="lede reveal">Roll paving, curb, and sitework quantities straight off the plan into
+          costs anchored to your own bids — so the estimate moves when the plan moves.</p>
       </div>
     </div>
   </section>
@@ -618,13 +651,20 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
       <div class="spec-table" id="spec">
         <div class="spec-row reveal"><span class="n">01</span><span class="t">Live county parcel data <span class="d">— Harris · Fort Bend · Chambers, pulled straight from public GIS</span></span><span class="ck">✓</span></div>
         <div class="spec-row reveal"><span class="n">02</span><span class="t">Feet-accurate <span class="d">— true Texas State Plane survey feet, no Web-Mercator stretch</span></span><span class="ck">✓</span></div>
-        <div class="spec-row reveal"><span class="n">03</span><span class="t">Instant yield on draw <span class="d">— coverage, FAR, impervious %, stalls, detention, open space</span></span><span class="ck">✓</span></div>
+        <div class="spec-row reveal"><span class="n">03</span><span class="t">Yield as you draw <span class="d">— coverage, FAR, impervious %, stalls, detention, open space</span></span><span class="ck">✓</span></div>
         <div class="spec-row reveal"><span class="n">04</span><span class="t">Auto-stitch + auto-calibrate + auto-file <span class="d">— drop a multi-sheet set, it organizes itself</span></span><span class="ck">✓</span></div>
         <div class="spec-row reveal"><span class="n">05</span><span class="t">Metes-and-bounds deed → polygon <span class="d">— parse the calls, drop it on the map</span></span><span class="ck">✓</span></div>
         <div class="spec-row reveal"><span class="n">06</span><span class="t">Runs in the browser <span class="d">— no install, nothing to provision</span></span><span class="ck">✓</span></div>
         <div class="spec-row reveal"><span class="n">07</span><span class="t">Cloud sync across devices <span class="d">— pick up where you left off, anywhere</span></span><span class="ck">✓</span></div>
         <div class="spec-row reveal"><span class="n">08</span><span class="t">Private by default <span class="d">— your deals are yours; sharing is always deliberate</span></span><span class="ck">✓</span></div>
       </div>
+    </div>
+  </section>
+
+  <!-- ============ PROOF STRIP (thin band, tracked caps, no icons) ============ -->
+  <section class="proof-strip" id="proofstrip" aria-label="What Planyr is built on">
+    <div class="wrap">
+      <p class="reveal">Real county parcel data&nbsp;·&nbsp;FEMA &amp; wetlands overlays&nbsp;·&nbsp;Jurisdiction-specific detention math&nbsp;·&nbsp;Survey-grade state-plane coordinates</p>
     </div>
   </section>
 
@@ -638,13 +678,9 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
           <polygon points="50,18 70,26 50,34 30,26" fill="#F8946A"/><polygon points="30,26 50,34 50,37 30,29" fill="#E8825A"/><polygon points="50,34 70,26 70,29 50,37" fill="#D6744E"/>
         </svg>
       </div>
-      <h2 class="reveal">Built by an industrial developer, for industrial site work.</h2>
-      <p class="lede reveal">Not a generic SaaS — Planyr is built by an industrial
-        developer for the people who run the deals: land and site-selection pros, civil and
-        development teams. Calm enough for a long technical session; precise to the survey foot.</p>
+      <h2 class="reveal">The next flyer that hits your inbox — answer it in an hour.</h2>
       <div class="ctas reveal">
-        <a class="btn btn-primary" href="/?app">Start a site — free in your browser</a>
-        <a class="btn btn-ghost" href="#how">See the deed-to-schedule flow</a>
+        <a class="btn btn-primary" href="/?app">Plan a site free →</a>
       </div>
     </div>
     <footer>
@@ -1037,9 +1073,12 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     drawVpDim(true);
 
     // generic reveals
+    reveal("#problem .reveal");
     reveal(".spine .reveal");
     reveal("#schedule .reveal");
+    reveal("#cost .reveal");
     reveal("#library .reveal");
+    reveal(".proof-strip .reveal");
     reveal(".spec .eyebrow, .spec h2");
     reveal(".close .reveal", { stagger: 0.06 });
 

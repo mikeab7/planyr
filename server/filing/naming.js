@@ -23,10 +23,12 @@ export function fmtDocDate(d) {
   return `${dt.getFullYear()}.${pad(dt.getMonth() + 1)}.${pad(dt.getDate())}`;
 }
 
-// "<Project> - <Item> - YYYY.MM.DD". Pieces that are empty drop out; an all-empty head
-// falls back to "Untitled" (never an empty or dangling-separator name).
+// "YYYY.MM.DD <Project> - <Item>" — DATE-FIRST, the owner's own filing convention
+// ("2026.06.23 GPL - Arch IFR"); B659, keep reviewStore.composeTitle in lockstep. Pieces that
+// are empty drop out; an all-empty head falls back to "Untitled" (never an empty or
+// dangling-separator name).
 export function composeFiledName({ project, item, docDate } = {}) {
   const head = [project, item].map((s) => (s || "").toString().trim()).filter(Boolean).join(" - ") || "Untitled";
   const date = fmtDocDate(docDate);
-  return date ? `${head} - ${date}` : head;
+  return date ? `${date} ${head}` : head;
 }

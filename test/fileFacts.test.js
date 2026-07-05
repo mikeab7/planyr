@@ -174,6 +174,19 @@ describe("fileFacts — tree derivation + browse (Work Item B)", () => {
     const civil = browseFiles(facts, { category: "Drawings", subcategory: "Civil" });
     expect(civil.map((f) => f.id)).toEqual(["c", "b"]); // newest first, no e (unfiled) or f (superseded)
   });
+  it("sorts by the DOCUMENT's own date, not upload time (B659 — 'latest revision on top' must be true)", () => {
+    const list = browseFiles(buildFileFacts([
+      // Uploaded LAST but the drawing itself is OLD → must sort below the newer document.
+      { id: "old-doc", projectId: "g1", discipline: "Civil", item: "Plan", doc_date: "2025-01-15", updated_at: "2026-07-01" },
+      { id: "new-doc", projectId: "g1", discipline: "Civil", item: "Plan", doc_date: "2026-06-23", updated_at: "2026-06-25" },
+    ]), { category: "Drawings", subcategory: "Civil" });
+    expect(list.map((f) => f.id)).toEqual(["new-doc", "old-doc"]);
+  });
+  it("carries the captured sheet number/title onto the fact (B659 — the Library badge)", () => {
+    const [f] = buildFileFacts([{ id: "s", discipline: "Civil", item: "Plan", sheet_number: "C-5–C-9", sheet_title: "GRADING PLAN" }]);
+    expect(f.sheetNumber).toBe("C-5–C-9");
+    expect(f.sheetTitle).toBe("GRADING PLAN");
+  });
   it("the on-map facet filters the node's files", () => {
     const withPlaced = buildFileFacts([
       { id: "p1", projectId: "g1", discipline: "Civil", item: "Plan", placed: true, updated_at: "2026-06-01" },
