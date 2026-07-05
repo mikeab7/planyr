@@ -56,7 +56,7 @@ import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints } from "./lib/siteModel.js";
+import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, roadMinRadius } from "./lib/roadGeometry.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
@@ -73,6 +73,7 @@ import {
   resolveDrainageContext, ruleBadge,
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
+import { overlappingParcelPairs } from "./lib/polyClip.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
@@ -2651,10 +2652,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           return;
         }
         pushHistory();
+        // B651 — split is a REPLACEMENT, not an addition: create + activate the pieces as
+        // CHILDREN (each carries parentId), and SUPERSEDE the parent in place (mark it inactive
+        // so it drops out of every yield/area sum, but keep it in the list — greyed, with the
+        // children nested under it — so the original real parcel stays visible). The parent +
+        // its children can never both be active (the Active toggle enforces mutual exclusion),
+        // so the active set that feeds Yield/Analysis stays spatially non-overlapping.
         const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
-        const made = pieces.map((ring) => ({ id: uid(), points: ring, locked: true, ...inherit }));
-        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? made : [p])));
-        tombstone(pc.id); // NEW-1 — the source parcel is replaced by fresh-uid pieces; tombstone it so a merge can't resurrect the whole lot overlapping the split (twin of splitParkingRows)
+        const made = pieces.map((ring) => ({ id: uid(), points: ring, locked: true, active: true, parentId: pc.id, ...inherit }));
+        // Retain the parent (active:false = superseded, non-counting) followed by its children.
+        // Do NOT tombstone it — it is no longer deleted; a tombstone would strip it on the next
+        // cross-copy merge. (The mutual-exclusion guard + the overlap warning, B652, cover the
+        // rare merge-skew case where a stale copy re-activates the parent.)
+        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [{ ...p, active: false }, ...made] : [p])));
         setSel({ kind: "parcel", id: made[0].id });
         return;
       }
@@ -5082,9 +5092,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Active/Inactive is independent of lock (B100): inactive parcels drop out of every area
   // calc but stay on the canvas (dimmed). Missing = active, so toggling off sets active:false.
+  // B651 mutual-exclusion guard: turning a parcel ON auto-deactivates any parcel it overlaps by
+  // split lineage — its ancestors AND descendants (a parent covers all of its children's
+  // ground) — so a parent and its split children can never both be active. Turning a parcel OFF
+  // can't create an overlap, so it's a plain flip. Keeps the active set spatially non-overlapping.
   const toggleParcelActive = (id) => {
     pushHistory();
-    setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, active: pc.active === false } : pc)));
+    setParcels((a) => {
+      const pc = a.find((p) => p.id === id);
+      if (!pc) return a;
+      if (pc.active !== false) return a.map((p) => (p.id === id ? { ...p, active: false } : p)); // turning OFF
+      const conflicts = lineageConflicts(a, id); // ancestors + descendants of the one being activated
+      return a.map((p) => {
+        if (p.id === id) return { ...p, active: true };
+        if (conflicts.has(p.id) && p.active !== false) return { ...p, active: false };
+        return p;
+      });
+    });
   };
   const toggleMarkupLock = (id) => {
     pushHistory();
@@ -5140,6 +5164,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const open = Math.max(0, siteSqft - impervious - pondArea);
   // Parcels excluded from the math (B100); their anchored chrome inherits the state (B213).
   const inactiveParcelIds = new Set(parcels.filter((p) => p.active === false).map((p) => p.id));
+  // B651 — lineage-aware display info (names + superseded flag). A "superseded" parent (one that
+  // was split) is hidden from the canvas (its children represent it) but kept in the list.
+  const parcelInfo = parcelDisplayInfo(parcels);
+  const supersededParcelIds = new Set([...parcelInfo].filter(([, v]) => v.superseded).map(([pid]) => pid));
+  // B652 — overlap safety net: any two ACTIVE parcels whose geometry overlaps by more than a
+  // small tolerance are double-counting acreage. Surface a non-blocking Yield banner naming them.
+  const parcelOverlaps = (() => {
+    const pairs = overlappingParcelPairs(parcels);
+    if (!pairs.length) return null;
+    const nameOf = (pid) => (parcelInfo.get(pid) && parcelInfo.get(pid).name) || "a parcel";
+    const names = [...new Set(pairs.flatMap((pr) => [nameOf(pr.aId), nameOf(pr.bId)]))];
+    return { count: pairs.length, names, overlapAcres: Math.max(...pairs.map((pr) => pr.area)) / SQFT_PER_ACRE };
+  })();
   // Easement encumbrance tally (NEW-1 readout + NEW-4 surface). Gross sum of easement
   // areas — overlaps are NOT deduped (screening), so it reads "gross" — split by what
   // each easement restricts (the same shape the buildable-area engine consumes). An
@@ -7815,6 +7852,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   top, else the background pan — exactly as on empty canvas. Reuses the B146 fat invisible
                   hit-stroke; ~12 screen px (f2p already projects feet→pixels, so the grab is zoom-independent). B420. */}
               {parcels.map((pc) => {
+                // B651 — a superseded (split) parent isn't drawn: its active children occupy the
+                // exact same ground, so a dimmed parent outline under them is redundant clutter.
+                // It stays selectable from the Parcel panel (nested, greyed).
+                if (supersededParcelIds.has(pc.id)) return null;
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 const picked = combineSel.includes(pc.id);
                 const removeHover = pc.id === parcelRemoveHoverId; // B598: about to be deleted in Remove mode
@@ -10144,7 +10185,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </Section>
           )}
           {leftPanel === "parcel" && (
-            <Section title={`Parcels · ${parcels.length}`}>
+            // B651 — count the CURRENT lots only: a superseded (split) parent is history, not a
+            // counted parcel, so splitting one lot into two still reads "Parcels · 2".
+            <Section title={`Parcels · ${parcels.length - supersededParcelIds.size}`}>
               {/* ＋ Add parcel (B383) — the one front-door for adding land once you're in the
                   planner, so you never have to back out to the map. Opens a menu of add methods
                   (reuses the AnchoredMenu portal flyout the right-rail Boundary menu uses). */}
@@ -10206,17 +10249,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add parcel</b> above, or draw one with the Boundary tool (right rail).</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                  {parcels.map((pc, i) => {
+                  {/* B651 — lineage-aware list: children of a split nest under their parent (indented),
+                      and the split parent is greyed + labelled "· split" as a SUPERSEDED, non-counting
+                      row (it's inactive, so excluded from yield/coverage/detention) with the original
+                      real parcel still visible. Names follow lineage: Parcel 3 → 3A / 3B. */}
+                  {parcelOutline(parcels).map(({ pc, depth, name, superseded }) => {
                     const on = selParcel?.id === pc.id;
                     const picked = combineSel.includes(pc.id);
                     const inactive = pc.active === false;
+                    const tag = superseded ? " · split" : inactive ? " · inactive" : "";
                     return (
                       // Per-row Active checkbox (B175): checked = participates in yield / coverage /
                       // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
                       // The `active` flag persists per-parcel via the Site Model (same path as B100).
-                      <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7 }}>
+                      <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7, marginLeft: depth * 16 }}>
                         <label
-                          title={inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
+                          title={superseded ? "Split into the parcels nested below — superseded, so excluded from yield / coverage / detention. Check to make it active again (its children go inactive)." : inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
                           onClick={(e) => e.stopPropagation()}
                           style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
                         >
@@ -10224,14 +10272,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
                         <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
-                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit", opacity: inactive ? 0.55 : 1 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{inactive ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "#e2dccb"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
                         {/* B598 — per-row remove (✕). Undo-able (removeParcelById pushes history); the
                             tombstone keeps it deleted across reload/merge. The most discoverable place
                             to remove a parcel, alongside the Parcel tool's Remove mode. */}
-                        <button title="Remove this parcel" aria-label={`Remove ${pc.addr || `Parcel ${i + 1}`}`}
+                        <button title="Remove this parcel" aria-label={`Remove ${name}`}
                           onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
                           style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid #e2dccb`, borderRadius: 8, background: "#fff", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
                       </div>
@@ -10484,7 +10532,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
             inactiveCount={parcels.filter((p) => p.active === false).length}
             easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
-            drainage={drainage}
+            drainage={drainage} parcelOverlaps={parcelOverlaps}
           />
           {(() => {
             // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
@@ -11687,6 +11735,7 @@ function YieldPanel({
   siteSqft, bldg, cov, far, stalls, ratio, trailers, impPct, pondArea, detPct, open,
   bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
   drainage, // B630–B632: required-vs-provided detention + tier + regime (null until a site exists)
+  parcelOverlaps, // B652: {count,names,overlapAcres} when active parcels overlap, else null
 }) {
   const [openPanel, setOpenPanel] = useState(!collapsed);
   const Y = YIELD_PAL;
@@ -11758,6 +11807,14 @@ function YieldPanel({
 
       {openPanel && (
         <div style={{ padding: "0 12px 13px" }}>
+          {/* B652 — non-blocking overlap warning: two or more ACTIVE parcels cover the same ground,
+              so this acreage is being double-counted. Names the offending parcels; never blocks. */}
+          {parcelOverlaps && (
+            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "#FBF1DF", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
+              <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap — acreage may be double-counted</div>
+              <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac). Make one inactive in the Parcel panel so the site area isn't inflated.</div>
+            </div>
+          )}
           {/* KPI cards */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 13 }}>
             {kpi("Site", f2(acres), "ac")}

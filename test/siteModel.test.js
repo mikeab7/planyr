@@ -4,6 +4,8 @@ import {
   statusOf, parcelsOf, activeParcelsOf, utilitiesOf, annotationsOf,
   constraintsOf, setbacksOf, developableArea, parcelDrawingsOf,
   buildingNumbers, isBuilding, roadTravelWidth,
+  parcelChildrenMap, parcelDescendants, parcelAncestors, lineageConflicts,
+  parcelDisplayInfo, parcelOutline,
 } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 describe("Site Model — schema, lifecycle status, selectors", () => {
@@ -220,5 +222,77 @@ describe("toMs + mergeSiteContent newer-wins is timestamp-type-safe (B559)", () 
     // scalar/meta — assert the merge ran without the type bug and kept all drawn work.
     expect(merged.els.map((e) => e.id).sort()).toEqual(["a", "b"]);
     expect(toMs(newerIso.updatedAt)).toBeGreaterThan(toMs(older.updatedAt));
+  });
+});
+
+// B651 — parcel split lineage: `parentId` on children, derived superseded/naming, and the
+// ancestor/descendant conflict set that the Active-toggle mutual-exclusion guard consumes.
+describe("Parcel split lineage (B651)", () => {
+  // Parcel 3 (id p3) split into 3A/3B; 3A split again into 3A1/3A2.
+  const parcels = [
+    { id: "p1", points: [] },
+    { id: "p2", points: [] },
+    { id: "p3", active: false, points: [] },     // superseded parent, kept inactive
+    { id: "a", parentId: "p3", points: [] },     // 3A (also superseded — split again)
+    { id: "a1", parentId: "a", points: [] },     // 3A1
+    { id: "a2", parentId: "a", points: [] },     // 3A2
+    { id: "b", parentId: "p3", points: [] },     // 3B
+  ];
+
+  it("parcelChildrenMap maps a present parent to its children in array order", () => {
+    const kids = parcelChildrenMap(parcels);
+    expect(kids.get("p3")).toEqual(["a", "b"]);
+    expect(kids.get("a")).toEqual(["a1", "a2"]);
+    expect(kids.has("b")).toBe(false);
+    // an orphaned parentId (parent not present) is ignored
+    expect(parcelChildrenMap([{ id: "x", parentId: "missing" }]).size).toBe(0);
+  });
+
+  it("descendants and ancestors walk the full lineage tree", () => {
+    expect(parcelDescendants(parcels, "p3")).toEqual(new Set(["a", "a1", "a2", "b"]));
+    expect(parcelDescendants(parcels, "a")).toEqual(new Set(["a1", "a2"]));
+    expect(parcelAncestors(parcels, "a1")).toEqual(new Set(["a", "p3"]));
+    expect(parcelAncestors(parcels, "p1")).toEqual(new Set());
+  });
+
+  it("lineageConflicts = ancestors ∪ descendants, excluding self and siblings", () => {
+    // Activating 3A must deactivate its ancestor (p3) and its descendants (3A1, 3A2) — NOT sibling 3B.
+    expect(lineageConflicts(parcels, "a")).toEqual(new Set(["p3", "a1", "a2"]));
+    // Activating 3A1 conflicts with its whole ancestor chain, not its sibling 3A2.
+    expect(lineageConflicts(parcels, "a1")).toEqual(new Set(["a", "p3"]));
+    // Siblings never conflict.
+    expect(lineageConflicts(parcels, "b")).toEqual(new Set(["p3"]));
+  });
+
+  it("cycle-guarded: a corrupt parentId cycle can't hang ancestor/descendant walks", () => {
+    const bad = [{ id: "x", parentId: "y" }, { id: "y", parentId: "x" }];
+    expect(() => parcelAncestors(bad, "x")).not.toThrow();
+    expect(() => parcelDescendants(bad, "x")).not.toThrow();
+    expect(parcelAncestors(bad, "x").has("y")).toBe(true);
+  });
+
+  it("parcelDisplayInfo derives lineage names (3 → 3A/3B → 3A1/3A2) and the superseded flag", () => {
+    const info = parcelDisplayInfo(parcels);
+    expect(info.get("p1").name).toBe("Parcel 1");
+    expect(info.get("p3").name).toBe("Parcel 3");
+    expect(info.get("p3").superseded).toBe(true);
+    expect(info.get("a").name).toBe("Parcel 3A");   // depth 1 → letter
+    expect(info.get("b").name).toBe("Parcel 3B");
+    expect(info.get("a").superseded).toBe(true);
+    expect(info.get("a1").name).toBe("Parcel 3A1"); // depth 2 → digit
+    expect(info.get("a2").name).toBe("Parcel 3A2");
+    expect(info.get("b").superseded).toBe(false);
+  });
+
+  it("a street address overrides the derived Parcel-N name", () => {
+    const info = parcelDisplayInfo([{ id: "p1", addr: "123 Main St", points: [] }]);
+    expect(info.get("p1").name).toBe("123 Main St");
+  });
+
+  it("parcelOutline nests each parcel's descendants right after it, with depth for indentation", () => {
+    const order = parcelOutline(parcels);
+    expect(order.map((o) => o.pc.id)).toEqual(["p1", "p2", "p3", "a", "a1", "a2", "b"]);
+    const depth = Object.fromEntries(order.map((o) => [o.pc.id, o.depth]));
+    expect(depth).toEqual({ p1: 0, p2: 0, p3: 0, a: 1, a1: 2, a2: 2, b: 1 });
   });
 });

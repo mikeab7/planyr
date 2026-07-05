@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _47 open · 0 awaiting live verification._
+> _47 open · 1 awaiting live verification._
 
 ## 🔲 Open
 
@@ -60,7 +60,9 @@
 
 ## ⏳ Verify — awaiting live confirmation
 
-_(none)_
+| B# | Title | Module | Tags | Verify |
+|---|---|---|---|---|
+| B651 | Parcel split double-counts acreage; make split REPLACE the parent (parent + children can never both be active) | [Site Planner] | #site-planner #yield #selection | ⏳ live — awaiting |
 
 ## By tag
 
@@ -76,8 +78,9 @@ _(none)_
 - **#perf** — B495, B484, B479
 - **#persistence** — B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38
 - **#scheduler** — B495, B408, B255
-- **#site-planner** — B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95
+- **#selection** — B651
+- **#site-planner** — B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95, B651
 - **#stitching** — B413
 - **#testing** — B269, B63
 - **#ui** — B115
-- **#yield** — B553
+- **#yield** — B553, B651

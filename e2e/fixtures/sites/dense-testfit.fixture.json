@@ -1,10 +1,10 @@
 {
   "fixtureVersion": 1,
   "generator": "scripts/build-fixtures.mjs",
-  "engine": "siteModel.js (SITE_MODEL_VERSION 10)",
+  "engine": "siteModel.js (SITE_MODEL_VERSION 11)",
   "note": "Synthetic dense industrial test-fit (no real parcel/address). Seeds e2e-fixture-testfit.",
   "site": {
-    "schemaVersion": 10,
+    "schemaVersion": 11,
     "id": "e2e-fixture-testfit",
     "groupId": "e2e-fixture-testfit",
     "site": "E2E Dense Test-Fit",
