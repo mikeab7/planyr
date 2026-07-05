@@ -206,10 +206,11 @@ export async function migrateProjectFiles(projectId, { onProgress } = {}) {
   const token = await authToken();
   if (!token) return { ok: false, skipped: true, error: "Not signed in." };
   const totals = { moved: 0, already: 0, skipped: 0 };
+  const fileErrors = []; // per-file failures ride along — they never stop the walk (B660 review)
   let offset = 0;
-  const MAX_ROUNDS = 60; // 60 × 8 files = 480 files/project — a hard runaway stop
+  const HARD_CAP = 500; // absolute runaway backstop; the real exit is done/stall below
   try {
-    for (let round = 0; round < MAX_ROUNDS; round++) {
+    for (let round = 0; round < HARD_CAP; round++) {
       const resp = await fetch("/api/folders", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -217,14 +218,23 @@ export async function migrateProjectFiles(projectId, { onProgress } = {}) {
       });
       if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
       let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
-      if (!(resp.ok && jr.ok)) return { ok: false, error: jr.error || `HTTP ${resp.status}`, ...totals };
+      // Chunk-level failure (index/page read, auth) is positional — stop here, report loudly.
+      if (!(resp.ok && jr.ok)) return { ok: false, error: jr.error || `HTTP ${resp.status}`, ...totals, fileErrors };
       totals.moved += jr.moved || 0; totals.already += jr.already || 0; totals.skipped += jr.skipped || 0;
-      offset = jr.nextOffset ?? offset;
+      if (Array.isArray(jr.errors) && jr.errors.length) fileErrors.push(...jr.errors);
+      const next = jr.nextOffset ?? offset;
       onProgress?.({ ...totals });
-      if (jr.done) return { ok: true, ...totals };
+      if (jr.done) {
+        return fileErrors.length
+          ? { ok: false, error: `${fileErrors.length} file${fileErrors.length === 1 ? "" : "s"} couldn't be moved (${fileErrors[0]})`, ...totals, fileErrors }
+          : { ok: true, ...totals };
+      }
+      // Stall guard: an ok round that didn't advance the cursor would loop forever — bail loudly.
+      if (next <= offset) return { ok: false, error: "File move stalled — run it again.", ...totals, fileErrors };
+      offset = next;
     }
-    return { ok: false, error: "File move didn't finish — run it again.", ...totals };
-  } catch (e) { return { ok: false, error: (e && e.message) || "Network error.", ...totals }; }
+    return { ok: false, error: "File move didn't finish — run it again.", ...totals, fileErrors };
+  } catch (e) { return { ok: false, error: (e && e.message) || "Network error.", ...totals, fileErrors }; }
 }
 
 /* THE one-time account migration (B660, owner-requested 2026-07-05): give EVERY existing
@@ -232,9 +242,12 @@ export async function migrateProjectFiles(projectId, { onProgress } = {}) {
  * folders in Drive. Per project: idempotent seed → chunked Drive mirror → chunked file moves.
  * Everything inside is resumable/idempotent, so a failure mid-way is safe to re-run; the
  * caller records completion (a local marker) and shows honest progress + errors. */
-export async function migrateAllProjects(projects = [], { onProgress } = {}) {
+export async function migrateAllProjects(projects = [], { onProgress, checkIdentity } = {}) {
   const result = { ok: true, projects: projects.length, seeded: 0, mirrored: 0, movedFiles: 0, errors: [] };
   for (let i = 0; i < projects.length; i++) {
+    // Identity pin (B660 review #9): an account switch mid-run must stop the walk — the next
+    // project would run under the WRONG user's token/marker.
+    if (checkIdentity && !(await checkIdentity())) { result.errors.push("Account changed — organization stopped."); break; }
     const p = projects[i];
     const label = p.name || p.id;
     onProgress?.({ index: i, total: projects.length, project: label, phase: "folders" });
@@ -244,14 +257,22 @@ export async function migrateAllProjects(projects = [], { onProgress } = {}) {
     const sync = await syncFoldersToDrive(p.id, {
       onProgress: ({ done, total }) => onProgress?.({ index: i, total: projects.length, project: label, phase: "mirror", mirrorDone: done, mirrorTotal: total }),
     });
-    if (sync.skipped) { result.errors.push("Google Drive isn't connected — folders saved in Planyr only."); break; }
+    if (sync.skipped) {
+      // Name the actual cause — "signed out" and "Drive off" need different user action.
+      result.errors.push(sync.error === "Not signed in."
+        ? "You were signed out — sign back in and the organizer will finish automatically."
+        : "Google Drive isn't connected — folders saved in Planyr only.");
+      break;
+    }
     if (!sync.ok) { result.errors.push(`${label}: ${sync.error || "Drive mirror failed"}`); continue; }
     result.mirrored += 1;
     onProgress?.({ index: i, total: projects.length, project: label, phase: "files" });
     const mig = await migrateProjectFiles(p.id, {
       onProgress: ({ moved }) => onProgress?.({ index: i, total: projects.length, project: label, phase: "files", moved }),
     });
-    if (mig.skipped) continue;
+    // The mirror just succeeded, so a skipped file phase is anomalous (e.g. signed out
+    // between calls) — record it so the done-marker can't be written over a silent gap.
+    if (mig.skipped) { result.errors.push(`${label}: ${mig.error || "file move skipped"}`); continue; }
     if (!mig.ok) { result.errors.push(`${label}: ${mig.error || "file move failed"}`); continue; }
     result.movedFiles += mig.moved;
   }

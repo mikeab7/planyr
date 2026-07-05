@@ -183,6 +183,10 @@ export async function migrateFilesToTree({ userId, projectId, client, store, idS
   const out = { ok: true, moved: 0, already: 0, skipped: 0, errors: [], done: true, nextOffset: offset };
   const prefix = `${userId}/project-${slugSeg(projectId)}/`;
   const keys = await idStore.listByPrefix(prefix, { limit, offset });
+  // A failed page read must be LOUD — an empty-page lookalike made the one-time migration
+  // report COMPLETE (and write its permanent done-marker) with files never moved (B660
+  // review #1, the same class as the store.list guard below).
+  if (!keys) return { ...out, ok: false, error: "Couldn't list the project's files — try again.", done: false };
   out.done = keys.length < limit;
   out.nextOffset = offset + keys.length;
   if (!keys.length) return out;
@@ -208,10 +212,21 @@ export async function migrateFilesToTree({ userId, projectId, client, store, idS
       });
       out.moved += 1;
     } catch (e) {
-      out.errors.push(`${k.planyrKey}: ${(e && e.message) || e}`);
+      const msg = (e && e.message) || String(e);
+      // A dangling mapping (the file was deleted/purged straight in Drive) is a SKIP, not an
+      // error — it must never wedge the walk, and it stops recurring: clean the stale row.
+      if (/404|not found/i.test(msg)) {
+        out.skipped += 1;
+        try { await idStore.del(k.planyrKey); } catch (_) { /* best-effort cleanup */ }
+        continue;
+      }
+      out.errors.push(`${k.planyrKey}: ${msg}`);
     }
   }
-  out.ok = out.errors.length === 0;
+  // Per-file errors do NOT fail the chunk (B660 review: one poisoned file must not abort the
+  // rest of the walk forever) — the chunk was processed, the cursor advances, and the errors
+  // ride along for the caller's final report. ok:false is reserved for CHUNK-level failures
+  // (the index/page reads above), which are positional and must stop the walk.
   out.error = out.errors[0];
   return out;
 }

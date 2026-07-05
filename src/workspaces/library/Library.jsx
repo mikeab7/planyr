@@ -22,7 +22,7 @@
  * persistence) and the Library (browsing/filing) legitimately share it. Lazy-loaded by
  * the shell, so opening Review never pulls the Library in and vice-versa.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import FileBrowser from "./components/FileBrowser.jsx";
 import FolderTree from "./components/FolderTree.jsx";
@@ -84,15 +84,25 @@ export default function Library({
   // per account (marker), automatically, the first time the Library opens signed-in; honest
   // progress + a Retry on failure (LOUD-FAILURE — never a silent half-migration).
   const [migrate, setMigrate] = useState({ status: "idle", text: "" });
-  const migrateRanRef = useRef(false);
   const runMigration = useCallback(async () => {
+    // Pin the identity for the whole run (B660 review #9): the walk stops — and the done-
+    // marker is never written — if a different account signs in mid-run.
     let uid = null;
     try { const u = await getUser(); uid = u && u.id; } catch (_) { /* keep null */ }
     if (!uid) return;
+    const sameUser = async () => {
+      try { const u = await getUser(); return !!u && u.id === uid; } catch (_) { return false; }
+    };
     setMigrate({ status: "running", text: "Organizing your projects into folders…" });
     let projects = [];
     try { projects = await listCloudProjects(); } catch (_) { projects = []; }
+    // Zero projects = either a truly empty account or a FAILED listing (listProjects swallows
+    // errors into []). Either way there is nothing safe to celebrate and nothing was done —
+    // do NOT write the permanent marker, do NOT claim success (B660 review #2). The next
+    // Library open re-checks cheaply.
+    if (!projects.length) { setMigrate({ status: "idle", text: "" }); return; }
     const r = await migrateAllProjects(projects, {
+      checkIdentity: sameUser,
       onProgress: ({ index, total, project, phase, mirrorDone, mirrorTotal, moved }) => {
         const step = `${index + 1} of ${total}`;
         const detail = phase === "mirror" && mirrorTotal ? ` — mirroring folders ${mirrorDone} of ${mirrorTotal}`
@@ -100,24 +110,27 @@ export default function Library({
         setMigrate({ status: "running", text: `Organizing ${project} (${step})${detail}` });
       },
     });
-    if (r.ok) {
+    if (r.ok && (await sameUser())) {
       try { localStorage.setItem(MIGRATE_KEY(uid), new Date().toISOString()); } catch (_) { /* full/blocked storage just means a harmless re-run later */ }
       setMigrate({ status: "done", text: `All ${r.projects} project${r.projects === 1 ? "" : "s"} organized${r.movedFiles ? ` · ${r.movedFiles} file${r.movedFiles === 1 ? "" : "s"} moved into folders` : ""}.` });
+    } else if (r.ok) {
+      setMigrate({ status: "idle", text: "" }); // account changed right at the end — no marker, no claim
     } else {
       setMigrate({ status: "error", text: r.errors[0] || "The one-time folder organization hit a problem." });
     }
   }, []);
   useEffect(() => {
-    if (!signedIn || migrateRanRef.current) return;
+    if (!signedIn) return;
     let live = true;
     (async () => {
       let uid = null;
       try { const u = await getUser(); uid = u && u.id; } catch (_) { /* keep null */ }
+      // Per-ACCOUNT session guard (not per component instance): a second account signing in
+      // on the same mounted Library still gets its own one-time run (B660 review #6).
       if (!live || !uid || migrationStartedFor.has(uid)) return;
       let done = null;
       try { done = localStorage.getItem(MIGRATE_KEY(uid)); } catch (_) { done = null; }
       if (done) return;
-      migrateRanRef.current = true;
       migrationStartedFor.add(uid);
       runMigration();
     })();

@@ -26,9 +26,11 @@ describe("supabaseIdStore.listByPrefix (B660)", () => {
     expect(rows).toEqual([{ planyrKey: "u1/project-p1/civil/a.pdf", driveId: "d1" }]);
   });
 
-  it("returns [] on failure instead of throwing (the round reports honestly upstream)", async () => {
+  it("returns NULL on failure — a failed page must never look like the end of the list", async () => {
+    // An [] here made a blipped page read report the one-time migration COMPLETE and write
+    // the permanent done-marker (B660 review #1).
     const f = recorder(() => ({ ok: false, status: 500, json: async () => ({}) }));
     const store = supabaseIdStore({ supabaseUrl: "https://x.supabase.co", anonKey: "anon", token: "tok", fetchImpl: f });
-    expect(await store.listByPrefix("u1/")).toEqual([]);
+    expect(await store.listByPrefix("u1/")).toBe(null);
   });
 });

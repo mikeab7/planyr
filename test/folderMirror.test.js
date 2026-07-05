@@ -393,7 +393,7 @@ describe("migrateFilesToTree — one-time move of existing files into the tree (
     expect(client.calls.updated[0].addParents).toBe("d-drawings");
   });
 
-  it("collects per-file errors with real text and keeps going (never a silent half)", async () => {
+  it("per-file errors ride along WITHOUT failing the chunk — one poisoned file can't wedge the walk", async () => {
     const idStore = idStoreOf([
       { planyrKey: "u1/project-p1/civil/a.pdf", driveId: "bad" },
       { planyrKey: "u1/project-p1/civil/b.pdf", driveId: "f2" },
@@ -401,9 +401,34 @@ describe("migrateFilesToTree — one-time move of existing files into the tree (
     const client = fakeClient({ parents: { f2: ["old"] } });
     client.parentsOf = async (id) => { if (id === "bad") throw new Error("drive 403"); return ["old"]; };
     const r = await migrateFilesToTree({ userId: "u1", projectId: "p1", client, store, idStore });
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true); // chunk processed; ok:false is reserved for positional (index/page) failures
+    expect(r.errors).toHaveLength(1);
     expect(r.error).toMatch(/drive 403/);
     expect(r.moved).toBe(1); // the healthy file still moved
+    expect(r.done).toBe(true); // the cursor keeps advancing
+  });
+
+  it("a dangling mapping (Drive 404) self-heals: counted skipped + the stale row is deleted", async () => {
+    const deleted = [];
+    const idStore = {
+      ...idStoreOf([{ planyrKey: "u1/project-p1/civil/gone.pdf", driveId: "dead" }]),
+      async del(key) { deleted.push(key); },
+    };
+    const client = fakeClient();
+    client.parentsOf = async () => { throw new Error("Drive GET 404"); };
+    const r = await migrateFilesToTree({ userId: "u1", projectId: "p1", client, store, idStore });
+    expect(r.ok).toBe(true);
+    expect(r.skipped).toBe(1);
+    expect(r.errors).toHaveLength(0);
+    expect(deleted).toEqual(["u1/project-p1/civil/gone.pdf"]);
+  });
+
+  it("a failed PAGE read is loud (null keys → ok:false, done:false) — never 'end of list'", async () => {
+    const idStore = { async listByPrefix() { return null; } };
+    const r = await migrateFilesToTree({ userId: "u1", projectId: "p1", client: fakeClient(), store, idStore });
+    expect(r.ok).toBe(false);
+    expect(r.done).toBe(false);
+    expect(r.error).toMatch(/list/i);
   });
 });
 
