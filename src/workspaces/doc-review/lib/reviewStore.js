@@ -375,7 +375,12 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
     const resp = await fetch("/api/files", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": file.type || "application/pdf",
-        "x-planyr-key": driveKey, "x-planyr-folder": folder, "x-planyr-name": name },
+        "x-planyr-key": driveKey, "x-planyr-folder": folder, "x-planyr-name": name,
+        // Tree targeting (B650 follow-on): the server files the bytes into the project's
+        // standard folder tree (Design → Drawings → discipline → Current) when it's mirrored;
+        // the flat x-planyr-folder path above stays the fallback, so nothing regresses.
+        ...(projectId ? { "x-planyr-project": String(projectId) } : {}),
+        "x-planyr-discipline": discipline || "Other" },
       body: file,
     });
     if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
@@ -406,7 +411,10 @@ export async function uploadLargeToDrive(file, { projectId = null, discipline = 
     const initResp = await fetch("/api/files/resumable", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "x-planyr-key": driveKey, "x-planyr-folder": folder,
-        "x-planyr-name": name, "x-planyr-content-type": contentType, "x-planyr-size": String(file.size || 0) },
+        "x-planyr-name": name, "x-planyr-content-type": contentType, "x-planyr-size": String(file.size || 0),
+        // Tree targeting (B650 follow-on) — same as pushFileToDrive; flat path stays the fallback.
+        ...(projectId ? { "x-planyr-project": String(projectId) } : {}),
+        "x-planyr-discipline": discipline || "Other" },
     });
     if (initResp.status === 404 || initResp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
     let init = {}; try { init = await initResp.json(); } catch (_) { /* ignore */ }

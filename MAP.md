@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-05 @ `2c45f7d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-05 @ `2388557` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -87,7 +87,7 @@ _183 source files mapped._
 - **`src/shared/folders/folderTemplate.js`** — Canonical default project folder template (B650) — the one 133-folder tree every new project is scaffolded from.
   - _exports_: `FOLDER_TEMPLATE`, `TEMPLATE_VERSION`
 - **`src/shared/folders/folderTree.js`** — Pure folder-tree ops (B650): flatten/treeify/validate/move-cycle guard/seed-row builder, shared by the Library editor + the Drive mirror.
-  - _exports_: `buildSeedRows`, `childrenOf`, `countTemplate`, `descendantIds`, `flattenTemplate`, `liveRows`, `nextOrder`, `padPrefix`, `subtreeIds`, `suggestNextNumberedName`, `treeify`, `validateFolderName`, `wouldCreateCycle`
+  - _exports_: `buildSeedRows`, `childrenOf`, `countTemplate`, `descendantIds`, `flattenTemplate`, `liveRows`, `nextOrder`, `padPrefix`, `resolveDrawingTarget`, `stripPrefix`, `subtreeIds`, `suggestNextNumberedName`, `treeify`, `validateFolderName`, `wouldCreateCycle`
 - **`src/shared/formula/formula.js`** — Excel-style formula engine (tokenize/parse/evaluate) powering scheduler user-defined columns; no eval, structured [Column] refs, byte-synced into the Sequence iframe
   - _exports_: `BLANK`, `compareValues`, `DEFAULT_CALENDAR`, `errVal`, `evaluateFormula`, `extractRefs`, `formatValue`, `FORMULA_ERRORS`, `FormulaError`, `FUNCTION_HELP`, `FUNCTION_NAMES`, `FUNCTIONS`, `isBlank`, `isDate`, `isErrVal`, `isFormulaError`, `isoToSerial`, `makeDate`, `numToGeneralStr`, `parse`, `parseFormula`, `parseLooseDate`, `planFormulaColumns`, `serialToISO`, `serialToYMD`, `toBool`, `toDateSerial`, `tokenize`, `toNumber`, `toStr`, `weekdayOf`, `ymdToSerial`
 - **`src/shared/geometry/pasteGeom.js`** — Pure paste-at-cursor placement math: bbox center plus translate so a pasted copy drops centered under the cursor, shared by both canvases

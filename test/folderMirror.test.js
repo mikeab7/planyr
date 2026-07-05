@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { syncProjectFolders, planDelete, slugSeg } from "../server/storage/folderMirror.js";
+import { syncProjectFolders, planDelete, slugSeg, treeParentForUpload } from "../server/storage/folderMirror.js";
 
 // A fake project_folders store: holds rows, applies drive_* patches like Supabase would.
 function fakeStore(initial) {
@@ -138,6 +138,109 @@ describe("syncProjectFolders — robustness fixes (B650 review)", () => {
     expect(client.calls.created).toHaveLength(1);
     expect(client.calls.trashed).toEqual(["d1"]); // the orphan was trashed so it can't duplicate
     expect(r.summary.created).toBe(0);
+  });
+});
+
+describe("syncProjectFolders — chunked ops (the live-502 fix, B650)", () => {
+  // A 3-level tree of 12 folders, none mirrored yet.
+  const bigTree = () => {
+    const rows = [];
+    for (let i = 0; i < 3; i++) {
+      rows.push({ id: `t${i}`, parentId: null, name: `T${i}` });
+      for (let j = 0; j < 3; j++) rows.push({ id: `t${i}c${j}`, parentId: `t${i}`, name: `C${j}` });
+    }
+    return rows;
+  };
+
+  it("executes at most maxOps per call, reports remaining, and finishes over rounds with no duplicates", async () => {
+    const store = fakeStore(bigTree());
+    const client = fakeClient();
+    const r1 = await syncProjectFolders({ projectId: "p1", userId: "u1", client, store, maxOps: 5 });
+    expect(r1.ok).toBe(true);
+    expect(r1.summary.created).toBe(5);
+    expect(r1.total).toBe(12);
+    expect(r1.remaining).toBe(7);
+
+    // Loop like the client does until remaining hits 0.
+    let rounds = 0;
+    let last = r1;
+    while (last.remaining > 0 && rounds < 10) {
+      last = await syncProjectFolders({ projectId: "p1", userId: "u1", client, store, maxOps: 5 });
+      rounds += 1;
+    }
+    expect(last.remaining).toBe(0);
+    expect(client.calls.created).toHaveLength(12); // every folder created EXACTLY once
+    expect(store.rows.every((x) => x.driveFolderId)).toBe(true);
+    // And a further sync is a clean no-op.
+    const done = await syncProjectFolders({ projectId: "p1", userId: "u1", client, store, maxOps: 5 });
+    expect(done.total).toBe(0);
+    expect(client.calls.created).toHaveLength(12);
+  });
+
+  it("keeps parents-first across the chunk boundary (a child never precedes its parent)", async () => {
+    const store = fakeStore(bigTree());
+    const client = fakeClient();
+    let r;
+    do {
+      r = await syncProjectFolders({ projectId: "p1", userId: "u1", client, store, maxOps: 4 });
+      expect(r.errors).toEqual([]); // "parent not yet in Drive" would land here
+    } while (r.remaining > 0);
+    expect(client.calls.created).toHaveLength(12);
+  });
+
+  it("defers (not errors) a move whose new parent's create fell past the chunk budget", async () => {
+    const store = fakeStore([
+      { id: "n1", parentId: null, name: "N1" }, // create #1 (fills the budget)
+      { id: "n2", parentId: null, name: "N2" }, // create #2 — beyond budget
+      // already-mirrored folder being moved under n2:
+      { id: "m", parentId: "n2", name: "M", driveFolderId: "dm", driveName: "M", driveParentId: "old" },
+    ]);
+    const client = fakeClient();
+    const r1 = await syncProjectFolders({ projectId: "p1", userId: "u1", client, store, maxOps: 1 });
+    expect(r1.ok).toBe(true);
+    expect(r1.errors).toEqual([]);
+    expect(r1.remaining).toBeGreaterThan(0); // n2's create + m's move still pending
+    // Finish the loop — the move lands once n2 exists.
+    let last = r1;
+    let guard = 0;
+    while (last.remaining > 0 && guard++ < 10) {
+      last = await syncProjectFolders({ projectId: "p1", userId: "u1", client, store, maxOps: 1 });
+      expect(last.errors).toEqual([]);
+    }
+    expect(store.rows.find((x) => x.id === "m").driveParentId).toBe("d2"); // n2's minted id
+  });
+
+  it("surfaces the first error as `error` (never a bare status code for the user)", async () => {
+    const store = {
+      rows: [],
+      async list() { return [{ id: "a", parentId: null, name: "A", trashed: false, driveFolderId: null, driveParentId: null, driveName: null, driveTrashed: false }]; },
+      async updateDrive() { return { ok: false, error: "supabase 503" }; },
+    };
+    const client = fakeClient();
+    const r = await syncProjectFolders({ projectId: "p1", userId: "u1", client, store, maxOps: 20 });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/supabase 503/);
+    expect(r.remaining).toBeGreaterThan(0); // the failed create re-plans next round
+  });
+});
+
+describe("treeParentForUpload — server-side tree targeting for uploads (B650)", () => {
+  const treeRows = [
+    { id: "design", parentId: null, name: "02. Design", trashed: false, driveFolderId: "d-design", driveParentId: null, driveName: "02. Design", driveTrashed: false },
+    { id: "drawings", parentId: "design", name: "01. Drawings", trashed: false, driveFolderId: "d-drawings", driveParentId: "d-design", driveName: "01. Drawings", driveTrashed: false },
+    { id: "civil", parentId: "drawings", name: "05. Civil", trashed: false, driveFolderId: "d-civil", driveParentId: "d-drawings", driveName: "05. Civil", driveTrashed: false },
+    { id: "cur", parentId: "civil", name: "01. Current", trashed: false, driveFolderId: "d-cur", driveParentId: "d-civil", driveName: "01. Current", driveTrashed: false },
+  ];
+
+  it("returns the mirrored Current folder's Drive id for a known discipline", async () => {
+    const store = { async list() { return treeRows; } };
+    expect(await treeParentForUpload({ store, projectId: "p1", discipline: "Civil" })).toBe("d-cur");
+  });
+
+  it("returns null when the tree is empty / project missing / store throws (legacy path)", async () => {
+    expect(await treeParentForUpload({ store: { async list() { return []; } }, projectId: "p1", discipline: "Civil" })).toBe(null);
+    expect(await treeParentForUpload({ store: { async list() { return treeRows; } }, projectId: null, discipline: "Civil" })).toBe(null);
+    expect(await treeParentForUpload({ store: { async list() { throw new Error("boom"); } }, projectId: "p1", discipline: "Civil" })).toBe(null);
   });
 });
 

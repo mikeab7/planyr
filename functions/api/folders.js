@@ -47,7 +47,11 @@ export async function onRequestPost(context) {
 
   try {
     if (action === "sync") {
-      const r = await syncProjectFolders({ projectId, userId: c.user.id, client: c.client, store: c.store });
+      // ONE small chunk per request (the 502 fix): a serverless request attempting a whole
+      // 133-folder seed in one go gets killed by the platform mid-flight. 20 ops ≈ 40 network
+      // calls ≈ seconds — comfortably inside every limit. The response's `remaining` tells the
+      // client to call again; completed work persists, so the loop resumes, never duplicates.
+      const r = await syncProjectFolders({ projectId, userId: c.user.id, client: c.client, store: c.store, maxOps: 20 });
       return json(r, r.ok ? 200 : 502);
     }
     if (action === "plan-delete") {

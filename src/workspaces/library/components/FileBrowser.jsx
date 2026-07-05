@@ -30,6 +30,7 @@ import {
   buildFileFacts, deriveTree, browseFiles, holdingArea, CATEGORIES,
   categoryOf, subcategoryOf, stateOf, FILE_STATES, FACETS, onMap, isReference, isSpatial,
 } from "../../../shared/files/fileFacts.js";
+import { resolveDrawingTarget, subtreeIds } from "../../../shared/folders/folderTree.js";
 import {
   QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
 } from "../../../shared/files/uploadQueue.js";
@@ -70,6 +71,13 @@ const FileTypeIcon = ({ kind }) => (
 export default function FileBrowser({
   projectId = null, projectName = "", signedIn = false, cross = false,
   onOpenReview, onNavigate, indexProvider = null,
+  /* Unified Library (B650 follow-on) — "folder mode": the left column shows the project's REAL
+   * folder tree (the `folderRail` node, a FolderTree) instead of the derived category tree, and
+   * the file list filters to the selected folder's subtree. Files place by the SAME resolver the
+   * server files uploads with (Design → Drawings → discipline → Current/Archive), so what you
+   * see on screen is where the bytes go in Drive. Cross-project browsing keeps the classic
+   * category tree (a folder tree is per-project). */
+  folderMode = false, folderRail = null, folderRows = [], selectedFolderId = null, onFolderCounts = null,
 }) {
   const [projects, setProjects] = useState([]);
   const [reviews, setReviews] = useState([]);
@@ -112,10 +120,48 @@ export default function FileBrowser({
   const tree = useMemo(() => deriveTree(facts, { includeSuperseded: showSuperseded }), [facts, showSuperseded]);
   const holding = useMemo(() => holdingArea(facts), [facts]);
   const filed = useMemo(() => facts.filter((f) => stateOf(f) !== FILE_STATES.NEEDS_FILING).length, [facts]);
-  const shown = useMemo(() => showHolding
-    ? holding
-    : browseFiles(facts, { ...node, facet, includeSuperseded: showSuperseded }),
-    [facts, node, facet, showHolding, showSuperseded, holding]);
+
+  // Folder mode: place every filed fact into the real tree (superseded → 02. Archive) — one
+  // map fact.id → folder row id, feeding both the list filter and the rail's rolled-up counts.
+  const placedFolder = useMemo(() => {
+    if (!folderMode || !folderRows.length) return new Map();
+    const m = new Map();
+    for (const f of facts) {
+      if (stateOf(f) === FILE_STATES.NEEDS_FILING) continue; // holding-area files aren't in the tree
+      const t = resolveDrawingTarget(folderRows, f.discipline, { archive: stateOf(f) === FILE_STATES.SUPERSEDED });
+      if (t) m.set(f.id, t.row.id);
+    }
+    return m;
+  }, [folderMode, folderRows, facts]);
+
+  // Rolled-up per-folder counts (a parent counts everything under it); null key = total filed.
+  useEffect(() => {
+    if (!folderMode || !onFolderCounts) return;
+    const byId = new Map(folderRows.map((r) => [r.id, r]));
+    const counts = new Map([[null, filed]]);
+    for (const folderId of placedFolder.values()) {
+      let cur = byId.get(folderId);
+      let guard = 0;
+      while (cur && guard++ <= byId.size) {
+        counts.set(cur.id, (counts.get(cur.id) || 0) + 1);
+        cur = cur.parentId != null ? byId.get(cur.parentId) : null;
+      }
+    }
+    onFolderCounts(counts);
+  }, [folderMode, onFolderCounts, placedFolder, folderRows, filed]);
+
+  const shown = useMemo(() => {
+    if (showHolding) return holding;
+    if (folderMode) {
+      // Archive folders ARE the superseded view, so the list always includes superseded files —
+      // they surface under 02. Archive (and carry their badge everywhere else).
+      const list = browseFiles(facts, { facet, includeSuperseded: true });
+      if (selectedFolderId == null) return list;
+      const allowed = subtreeIds(folderRows, selectedFolderId);
+      return list.filter((f) => allowed.has(placedFolder.get(f.id)));
+    }
+    return browseFiles(facts, { ...node, facet, includeSuperseded: showSuperseded });
+  }, [facts, node, facet, showHolding, showSuperseded, holding, folderMode, selectedFolderId, folderRows, placedFolder]);
 
   // ---- drop / file pipeline ------------------------------------------------
   const patchItem = (uploadId, patch) => setQueue((q) => q.map((it) => (it.uploadId === uploadId ? { ...it, ...patch } : it)));
@@ -247,50 +293,58 @@ export default function FileBrowser({
       onDrop={onDrop}
       style={{ flex: 1, display: "flex", minHeight: 0, position: "relative", background: "var(--surface-page)", fontFamily: "system-ui, sans-serif" }}>
 
-      {/* ---- LEFT: category tree ---- */}
-      <div style={{ flex: "none", width: 244, borderRight: "1px solid var(--border-default)", background: "var(--surface-raised)", display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: "11px 10px 7px 14px" }}>
-          <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {cross ? "All projects" : projName(projectId) || "Project"} · Files
-          </span>
-          {/* Cross-project mode (Work Item A): browse the tree across every project. Off by
-              default; exit by picking a single project in the breadcrumb. */}
-          {onNavigate && !cross && projectId && (
-            <button onClick={() => onNavigate({ cross: true })} title="Browse files across ALL your projects"
-              style={{ flex: "none", fontSize: 9.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", border: "1px solid var(--border-default)", borderRadius: 6, background: "var(--surface-page)", color: "var(--text-secondary)", padding: "2px 7px", whiteSpace: "nowrap" }}>
-              ⊞ All
-            </button>
-          )}
-        </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 6px 8px" }}>
-          <TreeRow label="All files" count={filed} active={!showHolding && !node.category}
-            onClick={() => { setShowHolding(false); setNode({ category: null, subcategory: null }); }} bold />
-          {tree.length === 0 && (
-            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", padding: "8px 10px", lineHeight: 1.5 }}>
-              No filed documents yet. Drop a PDF below — it reads its own title block and files itself.
+      {/* ---- LEFT: the project's REAL folder tree (folder mode) or the derived category tree ---- */}
+      <div style={{ flex: "none", width: folderMode ? 292 : 244, borderRight: "1px solid var(--border-default)", background: "var(--surface-raised)", display: "flex", flexDirection: "column", minHeight: 0 }}>
+        {folderMode ? (
+          // The editable, Drive-mirrored standard tree (FolderTree, embedded). Selecting a
+          // folder filters the file list on the right; files land in these same folders in Drive.
+          folderRail
+        ) : (
+          <>
+            <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: "11px 10px 7px 14px" }}>
+              <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {cross ? "All projects" : projName(projectId) || "Project"} · Files
+              </span>
+              {/* Cross-project mode (Work Item A): browse the tree across every project. Off by
+                  default; exit by picking a single project in the breadcrumb. */}
+              {onNavigate && !cross && projectId && (
+                <button onClick={() => onNavigate({ cross: true })} title="Browse files across ALL your projects"
+                  style={{ flex: "none", fontSize: 9.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", border: "1px solid var(--border-default)", borderRadius: 6, background: "var(--surface-page)", color: "var(--text-secondary)", padding: "2px 7px", whiteSpace: "nowrap" }}>
+                  ⊞ All
+                </button>
+              )}
             </div>
-          )}
-          {tree.map((n) => {
-            const expanded = openCats[n.category] ?? true;
-            const catActive = !showHolding && node.category === n.category && !node.subcategory;
-            return (
-              <div key={n.category}>
-                <TreeRow label={n.category} count={n.count} active={catActive} caret={expanded ? "▾" : "▸"}
-                  onCaret={() => setOpenCats((o) => ({ ...o, [n.category]: !expanded }))}
-                  onClick={() => { setShowHolding(false); setNode({ category: n.category, subcategory: null }); }} bold />
-                {expanded && n.subs.map((s) => (
-                  <TreeRow key={s.name} label={s.name} count={s.count} indent
-                    active={!showHolding && node.category === n.category && node.subcategory === s.name}
-                    onClick={() => { setShowHolding(false); setNode({ category: n.category, subcategory: s.name }); }} />
-                ))}
-              </div>
-            );
-          })}
-        </div>
-        <label style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderTop: "1px solid var(--border-default)", fontSize: 11, color: "var(--text-secondary)", cursor: "pointer" }}
-          title="Show files that have been replaced by a newer revision">
-          <input type="checkbox" checked={showSuperseded} onChange={(e) => setShowSuperseded(e.target.checked)} /> Show superseded
-        </label>
+            <div style={{ flex: 1, overflowY: "auto", padding: "0 6px 8px" }}>
+              <TreeRow label="All files" count={filed} active={!showHolding && !node.category}
+                onClick={() => { setShowHolding(false); setNode({ category: null, subcategory: null }); }} bold />
+              {tree.length === 0 && (
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", padding: "8px 10px", lineHeight: 1.5 }}>
+                  No filed documents yet. Drop a PDF below — it reads its own title block and files itself.
+                </div>
+              )}
+              {tree.map((n) => {
+                const expanded = openCats[n.category] ?? true;
+                const catActive = !showHolding && node.category === n.category && !node.subcategory;
+                return (
+                  <div key={n.category}>
+                    <TreeRow label={n.category} count={n.count} active={catActive} caret={expanded ? "▾" : "▸"}
+                      onCaret={() => setOpenCats((o) => ({ ...o, [n.category]: !expanded }))}
+                      onClick={() => { setShowHolding(false); setNode({ category: n.category, subcategory: null }); }} bold />
+                    {expanded && n.subs.map((s) => (
+                      <TreeRow key={s.name} label={s.name} count={s.count} indent
+                        active={!showHolding && node.category === n.category && node.subcategory === s.name}
+                        onClick={() => { setShowHolding(false); setNode({ category: n.category, subcategory: s.name }); }} />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            <label style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderTop: "1px solid var(--border-default)", fontSize: 11, color: "var(--text-secondary)", cursor: "pointer" }}
+              title="Show files that have been replaced by a newer revision">
+              <input type="checkbox" checked={showSuperseded} onChange={(e) => setShowSuperseded(e.target.checked)} /> Show superseded
+            </label>
+          </>
+        )}
       </div>
 
       {/* ---- RIGHT: facets + list + drop strip ---- */}
@@ -301,6 +355,14 @@ export default function FileBrowser({
             <button key={f.id} onClick={() => { setShowHolding(false); setFacet(f.id); }} style={chip(!showHolding && facet === f.id)}>{f.label}</button>
           ))}
           <span style={{ flex: 1 }} />
+          {/* Folder mode: the left rail belongs to the folder tree, so the all-projects switch
+              lives here instead. */}
+          {folderMode && onNavigate && !cross && projectId && (
+            <button onClick={() => onNavigate({ cross: true })} title="Browse files across ALL your projects"
+              style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", border: "1px solid var(--border-default)", borderRadius: 999, background: "var(--surface-raised)", color: "var(--text-secondary)", padding: "4px 11px", whiteSpace: "nowrap" }}>
+              ⊞ All projects
+            </button>
+          )}
           {/* Needs filing — separate + loud (a to-do; a stuck one is a silent failure) */}
           <button onClick={() => setShowHolding((v) => !v)} title="Files that couldn't be confidently classified — one click each to confirm"
             style={{ fontSize: 11.5, fontFamily: "inherit", fontWeight: 800, cursor: "pointer", borderRadius: 999, padding: "4px 12px", whiteSpace: "nowrap",

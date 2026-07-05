@@ -116,22 +116,37 @@ export async function trashSubtree(projectId, id) {
   return error ? { ok: false, error: error.message } : { ok: true, ids };
 }
 
-// Ask the server to reconcile the Drive mirror. 404/503 = Drive not enabled yet (the tree still
-// lives in Supabase) → a graceful skip, never an error the user must act on.
-export async function syncFoldersToDrive(projectId) {
+/* Ask the server to reconcile the Drive mirror. The server executes ONE small chunk per
+ * request (its 502 fix — one giant request gets killed by the platform), so this LOOPS,
+ * accumulating progress until `remaining` hits 0. Each completed chunk is durably recorded
+ * server-side, so an interrupted loop resumes exactly where it stopped — never duplicates.
+ * `onProgress({ done, total })` fires per round for the UI's "Mirroring… X of Y".
+ * 404/503 = Drive not enabled yet (the tree still lives in Supabase) → a graceful skip. */
+export async function syncFoldersToDrive(projectId, { onProgress } = {}) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   const token = await authToken();
   if (!token) return { ok: false, skipped: true, error: "Not signed in." };
+  const summary = { created: 0, renamed: 0, moved: 0, trashed: 0 };
+  const MAX_ROUNDS = 25; // 25 × 20 ops = 500 ops — far beyond any real tree; a hard runaway stop
+  let grandTotal = null;
   try {
-    const resp = await fetch("/api/folders", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ action: "sync", projectId }),
-    });
-    if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
-    let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
-    return resp.ok && jr.ok ? { ok: true, summary: jr.summary } : { ok: false, error: jr.error || `HTTP ${resp.status}`, summary: jr.summary };
-  } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const resp = await fetch("/api/folders", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ action: "sync", projectId }),
+      });
+      if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
+      let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
+      if (!(resp.ok && jr.ok)) return { ok: false, error: jr.error || `HTTP ${resp.status}`, summary };
+      for (const k of Object.keys(summary)) summary[k] += (jr.summary && jr.summary[k]) || 0;
+      if (grandTotal == null) grandTotal = jr.total || 0;
+      const remaining = jr.remaining || 0;
+      if (onProgress && grandTotal > 0) onProgress({ done: Math.max(0, grandTotal - remaining), total: grandTotal });
+      if (remaining === 0) return { ok: true, summary };
+    }
+    return { ok: false, error: "Drive sync didn't finish — try Sync now again.", summary };
+  } catch (e) { return { ok: false, error: (e && e.message) || "Network error.", summary }; }
 }
 
 // Pre-flight: what a delete of this folder's subtree would remove from Drive (folders + files),

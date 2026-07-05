@@ -19,6 +19,8 @@
 import { buildStorageAdapter, storageConfig } from "../../server/storage/index.js";
 import { verifySupabaseUser } from "../../server/auth/supabaseAuth.js";
 import { supabaseIdStore } from "../../server/storage/idStoreSupabase.js";
+import { folderStoreSupabase } from "../../server/storage/folderStoreSupabase.js";
+import { treeParentForUpload } from "../../server/storage/folderMirror.js";
 
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -32,7 +34,8 @@ async function context_(env, request) {
   const cfg = storageConfig(env);
   if (cfg.backend !== "drive") return { error: json({ ok: false, error: 'Storage backend is not "drive".' }, 503) };
   const idStore = supabaseIdStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token });
-  return { user: v.user, adapter: buildStorageAdapter(cfg, { idStore }) };
+  const folderStore = folderStoreSupabase({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token });
+  return { user: v.user, adapter: buildStorageAdapter(cfg, { idStore }), folderStore };
 }
 
 export async function onRequestPost(context) {
@@ -50,7 +53,17 @@ export async function onRequestPost(context) {
   try { bytes = new Uint8Array(await request.arrayBuffer()); } catch (_) { return json({ ok: false, error: "Couldn't read the upload body." }, 400); }
   if (!bytes.length) return json({ ok: false, error: "Empty upload." }, 400);
 
-  const r = await c.adapter.save({ planyrKey: `${c.user.id}/${rawKey}`, bytes, contentType, name, folder });
+  // Tree filing (B650 follow-on): when the project's standard folder tree is mirrored, the
+  // bytes land INSIDE it — 02. Design → 01. Drawings → <discipline> → 01. Current — via the
+  // exact Drive folder id (the same shared resolver the Library uses for display). Tree not
+  // seeded / not yet mirrored / no project → null → the flat legacy path above; never blocks.
+  const parentFolderId = await treeParentForUpload({
+    store: c.folderStore,
+    projectId: request.headers.get("x-planyr-project"),
+    discipline: request.headers.get("x-planyr-discipline"),
+  });
+
+  const r = await c.adapter.save({ planyrKey: `${c.user.id}/${rawKey}`, bytes, contentType, name, folder, parentFolderId });
   if (!r.ok) return json({ ok: false, error: r.error }, 502);
   return json({ ok: true, planyrKey: rawKey });
 }

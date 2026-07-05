@@ -24,6 +24,8 @@
 import { storageConfig, defaultDriveClientFactory } from "../../../server/storage/index.js";
 import { verifySupabaseUser } from "../../../server/auth/supabaseAuth.js";
 import { supabaseIdStore } from "../../../server/storage/idStoreSupabase.js";
+import { folderStoreSupabase } from "../../../server/storage/folderStoreSupabase.js";
+import { treeParentForUpload } from "../../../server/storage/folderMirror.js";
 
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -56,7 +58,16 @@ export async function onRequestPost(context) {
   if (!client) return json({ ok: false, error: "Google Drive isn't connected yet." }, 503);
 
   try {
-    const parentFolderId = await client.folderId(folder);
+    // Tree filing (B650 follow-on): large files target the project's standard tree folder too
+    // (same shared resolver as /api/files); tree not mirrored → the flat legacy path. The
+    // lookup itself never throws.
+    const store = folderStoreSupabase({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token: a.token });
+    const treeParent = await treeParentForUpload({
+      store,
+      projectId: request.headers.get("x-planyr-project"),
+      discipline: request.headers.get("x-planyr-discipline"),
+    });
+    const parentFolderId = treeParent || await client.folderId(folder);
     const origin = request.headers.get("origin") || undefined; // bind the session for the browser's cross-origin PUT
     const { uploadUri } = await client.createResumableSession({ name, parentFolderId, contentType, size, origin });
     return json({ ok: true, uploadUri });

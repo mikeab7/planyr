@@ -21,12 +21,13 @@ test.describe("app shell smoke (logged out)", () => {
     await expect(page.getByTestId("module-tab-site-planner")).toHaveAttribute("aria-current", "page");
   });
 
-  // B650: the Library's new Folders tab mounts (logged out shows the sign-in prompt, not a crash).
-  test("Library Folders tab renders the folder-tree surface", async ({ page }) => {
+  // B650 unified Library: ONE per-project view (folder tree rail + files — the Files/Folders
+  // tab split is gone). The folder rail is signed-in-only, so the logged-out smoke asserts the
+  // surface mounts with the sign-in gate, not a crash.
+  test("Library mounts the unified view surface (signed-out gate)", async ({ page }) => {
     await page.goto("/");
     await openModule(page, "library");
-    await page.getByTestId("library-tab-folders").click();
-    await expect(page.getByTestId("folder-tree")).toBeVisible();
-    await expect(page.getByText(/Sign in to use project folders/i)).toBeVisible();
+    await expect(page.getByTestId("library-root")).toBeVisible();
+    await expect(page.getByText(/Sign in to see your files/i)).toBeVisible();
   });
 });

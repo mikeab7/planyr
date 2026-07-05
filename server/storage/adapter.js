@@ -29,11 +29,14 @@ export function createStorageAdapter({ backend, idMap = createIdMap(), linkProvi
     linkKind: links.kind,
 
     /* Store bytes under a Planyr stable key. The app chooses the key; the backend returns
-     * its own id, which we bind in the idMap and never expose. */
-    async save({ planyrKey, bytes, contentType = "application/octet-stream", name, folder } = {}) {
+     * its own id, which we bind in the idMap and never expose. `parentFolderId` (optional,
+     * server-resolved — the B650 tree-filing follow-on) pins the file into an EXACT backend
+     * folder id (a folder of the project's standard tree); omitted → the backend derives the
+     * folder from the `folder` path exactly as before. */
+    async save({ planyrKey, bytes, contentType = "application/octet-stream", name, folder, parentFolderId } = {}) {
       if (!planyrKey) return fail("save needs a planyrKey.");
       if (bytes == null) return fail("save needs bytes.");
-      const r = await attempt(() => backend.put({ bytes, contentType, name, folder, planyrKey }), "Upload");
+      const r = await attempt(() => backend.put({ bytes, contentType, name, folder, planyrKey, parentFolderId }), "Upload");
       if (!r.ok) return r;
       if (!r.backendId) return fail("Backend did not return an id for the saved file.");
       // Record the key↔backend-id mapping. If THIS fails after the bytes already landed, the

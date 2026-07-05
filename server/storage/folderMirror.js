@@ -14,6 +14,7 @@
  *    silent success (a create whose id doesn't persist would read back as "never mirrored").
  */
 import { folderReconcilePlan, planIsEmpty } from "./folderReconcile.js";
+import { resolveDrawingTarget } from "../../src/shared/folders/folderTree.js";
 
 // Path-safe slug matching functions/api/files.js, so the folder tree and filed documents share
 // one project root in Drive (Planyr/<uid>/project-<slug>/…).
@@ -39,15 +40,39 @@ function subtreeRowIds(rows, id) {
 }
 
 /* Reconcile a project's folder tree into Drive. Returns
- * { ok, summary:{ created, renamed, moved, trashed }, errors:[...] }.
- * `ok` is true when every planned op succeeded (errors empty). */
-export async function syncProjectFolders({ projectId, userId, client, store }) {
+ * { ok, summary:{ created, renamed, moved, trashed }, errors:[...], error?, remaining, total }.
+ * `ok` is true when every ATTEMPTED op succeeded (errors empty).
+ *
+ * `maxOps` caps how many Drive operations ONE call executes (the 502 fix, found live on the
+ * first real 133-folder seed): a serverless request that tries all 133 creates in one go gets
+ * killed by the platform mid-flight and the caller sees a bare 502. Instead each call does a
+ * small chunk and reports `remaining`; the client loops until remaining hits 0. Safe because
+ * the reconcile is RESUMABLE by design — every completed op persists its drive_* bookkeeping,
+ * so the next call's plan contains only what's left (never a duplicate). Ops beyond the cap
+ * are DEFERRED (counted in `remaining`), never errored. 0 = uncapped (tests / small trees). */
+export async function syncProjectFolders({ projectId, userId, client, store, maxOps = 0 }) {
   if (!projectId) return { ok: false, error: "Missing projectId." };
   const rows = await store.list(projectId);
   const plan = folderReconcilePlan(rows);
   const summary = { created: 0, renamed: 0, moved: 0, trashed: 0 };
   const errors = [];
-  if (planIsEmpty(plan)) return { ok: true, summary, errors };
+  const total = plan.creates.length + plan.renames.length + plan.moves.length + plan.trashes.length;
+  if (planIsEmpty(plan)) return { ok: true, summary, errors, remaining: 0, total };
+
+  // Apply the op budget by SLICING the plan, in execution order (creates → renames → moves →
+  // trashes). Creates are depth-ascending, so any create kept in the slice has its parent's
+  // create in the slice too — the parents-first invariant survives chunking.
+  let deferred = 0;
+  if (maxOps > 0) {
+    const lists = ["creates", "renames", "moves", "trashes"];
+    let budget = maxOps;
+    for (const k of lists) {
+      const keep = plan[k].slice(0, Math.max(0, budget));
+      deferred += plan[k].length - keep.length;
+      plan[k] = keep;
+      budget -= keep.length;
+    }
+  }
 
   // The project's own Drive root (created on demand, app-created under drive.file).
   const projectRoot = await client.folderId(`${userId}/project-${slugSeg(projectId)}`);
@@ -100,7 +125,10 @@ export async function syncProjectFolders({ projectId, userId, client, store }) {
   for (const m of plan.moves) {
     try {
       const addParent = m.newParentId == null ? projectRoot : driveId.get(m.newParentId);
-      if (!addParent) { errors.push(`move ${m.id}: new parent not in Drive`); continue; }
+      // Parent's create was deferred past this chunk's budget (or failed and rolled back) →
+      // DEFER the move to the next round rather than raising a false error; the re-plan
+      // re-emits it once the parent has a Drive id.
+      if (!addParent) { deferred += 1; continue; }
       await client.update(m.driveFolderId, { addParents: addParent, removeParents: m.removeParent || projectRoot });
       const persisted = await store.updateDrive(m.id, { driveParentId: m.newParentId == null ? null : addParent });
       if (persisted && persisted.ok === false) errors.push(`move ${m.id}: ${persisted.error}`);
@@ -120,7 +148,28 @@ export async function syncProjectFolders({ projectId, userId, client, store }) {
     } catch (e) { errors.push(`trash ${t.id}: ${(e && e.message) || e}`); }
   }
 
-  return { ok: errors.length === 0, summary, errors };
+  // A failed create leaves its row un-mirrored → it re-plans next round; count it as
+  // remaining work so a looping caller keeps going (bounded by its round cap) instead of
+  // reading a lossy "done".
+  const remaining = deferred + errors.length;
+  return { ok: errors.length === 0, summary, errors, error: errors[0], remaining, total };
+}
+
+/* The Drive parent folder id a new UPLOAD should land in, per the project's standard tree:
+ * 02. Design → 01. Drawings → <discipline> → 01. Current (shared resolver — the same one the
+ * Library uses for display, so server filing and on-screen placement can never disagree).
+ * Returns a Drive folder id, or null when the tree/target isn't mirrored yet — the caller
+ * then keeps its legacy flat path, so filing NEVER breaks on a missing tree. Never throws. */
+export async function treeParentForUpload({ store, projectId, discipline } = {}) {
+  if (!store || !projectId) return null;
+  try {
+    const rows = await store.list(projectId);
+    if (!rows || !rows.length) return null;
+    const target = resolveDrawingTarget(rows, discipline);
+    return (target && target.driveFolderId) || null;
+  } catch (_) {
+    return null; // lookup trouble → legacy path, never a blocked upload
+  }
 }
 
 /* Enumerate exactly what deleting `folderId`'s subtree would remove from Drive, for the loud
