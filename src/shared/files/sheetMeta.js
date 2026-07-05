@@ -298,7 +298,12 @@ const looksLikeBoilerplate = (t) =>
   // The TX interim-review stamp ("PRELIMINARY — NOT FOR CONSTRUCTION, PERMIT, OR REGULATORY
   // APPROVAL / CURRENT AS OF … / REGISTRATION #…") prints HUGE on every IFR sheet and outscored
   // the real title once page rotation was honored (B659). Never a title.
-  /\bnot\s+for\s+(construction|permit|regulatory)\b|\bregulatory\s+approval\b|\bcurrent\s+as\s+of\b|\binterim\s+review\b|\bregistration\s*#?\s*\d/i.test(t);
+  /\bnot\s+for\s+(construction|permit|regulatory)\b|\bregulatory\s+approval\b|\bcurrent\s+as\s+of\b|\binterim\s+review\b|\bregistration\s*#?\s*\d/i.test(t) ||
+  // More of the same stamp, seen winning titles on the owner's live 49-page GPL set (2026-07-05):
+  // the huge lone "PRELIMINARY" word (a real title like "PRELIMINARY PLAT" is untouched — only the
+  // bare word is rejected) and the compliance sentence ("…VERIFIED THAT IT FULLY COMPLIES…").
+  /^\s*preliminary\s*$/i.test(t) ||
+  /\bverified\s+that\b|\bfully\s+complies\b|\breviewed\s+and\s+verified\b/i.test(t);
 // Title-block IDENTITY rows — the project/client/firm stamp lines that share the title block with
 // the real title and usually print LARGER than it, so a pure tallest-line pick grabs them on every
 // sheet (B659 — the "GRAND PORT LOGISTICS on all 44 sheets" misread). A sheet title never contains:

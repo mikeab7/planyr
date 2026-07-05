@@ -82,8 +82,8 @@ describe("groupKey / groupSheets — the read TITLE is primary (B659)", () => {
       sheet("C-2", "Topographic Survey", "Survey", "TOPO SURVEY I"),
       sheet("C-3", "Topographic Survey", "Survey", "TOPO SURVEY II"),
     ];
-    expect(groupSheets(tiles)[0].label).toBe("TOPO SURVEY · C-2–C-3 · 2 sheets");
-    expect(groupSheets([tiles[0]])[0].label).toBe("TOPO SURVEY I · C-2");
+    expect(groupSheets(tiles)[0].label).toBe("C-2–C-3 - TOPO SURVEY · 2 sheets");
+    expect(groupSheets([tiles[0]])[0].label).toBe("C-2 - TOPO SURVEY I");
   });
 });
 
@@ -99,7 +99,7 @@ describe("groupSheets — collapse a real set into logical sheets (B335)", () =>
     expect(groups).toHaveLength(3);
     expect(groups[0]).toMatchObject({ kind: "single", title: "COVER SHEET" });
     expect(groups[1]).toMatchObject({ kind: "group", title: "Grading Plan", sheetRange: "C5–C9" });
-    expect(groups[1].label).toBe("Grading Plan · C5–C9 · 5 sheets");
+    expect(groups[1].label).toBe("C5–C9 - Grading Plan · 5 sheets"); // number-first (owner convention, B660)
     expect(groups[1].pages).toHaveLength(5);
     expect(groups[2]).toMatchObject({ kind: "single", title: "Utility Plan" });
   });
