@@ -24,7 +24,7 @@ export function fmtDocDate(d) {
 }
 
 // "YYYY.MM.DD <Project> - <Item>" — DATE-FIRST, the owner's own filing convention
-// ("2026.06.23 GPL - Arch IFR"); B653, keep reviewStore.composeTitle in lockstep. Pieces that
+// ("2026.06.23 GPL - Arch IFR"); B659, keep reviewStore.composeTitle in lockstep. Pieces that
 // are empty drop out; an all-empty head falls back to "Untitled" (never an empty or
 // dangling-separator name).
 export function composeFiledName({ project, item, docDate } = {}) {

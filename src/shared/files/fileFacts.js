@@ -78,7 +78,7 @@ export function toFileFact(row = {}) {
     revision: row.revision || "",
     docDate: row.docDate || row.doc_date || null,
     updatedAt: row.updatedAt || row.updated_at || null,
-    // The engineer's own sheet identity, captured by the filing index (B653) — the Library list
+    // The engineer's own sheet identity, captured by the filing index (B659) — the Library list
     // shows the range/code badge so a 40-sheet set isn't an opaque row.
     sheetNumber: row.sheetNumber || row.sheet_number || "",
     sheetTitle: row.sheetTitle || row.sheet_title || "",
@@ -126,7 +126,7 @@ export const SAVED_VIEWS = [
 export const getSavedView = (id) => SAVED_VIEWS.find((v) => v.id === id) || SAVED_VIEWS[0];
 
 /* Newest-first by the DOCUMENT's own date — the issue/revision date read off the sheet — falling
- * back to upload time only when no docDate was captured (B653). Sorting on upload time alone put
+ * back to upload time only when no docDate was captured (B659). Sorting on upload time alone put
  * an old drawing uploaded yesterday above last week's newer revision ("latest on top" lied).
  * Upload time still breaks ties between same-day documents. */
 export function docRecency(a, b) {

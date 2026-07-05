@@ -1,4 +1,4 @@
-/* Set-aware sheet-title refinement (B653) — the cross-page correction a single-page reader
+/* Set-aware sheet-title refinement (B659) — the cross-page correction a single-page reader
  * can never make.
  *
  * The failure it exists for: a title block prints the PROJECT NAME (and client/firm stamps) in

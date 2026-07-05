@@ -46,7 +46,7 @@ export async function readSheets(doc, { extractItems = defaultExtractItems, ocr 
   // Drop duplicate adjacent sheet numbers (cross-reference misreads) so they don't read as a run
   // of identical sheets (B378), then fix per-page titles with the whole set in hand — the
   // project-name stamp that outprints the real title on EVERY sheet is only identifiable
-  // cross-page (B653). `stopTexts` = the caller's known project names/aliases.
+  // cross-page (B659). `stopTexts` = the caller's known project names/aliases.
   return refineSheetTitles(markAdjacentDuplicateNumbers(out), { stopTexts });
 }
 

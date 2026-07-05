@@ -240,7 +240,7 @@ export function parseSheetNumber(text) {
   // so a 3-digit grid ref like "A195" without that label is still ignored (stays conservative).
   // The captured code must not actually be the start of a DATE or a page-count: in PDF content
   // order a "SHEET NUMBER" label is often followed by the plot timestamp ("SHEET NUMBER 6/23/2026"
-  // read "6" as the sheet number — B653), and "SHEET 2 OF 44" is page numbering, not a sheet code.
+  // read "6" as the sheet number — B659), and "SHEET 2 OF 44" is page numbering, not a sheet code.
   const labelled = s.match(/\b(?:sheet|sht|dwg|drawing)\s*(?:no\.?|number|#)?\s*:?\s*([A-Z]{0,3}-?\d{1,3}(?:\.\d{1,2})?[A-Z]?)\b(?!\s*[/:.]\d)(?!\s+of\s+\d)/i);
   if (labelled) return labelled[1].toUpperCase();
   return "";

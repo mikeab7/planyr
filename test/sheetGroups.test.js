@@ -48,7 +48,7 @@ describe("markAdjacentDuplicateNumbers — clear cross-reference misreads (B378)
   });
 });
 
-describe("groupKey / groupSheets — the read TITLE is primary (B653)", () => {
+describe("groupKey / groupSheets — the read TITLE is primary (B659)", () => {
   it("does NOT collapse distinct arch sheets that merely share a discipline item (the '4 SHEETS · 44 PAGES' bug)", () => {
     const pages = [
       sheet("A201", "Architectural", "Architectural", "OVERALL ELEVATION - EAST"),

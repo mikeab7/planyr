@@ -7,7 +7,7 @@ import {
 const cand = (text, h = 10) => ({ text, h, score: h * 100 + Math.min(24, text.replace(/[^a-z]/gi, "").length) });
 const page = (title, cands, extra = {}) => ({ hasText: true, item: "Architectural", sheetTitle: title, titleCandidates: cands, ...extra });
 
-/* The B653 failure class, as read off the owner's real GPL arch set: the title block prints the
+/* The B659 failure class, as read off the owner's real GPL arch set: the title block prints the
  * PROJECT NAME (and the architect's stamp) LARGER than the sheet's own title, so the per-page
  * tallest-line pick returns the project name for every sheet. */
 function gplLikeSet(n = 12) {
@@ -19,7 +19,7 @@ function gplLikeSet(n = 12) {
   });
 }
 
-describe("refineSheetTitles — cross-page boilerplate demotion (B653)", () => {
+describe("refineSheetTitles — cross-page boilerplate demotion (B659)", () => {
   it("demotes the ubiquitous project-name stamp to the per-sheet unique title", () => {
     const out = refineSheetTitles(gplLikeSet());
     for (const p of out) {
@@ -62,7 +62,7 @@ describe("refineSheetTitles — cross-page boilerplate demotion (B653)", () => {
   });
   it("the real-corpus regression: 'SPEC OFFICE' (a spec building, not 'specifications') is demotable", () => {
     expect(DRAWING_TYPE_WORD.test("SPEC OFFICE")).toBe(false);
-    // 5 of 11 pages carry the stamp — the Jacintoport make-ready set (B653 corpus run).
+    // 5 of 11 pages carry the stamp — the Jacintoport make-ready set (B659 corpus run).
     const stamped = (alt) => page("SPEC OFFICE", [cand("SPEC OFFICE", 14), ...(alt ? [cand(alt, 10)] : [])]);
     const pages = [
       page("COMMENTS & NOTES", [cand("COMMENTS & NOTES", 12)]),
@@ -81,7 +81,7 @@ describe("refineSheetTitles — cross-page boilerplate demotion (B653)", () => {
   });
 });
 
-describe("isStopText — known-identity matching (B653)", () => {
+describe("isStopText — known-identity matching (B659)", () => {
   const stops = ["grand port logistics", "6955 mesa drive"];
   it("matches equality and ±1-word containment", () => {
     expect(isStopText("GRAND PORT LOGISTICS", stops)).toBe(true);

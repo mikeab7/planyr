@@ -178,7 +178,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     setReading(true); setOcrRunning(false);
     const ocr = createOcrRunner({ onOcrStart: () => setOcrRunning(true) });
     try {
-      // Known project names/aliases = certain not-a-title texts for the set-level title pass (B653).
+      // Known project names/aliases = certain not-a-title texts for the set-level title pass (B659).
       let stopTexts = []; try { stopTexts = projectStopTexts(listLocalProjects()); } catch (_) { /* fine — frequency still works */ }
       const { groups } = await readAndGroup(doc, { ocr: ocr.run, stopTexts });
       setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, groups } : x)));

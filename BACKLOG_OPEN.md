@@ -4,21 +4,25 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _47 open · 2 awaiting live verification._
+> _51 open · 4 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B653 | Split Setup into Standards + a canvas View menu | [Site Planner / Setup + UI] | #site-planner #ui | sandbox |
+| B654 | Merge Aerial + Overlay into one References panel | [Site Planner / references] | #site-planner #ui | sandbox |
+| B655 | Detention sizing card in the pond inspector, with a pumped-outfall toggle | [Site Planner / detention] | #site-planner #pond #yield | sandbox |
+| B656 | Properties inspector follows selection instead of occupying a rail tab | [Site Planner / UI] | #site-planner #ui #selection | sandbox |
+| B657 | Terminology & consistency pass | [App-wide / UI] | #ui | sandbox |
 | B650 | Per-project standard folder tree, user-editable in-app, with continuous one-way sync to Google Drive | [Doc Review / Library / storage · drive-integration / persistence] | — | — |
 | B648 | Persistence & Sync epic: one umbrella + a canonical write-path doc | [Site Planner / Persistence] | #persistence | live |
-| B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) | [Scheduler / robustness] | — | — |
 | B629 | Drive-backed county PARCEL snapshot cache so outages stop breaking the map | [Site Planner / GIS] | #site-planner #gis #drive | — |
 | B553 | Surface drawn landscaping in the yield breakdown (own line, kept pervious) | [Site Planner / yield] | #site-planner #yield | — |
 | B499 | Harden the LOAD-time self-heal for the OTHER bonded children (sidewalk / dock-zone stack / side-parking) | [Site Planner / Site Model] | #site-planner #persistence | — |
 | B495 | Schedule module: instant first paint (stale-while-revalidate local cache) | [Scheduler / perf] | #scheduler #perf #persistence | — |
 | B483 | A 100%-full localStorage boots the app signed-out (auth-token refresh write fails) | [Auth / Storage] | #auth #persistence | — |
-| B484 | Renderer freezes (~30 s main-thread stalls) during PDF title-block reading and heavy map/parcel ops | [Doc Review + Site Planner / perf] | #doc-review #site-planner #perf | — |
+| B484 | Renderer freezes (~30 s main-thread stalls): PDF title-block reading, heavy map/parcel ops, and panel/rail scrolling (×2) | [Doc Review + Site Planner / perf] | #doc-review #site-planner #perf | live |
 | B474 | Move the Site Planner on-device cache off the 5 MB localStorage cap onto IndexedDB | [Site Planner / Persistence] | #site-planner #persistence | — |
 | B479 | Persistence "state-of-the-art" perf refactors (the deferred tail of the B485 review) | [Site Planner / Persistence] | #site-planner #persistence #perf | — |
 | B471 | Revision compare (current vs. previous version), state-of-the-art | [Doc Review / compare] | #doc-review #compare | — |
@@ -62,27 +66,30 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B658 | Replace landing-page copy with the approved buyer-voice deck | [Landing / marketing] | #ui | ⏳ live — awaiting |
 | B651 | Parcel split double-counts acreage; make split REPLACE the parent (parent + children can never both be active) | [Site Planner] | #site-planner #yield #selection | ⏳ live — awaiting |
-| B653 | Sheet reader + file organizer revamp: rotated/offset pages, set-aware titles, left-edge & vertical title blocks, title-first grouping, date-first names | [Doc Review / Library] | #doc-review #library #files #filing | ⏳ live — awaiting |
+| B659 | Sheet reader + file organizer revamp: rotated/offset pages, set-aware titles, left-edge & vertical title blocks, title-first grouping, date-first names | [Doc Review / Library] | #doc-review #library #files #filing | ⏳ live — awaiting |
+| B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) (×2) | [Scheduler / robustness] | #scheduler | ⏳ live — awaiting |
 
 ## By tag
 
 - **#auth** — B483
 - **#compare** — B471
-- **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B653
+- **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B659
 - **#drive** — B629, B409
-- **#files** — B180, B181, B182, B183, B653
-- **#filing** — B411, B364, B273, B653
+- **#files** — B180, B181, B182, B183, B659
+- **#filing** — B411, B364, B273, B659
 - **#gis** — B629, B370, B309, B178, B171, B147, B13, B95
 - **#infra** — B408, B406, B179, B63
-- **#library** — B653
+- **#library** — B659
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479
 - **#persistence** — B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38
-- **#scheduler** — B495, B408, B255
-- **#selection** — B651
-- **#site-planner** — B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95, B651
+- **#pond** — B655
+- **#scheduler** — B495, B408, B255, B644
+- **#selection** — B656, B651
+- **#site-planner** — B653, B654, B655, B656, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95, B651
 - **#stitching** — B413
 - **#testing** — B269, B63
-- **#ui** — B115
-- **#yield** — B553, B651
+- **#ui** — B653, B654, B656, B657, B115, B658
+- **#yield** — B655, B553, B651

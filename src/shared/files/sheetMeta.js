@@ -38,7 +38,7 @@ const itemInBand = (it, band) => {
   return true;
 };
 
-/* Join GLYPH-STACKED pseudo-vertical strings (B653): some CAD exporters draw a vertical label as
+/* Join GLYPH-STACKED pseudo-vertical strings (B659): some CAD exporters draw a vertical label as
  * a stack of UNROTATED single-character items sharing an x-center ("1","1","9","6","4","1" top to
  * bottom). Row-bucketing reads one glyph per stack per row — the "O I C I 119641 T E" gibberish
  * lines that used to poison the title pick. Detect ≥3 single-char items on one x-center with a
@@ -168,7 +168,7 @@ export function reconstructLines(items, { yTol } = {}) {
       const gap = its[k].x - (prev.x + (prev.w || 0));
       // A sharp TYPE-SIZE jump across a real gap is a cell boundary even under the gap
       // tolerance — a 9.6pt note ending just before an 18.9pt title on the same baseline is two
-      // cells, not one label (B653: "SLAB ON GRADE" + "WALL SECTIONS AND" read as one line).
+      // cells, not one label (B659: "SLAB ON GRADE" + "WALL SECTIONS AND" read as one line).
       const sizeJump = Math.min(prev.h || 1, its[k].h || 1) / Math.max(prev.h || 1, its[k].h || 1) < 0.72 && gap > 8;
       if (gap > gapTol || sizeJump) { out.push(mkLine(seg)); seg = [its[k]]; }
       else seg.push(its[k]);
@@ -238,7 +238,7 @@ export function parseMatchLines(lines, dims = {}) {
 
 /* ----------------------------- title-block band -------------------------------- */
 /* The title block is a dense strip of text against the RIGHT edge (vertical title block), the
- * BOTTOM edge (horizontal), or the LEFT edge (B653 — the Powers-Brown-style block on the owner's
+ * BOTTOM edge (horizontal), or the LEFT edge (B659 — the Powers-Brown-style block on the owner's
  * GPL arch sheets, running down the left with a vertical sheet title). Find it by text density:
  * compare how much text mass sits in each edge band vs. the rest. Return the winning band rect
  * (the strip to crop, B338) — or null when no edge is clearly denser (fail open: don't crop). */
@@ -297,11 +297,11 @@ const looksLikeBoilerplate = (t) =>
   /\b(property of|all rights reserved|copyright|reproduced|reproduction|written (consent|permission|authoriz)|may not be (copied|used|reproduced|altered)|shall not be (used|copied|reproduced)|without (the )?(prior )?written|denotes|continued|hereon|instrument of service)\b/i.test(t) ||
   // The TX interim-review stamp ("PRELIMINARY — NOT FOR CONSTRUCTION, PERMIT, OR REGULATORY
   // APPROVAL / CURRENT AS OF … / REGISTRATION #…") prints HUGE on every IFR sheet and outscored
-  // the real title once page rotation was honored (B653). Never a title.
+  // the real title once page rotation was honored (B659). Never a title.
   /\bnot\s+for\s+(construction|permit|regulatory)\b|\bregulatory\s+approval\b|\bcurrent\s+as\s+of\b|\binterim\s+review\b|\bregistration\s*#?\s*\d/i.test(t);
 // Title-block IDENTITY rows — the project/client/firm stamp lines that share the title block with
 // the real title and usually print LARGER than it, so a pure tallest-line pick grabs them on every
-// sheet (B653 — the "GRAND PORT LOGISTICS on all 44 sheets" misread). A sheet title never contains:
+// sheet (B659 — the "GRAND PORT LOGISTICS on all 44 sheets" misread). A sheet title never contains:
 // a corporate suffix, a phone/web/email, a street "suite"/registration line, a "(A) PROJECT FOR …" /
 // "PREPARED FOR/BY …" credit, or a "CITY, TEXAS 77xxx" location row. Firm-word endings (…ARCHITECTS,
 // …ENGINEERING, …ASSOCIATES at the END of the line) are the firm's own name, not a drawing title.
@@ -328,7 +328,7 @@ const looksLikeFieldRow = (t) =>
 
 /* Ranked sheet-title CANDIDATES — every short, large-type, non-label line in the title-block
  * zone, tallest first. The per-page pick (readSheetTitle) takes the top one; the SET-level pass
- * (sheetTitleSet.refineSheetTitles, B653) re-ranks them with cross-page frequency — the signal a
+ * (sheetTitleSet.refineSheetTitles, B659) re-ranks them with cross-page frequency — the signal a
  * single page can never see (the project-name stamp repeats on EVERY sheet; the real title is
  * per-sheet unique). Wrapped two-line titles ("BUILDING ELEVATIONS -" / "SOUTH (-5)") are joined
  * into one candidate: same type size, horizontally overlapping, one line-gap apart. */
@@ -455,7 +455,7 @@ export function readSheetTitle(lines, band, fallback = "", dims = {}) {
 // A token shaped exactly like a sheet code and nothing else ("C-2", "A101", "C-2.01", "M201-A").
 // Used for the BARE-code read below — anchored ^…$ so it matches a standalone token, not a code
 // buried in prose. The visual TYPE SIZE of an item is its font height — for a vertical run the
-// bbox `h` is its LENGTH, so the prominence compares use typeH, not raw h (B653).
+// bbox `h` is its LENGTH, so the prominence compares use typeH, not raw h (B659).
 const SHEET_CODE = /^[A-Z]{1,3}-?\d{1,3}(?:\.\d{1,2})?(?:-?[A-Z])?$/i;
 const typeH = (it) => (it && it.vert ? (it.fontH || it.w || 0) : (it && it.h) || 0);
 /* The most PROMINENT bare sheet code in a zone (no "SHEET NO." label) — for a scanned/reference
@@ -474,7 +474,7 @@ function prominentSheetCode(items, pred) {
   return cands[0].str.trim().toUpperCase();
 }
 
-/* SPATIAL label-anchored number read (B653): find a title-block "SHEET NUMBER / SHEET NO. /
+/* SPATIAL label-anchored number read (B659): find a title-block "SHEET NUMBER / SHEET NO. /
  * DWG NO." caption ITEM and take the nearest code-shaped item around it. The joined-string
  * labeled read depends on PDF CONTENT order, where the item after the label is often the plot
  * timestamp ("SHEET NUMBER" → "6/23/2026" read a sheet number of "6"); position is what a human
@@ -522,7 +522,7 @@ function readSheetNumberInZone(items, dims, band) {
     const bare = prominentSheetCode(items, (it) => rightP(it) || bottomP(it) || leftP(it));
     if (bare) return bare;
   }
-  // 3) Whole-page LAST resort (B653): some blocks print the number as the page's single largest
+  // 3) Whole-page LAST resort (B659): some blocks print the number as the page's single largest
   // text OUTSIDE every canonical strip (the GPL arch "A303" prints at ~2× any other type).
   // Still conservative — prominentSheetCode only accepts a lone sheet-code-shaped token with a
   // real discipline prefix, and we additionally require it to CLEARLY out-print everything else
@@ -559,7 +559,7 @@ export function readSheetMeta(page = {}) {
   const { discipline, item } = classifyDiscipline(joined, fields.sheetNumber);
   // The zone sheet-number read runs FIRST: the strip its printed number sits in tells the title
   // scorer which edge holds the title block — the sheet-name cell sits beside the number cell,
-  // while equally-large detail CAPTIONS line the bottom of a details sheet (B653).
+  // while equally-large detail CAPTIONS line the bottom of a details sheet (B659).
   const zoneNumber = readSheetNumberInZone(items, dims, band);
   let numStrip = null;
   if (zoneNumber && dims.width && dims.height) {
@@ -570,7 +570,7 @@ export function readSheetMeta(page = {}) {
       numStrip = cx >= dims.width * 0.78 ? "right" : cx <= dims.width * 0.22 ? "left" : cy >= dims.height * 0.82 ? "bottom" : null;
     }
   }
-  // Ranked candidates travel WITH the record so the set-level pass (refineSheetTitles, B653) can
+  // Ranked candidates travel WITH the record so the set-level pass (refineSheetTitles, B659) can
   // demote cross-page boilerplate — a correction only visible with the whole file in hand.
   const titleCands = titleCandidates(lines, band, dims, { numStrip }).slice(0, 8)
     .map((c) => ({ text: c.text, h: c.lineH, score: c.score }));

@@ -224,7 +224,7 @@ export default function FileBrowser({
     const sel = refileSel[f.id] || {};
     // Normalize a typed discipline onto the canonical list case-insensitively ("civil" →
     // "Civil") so a typo/case variant can't mint a duplicate subcategory node in the tree;
-    // a genuinely new name still passes through untouched (B653).
+    // a genuinely new name still passes through untouched (B659).
     const typed = (sel.discipline || f.discipline || "Civil").trim();
     const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const res = await refileReview(f.id, { projectId: f.projectId || projectId, project: projName(f.projectId || projectId), discipline });

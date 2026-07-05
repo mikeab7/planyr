@@ -54,7 +54,7 @@ export function tileBaseTitle(s) {
 }
 
 /* The grouping key — what makes two consecutive sheets "the same plan." The READ TITLE is
- * primary (B653): two tiles of one plan print the same title; two DIFFERENT sheets print
+ * primary (B659): two tiles of one plan print the same title; two DIFFERENT sheets print
  * different ones — an arch set's A201/A202/… ("ELEVATIONS" vs "PARAPET DETAILS") must NOT
  * collapse just because both classify as item "Architectural" (the old item-first key turned a
  * 44-sheet set into "4 sheets"). The coarse discipline `item` is only the fallback for pages
@@ -74,7 +74,7 @@ export function groupKey(meta = {}) {
 
 // A clean human label for the logical sheet: the sheet's OWN read title when we have one
 // (specific — "TILTWALL PARAPET COPING DETAILS"), else the coarse discipline item ("Grading
-// Plan"), else "Sheet". (Pre-B653 this preferred the item, which labeled every arch sheet
+// Plan"), else "Sheet". (Pre-B659 this preferred the item, which labeled every arch sheet
 // "Architectural".)
 function displayTitle(meta = {}) {
   const t = (meta.sheetTitle || "").trim();

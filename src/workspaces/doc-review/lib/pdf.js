@@ -119,7 +119,7 @@ export async function extractPageItems(pdf, pageNum) {
     const page = await pdf.getPage(pageNum);
     const vp = page.getViewport({ scale: 1 });
     const tc = await page.getTextContent();
-    // Map every run through the VIEWPORT transform (B653). pdf.js reports text transforms in raw
+    // Map every run through the VIEWPORT transform (B659). pdf.js reports text transforms in raw
     // PDF user space, but real CAD exports routinely store the sheet ROTATED (/Rotate 90/180/270 —
     // the owner's GPL set is saved upside-down, Mesa at 270°) and/or with a shifted MediaBox
     // origin (Jacintoport starts at −1296,−864). Every viewer displays through the viewport, so

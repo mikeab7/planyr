@@ -210,9 +210,9 @@ describe("readSheetMeta — bare title-block sheet code on a scanned/reference s
   });
 });
 
-/* ------------------------- B653 — the "every file misreads" revamp ------------------------- */
+/* ------------------------- B659 — the "every file misreads" revamp ------------------------- */
 
-describe("readSheetTitle — rejects title-block IDENTITY rows (B653)", () => {
+describe("readSheetTitle — rejects title-block IDENTITY rows (B659)", () => {
   const band = { side: "right", x: W * 0.78, y: 0, w: W * 0.22, h: H };
   const t = (rows, fallback = "Civil") =>
     readSheetTitle(reconstructLines(rows.map((str, i) => ({ str, x: 1950, y: 150 + i * 40, w: 300, h: 14 }))), band, fallback, { width: W, height: H });
@@ -240,7 +240,7 @@ describe("readSheetTitle — rejects title-block IDENTITY rows (B653)", () => {
   });
 });
 
-describe("titleCandidates — wrapped titles & vertical (rotated) titles (B653)", () => {
+describe("titleCandidates — wrapped titles & vertical (rotated) titles (B659)", () => {
   const band = { side: "right", x: W * 0.78, y: 0, w: W * 0.22, h: H };
   it("joins a two-line wrapped title of the same type size into one candidate", () => {
     const lines = reconstructLines([
@@ -285,7 +285,7 @@ describe("titleCandidates — wrapped titles & vertical (rotated) titles (B653)"
   });
 });
 
-describe("detectTitleBlock — left-edge band (B653)", () => {
+describe("detectTitleBlock — left-edge band (B659)", () => {
   it("detects a dense LEFT-edge title block and keeps the drawing area to its right", () => {
     const items = [{ str: "PLAN LABEL", x: 1200, y: 700, w: 120, h: 12 }];
     for (let i = 0; i < 18; i++) items.push({ str: "TITLE BLOCK ROW " + i, x: 60, y: 120 + i * 70, w: 300, h: 14 });
@@ -296,7 +296,7 @@ describe("detectTitleBlock — left-edge band (B653)", () => {
   });
 });
 
-describe("readSheetMeta — spatial label-anchored sheet number (B653)", () => {
+describe("readSheetMeta — spatial label-anchored sheet number (B659)", () => {
   function stampSheet() {
     const items = [
       // right-edge title block, dense

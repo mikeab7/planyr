@@ -402,7 +402,7 @@ export default function DocReview({
   // misreads — B378). This ONE cleaned array feeds both the grouping and every per-page label
   // lookup, so the sidebar never shows the same wrong number on several rows. `metaOf(n)` reads it.
   // Known project names/aliases — CERTAIN not-a-sheet-title texts for the set-level title pass
-  // (B653). Recomputed per document open (fileName changes on open), not per scanned page —
+  // (B659). Recomputed per document open (fileName changes on open), not per scanned page —
   // listLocalProjects reads the on-device store, too heavy to run on every rail render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const titleStops = useMemo(() => { try { return projectStopTexts(listLocalProjects()); } catch (_) { return []; } }, [fileName]);

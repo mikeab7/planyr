@@ -29,7 +29,7 @@ describe("filingConfig — env parsing, key dormant by default (B299)", () => {
   });
 });
 
-describe("naming — 'YYYY.MM.DD <Project> - <Item>' — date-first, the owner's convention (B653; mirrors reviewStore.composeTitle)", () => {
+describe("naming — 'YYYY.MM.DD <Project> - <Item>' — date-first, the owner's convention (B659; mirrors reviewStore.composeTitle)", () => {
   it("formats a date", () => {
     expect(fmtDocDate("2026-06-20")).toBe("2026.06.20");
     expect(fmtDocDate("nonsense")).toBe("");
