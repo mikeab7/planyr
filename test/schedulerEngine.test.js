@@ -734,7 +734,11 @@ describe("anti-drift: the round-2 scheduler fixes still exist in the real source
   const fjs = readFileSync(fileURLToPath(new URL("../src/shared/formula/formula.js", import.meta.url)), "utf8");
 
   it("TH1: renameProject guards a stale/non-existent project id (no ghost project)", () => {
-    expect(src).toMatch(/setData\(d => \(d\.projects && d\.projects\[id\]\) \?/);
+    // B644 strengthened the guard to also survive a pre-load null d (the nav-bridge crash class).
+    expect(src).toMatch(/setData\(d => \(d && d\.projects && d\.projects\[id\]\) \?/);
+  });
+  it("B644: the shell nav bridge drops messages until data has loaded (null-d updater crash)", () => {
+    expect(src).toMatch(/if \(!latestData\.current\) return;/);
   });
   it("TH2: duplicateProject spreads ...src and deep-copies formulaCols (keeps column layout)", () => {
     expect(src).toMatch(/\{\.\.\.src, id: newId, name: src\.name \+ " \(Copy\)", tasks: newTasks,/);

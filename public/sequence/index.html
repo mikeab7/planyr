@@ -5916,6 +5916,7 @@ function App() {
     // passed as the first arg (the in-app + dropdown buttons call addProject() bare).
     const o = (opts && typeof opts === "object" && !("nativeEvent" in opts)) ? opts : {};
     setData(d => {
+      if (!d) return d; // B644 — pre-load call: data not loaded yet, nothing to add onto
       const id = d.nPid;
       const proj = {id, name: o.name || `Project ${id}`, tasks: []};
       if (o.linkedSiteId != null) { proj.linkedSiteId = o.linkedSiteId; proj.linkedSiteName = o.linkedSiteName || null; }
@@ -5928,7 +5929,7 @@ function App() {
     // Guard a stale/non-existent id (e.g. a deleted project still in the shell breadcrumb): spreading
     // {...undefined, name} would mint a malformed ghost project (no id, no tasks) that white-screens the
     // schedule when activated. Matches the existence guard nav-link / nav-select already have.
-    setData(d => (d.projects && d.projects[id]) ? {...d, editProjId: null, projects: {...d.projects, [id]: {...d.projects[id], name}}} : d);
+    setData(d => (d && d.projects && d.projects[id]) ? {...d, editProjId: null, projects: {...d.projects, [id]: {...d.projects[id], name}}} : d);
   }, []);
 
   const duplicateProject = useCallback((id) => {
@@ -5954,7 +5955,7 @@ function App() {
 
   const deleteProject = useCallback((id, { skipConfirm = false } = {}) => {
     setData(d => {
-      if (Object.keys(d.projects).length <= 1) return d;
+      if (!d || Object.keys(d.projects || {}).length <= 1) return d; // B644 — null-safe pre-load
       const proj = d.projects[id];
       const taskCount = proj?.tasks?.length || 0;
       const name = proj?.name || `Project ${id}`;
@@ -6006,6 +6007,14 @@ function App() {
       if (e.origin !== window.location.origin) return;
       const m = e.data;
       if (!m || m.source !== "planar-shell") return;
+      // B644 — `data` is null until the async hs-v1 load resolves, and every branch below
+      // reads or mutates it. A functional updater queued now runs INSIDE the next useState
+      // render, so a null `d.projects` read there throws and lands App in the error
+      // boundary ("Cannot read properties of null (reading 'projects')" — the fresh-project
+      // / cold-boot first paint). Drop shell messages until data exists: the shell re-posts
+      // nav intents on every tab switch and retries nav-request, so an early drop self-heals
+      // the moment the load lands (nav-request already no-op'd pre-load by design).
+      if (!latestData.current) return;
       if (m.type === "planar:nav-request") {
         // The shell's loader asks us to (re-)announce our nav state, so a missed or slow first
         // emit can't strand it on its fallback timer. Answer from the latest data — a no-op until
