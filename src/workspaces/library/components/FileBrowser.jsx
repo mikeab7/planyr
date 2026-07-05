@@ -34,6 +34,7 @@ import { resolveDrawingTarget, subtreeIds } from "../../../shared/folders/folder
 import { moveDriveFileToFolder } from "../lib/folders.js";
 import {
   QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
+  dropItemsToEntries, flattenEntries, partitionAccepted,
 } from "../../../shared/files/uploadQueue.js";
 
 const fmtDate = (f) => { const s = f.docDate || f.updatedAt; try { return s ? new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; } catch (_) { return ""; } };
@@ -95,7 +96,9 @@ export default function FileBrowser({
   const [share, setShare] = useState({});                  // fileId -> { status, url, error }
   const [delNotice, setDelNotice] = useState(null);        // { orphaned } after a delete left bytes behind
   const [moveNotice, setMoveNotice] = useState(null);      // refile moved metadata but not the Drive copy (B662 #3)
+  const [folderNote, setFolderNote] = useState(null);      // { filed, skipped } after a FOLDER drop/pick (B664)
   const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
   const reqRef = useRef(0);
   const prevFolderRef = useRef(selectedFolderId);
 
@@ -252,8 +255,33 @@ export default function FileBrowser({
     const accepted = items.filter((it) => it.status === QUEUE_STATUS.PROCESSING);
     if (accepted.length) { await runPool(accepted, processItem, 3); refresh(); }
   };
-  const onDrop = (e) => { e.preventDefault(); e.stopPropagation(); setDropOver(false); ingest(e.dataTransfer?.files); };
+
+  // A FOLDER drop/pick (B664): file the PDFs found anywhere in the tree; report ONE
+  // honest "skipped N" summary for the non-PDFs a project folder naturally contains,
+  // instead of a red rejection row per stray file the user never hand-picked.
+  const ingestFolder = async (allFiles) => {
+    if (!projectId && !cross) return;
+    const { accepted, skipped } = partitionAccepted(allFiles);
+    setFolderNote(accepted.length || skipped.length ? { filed: accepted.length, skipped: skipped.length } : null);
+    if (accepted.length) await ingest(accepted);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault(); e.stopPropagation(); setDropOver(false);
+    // Extract entries SYNCHRONOUSLY (the dataTransfer item list dies after this handler
+    // returns), then walk any folders asynchronously. A dropped folder recurses into its
+    // subfolders; loose files keep the classic per-file path (which shows rejection rows).
+    const { entries, files, hasEntryApi, hasDirectory } = dropItemsToEntries(e.dataTransfer);
+    if (hasEntryApi && entries.length) {
+      flattenEntries(entries).then((all) => (hasDirectory ? ingestFolder(all) : ingest(all)))
+        .catch(() => ingest(files));
+    } else {
+      ingest(files); // older browsers without the entry API — flat file list only
+    }
+  };
   const onPick = (e) => { ingest(e.target.files); e.target.value = ""; };
+  // Folder picker: input.webkitdirectory already hands back a FLAT, recursed file list.
+  const onPickFolder = (e) => { ingestFolder([...(e.target.files || [])]); e.target.value = ""; };
 
   const open = (f) => { const r = reviews.find((x) => x.id === f.id); onOpenReview?.(r || f); };
   const del = async (id) => {
@@ -415,6 +443,20 @@ export default function FileBrowser({
           </div>
         )}
 
+        {/* folder drop/pick summary (B664) — honest about the non-PDFs a folder held */}
+        {folderNote && (
+          <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
+            border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)", fontSize: 11.5, lineHeight: 1.45 }}>
+            <span style={{ flex: 1 }}>
+              {folderNote.filed
+                ? `Folder read — filing ${folderNote.filed} PDF${folderNote.filed === 1 ? "" : "s"}`
+                : "Folder read — no PDFs found"}
+              {folderNote.skipped ? ` · skipped ${folderNote.skipped} non-PDF file${folderNote.skipped === 1 ? "" : "s"}` : ""}.
+            </span>
+            <button onClick={() => setFolderNote(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
+          </div>
+        )}
+
         {/* delete left bytes behind — surface it (never a silent cleanup failure, NEW-4) */}
         {delNotice && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
@@ -487,17 +529,24 @@ export default function FileBrowser({
         {/* persistent processing queue (B260 lean) */}
         <DropQueue queue={queue} onDismiss={removeItem} onTriage={(id) => { setShowHolding(true); removeItem(id); }} />
 
-        {/* persistent drop strip */}
+        {/* persistent drop strip — a whole FOLDER or loose files (B664) */}
         <input ref={fileInputRef} type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={onPick} />
-        <button onClick={() => fileInputRef.current?.click()}
-          style={{ flex: "none", margin: "0 12px 12px", padding: "9px 12px", borderRadius: 9, textAlign: "center", cursor: "pointer", fontFamily: "inherit",
+        {/* webkitdirectory turns this picker into a folder picker; set imperatively so React
+            can't drop the non-standard attribute. Its files list is already flat + recursed. */}
+        <input ref={(el) => { folderInputRef.current = el; if (el) el.webkitdirectory = true; }}
+          type="file" multiple style={{ display: "none" }} onChange={onPickFolder} />
+        <div style={{ flex: "none", margin: "0 12px 12px", padding: "9px 12px", borderRadius: 9, textAlign: "center", fontFamily: "inherit",
             border: `1.5px dashed ${dropOver ? "var(--accent-library)" : "var(--border-default)"}`,
             background: dropOver ? "var(--hover-ghost)" : "var(--surface-raised)", color: "var(--text-secondary)" }}>
-          <span style={{ fontSize: 12, fontWeight: 600 }}>Drop, paste, or click to add PDFs</span>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Drag a folder or files here to file them</span>
           <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>
-            The title block is read and the file files itself{cross ? "" : ` into ${projName(projectId) || "this project"}`}. Anything it can’t place lands in Needs filing.
+            Each PDF’s title block is read and it files itself{cross ? "" : ` into ${projName(projectId) || "this project"}`}. Anything it can’t place lands in Needs filing.
           </span>
-        </button>
+          <span style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 7 }}>
+            <button onClick={() => fileInputRef.current?.click()} style={pickBtn}>Choose PDFs</button>
+            <button onClick={() => folderInputRef.current?.click()} style={pickBtn}>Choose a folder</button>
+          </span>
+        </div>
       </div>
 
       {/* drop-anywhere overlay hint */}
@@ -626,6 +675,8 @@ function DropQueue({ queue, onDismiss, onTriage }) {
   );
 }
 const miniBtn = { flex: "none", fontSize: 10, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 5, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "2px 8px" };
+// The two drop-strip pickers (B664): loose PDFs vs. a whole folder.
+const pickBtn = { flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 11px" };
 
 function Centered({ title, body }) {
   return (

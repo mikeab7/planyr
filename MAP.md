@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-05 @ `3a6ccdc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-05 @ `a76211f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -85,7 +85,7 @@ _184 source files mapped._
 - **`src/shared/files/titleBlockParse.js`** — Pure deterministic title-block field reader: discipline/item classification, sheet number, issue date, revision, stated scale for free auto-filing
   - _exports_: `classifyDiscipline`, `disciplineFromSheetNumber`, `DISCIPLINES`, `findDates`, `issueDate`, `latestDate`, `parseRevision`, `parseSheetNumber`, `readTitleBlockText`
 - **`src/shared/files/uploadQueue.js`** — Pure upload-queue model for the Project Files drop-zone: per-file status lifecycle, active/recently-filed split, and a bounded concurrency pool
-  - _exports_: `hasPendingDemote`, `isAcceptedFile`, `makeQueueItem`, `makeQueueItems`, `makeUploadId`, `QUEUE_STATUS`, `RECENT_BEAT_MS`, `RECENT_COLLAPSE_AT`, `runPool`, `splitQueue`
+  - _exports_: `dropItemsToEntries`, `entryToFiles`, `flattenEntries`, `hasPendingDemote`, `isAcceptedFile`, `makeQueueItem`, `makeQueueItems`, `makeUploadId`, `partitionAccepted`, `QUEUE_STATUS`, `RECENT_BEAT_MS`, `RECENT_COLLAPSE_AT`, `runPool`, `splitQueue`
 - **`src/shared/folders/folderTemplate.js`** — Canonical default project folder template (B650) — the one 133-folder tree every new project is scaffolded from.
   - _exports_: `FOLDER_TEMPLATE`, `TEMPLATE_VERSION`
 - **`src/shared/folders/folderTree.js`** — Pure folder-tree ops (B650): flatten/treeify/validate/move-cycle guard/seed-row builder, shared by the Library editor + the Drive mirror.

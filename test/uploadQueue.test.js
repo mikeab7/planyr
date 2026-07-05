@@ -2,10 +2,20 @@ import { describe, it, expect } from "vitest";
 import {
   QUEUE_STATUS, RECENT_BEAT_MS, RECENT_COLLAPSE_AT,
   isAcceptedFile, makeQueueItem, makeQueueItems, splitQueue, hasPendingDemote, runPool,
+  entryToFiles, flattenEntries, dropItemsToEntries, partitionAccepted,
 } from "../src/shared/files/uploadQueue.js";
 
 const pdf = (name = "a.pdf", size = 1000) => ({ name, size, type: "application/pdf" });
 const png = (name = "a.png", size = 1000) => ({ name, size, type: "image/png" });
+
+// ── Fake FileSystemEntry helpers for the folder-drop walk (B664) ──
+const fileEntry = (file) => ({ isFile: true, isDirectory: false, file: (res) => res(file) });
+// A directory whose reader serves `batches` (arrays of entries) in order, then [] to end —
+// mirroring the real chunked readEntries contract (you must call it until it returns empty).
+const dirEntry = (batches) => ({
+  isFile: false, isDirectory: true,
+  createReader: () => { let i = 0; return { readEntries: (res) => res(i < batches.length ? batches[i++] : []) }; },
+});
 
 describe("uploadQueue — accepted file types (Amendment A)", () => {
   it("accepts PDFs by type and by extension; rejects everything else", () => {
@@ -95,6 +105,68 @@ describe("uploadQueue — demote timing", () => {
   it("exposes sane convention constants", () => {
     expect(RECENT_BEAT_MS).toBe(3000);
     expect(RECENT_COLLAPSE_AT).toBe(3);
+  });
+});
+
+describe("uploadQueue — folder-aware drops (B664)", () => {
+  it("entryToFiles: a file entry yields its one File", async () => {
+    const f = pdf("survey.pdf");
+    expect(await entryToFiles(fileEntry(f))).toEqual([f]);
+  });
+
+  it("entryToFiles: recurses nested folders and reads EVERY chunk of a directory reader", async () => {
+    const a = pdf("a.pdf"), b = pdf("b.pdf"), c = pdf("c.pdf"), d = pdf("deep.pdf");
+    // root/ → [a, b (served in TWO chunks)] + sub/ → [c] + sub/deeper/ → [d]
+    const deeper = dirEntry([[fileEntry(d)]]);
+    const sub = dirEntry([[fileEntry(c), deeper]]);
+    const root = dirEntry([[fileEntry(a)], [fileEntry(b), sub]]); // two batches at the top level
+    const files = await entryToFiles(root);
+    expect(files).toEqual([a, b, c, d]);
+  });
+
+  it("entryToFiles: an unreadable entry is skipped, not fatal", async () => {
+    const boom = { isFile: true, isDirectory: false, file: (_res, rej) => rej(new Error("nope")) };
+    expect(await entryToFiles(boom)).toEqual([]);
+    expect(await entryToFiles(null)).toEqual([]);
+    expect(await entryToFiles({ isFile: false, isDirectory: false })).toEqual([]);
+  });
+
+  it("flattenEntries: flattens a mix of loose files and a folder", async () => {
+    const loose = pdf("loose.pdf"), inside = pdf("inside.pdf");
+    const out = await flattenEntries([fileEntry(loose), dirEntry([[fileEntry(inside)]])]);
+    expect(out).toEqual([loose, inside]);
+  });
+
+  it("dropItemsToEntries: pulls entries synchronously and flags a dropped folder", () => {
+    const folder = dirEntry([[fileEntry(pdf("in.pdf"))]]);
+    const dt = {
+      files: [pdf("flat.pdf")], // browsers leave this empty for a folder; kept as fallback
+      items: [
+        { kind: "file", webkitGetAsEntry: () => folder },
+        { kind: "file", webkitGetAsEntry: () => fileEntry(pdf("loose.pdf")) },
+        { kind: "string", webkitGetAsEntry: () => null }, // dragged text — ignored
+      ],
+    };
+    const r = dropItemsToEntries(dt);
+    expect(r.hasEntryApi).toBe(true);
+    expect(r.hasDirectory).toBe(true);
+    expect(r.entries).toHaveLength(2);
+    expect(r.files).toHaveLength(1);
+  });
+
+  it("dropItemsToEntries: falls back to the flat file list when the entry API is absent", () => {
+    const r = dropItemsToEntries({ files: [pdf("x.pdf"), pdf("y.pdf")], items: [{ kind: "file" }] });
+    expect(r.hasEntryApi).toBe(false);
+    expect(r.hasDirectory).toBe(false);
+    expect(r.files).toHaveLength(2);
+    expect(dropItemsToEntries(null).files).toEqual([]);
+  });
+
+  it("partitionAccepted: files the PDFs, sets the rest aside for one honest summary", () => {
+    const { accepted, skipped } = partitionAccepted([pdf("a.pdf"), png("logo.png"), pdf("b.pdf"), { name: "notes.docx", type: "" }]);
+    expect(accepted.map((f) => f.name)).toEqual(["a.pdf", "b.pdf"]);
+    expect(skipped.map((f) => f.name)).toEqual(["logo.png", "notes.docx"]);
+    expect(partitionAccepted(null)).toEqual({ accepted: [], skipped: [] });
   });
 });
 
