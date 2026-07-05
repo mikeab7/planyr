@@ -355,6 +355,7 @@ export function titleCandidates(lines, band, dims = {}, { numStrip = null } = {}
     if (!t || TITLE_SKIP.test(t) || looksLikeData(t) || looksLikeBoilerplate(t) || looksLikeFieldRow(t) || looksLikeIdentityRow(t)) return false;
     if (/match\s*-?\s*line|for\s+continuation/i.test(t)) return false; // a seam annotation, not a title
     if (mostlySingles(t)) return false;
+    if (/:\s*$/.test(t) || /^[[\]{}]/.test(t)) return false;  // a field-label row ("SEAL:") / a bracketed note ("[NOTE:") — never a title (B364 OCR pass)
     if (wordCount(t) > 7) return false;                       // a title is a few words, not a sentence
     return t.replace(/[^a-z]/gi, "").length <= 48;            // nor a long run-on line
   };
