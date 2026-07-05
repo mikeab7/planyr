@@ -142,6 +142,48 @@ export function suggestNextNumberedName(siblings = [], label = "New Folder") {
   return `${padPrefix(Math.max(...nums) + 1)}. ${label}`;
 }
 
+/* ── Filing into the tree (B650 follow-on: files land IN the standard tree) ──────────────
+ * One resolver shared by the SERVER upload targeting (functions/api/files*.js pick the Drive
+ * parent folder) and the CLIENT display (the Library shows each file inside its tree folder),
+ * so the two can never disagree about where a drawing belongs. */
+
+// "05. Civil" → "civil" — compare folder labels ignoring the numbered prefix + case.
+export const stripPrefix = (name) =>
+  String(name ?? "").replace(/^\s*\d{1,3}\.\s*/, "").trim().toLowerCase();
+
+// Word-normalize for comparison: any run of non-alphanumerics becomes one space, so
+// "Site Plans" ≡ "site-plans" ≡ "site_plans" — the stored Drive keys carry SLUGGED
+// discipline segments while folder labels carry spaces; both must resolve to one folder.
+const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+// Loose label equality on normalized forms, plus singular/plural off-by-an-s
+// ("Exhibits" folder ↔ "Exhibit" discipline).
+const labelEq = (a, b) => {
+  const na = norm(a), nb = norm(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  return na.replace(/s$/, "") === nb.replace(/s$/, "");
+};
+
+const childByLabel = (rows, parentId, label) =>
+  childrenOf(rows, parentId).find((r) => labelEq(stripPrefix(r.name), label)) || null;
+
+/* Where a drawing of `discipline` files in the standard tree:
+ * 02. Design → 01. Drawings → <discipline match> → 01. Current (or 02. Archive when
+ * `archive`). Falls back one level at a time — unknown discipline lands at the Drawings
+ * folder (visible, never hidden); no Design/Drawings in this tree → null (caller keeps its
+ * legacy flat path). Returns { row, driveFolderId } or null. Pure; rows = project_folders. */
+export function resolveDrawingTarget(rows, discipline, { archive = false } = {}) {
+  const design = childByLabel(rows, null, "design");
+  if (!design) return null;
+  const drawings = childByLabel(rows, design.id, "drawings");
+  if (!drawings) return null;
+  const disc = discipline ? childByLabel(rows, drawings.id, discipline) : null;
+  if (!disc) return { row: drawings, driveFolderId: drawings.driveFolderId || null };
+  const leaf = childByLabel(rows, disc.id, archive ? "archive" : "current") || disc;
+  return { row: leaf, driveFolderId: leaf.driveFolderId || null };
+}
+
 /* Turn a template into the exact insert rows that seed a project (B650). Pure — the id
  * generator is injected (crypto.randomUUID in the app; deterministic in tests). Because
  * flattenTemplate is depth-ordered, a parent's id is always assigned before its children, so

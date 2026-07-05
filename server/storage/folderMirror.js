@@ -14,6 +14,7 @@
  *    silent success (a create whose id doesn't persist would read back as "never mirrored").
  */
 import { folderReconcilePlan, planIsEmpty } from "./folderReconcile.js";
+import { resolveDrawingTarget } from "../../src/shared/folders/folderTree.js";
 
 // Path-safe slug matching functions/api/files.js, so the folder tree and filed documents share
 // one project root in Drive (Planyr/<uid>/project-<slug>/…).
@@ -39,15 +40,42 @@ function subtreeRowIds(rows, id) {
 }
 
 /* Reconcile a project's folder tree into Drive. Returns
- * { ok, summary:{ created, renamed, moved, trashed }, errors:[...] }.
- * `ok` is true when every planned op succeeded (errors empty). */
-export async function syncProjectFolders({ projectId, userId, client, store }) {
+ * { ok, summary:{ created, renamed, moved, trashed }, errors:[...], error?, remaining, total }.
+ * `ok` is true when every ATTEMPTED op succeeded (errors empty).
+ *
+ * `maxOps` caps how many Drive operations ONE call executes (the 502 fix, found live on the
+ * first real 133-folder seed): a serverless request that tries all 133 creates in one go gets
+ * killed by the platform mid-flight and the caller sees a bare 502. Instead each call does a
+ * small chunk and reports `remaining`; the client loops until remaining hits 0. Safe because
+ * the reconcile is RESUMABLE by design — every completed op persists its drive_* bookkeeping,
+ * so the next call's plan contains only what's left (never a duplicate). Ops beyond the cap
+ * are DEFERRED (counted in `remaining`), never errored. 0 = uncapped (tests / small trees). */
+export async function syncProjectFolders({ projectId, userId, client, store, maxOps = 0 }) {
   if (!projectId) return { ok: false, error: "Missing projectId." };
   const rows = await store.list(projectId);
+  // A failed index read must be a LOUD failure — treating it as an empty tree made the sync
+  // report "Mirrored ✓" with the tree unmirrored (B662 review, finding #1).
+  if (!rows) return { ok: false, error: "Couldn't read the folder index — try Sync now again.", remaining: 1, total: 0, summary: { created: 0, renamed: 0, moved: 0, trashed: 0 }, errors: ["folder index read failed"] };
   const plan = folderReconcilePlan(rows);
   const summary = { created: 0, renamed: 0, moved: 0, trashed: 0 };
   const errors = [];
-  if (planIsEmpty(plan)) return { ok: true, summary, errors };
+  const total = plan.creates.length + plan.renames.length + plan.moves.length + plan.trashes.length;
+  if (planIsEmpty(plan)) return { ok: true, summary, errors, remaining: 0, total };
+
+  // Apply the op budget by SLICING the plan, in execution order (creates → renames → moves →
+  // trashes). Creates are depth-ascending, so any create kept in the slice has its parent's
+  // create in the slice too — the parents-first invariant survives chunking.
+  let deferred = 0;
+  if (maxOps > 0) {
+    const lists = ["creates", "renames", "moves", "trashes"];
+    let budget = maxOps;
+    for (const k of lists) {
+      const keep = plan[k].slice(0, Math.max(0, budget));
+      deferred += plan[k].length - keep.length;
+      plan[k] = keep;
+      budget -= keep.length;
+    }
+  }
 
   // The project's own Drive root (created on demand, app-created under drive.file).
   const projectRoot = await client.folderId(`${userId}/project-${slugSeg(projectId)}`);
@@ -100,7 +128,10 @@ export async function syncProjectFolders({ projectId, userId, client, store }) {
   for (const m of plan.moves) {
     try {
       const addParent = m.newParentId == null ? projectRoot : driveId.get(m.newParentId);
-      if (!addParent) { errors.push(`move ${m.id}: new parent not in Drive`); continue; }
+      // Parent's create was deferred past this chunk's budget (or failed and rolled back) →
+      // DEFER the move to the next round rather than raising a false error; the re-plan
+      // re-emits it once the parent has a Drive id.
+      if (!addParent) { deferred += 1; continue; }
       await client.update(m.driveFolderId, { addParents: addParent, removeParents: m.removeParent || projectRoot });
       const persisted = await store.updateDrive(m.id, { driveParentId: m.newParentId == null ? null : addParent });
       if (persisted && persisted.ok === false) errors.push(`move ${m.id}: ${persisted.error}`);
@@ -120,7 +151,127 @@ export async function syncProjectFolders({ projectId, userId, client, store }) {
     } catch (e) { errors.push(`trash ${t.id}: ${(e && e.message) || e}`); }
   }
 
-  return { ok: errors.length === 0, summary, errors };
+  // A failed create leaves its row un-mirrored → it re-plans next round; count it as
+  // remaining work so a looping caller keeps going (bounded by its round cap) instead of
+  // reading a lossy "done".
+  const remaining = deferred + errors.length;
+  return { ok: errors.length === 0, summary, errors, error: errors[0], remaining, total };
+}
+
+/* Parse a stored drive_files key into its filing coordinates (B663 migration). Keys are
+ * `<uid>/project-<pid>/<discipline-slug>/<name>` (see reviewStore pushFileToDrive). Returns
+ * { discipline, name } or null for anything that isn't a filed project document (e.g. the
+ * `project-unfiled/…` holding area — those are deliberately NOT migrated: no auto-guess). */
+export function parseFiledKey(planyrKey, userId, projectId) {
+  const prefix = `${userId}/project-${slugSeg(projectId)}/`;
+  const s = String(planyrKey || "");
+  if (!s.startsWith(prefix)) return null;
+  const rest = s.slice(prefix.length);
+  const slash = rest.indexOf("/");
+  if (slash <= 0) return null; // no discipline segment → not a filed doc key
+  return { discipline: rest.slice(0, slash), name: rest.slice(slash + 1) };
+}
+
+/* One chunk of the ONE-TIME file migration (B663): move this project's already-uploaded Drive
+ * files INTO the standard tree (Design → Drawings → <discipline> → 01. Current), in place by
+ * file id — names, share links, and read-back keys are untouched (downloads resolve by id).
+ * Idempotent: a file already parented in its tree folder is skipped, so re-running is safe
+ * and cheap. Chunked exactly like syncProjectFolders (one small batch per request; the client
+ * loops on `done`). Returns { ok, moved, already, skipped, errors, error?, done, nextOffset }. */
+export async function migrateFilesToTree({ userId, projectId, client, store, idStore, offset = 0, limit = 10 } = {}) {
+  if (!projectId) return { ok: false, error: "Missing projectId." };
+  const out = { ok: true, moved: 0, already: 0, skipped: 0, errors: [], done: true, nextOffset: offset };
+  const prefix = `${userId}/project-${slugSeg(projectId)}/`;
+  const keys = await idStore.listByPrefix(prefix, { limit, offset });
+  // A failed page read must be LOUD — an empty-page lookalike made the one-time migration
+  // report COMPLETE (and write its permanent done-marker) with files never moved (B663
+  // review #1, the same class as the store.list guard below).
+  if (!keys) return { ...out, ok: false, error: "Couldn't list the project's files — try again.", done: false };
+  out.done = keys.length < limit;
+  out.nextOffset = offset + keys.length;
+  if (!keys.length) return out;
+
+  const rows = await store.list(projectId); // the project's folder tree, once per chunk
+  if (!rows) return { ...out, ok: false, error: "Couldn't read the folder index.", done: false };
+  // Any mirrored tree folder counts as "already filed": a file the user (or a refile) placed
+  // in a DIFFERENT tree folder than its stored key suggests must be respected, not yanked
+  // back to the key-derived spot (the key keeps its original discipline forever).
+  const treeFolderIds = new Set(rows.filter((r) => !r.trashed && r.driveFolderId).map((r) => r.driveFolderId));
+  for (const k of keys) {
+    try {
+      const parsed = parseFiledKey(k.planyrKey, userId, projectId);
+      if (!parsed || !k.driveId) { out.skipped += 1; continue; }
+      const target = resolveDrawingTarget(rows, parsed.discipline);
+      const targetId = target && target.driveFolderId;
+      if (!targetId) { out.skipped += 1; continue; } // tree/discipline not mirrored → leave in place
+      const parents = await client.parentsOf(k.driveId);
+      if (parents.some((p) => treeFolderIds.has(p))) { out.already += 1; continue; } // in the tree already (anywhere) — respect it
+      await client.update(k.driveId, {
+        addParents: targetId,
+        ...(parents.length ? { removeParents: parents.join(",") } : {}),
+      });
+      out.moved += 1;
+    } catch (e) {
+      const msg = (e && e.message) || String(e);
+      // A dangling mapping (the file was deleted/purged straight in Drive) is a SKIP, not an
+      // error — it must never wedge the walk, and it stops recurring: clean the stale row.
+      if (/404|not found/i.test(msg)) {
+        out.skipped += 1;
+        try { await idStore.del(k.planyrKey); } catch (_) { /* best-effort cleanup */ }
+        continue;
+      }
+      out.errors.push(`${k.planyrKey}: ${msg}`);
+    }
+  }
+  // Per-file errors do NOT fail the chunk (B663 review: one poisoned file must not abort the
+  // rest of the walk forever) — the chunk was processed, the cursor advances, and the errors
+  // ride along for the caller's final report. ok:false is reserved for CHUNK-level failures
+  // (the index/page reads above), which are positional and must stop the walk.
+  out.error = out.errors[0];
+  return out;
+}
+
+/* Move ONE stored file to the tree folder of an EXPLICIT discipline (B662 review #3: the
+ * refile flow — a "needs filing" PDF confirmed as Civil must have its Drive bytes follow the
+ * decision; the stored key keeps the original discipline forever, so the caller passes the
+ * confirmed one). In place by file id — name/share/read-back untouched. Never throws. */
+export async function moveKeyToTree({ userId, projectId, planyrKey, discipline, client, store, idStore } = {}) {
+  if (!projectId || !planyrKey) return { ok: false, error: "Missing projectId or planyrKey." };
+  try {
+    const rows = await store.list(projectId);
+    if (!rows) return { ok: false, error: "Couldn't read the folder index." };
+    const target = resolveDrawingTarget(rows, discipline);
+    const targetId = target && target.driveFolderId;
+    if (!targetId) return { ok: true, skipped: true }; // tree not mirrored yet → nothing to move to
+    const driveId = await idStore.get(`${userId}/${planyrKey}`);
+    if (!driveId) return { ok: true, skipped: true }; // not Drive-stored (Supabase copy / oversize)
+    const parents = await client.parentsOf(driveId);
+    if (parents.includes(targetId)) return { ok: true, moved: false };
+    await client.update(driveId, {
+      addParents: targetId,
+      ...(parents.length ? { removeParents: parents.join(",") } : {}),
+    });
+    return { ok: true, moved: true };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || "Couldn't move the file." };
+  }
+}
+
+/* The Drive parent folder id a new UPLOAD should land in, per the project's standard tree:
+ * 02. Design → 01. Drawings → <discipline> → 01. Current (shared resolver — the same one the
+ * Library uses for display, so server filing and on-screen placement can never disagree).
+ * Returns a Drive folder id, or null when the tree/target isn't mirrored yet — the caller
+ * then keeps its legacy flat path, so filing NEVER breaks on a missing tree. Never throws. */
+export async function treeParentForUpload({ store, projectId, discipline } = {}) {
+  if (!store || !projectId) return null;
+  try {
+    const rows = await store.list(projectId);
+    if (!rows || !rows.length) return null;
+    const target = resolveDrawingTarget(rows, discipline);
+    return (target && target.driveFolderId) || null;
+  } catch (_) {
+    return null; // lookup trouble → legacy path, never a blocked upload
+  }
 }
 
 /* Enumerate exactly what deleting `folderId`'s subtree would remove from Drive, for the loud
@@ -131,6 +282,9 @@ export async function syncProjectFolders({ projectId, userId, client, store }) {
 export async function planDelete({ projectId, folderId, client, store }) {
   if (!folderId) return { ok: false, error: "Missing folderId." };
   const rows = await store.list(projectId);
+  // A blipped index read must NOT produce an empty "nothing will be deleted" enumeration —
+  // the client's failed-check state ("couldn't verify — delete anyway?") handles ok:false.
+  if (!rows) return { ok: false, error: "Couldn't read the folder index." };
   const ids = subtreeRowIds(rows, folderId);
   const inSubtree = rows.filter((r) => ids.has(r.id) && !r.trashed);
   const folders = inSubtree.map((r) => ({ id: r.id, name: r.name }));

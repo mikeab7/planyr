@@ -51,9 +51,12 @@ export function driveBackend({ client = null } = {}) {
     name: "drive",
     configured: !!client,
 
-    async put({ bytes, contentType, name, folder }) {
+    async put({ bytes, contentType, name, folder, parentFolderId: pinnedParent }) {
       const n = need(); if (n) return n;
-      const parentFolderId = await folderId(folder);
+      // A pinned parent id (B650 tree filing — the caller resolved the exact tree folder's
+      // Drive id) wins over the lazy path-ensure; that's what lands drawings INSIDE the
+      // project's standard folder tree instead of the flat legacy path.
+      const parentFolderId = pinnedParent || await folderId(folder);
       const res = await client.create({ bytes, contentType, name, parentFolderId });
       if (!res || !res.id) return fail("Drive did not return a file id.");
       return ok({ backendId: res.id });

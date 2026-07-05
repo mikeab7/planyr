@@ -2,24 +2,43 @@
  *
  * File storage used to live INSIDE Review (FileBrowser was Review's landing screen),
  * which overloaded a module whose job is marking up one drawing. The Library is now its
- * own top-level tab: browse a project's files by discipline, drop PDFs to auto-file them,
- * the upload tray, the "needs filing" holding area. Clicking a file opens it in Review
- * (cross-workspace, via the Shell's onOpenReviewInDocReview intent — the SAME handler the
- * Site Planner's files drawer already uses).
+ * own top-level tab, and since the B650 unification it is ONE view per project (owner
+ * call, 2026-07-05 — no Files/Folders tab split):
+ *
+ *   • LEFT — the project's REAL folder tree (FolderTree, embedded): the standard
+ *     01. Hillwood … 12. Bldg Acq skeleton the user edits (add / rename / move / delete),
+ *     mirrored one-way into Google Drive. Selecting a folder filters the file list.
+ *   • RIGHT — the file list + drop zone + upload tray + "needs filing" holding area
+ *     (FileBrowser in folder mode). Files display inside the SAME tree folders the server
+ *     files their bytes into (Design → Drawings → discipline → Current/Archive), via one
+ *     shared resolver — the screen and Drive can't disagree.
+ *
+ * Cross-project ("All projects") browsing keeps the classic derived category tree — a
+ * folder tree belongs to one project. Clicking a file opens it in Review (cross-workspace,
+ * via the Shell's onOpenReviewInDocReview intent).
  *
  * The file-storage data layer (reviewStore / auto-filing / file-facts index) stays in
  * doc-review/lib — it is project-scoped and canvas-independent, and both Review (canvas
  * persistence) and the Library (browsing/filing) legitimately share it. Lazy-loaded by
  * the shell, so opening Review never pulls the Library in and vice-versa.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import FileBrowser from "./components/FileBrowser.jsx";
 import FolderTree from "./components/FolderTree.jsx";
 import { autofilingProvider } from "../doc-review/lib/autofiling.js";
-import { cloudReady } from "../doc-review/lib/reviewStore.js";
-import { onAuthChange } from "../site-planner/lib/auth.js";
+import { cloudReady, listProjects as listCloudProjects } from "../doc-review/lib/reviewStore.js";
+import { onAuthChange, getUser } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
+import { migrateAllProjects } from "./lib/folders.js";
+
+// One-time account migration marker (B663): "this account's existing projects were organized
+// into the standard tree on this device". Everything the migration does is idempotent server-
+// side, so a fresh device re-running it is harmless — the marker only avoids wasted work.
+const MIGRATE_KEY = (uid) => `planyr:treeMigrateV1:${uid}`;
+// StrictMode double-mount / remount guard — PER ACCOUNT, so signing out and into a different
+// account in the same tab still runs that account's one-time migration.
+const migrationStartedFor = new Set();
 
 export default function Library({
   shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject,
@@ -29,9 +48,6 @@ export default function Library({
   // is the all-projects browse mode, and `onNavigate` writes the hash to change either.
   projectId = null, onNavigate, crossProject = false,
 } = {}) {
-  // Files (browse/drop) vs Folders (the standard tree the user edits + mirrors to Drive, B650).
-  const [tab, setTab] = useState("files");
-
   // Cloud-readiness drives whether the browser can list files (it lives in the account).
   // Re-checks on auth changes so a sign-in/out flips the surface without a reload.
   const [signedIn, setSignedIn] = useState(false);
@@ -43,6 +59,84 @@ export default function Library({
     return () => { live = false; off && off(); };
   }, []);
 
+  // Unified-view wiring: FolderTree publishes its rows up; FileBrowser places files by those
+  // rows and publishes rolled-up per-folder counts back down. Selection filters the list.
+  const [folderRows, setFolderRows] = useState([]);
+  const [selectedFolderId, setSelectedFolderId] = useState(null); // null = All files
+  const [folderCounts, setFolderCounts] = useState(null); // Map folderId → n (null key = total)
+  const onRowsChange = useCallback((rows) => setFolderRows(rows), []);
+  const onFolderCounts = useCallback((counts) => setFolderCounts(counts), []);
+
+  // Selection is per project — switching projects resets to "All files".
+  useEffect(() => { setSelectedFolderId(null); setFolderRows([]); setFolderCounts(null); }, [projectId]);
+
+  // A selection must never point at a deleted/vanished folder (B662 review #6): deleting the
+  // selected folder — or an ancestor — republishes rows without it; fall back to "All files"
+  // instead of filtering the list by a ghost.
+  useEffect(() => {
+    if (selectedFolderId == null || !folderRows.length) return;
+    const row = folderRows.find((r) => r.id === selectedFolderId);
+    if (!row || row.trashed) setSelectedFolderId(null);
+  }, [folderRows, selectedFolderId]);
+
+  // ── One-time migration (B663, owner-requested): organize EVERY existing project into the
+  // standard tree + move its already-uploaded files into the right Drive folders. Runs once
+  // per account (marker), automatically, the first time the Library opens signed-in; honest
+  // progress + a Retry on failure (LOUD-FAILURE — never a silent half-migration).
+  const [migrate, setMigrate] = useState({ status: "idle", text: "" });
+  const runMigration = useCallback(async () => {
+    // Pin the identity for the whole run (B663 review #9): the walk stops — and the done-
+    // marker is never written — if a different account signs in mid-run.
+    let uid = null;
+    try { const u = await getUser(); uid = u && u.id; } catch (_) { /* keep null */ }
+    if (!uid) return;
+    const sameUser = async () => {
+      try { const u = await getUser(); return !!u && u.id === uid; } catch (_) { return false; }
+    };
+    setMigrate({ status: "running", text: "Organizing your projects into folders…" });
+    let projects = [];
+    try { projects = await listCloudProjects(); } catch (_) { projects = []; }
+    // Zero projects = either a truly empty account or a FAILED listing (listProjects swallows
+    // errors into []). Either way there is nothing safe to celebrate and nothing was done —
+    // do NOT write the permanent marker, do NOT claim success (B663 review #2). The next
+    // Library open re-checks cheaply.
+    if (!projects.length) { setMigrate({ status: "idle", text: "" }); return; }
+    const r = await migrateAllProjects(projects, {
+      checkIdentity: sameUser,
+      onProgress: ({ index, total, project, phase, mirrorDone, mirrorTotal, moved }) => {
+        const step = `${index + 1} of ${total}`;
+        const detail = phase === "mirror" && mirrorTotal ? ` — mirroring folders ${mirrorDone} of ${mirrorTotal}`
+          : phase === "files" ? ` — moving files${moved ? ` (${moved})` : "…"}` : "";
+        setMigrate({ status: "running", text: `Organizing ${project} (${step})${detail}` });
+      },
+    });
+    if (r.ok && (await sameUser())) {
+      try { localStorage.setItem(MIGRATE_KEY(uid), new Date().toISOString()); } catch (_) { /* full/blocked storage just means a harmless re-run later */ }
+      setMigrate({ status: "done", text: `All ${r.projects} project${r.projects === 1 ? "" : "s"} organized${r.movedFiles ? ` · ${r.movedFiles} file${r.movedFiles === 1 ? "" : "s"} moved into folders` : ""}.` });
+    } else if (r.ok) {
+      setMigrate({ status: "idle", text: "" }); // account changed right at the end — no marker, no claim
+    } else {
+      setMigrate({ status: "error", text: r.errors[0] || "The one-time folder organization hit a problem." });
+    }
+  }, []);
+  useEffect(() => {
+    if (!signedIn) return;
+    let live = true;
+    (async () => {
+      let uid = null;
+      try { const u = await getUser(); uid = u && u.id; } catch (_) { /* keep null */ }
+      // Per-ACCOUNT session guard (not per component instance): a second account signing in
+      // on the same mounted Library still gets its own one-time run (B663 review #6).
+      if (!live || !uid || migrationStartedFor.has(uid)) return;
+      let done = null;
+      try { done = localStorage.getItem(MIGRATE_KEY(uid)); } catch (_) { done = null; }
+      if (done) return;
+      migrationStartedFor.add(uid);
+      runMigration();
+    })();
+    return () => { live = false; };
+  }, [signedIn, runMigration]);
+
   // The breadcrumb project name resolves from the local site list (instant; the per-user
   // cloud cache feeds it), falling back to the id. { id, name } | null.
   let projectName = "";
@@ -50,6 +144,10 @@ export default function Library({
     try { const p = listLocalProjects().find((pp) => pp.id === projectId); if (p) projectName = p.name; } catch (_) {}
   }
   const libraryProject = projectId ? { id: projectId, name: projectName || "Project" } : null;
+
+  // Folder mode only makes sense with a project + signed in; FileBrowser gates its own
+  // signed-out / pick-a-project states, so the rail simply doesn't mount there.
+  const folderMode = !crossProject && !!projectId && signedIn;
 
   return (
     <div data-testid="library-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--surface-page)", position: "relative" }}>
@@ -65,45 +163,53 @@ export default function Library({
         accountActive={accountActive}
       />
 
-      {/* Files vs Folders. Folders is per-project only (a tree belongs to one project), so it
-          hides in the all-projects browse mode. */}
-      <div style={{ display: "flex", gap: 4, padding: "6px 12px 0", borderBottom: "1px solid var(--border-default)", background: "var(--surface-page)" }}>
-        <TabBtn testid="library-tab-files" active={tab === "files"} onClick={() => setTab("files")}>Files</TabBtn>
-        {!crossProject && <TabBtn testid="library-tab-folders" active={tab === "folders"} onClick={() => setTab("folders")}>Folders</TabBtn>}
-      </div>
+      {migrate.status !== "idle" && (
+        <div role={migrate.status === "error" ? "alert" : "status"} style={{
+          flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 12,
+          borderBottom: "1px solid var(--border-default)",
+          color: migrate.status === "error" ? "var(--danger-text)" : migrate.status === "done" ? "var(--text-secondary)" : "var(--text-secondary)",
+          background: "var(--surface-raised)",
+        }}>
+          <span>{migrate.status === "running" ? "↻" : migrate.status === "done" ? "✓" : "⚠"}</span>
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{migrate.text}</span>
+          {migrate.status === "error" && (
+            <button onClick={runMigration} style={{ flex: "none", border: "none", background: "none", color: "var(--accent-library-text)", cursor: "pointer", font: "inherit", fontWeight: 700 }}>Retry</button>
+          )}
+          {migrate.status === "done" && (
+            <button onClick={() => setMigrate({ status: "idle", text: "" })} title="Dismiss" style={{ flex: "none", border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 13 }}>✕</button>
+          )}
+        </div>
+      )}
 
-      <div style={{ flex: 1, minHeight: 0 }}>
-        {tab === "folders" && !crossProject ? (
-          <FolderTree projectId={projectId} signedIn={signedIn} projectName={projectName} />
-        ) : (
-          <FileBrowser
-            projectId={projectId}
-            projectName={projectName}
-            signedIn={signedIn}
-            cross={crossProject}
-            indexProvider={autofilingProvider}
-            // Click a file → open it in Review (cross-workspace). The Shell intent switches the
-            // tab AND hands Review the row, which DocReview's docIntent effect consumes on mount.
-            onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
-            onNavigate={onNavigate}
-          />
-        )}
+      <div data-testid={folderMode ? "library-unified" : undefined} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <FileBrowser
+          projectId={projectId}
+          projectName={projectName}
+          signedIn={signedIn}
+          cross={crossProject}
+          indexProvider={autofilingProvider}
+          // Click a file → open it in Review (cross-workspace). The Shell intent switches the
+          // tab AND hands Review the row, which DocReview's docIntent effect consumes on mount.
+          onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
+          onNavigate={onNavigate}
+          folderMode={folderMode}
+          folderRows={folderRows}
+          selectedFolderId={selectedFolderId}
+          onFolderCounts={onFolderCounts}
+          folderRail={folderMode ? (
+            <FolderTree
+              embedded
+              projectId={projectId}
+              signedIn={signedIn}
+              projectName={projectName}
+              selectedId={selectedFolderId}
+              onSelect={setSelectedFolderId}
+              onRowsChange={onRowsChange}
+              fileCounts={folderCounts}
+            />
+          ) : null}
+        />
       </div>
     </div>
-  );
-}
-
-function TabBtn({ active, onClick, children, testid }) {
-  return (
-    <button
-      onClick={onClick}
-      data-testid={testid}
-      style={{
-        font: "inherit", fontSize: 13, fontWeight: active ? 600 : 500, padding: "6px 12px",
-        border: "none", background: "none", cursor: "pointer",
-        color: active ? "var(--accent-library-text)" : "var(--text-secondary)",
-        borderBottom: active ? "2px solid var(--accent-library)" : "2px solid transparent", marginBottom: -1,
-      }}
-    >{children}</button>
   );
 }

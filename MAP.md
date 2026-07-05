@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-05 @ `aa4bafb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-05 @ `3a6ccdc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -89,7 +89,7 @@ _184 source files mapped._
 - **`src/shared/folders/folderTemplate.js`** — Canonical default project folder template (B650) — the one 133-folder tree every new project is scaffolded from.
   - _exports_: `FOLDER_TEMPLATE`, `TEMPLATE_VERSION`
 - **`src/shared/folders/folderTree.js`** — Pure folder-tree ops (B650): flatten/treeify/validate/move-cycle guard/seed-row builder, shared by the Library editor + the Drive mirror.
-  - _exports_: `buildSeedRows`, `childrenOf`, `countTemplate`, `descendantIds`, `flattenTemplate`, `liveRows`, `nextOrder`, `padPrefix`, `subtreeIds`, `suggestNextNumberedName`, `treeify`, `validateFolderName`, `wouldCreateCycle`
+  - _exports_: `buildSeedRows`, `childrenOf`, `countTemplate`, `descendantIds`, `flattenTemplate`, `liveRows`, `nextOrder`, `padPrefix`, `resolveDrawingTarget`, `stripPrefix`, `subtreeIds`, `suggestNextNumberedName`, `treeify`, `validateFolderName`, `wouldCreateCycle`
 - **`src/shared/formula/formula.js`** — Excel-style formula engine (tokenize/parse/evaluate) powering scheduler user-defined columns; no eval, structured [Column] refs, byte-synced into the Sequence iframe
   - _exports_: `BLANK`, `compareValues`, `DEFAULT_CALENDAR`, `errVal`, `evaluateFormula`, `extractRefs`, `formatValue`, `FORMULA_ERRORS`, `FormulaError`, `FUNCTION_HELP`, `FUNCTION_NAMES`, `FUNCTIONS`, `isBlank`, `isDate`, `isErrVal`, `isFormulaError`, `isoToSerial`, `makeDate`, `numToGeneralStr`, `parse`, `parseFormula`, `parseLooseDate`, `planFormulaColumns`, `serialToISO`, `serialToYMD`, `toBool`, `toDateSerial`, `tokenize`, `toNumber`, `toStr`, `weekdayOf`, `ymdToSerial`
 - **`src/shared/geometry/pasteGeom.js`** — Pure paste-at-cursor placement math: bbox center plus translate so a pasted copy drops centered under the cursor, shared by both canvases
@@ -399,7 +399,7 @@ _184 source files mapped._
 - **`src/workspaces/library/components/FolderTree.jsx`** — Library per-project folder-tree editor (B650): add / inline-rename / move / delete + the enumerated delete-safety modal + Drive-mirror status.
   - _exports_: `default (FolderTree)`
 - **`src/workspaces/library/lib/folders.js`** — Client folder-index store (B650): Supabase tree CRUD (own-row RLS) + idempotent template seed + the one-way Drive-mirror trigger via /api/folders.
-  - _exports_: `addFolder`, `ensureSeeded`, `listFolders`, `moveFolder`, `planFolderDelete`, `renameFolder`, `syncFoldersToDrive`, `trashSubtree`
+  - _exports_: `addFolder`, `ensureSeeded`, `listFolders`, `migrateAllProjects`, `migrateProjectFiles`, `moveDriveFileToFolder`, `moveFolder`, `planFolderDelete`, `renameFolder`, `syncFoldersToDrive`, `trashSubtree`
 - **`src/workspaces/library/Library.jsx`** — Library workspace root: AppHeader chrome + FileBrowser wired to project route/auth, opening a clicked file into Review via the Shell onOpenReviewInDocReview intent
   - _exports_: `default (Library)`
 

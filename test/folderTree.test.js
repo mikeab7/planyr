@@ -10,6 +10,8 @@ import {
   validateFolderName,
   suggestNextNumberedName,
   liveRows,
+  stripPrefix,
+  resolveDrawingTarget,
 } from "../src/shared/folders/folderTree.js";
 
 // A small live tree: A(1) -> A1(1), A2(2); B(2) -> B1(1)
@@ -99,6 +101,68 @@ describe("validateFolderName", () => {
   });
   it("lets a row keep its own name via excludeId (rename no-op)", () => {
     expect(validateFolderName("01. Civil", siblings, "A1").ok).toBe(true);
+  });
+});
+
+describe("resolveDrawingTarget — where a drawing files in the standard tree (B650)", () => {
+  // A slice of the real template with drive ids on the interesting rows.
+  const tree = [
+    { id: "design", parentId: null, name: "02. Design", order: 2 },
+    { id: "land", parentId: null, name: "08. Land", order: 8 },
+    { id: "drawings", parentId: "design", name: "01. Drawings", order: 1, driveFolderId: "d-drawings" },
+    { id: "specs", parentId: "design", name: "02. Specifications", order: 2 },
+    { id: "civil", parentId: "drawings", name: "05. Civil", order: 5 },
+    { id: "civil-cur", parentId: "civil", name: "01. Current", order: 1, driveFolderId: "d-civil-cur" },
+    { id: "civil-arc", parentId: "civil", name: "02. Archive", order: 2, driveFolderId: "d-civil-arc" },
+    { id: "exhibits", parentId: "drawings", name: "01. Exhibits", order: 1 },
+    { id: "ex-cur", parentId: "exhibits", name: "01. Current", order: 1, driveFolderId: "d-ex-cur" },
+  ];
+
+  it("stripPrefix drops the numbered prefix, case-insensitively", () => {
+    expect(stripPrefix("05. Civil")).toBe("civil");
+    expect(stripPrefix("  12. Bldg Acq ")).toBe("bldg acq");
+    expect(stripPrefix("Civil")).toBe("civil");
+  });
+
+  it("routes a discipline to Design → Drawings → <discipline> → 01. Current", () => {
+    const t = resolveDrawingTarget(tree, "Civil");
+    expect(t.row.id).toBe("civil-cur");
+    expect(t.driveFolderId).toBe("d-civil-cur");
+  });
+
+  it("routes archive:true to 02. Archive (superseded revisions)", () => {
+    const t = resolveDrawingTarget(tree, "Civil", { archive: true });
+    expect(t.row.id).toBe("civil-arc");
+    expect(t.driveFolderId).toBe("d-civil-arc");
+  });
+
+  it("tolerates a singular/plural mismatch (Exhibit ↔ 01. Exhibits)", () => {
+    const t = resolveDrawingTarget(tree, "Exhibit");
+    expect(t.row.id).toBe("ex-cur");
+  });
+
+  it("unknown discipline lands at the Drawings folder (visible, never hidden)", () => {
+    const t = resolveDrawingTarget(tree, "Geotech");
+    expect(t.row.id).toBe("drawings");
+    expect(t.driveFolderId).toBe("d-drawings");
+  });
+
+  it("returns null when the tree has no Design/Drawings (caller keeps its legacy path)", () => {
+    expect(resolveDrawingTarget([{ id: "x", parentId: null, name: "Misc", order: 1 }], "Civil")).toBe(null);
+    expect(resolveDrawingTarget([], "Civil")).toBe(null);
+  });
+
+  it("ignores trashed rows (a deleted Civil folder no longer captures files)", () => {
+    const withTrash = tree.map((r) => (r.id === "civil" ? { ...r, trashed: true } : r));
+    const t = resolveDrawingTarget(withTrash, "Civil");
+    expect(t.row.id).toBe("drawings"); // falls back a level
+  });
+
+  it("a matched folder with no Drive id yet reports driveFolderId null (upload keeps legacy path)", () => {
+    const noDrive = tree.map((r) => ({ ...r, driveFolderId: null }));
+    const t = resolveDrawingTarget(noDrive, "Civil");
+    expect(t.row.id).toBe("civil-cur");
+    expect(t.driveFolderId).toBe(null);
   });
 });
 

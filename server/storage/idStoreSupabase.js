@@ -60,5 +60,20 @@ export function supabaseIdStore({ supabaseUrl, anonKey, token, fetchImpl = fetch
     async del(planyrKey) {
       try { await fetchImpl(`${REST(supabaseUrl)}?planyr_key=eq.${enc(planyrKey)}`, { method: "DELETE", headers }); } catch (_) { /* best-effort */ }
     },
+
+    /* Page through the caller's Drive-stored files under a key prefix (B663 one-time
+     * migration: every filed key starts `<uid>/project-<id>/…`, so a prefix scan finds exactly
+     * one project's files — RLS scopes rows to the caller anyway). Ordered + offset so a
+     * chunked caller walks the set deterministically. Returns [{ planyrKey, driveId }], or
+     * NULL on a failed read — callers MUST treat null as "couldn't list", never as
+     * "end of list": an [] lookalike made a blipped page read report the one-time migration
+     * COMPLETE and write the permanent done-marker (B663 review #1, LOUD-FAILURE class). */
+    async listByPrefix(prefix, { limit = 10, offset = 0 } = {}) {
+      try {
+        const pattern = enc(String(prefix || "") + "*");
+        const rows = await query(`select=planyr_key,drive_id&planyr_key=like.${pattern}&order=planyr_key.asc&limit=${limit}&offset=${offset}`);
+        return (rows || []).map((r) => ({ planyrKey: r.planyr_key, driveId: r.drive_id }));
+      } catch (_) { return null; } // a failed read is a FAILURE, not an empty page
+    },
   };
 }

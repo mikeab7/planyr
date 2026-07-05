@@ -31,8 +31,15 @@ const centered = (children) => (
   </div>
 );
 
-export default function FolderTree({ projectId = null, signedIn = false, projectName = "" }) {
-  const [rows, setRows] = useState([]);
+/* Standalone (full-page) or `embedded` as the Library's left rail (the unified view): embedded
+ * adds row SELECTION (`selectedId` + `onSelect(folderId|null)` — null = "All files"), per-folder
+ * file counts (`fileCounts`: Map folderId→n, null key = total), and publishes its rows upward
+ * (`onRowsChange`) so the file list can place files into this same tree. */
+export default function FolderTree({
+  projectId = null, signedIn = false, projectName = "",
+  embedded = false, selectedId = null, onSelect = null, onRowsChange = null, fileCounts = null,
+}) {
+  const [rows, setRowsRaw] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
@@ -43,12 +50,16 @@ export default function FolderTree({ projectId = null, signedIn = false, project
   const [drive, setDrive] = useState({ state: "idle", msg: "" }); // idle|syncing|ok|off|error
   const syncTimer = useRef(null);
 
+  // Every rows update also publishes upward (the unified view places files by these rows).
+  const setRows = useCallback((list) => { setRowsRaw(list); onRowsChange?.(list); },
+    [onRowsChange]);
+
   const reload = useCallback(async () => {
     if (!signedIn || !projectId) return;
     const list = await listFolders(projectId);
     setRows(list);
     return list;
-  }, [signedIn, projectId]);
+  }, [signedIn, projectId, setRows]);
 
   // Seed-on-first-open (idempotent) → load → expand the top level → kick a background mirror sync.
   useEffect(() => {
@@ -70,13 +81,16 @@ export default function FolderTree({ projectId = null, signedIn = false, project
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn, projectId]);
 
-  // Debounced one-way reconcile to Drive after edits.
+  // Debounced one-way reconcile to Drive after edits. The server syncs one small chunk per
+  // request (the 502 fix), so this reports live progress across the rounds.
   const scheduleSync = useCallback((delay = 800) => {
     if (!projectId) return;
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(async () => {
       setDrive({ state: "syncing", msg: "Mirroring to Google Drive…" });
-      const r = await syncFoldersToDrive(projectId);
+      const r = await syncFoldersToDrive(projectId, {
+        onProgress: ({ done, total }) => setDrive({ state: "syncing", msg: `Mirroring to Google Drive… ${done} of ${total}` }),
+      });
       if (r.skipped) setDrive({ state: "off", msg: "Saved in Planyr. Google Drive mirror is off." });
       else if (r.ok) setDrive({ state: "ok", msg: "Mirrored to Google Drive." });
       else setDrive({ state: "error", msg: r.error || "Drive sync had a problem." });
@@ -184,6 +198,13 @@ export default function FolderTree({ projectId = null, signedIn = false, project
     const open = expanded.has(node.id);
     const isEditing = editing && editing.id === node.id;
     const isMoving = moving === node.id;
+    const isSelected = embedded && selectedId === node.id;
+    const count = fileCounts ? fileCounts.get(node.id) || 0 : null;
+    // Embedded (the unified Library): clicking a name SELECTS the folder (filters the file
+    // list); the caret owns expand/collapse. Standalone keeps click-to-toggle.
+    const onNameClick = embedded
+      ? () => onSelect?.(node.id)
+      : () => kids.length && toggle(node.id);
     return (
       <div key={node.id}>
         <div
@@ -191,7 +212,7 @@ export default function FolderTree({ projectId = null, signedIn = false, project
           style={{
             display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", paddingLeft: 8 + depth * 16,
             borderRadius: 6, color: T.text, minHeight: 30,
-            background: hoveredId === node.id ? T.raised : "transparent",
+            background: isSelected ? "var(--hover-menu)" : hoveredId === node.id ? T.raised : "transparent",
           }}
           onMouseEnter={() => setHoveredId(node.id)}
           onMouseLeave={() => setHoveredId((h) => (h === node.id ? null : h))}
@@ -223,16 +244,21 @@ export default function FolderTree({ projectId = null, signedIn = false, project
               {moveTargets(node.id).map((t) => <option key={t.id ?? "top"} value={t.id ?? ""}>{t.name}</option>)}
             </select>
           ) : (
-            <span style={{ flex: 1, cursor: kids.length ? "pointer" : "default", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onClick={() => kids.length && toggle(node.id)}>{node.name}</span>
+            <span style={{ flex: 1, cursor: embedded || kids.length ? "pointer" : "default", fontWeight: isSelected ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onClick={onNameClick}>{node.name}</span>
           )}
 
           {!isEditing && !isMoving && (
-            <span style={{ display: "flex", gap: 2, opacity: hoveredId === node.id ? 1 : 0, transition: "opacity .1s" }}>
-              <IconBtn title="Add subfolder" onClick={() => onAdd(node.id)}>＋</IconBtn>
-              <IconBtn title="Rename" onClick={() => setEditing({ id: node.id, value: node.name })}>✎</IconBtn>
-              <IconBtn title="Move" onClick={() => setMoving(node.id)}>⇄</IconBtn>
-              <IconBtn title="Delete" danger onClick={() => askDelete(node)}>🗑</IconBtn>
-            </span>
+            hoveredId === node.id ? (
+              <span style={{ display: "flex", gap: 2 }}>
+                <IconBtn title="Add subfolder" onClick={() => onAdd(node.id)}>＋</IconBtn>
+                <IconBtn title="Rename" onClick={() => setEditing({ id: node.id, value: node.name })}>✎</IconBtn>
+                <IconBtn title="Move" onClick={() => setMoving(node.id)}>⇄</IconBtn>
+                <IconBtn title="Delete" danger onClick={() => askDelete(node)}>🗑</IconBtn>
+              </span>
+            ) : count ? (
+              // Rolled-up file count (files in this folder + everything under it).
+              <span style={{ flex: "none", fontSize: 11, fontWeight: 600, color: T.faint, paddingRight: 4 }}>{count}</span>
+            ) : null
           )}
         </div>
         {open && kids.map((c) => renderRow(c, depth + 1))}
@@ -240,27 +266,54 @@ export default function FolderTree({ projectId = null, signedIn = false, project
     );
   };
 
-  return (
-    <div data-testid="folder-tree" style={{ height: "100%", display: "flex", flexDirection: "column", background: T.page, color: T.text, overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
-        <b style={{ fontSize: 13, letterSpacing: ".02em" }}>{projectName || "Project"} · Folders</b>
-        <span style={{ color: T.faint, fontSize: 12 }}>{liveCount} folder{liveCount === 1 ? "" : "s"}</span>
-        <div style={{ flex: 1 }} />
-        <button onClick={() => onAdd(null)} style={{ font: "inherit", fontSize: 12, padding: "4px 10px", border: "none", borderRadius: 6, background: T.accent, color: T.onAccent, cursor: "pointer" }}>＋ Category</button>
-      </div>
+  const totalFiles = fileCounts ? fileCounts.get(null) || 0 : null;
 
-      <DriveBadge drive={drive} onSync={() => scheduleSync(0)} />
+  return (
+    <div data-testid="folder-tree" style={{ height: "100%", display: "flex", flexDirection: "column", background: embedded ? "transparent" : T.page, color: T.text, overflow: "hidden" }}>
+      {embedded ? (
+        // Rail header (the unified Library) — the project name lives in the breadcrumb above,
+        // so this stays a quiet label + the add-category action.
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "11px 10px 7px 14px" }}>
+          <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {projectName || "Project"} · Folders
+          </span>
+          <div style={{ flex: 1 }} />
+          <button onClick={() => onAdd(null)} title="Add a top-level category"
+            style={{ flex: "none", font: "inherit", fontSize: 9.5, fontWeight: 700, padding: "2px 7px", border: "1px solid var(--border-default)", borderRadius: 6, background: T.page, color: T.sub, cursor: "pointer", whiteSpace: "nowrap" }}>＋ Category</button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
+          <b style={{ fontSize: 13, letterSpacing: ".02em" }}>{projectName || "Project"} · Folders</b>
+          <span style={{ color: T.faint, fontSize: 12 }}>{liveCount} folder{liveCount === 1 ? "" : "s"}</span>
+          <div style={{ flex: 1 }} />
+          <button onClick={() => onAdd(null)} style={{ font: "inherit", fontSize: 12, padding: "4px 10px", border: "none", borderRadius: 6, background: T.accent, color: T.onAccent, cursor: "pointer" }}>＋ Category</button>
+        </div>
+      )}
+
       {error && (
         <div role="alert" style={{ padding: "6px 14px", color: T.dangerText, fontSize: 12, borderBottom: `1px solid ${T.border}` }}>
           {error} <button onClick={() => setError("")} style={{ marginLeft: 8, border: "none", background: "none", color: T.faint, cursor: "pointer" }}>dismiss</button>
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: "auto", padding: "8px 6px" }}>
+      <div style={{ flex: 1, overflow: "auto", padding: "4px 6px 8px" }}>
+        {/* "All files" — clears the folder filter (embedded only; standalone has no file list). */}
+        {embedded && !loading && (
+          <div
+            onClick={() => onSelect?.(null)}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 2, borderRadius: 6, cursor: "pointer",
+              background: selectedId == null ? "var(--hover-menu)" : "transparent", color: T.text }}>
+            <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700 }}>All files</span>
+            {totalFiles != null && <span style={{ flex: "none", fontSize: 11, fontWeight: 600, color: T.faint, paddingRight: 4 }}>{totalFiles}</span>}
+          </div>
+        )}
         {loading ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>Loading folders…</div>
           : tree.length === 0 ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>No folders yet.</div>
             : tree.map((n) => renderRow(n, 0))}
       </div>
+
+      {/* Drive-mirror status pinned at the rail's foot, always visible while syncing. */}
+      <DriveBadge drive={drive} onSync={() => scheduleSync(0)} />
 
       {pendingDelete && (
         <DeleteConfirm info={pendingDelete} onCancel={() => setPendingDelete(null)} onConfirm={confirmDelete} />
@@ -282,10 +335,10 @@ function DriveBadge({ drive, onSync }) {
   if (drive.state === "idle") return null;
   const color = drive.state === "error" ? "var(--danger-text)" : drive.state === "off" ? "var(--warn-text)" : "var(--text-tertiary)";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 14px", fontSize: 12, color, borderBottom: "1px solid var(--border-default)" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 12, color, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
       <span>{drive.state === "syncing" ? "↻" : drive.state === "off" ? "☁︎" : drive.state === "error" ? "!" : "✓"}</span>
-      <span>{drive.msg}</span>
-      {drive.state !== "syncing" && <button onClick={onSync} style={{ marginLeft: "auto", border: "none", background: "none", color: "var(--accent-library-text)", cursor: "pointer", font: "inherit" }}>Sync now</button>}
+      <span style={{ flex: 1, minWidth: 0, lineHeight: 1.4 }}>{drive.msg}</span>
+      {drive.state !== "syncing" && <button onClick={onSync} style={{ flex: "none", border: "none", background: "none", color: "var(--accent-library-text)", cursor: "pointer", font: "inherit" }}>{drive.state === "error" ? "Retry" : "Sync now"}</button>}
     </div>
   );
 }
@@ -299,7 +352,7 @@ function DeleteConfirm({ info, onCancel, onConfirm }) {
   const folderCount = info.folders.length;
   return (
     <div role="dialog" aria-modal="true" onClick={onCancel}
-      style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.45)", display: "grid", placeItems: "center", zIndex: 40, padding: 20 }}>
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "grid", placeItems: "center", zIndex: 40, padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "min(460px, 96%)", maxHeight: "84%", overflow: "auto", background: "var(--surface-overlay)", color: "var(--text-primary)", borderRadius: 12, border: "1px solid var(--border-strong)", boxShadow: "0 12px 40px rgba(0,0,0,.35)", padding: 20 }}>
         <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>Delete “{info.name}”?</h3>
         {info.loading ? (
@@ -332,7 +385,7 @@ function DeleteConfirm({ info, onCancel, onConfirm }) {
             )}
             {info.truncated && <p style={{ color: "var(--warn-text)", fontSize: 12 }}>Some folders hold more than 1,000 files — the list above may be partial; all of them are removed.</p>}
             {!info.driveOff && <p style={{ color: "var(--text-tertiary)", fontSize: 11.5 }}>Plus anything added straight into Google Drive (not shown — Planyr only tracks files it filed).</p>}
-            {!info.driveOff && <p style={{ color: "var(--text-secondary)", fontSize: 12 }}>These move to your Google Drive trash and are recoverable for ~30 days.</p>}
+            {!info.driveOff && <p style={{ color: "var(--text-secondary)", fontSize: 12 }}>These move to your Google Drive trash and are recoverable for ~30 days. Their entries stay in your file list (they re-shelve under Drawings) until you delete them individually.</p>}
           </>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
