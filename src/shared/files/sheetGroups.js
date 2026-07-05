@@ -97,20 +97,22 @@ function stripTileSuffixDisplay(s) {
   return t || before;
 }
 
+// Labels read NUMBER FIRST — the owner's own convention ("A101 - OVERALL FLOOR PLAN", 2026-07-05):
+// the engineer's code is how he navigates a set, so it leads; the title follows after a dash.
 function toLogical(run) {
   const pages = run.pages;
   const head = pages[0];
   if (pages.length < 2) {
     const title = displayTitle(head);
-    const num = head.sheetNumber ? ` · ${head.sheetNumber}` : "";
-    return { kind: "single", title, label: `${title}${num}`, discipline: head.discipline || "Other", pages, sheetRange: head.sheetNumber || "" };
+    const label = head.sheetNumber ? (title && title !== "Sheet" ? `${head.sheetNumber} - ${title}` : head.sheetNumber) : title;
+    return { kind: "single", title, label, discipline: head.discipline || "Other", pages, sheetRange: head.sheetNumber || "" };
   }
   const title = stripTileSuffixDisplay(displayTitle(head));
   const first = pages[0].sheetNumber, last = pages[pages.length - 1].sheetNumber;
   const range = first && last ? `${first}–${last}` : "";
   return {
     kind: "group", title,
-    label: `${title} · ${range} · ${pages.length} sheets`,
+    label: `${range ? `${range} - ` : ""}${title} · ${pages.length} sheets`,
     discipline: head.discipline || "Other",
     pages, sheetRange: range,
   };

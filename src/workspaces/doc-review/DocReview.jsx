@@ -262,6 +262,7 @@ export default function DocReview({
   const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B329)
   const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
   const pageRef = useRef(page); pageRef.current = page; // live page for the ref-driven render callbacks (B415)
+  const [renderedPage, setRenderedPage] = useState(0);  // the page whose BACKDROP is actually on the canvas — a sheet switch dims + labels the stale frame until the new one lands (B660)
   const pageBaseRef = useRef(pageBase); pageBaseRef.current = pageBase;
   const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B329)
   const pointersRef = useRef(new Map()); // live touch pointers → viewport-relative {x,y} (B331)
@@ -577,6 +578,9 @@ export default function DocReview({
       await renderInto(pdf, pageRef.current, canvas, {
         scale: 1, density: backdropDensity(base.w, base.h, deviceDpr()), optionalContentConfig: ocgConfigRef.current,
         onTask: (t) => { backdropTaskRef.current = t; }, isStale: () => tok !== backdropTok.current });
+      // The canvas now shows THIS page — clears the sheet-switch dim/label (B660). A superseded
+      // render (tok moved on) never claims it.
+      if (tok === backdropTok.current) setRenderedPage(pageRef.current);
     } catch (e) { if (!(e && e.name === "RenderingCancelledException")) { /* keep the prior frame */ } }
   }, []);
 
@@ -1444,15 +1448,16 @@ export default function DocReview({
   // label (the old `hasReal` gate that let copyright/legend prose through).
   const trustedTitle = (m) =>
     m?.sheetTitle && m.sheetTitle !== "Document" && (m.titleBlock || m.sheetNumber || m.textDense) ? m.sheetTitle : "";
-  // The human label for a single sheet: the trusted title ("GENERAL NOTES"), else the deterministic
-  // discipline item ("Grading Plan"), with the sheet number appended; else just the number; else
-  // "Sheet N". Returns { label, real }.
+  // The human label for a single sheet — NUMBER FIRST, the owner's own convention (2026-07-05:
+  // "pick the sheet number first, then 'A101 - OVERALL FLOOR PLAN'"): the read sheet number, a
+  // dash, then the trusted title ("GENERAL NOTES"), else the deterministic discipline item
+  // ("Grading Plan"); no number → title alone; neither → "Sheet N". Returns { label, real }.
   const sheetLabel = (n) => {
     const m = metaOf(n);
     const title = trustedTitle(m) || (m?.item && m.item.toLowerCase() !== "document" ? m.item : "");
-    const num = m?.sheetNumber ? ` · ${m.sheetNumber}` : "";
-    if (title) return { label: `${title}${num}`, real: true };
+    if (m?.sheetNumber && title) return { label: `${m.sheetNumber} - ${title}`, real: true };
     if (m?.sheetNumber) return { label: m.sheetNumber, real: true };
+    if (title) return { label: title, real: true };
     return { label: `Sheet ${n}`, real: false };
   };
   const sheetTip = (n) => {
@@ -1815,8 +1820,21 @@ export default function DocReview({
             onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
             style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden", background: "var(--canvas-mat)", touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
               cursor: panning ? "grabbing" : panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}>
+            {/* B660 — while the new sheet rasterises, name what's opening (the dimmed frame behind
+                is the PREVIOUS sheet; without this the switch read as "it held the wrong sheet"). */}
+            {numPages > 0 && pageBase && renderedPage !== page && (
+              <div data-testid="sheet-switching" style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 5,
+                fontSize: 11.5, fontWeight: 700, color: "var(--text-primary)", background: "var(--surface-raised)",
+                border: "1px solid var(--border-default)", borderRadius: 999, padding: "4px 12px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)", pointerEvents: "none" }}>
+                Opening {sheetShort(page)}…
+              </div>
+            )}
             {pageBase && view && (
-              <div style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
+              <div style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)",
+                // Sheet switch (B660): until the NEW page's backdrop lands, the double-buffered canvas
+                // still shows the PREVIOUS sheet — dim it so it clearly reads "in transition", never
+                // "the wrong sheet". The chip below names what's opening.
+                opacity: renderedPage === page ? 1 : 0.35, transition: "opacity 120ms linear" }}>
               {/* Two layers (B415). BACKDROP: the whole page at a fixed density, filling the page
                   box — never re-rastered on zoom, so it's always present as a no-white floor. DETAIL:
                   just the visible window at full device density, positioned over the backdrop, sized

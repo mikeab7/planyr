@@ -46,7 +46,7 @@ describe("readAndGroup — collapse the set into logical sheets (B335)", () => {
     // B659: the group label now carries the sheet's OWN printed title (was the coarse
     // discipline item "Grading Plan").
     expect(groups[1]).toMatchObject({ kind: "group", title: "GRADING PLAN" });
-    expect(groups[1].label).toBe("GRADING PLAN · C-5–C-7 · 3 sheets");
+    expect(groups[1].label).toBe("C-5–C-7 - GRADING PLAN · 3 sheets"); // number-first (owner convention, B660)
     expect(groups[2]).toMatchObject({ kind: "single", title: "UTILITY PLAN" });
   });
 });

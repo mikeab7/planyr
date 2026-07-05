@@ -241,6 +241,11 @@ describe("readSheetTitle — rejects title-block IDENTITY rows (B659)", () => {
   it("rejects colon-terminated label rows and bracketed notes (B364 — the scanned-set OCR pass)", () => {
     expect(t(["SUBMITTALS / REVISIONS:", "[NOTE: SEE RISER", "ELECTRICAL POWER PLAN"])).toBe("ELECTRICAL POWER PLAN");
   });
+  it("rejects the lone huge 'PRELIMINARY' stamp word and the compliance sentence (B660 — live GPL set)", () => {
+    expect(t(["PRELIMINARY", "VERIFIED THAT IT FULLY COMPLIES", "OVERALL FLOOR PLAN"])).toBe("OVERALL FLOOR PLAN");
+    // …but a real title that CONTAINS the word stays eligible
+    expect(t(["PRELIMINARY PLAT"], "")).toBe("PRELIMINARY PLAT");
+  });
 });
 
 describe("titleCandidates — wrapped titles & vertical (rotated) titles (B659)", () => {
