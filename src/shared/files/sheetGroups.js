@@ -107,7 +107,11 @@ function toLogical(run) {
     const label = head.sheetNumber ? (title && title !== "Sheet" ? `${head.sheetNumber} - ${title}` : head.sheetNumber) : title;
     return { kind: "single", title, label, discipline: head.discipline || "Other", pages, sheetRange: head.sheetNumber || "" };
   }
-  const title = stripTileSuffixDisplay(displayTitle(head));
+  // The group's display title comes from the page with the LONGEST read title — when a run
+  // chained through a partial read ("WALL SECTIONS" + "WALL SECTIONS AND DETAILS", B664), the
+  // most complete read is the real cell text.
+  const best = pages.reduce((a, b) => (((b.sheetTitle || "").length > (a.sheetTitle || "").length) ? b : a), head);
+  const title = stripTileSuffixDisplay(displayTitle(best.sheetTitle ? best : head));
   const first = pages[0].sheetNumber, last = pages[pages.length - 1].sheetNumber;
   const range = first && last ? `${first}–${last}` : "";
   return {
@@ -137,6 +141,20 @@ export function markAdjacentDuplicateNumbers(pages = []) {
   );
 }
 
+/* Adjacent-page title compatibility (B664): a PARTIAL title read must not break a run. On the
+ * owner's real GPL set, A302 read "WALL SECTIONS" while A303–A306 read "WALL SECTIONS AND
+ * DETAILS" — same cell, one page's wrapped join fell short — and the strict key equality left
+ * A302 orphaned outside its own group. Two same-discipline titles are compatible when one is a
+ * word-PREFIX of the other (tile counters already stripped). Conservative: a shared first word
+ * alone ("WALL SECTIONS" vs "WALL TYPES") does NOT match — the shorter must be a complete
+ * word-boundary prefix of the longer. */
+export function titlesCompatible(a = {}, b = {}) {
+  if ((a.discipline || "") !== (b.discipline || "")) return false;
+  const ta = tileBaseTitle(a.sheetTitle), tb = tileBaseTitle(b.sheetTitle);
+  if (!ta || !tb) return false;
+  return ta === tb || ta.startsWith(tb + " ") || tb.startsWith(ta + " ");
+}
+
 /* Collapse per-page metadata into the logical sheet list. `pages` = [{ sheetNumber, sheetTitle,
  * discipline, item, ... }] in page order (each typically carries a `pageNum`/`srcId` the caller
  * added so it can map a logical entry back to real pages). Returns
@@ -147,9 +165,10 @@ export function groupSheets(pages = []) {
   for (const p of pages) {
     const key = groupKey(p);
     const code = parseSheetCode(p.sheetNumber);
-    const chains = cur && key && key === cur.key && code && consecutiveCodes(cur.lastCode, code);
-    if (chains) { cur.pages.push(p); cur.lastCode = code; }
-    else { cur = { key, pages: [p], lastCode: code }; runs.push(cur); }
+    const chains = cur && key && code && consecutiveCodes(cur.lastCode, code) &&
+      (key === cur.key || titlesCompatible(cur.lastMeta, p));
+    if (chains) { cur.pages.push(p); cur.lastCode = code; cur.lastMeta = p; }
+    else { cur = { key, pages: [p], lastCode: code, lastMeta: p }; runs.push(cur); }
   }
   return runs.map(toLogical);
 }

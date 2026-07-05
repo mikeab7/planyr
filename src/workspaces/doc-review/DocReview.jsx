@@ -94,6 +94,7 @@ const REGION = new Set(["eraser", "snapshot"]);
 // Rail icons for the Markup tools + zoom controls (B330). 16×16, stroke = currentColor so a
 // button's text colour drives them; select/pan/rect/text mirror the Site Planner's icon set.
 const MK_ICONS = {
+  takeoff: <><path d="M2.8 13.2 V9.2 M6.3 13.2 V6.4 M9.8 13.2 V8 M13.3 13.2 V4.4" /><path d="M2 13.9 H14" /></>,
   select: <path d="M4 2.5 L12.8 8 L8.8 9 L11.2 13.6 L9.2 14.6 L6.9 9.9 L4 12.4 Z" fill="currentColor" stroke="none" />,
   pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
   marquee: <><rect x="2.6" y="2.6" width="10.8" height="10.8" rx="0.6" strokeDasharray="2.4 1.8" /><rect x="1.7" y="1.7" width="1.8" height="1.8" fill="currentColor" stroke="none" /><rect x="12.5" y="1.7" width="1.8" height="1.8" fill="currentColor" stroke="none" /><rect x="1.7" y="12.5" width="1.8" height="1.8" fill="currentColor" stroke="none" /><rect x="12.5" y="12.5" width="1.8" height="1.8" fill="currentColor" stroke="none" /></>,
@@ -122,6 +123,16 @@ const MK_ICONS = {
   fitW: <><path d="M2.6 8 H13.4" /><path d="M2.6 8 l2.3 -2.3 M2.6 8 l2.3 2.3 M13.4 8 l-2.3 -2.3 M13.4 8 l-2.3 2.3" /></>,
   fitP: <><rect x="2.6" y="3.4" width="10.8" height="9.2" rx="1" /><rect x="5.4" y="5.8" width="5.2" height="4.4" rx="0.5" opacity="0.55" /></>,
 };
+// A sheet-rail row's text (B664): the sheet CODE bold — it's how the owner navigates a set —
+// the title lighter beside it. Module scope per MODULE-SCOPE-COMPONENTS.
+const SheetRowText = ({ code, title }) => (
+  <>
+    {code ? <span style={{ fontWeight: 700 }}>{code}</span> : null}
+    {code && title ? <span style={{ fontWeight: 400 }}>{"  "}</span> : null}
+    {title ? <span style={{ fontWeight: 500, color: "var(--text-secondary)" }}>{title}</span> : null}
+  </>
+);
+
 const MkIcon = ({ id, size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {MK_ICONS[id] || <circle cx="8" cy="8" r="5.5" />}
@@ -279,7 +290,22 @@ export default function DocReview({
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
-  const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B330)
+  // Takeoff is a TOOL-RAIL TOGGLE, hidden by default (owner, B664 — "why is takeoff a separate
+  // section, it should be one of the tools"); the choice persists per device.
+  const [takeoffOpen, setTakeoffOpen] = useState(() => { try { return localStorage.getItem("planarfit:takeoffOpen") === "1"; } catch (_) { return false; } });
+  useEffect(() => { try { localStorage.setItem("planarfit:takeoffOpen", takeoffOpen ? "1" : "0"); } catch (_) { /* private mode */ } }, [takeoffOpen]);
+  // Sheet rail: user-resizable (drag the right edge) + collapsible to a slim strip (owner, B664
+  // — "I should be able to expand and slim the left menu"); both persist per device.
+  const [railW, setRailW] = useState(() => { try { const v = +localStorage.getItem("planarfit:reviewRailW"); return v >= 160 && v <= 460 ? v : 224; } catch (_) { return 224; } });
+  const [railHidden, setRailHidden] = useState(() => { try { return localStorage.getItem("planarfit:reviewRailHidden") === "1"; } catch (_) { return false; } });
+  useEffect(() => { try { localStorage.setItem("planarfit:reviewRailW", String(railW)); localStorage.setItem("planarfit:reviewRailHidden", railHidden ? "1" : "0"); } catch (_) { /* private mode */ } }, [railW, railHidden]);
+  const startRailResize = (e) => {
+    e.preventDefault();
+    const startX = e.clientX, startW = railW;
+    const move = (ev) => setRailW(Math.max(160, Math.min(460, startW + ev.clientX - startX)));
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
   // The project the header breadcrumb points at in Markup now comes from the URL route
   // (Work Item A) — so it survives a module switch instead of resetting to "Select a
   // project". Picking another project navigates the hash; opening a review navigates to
@@ -398,15 +424,26 @@ export default function DocReview({
         setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "auto", label: (sc && sc.label) || "" } }));
       }
     };
+    // Scan ORDER (B664 speed): the sheet on screen first, then its neighbors outward — the label
+    // you're looking at fills in immediately instead of after a front-to-back sweep of a 50-page
+    // set. A macrotask yield between pages keeps the main thread responsive while the rail fills.
+    const start = Math.max(1, Math.min(pages, pageRef.current || 1));
+    const order = [start];
+    for (let d = 1; order.length < pages; d++) {
+      if (start + d <= pages) order.push(start + d);
+      if (start - d >= 1) order.push(start - d);
+    }
     const noText = [];
-    for (let p = 1; p <= pages; p++) {
+    for (const p of order) {
       if (tok !== scanTok.current) return;             // a newer open superseded this scan
       const page = await extractPageItems(pdf, p);
       if (tok !== scanTok.current) return;
       const meta = { ...readSheetMeta(page), width: page.width, height: page.height };
       if (!meta.hasText) noText.push(p);
       applyMeta(p, meta);
+      await new Promise((r) => setTimeout(r, 0));      // yield — never a long main-thread hog
     }
+    noText.sort((a, b) => a - b);
     if (!noText.length || tok !== scanTok.current) return;
     // OCR pass — only now does the (lazy, CDN-pinned) Tesseract worker load. Best-effort: any
     // failure leaves the page as its no-text record and the note clears; never blocks the viewer.
@@ -1438,8 +1475,9 @@ export default function DocReview({
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 7px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
   const tbDiv = { width: 1, height: 18, background: "var(--chrome-divider)", margin: "0 2px", flex: "none" };
   const curTool = TOOLS.find((t) => t.id === tool);
-  // Logical-sheet sidebar helpers (B266/B348): a calibration dot, a short sheet id, a rich tooltip.
-  const calMark = (n) => (calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : "");
+  // Logical-sheet sidebar helpers (B266/B348): a short sheet id + a rich tooltip. The old inline
+  // "·≈"/"·✓" calibration marks read as unexplained noise (owner, B664) — calibration status
+  // lives in the tooltip ("scale 1\"=40' — verify") and the Takeoff/Calibrate UI instead.
   const sheetShort = (n) => metaOf(n)?.sheetNumber || `Sheet ${n}`;
   // Do we trust the read title enough to surface it as the label (B378)? A title is trustworthy
   // when it came from a detected title-block band, OR is corroborated by a real sheet number read
@@ -1455,10 +1493,10 @@ export default function DocReview({
   const sheetLabel = (n) => {
     const m = metaOf(n);
     const title = trustedTitle(m) || (m?.item && m.item.toLowerCase() !== "document" ? m.item : "");
-    if (m?.sheetNumber && title) return { label: `${m.sheetNumber} - ${title}`, real: true };
-    if (m?.sheetNumber) return { label: m.sheetNumber, real: true };
-    if (title) return { label: title, real: true };
-    return { label: `Sheet ${n}`, real: false };
+    if (m?.sheetNumber && title) return { label: `${m.sheetNumber} - ${title}`, code: m.sheetNumber, title, real: true };
+    if (m?.sheetNumber) return { label: m.sheetNumber, code: m.sheetNumber, title: "", real: true };
+    if (title) return { label: title, code: "", title, real: true };
+    return { label: `Sheet ${n}`, code: `Sheet ${n}`, title: "", real: false };
   };
   const sheetTip = (n) => {
     const m = metaOf(n); const parts = [];
@@ -1470,10 +1508,14 @@ export default function DocReview({
   };
 
   // Right-side tool rail (B330): the drawing/measure tools + zoom controls, Bluebeam-style.
+  // Takeoff rides HERE as a toggle (B664 — owner: "takeoff should just be one of the tools"),
+  // not as a permanently-docked panel.
   const railItems = [
     ...TOOLS.map((t) => ({ kind: "tool", id: t.id, label: t.label, title: `${t.hint}${t.id !== "select" && t.id !== "pan" ? "  (double-click to keep this tool active)" : ""}`, icon: <MkIcon id={t.id} />, active: tool === t.id,
       onClick: () => { setTool(t.id); setToolLock(false); setDraft(null); setCalInput(null); },
       onDoubleClick: () => { setTool(t.id); setToolLock(true); setDraft(null); setCalInput(null); } })),
+    { kind: "tool", id: "takeoff", label: "Takeoff", title: "Show / hide the takeoff rollup (measured quantities across sheets)", icon: <MkIcon id="takeoff" />, active: takeoffOpen,
+      onClick: () => setTakeoffOpen((v) => !v) },
     { kind: "spacer" },
     { kind: "header", label: "Zoom" },
     { kind: "node", render: <div style={{ textAlign: "center", fontSize: 10, color: "var(--chrome-muted)", fontWeight: 600, padding: "1px 0 2px" }}>{Math.round((view?.scale || 0) * 100)}%</div> },
@@ -1722,8 +1764,16 @@ export default function DocReview({
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
-          {/* sheet list — logical sheets (B348) with real labels (B266) */}
-          <div style={{ flex: "none", width: 200, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          {/* sheet list — logical sheets (B348) with real labels (B266). Collapsed → a slim
+              re-open strip; open → user-resizable via the drag handle on its right edge (B664). */}
+          {railHidden && (
+            <button onClick={() => setRailHidden(false)} title="Show the sheet list" data-testid="sheet-rail-expand"
+              style={{ flex: "none", width: 26, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, border: "none", borderRightStyle: "solid", cursor: "pointer", color: PAL.muted, fontFamily: "inherit", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center" }}>
+              <span style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", whiteSpace: "nowrap" }}>Sheets ▸</span>
+            </button>
+          )}
+          {!railHidden && (
+          <div data-testid="sheet-rail" style={{ flex: "none", width: railW, position: "relative", background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
             {/* Prev/Next pager (B306) — also ← / → and PageUp/PageDown on the keyboard */}
             <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "8px 8px 6px" }}>
               {(() => { const pg = (on) => ({ flex: 1, padding: "4px 0", borderRadius: 6, cursor: on ? "pointer" : "default", fontFamily: "inherit", fontSize: 13, fontWeight: 700, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: on ? PAL.ink : "var(--text-tertiary)" }); return (
@@ -1731,6 +1781,8 @@ export default function DocReview({
                   <button style={pg(page > 1)} disabled={page <= 1} onClick={() => goToPage(page - 1)} title="Previous sheet (←)">‹</button>
                   <span style={{ flex: "none", fontSize: 10.5, color: PAL.muted, fontWeight: 700, minWidth: 40, textAlign: "center" }}>{page} / {numPages}</span>
                   <button style={pg(page < numPages)} disabled={page >= numPages} onClick={() => goToPage(page + 1)} title="Next sheet (→)">›</button>
+                  <button onClick={() => setRailHidden(true)} title="Hide the sheet list" data-testid="sheet-rail-collapse"
+                    style={{ flex: "none", border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: "2px 4px", fontFamily: "inherit" }}>⟨</button>
                 </>
               ); })()}
             </div>
@@ -1751,14 +1803,14 @@ export default function DocReview({
                 const gid = `${gi}:${g.pages[0]?.pageNum}`;
                 if (g.kind === "single") {
                   const n = g.pages[0].pageNum, active = n === page;
-                  // The label: the real title-block title + number, else "Sheet N" — never a random
-                  // body-text line (B266) and never a cross-referenced/duplicate number (B378).
-                  const lbl = sheetLabel(n).label;
+                  // The label: number bold + the real title-block title, else "Sheet N" — never a
+                  // random body-text line (B266) nor a cross-referenced/duplicate number (B378).
+                  const lb = sheetLabel(n);
                   return (
                     <button key={gid} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12,
                         border: `1px solid ${active ? PAL.accent : PAL.line}`, background: active ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {lbl}{calMark(n)}
+                      <SheetRowText code={lb.code} title={lb.title} />
                     </button>
                   );
                 }
@@ -1771,7 +1823,10 @@ export default function DocReview({
                       style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700,
                         border: `1px solid ${activeInGroup ? PAL.accent : PAL.line}`, background: activeInGroup ? "var(--hover-ghost)" : "var(--surface-page)", color: PAL.ink }}>
                       <span style={{ flex: "none", fontSize: 9, color: PAL.muted }}>{open ? "▾" : "▸"}</span>
-                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.label}</span>
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <SheetRowText code={g.sheetRange} title={g.title} />
+                        <span style={{ fontWeight: 500, color: "var(--text-tertiary)" }}>{`  · ${g.pages.length} sheets`}</span>
+                      </span>
                     </button>
                     {open && pagesN.map((n) => {
                       const active = n === page;
@@ -1779,7 +1834,7 @@ export default function DocReview({
                         <button key={n} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
                           style={{ display: "block", width: "calc(100% - 12px)", marginLeft: 12, textAlign: "left", padding: "5px 8px", marginBottom: 2, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600,
                             border: `1px solid ${active ? PAL.accent : PAL.line}`, background: active ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {sheetShort(n)}{calMark(n)}
+                          {sheetShort(n)}
                         </button>
                       );
                     })}
@@ -1808,7 +1863,11 @@ export default function DocReview({
                 </div>
               );
             })()}
+            {/* drag-to-resize handle on the rail's right edge (B664) */}
+            <div onPointerDown={startRailResize} data-testid="sheet-rail-resizer" title="Drag to resize the sheet list"
+              style={{ position: "absolute", top: 0, right: -3, width: 7, height: "100%", cursor: "col-resize", zIndex: 4 }} />
           </div>
+          )}
 
           {/* canvas + overlay — a transform viewport (B329). The sheet is a page-sized box
               positioned by translate(tx,ty) and sized by view.scale, so it pans freely in any
@@ -1989,11 +2048,7 @@ export default function DocReview({
             </div>
             {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "var(--danger-text)" }} onClick={() => { pushHistory(); const ids = selSet.length > 1 ? new Set(selSet) : new Set([sel]); setMarkups((a) => a.filter((m) => !ids.has(m.id))); clearSelection(); }}>{selSet.length > 1 ? `Delete ${selSet.length} selected` : "Delete selected"}</button>}
           </div>
-          ) : (
-            <button onClick={() => setTakeoffOpen(true)} title="Show the takeoff panel" style={{ flex: "none", width: 26, background: "#fff", borderLeft: `1px solid ${PAL.line}`, cursor: "pointer", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center" }}>
-              <span style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", whiteSpace: "nowrap" }}>◂ Takeoff</span>
-            </button>
-          )}
+          ) : null /* hidden entirely — Takeoff opens from its tool-rail button (B664), no reopen tab */}
           {/* "Opening…" overlay covers the whole canvas area, including the drop-over-an-open-doc
               path (B294/B446) where the prior sheet is still showing underneath. */}
           {openingOverlay}

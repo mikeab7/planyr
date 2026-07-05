@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-05 @ `3a6ccdc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-05 @ `a76211f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -73,7 +73,7 @@ _184 source files mapped._
 - **`src/shared/files/scaleBarRead.js`** — Pure graphic scale-bar reader: clusters horizontal bar segments + nearby numeric ticks into a feet-per-unit calibration when no scale text exists
   - _exports_: `clusterBars`, `readScaleBar`, `tickLinearity`, `ticksNearBar`
 - **`src/shared/files/sheetGroups.js`** — Pure auto-grouping of pages into logical sheets by contiguous sheet-code runs + shared plan type, with adjacent-duplicate-number cleanup
-  - _exports_: `consecutiveCodes`, `groupKey`, `groupSheets`, `markAdjacentDuplicateNumbers`, `parseSheetCode`, `tileBaseTitle`
+  - _exports_: `consecutiveCodes`, `groupKey`, `groupSheets`, `markAdjacentDuplicateNumbers`, `parseSheetCode`, `tileBaseTitle`, `titlesCompatible`
 - **`src/shared/files/sheetMeta.js`** — Pure positional sheet reader: reconstructs text lines to extract title-block band, sheet title/number, match-lines, notes, detail refs for grouping/stitching/calibration
   - _exports_: `detectTitleBlock`, `drawingAreaOf`, `edgeOf`, `parseMatchLines`, `readSheetMeta`, `readSheetTitle`, `reconstructLines`, `titleCandidates`
 - **`src/shared/files/sheetNotes.js`** — Pure notes/legend block reader plus multi-sheet aggregateNotes that pins every note once and flags ones that vary by sheet
