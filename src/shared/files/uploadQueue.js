@@ -75,6 +75,94 @@ export function makeQueueItems(files, makeId = makeUploadId) {
   return [...(files || [])].map((f) => makeQueueItem(f, { uploadId: makeId() }));
 }
 
+// ── Folder-aware drops (B664) ───────────────────────────────────────────────
+// Dragging a FOLDER onto a drop zone does NOT populate dataTransfer.files — that
+// list stays EMPTY. The browser instead exposes the folder as a directory ENTRY on
+// each dropped DataTransferItem (item.webkitGetAsEntry()). To file a dropped project
+// folder (often with nested discipline subfolders) we must walk that entry tree and
+// collect every leaf File. Two steps by necessity: the DataTransferItemList is dead
+// the moment the drop handler returns, so the ENTRIES are pulled out SYNCHRONOUSLY in
+// the handler (dropItemsToEntries), then walked ASYNCHRONOUSLY (flattenEntries).
+
+// Read a directory reader to exhaustion. readEntries hands back results in CHUNKS and
+// signals "done" with an EMPTY batch — you must keep calling until it returns nothing,
+// or a folder with many files silently loses everything past the first chunk.
+function readAllDirectoryEntries(reader) {
+  return new Promise((resolve, reject) => {
+    const all = [];
+    const pump = () => {
+      reader.readEntries((batch) => {
+        if (!batch || batch.length === 0) { resolve(all); return; }
+        for (const e of batch) all.push(e);
+        pump();
+      }, reject);
+    };
+    pump();
+  });
+}
+
+// Recursively flatten ONE FileSystemEntry into the File objects beneath it. A file
+// entry yields its single File; a directory entry yields every leaf below it (any
+// depth). Unknown entries yield nothing. Never throws — one unreadable entry resolves
+// to [] rather than aborting the whole drop (LOUD-FAILURE: a bad file is skipped, not
+// a silent total loss; the caller's per-file rows still account for what landed).
+export async function entryToFiles(entry) {
+  if (!entry) return [];
+  try {
+    if (entry.isFile) {
+      const file = await new Promise((res, rej) => entry.file(res, rej));
+      return file ? [file] : [];
+    }
+    if (entry.isDirectory) {
+      const children = await readAllDirectoryEntries(entry.createReader());
+      const nested = await Promise.all(children.map(entryToFiles));
+      return nested.flat();
+    }
+  } catch (_) { /* an unreadable entry contributes nothing instead of failing the drop */ }
+  return [];
+}
+
+// Flatten a list of dropped entries (files and/or folders) into one flat File[].
+export async function flattenEntries(entries) {
+  const nested = await Promise.all([...(entries || [])].map(entryToFiles));
+  return nested.flat();
+}
+
+// SYNC — pull the folder-aware entries out of a drop event's dataTransfer BEFORE any
+// await (the item list is neutered once the handler returns). Returns:
+//   entries      — the file/dir entries when the browser supports the entry API
+//   files        — the plain flat file list (fallback for browsers without the API)
+//   hasEntryApi  — did any item expose webkitGetAsEntry (walk `entries`, not `files`)
+//   hasDirectory — was any dropped entry an actual FOLDER (drives the filter+summary)
+export function dropItemsToEntries(dataTransfer) {
+  const out = { entries: [], files: [], hasEntryApi: false, hasDirectory: false };
+  if (!dataTransfer) return out;
+  out.files = [...(dataTransfer.files || [])];
+  const items = dataTransfer.items;
+  for (const it of Array.from(items || [])) {
+    if (it && it.kind && it.kind !== "file") continue; // skip dragged text/URLs
+    const getEntry = it && (it.webkitGetAsEntry || it.getAsEntry);
+    if (typeof getEntry !== "function") continue;
+    out.hasEntryApi = true;
+    let entry = null;
+    try { entry = getEntry.call(it); } catch (_) { entry = null; }
+    if (!entry) continue;
+    out.entries.push(entry);
+    if (entry.isDirectory) out.hasDirectory = true;
+  }
+  return out;
+}
+
+// Split a flat file list into the PDFs we'll file and the rest we'll skip. Used for
+// FOLDER drops/picks, where a real project folder legitimately holds non-PDF files
+// (DWG, spreadsheets, images): we file the PDFs and report ONE honest "skipped N"
+// summary instead of N red rejection rows the user never hand-picked.
+export function partitionAccepted(files) {
+  const accepted = [], skipped = [];
+  for (const f of [...(files || [])]) (isAcceptedFile(f) ? accepted : skipped).push(f);
+  return { accepted, skipped };
+}
+
 const ACTIVE_ALWAYS = new Set([
   QUEUE_STATUS.PROCESSING, QUEUE_STATUS.NEEDS_FILING, QUEUE_STATUS.FAILED, QUEUE_STATUS.REJECTED,
 ]);
