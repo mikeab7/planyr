@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _52 open · 1 awaiting live verification._
+> _51 open · 2 awaiting live verification._
 
 ## 🔲 Open
 
@@ -17,7 +17,6 @@
 | B657 | Terminology & consistency pass | [App-wide / UI] | #ui | sandbox |
 | B650 | Per-project standard folder tree, user-editable in-app, with continuous one-way sync to Google Drive | [Doc Review / Library / storage · drive-integration / persistence] | — | — |
 | B648 | Persistence & Sync epic: one umbrella + a canonical write-path doc | [Site Planner / Persistence] | #persistence | live |
-| B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) (×2) | [Scheduler / robustness] | #scheduler | live |
 | B629 | Drive-backed county PARCEL snapshot cache so outages stop breaking the map | [Site Planner / GIS] | #site-planner #gis #drive | — |
 | B553 | Surface drawn landscaping in the yield breakdown (own line, kept pervious) | [Site Planner / yield] | #site-planner #yield | — |
 | B499 | Harden the LOAD-time self-heal for the OTHER bonded children (sidewalk / dock-zone stack / side-parking) | [Site Planner / Site Model] | #site-planner #persistence | — |
@@ -68,6 +67,7 @@
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
 | B651 | Parcel split double-counts acreage; make split REPLACE the parent (parent + children can never both be active) | [Site Planner] | #site-planner #yield #selection | ⏳ live — awaiting |
+| B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) (×2) | [Scheduler / robustness] | #scheduler | ⏳ live — awaiting |
 
 ## By tag
 
@@ -83,7 +83,7 @@
 - **#perf** — B495, B484, B479
 - **#persistence** — B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38
 - **#pond** — B655
-- **#scheduler** — B644, B495, B408, B255
+- **#scheduler** — B495, B408, B255, B644
 - **#selection** — B656, B651
 - **#site-planner** — B653, B654, B655, B656, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95, B651
 - **#stitching** — B413
