@@ -238,6 +238,9 @@ describe("readSheetTitle — rejects title-block IDENTITY rows (B659)", () => {
   it("rejects shredded vertical text (mostly single-letter tokens)", () => {
     expect(t(["O I C I 119641 T E", "MECHANICAL DETAILS"])).toBe("MECHANICAL DETAILS");
   });
+  it("rejects colon-terminated label rows and bracketed notes (B364 — the scanned-set OCR pass)", () => {
+    expect(t(["SUBMITTALS / REVISIONS:", "[NOTE: SEE RISER", "ELECTRICAL POWER PLAN"])).toBe("ELECTRICAL POWER PLAN");
+  });
 });
 
 describe("titleCandidates — wrapped titles & vertical (rotated) titles (B659)", () => {

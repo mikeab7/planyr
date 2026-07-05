@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-04._
+_Last updated: 2026-07-05._
 
 ## Decisions only Michael can make
 - [ ] **Which big feature to build next.** In progress: he picked **Team Workspaces** (find/fix bugs) on 2026-06-27.
@@ -96,6 +96,13 @@ _Last updated: 2026-07-04._
       reloaded). Routine — only matters right after Claude ships something.
 
 ## Deferred / low-urgency (filed; no action needed unless he wants them sooner)
+- **B364 (remaining half) — two optional server backends, only if/when wanted.** The scanned-drawing reading
+      now runs FREE in the browser (shipped 2026-07-05 — scanned sets get real sheet labels + auto-filing with no
+      server). Two already-built backends stay parked until Michael provisions accounts (Claude can't create these):
+      **(a) DWG reading** — drop a `.dwg` straight in (today: export a PDF from CAD, which works fine). Needs a
+      Google Cloud Run deploy of `server/convert/` (LibreDWG container). **(b) AI fallback read** for the rare scan
+      the free path can't read — needs `server/filing/` on Cloud Run + an Anthropic API key (~pennies per file).
+      When wanted, say so and Claude will hand over the exact one-page deploy steps + env vars.
 - B479 — storage performance tweaks (invisible; deferred for stability).
 - B483 — a 100%-full browser store can sign him out (self-heals; very unlikely now that big images moved to the
       large drawer).
