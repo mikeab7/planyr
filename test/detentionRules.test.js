@@ -218,6 +218,15 @@ describe("computeRequiredDetention — rate-less band authorities can NEVER emit
     expect(r.basis).toMatch(/no published flat rate/i);
     expect(r.flags).toContain("verify-with-county-engineer");
   });
+  it("Waller: published 0.55–0.65 band (Appendix E), verify flag, basis names the floor + coefficient", () => {
+    const r = computeRequiredDetention({ acres: 10, impPct: 85, authorityId: "waller" });
+    expect(r.kind).toBe("band");
+    expect(r.bandAcFt[0]).toBeCloseTo(5.5, 2); // 0.55 × 10
+    expect(r.bandAcFt[1]).toBeCloseTo(6.5, 2); // 0.65 × 10
+    expect(r.flags).toContain("verify-with-county-engineer");
+    expect(r.basis).toMatch(/0\.55/);
+    expect(r.basis).toMatch(/0\.65/);
+  });
 });
 
 describe("computeRequiredDetention — Fort Bend Table 6-1 (transcribed → point)", () => {

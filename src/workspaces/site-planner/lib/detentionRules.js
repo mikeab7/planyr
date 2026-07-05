@@ -267,25 +267,30 @@ export const DETENTION_RULES = {
       authorityLabel: "Waller County",
       ruleType: "policy-band",
       effectiveDate: "2023-12-06",
-      verifiedOn: "2026-07-03",
-      // ⚠ INTENTIONALLY NOT re-verified 2026-07-05 (verifiedOn left at 2026-07-03). A research
-      // pass over the primary regs (rev. 2023-12-06, Appendix E) reported that Waller DOES
-      // publish detention rates — a "Coefficient Method" Storage = 0.65 × developed acres for
-      // small sites (<5 ac commercial / <10 ac residential) and a 0.55 ac-ft/ac FLOOR on the
-      // hydrograph (Malcom's) method — and that its TxDOT references are for materials/roadway
-      // specs, NOT the detention rate. If confirmed, this record should flip noPublishedRate→
-      // false, drop txdotDeference, and tighten the band toward 0.55–0.65. NOT applied here:
-      // the web text extractor truncated Appendix E before the rate section, so the number
-      // could NOT be read from the manual directly. OWNER-TODO: confirm & tighten.
+      verifiedOn: "2026-07-05",
+      // PRIMARY-SOURCE VERIFIED 2026-07-05 — read directly from Appendix E "Volume Requirements"
+      // (owner supplied the full PDF; the web extractor had truncated before this section).
+      // CORRECTION: Waller DOES publish detention rates, and its TxDOT references are only for
+      // road materials, NOT detention. Appendix E gives:
+      //   * Coefficient Method (small sites < 5 ac commercial / < 10 ac residential):
+      //       Storage = 0.65 * Adev, where Adev = developed (modified-cover) acreage
+      //       (worked example in the manual: 2.5 ac * 0.65 = 1.63 ac-ft); and
+      //   * Small-Watershed (Malcom's) & HEC-HMS methods: hydrograph-derived, but
+      //       "in no case shall the detention storage rate be less than 0.55 ac-ft per acre" (a FLOOR).
+      // Published range is therefore 0.55 (floor) .. 0.65 (coefficient) ac-ft/ac. Kept as a screening
+      // band because which method/volume applies is site-size- and analysis-dependent; the verify
+      // flag stays (hydrograph analysis governs above the small-site coefficient path).
       source: {
-        name: "Waller County Subdivision & Development Regulations (rev. 2023-12-06)",
-        section: "Appendix E (drainage) — zero-net-increase; §V/§VI detention (Coefficient / Malcom's) — rate section unverified, see note",
-        url: "https://www.co.waller.tx.us/",
+        name: "Waller County Subdivision & Development Regulations (rev. 2023-12-06), Appendix E — Detention",
+        section: "Appendix E, Volume Requirements — Coefficient Method (0.65 x developed ac) + 0.55 ac-ft/ac minimum on Small-Watershed/HEC-HMS methods",
+        url: "https://www.co.waller.tx.us/upload/page/0263/Subdivision%20-%20Development%20Regulations%20REVISED_FINAL-12-06-2023.pdf",
       },
       params: {
         screeningBand: true,
-        bandAcFtPerAc: [0.4, 1.2], // the thinnest criteria in the MSA → the widest band (see note: likely tightens to 0.55–0.65 once confirmed)
-        txdotDeference: true,
+        bandAcFtPerAc: [0.55, 0.65], // published range: 0.55 ac-ft/ac floor .. 0.65 ac-ft/ac coefficient method
+        coefficientMethod: { rateAcFtPerAc: 0.65, appliesTo: "developedArea", maxAcresCommercial: 5, maxAcresResidential: 10, note: "Storage = 0.65 x developed (modified-cover) acres; small sites only" },
+        minRateAcFtPerAc: 0.55, // "in no case less than 0.55 ac-ft per acre" — floor on all methods
+        hydrographGoverns: true, // Small-Watershed/HEC-HMS analysis governs above small sites -> verify with the county engineer
       },
     },
   ],
@@ -480,7 +485,7 @@ export function computeRequiredDetention({
     // No point available → the honest screening band (structurally never a fabricated point).
     const [lo, hi] = p.bandAcFtPerAc;
     const flags = ["screening-band"];
-    if (p.noPublishedRate || p.txdotDeference) flags.push("verify-with-county-engineer");
+    if (p.noPublishedRate || p.txdotDeference || p.hydrographGoverns) flags.push("verify-with-county-engineer");
     const transcribed = (p.table && p.table.transcribed) || (p.smallSite && p.smallSite.transcribed);
     let why;
     if (transcribed && impPct == null) {
@@ -491,7 +496,9 @@ export function computeRequiredDetention({
       why = `simplified rate method doesn't apply at ${round2(acres)} ac — full drainage modeling required${p.largeSiteMinRate ? ` (min ${p.largeSiteMinRate} ac-ft/ac)` : ""}`;
     } else {
       if ((p.table && !p.table.transcribed) || p.smallTableTranscribed === false) flags.push("table-unverified");
-      why = `Planyr screening band — no published flat rate${p.table && !p.table.transcribed ? `; exact figures ${p.table.figures} pending transcription` : ""}`;
+      why = p.coefficientMethod || p.minRateAcFtPerAc
+        ? `published range — ${p.minRateAcFtPerAc ?? lo} ac-ft/ac floor to the ${p.coefficientMethod ? p.coefficientMethod.rateAcFtPerAc : hi} coefficient rate; exact volume is method/analysis-dependent`
+        : `Planyr screening band — no published flat rate${p.table && !p.table.transcribed ? `; exact figures ${p.table.figures} pending transcription` : ""}`;
     }
     const basis = `${lo}–${hi} ac-ft/ac (${why}) × ${acres.toFixed(2)} ac`;
     return bandResult([lo * acres, hi * acres], basis, rule, flags);
