@@ -59,9 +59,10 @@ _Last updated: 2026-07-05._
       Houston's flat **0.8 ac-ft/ac applies to the paved/roofed (impervious) area, not the whole tract** — so required
       detention on a Houston site is meaningfully lower than the first build showed — and the single-family cutoff is
       **15,000 SF**, not 7,500. Fort Bend & Montgomery now give an exact number (not a range) once a test-fit sets
-      impervious %. Shipped + verified (2,577 tests green). **One loose end, and it's the cohort's job not yours:**
-      **Waller** likely publishes rates too, but the web PDF reader kept cutting off before the rate section, so it was
-      left as an honest range pending a clean read (tracked in `VERIFICATION.md` V204).
+      impervious %. Shipped + verified. **Waller is now closed too (2026-07-05):** you supplied the full Waller PDF,
+      so Cowork read Appendix E directly and confirmed Waller DOES publish rates — a 0.65 ac-ft/ac coefficient method
+      for small sites and a 0.55 ac-ft/ac floor — so its range tightened from a wide guess to a correct **0.55–0.65**.
+      All six authorities are now primary-sourced. Nothing left on your plate here.
 - [ ] **Add the six drainage-authority websites to the periodic Cowork re-verification checklist.** Every
       detention rule record now carries a "verified on" date so staleness is visible; a recurring Cowork pass
       over hcfcd.org, houstonpermittingcenter.org, fortbendcountytx.gov, the Montgomery DCM page, the Chambers
