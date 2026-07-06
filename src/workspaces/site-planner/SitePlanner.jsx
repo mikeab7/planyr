@@ -1073,6 +1073,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
   const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
   const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
+  const [propsDismissed, setPropsDismissed] = useState(false); // B656 follow-up: ✕ hides the companion while the element stays selected; re-clicking the element reopens it
   useEffect(() => {
     let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }
     const on = () => setNarrow(mq.matches);
@@ -2187,6 +2188,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [sel?.kind, sel?.id]);
   // B656: the phone companion overlay follows the selection's lifetime — deselect closes it.
   useEffect(() => { if (!companionSel) setNarrowProps(false); }, [companionSel]);
+  // B656 follow-up: any (re)selection clears a prior ✕-dismiss so the companion reopens.
+  // Keyed on `sel` identity, not kind/id — every canvas click re-fires setSel({...}) with a
+  // fresh object (startMoveEl), so re-clicking the already-selected element reopens the panel.
+  useEffect(() => { setPropsDismissed(false); }, [sel]);
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
   // so a later manual visit opens with the normal all-collapsed overview.
@@ -2217,14 +2222,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // EXACT delta we applied, so a mid-open rotation can never leave a residual sideways offset.
   const panelShiftRef = useRef(0);
   useEffect(() => {
-    const want = ((!!leftPanel || companionSel) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts)
+    const want = ((!!leftPanel || (companionSel && !propsDismissed)) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts; a ✕-dismissed companion must NOT hold the shift or it leaves a blank rail gap)
     if (want !== panelShiftRef.current) {
       const delta = want - panelShiftRef.current;
       panelShiftRef.current = want;
       setView((v) => ({ ...v, offX: v.offX - delta }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftPanel, narrow, companionSel]);
+  }, [leftPanel, narrow, companionSel, propsDismissed]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
@@ -6951,7 +6956,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B656: the Properties companion coexists with the open panel — it renders whenever a
   // qualifying selection exists. On a phone it stays closed unless a panel is already
   // open (B556: tap = select only) or the ✎ Properties pill explicitly opened it.
-  const companionOpen = companionSel && (!narrow || !!leftPanel || narrowProps);
+  const companionOpen = companionSel && !propsDismissed && (!narrow || !!leftPanel || narrowProps);
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
     padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
@@ -8919,7 +8924,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* B656: on a phone, selection alone never opens the overlay (B556) — this pill is
               the explicit affordance: tap it to open the Properties companion as an overlay. */}
           {narrow && companionSel && !leftPanel && !narrowProps && (
-            <button data-export="skip" onClick={() => setNarrowProps(true)}
+            <button data-export="skip" onClick={() => { setNarrowProps(true); setPropsDismissed(false); }}
               style={{ position: "absolute", left: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: 99, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
               ✎ Properties
             </button>
@@ -9313,7 +9318,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
               Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` — ${l}` : ""; })()}
             </span>
-            {narrow && narrowProps && !leftPanel && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit" }} title="Close" onClick={(e) => { e.stopPropagation(); setNarrowProps(false); }}>✕</button>}
+            {/* B656 follow-up: explicit close. On the phone-pill overlay it just closes the overlay (element stays
+                selected, pill returns); everywhere else it dismisses the companion but KEEPS the element selected —
+                re-clicking the element (or picking another) reopens it via the [sel] effect above. */}
+            <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — click it again to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsDismissed(true); }}>✕</button>
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
