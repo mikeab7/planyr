@@ -328,6 +328,53 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/inlineLabelEls\(roadDenseCenterline\(el, settings\), el\.inlineLabel/);
   });
 
+  it("B678: inline-label per-feature controls (spacing/size/halo) + screen-space self-thinning", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the renderer takes per-feature style opts and a base font size that DEFAULTS to the old 11
+    expect(src).toMatch(/function inlineLabelEls\(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, opts\)/);
+    expect(src).toMatch(/opts\.size[\s\S]{0,40}\?\s*opts\.size\s*:\s*11/);
+    // background halo is a toggle (on by default) — the paint-order stroke is conditional
+    expect(src).toMatch(/const halo = !\(opts && opts\.halo === false\)/);
+    expect(src).toMatch(/halo \? \{ paintOrder: "stroke", stroke: "#fff", strokeWidth: haloW \} : null/);
+    // screen-space self-thinning: a minimum PIXEL gap floors the effective feet-spacing
+    expect(src).toMatch(/const minGapPx = Math\.max\(150,/);
+    expect(src).toMatch(/const effSpacingFt = Math\.max\([\s\S]{0,80}minGapPx \/ Math\.max\(ppf/);
+    // every render site threads the feature's own spacing override + { size, halo } opts
+    expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,80}\{ size: m\.labelSize, halo: m\.labelHalo \}/);
+    expect(src).toMatch(/el\.labelSpacing \|\| INLINE_LABEL_SPACING\.road[\s\S]{0,80}\{ size: el\.labelSize, halo: el\.labelHalo \}/);
+    // the panel controls exist and their writers stay NON-STICKY (direct setMarkups / setSelEl, never mkStyle)
+    expect(src).toMatch(/const inlineLabelControls = \(feat, typeKey, patch\) =>/);
+    expect(src).not.toMatch(/setSelMarkup\(\{ labelSpacing/);
+    expect(src).not.toMatch(/setSelMarkup\(\{ labelSize/);
+  });
+
+  it("B679: manual double-tap opens the in-place editor (pointer capture eats the DOM dblclick)", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    expect(src).toMatch(/const isDoubleTap = \(id\) => \{/);
+    // callout / text box, markup line-polyline-easement, and centerline road all detect the double-tap
+    expect(src).toMatch(/if \(part === "box" && isDoubleTap\(id\)\) \{[\s\S]{0,60}beginEditCallout\(id\); return;/);
+    expect(src).toMatch(/m\.kind === "line" \|\| m\.kind === "polyline" \|\| m\.kind === "easement"\) && isDoubleTap\(id\)/);
+    expect(src).toMatch(/isCenterlineRoad\(el\) && isDoubleTap\(id\)\) \{[\s\S]{0,60}beginEditInline\("el", id\)/);
+  });
+
+  it("B680: callout editor overlays the box EXACTLY — no floor, committed box hidden while editing", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the editor no longer floors its size to 64×30 (that pushed it OUTSIDE a small / zoomed-out box)
+    expect(src).not.toMatch(/const w = Math\.max\(64, tw \+ padX \* 2\)/);
+    expect(src).toMatch(/B680 — size the editor to EXACTLY the committed box/);
+    // the committed box + selection chrome are hidden while THIS callout's editor is open
+    expect(src).toMatch(/editCallout\?\.id !== c\.id && <rect x=\{bp\.x - w \/ 2\}/);
+    expect(src).toMatch(/isSel && tool === "select" && editCallout\?\.id !== c\.id/);
+  });
+
+  it("B681: callout align buttons use the Word-style SVG icon, not cryptic glyphs", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    expect(src).toMatch(/function AlignIcon\(\{ dir \}\)/);
+    expect(src).toMatch(/<AlignIcon dir=\{a\} \/>/);
+    // the old unicode align glyphs are gone from the align-button map
+    expect(src).not.toMatch(/\["left", "⇤", "Align left"\]/);
+  });
+
   it("B567: shared ColorControl fires live on input + Doc Review coalesces it to one undo frame", () => {
     const pp = read("../src/shared/markup/PropertyPanel.jsx");
     expect(pp).toMatch(/onInput=\{\(e\) => onChange\(e\.target\.value, \{ live: true \}\)\}/);
