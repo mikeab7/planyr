@@ -17,6 +17,15 @@ _Last updated: 2026-07-06._
       Until this is done the new endpoint stays invisible (it answers "Not found" to everyone) — nothing is
       exposed by waiting. After you add the settings, the Claude cohort runs the technical checks (V220).
 
+## 🗓 Calendar note — old save-format safety copy expires ~Aug 6 (B674, no action until then)
+- [ ] **Around 2026-08-06, tell a Claude session "drop the old blob backup" (or just ignore this — a
+      session will re-raise it).** When the live-editing upgrade shipped (2026-07-06), the old
+      one-big-file save format was frozen and kept as a safety copy (`sites.data_backup`) for ~30 days
+      in case anything needed rolling back. Once a month passes with the new per-element saving working
+      live, the copy is dead weight; a Claude session removes it with one command (plus the follow-ups
+      noted in B674). **Nothing to do before then.** If saving ever looks wrong in the meantime, say so —
+      the rollback (`db/site_elements_down.sql` + that backup) is exactly what the copy is for.
+
 ## Decisions only Michael can make
 - [ ] **Which big feature to build next.** In progress: he picked **Team Workspaces** (find/fix bugs) on 2026-06-27.
       The other candidates still waiting: **Revision compare** (overlay/diff two drawing versions), **Named markup

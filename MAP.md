@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `e5aa91d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `505f2ce` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_200 source files mapped._
+_202 source files mapped._
 
 ## infra
 
@@ -283,6 +283,8 @@ _200 source files mapped._
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure metes-and-bounds engine: parses Texas deed bearing/distance calls (curves, SAVE-AND-EXCEPT tracts) to planner-feet paths, closure/misclosure, polyline offset/buffer, ring overlap
   - _exports_: `arcChordPoints`, `bufferPolyline`, `callsToPath`, `misclosure`, `offsetPolyline`, `parseCalls`, `parseTracts`, `pathCloses`, `ringsOverlap`, `VARA_FT`
+- **`src/workspaces/site-planner/lib/multiwriter.js`** — the B674 multi-writer switch: default-ON code constant + the `planyr.multiwriter=off` localStorage escape hatch (no build-time env var)
+  - _exports_: `MULTIWRITER_DEFAULT`, `MULTIWRITER_KEY`, `multiwriterEnabled`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
   - _exports_: `alignOverlaySimilarity`, `applySimilarityToOverlay`, `calibrateUnderlayScale`, `imagePointToWorld`, `scaleOverlayAbout`, `similarityTransform`, `solveSimilarityLSQ`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
@@ -311,6 +313,8 @@ _200 source files mapped._
   - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `contourLabelPoint`, `detentionStorage`, `pointInRing`, `pondContours`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `ringsArea`
+- **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
+  - _exports_: `presenceSummary`
 - **`src/workspaces/site-planner/lib/printSheet.js`** — Pure single-SVG print sheet composer: page geometry, buildings table, metrics band, title block, export filename builder
   - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `formatDateStamp`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
