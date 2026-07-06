@@ -66,6 +66,7 @@ export async function onRequestPost(context) {
       store,
       projectId: request.headers.get("x-planyr-project"),
       discipline: request.headers.get("x-planyr-discipline"),
+      folderId: request.headers.get("x-planyr-folder-id") || null, // explicit folder pick wins (B686)
     });
     const parentFolderId = treeParent || await client.folderId(folder);
     const origin = request.headers.get("origin") || undefined; // bind the session for the browser's cross-origin PUT

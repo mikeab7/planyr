@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `31b65ad` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `0228fcd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -87,7 +87,7 @@ _197 source files mapped._
 - **`src/shared/files/titleBlockParse.js`** — Pure deterministic title-block field reader: discipline/item classification, sheet number, issue date, revision, stated scale for free auto-filing
   - _exports_: `classifyDiscipline`, `disciplineFromSheetNumber`, `DISCIPLINES`, `findDates`, `issueDate`, `latestDate`, `parseRevision`, `parseSheetNumber`, `readTitleBlockText`
 - **`src/shared/files/uploadQueue.js`** — Pure upload-queue model for the Project Files drop-zone: per-file status lifecycle, active/recently-filed split, and a bounded concurrency pool
-  - _exports_: `dropItemsToEntries`, `entryToFiles`, `flattenEntries`, `hasPendingDemote`, `isAcceptedFile`, `makeQueueItem`, `makeQueueItems`, `makeUploadId`, `partitionAccepted`, `QUEUE_STATUS`, `RECENT_BEAT_MS`, `RECENT_COLLAPSE_AT`, `runPool`, `splitQueue`
+  - _exports_: `dropItemsToEntries`, `entryToFiles`, `flattenEntries`, `hasPendingDemote`, `isAcceptedFile`, `isJunkFile`, `isPdfName`, `makeQueueItem`, `makeQueueItems`, `makeUploadId`, `partitionAccepted`, `QUEUE_STATUS`, `RECENT_BEAT_MS`, `RECENT_COLLAPSE_AT`, `runPool`, `splitQueue`
 - **`src/shared/folders/folderTemplate.js`** — Canonical default project folder template (B650) — the one 133-folder tree every new project is scaffolded from.
   - _exports_: `FOLDER_TEMPLATE`, `TEMPLATE_VERSION`
 - **`src/shared/folders/folderTree.js`** — Pure folder-tree ops (B650): flatten/treeify/validate/move-cycle guard/seed-row builder, shared by the Library editor + the Drive mirror.
@@ -398,7 +398,7 @@ _197 source files mapped._
 - **`src/workspaces/doc-review/lib/renderBudget.js`** — Pure canvas backing-store budget math: two-layer backdrop/detail density, visible-region tiling and device-pixel rect rounding under a 24MP cap
   - _exports_: `BACKDROP_PX_BUDGET`, `backdropDensity`, `backingPixels`, `backingScale`, `CANVAS_PX_BUDGET`, `DETAIL_DENSITY_CAP`, `DETAIL_DENSITY_TARGET`, `deviceRect`, `tileCovers`, `visibleRegion`
 - **`src/workspaces/doc-review/lib/reviewStore.js`** — Document Review cloud persistence I/O: Supabase doc_reviews + file-facts index, Drive-first byte storage, filing/re-filing, localStorage flush mirror
-  - _exports_: `BUCKET`, `clearDraft`, `clearReviewVersions`, `cloudConfigured`, `cloudReady`, `composeTitle`, `currentUid`, `deleteFromDrive`, `deleteReview`, `DISCIPLINES`, `downloadFromDrive`, `downloadSource`, `fileNewReview`, `fmtDocDate`, `getShareLink`, `isStoredSource`, `keepaliveFlushReview`, `listFileFacts`, `listProjects`, `listReviews`, `loadReview`, `markReviewPlaced`, `MAX_BYTES`, `newReviewId`, `newSourceId`, `pushFileToDrive`, `readDraft`, `reconcile`, `refileReview`, `REVIEW_SCHEMA`, `setProjectStatus`, `STATUS_META`, `STATUSES`, `statusOf`, `storeSource`, `uploadLargeToDrive`, `uploadSource`, `upsertFileFacts`, `upsertReview`, `writeDraft`
+  - _exports_: `BUCKET`, `clearDraft`, `clearReviewVersions`, `cloudConfigured`, `cloudReady`, `composeTitle`, `currentUid`, `deleteFromDrive`, `deleteReview`, `DISCIPLINES`, `downloadFromDrive`, `downloadSource`, `fileNewReview`, `fmtDocDate`, `getShareLink`, `guessContentType`, `isStoredSource`, `keepaliveFlushReview`, `listFileFacts`, `listProjects`, `listReviews`, `loadReview`, `markReviewPlaced`, `MAX_BYTES`, `newReviewId`, `newSourceId`, `pushFileToDrive`, `readDraft`, `reconcile`, `refileReview`, `REVIEW_SCHEMA`, `setProjectStatus`, `STATUS_META`, `STATUSES`, `statusOf`, `storeSource`, `stripFileExt`, `uploadLargeToDrive`, `uploadSource`, `upsertFileFacts`, `upsertReview`, `writeDraft`
 - **`src/workspaces/doc-review/lib/sessionBytes.js`** — In-memory session-lifetime FIFO cache of dropped source Files by srcId so a backdrop reopens while its upload is still keyless
   - _exports_: `_clearSessionBytes`, `cacheSourceBytes`, `getSourceBytes`, `hasSourceBytes`, `SESSION_BYTES_CAP`
 - **`src/workspaces/doc-review/lib/sheetRead.js`** — Browser bridge from pdf.js to pure sheet engines: reads/groups pages, derives per-group stated/scale-bar calibration, flags not-to-scale sheets, with dormant OCR seam

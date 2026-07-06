@@ -25,6 +25,7 @@ import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveR
 import { recordOpen } from "../../shared/recents/recentDocs.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
+import { isPdfName } from "../../shared/files/uploadQueue.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -751,9 +752,14 @@ export default function DocReview({
   // resolved — writing on mount is what used to clobber the pointers before resume read them.
   useEffect(() => {
     if (!bootResolved) return;
+    // Never record a non-PDF as the resume/last-doc target (B686): the markup canvas can't render
+    // it, so resuming it would just re-trigger a download the user didn't ask for on load. Leaving
+    // the previous PDF as last-doc is the right resume. (setReviewId + setSource are batched in
+    // loadSingleReview, so this effect sees both together — no stale-source window.)
+    if (source && source.name && !isPdfName(source.name)) return;
     try { localStorage.setItem("planyr:docreview:lastSingleId", reviewId); } catch (_) {}
     if (mode === "review") writeLastDoc(meta.projectId, { id: reviewId, mode: "review" });
-  }, [bootResolved, reviewId, meta.projectId, mode]);
+  }, [bootResolved, reviewId, meta.projectId, mode, source]);
   useEffect(() => {
     if (!bootResolved) return;
     try { localStorage.setItem("planyr:docreview:lastMode", mode); } catch (_) {}
@@ -784,7 +790,26 @@ export default function DocReview({
       if (!buf) { setRedrop(sourceUnavailableMessage(signedIn ? "fetch-failed" : "signed-out", { name: src.name })); return; }
       blob = buf;
     }
-    const pdf = await loadPdf(blob);
+    // B685/B686 — the Library stores ANY file type, but the markup canvas can only render a PDF.
+    // A non-PDF reaches here when it's opened from a Library-Home pin (or an older resume). We
+    // already have the bytes, so DOWNLOAD the original right here — never a dead-end note — and
+    // show a clear message. (Non-PDFs are barred from becoming the resume target below, so this
+    // only fires on a deliberate open, never as a surprise download on load.)
+    if (src && src.name && !isPdfName(src.name)) {
+      try {
+        const dl = blob instanceof Blob ? blob : new Blob([blob]);
+        const url = URL.createObjectURL(dl);
+        const a = document.createElement("a"); a.href = url; a.download = src.name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
+        setRedrop(`“${src.name}” isn’t a PDF, so it can’t be shown on the markup canvas — it’s downloading instead. Find it anytime in the Library.`);
+      } catch (_) {
+        setRedrop(`“${src.name}” isn’t a PDF, so it can’t be shown on the markup canvas. Open it from the Library to download it.`);
+      }
+      return;
+    }
+    let pdf;
+    try { pdf = await loadPdf(blob); }
+    catch (_) { setRedrop(`“${src.name || "That file"}” couldn’t be opened as a PDF — it may be a different file type or a damaged PDF. Open it from the Library to download the original.`); return; }
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
     readOcg(pdf); // B490: populate the Layers panel from the new doc's optional content
@@ -795,10 +820,13 @@ export default function DocReview({
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
     suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
-    // Library-Home "Recent": every open (click OR resume) stamps the local opened-list.
-    currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: rec.projectId || null })).catch(() => {});
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
+    // Library-Home "Recent": every open stamps the local opened-list — but not a non-PDF (B686),
+    // which can't be marked up and shouldn't clutter "Recent drawings" (opening it just downloads).
+    if (!(src && src.name && !isPdfName(src.name))) {
+      currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: rec.projectId || null })).catch(() => {});
+    }
     // B446: a clear canvas-level "Opening…" overlay covers the whole load (setPdfDoc(null) below
     // blanks the backdrop, so without this the switch looks like nothing registered). Cleared in
     // the finally — but ONLY by the still-current load, so a rapid A→B switch doesn't let A's

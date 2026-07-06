@@ -103,7 +103,7 @@ const PAIRS = [
   ["--text-secondary", "--surface-raised", "secondary text · card", T],
   ["--text-tertiary", "--surface-page", "tertiary/hint · page", T],
   ["--text-tertiary", "--surface-raised", "tertiary/hint · card", T],
-  // B685: the Site Planner "drafting parchment" surfaces (cream in light, slate in dark) —
+  // B686: the Site Planner "drafting parchment" surfaces (cream in light, slate in dark) —
   // text + warn/danger must clear AA on both planner surfaces in both themes.
   ["--text-primary", "--planner-panel", "body text · planner panel", T],
   ["--text-primary", "--planner-raised", "body text · planner card", T],

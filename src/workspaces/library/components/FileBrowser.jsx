@@ -21,6 +21,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   listProjects, listReviews, listFileFacts, fileNewReview, refileReview,
   upsertFileFacts, deleteReview, loadReview, getShareLink, DISCIPLINES,
+  downloadFromDrive, downloadSource,
 } from "../../doc-review/lib/reviewStore.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../../doc-review/lib/fileIndex.js";
 import { fileWarn } from "../../doc-review/lib/sourceState.js";
@@ -30,12 +31,12 @@ import {
   buildFileFacts, deriveTree, browseFiles, holdingArea, CATEGORIES,
   categoryOf, subcategoryOf, stateOf, FILE_STATES, FACETS, onMap, isReference, isSpatial,
 } from "../../../shared/files/fileFacts.js";
-import { resolveDrawingTarget, subtreeIds } from "../../../shared/folders/folderTree.js";
+import { resolveDrawingTarget, subtreeIds, stripPrefix } from "../../../shared/folders/folderTree.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
 import { moveDriveFileToFolder } from "../lib/folders.js";
 import {
   QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
-  dropItemsToEntries, flattenEntries, partitionAccepted,
+  dropItemsToEntries, flattenEntries, partitionAccepted, isPdfName,
 } from "../../../shared/files/uploadQueue.js";
 import { loadIdSet, saveIdSet } from "../../../shared/ui/persistedSet.js";
 
@@ -99,6 +100,7 @@ export default function FileBrowser({
   const [delNotice, setDelNotice] = useState(null);        // { orphaned } after a delete left bytes behind
   const [moveNotice, setMoveNotice] = useState(null);      // refile moved metadata but not the Drive copy (B662 #3)
   const [folderNote, setFolderNote] = useState(null);      // { filed, skipped } after a FOLDER drop/pick (B664)
+  const [dlNotice, setDlNotice] = useState(null);          // { name, busy?, error? } for a non-PDF download (B685)
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const reqRef = useRef(0);
@@ -144,9 +146,13 @@ export default function FileBrowser({
   // map fact.id → folder row id, feeding both the list filter and the rail's rolled-up counts.
   const placedFolder = useMemo(() => {
     if (!folderMode || !folderRows.length) return new Map();
+    const byId = new Map(folderRows.map((r) => [r.id, r]));
     const m = new Map();
     for (const f of facts) {
       if (stateOf(f) === FILE_STATES.NEEDS_FILING) continue; // holding-area files aren't in the tree
+      // Explicit folder pick wins (B686): the file sits in the folder the user dropped it into,
+      // overriding the discipline-derived placement (as long as that folder still exists).
+      if (f.folderId && byId.has(f.folderId)) { m.set(f.id, f.folderId); continue; }
       const t = resolveDrawingTarget(folderRows, f.discipline, { archive: stateOf(f) === FILE_STATES.SUPERSEDED });
       if (t) m.set(f.id, t.row.id);
     }
@@ -187,8 +193,9 @@ export default function FileBrowser({
   const removeItem = (uploadId) => setQueue((q) => q.filter((it) => it.uploadId !== uploadId));
 
   // File one blob as a review + its facts row. Returns the fileNewReview result (or null on fail).
-  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling }) => {
-    const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName });
+  // `folderId` (B686) files the bytes into an explicitly-picked tree folder (Drive + on-screen).
+  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling, folderId = null }) => {
+    const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName, folderId });
     if (!r || !r.ok) return r || null;
     const factsIn = facts ? { ...facts } : { discipline, item: item_, docDate };
     factsIn.projectId = pid; factsIn.discipline = discipline; factsIn.item = item_; factsIn.needsFiling = needsFiling;
@@ -196,11 +203,28 @@ export default function FileBrowser({
     return r;
   };
 
-  const processItem = async (item) => {
+  const processItem = async (item, targetFolderId = null) => {
     patchItem(item.uploadId, { status: QUEUE_STATUS.PROCESSING, error: null, warn: null });
     try {
+      // Explicit folder pick (B686): the user dropped while viewing a specific folder → that folder
+      // WINS over auto-filing, for any file type. File straight into it — no title-block read, no
+      // discipline guess, and never "needs filing" (they told us exactly where it goes).
+      if (targetFolderId && projectId) {
+        const folder = folderRows.find((r) => r.id === targetFolderId);
+        const discipline = (folder && stripPrefix(folder.name)) || "Other";
+        const r = await fileOne({ pid: projectId, discipline, item_: "", docDate: null, blob: item.file, fileName: item.name, facts: { discipline }, needsFiling: false, folderId: targetFolderId });
+        if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn’t file." }); return; }
+        const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
+        patchItem(item.uploadId, { status: QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: folder ? stripPrefix(folder.name) : projName(projectId) });
+        return;
+      }
+
+      // Only PDFs carry a readable title block (B685). Non-PDFs (DWG, images, spreadsheets…) are
+      // stored as-is: skip the auto-file read entirely — it would just spin up pdf.js to fail — and
+      // file the bytes directly (under the project when we're in one; to the holding area otherwise).
+      const isPdf = isPdfName(item.file || item.name);
       let route = null;
-      if (indexProvider && indexProvider.autofileReady && indexProvider.autofile) {
+      if (isPdf && indexProvider && indexProvider.autofileReady && indexProvider.autofile) {
         try { const a = await indexProvider.autofile(item.file, projects); if (a && a.ok) route = a; } catch (_) { route = null; }
       }
       const decision = route ? route.decision : null;
@@ -240,9 +264,12 @@ export default function FileBrowser({
 
       const discipline = (decision && decision.discipline) || "Other";
       const item_ = (decision && decision.item) || "";
-      // Low-confidence classify (no project, or no readable discipline) → Needs filing for a
-      // one-click confirm — never a guessed category (misfiled is worse than unfiled).
-      const needsFiling = !pid || !discipline || discipline === "Other";
+      // A PDF with no confident discipline → Needs filing for a one-click confirm (never a guessed
+      // category — misfiled is worse than unfiled). A NON-PDF (B685) has no readable discipline at
+      // all, so once it's inside a project it's simply FILED as "Other" (it shows in the tree and
+      // can be re-filed anytime) instead of piling every upload into the holding area; with no
+      // project (cross mode) it still needs a home, so it goes to Needs filing.
+      const needsFiling = isPdf ? (!pid || !discipline || discipline === "Other") : !pid;
       const r = await fileOne({ pid, discipline, item_, docDate, blob: item.file, fileName: item.name, facts: route && route.facts, needsFiling });
       if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn't file." }); return; }
       const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
@@ -252,43 +279,77 @@ export default function FileBrowser({
     }
   };
 
-  const ingest = async (fileList) => {
+  // The folder a drop should file INTO (B686): the folder currently selected in the tree rail.
+  // null = "All files" is selected (or we're not in folder mode) → auto-file by title block —
+  // that "All files" node IS the drop-here-to-auto-sort spot the owner asked for. Captured at
+  // drop time (a prop read now, threaded through the async pipeline) so a later selection change
+  // can't retarget an in-flight upload.
+  const dropTargetFolder = () => (folderMode ? (selectedFolderId || null) : null);
+
+  const ingest = async (fileList, targetFolderId = null) => {
     if (!projectId && !cross) return; // drop gated until a project is chosen (no auto-guess)
     const items = makeQueueItems(fileList);
     if (!items.length) return;
     setQueue((q) => [...items, ...q]);
     const accepted = items.filter((it) => it.status === QUEUE_STATUS.PROCESSING);
-    if (accepted.length) { await runPool(accepted, processItem, 3); refresh(); }
+    if (accepted.length) { await runPool(accepted, (it) => processItem(it, targetFolderId), 3); refresh(); }
   };
 
-  // A FOLDER drop/pick (B664): file the PDFs found anywhere in the tree; report ONE
-  // honest "skipped N" summary for the non-PDFs a project folder naturally contains,
-  // instead of a red rejection row per stray file the user never hand-picked.
-  const ingestFolder = async (allFiles) => {
+  // A FOLDER drop/pick (B664/B685): file every real file found anywhere in the tree (any type);
+  // report ONE honest "skipped N system files" summary for the OS junk (dotfiles, thumbnail
+  // caches, lock files) a folder sweep drags along, instead of filing noise the user never picked.
+  const ingestFolder = async (allFiles, targetFolderId = null) => {
     if (!projectId && !cross) return;
     const { accepted, skipped } = partitionAccepted(allFiles);
     setFolderNote(accepted.length || skipped.length ? { filed: accepted.length, skipped: skipped.length } : null);
-    if (accepted.length) await ingest(accepted);
+    if (accepted.length) await ingest(accepted, targetFolderId);
   };
 
   const onDrop = (e) => {
     e.preventDefault(); e.stopPropagation(); setDropOver(false);
+    const target = dropTargetFolder();
     // Extract entries SYNCHRONOUSLY (the dataTransfer item list dies after this handler
     // returns), then walk any folders asynchronously. A dropped folder recurses into its
     // subfolders; loose files keep the classic per-file path (which shows rejection rows).
     const { entries, files, hasEntryApi, hasDirectory } = dropItemsToEntries(e.dataTransfer);
     if (hasEntryApi && entries.length) {
-      flattenEntries(entries).then((all) => (hasDirectory ? ingestFolder(all) : ingest(all)))
-        .catch(() => ingest(files));
+      flattenEntries(entries).then((all) => (hasDirectory ? ingestFolder(all, target) : ingest(all, target)))
+        .catch(() => ingest(files, target));
     } else {
-      ingest(files); // older browsers without the entry API — flat file list only
+      ingest(files, target); // older browsers without the entry API — flat file list only
     }
   };
-  const onPick = (e) => { ingest(e.target.files); e.target.value = ""; };
+  const onPick = (e) => { ingest(e.target.files, dropTargetFolder()); e.target.value = ""; };
   // Folder picker: input.webkitdirectory already hands back a FLAT, recursed file list.
-  const onPickFolder = (e) => { ingestFolder([...(e.target.files || [])]); e.target.value = ""; };
+  const onPickFolder = (e) => { ingestFolder([...(e.target.files || [])], dropTargetFolder()); e.target.value = ""; };
 
-  const open = (f) => { const r = reviews.find((x) => x.id === f.id); onOpenReview?.(r || f); };
+  // A PDF opens on the markup canvas; any other file type (B685) has no canvas preview, so
+  // clicking it DOWNLOADS the original instead. Legacy files carry no sourceFile — they were
+  // always PDFs, so an empty sourceFile reads as "PDF" (opens in Review, as before).
+  const isPdfFile = (f) => !f.sourceFile || isPdfName(f.sourceFile);
+  const open = (f) => {
+    if (!isPdfFile(f)) { downloadFile(f); return; }
+    const r = reviews.find((x) => x.id === f.id); onOpenReview?.(r || f);
+  };
+  // Fetch a stored file's bytes (Drive-first, Supabase-fallback — the same read-back order the
+  // Review canvas uses) and save it to disk. Failure is loud (a banner), never a dead click.
+  const downloadFile = async (f) => {
+    const label = f.sourceFile || f.title || f.item || "file";
+    setDlNotice({ name: label, busy: true });
+    try {
+      const rec = await loadReview(f.id);
+      const src = ((rec && rec.sources) || [])[0];
+      if (!src) { setDlNotice({ name: label, error: "This file isn’t stored yet — open it once to file its bytes, then try again." }); return; }
+      let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+      if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
+      if (!buf) { setDlNotice({ name: label, error: "Couldn’t fetch this file — check your connection and try again." }); return; }
+      const url = URL.createObjectURL(new Blob([buf]));
+      const a = document.createElement("a");
+      a.href = url; a.download = src.name || label; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
+      setDlNotice(null);
+    } catch (e) { setDlNotice({ name: label, error: (e && e.message) || "Couldn’t download this file." }); }
+  };
   const del = async (id) => {
     setPendingDel(null);
     const r = await deleteReview(id);
@@ -319,8 +380,11 @@ export default function FileBrowser({
     const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const pid = f.projectId || projectId;
     const res = await refileReview(f.id, { projectId: pid, project: projName(pid), discipline });
-    // Update the index row's category/state too so the tree moves it immediately.
-    try { await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.title })); } catch (_) {}
+    // Update the index row's category/state too so the tree moves it immediately. Preserve the
+    // REAL upload filename (B685) — never the extension-less title: source_file is what isPdfFile
+    // reads to decide open-in-Review vs. download, so writing f.title here would make a re-filed
+    // PDF look like a non-PDF (empty stays empty → legacy PDFs still read as PDF).
+    try { await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.sourceFile || "" })); } catch (_) {}
     if (res.ok) {
       // Move the Drive BYTES to match the confirmed discipline (B662 review #3): the upload
       // landed where the ORIGINAL read pointed (often the Drawings fallback for "Other");
@@ -352,6 +416,11 @@ export default function FileBrowser({
   }
 
   const holdingCount = holding.length;
+  // Where a drop will file (B686): the selected tree folder wins; "All files"/no selection means
+  // auto-file by title block. Drives the drop-strip copy + the drop-anywhere overlay so the two
+  // modes are unmistakable ("Filing into 02. Electric" vs. "auto-file drawings by title block").
+  const dropFolderRow = folderMode && selectedFolderId ? folderRows.find((r) => r.id === selectedFolderId) : null;
+  const dropFolderLabel = dropFolderRow ? stripPrefix(dropFolderRow.name) : null;
 
   return (
     <div onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setDropOver(true); } }}
@@ -385,7 +454,7 @@ export default function FileBrowser({
                 onClick={() => { setShowHolding(false); setNode({ category: null, subcategory: null }); }} bold />
               {tree.length === 0 && (
                 <div style={{ fontSize: 11.5, color: "var(--text-secondary)", padding: "8px 10px", lineHeight: 1.5 }}>
-                  No filed documents yet. Drop a PDF below — it reads its own title block and files itself.
+                  No filed documents yet. Drop files below — a PDF reads its own title block and files itself.
                 </div>
               )}
               {tree.map((n) => {
@@ -453,17 +522,28 @@ export default function FileBrowser({
           </div>
         )}
 
-        {/* folder drop/pick summary (B664) — honest about the non-PDFs a folder held */}
+        {/* folder drop/pick summary (B664/B685) — honest about system junk a folder sweep skips */}
         {folderNote && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
             border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)", fontSize: 11.5, lineHeight: 1.45 }}>
             <span style={{ flex: 1 }}>
               {folderNote.filed
-                ? `Folder read — filing ${folderNote.filed} PDF${folderNote.filed === 1 ? "" : "s"}`
-                : "Folder read — no PDFs found"}
-              {folderNote.skipped ? ` · skipped ${folderNote.skipped} non-PDF file${folderNote.skipped === 1 ? "" : "s"}` : ""}.
+                ? `Folder read — filing ${folderNote.filed} file${folderNote.filed === 1 ? "" : "s"}`
+                : "Folder read — no files found"}
+              {folderNote.skipped ? ` · skipped ${folderNote.skipped} system file${folderNote.skipped === 1 ? "" : "s"}` : ""}.
             </span>
             <button onClick={() => setFolderNote(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
+          </div>
+        )}
+
+        {/* non-PDF download — in-flight + honest failure (B685; never a dead click) */}
+        {dlNotice && (
+          <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
+            border: `1px solid ${dlNotice.error ? "var(--warn-border, #d6a64a)" : "var(--border-default)"}`,
+            background: dlNotice.error ? "var(--warn-bg, #fef3c7)" : "var(--surface-raised)",
+            color: dlNotice.error ? "var(--warn-text)" : "var(--text-secondary)", fontSize: 11.5, lineHeight: 1.45 }}>
+            <span style={{ flex: 1 }}>{dlNotice.error ? `${dlNotice.name}: ${dlNotice.error}` : `Downloading “${dlNotice.name}”…`}</span>
+            <button onClick={() => setDlNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: dlNotice.error ? "var(--warn-text)" : "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
           </div>
         )}
 
@@ -481,17 +561,21 @@ export default function FileBrowser({
           {busy && shown.length === 0 && <div style={{ fontSize: 12, color: "var(--text-secondary)", padding: 12 }}>Loading…</div>}
           {!busy && shown.length === 0 && (
             <div style={{ fontSize: 12.5, color: "var(--text-secondary)", padding: 16, lineHeight: 1.55 }}>
-              {showHolding ? "Nothing waiting to be filed — every document is sorted." : "No files here yet. Drop a PDF below to file it."}
+              {showHolding ? "Nothing waiting to be filed — every document is sorted." : "No files here yet. Drop files below to file them."}
             </div>
           )}
           {shown.map((f) => {
             const st = stateOf(f);
             const mapped = onMap(f), ref = isReference(f), spatial = isSpatial(f);
             const needs = st === FILE_STATES.NEEDS_FILING;
+            // A non-PDF (B685) has no markup-canvas preview: clicking it downloads the original,
+            // and a small type chip (its extension) makes clear it's not a drawing you mark up.
+            const pdfRow = isPdfFile(f);
+            const ext = (String(f.sourceFile || "").match(/\.([a-z0-9]+)$/i) || [])[1];
             return (
               <div key={f.id} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <button onClick={() => open(f)} title="Open to review / mark up"
+                  <button onClick={() => open(f)} title={pdfRow ? "Open to review / mark up" : "Download this file"}
                     style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
                     <FileTypeIcon kind={f.kind} />
                     <span style={{ minWidth: 0 }}>
@@ -500,6 +584,7 @@ export default function FileBrowser({
                       </span>
                       <span style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
                         <Badge title="Subcategory (discipline)">{subcategoryOf(f)}</Badge>
+                        {!pdfRow && ext && <Badge tone="old" title="File type — click the row to download it">{ext.toUpperCase()}</Badge>}
                         {f.sheetNumber && <Badge title="Sheet number / range read off the title block">{f.sheetNumber}</Badge>}
                         {st === FILE_STATES.SUPERSEDED && <Badge tone="old" title="Replaced by a newer revision">superseded</Badge>}
                         {needs && <Badge title="Couldn’t classify confidently">needs filing</Badge>}
@@ -517,7 +602,7 @@ export default function FileBrowser({
                       {pinnedFileIds && pinnedFileIds.has(f.id) ? "★" : "☆"}
                     </button>
                   )}
-                  {spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
+                  {pdfRow && spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
                   <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
@@ -547,8 +632,9 @@ export default function FileBrowser({
         {/* persistent processing queue (B260 lean) */}
         <DropQueue queue={queue} onDismiss={removeItem} onTriage={(id) => { setShowHolding(true); removeItem(id); }} />
 
-        {/* persistent drop strip — a whole FOLDER or loose files (B664) */}
-        <input ref={fileInputRef} type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={onPick} />
+        {/* persistent drop strip — a whole FOLDER or loose files (B664). Any file type (B685) —
+            no `accept` filter, so the OS picker never hides a DWG/spreadsheet/image. */}
+        <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onPick} />
         {/* webkitdirectory turns this picker into a folder picker; set imperatively so React
             can't drop the non-standard attribute. Its files list is already flat + recursed. */}
         <input ref={(el) => { folderInputRef.current = el; if (el) el.webkitdirectory = true; }}
@@ -556,12 +642,16 @@ export default function FileBrowser({
         <div style={{ flex: "none", margin: "0 12px 12px", padding: "9px 12px", borderRadius: 9, textAlign: "center", fontFamily: "inherit",
             border: `1.5px dashed ${dropOver ? "var(--accent-library)" : "var(--border-default)"}`,
             background: dropOver ? "var(--hover-ghost)" : "var(--surface-raised)", color: "var(--text-secondary)" }}>
-          <span style={{ fontSize: 12, fontWeight: 600 }}>Drag a folder or files here to file them</span>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>
+            {dropFolderLabel ? `Drag files here to file them into ${dropFolderLabel}` : "Drag a folder or files here to file them"}
+          </span>
           <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>
-            Each PDF’s title block is read and it files itself{cross ? "" : ` into ${projName(projectId) || "this project"}`}. Anything it can’t place lands in Needs filing.
+            {dropFolderLabel
+              ? <>Any file type is welcome — it goes straight into <b>{dropFolderLabel}</b>. To auto-sort drawings by title block instead, drop them on <b>All files</b>.</>
+              : <>Any file type is welcome. A PDF reads its own title block and files itself{cross ? "" : ` into ${projName(projectId) || "this project"}`}; other files are stored as-is. Click a folder to file straight into it. Anything unplaced lands in Needs filing.</>}
           </span>
           <span style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 7 }}>
-            <button onClick={() => fileInputRef.current?.click()} style={pickBtn}>Choose PDFs</button>
+            <button onClick={() => fileInputRef.current?.click()} style={pickBtn}>Choose files</button>
             <button onClick={() => folderInputRef.current?.click()} style={pickBtn}>Choose a folder</button>
           </span>
         </div>
@@ -570,7 +660,7 @@ export default function FileBrowser({
       {/* drop-anywhere overlay hint */}
       {dropOver && (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", border: "2.5px dashed var(--accent-library)", borderRadius: 4, background: "rgba(14,116,144,0.06)", display: "grid", placeItems: "center" }}>
-          <span style={{ background: "var(--surface-raised)", color: "var(--text-primary)", fontWeight: 700, fontSize: 13, padding: "8px 16px", borderRadius: 999, border: "1px solid var(--border-default)" }}>Drop to file into {cross ? "the matched project" : (projName(projectId) || "this project")}</span>
+          <span style={{ background: "var(--surface-raised)", color: "var(--text-primary)", fontWeight: 700, fontSize: 13, padding: "8px 16px", borderRadius: 999, border: "1px solid var(--border-default)" }}>Drop to file into {dropFolderLabel || (cross ? "the matched project" : (projName(projectId) || "this project"))}</span>
         </div>
       )}
     </div>
@@ -667,7 +757,7 @@ function DropQueue({ queue, onDismiss, onTriage }) {
     [S.DONE]: { color: "var(--success-text, #15803d)", label: it.target ? `Filed · ${it.target}` : "Filed" },
     [S.NEEDS_FILING]: { color: "var(--warn-text)", label: "Needs filing — confirm a discipline" },
     [S.FAILED]: { color: "var(--danger-text)", label: it.error || "Failed" },
-    [S.REJECTED]: { color: "var(--danger-text)", label: it.error || "Not a PDF" },
+    [S.REJECTED]: { color: "var(--danger-text)", label: it.error || "Couldn’t read this file" },
   })[it.status] || { color: "var(--text-secondary)", label: it.status };
   return (
     <div style={{ flex: "none", margin: "0 12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
@@ -693,7 +783,7 @@ function DropQueue({ queue, onDismiss, onTriage }) {
   );
 }
 const miniBtn = { flex: "none", fontSize: 10, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 5, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "2px 8px" };
-// The two drop-strip pickers (B664): loose PDFs vs. a whole folder.
+// The two drop-strip pickers (B664): loose files vs. a whole folder.
 const pickBtn = { flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 11px" };
 
 function Centered({ title, body }) {

@@ -12140,7 +12140,7 @@ const YIELD_PAL = {
   paving: "#B6AB9B",                               // warm taupe — paving / parking
   green: "#4FA587",                                // sage — open / green
   detention: "#6E94AB", detZeroFill: "#DCE5EB", detZeroBorder: "#C2D2DC", // dusty blue
-  // B685: surfaces/borders/text now theme with the app (parchment in light, slate in dark)
+  // B686: surfaces/borders/text now theme with the app (parchment in light, slate in dark)
   // via the shared --planner-* + text tokens. The chart hues above stay fixed (one semantic
   // colour = one meaning across arcs/legend/dots). warn/danger text ride the theme tokens
   // again now that the card itself flips — they're AA on the parchment in light AND on the
