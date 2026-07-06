@@ -226,6 +226,13 @@ server/                   # placeholder README only — NOT built or deployed; b
   build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
   involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
   of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
+  **⚠ CHECK `mergeable_state` FIRST — a "dirty" (merge-conflicted) PR silently swallows EVERY nudge
+  (learned 2026-07-06 on PR #518).** GitHub only creates `pull_request` build runs against the PR's
+  test-MERGE ref; while the PR conflicts with `main` that ref can't exist, so nudges, close/reopen —
+  nothing fires, with no error anywhere. Four nudges did nothing; merging `origin/main` into the branch
+  fixed it instantly. So: nudge once → if `actions_list` shows NO run for the branch, fetch the PR
+  (`pull_request_read get`) and look at `mergeable_state` BEFORE nudging again — `dirty` means resolve
+  the conflict first (main moves fast here), then the next push fires CI on its own.
   **⚠ One nudge is often NOT enough, and a PR never merges itself — BABYSIT it to `merged:true`
   (learned 2026-06-27 on PR #379).** Automation-token pushes (PR-open + a single nudge) frequently
   still don't fire the `pull_request` build — recent PRs have needed **two** `Nudge CI` commits — so
