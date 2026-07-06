@@ -24,6 +24,13 @@ _Last updated: 2026-07-06._
 - [ ] **Scheduler backend (B408, decision-gated).** Decide whether to consolidate the embedded Scheduler onto the
       main Supabase project (one backend) or keep it on its own. Claude can't proceed on this until he chooses.
 
+### 🔧 Optional data confirmation (not blocking anything)
+- [ ] **Confirm the detention rainfall table (B655).** The new per-pond "Required detention (screening)" card uses an
+      area-representative NOAA Atlas-14 rainfall table for the Houston area. It's clearly labelled "screening — pending
+      primary verification" and is fine to use as-is. If/when you want exact numbers for a specific site, you (or your
+      engineer) can pull the official Atlas-14 values for that site's coordinates and Claude will drop them in. No rush —
+      nothing breaks meanwhile.
+
 ### ❓ From the improve loop (2026-06-27)
 - [ ] **Landscaping in the yield numbers (B553).** A deep audit of the yield/takeoff math (building SF, coverage %,
       parking ratios, acreage, impervious %, detention volume) came back **clean — no wrong calculations.** One

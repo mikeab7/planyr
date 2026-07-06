@@ -915,6 +915,165 @@ export function deadStoragePoolDepthFt({ bfeFt = null, groundElevFt = null, dept
 }
 
 // ---------------------------------------------------------------------------
+// Rate-based (Modified Rational) screening — the per-pond sizing card (B655).
+// An INDEPENDENT cross-check beside the authority-coefficient computeRequiredDetention:
+// it consumes an allowable release rate + a design storm the authority method doesn't,
+// and it is the natural home for a pumped-outfall credit (a pump = a constant outflow).
+// Same rule-record discipline: carrier-shaped, caveat-carrying, and NEVER a fabricated
+// number when an input is missing (flag instead). Screening only. Pure + Node-testable.
+// ---------------------------------------------------------------------------
+
+/* Runoff coefficient from % impervious — the Schaake composite blend used for
+ * screening (C = 0.05 at 0% impervious → 0.95 at 100%). Monotonic, clamped.
+ * Returns null when impervious is unknown so the caller flags, never assumes. Pure. */
+export function runoffCoefficient(impPct) {
+  if (impPct == null || !Number.isFinite(impPct)) return null;
+  return Math.max(0.05, Math.min(0.95, 0.05 + 0.009 * impPct));
+}
+
+/* Design-storm intensity table — NOAA Atlas-14 depth-duration-frequency for the
+ * Harris County (Houston) area, transcribed as [durationMin, in/hr] rows per return
+ * period. secondarySource:true = area-representative IDF pending confirmation against
+ * the official Atlas-14 grid for the site's coordinates (see OWNER-TODO). Screening only. */
+export const DESIGN_STORMS = {
+  station: "Harris County (Houston), TX — area representative",
+  source: {
+    name: "NOAA Atlas 14 Vol. 11 (Texas) — point precipitation frequency, Houston area",
+    section: "Partial-duration intensity (in/hr)",
+    url: "https://hdsc.nws.noaa.gov/pfds/",
+  },
+  effectiveDate: "2018-09-01",
+  verifiedOn: "2026-07-06",
+  transcribed: true,
+  secondarySource: true, // area-representative — confirm against the official grid for the site
+  periods: {
+    2: [[5, 5.5], [10, 4.6], [15, 4.0], [30, 2.9], [60, 1.9], [120, 1.2], [180, 0.9]],
+    10: [[5, 7.2], [10, 6.1], [15, 5.3], [30, 3.9], [60, 2.6], [120, 1.7], [180, 1.3]],
+    25: [[5, 8.3], [10, 7.0], [15, 6.2], [30, 4.6], [60, 3.1], [120, 2.0], [180, 1.5]],
+    100: [[5, 9.8], [10, 8.4], [15, 7.4], [30, 5.6], [60, 3.9], [120, 2.6], [180, 2.0]],
+  },
+};
+
+/* Picker order, loudest storm first. */
+export const DESIGN_STORM_PERIODS = [100, 25, 10, 2];
+const DEFAULT_STORM_DURATIONS_MIN = [5, 10, 15, 30, 60, 120, 180];
+
+/* Rainfall intensity (in/hr) for a return period + storm duration, interpolated over
+ * the transcribed IDF rows with the shared interpolateCurve. Returns a carrier
+ * {inPerHr, source, secondarySource} or null for an unmodeled return period. Pure. */
+export function stormIntensity(returnPeriodYr, durationMin) {
+  const curve = DESIGN_STORMS.periods[returnPeriodYr];
+  if (!curve) return null;
+  const inPerHr = interpolateCurve(curve, durationMin);
+  if (inPerHr == null) return null;
+  return { inPerHr, source: DESIGN_STORMS.source, secondarySource: DESIGN_STORMS.secondarySource };
+}
+
+const idfRule = () => ({
+  source: DESIGN_STORMS.source,
+  effectiveDate: DESIGN_STORMS.effectiveDate,
+  verifiedOn: DESIGN_STORMS.verifiedOn,
+  secondarySource: DESIGN_STORMS.secondarySource,
+});
+
+/* Rate-based required detention via the Modified Rational Method — an independent
+ * screening cross-check beside the authority number. For each storm duration t: peak
+ * inflow Q_in = C·i(t)·A (rational method, the 1.008≈1 unit convention), and the volume
+ * that must be held while releasing at Q_allow is V_s(t) = max(0, Q_in − Q_allow)·t·60
+ * (cubic feet); the governing storage is the max over durations (the "critical
+ * duration"). NEVER fabricates: a missing release rate / unknown impervious / unmodeled
+ * storm / non-positive area returns kind:"unknown" with the reason flagged. Pure. */
+export function computeRateBasedDetention({
+  acres,
+  impPct,
+  allowableReleaseCfs,
+  returnPeriodYr = 100,
+  durationsMin = DEFAULT_STORM_DURATIONS_MIN,
+} = {}) {
+  const flags = [];
+  const C = runoffCoefficient(impPct);
+  if (C == null) flags.push("impervious-unknown");
+  if (allowableReleaseCfs == null || !Number.isFinite(allowableReleaseCfs) || allowableReleaseCfs < 0) flags.push("release-rate-missing");
+  if (!(acres > 0)) flags.push("area-unknown");
+  if (!DESIGN_STORMS.periods[returnPeriodYr]) flags.push("design-storm-unmodeled");
+
+  if (flags.length) {
+    return {
+      kind: "unknown",
+      requiredAcFt: null,
+      method: "modified-rational",
+      inputs: { C, intensityInPerHr: null, criticalDurationMin: null, peakInflowCfs: null, allowableReleaseCfs: allowableReleaseCfs ?? null, returnPeriodYr },
+      basis: `Modified Rational screening — ${returnPeriodYr}-yr design storm`,
+      rule: idfRule(),
+      flags,
+      caveat: SCREENING_CAVEAT,
+    };
+  }
+
+  let best = { vsCf: -Infinity, t: null, intensity: null, qIn: null };
+  for (const t of durationsMin) {
+    const si = stormIntensity(returnPeriodYr, t);
+    if (!si) continue;
+    const qIn = C * si.inPerHr * acres; // cfs — Q = C·i·A (1.008 ≈ 1)
+    const vsCf = Math.max(0, qIn - allowableReleaseCfs) * t * 60;
+    if (vsCf > best.vsCf) best = { vsCf, t, intensity: si.inPerHr, qIn };
+  }
+  return {
+    kind: "rate-based",
+    requiredAcFt: round4(Math.max(0, best.vsCf) / SQFT_PER_ACRE),
+    method: "modified-rational",
+    inputs: {
+      C: Math.round(C * 1000) / 1000,
+      intensityInPerHr: best.intensity,
+      criticalDurationMin: best.t,
+      peakInflowCfs: Math.round(best.qIn * 100) / 100,
+      allowableReleaseCfs,
+      returnPeriodYr,
+    },
+    basis: `Modified Rational · C=${Math.round(C * 100) / 100} · i=${best.intensity} in/hr @ ${best.t} min · release ${allowableReleaseCfs} cfs · ${returnPeriodYr}-yr`,
+    rule: idfRule(),
+    flags: DESIGN_STORMS.secondarySource ? ["idf-secondary-source"] : [],
+    caveat: SCREENING_CAVEAT,
+  };
+}
+
+/* Pumped-outfall credit — a constant pump discharge is exactly the Modified Rational
+ * Method's constant-outflow term, so the credit is the difference between the required
+ * storage at the gravity release rate and the required storage at (gravity + pump).
+ * Self-capping: the max-over-durations envelope can never credit more pumped volume
+ * than the storm delivers (pump ≥ peak inflow → required-with-pump is 0, credit equals
+ * the full gravity requirement, never more). B639: a pumped outfall is not gravity-
+ * drowned, so the Regime-B wet-bottom/tailwater penalty must NOT be applied against a
+ * pumped pond — the flag + assumption say so; the card surfaces it, never silent. Pure. */
+export function computePumpedCredit({
+  acres,
+  impPct,
+  gravityReleaseCfs = 0,
+  pumpRateCfs,
+  returnPeriodYr = 100,
+} = {}) {
+  const flags = ["regime-b-tailwater-suppressed-by-pump"];
+  const assumption =
+    "Pumped outfall assumed to run continuously at its rated capacity during the design storm; its discharge is not gravity-drowned, so the Regime-B wet-bottom / tailwater penalty is not applied here. Real pumps cycle and need power + backup — confirm reliability and redundancy with your engineer.";
+  if (pumpRateCfs == null || !Number.isFinite(pumpRateCfs) || pumpRateCfs < 0) {
+    return { creditedAcFt: null, requiredWithPumpAcFt: null, requiredGravityAcFt: null, flags: [...flags, "pump-rate-missing"], assumption, caveat: SCREENING_CAVEAT };
+  }
+  const gravity = computeRateBasedDetention({ acres, impPct, allowableReleaseCfs: gravityReleaseCfs, returnPeriodYr });
+  const withPump = computeRateBasedDetention({ acres, impPct, allowableReleaseCfs: gravityReleaseCfs + pumpRateCfs, returnPeriodYr });
+  if (gravity.requiredAcFt == null || withPump.requiredAcFt == null) {
+    return { creditedAcFt: null, requiredWithPumpAcFt: withPump.requiredAcFt, requiredGravityAcFt: gravity.requiredAcFt, flags: [...flags, ...gravity.flags], assumption, caveat: SCREENING_CAVEAT };
+  }
+  return {
+    creditedAcFt: round4(Math.max(0, gravity.requiredAcFt - withPump.requiredAcFt)),
+    requiredWithPumpAcFt: withPump.requiredAcFt,
+    requiredGravityAcFt: gravity.requiredAcFt,
+    flags,
+    assumption,
+    caveat: SCREENING_CAVEAT,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The drainage-authority resolver (B629) — identifyJurisdiction + the queried
 // TCEQ MUD layer (+ HCFCD channels & watersheds for Harris sites).
 // ---------------------------------------------------------------------------

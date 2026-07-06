@@ -143,6 +143,8 @@ const PAIRS = [
   ["--on-accent-schedule", "--accent-schedule", "on-fill · Schedule", T, "fill locked + white specced (B318); used only as ≥3:1 underline — safe for large/bold only"],
   ["--on-accent-review", "--accent-review", "on-fill · Review (amber→dark)", T],
   ["--on-accent-library", "--accent-library", "on-fill · Library (white on teal)", T],
+  // B657-5B: the shared Button primary/active variant — on-accent text on the global accent fill.
+  ["--on-accent", "--accent", "on-fill · global accent button", T],
   // The 2px active-tab underline (a UI graphic) — fill on chrome
   ["--accent-site", "--chrome-bg-elev", "Site underline · chrome", U],
   ["--accent-schedule", "--chrome-bg-elev", "Schedule underline · chrome", U],

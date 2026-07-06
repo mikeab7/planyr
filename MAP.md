@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `5eb3e07` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `31b65ad` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_196 source files mapped._
+_197 source files mapped._
 
 ## infra
 
@@ -162,6 +162,8 @@ _196 source files mapped._
   - _exports_: `default (AppHeader)`, `MODULE_ACCENT`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
+- **`src/shared/ui/controls.jsx`** — shared control primitives (B657-5B): one radius/padding/typography scale + Button/ToggleChip/IconButton/Field/Section/MenuItem, token-driven, with a threaded `accent` prop so each module keeps its hue.
+  - _exports_: `Button`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `PAD`, `RADIUS`, `Section`, `ToggleChip`
 - **`src/shared/ui/moduleAccent.js`** — MODULE_ACCENT: single source of truth for per-workspace accent hexes (Site/Schedule/Review/Library) as pure React-free constants
   - _exports_: `MODULE_ACCENT`
 - **`src/shared/ui/ModuleLoader.jsx`** — Per-module assembling skeleton loader: Site parcel-draws itself, Gantt bars/milestones/playhead animate; 250ms show-delay, reduced-motion fallback
@@ -222,7 +224,7 @@ _196 source files mapped._
 - **`src/workspaces/site-planner/lib/deedAlign.js`** — Deed-to-parcel basis-of-bearings fix: rigid rotate+translate best-fit overlay plus theoretical grid-convergence fallback
   - _exports_: `CONFIDENT_FRAC`, `describeRotation`, `gridConvergenceDeg`, `openRing`, `ringCentroid`, `rotatePointsAbout`, `solveDeedAlignment`
 - **`src/workspaces/site-planner/lib/detentionRules.js`** — Houston-MSA detention criteria as versioned rule-records + drainage-authority resolver, analysis-tier / hydraulic-regime assessors, and pond auto-size solvers; no volume ships without its rule record
-  - _exports_: `assessAnalysisTier`, `assessHydraulicRegime`, `authorityForJurisdiction`, `computeRequiredDetention`, `COUNTY_AUTHORITY`, `deadStoragePoolDepthFt`, `DETENTION_RULES`, `DETENTION_SOURCES`, `governingRequirement`, `interpolateCurve`, `MUNICIPAL_OVERLAYS`, `PARCEL_DISTRICT_TYPES`, `pondDefaultsFor`, `rateFromImpervious`, `resolveDrainageAuthority`, `resolveDrainageContext`, `ruleBadge`, `ruleFor`, `SCREENING_CAVEAT`, `screenOutfall`, `solvePondDepth`, `solvePondExpansion`, `SQFT_PER_ACRE`, `TIER_THRESHOLDS`, `WATERSHED_OVERLAYS`
+  - _exports_: `assessAnalysisTier`, `assessHydraulicRegime`, `authorityForJurisdiction`, `computePumpedCredit`, `computeRateBasedDetention`, `computeRequiredDetention`, `COUNTY_AUTHORITY`, `deadStoragePoolDepthFt`, `DESIGN_STORM_PERIODS`, `DESIGN_STORMS`, `DETENTION_RULES`, `DETENTION_SOURCES`, `governingRequirement`, `interpolateCurve`, `MUNICIPAL_OVERLAYS`, `PARCEL_DISTRICT_TYPES`, `pondDefaultsFor`, `rateFromImpervious`, `resolveDrainageAuthority`, `resolveDrainageContext`, `ruleBadge`, `ruleFor`, `runoffCoefficient`, `SCREENING_CAVEAT`, `screenOutfall`, `solvePondDepth`, `solvePondExpansion`, `SQFT_PER_ACRE`, `stormIntensity`, `TIER_THRESHOLDS`, `WATERSHED_OVERLAYS`
 - **`src/workspaces/site-planner/lib/dimSlide.js`** — Pure geometry constraining a footprint dimension callout to slide along the long axis, off dog-ear bumps, with collision AABB
   - _exports_: `clampDimOffset`, `DIM_POS_F_DEFAULT`, `DIM_POS_F_ROAD`, `dimNumberBox`, `dimSlideRange`
 - **`src/workspaces/site-planner/lib/dockZones.js`** — Building-anchored dock-zone stack geometry: outward court/trailer/buffer chain, catalog layers, dock-side axes, stranded-zone pruning
