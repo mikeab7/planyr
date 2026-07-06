@@ -231,11 +231,16 @@ export default function FolderTree({
     const isMoving = moving === node.id;
     const isSelected = embedded && selectedId === node.id;
     const count = fileCounts ? fileCounts.get(node.id) || 0 : null;
-    // Embedded (the unified Library): clicking a name SELECTS the folder (filters the file
-    // list); the caret owns expand/collapse. Standalone keeps click-to-toggle.
+    // Embedded (the unified Library): single-click a name SELECTS the folder (peek — filters
+    // the file list); the caret owns expand/collapse. DOUBLE-click OPENS it like File Explorer
+    // — select it AND expand it in place so its subfolders reveal (drill in). Standalone keeps
+    // click-to-toggle.
     const onNameClick = embedded
       ? () => onSelect?.(node.id)
       : () => kids.length && toggle(node.id);
+    const onNameDouble = embedded
+      ? () => { onSelect?.(node.id); if (kids.length) setExpanded((s) => new Set(s).add(node.id)); }
+      : undefined;
     return (
       <div key={node.id}>
         <div
@@ -278,7 +283,7 @@ export default function FolderTree({
               {moveTargets(node.id).map((t) => <option key={t.id ?? "top"} value={t.id ?? ""}>{t.name}</option>)}
             </select>
           ) : (
-            <span style={{ flex: 1, cursor: embedded || kids.length ? "pointer" : "default", fontWeight: isSelected ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onClick={onNameClick}>{node.name}</span>
+            <span style={{ flex: 1, cursor: embedded || kids.length ? "pointer" : "default", fontWeight: isSelected ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onClick={onNameClick} onDoubleClick={onNameDouble}>{node.name}</span>
           )}
 
           {/* Row actions (pin / add / rename / move / delete) moved to a right-click context
@@ -392,8 +397,10 @@ function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRen
         style={{ position: "fixed", inset: 0, zIndex: 5000 }} />
       <div data-testid="folder-context-menu" role="menu" aria-label="Folder actions"
         style={{
+          // OPAQUE surface (not --surface-overlay, which is translucent "frosted" — folder names
+          // behind the menu would bleed through it): a context menu over a text list must be solid.
           position: "fixed", zIndex: 5001, left, top, minWidth: W, padding: 5,
-          background: T.overlay, color: T.text, border: `1px solid ${T.borderStrong}`,
+          background: T.raised, color: T.text, border: `1px solid ${T.borderStrong}`,
           borderRadius: 10, boxShadow: "0 12px 40px rgba(0,0,0,.35)",
         }}>
         <div style={{ padding: "4px 10px 6px", fontSize: 11, fontWeight: 700, color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</div>
