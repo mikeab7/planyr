@@ -18,7 +18,7 @@ import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from ".
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
 import { uploadOverlayFile, uploadParcelDrawingFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
-import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
+import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -202,7 +202,6 @@ const TOOLS = [
   { id: "road", label: "Road", hint: "Pick a width, then click to drop centerline points — Enter or double-click to finish, Backspace to undo a point, Esc to cancel. Curve each vertex sharp / arc / smooth in the panel. Free draw still drags a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
   { id: "easement", label: "Easement", hint: "Draw an easement (Easement ▾ for mode). Centerline+width: click a path, double-click/Enter to finish — it builds a strip of the set width. Boundary: click points, close on the first dot. Offset from parcel edge: click a parcel's edges then Enter. Edit attributes (type/holder/width…) in the Element panel; width re-offsets the strip live" },
   { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Length (two-point distance), Polylength (click a path, double-click / Enter to finish), Area (outline a region, click the first dot or double-click to close), or Count (click to mark items, Enter to finish)" },
-  { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
   { id: "mline", label: "Line", hint: "Markup line (L): drag end-to-end. Hold Shift for 45° increments" },
   { id: "mrect", label: "Rectangle", hint: "Markup rectangle (R): drag a box. Hold Shift for a square" },
   { id: "mellipse", label: "Ellipse", hint: "Markup ellipse (E): drag a box. Hold Shift for a circle" },
@@ -1143,8 +1142,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const u = restored?.underlay;
     return !!(u && u.src && !String(u.src).startsWith("data:")); // show spinner until the remote aerial loads
   });
-  const [calib, setCalib] = useState(null);          // {a:{x,y}, b?:{x,y}}
-  const [calibInput, setCalibInput] = useState("");
   const fileRef = useRef(null);
 
   // Site-plan overlays (B72): backdrop PDFs/images the user drops onto the map and
@@ -1155,6 +1152,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
   const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
+  const [aerialSel, setAerialSel] = useState(false);    // References: aerial row expanded (B654)
   // Transient editor state for the ONE expanded overlay row (B575 opacity field draft + B576 scale
   // picker mode/paired fields). Keyed by overlay id; `null` = follow the overlay's stored values.
   // Reset whenever the expanded overlay changes so a fresh row derives its display from the model.
@@ -1164,7 +1162,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const overlayClip = useRef(null);                     // copied site-plan overlay (B461 Copy/Paste — shares the source ref, not a re-import)
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Drag-and-drop affordance for the site-plan overlay (NEW-1). Two independent hover flags:
-  // the left "Site-plan overlay" panel dropzone, and a full-canvas "drop to place" hint.
+  // the left References panel dropzone, and a full-canvas "drop to place" hint.
   const [overlayDropOver, setOverlayDropOver] = useState(false);
   const [canvasDropOver, setCanvasDropOver] = useState(false);
   // Parcel-attached drawings (B67): immutable backdrop + pixel-relative markup, per parcel.
@@ -2297,7 +2295,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
@@ -2660,14 +2658,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (measureMode === "area" && measDraft.length >= 3 && dist(f2p(sp), f2p(measDraft[0])) < 12) { finishMeasure(); return; }
         setMeasDraft((d) => [...d, sp]);
       }
-      return;
-    }
-    if (tool === "calibrate") {
-      // Calibration points are NOT grid-snapped — we want to land exactly on
-      // the screenshot feature the user is clicking.
-      if (!underlay) { flashWarn("Calibrate needs an underlay — drop an aerial/screenshot first (Aerial ▾).", 5000); return; }
-      if (!calib || calib.b) { setCalib({ a: fp }); setCalibInput(""); }
-      else setCalib((c) => ({ a: c.a, b: fp }));
       return;
     }
     if (tool === "split") {
@@ -3763,7 +3753,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setUnderlayErr(false);
       setUnderlayLost(false);
       setUnderlayLoading(true);
-      setCalib(null);
       requestFit();
       if (idbKey && idbAvailable()) idbPut(idbKey, src).then((ok) => { if (ok) setUnderlay((u) => (u && u.src === src ? { ...u, idbKey } : u)); });
       // B474 review (#5): back the underlay up to cloud Storage too (like overlays/drawings) so it survives
@@ -3781,33 +3770,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     drag.current = { mode: "moveUnderlay", fx: fp.x, fy: fp.y, ox: underlay.x, oy: underlay.y };
     svgRef.current.setPointerCapture(e.pointerId);
-  };
-  const applyCalibration = () => {
-    const knownFt = +calibInput;
-    if (!underlay || !calib?.a || !calib?.b || !(knownFt > 0) || !(underlay.ftPerPx > 0)) return;
-    // A map-sourced underlay is already georeferenced and its two axes can legitimately
-    // differ (ftPerPx ≠ ftPerPxY at this latitude); a single diagonal-derived scalar
-    // would mis-size it, so calibration is disabled for from-map underlays (B57a).
-    if (underlay.fromMap) {
-      flashWarn("This underlay came from the map — it's already to scale, so manual calibration is disabled for it.", 5000);
-      setCalib(null);
-      return;
-    }
-    const measured = dist(calib.a, calib.b);
-    if (measured <= 0) return;
-    const factor = knownFt / measured;
-    const sy = underlay.ftPerPxY || underlay.ftPerPx;
-    const newFtPerPx = underlay.ftPerPx * factor;
-    const newSy = sy * factor;
-    // image-pixel coords of point a under the current placement
-    const aPxX = (calib.a.x - underlay.x) / underlay.ftPerPx;
-    const aPxY = (calib.a.y - underlay.y) / sy;
-    pushHistory();
-    // keep point a pinned in world space so the image scales about that point
-    setUnderlay((u) => ({ ...u, ftPerPx: newFtPerPx, ftPerPxY: u.ftPerPxY ? newSy : undefined, x: calib.a.x - aPxX * newFtPerPx, y: calib.a.y - aPxY * newSy, calibrated: true }));
-    setCalib(null);
-    setCalibInput("");
-    setTool("select");
   };
 
   /* ------------ site-plan overlays (B72) ------------ */
@@ -3840,7 +3802,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       };
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
-      setSel(null); setSelOverlay(id); setLeftPanel("overlay");
+      setSel(null); setSelOverlay(id); setLeftPanel("references");
       // B474 review (#2): attach idbKey only AFTER the stash confirms — until then src stays inline so
       // dropIdbBackedSrc can't strip it before it's durable (overlays also have the cloud-Storage fallback below).
       if (ovIdbKey && idbAvailable() && r.src) idbPut(ovIdbKey, r.src).then((ok) => { if (ok) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, idbKey: ovIdbKey } : x))); });
@@ -3939,7 +3901,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const nid = uid();
     pushHistory();
     setSheetOverlays((arr) => [...arr, { ...o, id: nid, x, y, locked: false }]);
-    setSel(null); setSelOverlay(nid); setLeftPanel("overlay");
+    setSel(null); setSelOverlay(nid); setLeftPanel("references");
     return nid;
   };
   const duplicateOverlay = (id) => {
@@ -4003,10 +3965,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setOverlayPage = async (id, page) => {
     const doc = overlayDocs.current.get(id);
     if (!doc) return;
+    const o = sheetOverlays.find((x) => x.id === id);
     try {
-      const r = await rasterizePage(doc, page);
+      const r = await rasterizePage(doc, page, { knockout: o ? o.knockout !== false : true });
       patchOverlay(id, { src: r.src, imgW: r.imgW, imgH: r.imgH, page: r.page });
     } catch (_) { /* ignore a bad page render */ }
+  };
+  // B654 — toggle the white-paper knockout on a PDF reference: re-rasterize the current
+  // page with/without the transparency pass. Persists as the additive `knockout` field
+  // (absent = true = the long-standing default). Needs a source to re-render from: the
+  // in-session doc, or the stored PDF bytes (cross-device); the checkbox is disabled
+  // otherwise. LOUD on failure — never a silent no-op.
+  const setOverlayKnockout = async (id, on) => {
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o) return;
+    try {
+      const doc = overlayDocs.current.get(id);
+      let r = null;
+      if (doc) r = await rasterizePage(doc, o.page || 1, { knockout: on });
+      else if ((o.storageKey || "").toLowerCase().endsWith(".pdf")) {
+        const bytes = await downloadOverlayBytes(o.storageKey);
+        r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1, { knockout: on }) : null;
+      }
+      if (!r) { flashWarn("Couldn't re-render this sheet — re-add the PDF to change its white knockout.", 6000); return; }
+      pushHistory();
+      setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, src: r.src, knockout: on } : x)));
+      if (o.idbKey && idbAvailable()) idbPut(o.idbKey, r.src); // keep the offline raster cache in step
+    } catch (_) {
+      flashWarn("Couldn't re-render this sheet — re-add the PDF to change its white knockout.", 6000);
+    }
   };
   // B73 — apply a drawing scale (feet per inch) to an overlay: ftPerPx = S/72 (points),
   // keeping it centered so it scales in place to true real-world size.
@@ -4026,7 +4013,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B73 fallbacks — calibrate by clicking the canvas. trace: 2 points on the drawing +
   // a real length → rescale (pinned at the first click). align: 2 points on the drawing
   // then the 2 matching points on the map → similarity (move + rotate + scale).
+  // B654: the SAME flow also calibrates the aerial underlay ({target:"underlay"}) — the
+  // old separate "calibrate" tool + its dialog-box input are gone; the underlay commit
+  // goes through the pure calibrateUnderlayScale with the same inline numEdit UX.
   const onOvCalibClick = (fp) => {
+    if (ovCalib.target === "underlay") {
+      const u = underlay;
+      if (!u) { setOvCalib(null); return; }
+      const pts = [...ovCalib.pts, fp];
+      if (pts.length < 2) { setOvCalib({ ...ovCalib, pts }); return; }
+      setOvCalib(null);
+      setNumEdit({ fx: pts[1].x, fy: pts[1].y, value: "", onCommit: (realFt) => {
+        const patch = calibrateUnderlayScale(u, pts[0], pts[1], realFt);
+        if (!patch) return; // fromMap / non-positive input — the Calibrate button is already disabled for fromMap
+        pushHistory();
+        setUnderlay((cur) => (cur ? { ...cur, ...patch } : cur));
+        flashWarn(`Aerial calibrated — that segment is now ${f0(realFt)}′.`, 4000);
+      } });
+      return;
+    }
     const o = sheetOverlays.find((x) => x.id === ovCalib.id);
     if (!o) { setOvCalib(null); return; }
     const pts = [...ovCalib.pts, fp];
@@ -4065,7 +4070,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const ovCalibMsg = () => {
     if (!ovCalib) return "";
     const n = ovCalib.pts.length;
-    if (ovCalib.kind === "trace") return n === 0 ? "Click one end of a known dimension on the drawing." : "Click the other end — then enter its real length.";
+    const what = ovCalib.target === "underlay" ? "aerial" : "drawing";
+    if (ovCalib.kind === "trace") return n === 0 ? `Click one end of a known dimension on the ${what}.` : "Click the other end — then enter its real length.";
     const pairNo = Math.floor(n / 2) + 1;
     return n % 2 === 0 ? `Click a known point on the drawing (point ${pairNo}).` : "Now click where that point belongs on the map.";
   };
@@ -4091,7 +4097,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if (cached) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: cached } : x))); continue; }
           if ((o.storageKey || "").toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
             const bytes = await downloadOverlayBytes(o.storageKey);
-            const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
+            const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1, { knockout: o.knockout !== false }) : null; // honour the per-reference knockout (B654)
             if (r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
           } else if (o.storageKey) { // image: its raster IS the source — restore the src directly (dims already known)
             const src = await downloadOverlayDataUrl(o.storageKey);
@@ -6891,8 +6897,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     { id: "parcel", glyph: "⬡", label: "Parcel" },
     { id: "analysis", glyph: "⚐", label: "Analysis" },
     { id: "props", glyph: "✎", label: "Element" },
-    { id: "aerial", glyph: "◳", label: "Aerial" },
-    { id: "overlay", glyph: "▦", label: "Overlay" },
+    { id: "references", glyph: "▦", label: "References" }, // B654: Aerial + Overlay merged into one panel
     { id: "standards", glyph: "⚙", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
   ];
   const railBtn = (on) => ({
@@ -6947,7 +6952,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (id !== "select") setCombineSel([]); // merge selection only lives in the Select tool
     if (id !== "callout") setCalloutDraft(null);
     if (!MARKUP_TOOLS.includes(id)) { setMkRect(null); setMkPoly(null); }
-    if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
     if (id !== "building") setBuildingMenu(false);
     if (id !== "parking") setParkingMenu(false);
@@ -8539,22 +8543,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </g>
                 );
               })()}
-              {/* calibration pick (unsnapped, drawn over the underlay) */}
-              {calib?.a && (() => {
-                const a = f2p(calib.a);
-                const b = calib.b ? f2p(calib.b) : (cursor ? f2p(cursor) : a);
-                const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-                const measured = calib.b ? dist(calib.a, calib.b) : (cursor ? dist(calib.a, cursor) : 0);
-                return (
-                  <g pointerEvents="none">
-                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray={calib.b ? "none" : "5 4"} />
-                    <circle cx={a.x} cy={a.y} r={4} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
-                    {calib.b && <circle cx={b.x} cy={b.y} r={4} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />}
-                    <text x={mid.x} y={mid.y - 7} textAnchor="middle" fontSize="12" fontFamily="ui-monospace, Menlo, monospace"
-                      fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(measured)}′ now</text>
-                  </g>
-                );
-              })()}
               {/* draft polygon */}
               {draftPoly && (
                 <g pointerEvents="none">
@@ -8829,7 +8817,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             }[calibrationState];
             const warn = calibrationState === "uncalibrated";
             return (
-              <div onClick={warn ? () => { setShowAerial(true); setTool("calibrate"); setCalib(null); } : undefined}
+              <div onClick={warn ? () => { setShowAerial(true); setLeftPanel("references"); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); } : undefined}
                 style={{ position: "absolute", left: 56, bottom: 40, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6 }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>· {cfg.sub}</span>}
@@ -9215,52 +9203,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {leftPanel && (<>
           <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "#efe9dd", overflowY: "auto", padding: "13px 13px 24px",
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
-          {/* aerial underlay */}
-          {leftPanel === "aerial" && (
-          <Section title="Aerial underlay">
-            {!underlay ? (
-              <>
-                <button style={{ ...btn(false), width: "100%" }} onClick={() => fileRef.current?.click()}>Load screenshot…</button>
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { onUnderlayFile(e.target.files?.[0]); e.target.value = ""; }} />
-                <div style={{ fontSize: 11, color: PAL.muted, marginTop: 7, lineHeight: 1.5 }}>Drop in an aerial/screenshot, calibrate it to a known distance, then trace your parcel and buildings on top at true scale.</div>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 11, color: PAL.muted, marginBottom: 8, lineHeight: 1.5 }}>Hidden by default — click a parcel (or “Show” below) to reveal it. Locked &amp; click-through so you can draw right over it. Calibrate it to a known distance for true scale.</div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <button style={{ ...btn(showAerial), flex: 1 }} onClick={() => setShowAerial((v) => !v)}>{showAerial ? "Hide aerial" : "Show aerial"}</button>
-                  <button style={{ ...btn(tool === "calibrate") }} onClick={() => { setShowAerial(true); setTool("calibrate"); setCalib(null); }}>Calibrate</button>
-                  <button style={chip} onClick={requestFit}>Fit</button>
-                  <button style={{ ...chip, color: PAL.accent }} onClick={() => { if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setCalib(null); setShowAerial(false); setUnderlayLost(false); }}>Remove</button>
-                </div>
-                <div style={{ fontSize: 11, color: PAL.muted, marginTop: 7 }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide</div>
-                {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
-                {underlayLost && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>The saved aerial couldn't be recovered on this device (not in the offline cache or your account). Your boundary and tools are intact — <button style={{ ...chip, padding: "1px 7px", color: PAL.accent }} onClick={() => fileRef.current?.click()}>re-drop the screenshot</button> to restore the backdrop.</div>}
-                {tool === "calibrate" && (
-                  <div style={{ marginTop: 9, padding: "9px 10px", borderRadius: 7, background: "#fbf3ee", border: `1px solid ${PAL.accentSoft}` }}>
-                    {!calib?.a && <div style={{ fontSize: 11.5, color: PAL.ink }}>Click the <b>first</b> end of a known distance on the image (e.g. a building wall, a road width).</div>}
-                    {calib?.a && !calib?.b && <div style={{ fontSize: 11.5, color: PAL.ink }}>Now click the <b>second</b> end.</div>}
-                    {calib?.a && calib?.b && (
-                      <>
-                        <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 6 }}>Picked segment reads <b style={{ color: PAL.ink }}>{f0(dist(calib.a, calib.b))}′</b> at the current scale.</div>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <span style={{ fontSize: 11.5, color: PAL.muted }}>Actual ft</span>
-                          <input autoFocus style={numInput} value={calibInput} onChange={(e) => setCalibInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") applyCalibration(); }} />
-                          <button style={btn(false)} onClick={applyCalibration}>Apply</button>
-                          <button style={chip} onClick={() => setCalib(null)}>Reset</button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </Section>
-          )}
-
-          {/* site-plan overlay (B72) */}
-          {leftPanel === "overlay" && (
-          <Section title="Site-plan overlay">
+          {/* References (B654) — the merged Aerial + Overlay panel: every backdrop the plan
+              sits over, in one list with one add flow and ONE shared calibration (the
+              ovCalib trace/align flow — the old separate "calibrate" tool is gone).
+              Row #1 is the aerial (image-only, always beneath everything); the rest are
+              sheet references (site plans / surveys, PDF or image). Persisted fields are
+              UNCHANGED (`underlay` + `sheetOverlays`) — this is a UI unification. */}
+          {leftPanel === "references" && (
+          <Section title="References">
             {/* The whole block is a drop target (NEW-1): drop a PDF/image here or on the map,
                 or click to browse. Mirrors the Doc-Review FileBrowser dropzone pattern —
                 dashed border + accent highlight on hover, anti-flicker via currentTarget. */}
@@ -9269,13 +9219,56 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
               onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
               onDragLeave={(e) => { if (e.currentTarget === e.target) setOverlayDropOver(false); }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
               style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
-              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add site plan (PDF / image)…"}</button>
+              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image)…"}</button>
               <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
               <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
-                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this site plan</b> : <>Drop a site-plan PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through.</>}
+                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this reference</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
               </div>
+            </div>
+
+            {/* Aerial backdrop — pinned reference #1. Opacity + lock lived on the underlay
+                object all along (render honours both); the CONTROLS are new here. */}
+            <div style={{ marginTop: 12 }}>
+              {!underlay ? (
+                <div style={{ border: "1px dashed #ddd6c5", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
+                    <span style={{ flex: 1 }} />
+                    <button style={chip} onClick={() => fileRef.current?.click()}>Load screenshot…</button>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
+                </div>
+              ) : (
+                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "#ddd6c5", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                    <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
+                    <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
+                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
+                  </div>
+                  {aerialSel && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
+                      <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
+                        <input type="range" min={0.1} max={1} step={0.05} value={underlay.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => setUnderlay((u) => (u ? { ...u, opacity: +e.target.value } : u))} />
+                        <span style={{ fontSize: 11, color: PAL.muted, width: 34, textAlign: "right" }}>{Math.round((underlay.opacity ?? 1) * 100)}%</span>
+                      </label>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button style={{ ...chip, flex: 1, ...(underlay.fromMap ? { opacity: 0.55, cursor: "not-allowed" } : null) }} disabled={!!underlay.fromMap}
+                          title={underlay.fromMap ? "This aerial came from the map — it's already to scale, so manual calibration is disabled" : "Click two ends of a known distance on the aerial, then enter its real length"}
+                          onClick={() => { setShowAerial(true); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); }}>Calibrate</button>
+                        <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
+                      </div>
+                      <div style={{ fontSize: 11, color: PAL.muted }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide{underlay.fromMap ? " · georeferenced from the map" : ""}</div>
+                      {origin && basemapOn && <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>}
+                    </div>
+                  )}
+                  {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
+                  {underlayLost && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>The saved aerial couldn't be recovered on this device (not in the offline cache or your account). Your boundary and tools are intact — <button style={{ ...chip, padding: "1px 7px", color: PAL.accent }} onClick={() => fileRef.current?.click()}>re-drop the screenshot</button> to restore the backdrop.</div>}
+                </div>
+              )}
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { onUnderlayFile(e.target.files?.[0]); e.target.value = ""; }} />
             </div>
             {!sheetOverlays.length ? null : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -9335,6 +9328,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
                             <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
                           </div>
+                          {/* B654: above/below moved into the panel (the right-click menu keeps them too) */}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1 }} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
+                            <button style={{ ...chip, flex: 1 }} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
+                          </div>
+                          {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
+                          {(overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf")) && (
+                            <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
+                              <input type="checkbox" checked={o.knockout !== false} onChange={(e) => setOverlayKnockout(o.id, e.target.checked)} />
+                              <span>Knock out white paper</span>
+                            </label>
+                          )}
                           {o.sheet && (() => {
                             // Bluebeam-style scale entry (B576): the page→real ratio is the single source of
                             // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable

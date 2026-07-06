@@ -21,10 +21,20 @@ const MAX_RASTER_DIM = 2600; // cap the rendered raster so memory / the white-kn
 export const isPdfFile = (file) =>
   !!file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name || ""));
 
+/* The white-knockout pixel pass, factored pure for unit tests (B654): near-white
+ * (all channels ≥ 247) → fully transparent, in place. Returns the same array. */
+export function knockoutNearWhite(d) {
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] >= 247 && d[i + 1] >= 247 && d[i + 2] >= 247) d[i + 3] = 0; // near-white → transparent
+  }
+  return d;
+}
+
 /* Render one page of an already-open PDF to a PNG data URL, knocking near-white paper
- * to transparent so the map shows through the linework. Tainted-canvas safe (skips the
- * knockout rather than throwing). */
-export async function rasterizePage(pdf, pageNum = 1) {
+ * to transparent so the map shows through the linework (pass { knockout:false } to keep
+ * the paper — the References panel's per-reference toggle, B654; absent = knocked out,
+ * today's behavior). Tainted-canvas safe (skips the knockout rather than throwing). */
+export async function rasterizePage(pdf, pageNum = 1, { knockout = true } = {}) {
   const n = Math.min(Math.max(1, pageNum | 0), pdf.numPages);
   const page = await pdf.getPage(n);
   const base = page.getViewport({ scale: 1 });
@@ -35,14 +45,13 @@ export async function rasterizePage(pdf, pageNum = 1) {
   canvas.height = Math.max(1, Math.floor(viewport.height));
   const ctx = canvas.getContext("2d");
   await page.render({ canvasContext: ctx, viewport }).promise;
-  try {
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const d = img.data;
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i] >= 247 && d[i + 1] >= 247 && d[i + 2] >= 247) d[i + 3] = 0; // near-white → transparent
-    }
-    ctx.putImageData(img, 0, 0);
-  } catch (_) { /* getImageData blocked — leave the white in, the opacity slider still applies */ }
+  if (knockout) {
+    try {
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      knockoutNearWhite(img.data);
+      ctx.putImageData(img, 0, 0);
+    } catch (_) { /* getImageData blocked — leave the white in, the opacity slider still applies */ }
+  }
   return { src: canvas.toDataURL("image/png"), imgW: Math.round(base.width), imgH: Math.round(base.height), page: n };
 }
 
@@ -71,12 +80,13 @@ export async function openOverlayFile(file) {
 }
 
 /* Rebuild an overlay's raster from stored PDF bytes (cross-device reload, B72): rasterize
- * the stored page. Returns { src, imgW, imgH, pageCount } or null. */
-export async function rasterizeStoredPdf(bytes, page = 1) {
+ * the stored page (honouring the reference's knockout choice, B654).
+ * Returns { src, imgW, imgH, pageCount } or null. */
+export async function rasterizeStoredPdf(bytes, page = 1, opts = {}) {
   try {
     const { loadPdf } = await import("../../doc-review/lib/pdf.js");
     const pdf = await loadPdf(bytes);
-    const r = await rasterizePage(pdf, page);
+    const r = await rasterizePage(pdf, page, opts);
     const out = { src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: pdf.numPages };
     try { pdf.destroy(); } catch (_) {}
     return out;

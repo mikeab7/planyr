@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `fd1a1b4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `dc8d528` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -274,9 +274,9 @@ _195 source files mapped._
 - **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure metes-and-bounds engine: parses Texas deed bearing/distance calls (curves, SAVE-AND-EXCEPT tracts) to planner-feet paths, closure/misclosure, polyline offset/buffer, ring overlap
   - _exports_: `arcChordPoints`, `bufferPolyline`, `callsToPath`, `misclosure`, `offsetPolyline`, `parseCalls`, `parseTracts`, `pathCloses`, `ringsOverlap`, `VARA_FT`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
-  - _exports_: `alignOverlaySimilarity`, `applySimilarityToOverlay`, `imagePointToWorld`, `scaleOverlayAbout`, `similarityTransform`, `solveSimilarityLSQ`
+  - _exports_: `alignOverlaySimilarity`, `applySimilarityToOverlay`, `calibrateUnderlayScale`, `imagePointToWorld`, `scaleOverlayAbout`, `similarityTransform`, `solveSimilarityLSQ`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
-  - _exports_: `isPdfFile`, `openOverlayFile`, `rasterizePage`, `rasterizeStoredPdf`
+  - _exports_: `isPdfFile`, `knockoutNearWhite`, `openOverlayFile`, `rasterizePage`, `rasterizeStoredPdf`
 - **`src/workspaces/site-planner/lib/overlayPrint.js`** — Pure DOM-free print/export selection for placed site-plan overlays: filters src-bearing visible overlays, drives the 'Print overlay' checkbox visibility and the export compositing pass
   - _exports_: `hasPrintableOverlay`, `isOverlayPrintable`, `printableOverlays`
 - **`src/workspaces/site-planner/lib/overlayScale.js`** — Pure drawing-scale helpers: engineer scale-note parsing, standard sheet detection, feet-per-point conversions, viewport-sanity auto-scale guard, and Bluebeam-style page=real distance/preset scale entry
