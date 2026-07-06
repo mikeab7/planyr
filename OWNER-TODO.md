@@ -61,6 +61,16 @@ _Last updated: 2026-07-06._
       the mirror sync — fixed same-day (B662, chunked sync). Nothing on Michael's plate; the live Drive
       click-through is the Claude cohort's job (`VERIFICATION.md` V208/V209/V214, not his).
 
+## Run this SQL (one-click in Supabase) — syncs your Library **pins** across your devices (B676)
+> **One file, for the main app project `lyeqzkuiwngunutlkkmi`; safe + idempotent (re-run the whole file
+> anytime). Claude hands you the file.**
+- [ ] Run `pins.sql`. Until you do, your Library pins (the ☆ folders/files on the Library home) stay on
+      **this one computer**; after, your pinned folders and files **follow your account to any device you
+      sign in on**. Nothing else changes — pins keep working per-device in the meantime, and on your first
+      signed-in visit after the table exists, this computer's existing pins copy up to the cloud automatically
+      (safe + non-destructive). The signed-in cross-device click-through is the Claude cohort's job
+      (`VERIFICATION.md` V222), not yours.
+
 ## Things Claude needs FROM Michael to finish/verify
 - [x] **Drainage-manual transcription (B636 tail) — DONE (Cowork pulled the PDFs itself 2026-07-05; nothing needed from you).**
       Cowork reached the signed manuals directly (the sandbox couldn't, but Cowork can), so you never had to drop them
