@@ -43,6 +43,8 @@ const centered = (children) => (
 export default function FolderTree({
   projectId = null, signedIn = false, projectName = "",
   embedded = false, selectedId = null, onSelect = null, onRowsChange = null, fileCounts = null,
+  // Library-Home pins: which folder ids are pinned + the ☆ toggle (both optional).
+  pinnedIds = null, onTogglePin = null,
 }) {
   const [rows, setRowsRaw] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -269,11 +271,20 @@ export default function FolderTree({
           {!isEditing && !isMoving && (
             hoveredId === node.id ? (
               <span style={{ display: "flex", gap: 2 }}>
+                {onTogglePin && (
+                  <IconBtn title={pinnedIds && pinnedIds.has(node.id) ? "Unpin from the Library home" : "Pin to the Library home"}
+                    accent={pinnedIds && pinnedIds.has(node.id)} onClick={() => onTogglePin(node)}>
+                    {pinnedIds && pinnedIds.has(node.id) ? "★" : "☆"}
+                  </IconBtn>
+                )}
                 <IconBtn title="Add subfolder" onClick={() => onAdd(node.id)}>＋</IconBtn>
                 <IconBtn title="Rename" onClick={() => setEditing({ id: node.id, value: node.name })}>✎</IconBtn>
                 <IconBtn title="Move" onClick={() => setMoving(node.id)}>⇄</IconBtn>
                 <IconBtn title="Delete" danger onClick={() => askDelete(node)}>🗑</IconBtn>
               </span>
+            ) : pinnedIds && pinnedIds.has(node.id) ? (
+              // Quiet pinned marker when the row isn't hovered (so pins stay discoverable).
+              <span aria-hidden style={{ flex: "none", fontSize: 11, color: T.accentText, paddingRight: 4 }}>★</span>
             ) : count ? (
               // Rolled-up file count (files in this folder + everything under it).
               <span style={{ flex: "none", fontSize: 11, fontWeight: 600, color: T.faint, paddingRight: 4 }}>{count}</span>
@@ -341,11 +352,11 @@ export default function FolderTree({
   );
 }
 
-function IconBtn({ children, title, onClick, danger }) {
+function IconBtn({ children, title, onClick, danger, accent }) {
   return (
     <button title={title} onClick={onClick} style={{
       width: 24, height: 24, border: "none", background: "none", cursor: "pointer", borderRadius: 4,
-      color: danger ? "var(--danger)" : "var(--text-secondary)", fontSize: 13, lineHeight: 1,
+      color: danger ? "var(--danger)" : accent ? "var(--accent-library-text)" : "var(--text-secondary)", fontSize: 13, lineHeight: 1,
     }}>{children}</button>
   );
 }

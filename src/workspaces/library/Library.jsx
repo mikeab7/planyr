@@ -22,15 +22,17 @@
  * persistence) and the Library (browsing/filing) legitimately share it. Lazy-loaded by
  * the shell, so opening Review never pulls the Library in and vice-versa.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import FileBrowser from "./components/FileBrowser.jsx";
 import FolderTree from "./components/FolderTree.jsx";
+import LibraryHome from "./components/LibraryHome.jsx";
 import { autofilingProvider } from "../doc-review/lib/autofiling.js";
 import { cloudReady, listProjects as listCloudProjects } from "../doc-review/lib/reviewStore.js";
 import { onAuthChange, getUser } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import { migrateAllProjects } from "./lib/folders.js";
+import { listPins, togglePin, subscribePins } from "../../shared/pins/pinStore.js";
 
 // One-time account migration marker (B663): "this account's existing projects were organized
 // into the standard tree on this device". Everything the migration does is idempotent server-
@@ -51,13 +53,35 @@ export default function Library({
   // Cloud-readiness drives whether the browser can list files (it lives in the account).
   // Re-checks on auth changes so a sign-in/out flips the surface without a reload.
   const [signedIn, setSignedIn] = useState(false);
+  const [uid, setUid] = useState(null);
   useEffect(() => {
     let live = true;
-    const r = () => cloudReady().then((v) => live && setSignedIn(v));
+    const r = () => cloudReady().then(async (v) => {
+      if (!live) return;
+      setSignedIn(v);
+      try { const u = await getUser(); if (live) setUid((u && u.id) || null); } catch (_) { if (live) setUid(null); }
+    });
     r();
     const off = onAuthChange(r);
     return () => { live = false; off && off(); };
   }, []);
+
+  // Pinned folders/files (Library Home). One live list here feeds the ☆ toggles in the
+  // folder tree + file cards AND the Home surface (which subscribes on its own too).
+  const [pins, setPins] = useState([]);
+  useEffect(() => {
+    let live = true;
+    const load = () => listPins(uid).then((p) => { if (live) setPins(p); });
+    load();
+    const off = subscribePins(load);
+    return () => { live = false; off(); };
+  }, [uid]);
+  const onTogglePinFolder = useCallback((node) => {
+    togglePin(uid, { type: "folder", id: node.id, projectId, label: node.name || "Folder" });
+  }, [uid, projectId]);
+  const onTogglePinFile = useCallback((f) => {
+    togglePin(uid, { type: "file", id: f.id, projectId: f.projectId || projectId || null, label: f.title || f.item || "Drawing" });
+  }, [uid, projectId]);
 
   // Unified-view wiring: FolderTree publishes its rows up; FileBrowser places files by those
   // rows and publishes rolled-up per-folder counts back down. Selection filters the list.
@@ -69,6 +93,25 @@ export default function Library({
 
   // Selection is per project — switching projects resets to "All files".
   useEffect(() => { setSelectedFolderId(null); setFolderRows([]); setFolderCounts(null); }, [projectId]);
+
+  // A pinned-folder click from Home lands in two steps: navigate to the folder's project,
+  // then select the folder once its tree rows publish. The pending id rides a ref so the
+  // reset effect above (which clears selection on the project change) can't wipe it.
+  const pendingSelectRef = useRef(null);
+  useEffect(() => {
+    const want = pendingSelectRef.current;
+    if (!want || !folderRows.length) return;
+    pendingSelectRef.current = null;
+    const row = folderRows.find((r) => r.id === want && !r.trashed);
+    // Folder gone (deleted since it was pinned): fall to "All files" — the project still
+    // opens, and the pin card on Home is where the user unpins it.
+    setSelectedFolderId(row ? want : null);
+  }, [folderRows]);
+  const openPinnedFolder = useCallback(({ projectId: pid, folderId }) => {
+    if (!pid || !folderId) return;
+    pendingSelectRef.current = folderId;
+    onNavigate?.({ projectId: pid, cross: false });
+  }, [onNavigate]);
 
   // A selection must never point at a deleted/vanished folder (B662 review #6): deleting the
   // selected folder — or an ancestor — republishes rows without it; fall back to "All files"
@@ -182,6 +225,16 @@ export default function Library({
       )}
 
       <div data-testid={folderMode ? "library-unified" : undefined} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        {signedIn && !projectId && !crossProject ? (
+          // The Library HOME (owner request, 2026-07-05): pinned folders/files + recent
+          // drawings + project cards — replaces the bare "pick a project" dead end.
+          <LibraryHome
+            uid={uid}
+            onOpenFile={(row) => onOpenReviewInDocReview?.(row)}
+            onOpenFolder={openPinnedFolder}
+            onPickProject={(id) => onNavigate?.({ projectId: id, cross: false })}
+          />
+        ) : (
         <FileBrowser
           projectId={projectId}
           projectName={projectName}
@@ -196,6 +249,8 @@ export default function Library({
           folderRows={folderRows}
           selectedFolderId={selectedFolderId}
           onFolderCounts={onFolderCounts}
+          pinnedFileIds={new Set(pins.filter((p) => p.type === "file").map((p) => p.id))}
+          onTogglePinFile={onTogglePinFile}
           folderRail={folderMode ? (
             <FolderTree
               embedded
@@ -206,9 +261,12 @@ export default function Library({
               onSelect={setSelectedFolderId}
               onRowsChange={onRowsChange}
               fileCounts={folderCounts}
+              pinnedIds={new Set(pins.filter((p) => p.type === "folder").map((p) => p.id))}
+              onTogglePin={onTogglePinFolder}
             />
           ) : null}
         />
+        )}
       </div>
     </div>
   );

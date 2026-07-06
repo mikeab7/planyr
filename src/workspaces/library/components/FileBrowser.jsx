@@ -85,6 +85,8 @@ export default function FileBrowser({
    * see on screen is where the bytes go in Drive. Cross-project browsing keeps the classic
    * category tree (a folder tree is per-project). */
   folderMode = false, folderRail = null, folderRows = [], selectedFolderId = null, onFolderCounts = null,
+  // Library-Home pins: which file (review) ids are pinned + the ☆ toggle (both optional).
+  pinnedFileIds = null, onTogglePinFile = null,
 }) {
   const [projects, setProjects] = useState([]);
   const [reviews, setReviews] = useState([]);
@@ -509,6 +511,14 @@ export default function FileBrowser({
                       </span>
                     </span>
                   </button>
+                  {onTogglePinFile && (
+                    <button onClick={() => onTogglePinFile(f)}
+                      title={pinnedFileIds && pinnedFileIds.has(f.id) ? "Unpin from the Library home" : "Pin to the Library home"}
+                      style={{ flex: "none", border: "none", background: "transparent", cursor: "pointer", fontSize: 14, padding: 2, lineHeight: 1,
+                        color: pinnedFileIds && pinnedFileIds.has(f.id) ? "var(--accent-library-text)" : "var(--text-tertiary)" }}>
+                      {pinnedFileIds && pinnedFileIds.has(f.id) ? "★" : "☆"}
+                    </button>
+                  )}
                   {spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
                   <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"

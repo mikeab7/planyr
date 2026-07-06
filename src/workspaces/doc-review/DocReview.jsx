@@ -22,6 +22,7 @@ import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveResume } from "./lib/lastDoc.js";
+import { recordOpen } from "../../shared/recents/recentDocs.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
@@ -778,6 +779,8 @@ export default function DocReview({
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
     suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
+    // Library-Home "Recent": every open (click OR resume) stamps the local opened-list.
+    currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: rec.projectId || null })).catch(() => {});
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
     // B446: a clear canvas-level "Opening…" overlay covers the whole load (setPdfDoc(null) below
@@ -841,8 +844,10 @@ export default function DocReview({
     if (rec.projectId) onNavigate?.({ projectId: rec.projectId });
     // A stitch hands off to <Stitcher>; the single path owns the overlay through its own load
     // (loadSingleReview clears busy in its finally, token-guarded).
-    if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); setBusy(false); setBusyLabel(""); }
-    else { setMode("review"); await loadSingleReview(rec); }
+    if (rec.kind === "stitch") {
+      currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: rec.projectId || null })).catch(() => {}); // Library-Home "Recent"
+      setPendingStitch(rec); setMode("stitch"); setBusy(false); setBusyLabel("");
+    } else { setMode("review"); await loadSingleReview(rec); }
   };
 
   // Breadcrumb project switch → land on THAT project's last-open document (owner request,
