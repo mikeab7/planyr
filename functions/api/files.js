@@ -61,6 +61,7 @@ export async function onRequestPost(context) {
     store: c.folderStore,
     projectId: request.headers.get("x-planyr-project"),
     discipline: request.headers.get("x-planyr-discipline"),
+    folderId: request.headers.get("x-planyr-folder-id") || null, // explicit folder pick wins (B686)
   });
 
   const r = await c.adapter.save({ planyrKey: `${c.user.id}/${rawKey}`, bytes, contentType, name, folder, parentFolderId });

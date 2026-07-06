@@ -31,7 +31,7 @@ import {
   buildFileFacts, deriveTree, browseFiles, holdingArea, CATEGORIES,
   categoryOf, subcategoryOf, stateOf, FILE_STATES, FACETS, onMap, isReference, isSpatial,
 } from "../../../shared/files/fileFacts.js";
-import { resolveDrawingTarget, subtreeIds } from "../../../shared/folders/folderTree.js";
+import { resolveDrawingTarget, subtreeIds, stripPrefix } from "../../../shared/folders/folderTree.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
 import { moveDriveFileToFolder } from "../lib/folders.js";
 import {
@@ -146,9 +146,13 @@ export default function FileBrowser({
   // map fact.id → folder row id, feeding both the list filter and the rail's rolled-up counts.
   const placedFolder = useMemo(() => {
     if (!folderMode || !folderRows.length) return new Map();
+    const byId = new Map(folderRows.map((r) => [r.id, r]));
     const m = new Map();
     for (const f of facts) {
       if (stateOf(f) === FILE_STATES.NEEDS_FILING) continue; // holding-area files aren't in the tree
+      // Explicit folder pick wins (B686): the file sits in the folder the user dropped it into,
+      // overriding the discipline-derived placement (as long as that folder still exists).
+      if (f.folderId && byId.has(f.folderId)) { m.set(f.id, f.folderId); continue; }
       const t = resolveDrawingTarget(folderRows, f.discipline, { archive: stateOf(f) === FILE_STATES.SUPERSEDED });
       if (t) m.set(f.id, t.row.id);
     }
@@ -189,8 +193,9 @@ export default function FileBrowser({
   const removeItem = (uploadId) => setQueue((q) => q.filter((it) => it.uploadId !== uploadId));
 
   // File one blob as a review + its facts row. Returns the fileNewReview result (or null on fail).
-  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling }) => {
-    const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName });
+  // `folderId` (B686) files the bytes into an explicitly-picked tree folder (Drive + on-screen).
+  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling, folderId = null }) => {
+    const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName, folderId });
     if (!r || !r.ok) return r || null;
     const factsIn = facts ? { ...facts } : { discipline, item: item_, docDate };
     factsIn.projectId = pid; factsIn.discipline = discipline; factsIn.item = item_; factsIn.needsFiling = needsFiling;
@@ -198,9 +203,22 @@ export default function FileBrowser({
     return r;
   };
 
-  const processItem = async (item) => {
+  const processItem = async (item, targetFolderId = null) => {
     patchItem(item.uploadId, { status: QUEUE_STATUS.PROCESSING, error: null, warn: null });
     try {
+      // Explicit folder pick (B686): the user dropped while viewing a specific folder → that folder
+      // WINS over auto-filing, for any file type. File straight into it — no title-block read, no
+      // discipline guess, and never "needs filing" (they told us exactly where it goes).
+      if (targetFolderId && projectId) {
+        const folder = folderRows.find((r) => r.id === targetFolderId);
+        const discipline = (folder && stripPrefix(folder.name)) || "Other";
+        const r = await fileOne({ pid: projectId, discipline, item_: "", docDate: null, blob: item.file, fileName: item.name, facts: { discipline }, needsFiling: false, folderId: targetFolderId });
+        if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn’t file." }); return; }
+        const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
+        patchItem(item.uploadId, { status: QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: folder ? stripPrefix(folder.name) : projName(projectId) });
+        return;
+      }
+
       // Only PDFs carry a readable title block (B685). Non-PDFs (DWG, images, spreadsheets…) are
       // stored as-is: skip the auto-file read entirely — it would just spin up pdf.js to fail — and
       // file the bytes directly (under the project when we're in one; to the holding area otherwise).
@@ -261,41 +279,49 @@ export default function FileBrowser({
     }
   };
 
-  const ingest = async (fileList) => {
+  // The folder a drop should file INTO (B686): the folder currently selected in the tree rail.
+  // null = "All files" is selected (or we're not in folder mode) → auto-file by title block —
+  // that "All files" node IS the drop-here-to-auto-sort spot the owner asked for. Captured at
+  // drop time (a prop read now, threaded through the async pipeline) so a later selection change
+  // can't retarget an in-flight upload.
+  const dropTargetFolder = () => (folderMode ? (selectedFolderId || null) : null);
+
+  const ingest = async (fileList, targetFolderId = null) => {
     if (!projectId && !cross) return; // drop gated until a project is chosen (no auto-guess)
     const items = makeQueueItems(fileList);
     if (!items.length) return;
     setQueue((q) => [...items, ...q]);
     const accepted = items.filter((it) => it.status === QUEUE_STATUS.PROCESSING);
-    if (accepted.length) { await runPool(accepted, processItem, 3); refresh(); }
+    if (accepted.length) { await runPool(accepted, (it) => processItem(it, targetFolderId), 3); refresh(); }
   };
 
   // A FOLDER drop/pick (B664/B685): file every real file found anywhere in the tree (any type);
   // report ONE honest "skipped N system files" summary for the OS junk (dotfiles, thumbnail
   // caches, lock files) a folder sweep drags along, instead of filing noise the user never picked.
-  const ingestFolder = async (allFiles) => {
+  const ingestFolder = async (allFiles, targetFolderId = null) => {
     if (!projectId && !cross) return;
     const { accepted, skipped } = partitionAccepted(allFiles);
     setFolderNote(accepted.length || skipped.length ? { filed: accepted.length, skipped: skipped.length } : null);
-    if (accepted.length) await ingest(accepted);
+    if (accepted.length) await ingest(accepted, targetFolderId);
   };
 
   const onDrop = (e) => {
     e.preventDefault(); e.stopPropagation(); setDropOver(false);
+    const target = dropTargetFolder();
     // Extract entries SYNCHRONOUSLY (the dataTransfer item list dies after this handler
     // returns), then walk any folders asynchronously. A dropped folder recurses into its
     // subfolders; loose files keep the classic per-file path (which shows rejection rows).
     const { entries, files, hasEntryApi, hasDirectory } = dropItemsToEntries(e.dataTransfer);
     if (hasEntryApi && entries.length) {
-      flattenEntries(entries).then((all) => (hasDirectory ? ingestFolder(all) : ingest(all)))
-        .catch(() => ingest(files));
+      flattenEntries(entries).then((all) => (hasDirectory ? ingestFolder(all, target) : ingest(all, target)))
+        .catch(() => ingest(files, target));
     } else {
-      ingest(files); // older browsers without the entry API — flat file list only
+      ingest(files, target); // older browsers without the entry API — flat file list only
     }
   };
-  const onPick = (e) => { ingest(e.target.files); e.target.value = ""; };
+  const onPick = (e) => { ingest(e.target.files, dropTargetFolder()); e.target.value = ""; };
   // Folder picker: input.webkitdirectory already hands back a FLAT, recursed file list.
-  const onPickFolder = (e) => { ingestFolder([...(e.target.files || [])]); e.target.value = ""; };
+  const onPickFolder = (e) => { ingestFolder([...(e.target.files || [])], dropTargetFolder()); e.target.value = ""; };
 
   // A PDF opens on the markup canvas; any other file type (B685) has no canvas preview, so
   // clicking it DOWNLOADS the original instead. Legacy files carry no sourceFile — they were
@@ -390,6 +416,11 @@ export default function FileBrowser({
   }
 
   const holdingCount = holding.length;
+  // Where a drop will file (B686): the selected tree folder wins; "All files"/no selection means
+  // auto-file by title block. Drives the drop-strip copy + the drop-anywhere overlay so the two
+  // modes are unmistakable ("Filing into 02. Electric" vs. "auto-file drawings by title block").
+  const dropFolderRow = folderMode && selectedFolderId ? folderRows.find((r) => r.id === selectedFolderId) : null;
+  const dropFolderLabel = dropFolderRow ? stripPrefix(dropFolderRow.name) : null;
 
   return (
     <div onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setDropOver(true); } }}
@@ -611,9 +642,13 @@ export default function FileBrowser({
         <div style={{ flex: "none", margin: "0 12px 12px", padding: "9px 12px", borderRadius: 9, textAlign: "center", fontFamily: "inherit",
             border: `1.5px dashed ${dropOver ? "var(--accent-library)" : "var(--border-default)"}`,
             background: dropOver ? "var(--hover-ghost)" : "var(--surface-raised)", color: "var(--text-secondary)" }}>
-          <span style={{ fontSize: 12, fontWeight: 600 }}>Drag a folder or files here to file them</span>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>
+            {dropFolderLabel ? `Drag files here to file them into ${dropFolderLabel}` : "Drag a folder or files here to file them"}
+          </span>
           <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>
-            Any file type is welcome. A PDF reads its own title block and files itself{cross ? "" : ` into ${projName(projectId) || "this project"}`}; other files are stored as-is. Anything unplaced lands in Needs filing.
+            {dropFolderLabel
+              ? <>Any file type is welcome — it goes straight into <b>{dropFolderLabel}</b>. To auto-sort drawings by title block instead, drop them on <b>All files</b>.</>
+              : <>Any file type is welcome. A PDF reads its own title block and files itself{cross ? "" : ` into ${projName(projectId) || "this project"}`}; other files are stored as-is. Click a folder to file straight into it. Anything unplaced lands in Needs filing.</>}
           </span>
           <span style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 7 }}>
             <button onClick={() => fileInputRef.current?.click()} style={pickBtn}>Choose files</button>
@@ -625,7 +660,7 @@ export default function FileBrowser({
       {/* drop-anywhere overlay hint */}
       {dropOver && (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", border: "2.5px dashed var(--accent-library)", borderRadius: 4, background: "rgba(14,116,144,0.06)", display: "grid", placeItems: "center" }}>
-          <span style={{ background: "var(--surface-raised)", color: "var(--text-primary)", fontWeight: 700, fontSize: 13, padding: "8px 16px", borderRadius: 999, border: "1px solid var(--border-default)" }}>Drop to file into {cross ? "the matched project" : (projName(projectId) || "this project")}</span>
+          <span style={{ background: "var(--surface-raised)", color: "var(--text-primary)", fontWeight: 700, fontSize: 13, padding: "8px 16px", borderRadius: 999, border: "1px solid var(--border-default)" }}>Drop to file into {dropFolderLabel || (cross ? "the matched project" : (projName(projectId) || "this project"))}</span>
         </div>
       )}
     </div>

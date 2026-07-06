@@ -105,6 +105,14 @@ export function guessContentType(name = "", type = "") {
   return CONTENT_TYPE_BY_EXT[ext] || "application/octet-stream";
 }
 
+// Strip a trailing FILE EXTENSION for a display label — but only a REAL extension, one that
+// STARTS WITH A LETTER (B686). This keeps version-style names intact: "Rev.3", "Site Plan v1.2",
+// "Lot2.5Acres" are NOT clipped (their trailing ".3"/".2"/".5Acres" begin with a digit), while
+// "survey.pdf" / "plan.dwg" / "budget.xlsx" lose their extension as intended.
+export function stripFileExt(name = "") {
+  return String(name || "").replace(/\.[a-z][a-z0-9]{0,7}$/i, "");
+}
+
 /* ------------------------- review records (Postgres) ------------------------ */
 
 // Per-tab `version` tokens for the optimistic-concurrency guard (B314), populated by
@@ -235,10 +243,12 @@ export async function loadReview(id) {
 export async function listReviews() {
   if (!supabase || !(await currentUid())) return [];
   // `placed:data->placed` pulls just the on-map flag out of the data jsonb (NOT the whole
-  // heavy payload) so the drawer's Filed/On-map badge can reflect it (NEW-3). On any error
-  // we fall back to the core columns — the badge degrades to "filed", never regresses.
+  // heavy payload) so the drawer's Filed/On-map badge can reflect it (NEW-3). `sfile`/`folderId`
+  // (B685/B686) likewise pull the authoritative source filename + explicit folder pick out of
+  // `data` so the Library classifies type + places the file without re-reading the record. On any
+  // error we fall back to the core columns — those extras degrade to absent, never a regression.
   let res = await supabase.from("doc_reviews")
-    .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed")
+    .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed,sfile:data->>sourceFile,folderId:data->>folderId")
     .order("updated_at", { ascending: false });
   // team_id/user_id may be un-migrated → drop to the prior column set; then the older core set.
   if (res.error) res = await supabase.from("doc_reviews")
@@ -395,7 +405,7 @@ export async function listFileFacts() {
  * { ok, driveKey } on success (driveKey = the stable key to read it back with),
  * { ok:false, skipped:true } when Drive isn't enabled yet, or { ok:false, error }.
  * Best-effort — never throws. */
-export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName } = {}) {
+export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName, folderId = null } = {}) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   let token = null;
   try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { /* none */ }
@@ -412,6 +422,9 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
         // standard folder tree (Design → Drawings → discipline → Current) when it's mirrored;
         // the flat x-planyr-folder path above stays the fallback, so nothing regresses.
         ...(projectId ? { "x-planyr-project": String(projectId) } : {}),
+        // Explicit folder pick (B686): the user dropped into a folder they clicked → the server
+        // files the bytes into THAT folder's Drive folder, overriding the discipline route.
+        ...(folderId ? { "x-planyr-folder-id": String(folderId) } : {}),
         "x-planyr-discipline": headerSafe(discipline) },
       body: file,
     });
@@ -429,7 +442,7 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
  * only MINTS a resumable session; the browser PUTs the bytes DIRECTLY to Google (cross-origin),
  * so neither limit applies (multi-GB works). Mirrors pushFileToDrive's return:
  * { ok, driveKey } | { ok:false, skipped:true, error } | { ok:false, error }. Never throws. */
-export async function uploadLargeToDrive(file, { projectId = null, discipline = "Other", fileName } = {}) {
+export async function uploadLargeToDrive(file, { projectId = null, discipline = "Other", fileName, folderId = null } = {}) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   let token = null;
   try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { /* none */ }
@@ -446,6 +459,7 @@ export async function uploadLargeToDrive(file, { projectId = null, discipline = 
         "x-planyr-name": name, "x-planyr-content-type": contentType, "x-planyr-size": String(file.size || 0),
         // Tree targeting (B650 follow-on) — same as pushFileToDrive; flat path stays the fallback.
         ...(projectId ? { "x-planyr-project": String(projectId) } : {}),
+        ...(folderId ? { "x-planyr-folder-id": String(folderId) } : {}), // explicit folder pick wins (B686)
         "x-planyr-discipline": headerSafe(discipline) },
     });
     if (initResp.status === 404 || initResp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
@@ -521,22 +535,28 @@ export async function getShareLink(driveKey) {
 // the home: push there first; only fall back to Supabase Storage if Drive didn't take it,
 // so a file is never left unstored AND the redundant Supabase copy stops consuming storage
 // on the happy path. Then upsert the indexed record. Returns { ok, id }.
-export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", docDate = null, blob, fileName }) {
+export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", docDate = null, blob, fileName, folderId = null }) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const id = newReviewId();
   const srcId = newSourceId();
   // Use the drawing's own date when auto-filing supplies one (YYYY-MM-DD); else today.
   const filedDate = (typeof docDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(docDate)) ? docDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
-  const itemLabel = item || (fileName || "Document").replace(/\.[a-z0-9]{1,8}$/i, "");
+  const itemLabel = item || stripFileExt(fileName || "Document");
   // Store the bytes Drive-first, Supabase-fallback (the one shared policy — see storeSource).
   const stored = blob
-    ? await storeSource(srcId, blob, { projectId, discipline, fileName })
+    ? await storeSource(srcId, blob, { projectId, discipline, fileName, folderId })
     : { ok: false, storageKey: null, driveKey: null, oversize: false, driveError: null, driveSkipped: true };
   // Unstored only if NEITHER backend took it (and it wasn't merely oversize for Supabase).
   const uploadFailed = !stored.ok && !stored.oversize;
   const record = {
     id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate: filedDate }),
     project, projectId, discipline, item: itemLabel, revision: "", docDate: filedDate,
+    // The original upload filename lives on the review itself (B685/B686) — AUTHORITATIVE for
+    // "is this a PDF?" (listReviews surfaces it), so a missed best-effort facts write can't make a
+    // non-PDF look like a PDF. folderId records an explicit folder pick so on-screen placement +
+    // the Drive folder agree.
+    sourceFile: fileName || "document.pdf",
+    ...(folderId ? { folderId } : {}),
     sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: stored.storageKey, oversize: stored.oversize, driveKey: stored.driveKey }],
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
@@ -563,14 +583,14 @@ export const isStoredSource = (s) => !!(s && (s.storageKey || s.driveKey || s.ov
  * skip the Cloudflare Worker's body/memory limits; smaller files keep the proven multipart
  * path. Returns { ok, storageKey, driveKey, oversize, large, driveError, driveSkipped }.
  * Never throws. (B322/NEW-2; B409 large-file path.) */
-export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName } = {}) {
+export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName, folderId = null } = {}) {
   // A file over the Supabase cap can't go through the Worker AND Supabase rejects it as
   // "oversize" — so route it straight to Drive (B409). If that path is unavailable it falls back
   // to the Supabase attempt (still flags oversize), so behaviour is never worse than before.
   const isLarge = !!(blob && blob.size > MAX_BYTES);
   const drive = blob
-    ? (isLarge ? await uploadLargeToDrive(blob, { projectId, discipline, fileName })
-               : await pushFileToDrive(blob, { projectId, discipline, fileName }))
+    ? (isLarge ? await uploadLargeToDrive(blob, { projectId, discipline, fileName, folderId })
+               : await pushFileToDrive(blob, { projectId, discipline, fileName, folderId }))
     : { ok: false, skipped: true };
   if (drive.ok) return { ok: true, storageKey: null, driveKey: drive.driveKey, oversize: false, large: isLarge, driveError: null, driveSkipped: false };
   const up = await uploadSource(srcId, blob, projectId, discipline);

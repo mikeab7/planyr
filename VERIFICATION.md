@@ -68,6 +68,15 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V228 — B687: dropping a file into a SELECTED Library folder files it there — bytes land in the matching Google Drive folder ⏳ **SIGNED-IN + a connected Drive account** (folder-id filing writes to the real Drive folder; the sandbox blocks the Supabase/Drive handshake and can't render the folder tree logged-out)
+- **Verified here (sandbox, 2026-07-06):** lint 0 · full suite **2,836** green (+`treeParentForUpload` explicit-folder cases in `test/folderMirror.test.js`: an explicit folderId wins over discipline for any folder incl. non-Drawings like Utilities → Electric, and an unmirrored/unknown folder falls back to the discipline route; +`stripFileExt` cases) · MAP.md regenerated · build green. **Headless (logged-out):** root + `#/library` + `#/markup` render with the new pipeline and **zero JS/page errors**. The placement logic (`placedFolder` honours `folderId`), the server resolver, and the drop-strip copy are unit/inspection-verified; the actual Drive write is auth-only.
+- **Pending signed-in steps (planyr.io, any teammate — NOT Michael's job), on a project whose tree is mirrored to Drive:**
+  1. In the Library, click a specific folder (e.g. **10. Utilities → 02. Electric**) and drop a file (any type) → it appears **in that folder** (not Design/Drawings), the drop-strip reads "Filing into 02. Electric", and in Google Drive the bytes land in that folder.
+  2. Click **All files** and drop a PDF drawing → it still **auto-sorts by title block** into its discipline folder (the auto-file "spot" still works).
+  3. Drop a spreadsheet into a folder → filed there, `needsFiling:false` (not dumped into the holding area); re-open the project → it's still in that folder (placement persisted).
+  4. Reload / open on a second device → the file stays in the picked folder (the `data.folderId` round-trips through `listReviews`).
+  5. Regression: on **All files**, a Civil PDF still finds Design → Drawings → Civil; an existing project's files still show under their discipline folders (no folderId → discipline placement).
+
 ### V227 — B685: the Library uploads (and files, then downloads) a NON-PDF end to end ⏳ **SIGNED-IN + a connected Drive account** (the drop zone only renders signed in; the sandbox proxy blocks the Supabase/Drive handshake, so the store→file→download round-trip is unreachable logged-out)
 - **Verified here (sandbox, 2026-07-06):** lint 0 · full suite **2,831** green (rewrote `test/uploadQueue.test.js` — accepts any non-empty file, junk/partition, `isPdfName`/`isJunkFile`; added `guessContentType` cases to `test/docPersistence.test.js`) · MAP.md regenerated · build green. **Headless (logged-out):** the app loads root + `#/library` + `#/markup` with the new imports resolved and **zero JS/page errors** (only the sandbox proxy's expected network-blocked resource errors). The pure acceptance/junk/content-type logic is unit-proven; the OS picker no longer carries `accept="application/pdf"`.
 - **Pending signed-in steps (planyr.io, any teammate — NOT Michael's job), on a project with a connected Drive:**
