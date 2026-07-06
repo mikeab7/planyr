@@ -15,6 +15,13 @@ import { useProfile } from "../shared/profile/useProfile.js";
 import { prefetchOnIdle } from "./modulePrefetch.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 import { useHashRoute, INITIAL_HASH_EMPTY } from "./route.js";
+import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
+
+// "Open where I left off": on an empty-hash boot, seed the URL from the stored last-route
+// pointer BEFORE the first render (so useHashRoute's initial read sees it). Runs at module
+// scope — after route.js captured INITIAL_HASH_EMPTY, so deep links (incl. "#/") still win
+// and resumeAllowed stays true for the Site Planner's own plan-level resume.
+seedBootRoute();
 
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
@@ -141,6 +148,10 @@ export default function Shell() {
   // B279 — tag telemetry rows with the workspace the user is in, so a reported error
   // says WHERE it happened (site-planner / doc-review / scheduler).
   useEffect(() => { setTelemetryModule(active); }, [active]);
+
+  // "Open where I left off" — persist every route change as the last-route pointer.
+  // Single choke point: catches tab clicks, breadcrumb picks, and programmatic navigates.
+  useEffect(() => { writeLastRoute(route); }, [route]);
 
   const current = WORKSPACES.find((w) => w.id === active) || WORKSPACES[0];
   const Active  = current.Comp;
