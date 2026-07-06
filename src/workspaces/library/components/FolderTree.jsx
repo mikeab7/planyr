@@ -16,6 +16,11 @@ import {
   listFolders, ensureSeeded, addFolder, renameFolder, moveFolder,
   trashSubtree, syncFoldersToDrive, planFolderDelete,
 } from "../lib/folders.js";
+import { loadIdSet, saveIdSet, pruneSet } from "../../../shared/ui/persistedSet.js";
+
+/* Per-project remembered expansion (B-item: tree opens collapsed, not with every
+ * category flung open). One key per project so switching projects can't bleed state. */
+const treeOpenKey = (projectId) => `planyr:library:treeOpen:v1:${projectId}`;
 
 const T = {
   page: "var(--surface-page)", raised: "var(--surface-raised)", overlay: "var(--surface-overlay)",
@@ -49,6 +54,9 @@ export default function FolderTree({
   const [pendingDelete, setPendingDelete] = useState(null); // { id, name, folders, files, empty, loading }
   const [drive, setDrive] = useState({ state: "idle", msg: "" }); // idle|syncing|ok|off|error
   const syncTimer = useRef(null);
+  // Which project's stored expansion has been restored — persistence must not fire before the
+  // restore (the initial empty set would overwrite what the user had open last visit).
+  const expandedLoadedFor = useRef(null);
 
   // Every rows update also publishes upward (the unified view places files by these rows).
   const setRows = useCallback((list) => { setRowsRaw(list); onRowsChange?.(list); },
@@ -61,9 +69,11 @@ export default function FolderTree({
     return list;
   }, [signedIn, projectId, setRows]);
 
-  // Seed-on-first-open (idempotent) → load → expand the top level → kick a background mirror sync.
+  // Seed-on-first-open (idempotent) → load → restore this project's remembered expansion
+  // (default: everything collapsed) → kick a background mirror sync.
   useEffect(() => {
     let live = true;
+    expandedLoadedFor.current = null;
     if (!signedIn || !projectId) { setRows([]); return; }
     (async () => {
       setLoading(true); setError("");
@@ -73,13 +83,22 @@ export default function FolderTree({
       const list = await listFolders(projectId);
       if (!live) return;
       setRows(list);
-      setExpanded(new Set(childrenOf(list, null).map((r) => r.id))); // top level open
+      // Restore what the user last had open, pruning ids of since-deleted folders. A first
+      // visit restores the empty set = all collapsed (the tree no longer flings itself open).
+      setExpanded(pruneSet(loadIdSet(treeOpenKey(projectId)), new Set(list.map((r) => r.id))));
+      expandedLoadedFor.current = projectId;
       setLoading(false);
       scheduleSync(seed && seed.seeded ? 0 : 400); // seed → sync now so Drive materializes promptly
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn, projectId]);
+
+  // Persist expansion the moment it changes — but only after this project's restore ran,
+  // and only for the project the state belongs to (guards the project-switch transition).
+  useEffect(() => {
+    if (projectId && expandedLoadedFor.current === projectId) saveIdSet(treeOpenKey(projectId), expanded);
+  }, [expanded, projectId]);
 
   // Debounced one-way reconcile to Drive after edits. The server syncs one small chunk per
   // request (the 502 fix), so this reports live progress across the rounds.

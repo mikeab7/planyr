@@ -36,6 +36,11 @@ import {
   QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
   dropItemsToEntries, flattenEntries, partitionAccepted,
 } from "../../../shared/files/uploadQueue.js";
+import { loadIdSet, saveIdSet } from "../../../shared/ui/persistedSet.js";
+
+// Cross-project category tree: remembered set of OPEN categories (default: all collapsed).
+// Category names are stable canonical labels, so one shared key works across sessions.
+const CATS_OPEN_KEY = "planyr:library:catsOpen:v1";
 
 const fmtDate = (f) => { const s = f.docDate || f.updatedAt; try { return s ? new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; } catch (_) { return ""; } };
 
@@ -88,7 +93,7 @@ export default function FileBrowser({
   const [facet, setFacet] = useState("all");
   const [showHolding, setShowHolding] = useState(false);   // "Needs filing" view active
   const [showSuperseded, setShowSuperseded] = useState(false);
-  const [openCats, setOpenCats] = useState({});            // category -> expanded?
+  const [openCats, setOpenCats] = useState(() => loadIdSet(CATS_OPEN_KEY)); // Set of open categories
   const [dropOver, setDropOver] = useState(false);
   const [queue, setQueue] = useState([]);
   const [refileSel, setRefileSel] = useState({});          // fileId -> { category, discipline }
@@ -384,12 +389,17 @@ export default function FileBrowser({
                 </div>
               )}
               {tree.map((n) => {
-                const expanded = openCats[n.category] ?? true;
+                const expanded = openCats.has(n.category);
                 const catActive = !showHolding && node.category === n.category && !node.subcategory;
                 return (
                   <div key={n.category}>
                     <TreeRow label={n.category} count={n.count} active={catActive} caret={expanded ? "▾" : "▸"}
-                      onCaret={() => setOpenCats((o) => ({ ...o, [n.category]: !expanded }))}
+                      onCaret={() => setOpenCats((o) => {
+                        const next = new Set(o);
+                        next.has(n.category) ? next.delete(n.category) : next.add(n.category);
+                        saveIdSet(CATS_OPEN_KEY, next);
+                        return next;
+                      })}
                       onClick={() => { setShowHolding(false); setNode({ category: n.category, subcategory: null }); }} bold />
                     {expanded && n.subs.map((s) => (
                       <TreeRow key={s.name} label={s.name} count={s.count} indent
