@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _51 open · 12 awaiting live verification._
+> _51 open · 13 awaiting live verification._
 
 ## 🔲 Open
 
@@ -66,6 +66,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B685 | Library upload was PDF-only; accept ANY file type | [Library / Doc Review] | #library #files #filing #doc-review | ⏳ live — awaiting |
 | B684 | Export to Google Earth (KMZ) via right-click, in both the map viewer and the canvas | [Site Planner / Map] | #site-planner #export #coordinates | ⏳ live — awaiting |
 | B682 | Dragging a parcel's acreage label spawns a "bunch of copies" (id-less parcels + value-based union merge) | [Site Planner] | #site-planner #persistence #selection | ⏳ live — awaiting |
 | B675 | Planyr MCP connector: read-only `/api/mcp/<token>` endpoint gives Claude live cross-project context | [functions/api/mcp] | #infra #files | ⏳ live — awaiting |
@@ -84,14 +85,14 @@
 - **#auth** — B483, B676
 - **#compare** — B471
 - **#coordinates** — B684
-- **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B667, B659
+- **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B685, B667, B659
 - **#drive** — B663, B662, B629, B409
 - **#export** — B684
-- **#files** — B180, B181, B182, B183, B675, B668, B664, B659
-- **#filing** — B411, B364, B273, B664, B659
+- **#files** — B180, B181, B182, B183, B685, B675, B668, B664, B659
+- **#filing** — B411, B364, B273, B685, B664, B659
 - **#gis** — B629, B370, B309, B178, B171, B147, B13, B95
 - **#infra** — B408, B406, B179, B63, B675, B669
-- **#library** — B663, B662, B676, B668, B664, B659
+- **#library** — B663, B662, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479, B669
 - **#persistence** — B672, B673, B674, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B682, B676, B667

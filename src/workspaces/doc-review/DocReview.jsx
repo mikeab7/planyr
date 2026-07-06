@@ -25,6 +25,7 @@ import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveR
 import { recordOpen } from "../../shared/recents/recentDocs.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
+import { isPdfName } from "../../shared/files/uploadQueue.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -784,7 +785,16 @@ export default function DocReview({
       if (!buf) { setRedrop(sourceUnavailableMessage(signedIn ? "fetch-failed" : "signed-out", { name: src.name })); return; }
       blob = buf;
     }
-    const pdf = await loadPdf(blob);
+    // B685 — the Library now stores ANY file type, but the markup canvas can only render a PDF.
+    // A non-PDF reaches here only via "resume last document"; show a clear, non-crashing note
+    // (its bytes are safe — download it from the Library) instead of letting pdf.js throw.
+    if (src && src.name && !isPdfName(src.name)) {
+      setRedrop(`“${src.name}” isn’t a PDF, so it can’t be shown on the markup canvas. Open it from the Library to download it.`);
+      return;
+    }
+    let pdf;
+    try { pdf = await loadPdf(blob); }
+    catch (_) { setRedrop(`“${src.name || "That file"}” couldn’t be opened as a PDF — it may be a different file type or a damaged PDF. Open it from the Library to download the original.`); return; }
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
     readOcg(pdf); // B490: populate the Layers panel from the new doc's optional content
