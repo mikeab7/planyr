@@ -109,6 +109,41 @@ log(cTexts.length >= 1 && !cTexts[0].hasHalo && aTexts[0].hasHalo,
   `B678 labelHalo:false removes the white halo (styled hasHalo=${cTexts[0]?.hasHalo}, default hasHalo=${aTexts[0]?.hasHalo})`);
 await page.screenshot({ path: OUT + "b678-inline-label-controls.png" });
 
+// ---- B682: the label-spacing SLIDER is LIVE — moving it re-spaces the labels immediately ----
+// select lineA (a click at its midpoint) so its inline-label controls appear in the panel
+const aMid0 = await page.evaluate(() => {
+  const l = [...document.querySelectorAll("svg line")].find((x) => (x.getAttribute("stroke") || "").toLowerCase() === "#b30d6a");
+  if (!l) return null;
+  const x1 = +l.getAttribute("x1"), y1 = +l.getAttribute("y1"), x2 = +l.getAttribute("x2"), y2 = +l.getAttribute("y2");
+  const svg = l.ownerSVGElement.getBoundingClientRect();
+  return { x: svg.x + (x1 + x2) / 2, y: svg.y + (y1 + y2) / 2 };
+});
+if (aMid0) { await page.mouse.move(aMid0.x, aMid0.y); await page.mouse.down(); await page.mouse.up(); await page.waitForTimeout(300); }
+// drive the range input the React-friendly way (native value setter + input/change events)
+const setSpacingSlider = (v) => page.evaluate((val) => {
+  const s = document.querySelector('input[type="range"][aria-label="Label spacing (ft)"]');
+  if (!s) return false;
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+  setter.call(s, String(val));
+  s.dispatchEvent(new Event("input", { bubbles: true }));
+  s.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
+}, v);
+const sliderPresent = await page.evaluate(() => !!document.querySelector('input[type="range"][aria-label="Label spacing (ft)"]'));
+log(sliderPresent, `B682 label-spacing slider present in the panel once a labeled line is selected`);
+if (sliderPresent) {
+  await setSpacingSlider(1500); await page.waitForTimeout(300);
+  const sparse = (await readLabelTexts("AAAAA")).length;
+  await setSpacingSlider(60); await page.waitForTimeout(300);
+  const dense = (await readLabelTexts("AAAAA")).length;
+  log(dense > sparse && sparse >= 1,
+    `B682 slider is LIVE — a tight setting shows MORE labels than a wide one (${dense} at 60ft vs ${sparse} at 1500ft)`);
+  await page.screenshot({ path: OUT + "b682-spacing-slider.png" });
+}
+// deselect so the callout tests below start clean
+await page.keyboard.press("Escape");
+await page.waitForTimeout(150);
+
 // ---- helper: a REAL physical double-click at a screen point — two down/up pairs at the SAME spot,
 //      close in time, exactly the gesture the time+distance-gated isDoubleTap reconstructs. ----
 const realDblClick = async (x, y) => {
