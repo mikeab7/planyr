@@ -354,8 +354,11 @@ export default function FileBrowser({
     const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const pid = f.projectId || projectId;
     const res = await refileReview(f.id, { projectId: pid, project: projName(pid), discipline });
-    // Update the index row's category/state too so the tree moves it immediately.
-    try { await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.title })); } catch (_) {}
+    // Update the index row's category/state too so the tree moves it immediately. Preserve the
+    // REAL upload filename (B685) — never the extension-less title: source_file is what isPdfFile
+    // reads to decide open-in-Review vs. download, so writing f.title here would make a re-filed
+    // PDF look like a non-PDF (empty stays empty → legacy PDFs still read as PDF).
+    try { await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.sourceFile || "" })); } catch (_) {}
     if (res.ok) {
       // Move the Drive BYTES to match the confirmed discipline (B662 review #3): the upload
       // landed where the ORIGINAL read pointed (often the Drawings fallback for "Other");
