@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `0228fcd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `d0b39a9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -212,7 +212,7 @@ _197 source files mapped._
 - **`src/workspaces/site-planner/lib/buildingProps.js`** — Pure tiered building-property rules: sf-driven clear-height + slab-thickness defaults with per-building manual overrides
   - _exports_: `autoClearHeight`, `autoSlab`, `DEFAULT_BUILDING_RULES`, `effectiveBuildingProps`, `evalTier`, `fmtClearHeight`, `fmtSlab`, `normalizeRules`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
-  - _exports_: `_siteContent`, `_siteTombs`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudList`, `cloudUpsert`, `fetchSiteForReconcile`, `interpretDelete`, `keepaliveCloudPush`, `noteLocalContent`, `wouldThinClobber`
+  - _exports_: `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudList`, `cloudUpsert`, `fetchSiteForReconcile`, `interpretDelete`, `keepaliveCloudPush`, `slimForCloud`
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
   - _exports_: `conceptLettersToNumber`, `nextConceptName`, `numberToConcept`, `parseConceptIndex`
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
@@ -326,7 +326,7 @@ _197 source files mapped._
 - **`src/workspaces/site-planner/lib/sourceHealth.js`** — Per-source circuit breaker for county parcel servers: track consecutive failures, open/cooldown/half-open, filter healthy candidates, and decide the honest statewide-backup badge
   - _exports_: `filterHealthyCandidates`, `isSourceOpen`, `isStatewideBackup`, `recordSourceResult`, `resetSourceHealth`, `SOURCE_COOLDOWN_MS`, `SOURCE_FAIL_THRESHOLD`, `sourceCooldownMs`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
-  - _exports_: `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `noteLocalContent`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `renameSiteGroup`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
+  - _exports_: `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `renameSiteGroup`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
 - **`src/workspaces/site-planner/lib/supabase.js`** — Supabase anon client factory from build-time env, connection/health test, and synchronous access-token read for the keepalive cloud push
   - _exports_: `connectionInfo`, `currentAccessToken`, `supabase`, `supabaseConfigured`, `supabaseRest`, `testConnection`
 - **`src/workspaces/site-planner/lib/teams.js`** — Team-workspace I/O over the anon Supabase client: create/list teams, roster + role management, email invites and claim, all RLS-scoped with SECURITY DEFINER RPC preferred paths

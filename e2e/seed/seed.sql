@@ -71,3 +71,24 @@ select s.id, s.user_id, s.name, s.county
 from public.sites s
 join auth.users u on u.id = s.user_id
 where u.email = 'e2e@planyr.test' and s.id = 'e2e-fixture-site';
+
+-- B672 — explode this fixture's element collections into site_elements rows (per-element sync).
+-- The planner now READS elements from rows (the blob is a slim-header format post-cutover), so a
+-- seeded fixture without rows would open empty. Delete-then-explode, scoped to this fixture id
+-- (never touches real data); mirrors db/site_elements_backfill.sql (z = index*1024, rev 1).
+delete from public.site_elements where site_id = 'e2e-fixture-site';
+insert into public.site_elements (site_id, id, kind, data, z_index, rev, updated_at, updated_by)
+select s.id, e.value->>'id', k.kind, e.value, (e.ordinality - 1) * 1024, 1, s.updated_at, s.user_id
+from public.sites s
+cross join (values ('el','els'), ('markup','markups'), ('measure','measures'),
+                   ('callout','callouts'), ('parcel','parcels')) as k(kind, field)
+cross join lateral jsonb_array_elements(coalesce(s.data->k.field, '[]'::jsonb))
+  with ordinality as e(value, ordinality)
+where s.id = 'e2e-fixture-site' and e.value->>'id' is not null
+  and not (coalesce(s.data->'deletedIds', '[]'::jsonb) ? (e.value->>'id'));
+insert into public.site_elements (site_id, id, kind, data, z_index, rev, updated_at, updated_by, deleted_at, deleted_by)
+select s.id, d.value, 'tombstone', null, 0, 1, s.updated_at, s.user_id, now(), s.user_id
+from public.sites s
+cross join lateral jsonb_array_elements_text(coalesce(s.data->'deletedIds', '[]'::jsonb)) as d(value)
+where s.id = 'e2e-fixture-site' and d.value is not null and d.value <> ''
+on conflict (site_id, kind, id) do nothing;

@@ -2,12 +2,13 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, noteLocalContent } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { createElementSync } from "./lib/elementSync.js";
+import { createElementSync, stableStringify } from "./lib/elementSync.js";
+import { rowsToModel } from "./lib/elementRows.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
@@ -1749,13 +1750,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // user must reload to get the latest before saving, so it gets its own loud "reload" banner.
   // Work is NOT lost: the edit is saved on this device, and reload union-merges it with the
   // other session's change (mergeSiteContent), then re-pushes the combined result.
-  const [cloudConflict, setCloudConflict] = useState(false);
+  // B672 — the doc-level cloudConflict state + its blocking "changed in another session … Take
+  // over editing" banner are RETIRED BY ARCHITECTURE (the B455/B460/B558/B596 false-conflict
+  // class). Elements are per-row rev-guarded in site_elements (a real collision surfaces per
+  // element, B673); the header row self-heals a stale CAS inside cloudUpsert (refetch + one
+  // re-push). A residual header conflict (a live write race that also lost the retry) is treated
+  // as a transient failed write — retried on the next edit, never a blocking banner.
   // B455/NEW-7 — single-active-editor lockout. When the same plan is open in another tab of
   // THIS browser, only the lock-holder edits; a background tab goes read-only so it can't push
   // a save over the active tab's newer cloud row (the structural fix for the stale-tab clobber).
-  // Degrades open where Web Locks is unavailable. cloudConflict + readOnly gate the cloud push.
+  // Degrades open where Web Locks is unavailable. readOnly gates the cloud push.
   const [readOnly, setReadOnly] = useState(false);
-  const conflictRef = useRef(false); conflictRef.current = cloudConflict;
   const readOnlyRef = useRef(false); readOnlyRef.current = readOnly;
   const siteIdRef = useRef(siteId); siteIdRef.current = siteId; // current id for the lock telemetry closure
   const prevReadOnlyRef = useRef(false); // so a read-only enter/leave fires telemetry exactly once per transition
@@ -1767,7 +1772,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSaveStatus("saving");
     const wd = setTimeout(() => setCloudSaveFailed(true), 6000);
     return pushSiteToCloud(id)
-      .then((c) => { clearTimeout(wd); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudConflict(!!c.conflict); setCloudSaveFailed(!c.ok && !c.conflict); })
+      .then((c) => { clearTimeout(wd); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); })
       .catch(() => { clearTimeout(wd); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
   };
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
@@ -1840,7 +1845,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // local save above still ran (work preserved), and reload union-merges it. Pushing
       // here is exactly the stale-tab clobber we're preventing.
       if (isCloudActive()) {
-        if (conflictRef.current || readOnlyRef.current) {
+        if (readOnlyRef.current) {
           setSaveStatus("unsaved");
           // B468/NEW-5 — an edit happened but its cloud push was suppressed (read-only tab or an
           // active conflict). The immediate local mirror above still saved it; record WHY it didn't
@@ -1861,13 +1866,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               reportClientEvent("save-local-failed-cloud-ok", "device storage full; saved to cloud instead", { id: siteId });
             } else {
               // B474 review (#17/#18): the latest edit reached NEITHER device nor cloud — clear any stale
-              // amber "saved to your account" so it can't keep falsely claiming safety. And if the cloud
-              // push hit a CONFLICT (not a dead cloud), route to the blocking conflict UI ("reload/take
-              // over to merge") rather than the "will retry on your next edit" banner, which can never
-              // clear while the conflict gates every future push.
+              // amber "saved to your account" so it can't keep falsely claiming safety. (B672: a header
+              // CAS conflict now self-heals inside cloudUpsert; a residual conflict is treated the same
+              // as any failed write — loud banner + retry, never a blocking take-over prompt.)
               setSaveStatus("unsaved"); setSavedToCloudOnly(false);
-              if (r && r.conflict) { setCloudConflict(true); reportClientEvent("save-suppressed", "device full AND cloud push hit a conflict — routed to conflict UI", { id: siteId }); }
-              else { setCloudSaveFailed(true); reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
+              setCloudSaveFailed(true); reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "", conflict: !!(r && r.conflict) });
             }
           }).catch(() => { setSaveStatus("unsaved"); setSavedToCloudOnly(false); setCloudSaveFailed(true); });  // B506: a rejected cloud push must not strand the badge on "saving"
         }
@@ -1907,7 +1910,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B452 — a FORCED reload (chunk-recovery / ErrorBoundary) flushes through this registry
     // before navigating: the synchronous local save above PLUS a keepalive cloud push that
     // survives the navigation, so the last edits don't sit only in memory + the local mirror.
-    const offFlush = registerFlush(() => { flush(); if (isCloudActive() && !conflictRef.current && !readOnlyRef.current) keepaliveFlushSite(siteId); });
+    const offFlush = registerFlush(() => { flush(); if (isCloudActive() && !readOnlyRef.current) keepaliveFlushSite(siteId); });
     return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); offFlush(); };
   }, [siteId]); // eslint-disable-line
   // B455/NEW-7 — hold the single-active-editor lock for this plan. A second tab on the same
@@ -1946,6 +1949,64 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[kind];
     if (setter) setter((a) => a.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   };
+  // B672 — instructions from remote rows that arrived MID-GESTURE (busyRef): buffered here and
+  // drained at the next reconcile/flush so a remote apply never yanks the canvas mid-drag.
+  const pendingRemoteRef = useRef([]);
+  // Put one applyRemoteRow instruction onto the canvas. The engine already updated its shadow, so
+  // the autosave-effect diff that this setState triggers sees the element as unchanged (no echo
+  // commit). Insertion respects the collection's z (byZ reads z, not array position).
+  const applyRemoteInstr = (instr) => {
+    if (!instr || instr.action === "ignore") return;
+    const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
+    if (!setter) return;
+    if (instr.action === "remove") setter((a) => a.filter((x) => x.id !== instr.id));
+    else if (instr.action === "upsert") setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+  };
+  const drainRemote = () => {
+    if (!pendingRemoteRef.current.length) return;
+    const q = pendingRemoteRef.current; pendingRemoteRef.current = [];
+    for (const instr of q) applyRemoteInstr(instr);
+  };
+  // B672 — the READ cutover: full refetch of the site's live rows + REPLACE local canonical state.
+  // Runs on every channel join/rejoin and tab wake — never trust event gaps. Elements with a
+  // pending local commit keep their LOCAL data (they re-commit through the rev-checked path).
+  // A failed fetch changes NOTHING (B54 discipline — the mirror-booted canvas stays) and retries;
+  // the engine stays un-seeded until a fetch lands, so no commit can target unknown revs. Setters
+  // keep the previous reference when a collection is value-identical, so an idle tab-wake refetch
+  // re-trues nothing and therefore saves nothing (no version churn).
+  const refetchReplace = async (eng) => {
+    const r = await fetchElements(supabase, siteId);
+    if (elSyncRef.current !== eng) return;
+    if (!r || !r.ok) {
+      reportClientEvent("element-refetch-failed", "site_elements refetch failed — retrying", { id: siteId, error: (r && r.error) || "" });
+      setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 5000);
+      return;
+    }
+    pendingRemoteRef.current = []; // the refetch supersedes any buffered per-row events
+    eng.seed(r.rows);
+    const model = rowsToModel({}, r.rows);
+    const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
+    const sub = (kind, list) => {
+      let out = list;
+      for (const d of dirtyByKey.values()) {
+        if (d.kind !== kind) continue;
+        if (d.cls === "delete") out = out.filter((x) => x.id !== d.id);
+        else out = out.some((x) => x.id === d.id) ? out.map((x) => (x.id === d.id ? d.el : x)) : [...out, d.el];
+      }
+      return out;
+    };
+    const replace = (setter, next) => setter((prev) => (stableStringify(prev) === stableStringify(next) ? prev : next));
+    replace(setEls, sub("el", model.els)); replace(setMarkups, sub("markup", model.markups)); replace(setMeasures, sub("measure", model.measures));
+    replace(setCallouts, sub("callout", model.callouts)); replace(setParcels, sub("parcel", model.parcels));
+    // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
+    // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
+    // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
+    const liveIds = new Set(r.rows.filter((row) => row && !row.deleted_at).map((row) => row.id));
+    setDeletedIds((prev) => (prev.some((id) => liveIds.has(id)) ? prev.filter((id) => !liveIds.has(id)) : prev));
+    // one reconcile pass so any edit made during the fetch window commits normally
+    const s = stateRef.current;
+    try { eng.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy: !!drag.current }); } catch (_) {}
+  };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
       if (elSyncRef.current) { elSyncRef.current.stop(); elSyncRef.current = null; }
@@ -1963,24 +2024,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       report: reportClientEvent,
     });
     elSyncRef.current = eng;
-    // Seed the shadow from the site's current rows (Phase-1 backfill) BEFORE diffing, so a plain
-    // load doesn't try to re-create every existing element. On a fetch failure seed empty (the
-    // engine still works — it just re-syncs from scratch). After seeding, reconcile once to catch
-    // any edit made during the fetch window. (B671 still READS from the blob — this fetch only
-    // primes the write engine; the read cutover is B672.)
-    fetchElements(supabase, siteId).then((r) => {
-      if (elSyncRef.current !== eng) return;
-      eng.seed(r && r.ok ? r.rows : []);
-      const s = stateRef.current;
-      try { eng.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy: !!drag.current }); } catch (_) {}
-    });
-    return () => { eng.stop(); if (elSyncRef.current === eng) elSyncRef.current = null; };
+    // Realtime channel for this site's element rows (B672). Events are applied per-row through the
+    // idempotent rev check (own echoes = no-op); EVERY successful (re)join instead does a full
+    // refetch-replace — postgres_changes offers no gap guarantee across a reconnect, so the join is
+    // the moment to re-true the whole canvas from rows. Supabase applies the SELECT RLS to events.
+    const ch = supabase
+      .channel("site-elements:" + siteId)
+      .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + siteId }, (payload) => {
+        if (elSyncRef.current !== eng) return;
+        const row = payload && (payload.new && payload.new.id ? payload.new : payload.old);
+        if (!row) return;
+        const instr = eng.applyRemoteRow(row);
+        if (instr.action === "ignore") return;
+        if (busyRef.current) pendingRemoteRef.current.push(instr); // never yank the canvas mid-gesture
+        else applyRemoteInstr(instr);
+      })
+      .subscribe((status) => {
+        if (elSyncRef.current !== eng) return;
+        if (status === "SUBSCRIBED") refetchReplace(eng); // initial load AND reconnect re-true from rows
+      });
+    // Fallback: if the channel can't join (proxy/WebSocket blocked), a plain fetch still seeds the
+    // engine + replaces the canvas once, so the read cutover and the write path work without realtime.
+    const fallback = setTimeout(() => { if (elSyncRef.current === eng && !eng.isSeeded()) refetchReplace(eng); }, 4000);
+    // Tab wake = a classic event-gap window → refetch (visibilitychange is the B672-mandated hook).
+    const onVis = () => { if (document.visibilityState === "visible" && elSyncRef.current === eng) refetchReplace(eng); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearTimeout(fallback);
+      document.removeEventListener("visibilitychange", onVis);
+      try { supabase.removeChannel(ch); } catch (_) {}
+      eng.stop();
+      if (elSyncRef.current === eng) elSyncRef.current = null;
+    };
   }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Diff the live collections and enqueue per-element commits. `busy` (a geometry gesture is in
   // flight) defers the diff — flushElems() at gesture end (onUp) commits the settled result.
   const reconcileElems = (busy) => {
     const e = elSyncRef.current;
     if (!e || !isCloudActive()) return;
+    if (!busy) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
     const s = stateRef.current;
     try { e.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
   };
@@ -1992,7 +2074,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     const off = registerFlush(() => {
       const e = elSyncRef.current;
-      if (!e || !isCloudActive() || conflictRef.current || readOnlyRef.current) return;
+      if (!e || !isCloudActive() || readOnlyRef.current) return;
       const ops = e.pendingOps();
       if (!ops.length) return;
       const { url, anon } = supabaseRest();
@@ -2012,6 +2094,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!siteId) return undefined;
     const onStore = (e) => {
       if (e && e.key && !e.key.startsWith("planarfit:sites:")) return;
+      // B672 — signed-in tabs converge through the site_elements realtime channel + refetch-replace
+      // (rows are canonical); the localStorage union fold below would fight that (it can resurrect
+      // an element a row-tombstone just removed). It remains the signed-OUT cross-tab convergence.
+      if (isCloudActive()) return;
       if (busyRef.current) return;
       const stored = loadSite(siteId);
       if (!stored) return;
@@ -2054,11 +2140,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pushHistory = () => { histRef.current.push(stateRef.current); touchHist(); };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
-    // B556 — an undo/redo (or a cancelled drag) is a DELIBERATE local restore; if it shrinks the plan
-    // (e.g. undo of a building add, which removed building + parking + sidewalk at once) tell the
-    // thin-clobber baseline this is authoritative so the resulting push isn't mistaken for a stale
-    // cross-session clobber and falsely re-shown as "changed in another session".
-    if (siteId) noteLocalContent(siteId, s);
+    // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard itself — an
+    // undo/redo shrink now just diffs into per-element deletes through the rev-checked path.)
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
@@ -5702,10 +5785,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // multi-device single-editor lease stays the deferred per-sharing item.)
   const takeOverEditing = async () => {
     if (editorLockRef.current) editorLockRef.current.takeOver(); // same-browser: steal the per-plan lock + broadcast a yield → the other tab steps down to read-only and stops pushing
-    reportClientEvent("readonly-takeover", "user took over editing in this tab", { id: siteId, conflict: conflictRef.current });
+    reportClientEvent("readonly-takeover", "user took over editing in this tab", { id: siteId });
     flushSite();             // persist live work to the device mirror first
     setReadOnly(false);      // optimistic; the lock's onChange confirms the hand-off
-    setCloudConflict(false); // clear the gate so the reconciled save is allowed to push
     if (!isCloudActive() || !siteId) { flashWarn("You're now editing here.", 5000); return; }
     setSaveStatus("saving");
     // Reconcile THIS plan from the cloud: refresh the optimistic-version token + fetch the latest copy.
@@ -5742,7 +5824,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (back && got >= want) {
       // Device write is good → clear any alarm, push to cloud as usual, show provable confirmation.
       setLocalSaveFailed(false); setSavedToCloudOnly(false);
-      if (isCloudActive() && !readOnlyRef.current && !conflictRef.current) cloudPushWithWatchdog(siteId);
+      if (isCloudActive() && !readOnlyRef.current) cloudPushWithWatchdog(siteId);
       setSaveNowMsg(`Saved ✓ ${got} item${got === 1 ? "" : "s"} on this device${isCloudActive() ? " + cloud" : ""}`);
       setTimeout(() => setSaveNowMsg(""), 4500);
       return;
@@ -5751,7 +5833,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // cloud (no ~5MB cap). If it lands, the work is safe in the account even though this device can't
     // hold it — say so honestly (amber, not red). If the cloud is unreachable too, go loud.
     reportClientEvent("save-verify-failed", "Save now: on-device write did not persist", { id: siteId, want, got });
-    if (isCloudActive() && !readOnlyRef.current && !conflictRef.current) {
+    if (isCloudActive() && !readOnlyRef.current) {
       setSaveNowMsg("Saving to your account…");
       pushModelToCloud({ id: siteId, ...metaRef.current, ...liveRef.current }).then((r) => {
         setSaveNowMsg("");
@@ -5786,14 +5868,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
     // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
     // restore above silently skipped it: the canvas kept the CURRENT drawings while every other
-    // collection reverted (a mixed-version state), and noteLocalContent(v) below then recorded v's
-    // drawings as the local baseline — so live ≠ baseline. The stored version DOES capture
-    // parcelDrawings (sigOf + snapshotVersion store the full model), so restore + durably persist
-    // them via persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    // collection reverted (a mixed-version state). The stored version DOES capture parcelDrawings
+    // (sigOf + snapshotVersion store the full model), so restore + durably persist them via
+    // persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard — a restore to a
+    // thinner version now diffs into per-element deletes through the rev-checked path.)
     persistDrawings(v.parcelDrawings || []);
-    // B556 — restoring an older (possibly thinner) version is a deliberate local restore; rebase the
-    // thin-clobber baseline onto it so the next push isn't falsely rejected as a cross-session conflict.
-    if (siteId) noteLocalContent(siteId, v);
     setSel(null); setMulti([]); setVersionsOpen(false);
   };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
@@ -7737,12 +7817,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // lock this tab isn't writing to the cloud, even though read queries (the connection) succeed —
     // so the connection being fine is NOT the same as "your edits are saving". Surfaced as its own
     // amber "Read-only — not saving" badge state, ahead of the synced/offline resting states.
-    if (cloudActive && readOnly && !cloudConflict) return "readonly";
+    if (cloudActive && readOnly) return "readonly";
     // B671 — the per-element write engine feeds the SAME badge: a dropped element commit is
     // crash-severity (LOUD-FAILURE) → "error"; in-flight / retrying element commits → "saving".
     if (cloudActive && elemSync.state === "failed") return "error";
     if (saveStatus === "saving" || (cloudActive && (elemSync.state === "syncing" || elemSync.state === "retrying"))) return "saving";
-    if (cloudSaveFailed || cloudConflict) return "error";
+    if (cloudSaveFailed) return "error";
     if (cloudActive && !connOk) return "offline";
     return cloudActive ? "synced" : "local";
   })();
@@ -7763,8 +7843,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         saveState={headerSaveState}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
-        onRetrySave={cloudConflict ? undefined : (() => { retryCloudSave(); retryElems(); })}
-        saveDetail={cloudConflict ? "This project was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : (elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined)}
+        onRetrySave={() => { retryCloudSave(); retryElems(); }}
+        saveDetail={elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined}
         centerContent={null}
         planSlot={plannerPlanCrumb}
         authControl={authControl}
@@ -7772,25 +7852,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         toolbarContent={plannerToolbar}
       />
 
-      {/* B455/NEW-7 — a conflict is now BLOCKING (no dismiss): further cloud saves are gated
-          until you reload, so a stale copy can't be re-pushed over the newer one. Your edits
-          stay on this device and union-merge in on reload. */}
-      {/* B474 review (#8): gated on !localSaveFailed — when the on-device write ALSO failed (full storage),
-          "your edits are safe on this device" is FALSE, so suppress this and let the truthful red
-          local-save-failed banner be the only message (no contradictory pair, no false reassurance). */}
-      {cloudConflict && !localSaveFailed && (
-        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6001, maxWidth: "min(680px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#1e3a5f", color: "#fff", border: "1px solid #60a5fa", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>⚠ Your changes <b>aren't reaching the cloud</b> — this plan was changed in <b>another session</b> (another tab, or another computer). Your edits are safe on this device. <b>Take over editing here</b> to pull in the latest and resume saving — nothing is lost.</span>
-          <button onClick={takeOverEditing} data-testid="conflict-takeover-btn" title="Pull in the latest from the other session and make this the active editor (your work merges in — nothing is lost)" style={{ flex: "none", cursor: "pointer", background: "#60a5fa", color: "#0a1a2f", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
-        </div>
-      )}
+      {/* B672 — the "changed in another session … Take over editing" conflict banner is GONE:
+          the whole-doc conflict class it surfaced (B455/B460/B558/B596) is retired by per-element
+          sync — elements are per-row rev-guarded, the header self-heals a stale CAS (cloudUpsert). */}
       {/* B455/NEW-7 + B464/B466 (NEW-1/NEW-3) — single-active-editor read-only banner, now LOUD and
           ACTIONABLE. Another tab of this browser is the active editor, so this tab is read-only and
           its edits are NOT syncing to the cloud (they ARE kept on this device — B458). Reloading does
           NOT clear it while the other tab is open (the lock is still held), which is the trap the owner
           hit — so we say so and offer "Take over editing here" (steal the lock + push the pent-up work)
           instead. Closes automatically (lock hand-off) when the other tab is closed. */}
-      {readOnly && !cloudConflict && !localSaveFailed && (
+      {readOnly && !localSaveFailed && (
         <div role="alert" data-testid="readonly-banner" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
           <button onClick={takeOverEditing} data-testid="takeover-btn" title="Make this the active tab and save your changes to the cloud now" style={{ flex: "none", cursor: "pointer", background: "#d6b24a", color: "#2a2410", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
