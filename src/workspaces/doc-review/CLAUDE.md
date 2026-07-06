@@ -10,6 +10,9 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
 **Key `lib/`**
 - `reviewStore.js` — all persistence I/O (Supabase `doc_reviews` + Drive-first file storage);
   `usePersistence.js` — the data-loss hook (first-edit save, honest badge, flush on unload).
+- `lastDoc.js` — per-PROJECT "last document reviewed" map + legacy-pointer fallback and the
+  `resolveResume` boot-candidate ordering (B667; pointers are captured at first render and
+  writes arm only after boot — the resume self-clobber fix).
 - `localRead.js` / `autofiling.js` / `fileIndex.js` — Tier-1 plain-code title-block read +
   auto-filing (never auto-guesses). `sheetRead.js` / `autoStitch.js` / `ocr.js` — drop-a-set
   auto-group/stitch/crop/calibrate pipeline (Tesseract OCR for scanned sheets). `stitchGeom.js` —
