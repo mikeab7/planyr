@@ -83,10 +83,15 @@ export function toFileFact(row = {}) {
     sheetNumber: row.sheetNumber || row.sheet_number || "",
     sheetTitle: row.sheetTitle || row.sheet_title || "",
     kind: row.kind || "single",
-    // The original upload filename (B685; from the file-facts index). Its extension is how the
-    // Library distinguishes a PDF (openable in Review) from any other stored file (downloadable).
-    // Absent on legacy/interactive files — which were always PDFs, so absence reads as "PDF".
-    sourceFile: row.sourceFile || row.source_file || "",
+    // The original upload filename — its extension is how the Library distinguishes a PDF
+    // (openable in Review) from any other stored file (downloadable). `sfile` is the AUTHORITATIVE
+    // copy carried on the review itself (B686), so a missed best-effort file-facts write can't
+    // make a non-PDF look like a PDF; `source_file` is the file-facts fallback. Absent on
+    // legacy/interactive files — which were always PDFs, so absence reads as "PDF".
+    sourceFile: row.sfile || row.sourceFile || row.source_file || "",
+    // Explicit folder placement (B686): when set, the Library shows the file in THIS folder and
+    // the Drive bytes live there too — overriding the discipline-derived placement.
+    folderId: row.folderId || null,
     docClass: classifyDocClass(discipline, item, title),
     // Work Item B IA fields. `category` (canonical top-level) + `state` are written by the
     // auto-filer / a re-file; when absent they're derived (categoryOf / stateOf) so the

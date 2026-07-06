@@ -257,16 +257,28 @@ export async function moveKeyToTree({ userId, projectId, planyrKey, discipline, 
   }
 }
 
-/* The Drive parent folder id a new UPLOAD should land in, per the project's standard tree:
- * 02. Design → 01. Drawings → <discipline> → 01. Current (shared resolver — the same one the
- * Library uses for display, so server filing and on-screen placement can never disagree).
- * Returns a Drive folder id, or null when the tree/target isn't mirrored yet — the caller
- * then keeps its legacy flat path, so filing NEVER breaks on a missing tree. Never throws. */
-export async function treeParentForUpload({ store, projectId, discipline } = {}) {
+/* The Drive parent folder id a new UPLOAD should land in.
+ *
+ * An EXPLICIT `folderId` (a project_folders row id — the user dropped into a folder they picked,
+ * B686) WINS: it resolves straight to that row's mirrored Drive id, so "drop into the folder I'm
+ * viewing" files there for ANY file type, no discipline guess. When no explicit folder is given
+ * (a drop on "All files"), fall back to the discipline auto-route: 02. Design → 01. Drawings →
+ * <discipline> → 01. Current (shared resolver — the same one the Library uses for display, so
+ * server filing and on-screen placement can never disagree).
+ *
+ * Returns a Drive folder id, or null when the tree/target isn't mirrored yet — the caller then
+ * keeps its legacy flat path, so filing NEVER breaks on a missing tree. Never throws. */
+export async function treeParentForUpload({ store, projectId, discipline, folderId = null } = {}) {
   if (!store || !projectId) return null;
   try {
     const rows = await store.list(projectId);
     if (!rows || !rows.length) return null;
+    if (folderId) {
+      // Explicit folder pick wins — but only if that folder is mirrored to Drive; otherwise fall
+      // through to the discipline route so the bytes still land somewhere sensible.
+      const row = rows.find((r) => r.id === folderId && !r.trashed);
+      if (row && row.driveFolderId) return row.driveFolderId;
+    }
     const target = resolveDrawingTarget(rows, discipline);
     return (target && target.driveFolderId) || null;
   } catch (_) {

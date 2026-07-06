@@ -243,6 +243,28 @@ describe("treeParentForUpload — server-side tree targeting for uploads (B650)"
     expect(await treeParentForUpload({ store: { async list() { return treeRows; } }, projectId: null, discipline: "Civil" })).toBe(null);
     expect(await treeParentForUpload({ store: { async list() { throw new Error("boom"); } }, projectId: "p1", discipline: "Civil" })).toBe(null);
   });
+
+  // B686 — an explicit folder pick (the user dropped into a folder they clicked) wins over the
+  // discipline auto-route, for ANY folder in the tree — including non-Drawings ones like Utilities.
+  const utilRows = [
+    ...treeRows,
+    { id: "util", parentId: null, name: "10. Utilities", trashed: false, driveFolderId: "d-util", driveParentId: null, driveName: "10. Utilities", driveTrashed: false },
+    { id: "electric", parentId: "util", name: "02. Electric", trashed: false, driveFolderId: "d-electric", driveParentId: "d-util", driveName: "02. Electric", driveTrashed: false },
+    { id: "unmirrored", parentId: "util", name: "03. Gas", trashed: false, driveFolderId: null, driveParentId: null, driveName: null, driveTrashed: false },
+  ];
+  it("an explicit folderId wins over discipline — files into that folder's Drive id", async () => {
+    const store = { async list() { return utilRows; } };
+    // Dropped into Utilities → Electric while a Civil title block would auto-route to Drawings:
+    // the explicit folder wins.
+    expect(await treeParentForUpload({ store, projectId: "p1", discipline: "Civil", folderId: "electric" })).toBe("d-electric");
+    // A top-level non-Drawings folder works too.
+    expect(await treeParentForUpload({ store, projectId: "p1", discipline: "Civil", folderId: "util" })).toBe("d-util");
+  });
+  it("an explicit folder not yet mirrored (or unknown/trashed) falls back to the discipline route", async () => {
+    const store = { async list() { return utilRows; } };
+    expect(await treeParentForUpload({ store, projectId: "p1", discipline: "Civil", folderId: "unmirrored" })).toBe("d-cur");
+    expect(await treeParentForUpload({ store, projectId: "p1", discipline: "Civil", folderId: "nope" })).toBe("d-cur");
+  });
 });
 
 describe("null-index guards — a failed read is LOUD, never an empty-tree lookalike (B662 review #1)", () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { planAutosave } from "../src/workspaces/doc-review/lib/autosavePlan.js";
-import { isStoredSource, storeSource, guessContentType } from "../src/workspaces/doc-review/lib/reviewStore.js";
+import { isStoredSource, storeSource, guessContentType, stripFileExt } from "../src/workspaces/doc-review/lib/reviewStore.js";
 
 /* B324/NEW-4 — a genuine edit made inside the ~1.5 s post-open suspend window must still be
  * mirrored + flagged dirty (so it's recoverable and flushes to the cloud), while only the
@@ -83,5 +83,25 @@ describe("guessContentType — sensible MIME for any file (B685)", () => {
     expect(guessContentType("mystery.qqq", "")).toBe("application/octet-stream");
     expect(guessContentType("", "")).toBe("application/octet-stream");
     expect(guessContentType(null, null)).toBe("application/octet-stream");
+  });
+});
+
+/* B686 — the display-label extension strip only removes a REAL (letter-first) extension, so
+ * version-style names keep their trailing number. */
+describe("stripFileExt — strip a real extension, keep version-style dotted names (B686)", () => {
+  it("strips a genuine, letter-first extension", () => {
+    expect(stripFileExt("survey.pdf")).toBe("survey");
+    expect(stripFileExt("Site Plan.DWG")).toBe("Site Plan");
+    expect(stripFileExt("budget.xlsx")).toBe("budget");
+    expect(stripFileExt("2026.06.20 Plan.pdf")).toBe("2026.06.20 Plan"); // only the final ext goes
+  });
+  it("keeps a trailing dotted segment that starts with a digit (a version, not an extension)", () => {
+    expect(stripFileExt("Rev.3")).toBe("Rev.3");
+    expect(stripFileExt("Site Plan v1.2")).toBe("Site Plan v1.2");
+    expect(stripFileExt("Lot2.5Acres")).toBe("Lot2.5Acres");
+  });
+  it("leaves an extension-less name untouched", () => {
+    expect(stripFileExt("Sitemap")).toBe("Sitemap");
+    expect(stripFileExt("")).toBe("");
   });
 });
