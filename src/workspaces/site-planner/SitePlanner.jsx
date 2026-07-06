@@ -7681,8 +7681,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <div ref={exportAnchor} style={{ position: "relative" }}>
           <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setExportMenu((o) => !o)}>File ▾</button>
           <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
-            <button style={menuItem(false)} title="Download this plan as a .json file you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
-            <button style={menuItem(false)} title="Load a plan from a .json file (replaces the current canvas)" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
+            <button style={menuItem(false)} title="Download this plan as a project file (.json) you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export project file</button>
+            <button style={menuItem(false)} title="Load a plan from a project file (.json) — replaces the current canvas" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import project file…</button>
             <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
               onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
             <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
@@ -8884,7 +8884,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {[
                   ["1", <>Pick a <b>parcel from the map</b> (the “Map” button, top-left) to start from real county data,</>],
                   ["2", <>or drop a <b>screenshot underlay</b> and calibrate it,</>],
-                  ["3", <>or draw one with the <b>Boundary</b> tool (right rail).</>],
+                  ["3", <>or draw one with the <b>Parcel</b> tool (right rail).</>],
                 ].map(([n, body]) => (
                   <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
                     <span style={{ width: 17, height: 17, borderRadius: 99, background: "#f1ece1", color: "#6b6557", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
@@ -9233,7 +9233,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               );
             }
             // paving / trailer / pond — single-line buttons; sub-label in tooltip (B604)
-            const sub = { paving: "Drive / Court", trailer: "Back-in Storage", pond: "Detention Basin" }[id];
+            const sub = { paving: "Drive / Court", trailer: "Back-in Storage", pond: "Detention Pond" }[id];
             return (
               <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} title={sub || undefined}>
                 <ToolIcon id={id} /> {t.label}
@@ -10512,7 +10512,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </AnchoredMenu>
               </div>
               {parcels.length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add parcel</b> above, or draw one with the Boundary tool (right rail).</div>
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add parcel</b> above, or draw one with the Parcel tool (right rail).</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                   {/* B651 — lineage-aware list: children of a split nest under their parent (indented),
