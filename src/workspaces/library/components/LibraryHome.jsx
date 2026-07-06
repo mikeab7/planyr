@@ -92,9 +92,13 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
     if (!active) return; // keep-alive: reload pins/recents/names each time Home comes back on screen
     let live = true;
     const load = async () => {
-      const [p, r] = await Promise.all([listPins(uid), Promise.resolve(listRecents(uid))]);
-      if (!live) return;
-      setPins(p); setRecents(r);
+      // A cloud read failure REJECTS (distinct from an empty account) — keep the currently
+      // shown pins/recents rather than blanking the Pinned section on a transient blip.
+      try {
+        const [p, r] = await Promise.all([listPins(uid), Promise.resolve(listRecents(uid))]);
+        if (!live) return;
+        setPins(p); setRecents(r);
+      } catch (_) { /* transient cloud read failure (already reported): keep prior */ }
     };
     load();
     const off = subscribePins(load);

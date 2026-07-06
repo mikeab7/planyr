@@ -99,16 +99,31 @@ function writeList(uid, list) {
 
 /* ---- cloud (signed-in) backend — dependency-injected client, testable with a fake ---
  * These take the Supabase client as a param (the casUpsert/folderStoreSupabase pattern),
- * so unit tests pass a fake and the public API below wires in the real `supabase`. Reads
- * degrade to [] and never throw; writes return { error } | { ok } and never throw. */
+ * so unit tests pass a fake and the public API below wires in the real `supabase`. Writes
+ * return { ok } | { ok:false, error } and never throw. */
 
-export async function listPinsCloud(client) {
+// The single source of truth for a cloud read. Crucially, it DISTINGUISHES a genuinely
+// empty cloud ({ ok:true, pins:[] }) from a FAILED read ({ ok:false }) — folders.js's "a
+// failed read must never look like an empty tree" rule. Everything downstream (the list
+// display, the toggle decision, the migration) depends on that distinction: a swallowed
+// read error that looked empty would blank the UI, invert an unpin, and let the migration
+// overwrite another device's pins.
+export async function fetchPinsCloud(client) {
   const { data, error } = await client
     .from("pins")
     .select("type,target_id,project_id,label")
     .order("created_at", { ascending: false });
-  if (error) { console.warn("listPins (cloud) failed:", error.message); return []; }
-  return (data || []).map(rowToPin);
+  if (error) return { ok: false, pins: [], error: error.message };
+  return { ok: true, pins: (data || []).map(rowToPin) };
+}
+
+// Graceful display wrapper: [] on failure. Used only where degrading to empty is acceptable
+// (the discarded post-write re-read). The public listPins path uses fetchPinsCloud so a
+// failed read is loud + keeps the prior list, never a silent blank.
+export async function listPinsCloud(client) {
+  const r = await fetchPinsCloud(client);
+  if (!r.ok) console.warn("listPins (cloud) failed:", r.error);
+  return r.pins;
 }
 
 export async function addPinCloud(client, pin) {
@@ -125,13 +140,24 @@ export async function removePinCloud(client, type, id) {
 }
 
 // Copy local-only pins into the cloud. Non-destructive (local buckets kept), idempotent
-// (upsert onConflict → a re-run is a no-op), returns { copied, skipped, failed }.
-export async function runPinMigration(client, localPins) {
-  const cloud = await listPinsCloud(client);
-  const toCopy = planPinMigration(localPins, cloud);
-  const skipped = dedupePins(localPins).length - toCopy.length;
+// (upsert onConflict → a re-run is a no-op). Three safety properties the review demanded:
+//   • ABORT on a failed read — never upsert against an unknown cloud, or a blip would
+//     misclassify every pin as local-only and overwrite another device's newer labels.
+//   • IDENTITY re-check before each write (the folders-migration checkIdentity pattern) —
+//     an account switch mid-run must not land account A's pins under account B's token.
+//   • OLDEST-FIRST insertion — each row takes created_at = now(), so writing the newest
+//     local pin LAST gives it the largest created_at, which the newest-first read returns
+//     first — preserving the user's local pin order instead of reversing it.
+export async function runPinMigration(client, localPins, checkIdentity) {
+  const read = await fetchPinsCloud(client);
+  const wanted = dedupePins(localPins);
+  if (!read.ok) return { copied: 0, skipped: 0, failed: wanted.length || 1 }; // couldn't see the cloud → no writes, no done-marker
+  const toCopy = planPinMigration(localPins, read.pins);
+  const skipped = wanted.length - toCopy.length;
+  const ordered = [...toCopy].reverse(); // newest-first → insert oldest-first
   let copied = 0, failed = 0;
-  for (const p of toCopy) {
+  for (const p of ordered) {
+    if (checkIdentity && !(await checkIdentity())) { failed += ordered.length - copied - failed; break; }
     const r = await addPinCloud(client, p);
     if (r.ok) copied++; else failed++;
   }
@@ -190,11 +216,24 @@ function reportPinFailure(op, error) {
   try { reportClientEvent("pin-write-failed", `${op} failed`, { op, error }); } catch (_) { /* never let telemetry throw */ }
   emitError(error);
 }
+// A failed READ is loud on telemetry but NOT the toast channel: the visible signal is the
+// kept-prior list (never a blank), and a toast on every offline tab-focus refetch would be
+// user-hostile. Telemetry's own dedup (10s) + rate cap collapse a focus-refetch storm.
+function reportReadFailure(error) {
+  try { reportClientEvent("pin-read-failed", "cloud pins read failed", { error }); } catch (_) { /* never let telemetry throw */ }
+}
 
 /* ---- public API (async signatures identical to v1) --------------------------------- */
 
 export async function listPins(uid) {
-  return (await cloudUid()) ? listPinsCloud(supabase) : readList(uid);
+  if (await cloudUid()) {
+    // THROW on a failed read (distinct from an empty account) so the subscribers keep the
+    // last-known pins instead of blanking the whole list on a transient blip / offline focus.
+    const r = await fetchPinsCloud(supabase);
+    if (!r.ok) { reportReadFailure(r.error); throw new Error(r.error || "pins read failed"); }
+    return r.pins;
+  }
+  return readList(uid);
 }
 
 export async function addPin(uid, pin) {
@@ -225,7 +264,14 @@ export async function removePin(uid, { type, id }) {
 }
 
 export async function togglePin(uid, pin) {
-  const cur = await listPins(uid);   // read the authoritative source first (cloud or local)
+  if (await cloudUid()) {
+    // Decide add-vs-remove from a read that can FAIL loudly — a swallowed [] would make a
+    // currently-pinned item look unpinned and silently re-pin it (inverting an unpin).
+    const r = await fetchPinsCloud(supabase);
+    if (!r.ok) { reportPinFailure("pin-toggle", r.error); return r.pins; } // don't guess/invert on a failed read
+    return isPinned(r.pins, pin) ? removePin(uid, pin) : addPin(uid, pin);
+  }
+  const cur = readList(uid);
   return isPinned(cur, pin) ? removePin(uid, pin) : addPin(uid, pin);
 }
 
@@ -237,7 +283,10 @@ export async function migrateLocalPinsToCloud(uid) {
   if (!supabase || !uid) return { copied: 0, skipped: 0, failed: 0 };
   const local = dedupePins([...readList(uid), ...readList(null)]);
   if (!local.length) return { copied: 0, skipped: 0, failed: 0 };
-  const res = await runPinMigration(supabase, local);
-  if (res.copied) emit();            // mounted subscribers show the just-migrated pins
+  // Re-check identity before each write so an account switch mid-run can't land this
+  // account's pins under a different signed-in account.
+  const res = await runPinMigration(supabase, local, async () => (await cloudUid()) === uid);
+  if (res.copied) emit();                                          // mounted subscribers show the migrated pins
+  if (res.failed) reportPinFailure("pin-migrate", `${res.failed} pin(s) failed to sync during migration`); // LOUD, not silent
   return res;
 }

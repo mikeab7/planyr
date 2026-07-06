@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `d0cb153` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `d4564a9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -127,7 +127,7 @@ _191 source files mapped._
 - **`src/shared/markup/tools.matrix.js`** — Single-source-of-truth tool matrix: property columns, draw modes, per-workspace tool rows + pure accessors; drives the panel and generates tool tests
   - _exports_: `CATEGORIES`, `columnMeta`, `DRAW_MODES`, `isClosedTool`, `measureTools`, `PROPERTY_COLUMNS`, `propsForTool`, `TOOL_MATRIX`, `toolById`, `toolsForWorkspace`, `WORKSPACES`
 - **`src/shared/pins/pinStore.js`** — Library-Home pinned folders/files store: per-uid localStorage lists with async swap-ready API (list/add/remove/toggle) + same-tab/cross-tab change subscription
-  - _exports_: `addPin`, `addPinCloud`, `dedupePins`, `isPinned`, `listPins`, `listPinsCloud`, `migrateLocalPinsToCloud`, `pinToRow`, `planPinMigration`, `removePin`, `removePinCloud`, `rowToPin`, `runPinMigration`, `subscribePinError`, `subscribePins`, `togglePin`
+  - _exports_: `addPin`, `addPinCloud`, `dedupePins`, `fetchPinsCloud`, `isPinned`, `listPins`, `listPinsCloud`, `migrateLocalPinsToCloud`, `pinToRow`, `planPinMigration`, `removePin`, `removePinCloud`, `rowToPin`, `runPinMigration`, `subscribePinError`, `subscribePins`, `togglePin`
 - **`src/shared/placement/fitToBoundary.js`** — Fit-to-boundary solver: one similarity transform (Procrustes correspondence or OBB fallback) landing a drawing ring on held survey feet with RMS-fraction confidence
   - _exports_: `CONFIDENT_FRAC`, `fitToBoundary`
 - **`src/shared/placement/placementFacts.js`** — Placement-readiness facts contract: empty/merge helpers + longest-dimension picker for facts captured at filing time so the cascade never reopens the file

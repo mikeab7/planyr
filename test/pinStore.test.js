@@ -13,7 +13,7 @@ import {
   // pure helpers
   rowToPin, pinToRow, dedupePins, planPinMigration,
   // cloud I/O (dependency-injected client)
-  listPinsCloud, addPinCloud, removePinCloud, runPinMigration,
+  fetchPinsCloud, listPinsCloud, addPinCloud, removePinCloud, runPinMigration,
 } from "../src/shared/pins/pinStore.js";
 
 function makeStore() {
@@ -28,48 +28,58 @@ function makeStore() {
 }
 
 /* A chainable fake Supabase client that records calls and returns canned {data,error}.
- * .from(table).select(cols).order(...) resolves to the seeded rows; .upsert / .delete().eq().eq()
- * resolve to {error}. Deletes mutate the seeded rows so a follow-up select reflects them. */
+ * Faithful to the bits prod depends on: .select(cols).order(col,opts) SORTS by that column
+ * (so newest-first ordering is actually exercised, not faked as a no-op); .upsert stamps a
+ * monotonic created_at when the payload omits one (models the DB default now(), so migration
+ * insert order is observable); .delete().eq().eq() removes matching rows so a follow-up read
+ * reflects it. failOn simulates a query error on select/upsert/delete. */
 function fakeClient({ rows = [], failOn = new Set() } = {}) {
   const calls = [];
   let store = rows.slice();
-  const client = {
-    calls,
-    _rows: () => store,
-    from(table) {
-      calls.push({ op: "from", table });
-      const ctx = { table, _eq: [] };
-      const selectResult = () => {
-        if (failOn.has("select")) return Promise.resolve({ data: null, error: { message: "select boom" } });
-        return Promise.resolve({ data: store.map((r) => ({ ...r })), error: null });
-      };
-      const api = {
-        select(cols) { calls.push({ op: "select", table, cols }); return { order: () => selectResult(), then: (res) => selectResult().then(res) }; },
-        upsert(payload, opts) {
-          calls.push({ op: "upsert", table, payload, opts });
-          if (failOn.has("upsert")) return Promise.resolve({ error: { message: "upsert boom" } });
-          const i = store.findIndex((r) => r.type === payload.type && r.target_id === payload.target_id);
-          if (i >= 0) store[i] = { ...store[i], ...payload }; else store.push({ ...payload });
-          return Promise.resolve({ error: null });
-        },
-        delete() {
-          calls.push({ op: "delete", table });
-          const eqs = [];
-          const chain = {
-            eq(col, val) { eqs.push([col, val]); ctx._eq.push([col, val]); return chain; },
-            then(res) {
-              if (failOn.has("delete")) return Promise.resolve({ error: { message: "delete boom" } }).then(res);
-              store = store.filter((r) => !eqs.every(([c, v]) => r[c] === v));
-              return Promise.resolve({ error: null }).then(res);
-            },
-          };
-          return chain;
-        },
-      };
-      return api;
-    },
+  let seq = store.length; // monotonic created_at source for upserts without an explicit one
+  const from = (table) => {
+    calls.push({ op: "from", table });
+    return {
+      select(cols) {
+        calls.push({ op: "select", table, cols });
+        return {
+          order(col, opts = {}) {
+            calls.push({ op: "order", table, col, opts });
+            if (failOn.has("select")) return Promise.resolve({ data: null, error: { message: "select boom" } });
+            const dir = opts.ascending === false ? -1 : 1;
+            const sorted = store.map((r) => ({ ...r })).sort((a, b) => {
+              const av = a[col], bv = b[col];
+              return av === bv ? 0 : (av < bv ? -1 : 1) * dir;
+            });
+            return Promise.resolve({ data: sorted, error: null });
+          },
+        };
+      },
+      upsert(payload, opts) {
+        calls.push({ op: "upsert", table, payload, opts });
+        if (failOn.has("upsert")) return Promise.resolve({ error: { message: "upsert boom" } });
+        const i = store.findIndex((r) => r.type === payload.type && r.target_id === payload.target_id);
+        const created_at = payload.created_at != null ? payload.created_at : seq++;
+        if (i >= 0) store[i] = { ...store[i], ...payload };
+        else store.push({ created_at, ...payload });
+        return Promise.resolve({ error: null });
+      },
+      delete() {
+        calls.push({ op: "delete", table });
+        const eqs = [];
+        const chain = {
+          eq(col, val) { eqs.push([col, val]); return chain; },
+          then(res) {
+            if (failOn.has("delete")) return Promise.resolve({ error: { message: "delete boom" } }).then(res);
+            store = store.filter((r) => !eqs.every(([c, v]) => r[c] === v));
+            return Promise.resolve({ error: null }).then(res);
+          },
+        };
+        return chain;
+      },
+    };
   };
-  return client;
+  return { calls, _rows: () => store, from };
 }
 
 beforeEach(() => { globalThis.localStorage = makeStore(); });
@@ -109,12 +119,32 @@ describe("pinStore — pure helpers", () => {
 
 /* ---- cloud I/O (dependency-injected fake client) --------------------------------- */
 describe("pinStore — cloud backend (DI)", () => {
-  it("listPinsCloud selects the columns, orders, and maps rows; [] on error (never throws)", async () => {
-    const c = fakeClient({ rows: [{ type: "folder", target_id: "a", project_id: "p", label: "A" }] });
-    expect(await listPinsCloud(c)).toEqual([{ type: "folder", id: "a", projectId: "p", label: "A" }]);
+  it("fetchPinsCloud selects the columns, orders newest-first, and maps rows", async () => {
+    const c = fakeClient({ rows: [
+      { type: "folder", target_id: "old", project_id: "p", label: "O", created_at: 1 },
+      { type: "file", target_id: "new", project_id: null, label: "N", created_at: 9 },
+    ] });
+    const r = await fetchPinsCloud(c);
+    expect(r.ok).toBe(true);
+    expect(r.pins.map((p) => p.id)).toEqual(["new", "old"]); // created_at DESC — fails if flipped to ascending
     const sel = c.calls.find((x) => x.op === "select");
     expect(sel.cols).toBe("type,target_id,project_id,label");
+    const ord = c.calls.find((x) => x.op === "order");
+    expect(ord).toMatchObject({ col: "created_at", opts: { ascending: false } });
+  });
 
+  it("fetchPinsCloud DISTINGUISHES a failed read ({ok:false}) from an empty account", async () => {
+    const empty = fakeClient({ rows: [] });
+    expect(await fetchPinsCloud(empty)).toMatchObject({ ok: true, pins: [] });
+    const bad = fakeClient({ failOn: new Set(["select"]) });
+    const r = await fetchPinsCloud(bad);
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("select boom");
+  });
+
+  it("listPinsCloud is the graceful []-wrapper (never throws) for the discarded post-write re-read", async () => {
+    const c = fakeClient({ rows: [{ type: "folder", target_id: "a", project_id: "p", label: "A", created_at: 1 }] });
+    expect(await listPinsCloud(c)).toEqual([{ type: "folder", id: "a", projectId: "p", label: "A" }]);
     const bad = fakeClient({ failOn: new Set(["select"]) });
     expect(await listPinsCloud(bad)).toEqual([]); // graceful
   });
@@ -163,6 +193,34 @@ describe("pinStore — runPinMigration (local → cloud)", () => {
     const c = fakeClient({ failOn: new Set(["upsert"]) });
     const res = await runPinMigration(c, [F]);
     expect(res).toEqual({ copied: 0, skipped: 0, failed: 1 });
+  });
+
+  it("ABORTS without any write when the cloud read fails (no blind clobber, no done-marker)", async () => {
+    const c = fakeClient({ failOn: new Set(["select"]) });
+    const res = await runPinMigration(c, [F, D]);
+    expect(res).toEqual({ copied: 0, skipped: 0, failed: 2 }); // failed>0 → Library withholds the marker
+    expect(c.calls.some((x) => x.op === "upsert")).toBe(false); // never upserted against an unknown cloud
+  });
+
+  it("inserts oldest-first so migrated pins read newest-first (no order reversal)", async () => {
+    const c = fakeClient({ rows: [] }); // empty cloud
+    const local = [ // newest-first, as readList returns
+      { type: "folder", id: "C", projectId: null, label: "C" },
+      { type: "folder", id: "B", projectId: null, label: "B" },
+      { type: "folder", id: "A", projectId: null, label: "A" },
+    ];
+    await runPinMigration(c, local);
+    expect((await listPinsCloud(c)).map((p) => p.id)).toEqual(["C", "B", "A"]); // preserved, not reversed
+  });
+
+  it("stops writing on an identity change mid-run and marks the rest failed", async () => {
+    const c = fakeClient({ rows: [] });
+    let n = 0;
+    const checkIdentity = async () => { n += 1; return n <= 1; }; // ok for the first write, then account changed
+    const res = await runPinMigration(c, [F, D], checkIdentity);
+    expect(res.copied).toBe(1);
+    expect(res.failed).toBe(1); // the remaining pin isn't written under the wrong account
+    expect(c.calls.filter((x) => x.op === "upsert").length).toBe(1);
   });
 });
 

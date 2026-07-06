@@ -80,7 +80,10 @@ export default function Library({
   const [pins, setPins] = useState([]);
   useEffect(() => {
     let live = true;
-    const load = () => listPins(uid).then((p) => { if (live) setPins(p); });
+    // A cloud read failure REJECTS (distinct from an empty account) — keep the last-known
+    // pins rather than blanking the ☆ state on a transient blip / offline tab-focus refetch.
+    const load = () => listPins(uid).then((p) => { if (live) setPins(p); })
+      .catch(() => { /* transient cloud read failure (already reported to telemetry): keep prior */ });
     load();
     const off = subscribePins(load);
     return () => { live = false; off(); };
@@ -116,6 +119,11 @@ export default function Library({
       try { const u = await getUser(); stillSame = !!u && u.id === mid; } catch (_) { stillSame = false; }
       if (res && res.failed === 0 && stillSame) {
         try { localStorage.setItem(PINS_MIGRATE_KEY(mid), new Date().toISOString()); } catch (_) { /* harmless re-run later */ }
+      } else if (res && res.failed > 0) {
+        // A partial/failed run left some pins only in the local bucket (invisible while
+        // signed in, since listPins reads cloud-only). Release the in-session guard so a
+        // remount / re-focus retries this account WITHOUT waiting for a full page reload.
+        pinsMigrationStartedFor.delete(mid);
       }
     })();
     return () => { live = false; };
