@@ -2,13 +2,17 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
-import { rowsToModel } from "./lib/elementRows.js";
+import { rowsToModel, KIND_TO_FIELD } from "./lib/elementRows.js";
+import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
+import { createNameResolver, describeElement } from "./lib/editorNames.js";
+import { toastForSyncEvent } from "./lib/conflictToasts.js";
+import { listMembers } from "./lib/teams.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
@@ -1949,6 +1953,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[kind];
     if (setter) setter((a) => a.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   };
+  // B673 — the loud-but-non-blocking conflict surface: toast stack + name resolver + the
+  // late-bound sync-event handler (assigned each render further down, once zoomToElement and
+  // featBBox exist in scope).
+  const { toasts, pushToast, dismissToast } = useToasts();
+  const nameResolverRef = useRef(null);
+  const syncEventRef = useRef(() => {});
   // B672 — instructions from remote rows that arrived MID-GESTURE (busyRef): buffered here and
   // drained at the next reconcile/flush so a remote apply never yanks the canvas mid-drag.
   const pendingRemoteRef = useRef([]);
@@ -2020,10 +2030,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setTimer: (fn, ms) => setTimeout(fn, ms),
       clearTimer: (h) => clearTimeout(h),
       onStatus: (s) => setElemSync(s),
+      onEvent: (ev) => { try { syncEventRef.current(ev); } catch (_) {} }, // B673 — late-bound (the handler needs helpers defined further down)
       patchElement: applyZPatch,
       report: reportClientEvent,
+      selfUid: activeUid(),
     });
     elSyncRef.current = eng;
+    // B673 — who to blame in a conflict toast: self → "you (another window)"; teammates via the
+    // list_team_members roster RPC (profiles RLS is own-row-only); cached per site session.
+    nameResolverRef.current = createNameResolver({
+      selfUid: activeUid(),
+      teamIdOf: () => { try { return loadSite(siteId)?.teamId || null; } catch (_) { return null; } },
+      fetchRoster: listMembers,
+    });
     // Realtime channel for this site's element rows (B672). Events are applied per-row through the
     // idempotent rev check (own echoes = no-op); EVERY successful (re)join instead does a full
     // refetch-replace — postgres_changes offers no gap guarantee across a reconnect, so the join is
@@ -3672,6 +3691,60 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { x0, y0, x1, y1 };
+  };
+  // B673 — zoom the canvas to one element (the conflict toast's "Show" action) and select it so
+  // the highlight makes "which element are they talking about" unmistakable. Same framing math as
+  // frameToActiveParcels, over the element's bbox with generous margin for context.
+  const zoomToElement = (kind, id) => {
+    const field = KIND_TO_FIELD[kind];
+    const el = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
+    if (!el) return;
+    const b = featBBox(el);
+    if (!b) return;
+    const marginFrac = 1.2;
+    const bw = Math.max(b.x1 - b.x0, 10), bh = Math.max(b.y1 - b.y0, 10);
+    const minX = b.x0 - bw * marginFrac, maxX = b.x1 + bw * marginFrac;
+    const minY = b.y0 - bh * marginFrac, maxY = b.y1 + bh * marginFrac;
+    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
+    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
+    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
+    if (kind === "el" || kind === "markup" || kind === "callout" || kind === "parcel") setSel({ kind, id });
+  };
+  // B673 — the conflict policy matrix, wired: elementSync event → (maybe) a toast. The mapping
+  // itself is the pure toastForSyncEvent (unit-tested); this glue resolves the editor's display
+  // name (async, cached roster), labels the element, applies any canvas side-effect, and pushes.
+  syncEventRef.current = (ev) => {
+    const kind = ev && ev.kind, id = ev && ev.id;
+    if (!kind || !id) return;
+    const field = KIND_TO_FIELD[kind];
+    const localEl = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
+    const elForLabel = localEl || ev.local || (ev.remote && ev.remote.data) || null;
+    const label = describeElement(kind, elForLabel, stateRef.current ? stateRef.current.els : []);
+    const spec = toastForSyncEvent(ev, { name: "", label });
+    if (!spec) return;
+    if (spec.removeFromCanvas) applyRemoteInstr({ action: "remove", kind, id }); // deletion is showing; Restore re-adds
+    if (ev.type === "restore-conflict" && ev.remote) {
+      // someone got there first — their current row is the truth on canvas
+      if (ev.remote.deleted_at) applyRemoteInstr({ action: "remove", kind, id });
+      else if (ev.remote.data) applyRemoteInstr({ action: "upsert", kind, id, el: ev.remote.data });
+    }
+    const uid = (ev.remote && (ev.remote.deleted_by || ev.remote.updated_by)) || null;
+    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve("a teammate");
+    Promise.resolve(resolve).then((name) => {
+      const finalSpec = toastForSyncEvent(ev, { name, label });
+      if (!finalSpec) return;
+      const localCopy = ev.local || localEl || null;
+      const action =
+        finalSpec.action === "zoom" ? { label: "Show", onClick: () => zoomToElement(kind, id) } :
+        finalSpec.action === "restore" && localCopy ? {
+          label: "Restore",
+          onClick: () => {
+            applyRemoteInstr({ action: "upsert", kind, id, el: localCopy }); // back on canvas now
+            const e = elSyncRef.current; if (e) { try { e.restore(kind, id, localCopy); } catch (_) {} }
+          },
+        } : null;
+      pushToast({ text: finalSpec.text, action });
+    }).catch(() => {});
   };
   const onUp = (e) => {
     if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)
@@ -7855,6 +7928,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* B672 — the "changed in another session … Take over editing" conflict banner is GONE:
           the whole-doc conflict class it surfaced (B455/B460/B558/B596) is retired by per-element
           sync — elements are per-row rev-guarded, the header self-heals a stale CAS (cloudUpsert). */}
+      {/* B673 — its successor: the loud-but-NON-BLOCKING per-element conflict toasts (both sides of
+          a collision get told, with Show / Restore actions; nothing is ever silently overwritten). */}
+      <ToastHost toasts={toasts} onDismiss={dismissToast} />
       {/* B455/NEW-7 + B464/B466 (NEW-1/NEW-3) — single-active-editor read-only banner, now LOUD and
           ACTIONABLE. Another tab of this browser is the active editor, so this tab is read-only and
           its edits are NOT syncing to the cloud (they ARE kept on this device — B458). Reloading does
