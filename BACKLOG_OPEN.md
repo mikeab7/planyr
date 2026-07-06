@@ -15,7 +15,7 @@
 | B674 | Element-level sync, phase 5/5: remove the edit lock — multi-writer cutover + presence pill | [Site Planner / Shell] | #site-planner #ui #persistence | live |
 | B663 | ONE-TIME migration: every existing project gets the standard tree + existing files move into their tree folders in Drive | [Library / storage] | #library #drive | — |
 | B662 | Unified Library: the folder tree IS the view, and files live inside it (+ the live-502 chunked Drive sync fix) | [Library / Doc Review / storage] | #library #drive #persistence | — |
-| B657 | Terminology & consistency pass | [App-wide / UI] | #ui | sandbox |
+| B685 | The Site Planner inspector / left panel doesn't theme to dark (hardcoded cream) | [Site Planner / UI] | #site-planner #ui | live |
 | B650 | Per-project standard folder tree, user-editable in-app, with continuous one-way sync to Google Drive | [Doc Review / Library / storage · drive-integration / persistence] | — | — |
 | B648 | Persistence & Sync epic: one umbrella + a canonical write-path doc | [Site Planner / Persistence] | #persistence | live |
 | B629 | Drive-backed county PARCEL snapshot cache so outages stop breaking the map | [Site Planner / GIS] | #site-planner #gis #drive | — |
@@ -97,8 +97,8 @@
 - **#persistence** — B672, B673, B674, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B682, B676, B667
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B672, B673, B674, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B684, B682, B651
+- **#site-planner** — B672, B673, B674, B685, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B684, B682, B651
 - **#stitching** — B413
 - **#testing** — B269, B63
-- **#ui** — B673, B674, B657, B115, B669, B668, B658
+- **#ui** — B673, B674, B685, B115, B669, B668, B658
 - **#yield** — B553, B651
