@@ -8,6 +8,7 @@
  * removed from Drive (folders + files), which then mirrors as a recoverable Drive-trash move.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   treeify, childrenOf, subtreeIds, wouldCreateCycle,
   validateFolderName, suggestNextNumberedName, liveRows,
@@ -53,6 +54,7 @@ export default function FolderTree({
   const [editing, setEditing] = useState(null); // { id, value }
   const [moving, setMoving] = useState(null); // id being re-parented
   const [hoveredId, setHoveredId] = useState(null);
+  const [menu, setMenu] = useState(null); // right-click actions: { node, x, y }
   const [pendingDelete, setPendingDelete] = useState(null); // { id, name, folders, files, empty, loading }
   const [drive, setDrive] = useState({ state: "idle", msg: "" }); // idle|syncing|ok|off|error
   const syncTimer = useRef(null);
@@ -119,6 +121,14 @@ export default function FolderTree({
   }, [projectId]);
 
   useEffect(() => () => { if (syncTimer.current) clearTimeout(syncTimer.current); }, []);
+
+  // Right-click context menu closes on Escape (the backdrop handles click-away).
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e) => { if (e.key === "Escape") setMenu(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menu]);
 
   const tree = useMemo(() => treeify(rows), [rows]);
   const live = useMemo(() => liveRows(rows), [rows]);
@@ -230,13 +240,16 @@ export default function FolderTree({
       <div key={node.id}>
         <div
           data-testid="folder-row"
+          title={`${node.name} — right-click for options`}
           style={{
             display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", paddingLeft: 8 + depth * 16,
             borderRadius: 6, color: T.text, minHeight: 30,
-            background: isSelected ? "var(--hover-menu)" : hoveredId === node.id ? T.raised : "transparent",
+            background: isSelected ? "var(--hover-menu)"
+              : (hoveredId === node.id || (menu && menu.node.id === node.id)) ? T.raised : "transparent",
           }}
           onMouseEnter={() => setHoveredId(node.id)}
           onMouseLeave={() => setHoveredId((h) => (h === node.id ? null : h))}
+          onContextMenu={(e) => { if (isEditing || isMoving) return; e.preventDefault(); setMenu({ node, x: e.clientX, y: e.clientY }); }}
         >
           <button
             onClick={() => kids.length && toggle(node.id)}
@@ -268,22 +281,11 @@ export default function FolderTree({
             <span style={{ flex: 1, cursor: embedded || kids.length ? "pointer" : "default", fontWeight: isSelected ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onClick={onNameClick}>{node.name}</span>
           )}
 
+          {/* Row actions (pin / add / rename / move / delete) moved to a right-click context
+              menu (B-item) so they no longer clutter the row on hover. The quiet pinned marker
+              and rolled-up file count still show inline. */}
           {!isEditing && !isMoving && (
-            hoveredId === node.id ? (
-              <span style={{ display: "flex", gap: 2 }}>
-                {onTogglePin && (
-                  <IconBtn title={pinnedIds && pinnedIds.has(node.id) ? "Unpin from the Library home" : "Pin to the Library home"}
-                    accent={pinnedIds && pinnedIds.has(node.id)} onClick={() => onTogglePin(node)}>
-                    {pinnedIds && pinnedIds.has(node.id) ? "★" : "☆"}
-                  </IconBtn>
-                )}
-                <IconBtn title="Add subfolder" onClick={() => onAdd(node.id)}>＋</IconBtn>
-                <IconBtn title="Rename" onClick={() => setEditing({ id: node.id, value: node.name })}>✎</IconBtn>
-                <IconBtn title="Move" onClick={() => setMoving(node.id)}>⇄</IconBtn>
-                <IconBtn title="Delete" danger onClick={() => askDelete(node)}>🗑</IconBtn>
-              </span>
-            ) : pinnedIds && pinnedIds.has(node.id) ? (
-              // Quiet pinned marker when the row isn't hovered (so pins stay discoverable).
+            pinnedIds && pinnedIds.has(node.id) ? (
               <span aria-hidden style={{ flex: "none", fontSize: 11, color: T.accentText, paddingRight: 4 }}>★</span>
             ) : count ? (
               // Rolled-up file count (files in this folder + everything under it).
@@ -345,6 +347,19 @@ export default function FolderTree({
       {/* Drive-mirror status pinned at the rail's foot, always visible while syncing. */}
       <DriveBadge drive={drive} onSync={() => scheduleSync(0)} />
 
+      {menu && (
+        <FolderContextMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          pinnedIds={pinnedIds}
+          onTogglePin={onTogglePin}
+          onAdd={onAdd}
+          onRename={(node) => setEditing({ id: node.id, value: node.name })}
+          onMove={(id) => setMoving(id)}
+          onDelete={askDelete}
+        />
+      )}
+
       {pendingDelete && (
         <DeleteConfirm info={pendingDelete} onCancel={() => setPendingDelete(null)} onConfirm={confirmDelete} />
       )}
@@ -352,12 +367,56 @@ export default function FolderTree({
   );
 }
 
-function IconBtn({ children, title, onClick, danger, accent }) {
-  return (
-    <button title={title} onClick={onClick} style={{
-      width: 24, height: 24, border: "none", background: "none", cursor: "pointer", borderRadius: 4,
-      color: danger ? "var(--danger)" : accent ? "var(--accent-library-text)" : "var(--text-secondary)", fontSize: 13, lineHeight: 1,
-    }}>{children}</button>
+/* Right-click actions for a folder row. Rendered in a body portal (like the project-manage menu
+ * in ProjectBreadcrumb) so it floats above the tree at the cursor: a full-screen backdrop closes
+ * it on any click / right-click, and each item runs its action then dismisses. Positioned at the
+ * click point, clamped so it never spills past the viewport edge. */
+function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRename, onMove, onDelete }) {
+  const node = menu.node;
+  const pinned = !!(pinnedIds && pinnedIds.has(node.id));
+  const W = 210, H = 232; // approx footprint for edge clamping
+  const left = Math.max(6, Math.min(menu.x, window.innerWidth - W - 8));
+  const top = Math.max(6, Math.min(menu.y, window.innerHeight - H - 8));
+  const item = (extra) => ({
+    display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
+    padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer",
+    borderRadius: 6, font: "inherit", fontSize: 13, color: T.text, ...extra,
+  });
+  const hoverOn = (e) => { e.currentTarget.style.background = "var(--hover-ghost)"; };
+  const hoverOff = (e) => { e.currentTarget.style.background = "transparent"; };
+  const run = (fn) => () => { onClose(); fn(); };
+  const glyph = { flex: "none", width: 16, textAlign: "center", fontSize: 13 };
+  return createPortal(
+    <>
+      <div role="presentation" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+        style={{ position: "fixed", inset: 0, zIndex: 5000 }} />
+      <div data-testid="folder-context-menu" role="menu" aria-label="Folder actions"
+        style={{
+          position: "fixed", zIndex: 5001, left, top, minWidth: W, padding: 5,
+          background: T.overlay, color: T.text, border: `1px solid ${T.borderStrong}`,
+          borderRadius: 10, boxShadow: "0 12px 40px rgba(0,0,0,.35)",
+        }}>
+        <div style={{ padding: "4px 10px 6px", fontSize: 11, fontWeight: 700, color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</div>
+        {onTogglePin && (
+          <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onTogglePin(node))} style={item()}>
+            <span aria-hidden style={glyph}>{pinned ? "★" : "☆"}</span>{pinned ? "Unpin from Library home" : "Pin to Library home"}
+          </button>
+        )}
+        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onAdd(node.id))} style={item()}>
+          <span aria-hidden style={glyph}>＋</span>Add subfolder
+        </button>
+        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onRename(node))} style={item()}>
+          <span aria-hidden style={glyph}>✎</span>Rename
+        </button>
+        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onMove(node.id))} style={item()}>
+          <span aria-hidden style={glyph}>⇄</span>Move
+        </button>
+        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onDelete(node))} style={item({ color: T.dangerText })}>
+          <span aria-hidden style={glyph}>🗑</span>Delete
+        </button>
+      </div>
+    </>,
+    document.body,
   );
 }
 
