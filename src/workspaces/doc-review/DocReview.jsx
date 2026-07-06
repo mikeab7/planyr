@@ -21,6 +21,7 @@ import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
+import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveResume } from "./lib/lastDoc.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
@@ -286,6 +287,14 @@ export default function DocReview({
   // --- cloud persistence (single-sheet review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
   const [meta, setMeta] = useState(() => newMeta()); // { title, projectId, project, discipline, item, revision, docDate }
+  // Snapshot the stored "last doc" pointers at FIRST RENDER, before any effect below can
+  // touch them. The mount-time pointer writes used to overwrite lastSingleId/lastMode with
+  // this session's fresh blank id/mode BEFORE the resume effect read them back — so resume
+  // loaded a review that was never saved and fell to the empty state ("starts from nothing"
+  // on every reload). Resume now reads this capture; writes stay silent until boot resolves.
+  const bootPointers = useRef(null);
+  if (bootPointers.current === null) bootPointers.current = { legacy: readLegacyPointers(), map: readLastDocMap() };
+  const [bootResolved, setBootResolved] = useState(false); // pointer writes arm only after the boot resume settled
   const [source, setSource] = useState(null);     // { srcId, name, size, storageKey, oversize }
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
@@ -720,9 +729,19 @@ export default function DocReview({
   });
 
   // Remember the active review so a refresh resumes it (cloud reconciled with the
-  // synchronous local mirror, so an edit made just before reload isn't lost).
-  useEffect(() => { try { localStorage.setItem("planyr:docreview:lastSingleId", reviewId); } catch (_) {} }, [reviewId]);
-  useEffect(() => { try { localStorage.setItem("planyr:docreview:lastMode", mode); } catch (_) {} }, [mode]);
+  // synchronous local mirror, so an edit made just before reload isn't lost). Two layers:
+  // the legacy GLOBAL pointers (kept as the resume fallback for existing devices) and the
+  // per-PROJECT map (each project reopens ITS last drawing). Both stay silent until boot
+  // resolved — writing on mount is what used to clobber the pointers before resume read them.
+  useEffect(() => {
+    if (!bootResolved) return;
+    try { localStorage.setItem("planyr:docreview:lastSingleId", reviewId); } catch (_) {}
+    if (mode === "review") writeLastDoc(meta.projectId, { id: reviewId, mode: "review" });
+  }, [bootResolved, reviewId, meta.projectId, mode]);
+  useEffect(() => {
+    if (!bootResolved) return;
+    try { localStorage.setItem("planyr:docreview:lastMode", mode); } catch (_) {}
+  }, [bootResolved, mode]);
 
   const loadTok = useRef(0); // a newer open supersedes an in-flight single-review load (B52)
   const fetchSourceBytes = async (src, tok) => {
@@ -826,6 +845,32 @@ export default function DocReview({
     else { setMode("review"); await loadSingleReview(rec); }
   };
 
+  // Breadcrumb project switch → land on THAT project's last-open document (owner request,
+  // 2026-07-05: "whatever I last reviewed in that project should stay open too"). Declared
+  // BEFORE the docIntent consumer so a same-commit cross-workspace open still reads as
+  // pending here and wins. Skips during boot (the resume effect owns the first resolve) and
+  // when the project change came FROM opening a doc (meta already matches the new project).
+  const booted = useRef(false);
+  const prevProjectRef = useRef(projectId);
+  useEffect(() => {
+    const prev = prevProjectRef.current;
+    prevProjectRef.current = projectId;
+    if (!booted.current || projectId === prev || !projectId) return;
+    if (docIntent && docIntent.token !== lastConsumedDocToken) return; // a specific open is incoming — it wins
+    if (meta.projectId === projectId) return; // the open doc already belongs here (its own open navigated us)
+    const entry = readLastDoc(projectId);
+    const openId = mode === "stitch" ? ((pendingStitch && pendingStitch.id) || null) : reviewId;
+    if (entry && entry.id === openId) return; // that doc is already on screen
+    if (entry) { openReview({ id: entry.id }); return; } // openReview flushes the outgoing doc first (B447)
+    // No remembered doc for this project: fall to the clean empty state — a drawing from
+    // ANOTHER project staying open under the new breadcrumb reads as the wrong file. Flush
+    // the outgoing review's pending edit before wiping the canvas state.
+    if (mode !== "review" || source || markups.length > 0 || meta.projectId) {
+      (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   // Consume the Shell's cross-workspace "open this review" intent (NEW-1). A file clicked in
   // the GLOBAL Project Files panel switches here AND hands us the review; because this
   // workspace is lazy-mounted, we can only open it once we exist. Token-guarded (module-
@@ -836,42 +881,41 @@ export default function DocReview({
     if (docIntent.kind === "open-review" && docIntent.row) openReview(docIntent.row);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docIntent]);
-  // Resume the last review (and its mode) on mount, once. Stitch reviews are handed
-  // to <Stitcher> via pendingStitch; single reviews load here.
-  const booted = useRef(false);
+  // Resume the last review (and its mode) on mount, once — per-project first. Stitch
+  // reviews are handed to <Stitcher> via pendingStitch; single reviews load here.
   useEffect(() => {
     if (booted.current) return; booted.current = true;
     // A cross-workspace open is incoming — let the docIntent effect load THAT review rather
     // than also resuming the last one (the two are async and would race; resume could win
     // and silently replace the file the user just clicked). (NEW-1)
-    if (bootDocIntentRef.current) return;
-    // Browsing now lives in the Library workspace, so Review resumes the last open drawing on
-    // mount (project deep-links included) — the `wrongProject` guard below keeps it from
-    // resuming a review that belongs to a DIFFERENT project than the URL names (that lands on
-    // the empty state instead, where the Library is one click away).
+    if (bootDocIntentRef.current) { setBootResolved(true); return; }
+    // Browsing lives in the Library workspace, so Review resumes the last open drawing on
+    // mount. Candidates come from the FIRST-RENDER pointer capture (the live keys may already
+    // be touched by this session): the URL's project → that project's own last doc first,
+    // then the legacy global pointers; no URL project → the legacy globals, then unfiled.
     (async () => {
-      let lastMode = "review", lastSingle = null, lastStitch = null;
-      try {
-        lastMode = localStorage.getItem("planyr:docreview:lastMode") || "review";
-        lastSingle = localStorage.getItem("planyr:docreview:lastSingleId");
-        lastStitch = localStorage.getItem("planyr:docreview:lastStitchId");
-      } catch (_) {}
+      const candidates = resolveResume({
+        routeProjectId: projectId,
+        map: bootPointers.current.map,
+        legacy: bootPointers.current.legacy,
+      });
+      if (!candidates.length) return;
       const uid = await currentUid();
       // Respect an explicit deep link (Work Item A): if the URL named a project, don't
-      // auto-resume a review that belongs to a DIFFERENT project — show the empty state
-      // instead. No URL project → resume freely (it reflects into the URL).
+      // auto-resume a review that belongs to a DIFFERENT project — try the next candidate,
+      // else the empty state. No URL project → resume freely (it reflects into the URL).
       const wrongProject = (rec) => projectId && rec && rec.projectId && rec.projectId !== projectId;
-      if (lastMode === "stitch" && lastStitch) {
-        const rec = reconcile(await loadReview(lastStitch), readDraft(uid, lastStitch));
-        if (rec && rec.kind === "stitch" && !wrongProject(rec)) { setPendingStitch(rec); setMode("stitch"); return; }
+      for (const c of candidates) {
+        const rec = reconcile(await loadReview(c.id), readDraft(uid, c.id));
+        if (!rec || wrongProject(rec)) continue;
+        // Route by the RECORD's kind (an entry's stored mode could be stale if re-filed).
+        if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
+        if (rec.kind === "single") { await loadSingleReview(rec); return; }
       }
-      if (lastSingle) {
-        const rec = reconcile(await loadReview(lastSingle), readDraft(uid, lastSingle));
-        if (rec && rec.kind === "single" && !wrongProject(rec)) await loadSingleReview(rec);
-      }
-    })().catch(() => {}); // B535: a resume failure (currentUid/loadReview/reconcile throwing) must
-    // not be an unhandled rejection — loadSingleReview owns its own "Opening…" overlay via finally,
-    // so swallowing here just falls to the empty state (the intended behavior per the comment above).
+    })().catch(() => {}) // B535: a resume failure (currentUid/loadReview/reconcile throwing) must
+      // not be an unhandled rejection — loadSingleReview owns its own "Opening…" overlay via
+      // finally, so swallowing here just falls to the empty state.
+      .finally(() => setBootResolved(true)); // arm the pointer writes only now — never before resume read them
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

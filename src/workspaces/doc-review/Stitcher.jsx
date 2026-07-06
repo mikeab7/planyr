@@ -30,6 +30,7 @@ import ReviewsBar from "./components/ReviewsBar.jsx";
 import CloudSyncBadge from "../../shared/ui/CloudSyncBadge.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
+import { writeLastDoc, readLegacyPointers } from "./lib/lastDoc.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
@@ -113,6 +114,13 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // --- cloud persistence (stitched-set review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
   const [meta, setMeta] = useState(() => newMeta()); // { title, projectId, project, discipline, item, revision, docDate }
+  // Capture the stored stitch pointer at FIRST RENDER — the mount-time pointer write below
+  // used to overwrite it with this instance's fresh blank id before the resume effect read
+  // it back (same self-clobber the single path had), so "toggling back resumes the last
+  // stitch" never actually resumed. Writes stay silent until boot resolves.
+  const bootStitchPointer = useRef(null);
+  if (bootStitchPointer.current === null) bootStitchPointer.current = readLegacyPointers().stitchId;
+  const [bootResolved, setBootResolved] = useState(false);
   const pdfsRef = useRef([]); useEffect(() => { pdfsRef.current = pdfs; });
   const placedRef = useRef([]); useEffect(() => { placedRef.current = placed; });
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
@@ -524,7 +532,13 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     buildSnapshot, isEmpty,
     deps: [reviewId, meta, pdfs, placed, measures, ftPerUnit],
   });
-  useEffect(() => { try { localStorage.setItem("planyr:docreview:lastStitchId", reviewId); } catch (_) {} }, [reviewId]);
+  // Legacy global pointer + the per-PROJECT last-doc map entry — armed only after boot
+  // resolved so this mount's blank id can never clobber the stored resume target.
+  useEffect(() => {
+    if (!bootResolved) return;
+    try { localStorage.setItem("planyr:docreview:lastStitchId", reviewId); } catch (_) {}
+    writeLastDoc(meta.projectId, { id: reviewId, mode: "stitch" });
+  }, [bootResolved, reviewId, meta.projectId]);
 
   // B633/NEW-4 — after a load collapsed duplicate sheets, persist the cleaned array once. This runs
   // post-commit, so buildSnapshot reads the deduped `placed`; saveNow writes both the local mirror
@@ -646,19 +660,21 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     loadStitch(loadReq).then(() => onConsumeLoad && onConsumeLoad()).catch(() => onConsumeLoad && onConsumeLoad());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadReq]);
-  // Otherwise resume the last stitch session on mount (e.g. toggling back from single).
+  // Otherwise resume the last stitch session on mount (e.g. toggling back from single) —
+  // from the first-render capture, since the live key may already be touched this session.
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return; booted.current = true;
-    if (loadReq) return;
+    if (loadReq) { setBootResolved(true); return; }
     (async () => {
-      let sid = null; try { sid = localStorage.getItem("planyr:docreview:lastStitchId"); } catch (_) {}
+      const sid = bootStitchPointer.current;
       if (!sid) return;
       const rec = reconcile(await loadReview(sid), readDraft(await currentUid(), sid));
       if (rec && rec.kind === "stitch") { loadedId.current = rec.id; await loadStitch(rec); }
-    })().catch(() => {}); // B534: a resume failure (Drive/Storage/parse) must not be an unhandled
-    // rejection — loadStitch owns its own busy via finally, so swallowing here just falls to the
-    // empty stitcher instead of leaving a half-started boot.
+    })().catch(() => {}) // B534: a resume failure (Drive/Storage/parse) must not be an unhandled
+      // rejection — loadStitch owns its own busy via finally, so swallowing here just falls to
+      // the empty stitcher instead of leaving a half-started boot.
+      .finally(() => setBootResolved(true)); // arm the pointer writes only after resume read the capture
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
