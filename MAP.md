@@ -416,7 +416,7 @@ _195 source files mapped._
 
 - **`src/workspaces/library/components/FileBrowser.jsx`** — Library main surface: category tree + facet row + badged file list, drop-to-autofile queue with discipline split, needs-filing triage, delete and Drive share-link
   - _exports_: `default (FileBrowser)`
-- **`src/workspaces/library/components/FolderTree.jsx`** — Library per-project folder-tree editor (B650): add / inline-rename / move / delete + the enumerated delete-safety modal + Drive-mirror status.
+- **`src/workspaces/library/components/FolderTree.jsx`** — Library per-project folder-tree editor (B650): add / inline-rename / move / delete via a right-click context menu (B677; double-click opens+expands a folder) + the enumerated delete-safety modal + Drive-mirror status.
   - _exports_: `default (FolderTree)`
 - **`src/workspaces/library/components/LibraryHome.jsx`** — Library landing Home: Pinned folder/file cards (loud missing-target state), Recent drawings, project card grid; import stays per-project
   - _exports_: `default (LibraryHome)`
