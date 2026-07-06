@@ -48,7 +48,8 @@ const f0 = (n) => Math.round(n).toLocaleString();
 const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOpenReview, signedIn = false }) {
+export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOpenReview, signedIn = false, isActive = true }) {
+  const isActiveRef = useRef(isActive); isActiveRef.current = isActive; // keep-alive: live value for the once-bound key handler
   const svgRef = useRef(null);
   const [pdfs, setPdfs] = useState([]);          // {srcId,name,doc,numPages,blob,size,storageKey,oversize,missing}
   const [placed, setPlaced] = useState([]);      // {id,srcId,pageNum,name,href,baseW,baseH,M,missing}
@@ -508,7 +509,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     else if ((e.key === "Delete" || e.key === "Backspace") && removeLastVertex()) e.preventDefault();
   };
   useEffect(() => {
-    const onKey = (e) => onKeyRef.current && onKeyRef.current(e);
+    // Keep-alive gate: a hidden stitcher must not eat Delete/Enter/Escape for the visible module.
+    const onKey = (e) => { if (isActiveRef.current && onKeyRef.current) onKeyRef.current(e); };
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
   }, []);
 

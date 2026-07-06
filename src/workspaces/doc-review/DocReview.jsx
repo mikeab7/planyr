@@ -159,7 +159,13 @@ export default function DocReview({
   // no project → pick-a-project); `onNavigate` writes the hash to change it; `crossProject`
   // is the all-projects browse mode.
   projectId = null, onNavigate, crossProject = false,
+  // Keep-alive: false while this workspace is mounted but hidden behind another tab. The
+  // once-bound window key handlers MUST no-op then (a hidden Review eating Delete would
+  // silently delete markups), and a PDF that finished loading while hidden re-fits on show.
+  isActive = true,
 } = {}) {
+  const isActiveRef = useRef(isActive); isActiveRef.current = isActive; // live value for once-bound handlers
+  const hiddenFitPending = useRef(false); // a fit computed at display:none fallback size → redo on activation
   const wrapRef = useRef(null);
   const backdropRef = useRef(null);     // whole-page floor canvas — always present, no white (B415)
   const detailRef = useRef(null);       // viewport-clipped sharp canvas over the backdrop (B415)
@@ -584,6 +590,9 @@ export default function DocReview({
       if (!viewRef.current) {
         const wrap = wrapRef.current;
         const vw = wrap?.clientWidth || 900, vh = wrap?.clientHeight || 600;
+        // Keep-alive: while hidden (display:none), clientWidth reads 0 and the fit lands on
+        // the 900×600 fallback — flag it so activation re-fits at the real viewport size.
+        if (!isActiveRef.current) hiddenFitPending.current = true;
         setView(fitView(base.width, base.height, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode: fitMode }));
       }
       setBackdropReq((n) => n + 1); setDetailReq((n) => n + 1); // raster both layers for the new page/size
@@ -688,6 +697,12 @@ export default function DocReview({
     const nv = fitView(base.w, base.h, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode });
     setView(nv); setDetailReq((n) => n + 1); // re-raster the detail at the new fit (backdrop is zoom-independent)
   };
+  // Keep-alive: a PDF that finished loading while this tab was HIDDEN fitted to the 900×600
+  // fallback (display:none ⇒ clientWidth 0). Re-fit once on activation, at the real size.
+  useEffect(() => {
+    if (isActive && hiddenFitPending.current) { hiddenFitPending.current = false; fitNow(fitMode); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
   // Bind a NON-passive wheel listener via a callback ref so preventDefault works (a React
   // onWheel is registered passive at the root and can't stop the page from scrolling/zooming)
   // and so it attaches exactly when the viewport mounts. Plain wheel, Ctrl/Cmd+wheel, and
@@ -745,6 +760,7 @@ export default function DocReview({
   }, [bootResolved, mode]);
 
   const loadTok = useRef(0); // a newer open supersedes an in-flight single-review load (B52)
+  const openInFlightRef = useRef(false); // an openReview is running — the project-switch resume must stand down
   const fetchSourceBytes = async (src, tok) => {
     const superseded = () => tok != null && tok !== loadTok.current; // a newer open won
     if (superseded()) return; // superseded before fetching
@@ -821,6 +837,12 @@ export default function DocReview({
     // Even a malformed open request is named, never silent (B446).
     if (!row || !row.id) { setOpenErr("That file can't be opened (its reference is missing). Browse the Files list and try again."); return; }
     setOpenErr("");
+    // While THIS open runs, the project-switch resume effect must stand down: a cross-
+    // workspace open navigates the route a commit AFTER its intent is consumed, and without
+    // this flag that route change would kick off the target project's LAST doc in parallel,
+    // racing (and possibly superseding) the very file the user just clicked.
+    openInFlightRef.current = true;
+    try {
     // B447 — switching is deterministic: flush the OUTGOING review's pending write to the cloud
     // BEFORE the incoming load starts. The debounced autosave's timer is cancelled the instant
     // this load changes the deps, so without this the outgoing edit would live only in the local
@@ -848,6 +870,7 @@ export default function DocReview({
       currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: rec.projectId || null })).catch(() => {}); // Library-Home "Recent"
       setPendingStitch(rec); setMode("stitch"); setBusy(false); setBusyLabel("");
     } else { setMode("review"); await loadSingleReview(rec); }
+    } finally { openInFlightRef.current = false; }
   };
 
   // Breadcrumb project switch → land on THAT project's last-open document (owner request,
@@ -862,6 +885,7 @@ export default function DocReview({
     prevProjectRef.current = projectId;
     if (!booted.current || projectId === prev || !projectId) return;
     if (docIntent && docIntent.token !== lastConsumedDocToken) return; // a specific open is incoming — it wins
+    if (openInFlightRef.current) return; // an open is mid-flight — ITS navigate caused this change; it owns the outcome
     if (meta.projectId === projectId) return; // the open doc already belongs here (its own open navigated us)
     const entry = readLastDoc(projectId);
     const openId = mode === "stitch" ? ((pendingStitch && pendingStitch.id) || null) : reviewId;
@@ -1500,8 +1524,11 @@ export default function DocReview({
     else if (!draft && !calInput && (e.key === "ArrowRight" || e.key === "PageDown")) { e.preventDefault(); goToPage(page + 1); }
   };
   useEffect(() => {
-    const onKey = (e) => onKeyRef.current && onKeyRef.current(e);
-    const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") setSpaceHeld(false); };
+    // Keep-alive gate: these listeners stay bound for the workspace's whole mounted life,
+    // which now spans hidden-tab time — a hidden Review must never eat Delete/Ctrl-Z/Space
+    // (or actually delete markups on the hidden canvas) while another module is on screen.
+    const onKey = (e) => { if (isActiveRef.current && onKeyRef.current) onKeyRef.current(e); };
+    const onKeyUp = (e) => { if (isActiveRef.current && (e.key === " " || e.code === "Space")) setSpaceHeld(false); };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
@@ -1576,6 +1603,7 @@ export default function DocReview({
 
   if (mode === "stitch") return (
     <Stitcher
+      isActive={isActive}
       onReview={() => setMode("review")}
       loadReq={pendingStitch}
       onConsumeLoad={() => setPendingStitch(null)}

@@ -49,6 +49,8 @@ export default function Library({
   // switch; `projectId` is the route's Site-group id (null = pick-a-project), `crossProject`
   // is the all-projects browse mode, and `onNavigate` writes the hash to change either.
   projectId = null, onNavigate, crossProject = false,
+  // Keep-alive: false while mounted but hidden. Returning revalidates the file list cheaply.
+  isActive = true,
 } = {}) {
   // Cloud-readiness drives whether the browser can list files (it lives in the account).
   // Re-checks on auth changes so a sign-in/out flips the surface without a reload.
@@ -230,6 +232,7 @@ export default function Library({
           // drawings + project cards — replaces the bare "pick a project" dead end.
           <LibraryHome
             uid={uid}
+            active={isActive}
             onOpenFile={(row) => onOpenReviewInDocReview?.(row)}
             onOpenFolder={openPinnedFolder}
             onPickProject={(id) => onNavigate?.({ projectId: id, cross: false })}
@@ -239,6 +242,7 @@ export default function Library({
           projectId={projectId}
           projectName={projectName}
           signedIn={signedIn}
+          isActive={isActive}
           cross={crossProject}
           indexProvider={autofilingProvider}
           // Click a file → open it in Review (cross-workspace). The Shell intent switches the

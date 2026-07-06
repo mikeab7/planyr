@@ -77,7 +77,7 @@ function FolderCard({ pin, projectName, onOpen, onUnpin }) {
   );
 }
 
-export default function LibraryHome({ uid = null, onOpenFile, onOpenFolder, onPickProject }) {
+export default function LibraryHome({ uid = null, active = true, onOpenFile, onOpenFolder, onPickProject }) {
   const [pins, setPins] = useState([]);
   const [recents, setRecents] = useState([]);
   const [reviews, setReviews] = useState([]);   // doc_reviews rows, for names/projects on cards
@@ -89,6 +89,7 @@ export default function LibraryHome({ uid = null, onOpenFile, onOpenFolder, onPi
   const projName = (id) => { const p = projects.find((x) => x.id === id); return p ? p.name : ""; };
 
   useEffect(() => {
+    if (!active) return; // keep-alive: reload pins/recents/names each time Home comes back on screen
     let live = true;
     const load = async () => {
       const [p, r] = await Promise.all([listPins(uid), Promise.resolve(listRecents(uid))]);
@@ -103,7 +104,7 @@ export default function LibraryHome({ uid = null, onOpenFile, onOpenFolder, onPi
       finally { if (live) setLoading(false); }
     })();
     return () => { live = false; off(); };
-  }, [uid]);
+  }, [uid, active]);
 
   const byId = new Map(reviews.map((r) => [r.id, r]));
   const docProject = (doc, fallback) => (doc && (doc.project_id || doc.projectId)) || fallback || null;

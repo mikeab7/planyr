@@ -76,7 +76,7 @@ const FileTypeIcon = ({ kind }) => (
 );
 
 export default function FileBrowser({
-  projectId = null, projectName = "", signedIn = false, cross = false,
+  projectId = null, projectName = "", signedIn = false, cross = false, isActive = true,
   onOpenReview, onNavigate, indexProvider = null,
   /* Unified Library (B650 follow-on) — "folder mode": the left column shows the project's REAL
    * folder tree (the `folderRail` node, a FolderTree) instead of the derived category tree, and
@@ -127,7 +127,10 @@ export default function FileBrowser({
       setProjects(p); setReviews(mergeFactsIntoReviews(r, ff));
     } finally { if (tok === reqRef.current) setBusy(false); }
   };
-  useEffect(() => { refresh(); }, [signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Keep-alive: the browser stays mounted while hidden, so returning to the Library tab
+  // revalidates the (cheap, token-guarded) file index instead of showing a stale list.
+  // A hidden browser skips the fetch; the next activation runs it.
+  useEffect(() => { if (isActive) refresh(); }, [signedIn, isActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const projName = (id) => (projects.find((p) => p.id === id) || {}).name || projectName || "";
 

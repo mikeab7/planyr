@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-05 @ `a76211f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `72e20ad` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_184 source files mapped._
+_190 source files mapped._
 
 ## infra
 
@@ -25,6 +25,8 @@ _184 source files mapped._
   - _exports_: `default (ErrorBoundary)`
 - **`src/app/flushRegistry.js`** — Cross-workspace flush-before-navigate registry: registerFlush/flushAll give each live workspace one synchronous local-save + keepalive cloud push before a forced reload
   - _exports_: `_flushers`, `flushAll`, `registerFlush`
+- **`src/app/lastRoute.js`** — "Open where I left off": last {module,projectId,cross} pointer written on every navigate; pickBootRoute/seedBootRoute seed an empty-hash boot pre-render (deep links win)
+  - _exports_: `pickBootRoute`, `readLastRoute`, `RESTORE_LAST_MODULE`, `seedBootRoute`, `writeLastRoute`
 - **`src/app/modulePrefetch.js`** — Warm non-active workspace chunks on idle/hover and prefetch the heavy /sequence/ Gantt iframe doc so tab switches feel instant
   - _exports_: `prefetchModule`, `prefetchOnIdle`
 - **`src/app/route.js`** — Hash-route model: parseRoute/buildHash for {module,projectId,cross}, slug maps, useHashRoute hook with merge-navigate, INITIAL_HASH_EMPTY resume flag
@@ -124,6 +126,8 @@ _184 source files mapped._
   - _exports_: `ARM_POLICY`, `canonicalToolId`, `hostToolId`, `nextToolAfterCommit`, `SITE_TOOL_ALIAS`
 - **`src/shared/markup/tools.matrix.js`** — Single-source-of-truth tool matrix: property columns, draw modes, per-workspace tool rows + pure accessors; drives the panel and generates tool tests
   - _exports_: `CATEGORIES`, `columnMeta`, `DRAW_MODES`, `isClosedTool`, `measureTools`, `PROPERTY_COLUMNS`, `propsForTool`, `TOOL_MATRIX`, `toolById`, `toolsForWorkspace`, `WORKSPACES`
+- **`src/shared/pins/pinStore.js`** — Library-Home pinned folders/files store: per-uid localStorage lists with async swap-ready API (list/add/remove/toggle) + same-tab/cross-tab change subscription
+  - _exports_: `addPin`, `isPinned`, `listPins`, `removePin`, `subscribePins`, `togglePin`
 - **`src/shared/placement/fitToBoundary.js`** — Fit-to-boundary solver: one similarity transform (Procrustes correspondence or OBB fallback) landing a drawing ring on held survey feet with RMS-fraction confidence
   - _exports_: `CONFIDENT_FRAC`, `fitToBoundary`
 - **`src/shared/placement/placementFacts.js`** — Placement-readiness facts contract: empty/merge helpers + longest-dimension picker for facts captured at filing time so the cascade never reopens the file
@@ -142,6 +146,8 @@ _184 source files mapped._
   - _exports_: `filterProjects`, `groupProjects`, `normalizeProjectName`, `relTime`, `suggestNameMatch`
 - **`src/shared/projects/projects.js`** — Live project list for the breadcrumb switcher: groups the RLS-scoped site store, warms an empty on-device cache via cloud pull, and rename/delete a site-group project
   - _exports_: `deleteProject`, `filterProjects`, `groupProjects`, `listProjects`, `normalizeProjectName`, `relTime`, `renameProject`, `suggestNameMatch`, `warmProjectsIfEmpty`
+- **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
+  - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
   - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `TAB_ID`
 - **`src/shared/theme/palette.js`** — JS mirror of index.css theme tokens as concrete light/dark hex for the SVG canvas and Markup viewer where var() cannot resolve; paletteFor(resolved) selector
@@ -162,6 +168,8 @@ _184 source files mapped._
   - _exports_: `default (ModuleLoader)`, `SHOW_DELAY_MS`
 - **`src/shared/ui/moduleLoaderTheme.js`** — Pure loader theming: resolves a module id to accent+skin-kind+caption (LOADER_SKINS), never-throw fallback, SHOW_DELAY_MS constant
   - _exports_: `LOADER_SKINS`, `resolveLoaderTheme`, `SHOW_DELAY_MS`
+- **`src/shared/ui/persistedSet.js`** — Tiny localStorage Set-of-ids persistence (loadIdSet/saveIdSet/pruneSet) for remembered UI state like Library tree expansion; corrupt payloads read empty + clear
+  - _exports_: `loadIdSet`, `pruneSet`, `saveIdSet`
 - **`src/shared/ui/ProjectBreadcrumb.jsx`** — Row-1 Dashboard/Project breadcrumb + switcher dropdown: search, recents, New project, inline rename/delete kebab, at-risk-save surfacing, cloud-cache warm
   - _exports_: `default (ProjectBreadcrumb)`
 - **`src/shared/ui/RotationStepper.jsx`** — The one app-wide rotation control: type-to-set 2dp field + spinner nudges, wrap to [0,360), fine Shift+Arrow, invalid-flash-revert, locked-disable
@@ -357,6 +365,8 @@ _184 source files mapped._
   - _exports_: `binImageData`, `compareBinaries`, `comparePdfPages`, `resampleBinary`
 - **`src/workspaces/doc-review/lib/fileIndex.js`** — Pure auto-filing file-facts view-model: filing decision to Postgres index row, and merge stored placement/needs-filing facts onto review rows
   - _exports_: `factsRowToPatch`, `mergeFactsIntoReviews`, `toFactsRow`
+- **`src/workspaces/doc-review/lib/lastDoc.js`** — Per-PROJECT last-document map for Review resume ({projectId: {id,mode}}) + legacy-global fallback and resolveResume boot-candidate ordering
+  - _exports_: `readLastDoc`, `readLastDocMap`, `readLegacyPointers`, `resolveResume`, `writeLastDoc`
 - **`src/workspaces/doc-review/lib/localRead.js`** — Tier-1 free local title-block read: extract every page text (OCR scanned pages), classify per-page, pick majority discipline, emit multi-discipline filing decision
   - _exports_: `localTitleBlockRead`
 - **`src/workspaces/doc-review/lib/matchLineRefine.js`** — Stitcher raster match-line refinement: fit true seam line in pixels, remap neighbor placement onto anchor line and slide to connect crossing linework
@@ -398,6 +408,8 @@ _184 source files mapped._
   - _exports_: `default (FileBrowser)`
 - **`src/workspaces/library/components/FolderTree.jsx`** — Library per-project folder-tree editor (B650): add / inline-rename / move / delete + the enumerated delete-safety modal + Drive-mirror status.
   - _exports_: `default (FolderTree)`
+- **`src/workspaces/library/components/LibraryHome.jsx`** — Library landing Home: Pinned folder/file cards (loud missing-target state), Recent drawings, project card grid; import stays per-project
+  - _exports_: `default (LibraryHome)`
 - **`src/workspaces/library/lib/folders.js`** — Client folder-index store (B650): Supabase tree CRUD (own-row RLS) + idempotent template seed + the one-way Drive-mirror trigger via /api/folders.
   - _exports_: `addFolder`, `ensureSeeded`, `listFolders`, `migrateAllProjects`, `migrateProjectFiles`, `moveDriveFileToFolder`, `moveFolder`, `planFolderDelete`, `renameFolder`, `syncFoldersToDrive`, `trashSubtree`
 - **`src/workspaces/library/Library.jsx`** — Library workspace root: AppHeader chrome + FileBrowser wired to project route/auth, opening a clicked file into Review via the Shell onOpenReviewInDocReview intent

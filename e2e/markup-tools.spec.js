@@ -13,7 +13,7 @@
  * fixture account can open a PDF. */
 import { fileURLToPath } from "node:url";
 import { test, expect } from "@playwright/test";
-import { openModule, hasAccount, STORAGE_STATE } from "./helpers.js";
+import { openModule, moduleTab, hasAccount, STORAGE_STATE } from "./helpers.js";
 import { toolsForWorkspace, propsForTool } from "../src/shared/markup/tools.matrix.js";
 import { schemaForMarkup } from "../src/shared/markup/propertySchema.js";
 
@@ -52,7 +52,7 @@ test.describe("markup tools (signed in)", () => {
     await page.goto("/");
     // The restored session should land us signed in — the module tabs only render in the
     // authed shell. This replaces the full interactive sign-in.
-    await expect(page.getByTestId("module-tab-site-planner")).toBeVisible({ timeout: 20_000 });
+    await expect(moduleTab(page, "site-planner")).toBeVisible({ timeout: 20_000 });
   });
 
   test("the Review workspace mounts", async ({ page }) => {
@@ -65,7 +65,7 @@ test.describe("markup tools (signed in)", () => {
     if (await root.count()) {
       await expect(root).toBeVisible({ timeout: 20_000 });
     } else {
-      await expect(page.getByTestId("module-tab-doc-review")).toHaveAttribute("aria-current", "page");
+      await expect(moduleTab(page, "doc-review")).toHaveAttribute("aria-current", "page");
     }
   });
 

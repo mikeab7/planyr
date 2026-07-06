@@ -24,6 +24,10 @@ export default function Scheduler({
   // "create / link" resolution panel. onScheduleLinkChanged lets the Shell mirror the link onto
   // the Site Planner side (the two live in separate backends).
   projectId = null, onProjectChange, onScheduleLinkChanged,
+  // Keep-alive: false while mounted but hidden behind another tab. The iframe stays booted
+  // (the whole point — no ~2 s Gantt re-boot per switch); hidden, we still FOLLOW the route
+  // into the iframe, but never write the route from iframe state.
+  isActive = true,
 } = {}) {
   const iframeRef = useRef(null);
   const [projects, setProjects] = useState([]);   // [{id, name}] from the embedded app
@@ -162,11 +166,14 @@ export default function Scheduler({
   // flashed the whole screen + breadcrumb, B560.) A user switching schedules WITHIN the scheduler
   // carries up via selectSchedule() below.
   useEffect(() => {
-    if (section !== "projects" || projectId != null) return;
+    // Keep-alive gate: only the VISIBLE module may write the route. A hidden scheduler
+    // adopting its linked site would rewrite the project out from under the user (e.g.
+    // while they sit on the Site dashboard with no project selected).
+    if (!isActive || section !== "projects" || projectId != null) return;
     const cur = deriveCurrentProject(projects, activeId, section);
     const linked = cur && cur.linkedSiteId != null ? cur.linkedSiteId : null;
     if (linked != null) { try { onProjectChange?.(linked); } catch (_) {} }
-  }, [projects, activeId, section, projectId, onProjectChange]);
+  }, [projects, activeId, section, projectId, onProjectChange, isActive]);
 
   // Picking a schedule from the breadcrumb is a USER action: switch to it, and if it's linked to a
   // site, carry that site into the route so the Site/Review tabs follow. One-shot (not a reactive
