@@ -1,5 +1,15 @@
 ## ✅ Done
 
+### B683 — Coordinate readout shows WGS84 GPS lat/long (not State Plane E/N) `[Site Planner / Map]` (task) #site-planner #coordinates  *(owner brief 2026-07-06, arrived as "NEW-1"; minted **B683** = highest B# across both files (B682) + 1. Branch `claude/hopeful-fermi-3yaqcj`. DEDUPE-FIRST — no prior coordinate-display / lat-long item.)*
+`[x]` **DONE — shipped + sandbox+headless-verified this session (Verify: sandbox). lint 0 errors · full suite green · build green · `gis-verify/kmz-gps-verify.mjs` 13/13.** Display-only: wherever a cursor coordinate is shown, show WGS84 lat/long (decimal degrees, lat,lon order, 6 dp ≈ 0.1 m) instead of the EPSG:2278 State Plane E/N grid it showed before.
+- Verify: sandbox
+- Origin: filed 2026-07-06 from chat
+- **AUDIT-FIRST reconcile:** the brief's "2278→4326" is the owner's mental model — the code reality is that the planner canvas stores geometry in a per-site **feet frame** about a lat/lon origin, and `feetToLatLng` (arcgis.js) is the transform ALREADY in the render path (map redraw of footprints). The EPSG:2278 `projectToGrid` was used ONLY by the old HUD chip (B609). So the one shared 2278↔4326 util both this and B684 reuse is **`feetToLatLng`** — a single projection path, no second one added.
+- **Site-planner canvas:** the bottom-left HUD chip (was `{gridOrigin.x+cursor.x} E … N`, State Plane feet) now shows `{lat.toFixed(6)}°, {lon.toFixed(6)}°` via `feetToLatLng(cursor, origin.lat, origin.lon)`. Removed the now-dead `gridOrigin` memo + `projectToGrid` import.
+- **Map viewer (MapFinder):** had NO coordinate readout — added a "you are here" lat/long chip (bottom-center, clears the zoom + scale controls), updated on mousemove and coalesced to one update per animation frame so a fast move can't thrash React.
+- EPSG:2278 stays the internal frame for ALL geometry / measurement / storage — this is a formatting change at the display layer only; measurements/areas stay in feet.
+- **Verified (headless, logged-out):** seeded a georeferenced Katy site → both the map-viewer chip and the canvas chip render lat/long; the canvas chip read `29.785977°, -95.829959°` over the seeded origin (29.786, -95.83). (`gis-verify/kmz-gps-verify.mjs`.)
+
 ### B655 — Detention sizing card in the pond inspector, with a pumped-outfall toggle `[Site Planner / detention]` (feature) #site-planner #pond #yield  *(owner brief 2026-07-05, arrived as "NEW-3"; minted **B655**. Branch `claude/site-planner-setup-menu-ui-euzpyf`.)*
 `[x]` **SHIPPED 2026-07-06 (Verify: sandbox — headless `ui-audit/verify-b655-detention-card.mjs` 9/9 incl. the pumped-outfall path; lint 0 new · 2,799 tests (+13 engine cases) · build green).** A per-pond required-vs-provided **screening** card lives in the pond inspector, directly below DETENTION STORAGE.
 - Verify: sandbox

@@ -18,6 +18,7 @@ import {
   humanizeError,
 } from "./lib/arcgis.js";
 import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
+import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./lib/kmzExport.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
@@ -295,6 +296,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     return { complete: true, dead: true };
   });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
+  const [mapMenu, setMapMenu] = useState(null);       // {x, y} — right-click-on-empty-map menu (KMZ export) (B684)
+  const [hoverLL, setHoverLL] = useState(null);       // {lat, lng} — live "you are here" GPS readout (B683)
   const [renaming, setRenaming] = useState(null);     // {id, name} — the site row being inline-renamed (B158)
   const skipRenameBlurRef = useRef(false);            // Esc cancels without the trailing blur committing
   const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
@@ -341,6 +344,50 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [statusMenu]);
+  // Escape also closes the right-click map (KMZ export) menu.
+  useEffect(() => {
+    if (!mapMenu) return;
+    const onKey = (e) => { if (e.key === "Escape") setMapMenu(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mapMenu]);
+  // Export the sites currently on the map — plus any selected parcels — to a Google Earth .kmz
+  // (B684). Each visible site becomes its own folder; its boundary + drawn layout are reprojected
+  // to WGS84 via the SAME feetToLatLng the map render uses (KML is lon,lat, so we flip [lat,lng]).
+  // Selected parcels are already lon/lat. Honors the status-chip filter. LOUD-FAILURE: siteToFeatures
+  // throws on a non-finite reprojection → caught, surfaced via setErr, no partial file written.
+  const exportSitesKmz = (extrude = false) => {
+    setMapMenu(null);
+    try {
+      const projectFor = (o) => (pt) => { const [la, ln] = feetToLatLng(pt, o.lat, o.lon); return [ln, la]; };
+      const features = [];
+      sites.forEach((site) => {
+        if (!site.origin) return;
+        const status = statusOf(site);
+        if (statusFilter.size && !statusFilter.has(status)) return;   // honor the chip filter (matches the map)
+        if (status === "dead" && !statusFilter.has("dead")) return;   // dead recedes unless filtered to (B365)
+        features.push(...siteToFeatures(site, projectFor(site.origin), { extrudeBuildings: extrude, prefix: [site.site || site.name || "Site"] }));
+      });
+      selected.forEach((sp, i) => {
+        (sp.rings || []).forEach((ring) => {
+          if (!ring || ring.length < 3) return;
+          const closed = ring.map(([lon, lat]) => [lon, lat]);
+          const a = closed[0], b = closed[closed.length - 1];
+          if (a[0] !== b[0] || a[1] !== b[1]) closed.push([a[0], a[1]]);
+          features.push({ geom: "polygon", name: sp.addr || sp.acct || `Parcel ${i + 1}`, folder: ["Selected parcels"], rings: [closed], style: { line: "#0E7490", fill: "#0E7490", fillOpacity: 0.08 } });
+        });
+      });
+      if (!features.length) { setErr("Nothing to export yet — save a site or select a parcel first."); return; }
+      const blob = new Blob([buildKmz("Planyr sites", features)], { type: KMZ_MIME });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = kmzFilename("planyr-sites");
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      setErr(`Couldn't build the Google Earth file: ${(e && e.message) || "unexpected error"}.`);
+    }
+  };
   // Share a project (site group) with a team, or make it private again (teamId=null).
   const doShare = async (site, teamId) => {
     const gid = site.groupId || site.id;
@@ -393,10 +440,32 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     };
     const onDragStart = () => { draggingRef.current = true; map.getContainer().style.cursor = "grabbing"; };
     const onDragEnd = () => { draggingRef.current = false; map.getContainer().style.cursor = selectModeRef.current ? ADD_CURSOR : ""; };
+    // Live "you are here" GPS readout (B683): the cursor's WGS84 lat/long, coalesced to one
+    // update per animation frame so a fast mousemove can't thrash React. Cleared on mouse-out.
+    let llLatest = null, llPending = false;
+    const onCoordMove = (e) => {
+      llLatest = { lat: e.latlng.lat, lng: e.latlng.lng };
+      if (llPending) return;
+      llPending = true;
+      requestAnimationFrame(() => { llPending = false; if (llLatest) setHoverLL(llLatest); });
+    };
+    const onCoordOut = () => setHoverLL(null);
+    // Right-click on EMPTY map → the KMZ export menu (B684). A right-click ON a site keeps its own
+    // status menu: skip when the DOM target is an interactive site layer / marker, so the two never fight.
+    const onMapCtx = (e) => {
+      const oe = e.originalEvent;
+      if (oe && oe.target && oe.target.closest && oe.target.closest(".leaflet-interactive, .leaflet-marker-pane")) return;
+      if (oe) { oe.preventDefault(); oe.stopPropagation(); }
+      setStatusMenu(null);
+      setMapMenu({ x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 });
+    };
     map.on("click", onClick);
     map.on("zoomend", onZoom);
     map.on("moveend", onMove);
     map.on("mousemove", onMouseMove);
+    map.on("mousemove", onCoordMove);
+    map.on("mouseout", onCoordOut);
+    map.on("contextmenu", onMapCtx);
     map.on("dragstart", onDragStart);
     map.on("dragend", onDragEnd);
     // B64: track whether a pointer is currently pressed on the map, so the saved-site
@@ -412,7 +481,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     containerEl.addEventListener("pointerdown", onPress);
     containerEl.addEventListener("pointerup", onRelease);
     containerEl.addEventListener("pointercancel", onRelease);
-    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); map.remove(); mapRef.current = null; };
+    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1128,6 +1197,29 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       {/* map */}
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
+
+        {/* Live GPS readout (B683): the cursor's WGS84 lat/long, bottom-center so it clears the
+            zoom control (corner) and the scale bar (bottom-right). Display-only; the app's frame
+            stays EPSG:2278 feet. */}
+        {hoverLL && (
+          <div style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 900, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.9)", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 9px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+            {hoverLL.lat.toFixed(6)}°,&nbsp;{hoverLL.lng.toFixed(6)}°
+          </div>
+        )}
+
+        {/* Right-click-on-empty-map menu → export the map's sites to Google Earth (B684). */}
+        {mapMenu && (
+          <>
+            <div onClick={() => setMapMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMapMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 3999 }} />
+            <div style={{ position: "fixed", left: Math.min(mapMenu.x + 4, window.innerWidth - 244), top: Math.min(mapMenu.y + 4, window.innerHeight - 108), zIndex: 4000, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, boxShadow: "0 10px 30px rgba(28,25,20,0.22)", padding: 4, minWidth: 236, fontFamily: "inherit" }}>
+              <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 10px 4px" }}>Map</div>
+              <button onClick={() => exportSitesKmz(false)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: 6 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export to Google Earth (KMZ)</button>
+              <button onClick={() => exportSitesKmz(true)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: 6 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export with 3D buildings</button>
+            </div>
+          </>
+        )}
 
         {/* ── Combined site bar — floating pill at top-center (full-width bar on a phone) ── */}
         <div style={{

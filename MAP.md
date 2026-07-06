@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `81bcf35` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `31b65ad` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_196 source files mapped._
+_197 source files mapped._
 
 ## infra
 
@@ -263,6 +263,8 @@ _196 source files mapped._
   - _exports_: `jpegToPdf`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
   - _exports_: `buildIdentifyParams`, `countyAtPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
+- **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
+  - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelLayout.js`** — Pure label level-of-detail plus collision engine: line-dropping by priority, greedy overlap resolution, leader overflow, and dimension-callout zoom gates
   - _exports_: `boxesOverlap`, `boxOf`, `buildingLabelLines`, `DETAIL_LABEL_MIN_PX`, `detailLabelVisible`, `DIM_CALLOUT_MIN_PPF`, `dimCalloutVisible`, `fitLines`, `layoutLabels`, `suppressedDimIds`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
