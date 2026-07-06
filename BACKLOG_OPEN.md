@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _52 open · 11 awaiting live verification._
+> _51 open · 11 awaiting live verification._
 
 ## 🔲 Open
 
@@ -15,7 +15,6 @@
 | B674 | Element-level sync, phase 5/5: remove the edit lock — multi-writer cutover + presence pill | [Site Planner / Shell] | #site-planner #ui #persistence | live |
 | B663 | ONE-TIME migration: every existing project gets the standard tree + existing files move into their tree folders in Drive | [Library / storage] | #library #drive | — |
 | B662 | Unified Library: the folder tree IS the view, and files live inside it (+ the live-502 chunked Drive sync fix) | [Library / Doc Review / storage] | #library #drive #persistence | — |
-| B655 | Detention sizing card in the pond inspector, with a pumped-outfall toggle | [Site Planner / detention] | #site-planner #pond #yield | sandbox |
 | B657 | Terminology & consistency pass | [App-wide / UI] | #ui | sandbox |
 | B650 | Per-project standard folder tree, user-editable in-app, with continuous one-way sync to Google Drive | [Doc Review / Library / storage · drive-integration / persistence] | — | — |
 | B648 | Persistence & Sync epic: one umbrella + a canonical write-path doc | [Site Planner / Persistence] | #persistence | live |
@@ -93,11 +92,10 @@
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479, B669
 - **#persistence** — B672, B673, B674, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B682, B676, B667
-- **#pond** — B655
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B672, B673, B674, B655, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B682, B651
+- **#site-planner** — B672, B673, B674, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B682, B651
 - **#stitching** — B413
 - **#testing** — B269, B63
 - **#ui** — B673, B674, B657, B115, B669, B668, B658
-- **#yield** — B655, B553, B651
+- **#yield** — B553, B651
