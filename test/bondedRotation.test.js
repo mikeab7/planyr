@@ -50,11 +50,13 @@ describe("bonded-child rotation invariant (B363)", () => {
   });
 
   it("leaves a correctly-bonded assembly UNTOUCHED (no needless churn) and is idempotent", () => {
-    const host = { id: "h", type: "building", cx: 10, cy: 20, w: 100, h: 200, rot: 30 };
+    // z present on every element (already-migrated v12 shape) so ensureZ no-ops and this test
+    // isolates the bonded-rotation normalizer's identity-preservation, not the z migration.
+    const host = { id: "h", type: "building", cx: 10, cy: 20, w: 100, h: 200, rot: 30, z: 0 };
     const els = [
       host,
-      { id: "c0", type: "building", attachedTo: "h", cx: 11, cy: 21, rot: 30 },   // offset 0
-      { id: "c90", type: "parking", attachedTo: "h", cx: 12, cy: 22, rot: 120 },  // offset +90
+      { id: "c0", type: "building", attachedTo: "h", cx: 11, cy: 21, rot: 30, z: 1024 },   // offset 0
+      { id: "c90", type: "parking", attachedTo: "h", cx: 12, cy: 22, rot: 120, z: 2048 },  // offset +90
     ];
     const once = createSiteModel({ els }).els;
     expect(once.find((e) => e.id === "c0").rot).toBe(30);
@@ -68,8 +70,8 @@ describe("bonded-child rotation invariant (B363)", () => {
   });
 
   it("never touches points-based children (markups carry geometry in their points, no rot)", () => {
-    const host = { id: "h", type: "building", cx: 0, cy: 0, w: 100, h: 100, rot: 0 };
-    const poly = { id: "p", attachedTo: "h", points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] };
+    const host = { id: "h", type: "building", cx: 0, cy: 0, w: 100, h: 100, rot: 0, z: 0 };
+    const poly = { id: "p", attachedTo: "h", points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], z: 1024 };
     const out = createSiteModel({ els: [host, poly] }).els;
     expect(out.find((e) => e.id === "p")).toBe(poly);
   });
@@ -125,8 +127,10 @@ describe("dog-ear bump-out re-anchors to the host's CURRENT edge on load (NEW-6)
   });
 
   it("leaves an already-flush bump UNTOUCHED (idempotent, preserves object identity)", () => {
-    const host = { id: "h", type: "building", cx: 10, cy: -5, w: 280, h: 540, rot: 0 };
-    const els = [host, flushBump("b", 1, host), flushBump("b2", -1, host)];
+    const host = { id: "h", type: "building", cx: 10, cy: -5, w: 280, h: 540, rot: 0, z: 0 };
+    // z present (v12 shape) so ensureZ no-ops → this asserts the dog-ear normalizer's identity
+    // preservation, not the one-time z migration.
+    const els = [host, { ...flushBump("b", 1, host), z: 1024 }, { ...flushBump("b2", -1, host), z: 2048 }];
     const out = createSiteModel({ els }).els;
     expect(out.find((e) => e.id === "b")).toBe(els[1]);   // same reference back → no churn
     expect(out.find((e) => e.id === "b2")).toBe(els[2]);

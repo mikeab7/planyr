@@ -7,6 +7,9 @@ import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+import { createElementSync } from "./lib/elementSync.js";
+import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
+import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
@@ -1740,6 +1743,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (firstSave.current) { firstSave.current = false; return; }
     if (isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
     setSaveStatus("saving");
+    // B671 — per-element sync (signed-in): diff the vector collections and enqueue per-element
+    // commits. Deferred while a geometry gesture is in flight (flushElems() at gesture end commits
+    // the settled result); property-panel edits + text land on the engine's own debounce. Runs
+    // ALONGSIDE the whole-doc save below (dual-write; the blob is still the read source until B672).
+    reconcileElems(!!drag.current);
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
     const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds };
     // B458 — write the on-device mirror IMMEDIATELY, decoupled from the debounced cloud push: a reload
@@ -1881,6 +1889,75 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, []);
   useEffect(() => { editorLockRef.current.setProject(siteId || null); }, [siteId]);
   useEffect(() => () => { editorLockRef.current && editorLockRef.current.stop(); }, []);
+
+  // B671 — per-element write engine. Runs ONLY when signed in (cloud-active): it diffs the live
+  // vector collections against a shadow of last-committed elements and commits per-element through
+  // the commit_elements RPC (dual-write — the whole-doc blob autosave keeps running unchanged this
+  // phase; the read path stays on the blob until B672). Signed-out mode is untouched. An auth change
+  // remounts this component (loadEpoch), so keying the engine on [siteId] is sufficient.
+  const elSyncRef = useRef(null);
+  const [elemSync, setElemSync] = useState({ state: "idle", pending: 0 });
+  // Reflect an engine-assigned z back onto the canvas element so render/hit-test (byZ) and the
+  // committed row's z_index + data.z all agree. One of the five collection setters by kind.
+  const applyZPatch = (kind, id, patch) => {
+    const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[kind];
+    if (setter) setter((a) => a.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  };
+  useEffect(() => {
+    if (!isCloudActive() || !siteId || !supabase) {
+      if (elSyncRef.current) { elSyncRef.current.stop(); elSyncRef.current = null; }
+      setElemSync({ state: "idle", pending: 0 });
+      return;
+    }
+    const eng = createElementSync({
+      siteId,
+      commit: (ops) => commitElements(supabase, siteId, ops),
+      now: () => Date.now(),
+      setTimer: (fn, ms) => setTimeout(fn, ms),
+      clearTimer: (h) => clearTimeout(h),
+      onStatus: (s) => setElemSync(s),
+      patchElement: applyZPatch,
+      report: reportClientEvent,
+    });
+    elSyncRef.current = eng;
+    // Seed the shadow from the site's current rows (Phase-1 backfill) BEFORE diffing, so a plain
+    // load doesn't try to re-create every existing element. On a fetch failure seed empty (the
+    // engine still works — it just re-syncs from scratch). After seeding, reconcile once to catch
+    // any edit made during the fetch window. (B671 still READS from the blob — this fetch only
+    // primes the write engine; the read cutover is B672.)
+    fetchElements(supabase, siteId).then((r) => {
+      if (elSyncRef.current !== eng) return;
+      eng.seed(r && r.ok ? r.rows : []);
+      const s = stateRef.current;
+      try { eng.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy: !!drag.current }); } catch (_) {}
+    });
+    return () => { eng.stop(); if (elSyncRef.current === eng) elSyncRef.current = null; };
+  }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Diff the live collections and enqueue per-element commits. `busy` (a geometry gesture is in
+  // flight) defers the diff — flushElems() at gesture end (onUp) commits the settled result.
+  const reconcileElems = (busy) => {
+    const e = elSyncRef.current;
+    if (!e || !isCloudActive()) return;
+    const s = stateRef.current;
+    try { e.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
+  };
+  const flushElems = () => { const e = elSyncRef.current; if (e && isCloudActive()) { reconcileElems(false); try { e.flushGesture(); } catch (_) {} } };
+  const retryElems = () => { const e = elSyncRef.current; if (e) e.retryNow(); };
+  // Last-ditch flush of pending element commits during page unload (the supabase-js client can't do
+  // keepalive) — hits the commit_elements RPC endpoint directly. Composes with the whole-doc unload
+  // flush already registered above; the dirty queue + next-load re-sync remain the guarantee.
+  useEffect(() => {
+    const off = registerFlush(() => {
+      const e = elSyncRef.current;
+      if (!e || !isCloudActive() || conflictRef.current || readOnlyRef.current) return;
+      const ops = e.pendingOps();
+      if (!ops.length) return;
+      const { url, anon } = supabaseRest();
+      keepaliveCommit({ url, anon, token: currentAccessToken(), siteId, ops });
+    });
+    return off;
+  }, [siteId]);
+
   // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
   // background storage event never yanks the canvas out from under an active edit.
   const busyRef = useRef(false);
@@ -3480,7 +3557,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
-    if (d && d.mode === "groupMove") { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} return; }
+    if (d && d.mode === "groupMove") { drag.current = null; flushElems(); try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (d && d.mode === "mkDraw" && mkRect) {
       const { a, b, kind } = mkRect;
       const minFt = 3 / view.ppf; // a deliberate ~3px drag, regardless of zoom — feet-based mins silently dropped real markups when zoomed in (B30)
@@ -3490,6 +3567,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (dist(a, b) >= minFt) { commitMkRect(kind, a, b); setMkRect(null); }
       else { setMkRect({ kind, a, b: a, pending: true }); }
       drag.current = null; setPanning(false);
+      flushElems();
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
@@ -3563,6 +3641,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = null;
     setPanning(false);
     capturePidRef.current = null;
+    flushElems(); // B671 — commit the settled result of a draw / resize / vertex-edit gesture now
     try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
   };
 
@@ -7524,7 +7603,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // so the connection being fine is NOT the same as "your edits are saving". Surfaced as its own
     // amber "Read-only — not saving" badge state, ahead of the synced/offline resting states.
     if (cloudActive && readOnly && !cloudConflict) return "readonly";
-    if (saveStatus === "saving") return "saving";
+    // B671 — the per-element write engine feeds the SAME badge: a dropped element commit is
+    // crash-severity (LOUD-FAILURE) → "error"; in-flight / retrying element commits → "saving".
+    if (cloudActive && elemSync.state === "failed") return "error";
+    if (saveStatus === "saving" || (cloudActive && (elemSync.state === "syncing" || elemSync.state === "retrying"))) return "saving";
     if (cloudSaveFailed || cloudConflict) return "error";
     if (cloudActive && !connOk) return "offline";
     return cloudActive ? "synced" : "local";
@@ -7546,8 +7628,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         saveState={headerSaveState}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
-        onRetrySave={cloudConflict ? undefined : retryCloudSave}
-        saveDetail={cloudConflict ? "This project was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
+        onRetrySave={cloudConflict ? undefined : (() => { retryCloudSave(); retryElems(); })}
+        saveDetail={cloudConflict ? "This project was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : (elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined)}
         centerContent={null}
         planSlot={plannerPlanCrumb}
         authControl={authControl}

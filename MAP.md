@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `7e48860` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `d4655a2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_191 source files mapped._
+_194 source files mapped._
 
 ## infra
 
@@ -233,8 +233,12 @@ _191 source files mapped._
   - _exports_: `buildParcelEdgeStrip`, `DEFAULT_EASEMENT_ATTRS`, `deriveEasementRing`, `EASEMENT_TYPES`, `easementArea`, `easementColor`, `easementLabel`, `easementType`, `ringArea`
 - **`src/workspaces/site-planner/lib/edgeRuns.js`** — Group parcel boundary edges into logical sides (runs) by bearing tolerance, with per-run length, midpoint, and shared setback value
   - _exports_: `bearingDelta`, `edgeRuns`, `runOfEdge`, `runSetbackValue`, `segBearing`
+- **`src/workspaces/site-planner/lib/elementApi.js`** — network seam for per-element sync (B671): the commit_elements RPC wrapper, element-row fetch, and the pure unload keepalive commit
+  - _exports_: `commitElements`, `ELEMENT_SELECT`, `fetchElements`, `keepaliveCommit`
 - **`src/workspaces/site-planner/lib/elementRows.js`** — pure JS mirror of the site_elements explode/rebuild (B670): model⇄rows for the 5 vector collections, tombstone-aware, keyed by (kind,id)
   - _exports_: `byRowOrder`, `ELEMENT_FIELDS`, `explodeModel`, `FIELD_TO_KIND`, `KIND_TO_FIELD`, `rowsToModel`, `Z_GAP`
+- **`src/workspaces/site-planner/lib/elementSync.js`** — the per-element write engine (B671): diffs live collections vs a shadow map, batches rev-guarded commits, LWW conflict events, dirty-queue backoff
+  - _exports_: `createElementSync`, `stableStringify`
 - **`src/workspaces/site-planner/lib/elevation.js`** — USGS 3DEP bare-earth DEM sampling: profile elevations along a polyline (metres to survey-ft) plus ditch-depth screening stats
   - _exports_: `DEP_URL`, `ditchStats`, `sampleProfile`
 - **`src/workspaces/site-planner/lib/evidenceLayers.js`** — View-driven Leaflet utility-evidence overlays (OSM Overpass power/hydrants + Mapillary detections) with SWR cache and per-layer status
@@ -325,6 +329,8 @@ _191 source files mapped._
   - _exports_: `fileToBase64`, `getKey`, `KEY_LS`, `readTitlePDF`, `setKey`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine for FEMA flood + NWI wetlands: paged ArcGIS pull, Esri-to-GeoJSON, Douglas-Peucker simplify, risk symbology, vector-vs-image decision, SWR cache
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `simplifyGeoJson`, `styleFor`, `VECTOR_SOURCES`
+- **`src/workspaces/site-planner/lib/zOrder.js`** — explicit z_index utilities (B671): assign/sort/renormalize the within-type-layer stacking tiebreak that replaced implicit array position
+  - _exports_: `byZAsc`, `ensureZ`, `needsZ`, `nextZ`, `normalizeZ`, `sortByZ`, `Z_GAP`
 - **`src/workspaces/site-planner/MapFinder.jsx`** — Leaflet map finder: aerial basemaps + labels, GIS overlay panel, eager county/statewide parcel identify, and status-pinned site markers for picking/opening sites
   - _exports_: `default (MapFinder)`
 - **`src/workspaces/site-planner/SitePlanner.jsx`** — Hand-rolled SVG planner canvas: parcels, buildings, roads, parking, docks, easements, overlays, measurements, dimensions, cost takeoff, elevation, and autosave with version history
