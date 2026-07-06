@@ -31,6 +31,7 @@ import {
   categoryOf, subcategoryOf, stateOf, FILE_STATES, FACETS, onMap, isReference, isSpatial,
 } from "../../../shared/files/fileFacts.js";
 import { resolveDrawingTarget, subtreeIds } from "../../../shared/folders/folderTree.js";
+import { ToggleChip } from "../../../shared/ui/controls.jsx";
 import { moveDriveFileToFolder } from "../lib/folders.js";
 import {
   QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
@@ -45,13 +46,7 @@ const CATS_OPEN_KEY = "planyr:library:catsOpen:v1";
 const fmtDate = (f) => { const s = f.docDate || f.updatedAt; try { return s ? new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; } catch (_) { return ""; } };
 
 // ---- small styled atoms (theme tokens only — WCAG AA in light + dark) ----
-const chip = (active, accent) => ({
-  fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999,
-  padding: "4px 11px", whiteSpace: "nowrap",
-  border: `1px solid ${active ? "var(--accent-library)" : "var(--border-default)"}`,
-  background: active ? "var(--accent-library)" : "var(--surface-raised)",
-  color: active ? "var(--on-accent-library)" : "var(--text-secondary)",
-});
+// (facet chips now use the shared ToggleChip primitive — B657-5B.)
 const Badge = ({ children, tone = "neutral", title }) => {
   const tones = {
     neutral: { bg: "var(--hover-ghost)", fg: "var(--text-secondary)", bd: "var(--border-default)" },
@@ -428,7 +423,7 @@ export default function FileBrowser({
         {/* facet row (state + usage) */}
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, padding: "10px 14px", borderBottom: "1px solid var(--border-default)", flexWrap: "wrap" }}>
           {FACETS.map((f) => (
-            <button key={f.id} onClick={() => { setShowHolding(false); setFacet(f.id); }} style={chip(!showHolding && facet === f.id)}>{f.label}</button>
+            <ToggleChip key={f.id} onClick={() => { setShowHolding(false); setFacet(f.id); }} active={!showHolding && facet === f.id} accent="var(--accent-library)" onAccent="var(--on-accent-library)" style={{ whiteSpace: "nowrap" }}>{f.label}</ToggleChip>
           ))}
           <span style={{ flex: 1 }} />
           {/* Folder mode: the left rail belongs to the folder tree, so the all-projects switch

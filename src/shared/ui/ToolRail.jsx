@@ -27,7 +27,7 @@ export function RailButton({ icon, label, title, active, accent, onClick, onDoub
         border: "1px solid transparent", fontFamily: "inherit", fontSize: 9, lineHeight: 1.05,
         fontWeight: active ? 700 : 500, textAlign: "center", whiteSpace: "normal",
         background: active ? accent : "transparent",
-        color: active ? "#231a0e" : (disabled ? MUTED : INK),
+        color: active ? "var(--on-accent-review)" : (disabled ? MUTED : INK),
         opacity: disabled ? 0.5 : 1, boxShadow: active ? "0 2px 8px rgba(0,0,0,0.28)" : "none",
       }}>
       <span style={{ display: "grid", placeItems: "center", height: 17 }}>{icon}</span>
@@ -36,7 +36,7 @@ export function RailButton({ icon, label, title, active, accent, onClick, onDoub
   );
 }
 
-export default function ToolRail({ items = [], accent = "#EF9F27", width = 64, style, "data-testid": testId }) {
+export default function ToolRail({ items = [], accent = "var(--accent-review)", width = 64, style, "data-testid": testId }) {
   return (
     <div data-testid={testId} style={{ flex: "none", width, background: CHROME, borderLeft: "1px solid var(--border-default)", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 2, padding: "6px 5px", overflowY: "auto", ...style }}>
       {items.map((it, i) => {
