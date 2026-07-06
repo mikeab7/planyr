@@ -413,20 +413,36 @@ function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p) {
 // Render the repeating inline-label <text> nodes for a feature. Pure + module-level so BOTH the
 // component markup render AND renderElPx (a module fn) share it. Own color + white halo, gentle
 // zoom-clamped font, LOD-gated per instance, and NO data-export="skip" (so it lands in PNG/PDF).
-function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix) {
+// B678 — `opts` carries the per-feature label style overrides: { size } (base font px, default 11),
+// { halo } (white background/outline on|off, default on). Spacing is the caller's `spacingFt`, which
+// is the per-feature `labelSpacing` when set, else the per-type default. A screen-space minimum gap
+// keeps restamps from crushing together when zoomed out (self-thins BEFORE the user touches a knob),
+// mirroring the dimCalloutVisible / label-collision level-of-detail patterns.
+function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, opts) {
   const label = (text || "").trim();
   if (!label || !ptsFeet || ptsFeet.length < 2) return [];
+  const baseSize = (opts && Number.isFinite(opts.size) && opts.size > 0) ? opts.size : 11; // default matches the pre-B678 look
+  const halo = !(opts && opts.halo === false);                     // background on by default (existing lines unchanged)
   const k = Math.max(0.34, Math.min(1, ppf / 0.45));               // gentle, capped at 1 (matches the road-dim clamp)
-  const fs = 11 * k, haloW = Math.max(2, fs * 0.3), offsetPx = fs * 1.05;
+  const fs = baseSize * k, haloW = Math.max(2, fs * 0.3), offsetPx = fs * 1.05;
   const minSegPx = label.length * fs * 0.6;                        // LOD: the on-screen segment must fit the text (CW_RATIO 0.6)
+  // B678 — screen-space self-thinning is an ANTI-OVERLAP floor, nothing more: keep restamps at least
+  // the label's own on-screen width + ~50% breathing room apart (`len·fs·0.9` ≈ width·1.5), converted
+  // back to feet at the live zoom, and take the LOOSER of it and the requested feet-spacing. So a SHORT
+  // label (whose width is < the feet-spacing on screen) keeps its exact per-type/typed spacing — only a
+  // label that would physically OVERLAP is thinned, and it self-thins further on zoom-out. Deliberately
+  // NOT a large fixed floor: a flat floor would dominate every normal zoom and make the spacing control
+  // inert. (minSegPx already hides an instance whose own segment can't fit the text.)
+  const minGapPx = label.length * fs * 0.9;
+  const effSpacingFt = Math.max(Math.max(1, spacingFt || 0), minGapPx / Math.max(ppf, 1e-4));
   const out = [];
-  inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p).forEach((pl, i) => {
+  inlineLabelPlaces(ptsFeet, effSpacingFt, offsetPx, f2p).forEach((pl, i) => {
     if (pl.segLenPx < minSegPx) return;
     out.push(
       <text key={`${keyPrefix}${i}`} x={pl.x} y={pl.y} textAnchor="middle" dominantBaseline="middle"
         transform={`rotate(${pl.angle} ${pl.x} ${pl.y})`}
         fontFamily="Inter, system-ui, sans-serif" fontSize={fs} fill={color} pointerEvents="none"
-        style={{ fontWeight: 600, paintOrder: "stroke", stroke: "#fff", strokeWidth: haloW }}>{label}</text>,
+        style={{ fontWeight: 600, ...(halo ? { paintOrder: "stroke", stroke: "#fff", strokeWidth: haloW } : null) }}>{label}</text>,
     );
   });
   return out;
@@ -1627,6 +1643,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // preventDefault. Updates are throttled to one per animation frame so a heavy plan doesn't
   // re-render on every raw touchmove (the other half of the jank).
   const touchCountRef = useRef(0);       // # of fingers currently down (gates the pointer handlers)
+  // B679 — double-click a feature to edit it in place. A pointerdown that calls setPointerCapture (every
+  // move handler does, to keep dragging past the SVG edge) SUPPRESSES the browser's synthetic dblclick on
+  // the element, so the wired onDoubleClick never fires for the user (the B620 harness works around this
+  // by dispatching a raw dblclick). `e.detail` is 0 on pointerdown (per the Pointer Events spec — click
+  // count only rides mouse events), so we reconstruct the browser's OWN double-click test ourselves:
+  // a second press on the SAME feature within DBLTAP_MS *and* within DBLTAP_PX of the first (the time +
+  // distance thresholds a native double-click uses). The distance gate is what stops a "click here to
+  // select, then press over THERE to drag" gesture from misfiring as an edit.
+  const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0 });
+  const DBLTAP_MS = 350, DBLTAP_PX = 14;
+  const isDoubleTap = (e, id) => {
+    const now = Date.now(), p = lastTapRef.current;
+    const near = Math.abs(e.clientX - p.x) <= DBLTAP_PX && Math.abs(e.clientY - p.y) <= DBLTAP_PX;
+    if (p.id === id && now - p.t < DBLTAP_MS && near) { lastTapRef.current = { id: null, t: 0, x: 0, y: 0 }; return true; }
+    lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY };
+    return false;
+  };
   const pinch2Ref = useRef(null);        // active baseline { mid, dist } (svg-relative) | null
   const pinchRafRef = useRef(0);         // pending rAF id (0 = none)
   const pinchNextRef = useRef(null);     // latest { mid, dist } awaiting the next frame
@@ -2931,6 +2964,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
+    // B679 — double-click an UNLOCKED line / polyline / easement → edit its inline label in place
+    // (pointer capture eats the DOM dblclick, so read e.detail here). Locked features stay select-only.
+    if (m && !m.locked && (m.kind === "line" || m.kind === "polyline" || m.kind === "easement") && isDoubleTap(e, id)) {
+      setSel({ kind: "markup", id }); beginEditInline("markup", id); return;
+    }
     const mkMods = selMods(e); // Ctrl/⌘-click = toggle in/out, Shift-click = additive add (B569)
     if (mkMods.toggle || mkMods.add) {
       setMulti((s) => nextSelection(seedMulti(s), { kind: "markup", id }, mkMods, refEq));
@@ -3062,6 +3100,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
+    // B679 — double-click a callout / text box (box part only) → edit its text in place. Pointer
+    // capture eats the DOM dblclick, so we read e.detail on the pointerdown instead.
+    if (part === "box" && isDoubleTap(e, id)) { setSel({ kind: "callout", id }); beginEditCallout(id); return; }
     const c = callouts.find((x) => x.id === id);
     setSel({ kind: "callout", id });
     pushHistory();
@@ -4857,6 +4898,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
+    // B679 — double-click a non-grouped, UNLOCKED centerline road → edit its inline label in place,
+    // matching onElDouble. Pointer capture eats the DOM dblclick, so read e.detail here too.
+    if (!el.groupId && !el.locked && isCenterlineRoad(el) && isDoubleTap(e, id)) { setSel({ kind: "el", id }); beginEditInline("el", id); return; }
     const fp = p2f(e.clientX, e.clientY);
     // Explicit attach/align flows (click a host/target) take precedence.
     if (attachFor) { attachTo(attachFor, el.id); setAttachFor(null); return; }
@@ -6941,6 +6985,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B653: link-styled jump from an inspector's "default" value to its Standards section.
   const linkBtn = { padding: 0, border: "none", background: "transparent", color: PAL.accentText, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
+  // B678 — the per-label style controls (repeat spacing · text size · background halo) shown under an
+  // "Inline label" field once the feature actually carries a label. `patch` is the feature-specific,
+  // NON-STICKY writer (direct setMarkups / setSelEl, never mkStyle) so a tweak never bleeds into the
+  // next drawn shape; each commit pushes ONE undo frame. A plain render-body function (NOT a component)
+  // so it can't remount its inputs. Defaults keep the per-type spacing / size 11 / halo on; the
+  // anti-overlap min-gap in inlineLabelEls only thins labels that would otherwise collide (so a short
+  // label at working zoom is unchanged) and self-thins further on zoom-out.
+  const inlineLabelControls = (feat, typeKey, patch) => {
+    if (!feat || !(feat.inlineLabel || "").trim()) return null;
+    const haloOn = feat.labelHalo !== false;
+    return (<>
+      <Field label="Label spacing (ft)"><NumInput style={{ ...numInput, width: 70 }} value={feat.labelSpacing ?? INLINE_LABEL_SPACING[typeKey]} min={10} step={10} coarse={50} onCommit={(n) => patch({ labelSpacing: n })} /></Field>
+      <Field label="Label text size"><NumInput style={{ ...numInput, width: 70 }} value={feat.labelSize ?? 11} min={5} max={48} step={1} coarse={4} onCommit={(n) => patch({ labelSize: n })} /></Field>
+      <Field label="Label background"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={haloOn} onChange={(e) => patch({ labelHalo: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{haloOn ? "Halo (legible over aerial)" : "None"}</span></label></Field>
+    </>);
+  };
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
   // One shared square icon-button (B574) — identical width/height/padding/hit-target for the overlay
   // header's hide / lock / remove controls, so they can never render at mismatched sizes again.
@@ -8100,7 +8160,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
-                      {editInline?.id !== m.id && inlineLabelEls(easePathFeet, m.inlineLabel, ecol, INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`)}
+                      {editInline?.id !== m.id && inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
                     </g>
                   );
                 }
@@ -8117,7 +8177,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
                       {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
-                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`)}
+                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
                     </g>
                   );
                 }
@@ -8127,7 +8187,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
                       <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
-                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`)}
+                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
                     </g>
                   );
                 }
@@ -8289,19 +8349,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <line x1={bp.x} y1={bp.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
                       <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
                     </>}
-                    <rect x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} rx={4}
+                    {/* B680 — hide the committed box + text while its editor is open so the textarea is the
+                        ONLY box on screen (was drawing a second, offset box behind the editor overlay). */}
+                    {editCallout?.id !== c.id && <rect x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} rx={4}
                       fill={st.fill} stroke={border} strokeWidth={1.4}
                       pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
                       style={{ cursor: tool === "select" ? "move" : "default" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
-                      onDoubleClick={(e) => { e.stopPropagation(); beginEditCallout(c.id); }} />
+                      onDoubleClick={(e) => { e.stopPropagation(); beginEditCallout(c.id); }} />}
                     {editCallout?.id !== c.id && lines.map((ln, i) => (
                       <text key={i} x={tx} y={bp.y - h / 2 + padY + fontPx * 0.82 + i * lineH} textAnchor={anchor}
                         fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
                         fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
-                    {/* B619 — blue selection chrome (outline + corner handles + tip grip); never exported. */}
-                    {isSel && tool === "select" && (() => {
+                    {/* B619 — blue selection chrome (outline + corner handles + tip grip); never exported. B680: also
+                        hidden while this callout's text editor is open (the editor's own accent outline cues focus). */}
+                    {isSel && tool === "select" && editCallout?.id !== c.id && (() => {
                       const gx = bp.x - w / 2, gy = bp.y - h / 2;
                       const corners = [[gx, gy], [gx + w, gy], [gx + w, gy + h], [gx, gy + h]];
                       return (
@@ -8345,10 +8408,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const charW = fontPx * 0.56 * (st.bold ? 1.05 : 1), lineH = fontPx * st.lineHeight;
                 const padX = st.padX * zk, padY = st.padY * zk;
                 const tw = Math.max(fontPx, ...lines.map((l) => l.length * charW));
-                // Match the committed box, but never collapse below a usable typing target — an empty
-                // new callout, a tiny font, or a zoomed-way-out edit would otherwise be a few px wide.
-                // The floor only lifts sub-64px content (where the committed callout is itself tiny/
-                // invisible), so it never causes a perceptible jump for real, visible content.
+                // B680 — the editor uses the committed box's own geometry (tw/padX/padY), so for a
+                // normal callout it overlays the box EXACTLY. The doubling the owner saw came from the
+                // committed box being VISIBLE behind an over-sized editor — now the committed box + its
+                // selection chrome are hidden while editing (below), so there is never a second box. A
+                // screen-px minimum (64×30) is kept ONLY so a tiny / zoomed-way-out / empty callout is
+                // still a usable typing target; because the box is hidden it can no longer double it.
                 const w = Math.max(64, tw + padX * 2), h = Math.max(30, lines.length * lineH + padY * 2);
                 const bp = f2p(c.box);
                 return (
@@ -9283,6 +9348,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   onFocus={() => pushHistory()}
                   onChange={(ev) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: ev.target.value } : m)))}
                   placeholder='e.g. 20&#39; DRAINAGE ESMT' style={txt} /></Field>
+                {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
+                {inlineLabelControls(e, "easement", (p) => { pushHistory(); setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m))); })}
                 <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} sf</b> · {(area / SQFT_PER_ACRE).toFixed(2)} ac</div>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
@@ -9310,12 +9377,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in
                     place). NON-sticky (direct setMarkups, never setMkStyle) so the text can't bleed into the next
                     drawn shape; onFocus pushes ONE undo frame per edit (not one per keystroke). */}
-                {(selMarkup.kind === "line" || selMarkup.kind === "polyline") && (
+                {(selMarkup.kind === "line" || selMarkup.kind === "polyline") && (<>
                   <Field label="Inline label"><input value={selMarkup.inlineLabel || ""} maxLength={120}
                     onFocus={() => pushHistory()}
                     onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: e.target.value } : m)))}
                     placeholder={'e.g. 18" SANITARY SEWER'} style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
-                )}
+                  {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
+                  {inlineLabelControls(selMarkup, selMarkup.kind, (p) => { pushHistory(); setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m))); })}
+                </>)}
                 {closed && <>
                   <Field label="Fill"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} onChange={(e) => setSelMarkup({ fillOpacity: +e.target.value })} /></Field>
@@ -9392,9 +9461,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={{ ...seg(cs.italic), fontStyle: "italic" }} title="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
                   <button style={{ ...seg(cs.underline), textDecoration: "underline" }} title="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
                   <span style={{ width: 6 }} />
-                  {/* B615 — clear align icons (⇤ left / ▭ center / ⇥ right) instead of the cryptic ⤙ ≡ ⤚. */}
-                  {[["left", "⇤", "Align left"], ["center", "≣", "Align center"], ["right", "⇥", "Align right"]].map(([a, icon, lbl]) => (
-                    <button key={a} style={seg(cs.align === a)} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}>{icon}</button>
+                  {/* B681 — familiar Word-style alignment icons (stacked rows) instead of the cryptic ⇤ ≣ ⇥ unicode. */}
+                  {[["left", "Align left"], ["center", "Align center"], ["right", "Align right"]].map(([a, lbl]) => (
+                    <button key={a} style={{ ...seg(cs.align === a), display: "flex", alignItems: "center", justifyContent: "center" }} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
                   ))}
                 </div>
                 {/* row 3: padding · line spacing */}
@@ -9423,12 +9492,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
-                      {cl && (
+                      {cl && (<>
                         <Field label="Inline label"><input value={selEl.inlineLabel || ""} maxLength={120}
                           onFocus={() => pushHistory()}
                           onChange={(e) => setSelEl({ inlineLabel: e.target.value })}
                           placeholder="e.g. MAIN STREET" style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
-                      )}
+                        {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
+                        {inlineLabelControls(selEl, "road", (p) => { pushHistory(); setSelEl(p); })}
+                      </>)}
                       {cl && (
                         <Field label="Road class">
                           <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -11570,7 +11641,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       }
     }
     // B620 — inline label riding the road centerline (own color + white halo; sparse spacing).
-    if (editInlineId !== el.id) rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`));
+    if (editInlineId !== el.id) rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo }));
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
@@ -11823,6 +11894,21 @@ function Field({ label, children }) {
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
       <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{label}</span>{children}
     </div>
+  );
+}
+// B681 — familiar Word-style paragraph-alignment glyph: four stacked rows, long rows spanning the
+// width and short rows anchored left / centre / right per `dir`. Replaces the cryptic ⇤ ≣ ⇥ unicode.
+// `currentColor` makes it inherit the button's active/idle text colour.
+function AlignIcon({ dir }) {
+  const W = 14, rows = [1, 0.62, 0.86, 0.54], ys = [2.2, 5.8, 9.4, 13];
+  return (
+    <svg width="14" height="15" viewBox="0 0 14 15" aria-hidden="true" focusable="false" style={{ display: "block", pointerEvents: "none" }}>
+      {rows.map((r, i) => {
+        const len = r * W;
+        const x = dir === "right" ? W - len : dir === "center" ? (W - len) / 2 : 0;
+        return <line key={i} x1={x} y1={ys[i]} x2={x + len} y2={ys[i]} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />;
+      })}
+    </svg>
   );
 }
 // A numeric input you can edit freely (clear it, type partial values) — it only
