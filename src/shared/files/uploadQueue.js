@@ -75,7 +75,7 @@ export function makeQueueItems(files, makeId = makeUploadId) {
   return [...(files || [])].map((f) => makeQueueItem(f, { uploadId: makeId() }));
 }
 
-// ── Folder-aware drops (B664) ───────────────────────────────────────────────
+// ── Folder-aware drops (B665) ───────────────────────────────────────────────
 // Dragging a FOLDER onto a drop zone does NOT populate dataTransfer.files — that
 // list stays EMPTY. The browser instead exposes the folder as a directory ENTRY on
 // each dropped DataTransferItem (item.webkitGetAsEntry()). To file a dropped project
