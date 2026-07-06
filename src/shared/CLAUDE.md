@@ -17,7 +17,9 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   dormant, verified live): `scaleBarRead.js` (graphic scale-bar → ft/unit), `edgeGeomMatch.js`
   (vector match-line edge fit), `legendUnion.js` (union sheet legends into the composite key).
 - `theme/palette.js` — JS mirror of the CSS theme tokens (keep in sync; SVG/canvas can't use
-  `var()`). `ui/statusTokens.js` — the single project-status palette source.
+  `var()`). `ui/statusTokens.js` — the single project-status palette source. `ui/controls.jsx` —
+  shared control primitives (Button/ToggleChip/IconButton/Field/Section/MenuItem) + the one
+  radius/padding/type scale; token-driven, an `accent` prop keeps each module's hue (B657-5B).
 - `folders/` — the canonical per-project folder tree (B650): `folderTemplate.js` (the one default
   12-category template) + `folderTree.js` (pure flatten / treeify / validate / seed-row builder).
   Shared by the Library editor + the server Drive-mirror; the server-side reconcile executor lives

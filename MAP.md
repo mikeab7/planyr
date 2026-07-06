@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `dd45df1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `81bcf35` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_195 source files mapped._
+_196 source files mapped._
 
 ## infra
 
@@ -162,6 +162,8 @@ _195 source files mapped._
   - _exports_: `default (AppHeader)`, `MODULE_ACCENT`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
+- **`src/shared/ui/controls.jsx`** — shared control primitives (B657-5B): one radius/padding/typography scale + Button/ToggleChip/IconButton/Field/Section/MenuItem, token-driven, with a threaded `accent` prop so each module keeps its hue.
+  - _exports_: `Button`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `PAD`, `RADIUS`, `Section`, `ToggleChip`
 - **`src/shared/ui/moduleAccent.js`** — MODULE_ACCENT: single source of truth for per-workspace accent hexes (Site/Schedule/Review/Library) as pure React-free constants
   - _exports_: `MODULE_ACCENT`
 - **`src/shared/ui/ModuleLoader.jsx`** — Per-module assembling skeleton loader: Site parcel-draws itself, Gantt bars/milestones/playhead animate; 250ms show-delay, reduced-motion fallback
