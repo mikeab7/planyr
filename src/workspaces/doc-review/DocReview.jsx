@@ -1556,7 +1556,7 @@ export default function DocReview({
   const markRowValue = (m) => MEASURE.has(m.kind) ? measureLabel(m, ftPerUnit) : (m.kind === "text" || m.kind === "callout") ? ((m.text || "").trim() || "empty note") : "";
   // Toolbar buttons: nowrap (so labels never break mid-word into uneven multi-line chips)
   // + tightened padding for density on the single header row (B305).
-  const btn = (on) => ({ padding: "5px 9px", fontSize: 12, lineHeight: 1.1, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
+  const btn = (on) => ({ padding: "5px 9px", fontSize: 12, lineHeight: 1.1, whiteSpace: "nowrap", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink }); // B657-5B: radius 8 = shared control scale
   const chromeBtn = (extra = {}) => ({ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk, ...extra });
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 7px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
   const tbDiv = { width: 1, height: 18, background: "var(--chrome-divider)", margin: "0 2px", flex: "none" };
