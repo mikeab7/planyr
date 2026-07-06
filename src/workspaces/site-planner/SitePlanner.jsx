@@ -26,6 +26,7 @@ import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import ViewMenu from "./components/ViewMenu.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -917,7 +918,7 @@ const DEFAULT_SETTINGS = {
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
   // Building-anchored dock-zone stack default depths (B228), outward from the dock
-  // face: truck court → trailer parking → buffer. User-editable in Setup → Dock zones.
+  // face: truck court → trailer parking → buffer. User-editable in Standards → Dock zones.
   truckCourtD: 135, trailerParkD: 50, bufferD: 15,
   roadCurb: 0.5, roadWidths: "24, 26, 30, 36, 40",
   showDocks: true,
@@ -1044,6 +1045,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
+  // B653 cross-links: which Standards section a "default ↗" jump should open + scroll to
+  // (parcels|building|parking|trailers|dockzones|roads|colors). Cleared when the panel closes.
+  const [standardsFocus, setStandardsFocus] = useState(null);
+  const jumpToStandards = useCallback((key) => { setStandardsFocus(key); setLeftPanel("standards"); }, []);
   const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
   // B113: phone-width responsive mode. Below ~760px the fixed side rails would crush
   // the canvas to a sliver, so they OVERLAY it instead of consuming row width, and the
@@ -1384,6 +1389,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
   const [basemapOn, setBasemapOn] = useState(!!origin);
   const [layersOpen, setLayersOpen] = useState(false); // planner Layers control expanded
+  const [viewMenuOpen, setViewMenuOpen] = useState(false); // on-canvas View (eye) menu expanded (B653)
   const geoWrapRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
@@ -2145,6 +2151,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else if (sel?.kind === "parcel") setLeftPanel("parcel");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.kind, sel?.id]);
+  // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
+  // section into view (it opens via its remount key); drop the focus when the panel closes
+  // so a later manual visit opens with the normal all-collapsed overview.
+  useEffect(() => {
+    if (!standardsFocus) return;
+    if (leftPanel !== "standards") { setStandardsFocus(null); return; }
+    const t = setTimeout(() => {
+      try { document.querySelector(`[data-std-sec="${standardsFocus}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" }); } catch (_) {}
+    }, 30);
+    return () => clearTimeout(t);
+  }, [standardsFocus, leftPanel]);
   // Resolve taxing jurisdictions for the selected parcel (async, graceful).
   useEffect(() => {
     const pc = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
@@ -6876,7 +6893,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     { id: "props", glyph: "✎", label: "Element" },
     { id: "aerial", glyph: "◳", label: "Aerial" },
     { id: "overlay", glyph: "▦", label: "Overlay" },
-    { id: "standards", glyph: "⚙", label: "Setup" },
+    { id: "standards", glyph: "⚙", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
   ];
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
@@ -6909,6 +6926,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Site/Plan dropdown trigger buttons in the dark top bar.
   const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
+  // B653: link-styled jump from an inspector's "default" value to its Standards section.
+  const linkBtn = { padding: 0, border: "none", background: "transparent", color: PAL.accentText, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
   // One shared square icon-button (B574) — identical width/height/padding/hit-target for the overlay
@@ -7435,8 +7454,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
   const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
   const liveTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } }));
-  // Make the selected element's current colors the default for its type.
-  const setStyleDefault = () => { if (!selEl || !curStyle) return; setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity }); };
+  // Make the selected element's current colors the default for its type — and say so (B653).
+  const setStyleDefault = () => {
+    if (!selEl || !curStyle) return;
+    setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity });
+    flashWarn(`Saved to Standards — new ${TYPE[selEl.type].label.split(" / ")[0].toLowerCase()} elements start with these colors.`, 4000);
+  };
   // Drop the selected element's per-element overrides (back to the type default).
   const clearElStyle = () => { if (!selEl) return; pushHistory(); const tid = styleHostOf(selEl).id; setEls((a) => a.map((e) => { if (e.id !== tid) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
 
@@ -7531,11 +7554,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <button className="dbtn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
         <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
       </div>
-      <button className="dbtn" aria-pressed={settings.snap} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? PAL.chromeInk : PAL.chromeMuted, fontWeight: 600 }}
-        onClick={() => setSnap(!settings.snap)} title="Snap only ALIGNS position to the grid & flush against neighbours — it never groups or bonds anything. Click or press S to toggle (this browser session only; off by default); hold Alt while dragging to place freely.">
-        <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-        {settings.snap ? `Snap ${settings.gridSize}′ on` : "Snap off"}
-      </button>
+      {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
+          view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
       {parcels.length > 0 && (
         <button className="dbtn" aria-pressed={settings.parcelSelect} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.parcelSelect ? PAL.chromeInk : PAL.chromeMuted, fontWeight: 600 }}
           onClick={() => {
@@ -8691,9 +8711,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
+          {/* Top-right on-canvas controls — one anchored row: View (eye, B653) + Layers.
+              The container owns the position so the two cards can never overlap; each
+              card keeps its own open/closed width and scrolling. */}
+          <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, display: "flex", gap: 8, alignItems: "flex-start" }}>
+          <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
+            setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
           {/* Layers control (located sites) — same shared layers as the map finder */}
           {origin && (
-            <div data-export="skip" data-wheelscroll="1" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, width: layersOpen ? 226 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
+            <div data-wheelscroll="1" style={{ width: layersOpen ? 226 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
               <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
                 <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
@@ -8764,6 +8790,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
             </div>
           )}
+          </div>
 
           {/* empty state */}
           {parcels.length === 0 && els.length === 0 && !underlay && (
@@ -9178,7 +9205,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {leftTabs.map((tb) => (
               <button key={tb.id} title={tb.label} className="dbtn" style={railBtn(leftPanel === tb.id)}
                 onClick={() => setLeftPanel((p) => (p === tb.id ? null : tb.id))}>
-                <span style={{ fontSize: 16, lineHeight: 1 }}>{tb.glyph}</span>{tb.label}
+                <span style={{ fontSize: 16, lineHeight: 1 }}>{tb.glyph}</span>
+                {/* long labels ("Standards") overflow the 54px rail at 10.5px — shrink, never clip */}
+                <span style={tb.label.length > 8 ? { fontSize: 9, letterSpacing: 0 } : undefined}>{tb.label}</span>
               </button>
             ))}
           </div>
@@ -9596,9 +9625,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       )}
                       {cl && (
                         <Field label="Road class">
-                          <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
-                            {roadClassesOf(settings).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                          </select>
+                          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
+                              {roadClassesOf(settings).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                            </select>
+                            <button title="Class defaults (radius, design speed) — edit in Standards" onClick={() => jumpToStandards("roads")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
+                          </span>
                         </Field>
                       )}
                       {warn && (
@@ -9644,7 +9676,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                       <>
                         <Field label={`${DOCK_ZONES[i].label} depth (ft)`}>
-                          <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n2) => b && side && setZoneDepthAll(b, i, n2)} />
+                          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n2) => b && side && setZoneDepthAll(b, i, n2)} />
+                            <button title="Plan standard depths for new dock zones — edit in Standards" onClick={() => jumpToStandards("dockzones")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
+                          </span>
                         </Field>
                         {i === 0 && b && side && (
                           <Field label="Truck court length (ft)">
@@ -9804,7 +9839,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 <NumInput style={{ ...numInput, width: 52 }} value={Math.round(valueShown)} min={floor} onCommit={(n) => { pushHistory(); setSelEl({ [ovKey]: n }); }} />
                                 {b[ovKey] != null
                                   ? <button title="Revert to plan default" onClick={() => { pushHistory(); setSelEl({ [ovKey]: null }); }} style={resetBtn}>set ↺</button>
-                                  : <span style={autoTag}>default</span>}
+                                  : <button title="Plan standard — edit in Standards" onClick={() => jumpToStandards("building")} style={{ ...linkBtn, fontSize: 10, marginLeft: 2 }}>default ↗</button>}
                               </span>
                             </Field>
                           );
@@ -9815,6 +9850,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               {ovRow("Typ. bay — depth", grd.bayDepthTarget, "bayDepthOverride", 1)}
                               {ovRow("Dock door o.c. (ft)", grd.doorOC, "doorOCOverride", 2)}
                               {gg.summary && <div style={note}>{gg.summary.lengthCount} × {gg.summary.depthCount} bays · {gg.summary.lengthTyp}′ × {gg.summary.depthTyp}′ typ{gg.summary.speedBay ? ` · speed bay ${gg.summary.speedBay}′` : ""}.</div>}
+                              {/* B653 write-back: this building's resolved grid becomes the plan standard, and says so. */}
+                              <button style={{ ...chip, width: "100%", marginTop: 6 }} title="Make this building's column grid the plan standard for new buildings"
+                                onClick={() => { pushHistory(); setSettings((s) => ({ ...s, speedBay: grd.speedBay, bayLengthTarget: grd.bayLengthTarget, bayDepthTarget: grd.bayDepthTarget, doorOC: grd.doorOC })); flashWarn("Saved to Standards — new buildings start with this column grid.", 4000); }}>
+                                Set as standard
+                              </button>
                             </>
                           );
                         })()}
@@ -9858,9 +9898,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const pc = cfgOf(selEl);
                     return (
                       <div style={{ marginTop: 4 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Parking layout</div>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "2px 0 6px" }}>
+                          <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", flex: 1 }}>Parking layout</span>
+                          <button title="Plan standards for new parking — stall size, aisle, angle" onClick={() => jumpToStandards("parking")} style={linkBtn}>Standards ↗</button>
+                        </div>
                         <Field label="Stall depth (ft)"><NumInput style={numInput} value={pc.stallDepth} min={8} onCommit={(n) => setParkCfg(selEl, { stallDepth: n })} /></Field>
                         <Field label="Drive aisle (ft)"><NumInput style={numInput} value={pc.aisle} min={0} onCommit={(n) => setParkCfg(selEl, { aisle: n })} /></Field>
+                        {/* B653 write-back: this field's stall depth + aisle become the plan standard, and say so. */}
+                        <button style={{ ...chip, width: "100%", marginTop: 6 }} title="Make this field's stall depth & drive aisle the plan standard for new parking"
+                          onClick={() => { pushHistory(); setSettings((s) => ({ ...s, stallDepth: pc.stallDepth, aisle: pc.aisle })); flashWarn("Saved to Standards — new parking starts with this stall depth & aisle.", 4000); }}>
+                          Set as standard
+                        </button>
                         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row</button>
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, -1)}>－ Row</button>
@@ -9930,8 +9978,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
                       return <span style={{ color: PAL.purple }}>+ {bumps.length} bump-out{bumps.length > 1 ? "s" : ""} ({f0(ba)} sf) → <b style={{ color: PAL.ink }}>{f0(area + ba)} sf</b> total<br /></span>;
                     })()}
-                    {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, cfgOf(selEl)).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}</>}
-                    {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
+                    {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, cfgOf(selEl)).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle <button style={linkBtn} title="Plan standards for new parking" onClick={() => jumpToStandards("parking")}>↗</button></>}</>}
+                    {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`} <button style={linkBtn} title="Plan standards for new trailer courts" onClick={() => jumpToStandards("trailers")}>↗</button></>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       // Door count + column-grid readout track the SAME pure layout the canvas draws
                       // (B568/B569): doors fall between columns, so the count reflects the column
@@ -10246,6 +10294,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                 <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${TYPE[selEl.type].label}`}>Set as default</button>
                 <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
+              </div>
+              <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>
+                New {TYPE[selEl.type].label.split(" / ")[0].toLowerCase()} elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
               </div>
             </Section>
           )}
@@ -10653,23 +10704,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           })()}
           </>)}
 
-          {/* settings — grouped, collapsible */}
+          {/* Standards (B653) — pure per-element-type STARTING VALUES. The what-you-see
+              toggles + grid/snap moved to the on-canvas View (eye) menu; each section
+              below is one element type, deep-linkable from that type's inspector via
+              standardsFocus (the remount key opens the focused section). */}
           {leftPanel === "standards" && (<>
-          <Section title="Site defaults">
-            <Field label="Grid (ft)"><NumInput style={numInput} value={settings.gridSize} min={1} onCommit={(n) => setSettings((s) => ({ ...s, gridSize: n }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }} title="Snap to grid & flush against neighbours — press S to toggle; hold Alt while dragging to place freely"><input type="checkbox" checked={settings.snap} onChange={(e) => setSnap(e.target.checked)} /> Snap to grid &amp; neighbours (S)</label>
+          <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.55, margin: "2px 2px 10px" }}>
+            <b style={{ color: PAL.ink }}>Starting values for new elements</b> — editable per element after you place it.
+            Show/hide toggles and grid &amp; snap moved to the <b>View</b> (eye) menu on the canvas.
+          </div>
+
+          <div data-std-sec="parcels">
+          <Section key={`std-parcels:${standardsFocus === "parcels"}`} title="Parcels" collapsed={standardsFocus !== "parcels"}>
             <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
             {/* "Show setback line" lives in the Parcel panel (Boundary › Setbacks per edge › Show),
                 next to the object it acts on — see B164. Not duplicated here. */}
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showGrid} onChange={(e) => setSettings((s) => ({ ...s, showGrid: e.target.checked }))} /> Show column grid</label>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }} title="Show the red footprint dimension callouts (building depth, road width, strip width)"><input type="checkbox" checked={settings.showDims !== false} onChange={(e) => setSettings((s) => ({ ...s, showDims: e.target.checked }))} /> Show dimensions</label>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }} title="Show the square-footage / acreage line on element labels"><input type="checkbox" checked={settings.showAreas !== false} onChange={(e) => setSettings((s) => ({ ...s, showAreas: e.target.checked }))} /> Show areas</label>
           </Section>
+          </div>
 
           {/* Structural column grid (B568): speed bay + flex-to-band typical bays + dock doors.
               These are the plan-wide defaults; a single building can pin its own in its inspector. */}
-          <Section title="Structural grid" collapsed>
+          <div data-std-sec="building">
+          <Section key={`std-building:${standardsFocus === "building"}`} title="Buildings — structural grid" collapsed={standardsFocus !== "building"}>
             <Field label="Speed bay (ft)"><NumInput style={numInput} value={settings.speedBay} min={1} onCommit={(n) => setSettings((s) => ({ ...s, speedBay: n }))} /></Field>
             <Field label="Typ. bay — length"><NumInput style={numInput} value={settings.bayLengthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayLengthTarget: n }))} /></Field>
             <Field label="Typ. bay — depth"><NumInput style={numInput} value={settings.bayDepthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayDepthTarget: n }))} /></Field>
@@ -10677,28 +10733,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Dock door — W / o.c."><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.doorWidth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, doorWidth: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.doorOC} min={2} onCommit={(n) => setSettings((s) => ({ ...s, doorOC: n }))} /></span></Field>
             <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Interior bays are sized evenly within the band toward the typical size, so the columns are uniformly spaced; the speed bay is pinned. The band is the allowed bay range.</div>
           </Section>
+          </div>
 
-          <Section title="Parking" collapsed>
+          <div data-std-sec="parking">
+          <Section key={`std-parking:${standardsFocus === "parking"}`} title="Parking" collapsed={standardsFocus !== "parking"}>
             <Field label="Stall W / D"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.stallW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.stallDepth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallDepth: n }))} /></span></Field>
             <Field label="Drive aisle"><NumInput style={numInput} value={settings.aisle} min={1} onCommit={(n) => setSettings((s) => ({ ...s, aisle: n }))} /></Field>
             <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
           </Section>
+          </div>
 
-          <Section title="Trailers" collapsed>
+          <div data-std-sec="trailers">
+          <Section key={`std-trailers:${standardsFocus === "trailers"}`} title="Trailers" collapsed={standardsFocus !== "trailers"}>
             <Field label="Trailer W / L"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.trailerW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.trailerL} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerL: n }))} /></span></Field>
             <Field label="Trailer aisle"><NumInput style={numInput} value={settings.trailerAisle} min={0} onCommit={(n) => setSettings((s) => ({ ...s, trailerAisle: n }))} /></Field>
           </Section>
 
+          </div>
+
           {/* Default depths for the building-anchored dock-zone stack (B228), outward from
               the dock face. Editable per plan — the building "+" reads these. */}
-          <Section title="Dock zones" collapsed>
+          <div data-std-sec="dockzones">
+          <Section key={`std-dockzones:${standardsFocus === "dockzones"}`} title="Dock zones" collapsed={standardsFocus !== "dockzones"}>
             <Field label="Truck court (ft)"><NumInput style={numInput} value={settings.truckCourtD ?? 135} min={1} onCommit={(n) => setSettings((s) => ({ ...s, truckCourtD: n }))} /></Field>
             <Field label="Trailer parking (ft)"><NumInput style={numInput} value={settings.trailerParkD ?? 50} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerParkD: n }))} /></Field>
             <Field label="Buffer (ft)"><NumInput style={numInput} value={settings.bufferD ?? 15} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bufferD: n }))} /></Field>
             <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Outward from the dock face: truck court → trailer parking → buffer. New zones use these depths; each is still editable per building.</div>
           </Section>
+          </div>
 
-          <Section title="Roads" collapsed>
+          <div data-std-sec="roads">
+          <Section key={`std-roads:${standardsFocus === "roads"}`} title="Roads" collapsed={standardsFocus !== "roads"}>
             <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
             <Field label="Road widths (ft)">
               <input style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
@@ -10735,8 +10800,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             })()}
           </Section>
 
+          </div>
+
           {/* element default colors — edit without selecting anything */}
-          <Section title="Element default colors" collapsed>
+          <div data-std-sec="colors">
+          <Section key={`std-colors:${standardsFocus === "colors"}`} title="Colors" collapsed={standardsFocus !== "colors"}>
             {Object.keys(TYPE).map((k) => {
               const st = typeStyle(k, settings);
               return (
@@ -10749,6 +10817,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             })}
             <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: {} })); }}>Reset all to built-in</button>
           </Section>
+          </div>
           </>)}
           </div>
           {/* drag handle to resize the menu (desktop only — on phones the panel is a fixed-width overlay) */}
