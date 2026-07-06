@@ -297,3 +297,53 @@ describe("Parcel split lineage (B651)", () => {
     expect(depth).toEqual({ p1: 0, p2: 0, p3: 0, a: 1, a1: 2, a2: 2, b: 1 });
   });
 });
+
+// B682 — id-less parcels (map-finder hand-off / legacy saves) get a stable, geometry-derived id at
+// the createSiteModel funnel, so a dragged acreage-label offset can no longer spawn phantom copies
+// through the cross-copy union merge.
+describe("Stable parcel ids heal the acreage-label duplication (B682)", () => {
+  const RING = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+
+  it("createSiteModel backfills a stable id for an id-less parcel, deterministically", () => {
+    const a = createSiteModel({ parcels: [{ points: RING, locked: true }] }).parcels[0];
+    const b = createSiteModel({ parcels: [{ points: RING, locked: true }] }).parcels[0];
+    expect(a.id).toBeTruthy();
+    expect(a.id).toBe(b.id); // same geometry → same id, run to run
+    expect(a.locked).toBe(true); // other fields preserved
+  });
+
+  it("the id is derived from GEOMETRY only — a labelOffset edit does NOT change it", () => {
+    const before = createSiteModel({ parcels: [{ points: RING }] }).parcels[0];
+    const after = createSiteModel({ parcels: [{ points: RING, labelOffset: { x: 9, y: 9 } }] }).parcels[0];
+    expect(after.id).toBe(before.id); // label-drag can't fork the identity anymore
+  });
+
+  it("genuinely-distinct parcels get distinct ids", () => {
+    const shifted = RING.map((p) => ({ x: p.x + 500, y: p.y }));
+    const m = createSiteModel({ parcels: [{ points: RING }, { points: shifted }] });
+    expect(m.parcels[0].id).not.toBe(m.parcels[1].id);
+  });
+
+  it("an existing id is never rewritten (in-planner parcels carry a uid())", () => {
+    const m = createSiteModel({ parcels: [{ id: "p_keepme", points: RING }] });
+    expect(m.parcels[0].id).toBe("p_keepme");
+  });
+
+  it("REPRO: dragging an id-less parcel's label no longer duplicates it on merge", () => {
+    const stored = { id: "s1", updatedAt: 1000, parcels: [{ points: RING, locked: true }] };
+    const live = { id: "s1", updatedAt: 2000, parcels: [{ points: RING, locked: true, labelOffset: { x: 5, y: 5 } }] };
+    const merged = mergeSiteContent(live, stored);
+    expect(merged.parcels).toHaveLength(1);            // was 2 before the fix (the phantom copy)
+    expect(merged.parcels[0].labelOffset).toEqual({ x: 5, y: 5 }); // the dragged position wins
+  });
+
+  it("exact-geometry id-less duplicates already persisted are collapsed to one (self-heal)", () => {
+    // What the bug wrote to a record: the same parcel twice, one with the dragged offset.
+    const m = createSiteModel({ parcels: [
+      { points: RING, labelOffset: { x: 5, y: 5 } },
+      { points: RING },
+    ] });
+    expect(m.parcels).toHaveLength(1);
+    expect(m.parcels[0].labelOffset).toEqual({ x: 5, y: 5 }); // keeps the first (the edited one)
+  });
+});

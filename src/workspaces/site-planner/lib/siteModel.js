@@ -66,6 +66,48 @@ const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVer
 const arr = (v) => (Array.isArray(v) ? v : []);
 
 const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+
+// B682 — every parcel MUST carry a stable `id`. The map-finder hand-off (MapFinder.computeAssembly)
+// and legacy saved sites can hold id-LESS parcels ({points, addr, acct, attrs} with no id). Two bugs
+// flow from that. (1) The acreage-chip drag matches parcels by `pc.id === draggedId`; with both
+// undefined it moves EVERY id-less parcel at once. (2) Worse, the cross-copy union merge
+// (mergeSiteContent → unionById) can only dedupe id-less items by JSON value, so the instant a drag
+// adds a `labelOffset` the edited copy no longer equals its stored twin and the union keeps BOTH — a
+// phantom parcel that MULTIPLIES with each further drag (the owner's "moved the 69.48 ac label and it
+// made a bunch of copies"). Fix at the one funnel every load/save/merge passes through: backfill a
+// DETERMINISTIC id derived from the parcel GEOMETRY only, so the same parcel hashes identically before
+// and after any mutable-field edit (labelOffset / active / locked / setbacks) and the union dedupes it
+// by id; two genuinely-distinct parcels differ in points → distinct ids. Only a MISSING id is filled
+// (parcels drawn/imported in-planner already carry a unique uid()), so it's additive + idempotent and
+// never rewrites an existing id. Exact-geometry id-less duplicates collapse to one — which also HEALS
+// the phantom copies this bug already persisted, on the very next load.
+const hashPoints = (pts) => {
+  let h = 5381 >>> 0; // djb2-xor over rounded coords; stability (same points → same hash) is what matters
+  for (const p of pts) {
+    const x = p && typeof p.x === "number" && Number.isFinite(p.x) ? p.x : 0;
+    const y = p && typeof p.y === "number" && Number.isFinite(p.y) ? p.y : 0;
+    h = (((h << 5) + h) ^ (Math.round(x * 1000) | 0)) >>> 0; // 1e-3 ft rounding kills float re-projection noise
+    h = (((h << 5) + h) ^ (Math.round(y * 1000) | 0)) >>> 0;
+  }
+  return h.toString(36);
+};
+const withStableParcelIds = (list) => {
+  let changed = false;
+  const seen = new Set();
+  const out = [];
+  for (const pc of list) {
+    if (pc && pc.id == null && Array.isArray(pc.points) && pc.points.length) {
+      const id = `pcg_${pc.points.length}_${hashPoints(pc.points)}`;
+      changed = true;
+      if (seen.has(id)) continue; // exact-geometry duplicate of an already-kept id-less parcel → drop (heals prior phantom copies)
+      seen.add(id);
+      out.push({ ...pc, id });
+    } else {
+      out.push(pc);
+    }
+  }
+  return changed ? out : list; // reference-stable when nothing was id-less (no churn on already-migrated data)
+};
 // B559: coerce a timestamp to milliseconds for comparison. `updatedAt` is normally a number
 // (Date.now()), but createSiteModel keeps whatever it's given (p.updatedAt || Date.now()), so an
 // imported/legacy record can carry an ISO STRING — and `"2025-…" >= 1718…` is a silent false,
@@ -223,7 +265,7 @@ export function createSiteModel(p = {}) {
     // a fresh record (no prior version) starts in "pursuit".
     status: normStatus(p.status, isLegacyRecord(p) ? LEGACY_STATUS : DEFAULT_STATUS),
     // inputs
-    parcels: ensureZ(arr(p.parcels)),
+    parcels: ensureZ(withStableParcelIds(arr(p.parcels))),
     underlay: p.underlay || null,
     // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by
     // hand. Each: {id,name,src,imgW,imgH,page,pageCount,x,y,ftPerPx,rotation,opacity,locked}
