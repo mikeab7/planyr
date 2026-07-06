@@ -11,6 +11,11 @@ import {
   computeRequiredDetention,
   ruleBadge,
   pondDefaultsFor,
+  runoffCoefficient,
+  DESIGN_STORMS,
+  stormIntensity,
+  computeRateBasedDetention,
+  computePumpedCredit,
 } from "../src/workspaces/site-planner/lib/detentionRules.js";
 
 describe("rule records — integrity sweep", () => {
@@ -341,5 +346,93 @@ describe("edges + helpers", () => {
     expect(pondDefaultsFor("hcfcd").sideSlope).toBe(3);
     expect(pondDefaultsFor("nowhere").sideSlope).toBe(3);
     expect(pondDefaultsFor("nowhere").freeboardFt).toBe(1);
+  });
+});
+
+// B655 — rate-based (Modified Rational) screening + pumped-outfall credit.
+describe("runoffCoefficient — Schaake composite", () => {
+  it("clamps at the ends and is monotonic", () => {
+    expect(runoffCoefficient(0)).toBeCloseTo(0.05, 5);
+    expect(runoffCoefficient(100)).toBeCloseTo(0.95, 5);
+    expect(runoffCoefficient(50)).toBeCloseTo(0.5, 5);
+    let prev = -1;
+    for (let p = 0; p <= 100; p += 5) {
+      const c = runoffCoefficient(p);
+      expect(c).toBeGreaterThanOrEqual(prev);
+      prev = c;
+    }
+  });
+  it("returns null on unknown impervious (never a fabricated C)", () => {
+    expect(runoffCoefficient(null)).toBe(null);
+    expect(runoffCoefficient(undefined)).toBe(null);
+    expect(runoffCoefficient(NaN)).toBe(null);
+  });
+});
+
+describe("DESIGN_STORMS + stormIntensity", () => {
+  it("the record carries a cited source and ascending-duration rows per period", () => {
+    expect(DESIGN_STORMS.source?.name).toBeTruthy();
+    expect(DESIGN_STORMS.source?.url).toMatch(/^https:\/\//);
+    for (const rows of Object.values(DESIGN_STORMS.periods)) {
+      for (let i = 0; i + 1 < rows.length; i++) expect(rows[i + 1][0]).toBeGreaterThan(rows[i][0]);
+    }
+  });
+  it("returns an exact table hit, interpolates between, and nulls an unmodeled period", () => {
+    expect(stormIntensity(100, 60).inPerHr).toBe(3.9); // exact row
+    const mid = stormIntensity(100, 45).inPerHr; // between 30(5.6) and 60(3.9)
+    expect(mid).toBeLessThan(5.6);
+    expect(mid).toBeGreaterThan(3.9);
+    expect(stormIntensity(500, 60)).toBe(null); // not a modeled return period
+    expect(stormIntensity(100, 60).secondarySource).toBe(true);
+  });
+});
+
+describe("computeRateBasedDetention — Modified Rational", () => {
+  it("hand-checked C·i·A case picks the critical duration and volume", () => {
+    // acres 10, impPct 75 → C=0.725; 100-yr; release 10 cfs.
+    // The 60-min storm governs: Q=0.725*3.9*10=28.275, Vs=(28.275-10)*3600=65790 cf → 1.5103 ac-ft.
+    const r = computeRateBasedDetention({ acres: 10, impPct: 75, allowableReleaseCfs: 10, returnPeriodYr: 100 });
+    expect(r.kind).toBe("rate-based");
+    expect(r.method).toBe("modified-rational");
+    expect(r.inputs.criticalDurationMin).toBe(60);
+    expect(r.requiredAcFt).toBeCloseTo(1.51, 1);
+    expect(r.inputs.peakInflowCfs).toBeCloseTo(28.28, 1);
+    expect(r.caveat).toBeTruthy();
+  });
+  it("a bigger allowable release lowers the required volume (monotonic)", () => {
+    const tight = computeRateBasedDetention({ acres: 10, impPct: 75, allowableReleaseCfs: 5, returnPeriodYr: 100 });
+    const loose = computeRateBasedDetention({ acres: 10, impPct: 75, allowableReleaseCfs: 20, returnPeriodYr: 100 });
+    expect(loose.requiredAcFt).toBeLessThan(tight.requiredAcFt);
+  });
+  it("missing input flags rather than fabricates a number", () => {
+    const noRel = computeRateBasedDetention({ acres: 10, impPct: 75, returnPeriodYr: 100 });
+    expect(noRel.kind).toBe("unknown");
+    expect(noRel.requiredAcFt).toBe(null);
+    expect(noRel.flags).toContain("release-rate-missing");
+    const noImp = computeRateBasedDetention({ acres: 10, allowableReleaseCfs: 10, returnPeriodYr: 100 });
+    expect(noImp.requiredAcFt).toBe(null);
+    expect(noImp.flags).toContain("impervious-unknown");
+    const badStorm = computeRateBasedDetention({ acres: 10, impPct: 75, allowableReleaseCfs: 10, returnPeriodYr: 500 });
+    expect(badStorm.flags).toContain("design-storm-unmodeled");
+  });
+});
+
+describe("computePumpedCredit", () => {
+  it("a pump reduces required volume and carries the regime-B suppression flag", () => {
+    const c = computePumpedCredit({ acres: 10, impPct: 75, gravityReleaseCfs: 0, pumpRateCfs: 15, returnPeriodYr: 100 });
+    expect(c.creditedAcFt).toBeGreaterThan(0);
+    expect(c.requiredWithPumpAcFt).toBeLessThan(c.requiredGravityAcFt);
+    expect(c.flags).toContain("regime-b-tailwater-suppressed-by-pump");
+    expect(c.assumption).toMatch(/not.+gravity-drowned|not applied/i);
+  });
+  it("a pump at or above peak inflow zeroes required and never over-credits", () => {
+    const c = computePumpedCredit({ acres: 10, impPct: 75, gravityReleaseCfs: 0, pumpRateCfs: 100000, returnPeriodYr: 100 });
+    expect(c.requiredWithPumpAcFt).toBe(0);
+    expect(c.creditedAcFt).toBeCloseTo(c.requiredGravityAcFt, 5); // credit === full gravity requirement, no more
+  });
+  it("a missing pump rate flags, never fabricates a credit", () => {
+    const c = computePumpedCredit({ acres: 10, impPct: 75, returnPeriodYr: 100 });
+    expect(c.creditedAcFt).toBe(null);
+    expect(c.flags).toContain("pump-rate-missing");
   });
 });

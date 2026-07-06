@@ -75,6 +75,7 @@ import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt,
   resolveDrainageContext, ruleBadge,
+  computeRateBasedDetention, computePumpedCredit, DESIGN_STORM_PERIODS,
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs } from "./lib/polyClip.js";
@@ -10018,6 +10019,95 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         ⚠ This footprint can't hold an {f1(depth)}′ pond at {slope}:1 side slopes — the opposing slopes meet at about {f1(r.maxDepth)}′ deep. The volume above is for that {f1(r.maxDepth)}′ basin. Reduce the depth, flatten the side slope, or enlarge the footprint.
                       </div>
                     )}
+                    {/* B655 — per-pond required-vs-provided screening card. Editable inputs feed the
+                        Modified Rational (rate-based) method in detentionRules.js; the authority
+                        site total (detReq) is shown for reference. A pumped outfall credits its
+                        constant discharge and suppresses the Regime-B tailwater penalty (noted). */}
+                    {(() => {
+                      const da = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
+                      const imp = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
+                      const storm = det.designStorm || 100;
+                      const rel = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs : null;
+                      const pumped = det.outfallMode === "pumped";
+                      const pumpUnit = det.pumpRateUnit === "gpm" ? "gpm" : "cfs";
+                      const pumpRaw = Number.isFinite(det.pumpRateCfs) ? det.pumpRateCfs : null;
+                      const pumpCfs = pumpRaw == null ? null : pumpUnit === "gpm" ? pumpRaw / 448.831 : pumpRaw;
+                      const rateReq = computeRateBasedDetention({ acres: da, impPct: imp, allowableReleaseCfs: rel, returnPeriodYr: storm });
+                      const credit = pumped ? computePumpedCredit({ acres: da, impPct: imp, gravityReleaseCfs: rel ?? 0, pumpRateCfs: pumpCfs, returnPeriodYr: storm }) : null;
+                      const providedAcFt = r.vol / 43560;
+                      // The pond delta uses the RESPONSIVE rate-based number (pumped-adjusted); the
+                      // authority site total is a reference badge. Null when no release rate yet.
+                      const reqAcFt = credit && credit.requiredWithPumpAcFt != null ? credit.requiredWithPumpAcFt
+                        : rateReq.kind === "rate-based" ? rateReq.requiredAcFt : null;
+                      const delta = reqAcFt == null ? null : providedAcFt - reqAcFt;
+                      const authPoint = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0;
+                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 0" };
+                      return (
+                        <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Required detention (screening)</div>
+                          <Field label="Drainage area (ac)">
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <NumInput style={{ ...numInput, width: 64 }} value={Math.round(da * 100) / 100} min={0} onCommit={(n) => setDet({ daAcres: n > 0 ? n : null })} />
+                              {det.daAcres != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the whole site" onClick={() => setDet({ daAcres: null })}>Site</button>}
+                            </span>
+                          </Field>
+                          <Field label="Impervious %">
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <NumInput style={{ ...numInput, width: 64 }} value={Math.round(imp * 10) / 10} min={0} max={100} onCommit={(n) => setDet({ daImpPct: Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null })} />
+                              {det.daImpPct != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the plan's auto value" onClick={() => setDet({ daImpPct: null })}>Auto</button>}
+                            </span>
+                          </Field>
+                          {det.daImpPct == null && <div style={smallNote}>Impervious % auto from the plan.</div>}
+                          <Field label="Design storm">
+                            <select style={{ ...numInput, width: 88 }} value={storm} onChange={(e) => setDet({ designStorm: +e.target.value })}>
+                              {DESIGN_STORM_PERIODS.map((p) => <option key={p} value={p}>{p}-yr</option>)}
+                            </select>
+                          </Field>
+                          <Field label="Allowable release (cfs)">
+                            <NumInput style={{ ...numInput, width: 64 }} value={rel ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ releaseRateCfs: Number.isFinite(n) ? n : null })} />
+                          </Field>
+                          <Field label="Outfall">
+                            <span style={{ display: "flex", gap: 5, width: 150 }}>
+                              <button style={{ ...chip, flex: 1, padding: "6px 0", textAlign: "center", ...(!pumped ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={() => setDet({ outfallMode: "gravity" })}>Gravity</button>
+                              <button style={{ ...chip, flex: 1, padding: "6px 0", textAlign: "center", ...(pumped ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={() => setDet({ outfallMode: "pumped" })}>Pumped</button>
+                            </span>
+                          </Field>
+                          {pumped && (
+                            <Field label="Pump rate">
+                              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                <NumInput style={{ ...numInput, width: 58 }} value={pumpRaw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ pumpRateCfs: Number.isFinite(n) ? n : null })} />
+                                <select style={{ ...numInput, width: 58 }} value={pumpUnit} onChange={(e) => setDet({ pumpRateUnit: e.target.value })}>
+                                  <option value="cfs">cfs</option>
+                                  <option value="gpm">gpm</option>
+                                </select>
+                              </span>
+                            </Field>
+                          )}
+                          <div style={{ marginTop: 7, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
+                            {pondRow("Provided (this pond)", `${f2(providedAcFt)} ac-ft`)}
+                            {rateReq.kind === "rate-based"
+                              ? pondRow(`Required · ${storm}-yr rate-based`, `${f2(rateReq.requiredAcFt)} ac-ft`)
+                              : <div style={{ ...smallNote, color: PAL.warn }}>Enter an allowable release rate to screen the required volume.</div>}
+                            {pumped && credit && credit.creditedAcFt != null && (
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.info, marginTop: 2 }}><span>− pumped credit</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{f2(credit.creditedAcFt)} ac-ft</span></div>
+                            )}
+                            {delta != null && (
+                              <>
+                                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 700, color: delta >= 0 ? PAL.success : PAL.danger }}>
+                                  <span>{delta >= 0 ? "Surplus" : "Shortfall"}</span>
+                                  <span style={{ fontFamily: "ui-monospace, monospace" }}>{delta >= 0 ? "+" : "−"}{f2(Math.abs(delta))} ac-ft</span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          {rateReq.kind === "rate-based" && <div style={smallNote}>{rateReq.basis}{rateReq.flags.includes("idf-secondary-source") ? " · Atlas-14 pending primary verification" : ""}</div>}
+                          {authPoint && <div style={smallNote}>Authority (site total): {f2(detReq.requiredAcFt)} ac-ft — {ruleBadge(detReq.rule, detReq.rateAcFtPerAc)}. The site rollup lives in Yield.</div>}
+                          {pumped && credit && <div style={{ ...smallNote, color: PAL.warn }}>{credit.assumption}</div>}
+                          <div style={smallNote}>Modified Rational screening — confirm with your engineer and the reviewing authority.</div>
+                        </div>
+                      );
+                    })()}
                     {/* B139 — Expand this pond: enter mode (auto-baseline + ghost), then steppers
                         (push banks out / dig deeper) or free drag feed one Existing→Proposed delta. */}
                     {!inMode ? (
