@@ -8,7 +8,7 @@ import {
 const pdf = (name = "a.pdf", size = 1000) => ({ name, size, type: "application/pdf" });
 const png = (name = "a.png", size = 1000) => ({ name, size, type: "image/png" });
 
-// ── Fake FileSystemEntry helpers for the folder-drop walk (B665) ──
+// ── Fake FileSystemEntry helpers for the folder-drop walk (B664) ──
 const fileEntry = (file) => ({ isFile: true, isDirectory: false, file: (res) => res(file) });
 // A directory whose reader serves `batches` (arrays of entries) in order, then [] to end —
 // mirroring the real chunked readEntries contract (you must call it until it returns empty).
@@ -108,7 +108,7 @@ describe("uploadQueue — demote timing", () => {
   });
 });
 
-describe("uploadQueue — folder-aware drops (B665)", () => {
+describe("uploadQueue — folder-aware drops (B664)", () => {
   it("entryToFiles: a file entry yields its one File", async () => {
     const f = pdf("survey.pdf");
     expect(await entryToFiles(fileEntry(f))).toEqual([f]);

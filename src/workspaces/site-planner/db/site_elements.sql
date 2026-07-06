@@ -1,10 +1,10 @@
--- Element-level sync, phase 1 (B666) — the `site_elements` table: one row per drawn
+-- Element-level sync, phase 1 (B670) — the `site_elements` table: one row per drawn
 -- Site Planner element (els / markups / measures / callouts / parcels) instead of one
 -- jsonb blob per site. Run ONCE in the Supabase SQL editor (project `lyeqzkuiwngunutlkkmi`)
 -- or via the Supabase MCP. Idempotent; safe to re-run. AFTER this file, run
 -- db/site_elements_backfill.sql to explode existing blobs into rows.
 --
--- Design notes (B666):
+-- Design notes (B670):
 --  • PK is (site_id, kind, id): ids are reused VERBATIM, but a legacy pre-salt id ("e6327",
 --    minted before the B591 per-tab salt) can be reused ACROSS collections within one site —
 --    live prod has exactly one such case (an el and a markup share e6327 on one site). Keying
@@ -239,7 +239,7 @@ begin
           results := results || jsonb_build_array(jsonb_build_object('id', v_id, 'status', 'ok', 'rev', r.rev));
         else
           -- live but newer: delete-vs-edit — the client re-applies the delete at the fresh
-          -- rev (delete wins, per the B669 policy matrix) and surfaces the supersede notice.
+          -- rev (delete wins, per the B673 policy matrix) and surfaces the supersede notice.
           results := results || jsonb_build_array(jsonb_build_object('id', v_id, 'status', 'conflict', 'row', to_jsonb(r)));
         end if;
       end if;

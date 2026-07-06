@@ -40,6 +40,9 @@ export default function App({
   // back to the URL; `resumeAllowed` lets a route-less first visit resume the last site;
   // `newProjectTick` increments when "New project" is clicked from any workspace.
   projectId = null, onProjectChange, resumeAllowed = true, newProjectTick = 0,
+  // Keep-alive: false while this workspace is mounted but hidden behind another tab.
+  // Hidden = follow the route, but never WRITE to it and never own global keyboard input.
+  isActive = true,
 } = {}) {
   // (County is no longer a top-level pick — the map auto-resolves a clicked
   // parcel's county (B11), and the planner reads its county from the saved site.)
@@ -340,9 +343,16 @@ export default function App({
   //    strip the route ("#/project/<id>/site" → "#/") and bounce to the finder before the
   //    pull can resume. Hold the URL (the route is the source of truth during boot) until
   //    the first auth + pull settles, then sync (de-duped if already correct).
+  //    Keep-alive: a HIDDEN Site Planner must never write to the URL (the visible module
+  //    owns it) — `isActive` in the deps makes re-activation reconcile immediately instead.
   const effGroup = groupForPlan(activeSiteId, mode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (mayReconcileUrl(bootResolved)) onProjectChange?.(effGroup); }, [effGroup, bootResolved]);
+  useEffect(() => { if (isActive && mayReconcileUrl(bootResolved)) onProjectChange?.(effGroup); }, [effGroup, bootResolved, isActive]);
+
+  // Keep-alive: returning to this tab re-reads the local site list (cheap, synchronous) so a
+  // project created/renamed from another module while we were hidden shows without a reload.
+  useEffect(() => { if (isActive) refreshSites(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   // 3) "New project" from any workspace → start a blank site here (a side effect, not a
   //    route: the blank has no saved id yet; once edited it writes its id into the URL).
@@ -503,6 +513,7 @@ export default function App({
         <div style={{ flex: 1, minHeight: 0 }}>
           <MapFinder
             visible={mode === "map"}
+            isActive={isActive}
             overlays={overlays}
             setOverlays={setOverlays}
             layerStatus={layerStatus}
@@ -524,7 +535,7 @@ export default function App({
         {activeSiteId && (
           <SitePlanner
             key={`${activeSiteId}:${loadEpoch}`}
-            active={mode === "plan"}
+            active={mode === "plan" && isActive}
             siteId={activeSiteId}
             overlays={overlays}
             setOverlays={setOverlays}

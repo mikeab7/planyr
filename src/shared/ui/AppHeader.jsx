@@ -283,6 +283,8 @@ export default function AppHeader({
   accountActive = false,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
+  const fullscreenRef = useRef(false); fullscreenRef.current = fullscreen; // live value for the once-bound key handler
+  const headerRef = useRef(null); // visibility probe for the keep-alive gate below
   const { resolved } = useTheme();
   const multiTab = useMultiTab(accountActive && currentProject ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only)
   const narrow = useNarrow(); // V11 — phone-width header: scroll each row sideways instead of clipping its controls
@@ -296,6 +298,13 @@ export default function AppHeader({
     const handle = (e) => {
       const tag = e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
+      // Keep-alive gate: with workspaces kept mounted-but-hidden, EVERY workspace's header
+      // has this window listener. A hidden header (display:none ancestor ⇒ offsetParent
+      // null) must ignore the shortcut, or one keypress toggles fullscreen in all of them.
+      // (While fullscreen, the header renders only a position:fixed exit button — offsetParent
+      // is null for fixed elements, so only apply the check when NOT fullscreen; a hidden
+      // header can never BE fullscreen since the toggle is ignored while hidden.)
+      if (!fullscreenRef.current && headerRef.current && headerRef.current.offsetParent === null) return;
       if (e.key === "f" || e.key === "F") setFullscreen((v) => !v);
       if (e.key === "Escape") setFullscreen(false);
     };
@@ -337,6 +346,7 @@ export default function AppHeader({
   return (
     <>
     <header
+      ref={headerRef}
       style={{
         flex: "none",
         background: CHROME,

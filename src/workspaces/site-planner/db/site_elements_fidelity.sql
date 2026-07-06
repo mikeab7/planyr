@@ -1,5 +1,5 @@
--- Element-level sync (B666) — FIDELITY CHECK (read-only). Run after the backfill (and
--- again at the B668 cutover re-run). Rebuilds every site's collections from rows and
+-- Element-level sync (B670) — FIDELITY CHECK (read-only). Run after the backfill (and
+-- again at the B672 cutover re-run). Rebuilds every site's collections from rows and
 -- compares them to the blob. MUST return ZERO rows; any row is a mismatch to investigate
 -- before proceeding.
 --

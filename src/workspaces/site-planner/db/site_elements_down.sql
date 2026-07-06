@@ -1,4 +1,4 @@
--- Element-level sync (B666) — DOWN-MIGRATION: rebuild each site's `data` blob collections
+-- Element-level sync (B670) — DOWN-MIGRATION: rebuild each site's `data` blob collections
 -- from `site_elements` rows, so an emergency revert to the whole-doc pipeline is one
 -- command instead of archaeology. Safe + idempotent; leaves `site_elements` intact (a
 -- re-cutover loses nothing). Only touches sites that actually have element rows.

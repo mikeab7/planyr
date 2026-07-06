@@ -1,4 +1,4 @@
-// Element-level sync (B666) — the pure JS mirror of the SQL explode/rebuild in
+// Element-level sync (B670) — the pure JS mirror of the SQL explode/rebuild in
 // db/site_elements_backfill.sql / db/site_elements_down.sql. One element = one row in
 // `site_elements`; the 5 vector collections below ride rows, everything else in the site
 // model (settings, underlay, sheetOverlays, parcelDrawings, meta…) stays in the slim
@@ -76,7 +76,7 @@ export function explodeModel(model) {
 export const byRowOrder = (a, b) =>
   (a.z_index || 0) - (b.z_index || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-// Rebuild a site model object from a slim header + site_elements rows (the B668 load
+// Rebuild a site model object from a slim header + site_elements rows (the B672 load
 // shape). Collections come from LIVE rows in (z_index, id) order; deletedIds = the header's
 // surviving (non-element) tombstones ∪ the rows' tombstoned ids, deduped + sorted —
 // deletedIds is a SET, its order carries no meaning. Pure merge: callers still pass the

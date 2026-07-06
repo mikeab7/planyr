@@ -21,6 +21,8 @@ import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
+import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveResume } from "./lib/lastDoc.js";
+import { recordOpen } from "../../shared/recents/recentDocs.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
@@ -157,7 +159,13 @@ export default function DocReview({
   // no project → pick-a-project); `onNavigate` writes the hash to change it; `crossProject`
   // is the all-projects browse mode.
   projectId = null, onNavigate, crossProject = false,
+  // Keep-alive: false while this workspace is mounted but hidden behind another tab. The
+  // once-bound window key handlers MUST no-op then (a hidden Review eating Delete would
+  // silently delete markups), and a PDF that finished loading while hidden re-fits on show.
+  isActive = true,
 } = {}) {
+  const isActiveRef = useRef(isActive); isActiveRef.current = isActive; // live value for once-bound handlers
+  const hiddenFitPending = useRef(false); // a fit computed at display:none fallback size → redo on activation
   const wrapRef = useRef(null);
   const backdropRef = useRef(null);     // whole-page floor canvas — always present, no white (B415)
   const detailRef = useRef(null);       // viewport-clipped sharp canvas over the backdrop (B415)
@@ -286,6 +294,14 @@ export default function DocReview({
   // --- cloud persistence (single-sheet review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
   const [meta, setMeta] = useState(() => newMeta()); // { title, projectId, project, discipline, item, revision, docDate }
+  // Snapshot the stored "last doc" pointers at FIRST RENDER, before any effect below can
+  // touch them. The mount-time pointer writes used to overwrite lastSingleId/lastMode with
+  // this session's fresh blank id/mode BEFORE the resume effect read them back — so resume
+  // loaded a review that was never saved and fell to the empty state ("starts from nothing"
+  // on every reload). Resume now reads this capture; writes stay silent until boot resolves.
+  const bootPointers = useRef(null);
+  if (bootPointers.current === null) bootPointers.current = { legacy: readLegacyPointers(), map: readLastDocMap() };
+  const [bootResolved, setBootResolved] = useState(false); // pointer writes arm only after the boot resume settled
   const [source, setSource] = useState(null);     // { srcId, name, size, storageKey, oversize }
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
@@ -574,6 +590,9 @@ export default function DocReview({
       if (!viewRef.current) {
         const wrap = wrapRef.current;
         const vw = wrap?.clientWidth || 900, vh = wrap?.clientHeight || 600;
+        // Keep-alive: while hidden (display:none), clientWidth reads 0 and the fit lands on
+        // the 900×600 fallback — flag it so activation re-fits at the real viewport size.
+        if (!isActiveRef.current) hiddenFitPending.current = true;
         setView(fitView(base.width, base.height, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode: fitMode }));
       }
       setBackdropReq((n) => n + 1); setDetailReq((n) => n + 1); // raster both layers for the new page/size
@@ -678,6 +697,12 @@ export default function DocReview({
     const nv = fitView(base.w, base.h, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode });
     setView(nv); setDetailReq((n) => n + 1); // re-raster the detail at the new fit (backdrop is zoom-independent)
   };
+  // Keep-alive: a PDF that finished loading while this tab was HIDDEN fitted to the 900×600
+  // fallback (display:none ⇒ clientWidth 0). Re-fit once on activation, at the real size.
+  useEffect(() => {
+    if (isActive && hiddenFitPending.current) { hiddenFitPending.current = false; fitNow(fitMode); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
   // Bind a NON-passive wheel listener via a callback ref so preventDefault works (a React
   // onWheel is registered passive at the root and can't stop the page from scrolling/zooming)
   // and so it attaches exactly when the viewport mounts. Plain wheel, Ctrl/Cmd+wheel, and
@@ -720,11 +745,22 @@ export default function DocReview({
   });
 
   // Remember the active review so a refresh resumes it (cloud reconciled with the
-  // synchronous local mirror, so an edit made just before reload isn't lost).
-  useEffect(() => { try { localStorage.setItem("planyr:docreview:lastSingleId", reviewId); } catch (_) {} }, [reviewId]);
-  useEffect(() => { try { localStorage.setItem("planyr:docreview:lastMode", mode); } catch (_) {} }, [mode]);
+  // synchronous local mirror, so an edit made just before reload isn't lost). Two layers:
+  // the legacy GLOBAL pointers (kept as the resume fallback for existing devices) and the
+  // per-PROJECT map (each project reopens ITS last drawing). Both stay silent until boot
+  // resolved — writing on mount is what used to clobber the pointers before resume read them.
+  useEffect(() => {
+    if (!bootResolved) return;
+    try { localStorage.setItem("planyr:docreview:lastSingleId", reviewId); } catch (_) {}
+    if (mode === "review") writeLastDoc(meta.projectId, { id: reviewId, mode: "review" });
+  }, [bootResolved, reviewId, meta.projectId, mode]);
+  useEffect(() => {
+    if (!bootResolved) return;
+    try { localStorage.setItem("planyr:docreview:lastMode", mode); } catch (_) {}
+  }, [bootResolved, mode]);
 
   const loadTok = useRef(0); // a newer open supersedes an in-flight single-review load (B52)
+  const openInFlightRef = useRef(false); // an openReview is running — the project-switch resume must stand down
   const fetchSourceBytes = async (src, tok) => {
     const superseded = () => tok != null && tok !== loadTok.current; // a newer open won
     if (superseded()) return; // superseded before fetching
@@ -759,6 +795,8 @@ export default function DocReview({
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
     suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
+    // Library-Home "Recent": every open (click OR resume) stamps the local opened-list.
+    currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: rec.projectId || null })).catch(() => {});
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
     // B446: a clear canvas-level "Opening…" overlay covers the whole load (setPdfDoc(null) below
@@ -799,6 +837,12 @@ export default function DocReview({
     // Even a malformed open request is named, never silent (B446).
     if (!row || !row.id) { setOpenErr("That file can't be opened (its reference is missing). Browse the Files list and try again."); return; }
     setOpenErr("");
+    // While THIS open runs, the project-switch resume effect must stand down: a cross-
+    // workspace open navigates the route a commit AFTER its intent is consumed, and without
+    // this flag that route change would kick off the target project's LAST doc in parallel,
+    // racing (and possibly superseding) the very file the user just clicked.
+    openInFlightRef.current = true;
+    try {
     // B447 — switching is deterministic: flush the OUTGOING review's pending write to the cloud
     // BEFORE the incoming load starts. The debounced autosave's timer is cancelled the instant
     // this load changes the deps, so without this the outgoing edit would live only in the local
@@ -822,9 +866,39 @@ export default function DocReview({
     if (rec.projectId) onNavigate?.({ projectId: rec.projectId });
     // A stitch hands off to <Stitcher>; the single path owns the overlay through its own load
     // (loadSingleReview clears busy in its finally, token-guarded).
-    if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); setBusy(false); setBusyLabel(""); }
-    else { setMode("review"); await loadSingleReview(rec); }
+    if (rec.kind === "stitch") {
+      currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: rec.projectId || null })).catch(() => {}); // Library-Home "Recent"
+      setPendingStitch(rec); setMode("stitch"); setBusy(false); setBusyLabel("");
+    } else { setMode("review"); await loadSingleReview(rec); }
+    } finally { openInFlightRef.current = false; }
   };
+
+  // Breadcrumb project switch → land on THAT project's last-open document (owner request,
+  // 2026-07-05: "whatever I last reviewed in that project should stay open too"). Declared
+  // BEFORE the docIntent consumer so a same-commit cross-workspace open still reads as
+  // pending here and wins. Skips during boot (the resume effect owns the first resolve) and
+  // when the project change came FROM opening a doc (meta already matches the new project).
+  const booted = useRef(false);
+  const prevProjectRef = useRef(projectId);
+  useEffect(() => {
+    const prev = prevProjectRef.current;
+    prevProjectRef.current = projectId;
+    if (!booted.current || projectId === prev || !projectId) return;
+    if (docIntent && docIntent.token !== lastConsumedDocToken) return; // a specific open is incoming — it wins
+    if (openInFlightRef.current) return; // an open is mid-flight — ITS navigate caused this change; it owns the outcome
+    if (meta.projectId === projectId) return; // the open doc already belongs here (its own open navigated us)
+    const entry = readLastDoc(projectId);
+    const openId = mode === "stitch" ? ((pendingStitch && pendingStitch.id) || null) : reviewId;
+    if (entry && entry.id === openId) return; // that doc is already on screen
+    if (entry) { openReview({ id: entry.id }); return; } // openReview flushes the outgoing doc first (B447)
+    // No remembered doc for this project: fall to the clean empty state — a drawing from
+    // ANOTHER project staying open under the new breadcrumb reads as the wrong file. Flush
+    // the outgoing review's pending edit before wiping the canvas state.
+    if (mode !== "review" || source || markups.length > 0 || meta.projectId) {
+      (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   // Consume the Shell's cross-workspace "open this review" intent (NEW-1). A file clicked in
   // the GLOBAL Project Files panel switches here AND hands us the review; because this
@@ -836,42 +910,41 @@ export default function DocReview({
     if (docIntent.kind === "open-review" && docIntent.row) openReview(docIntent.row);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docIntent]);
-  // Resume the last review (and its mode) on mount, once. Stitch reviews are handed
-  // to <Stitcher> via pendingStitch; single reviews load here.
-  const booted = useRef(false);
+  // Resume the last review (and its mode) on mount, once — per-project first. Stitch
+  // reviews are handed to <Stitcher> via pendingStitch; single reviews load here.
   useEffect(() => {
     if (booted.current) return; booted.current = true;
     // A cross-workspace open is incoming — let the docIntent effect load THAT review rather
     // than also resuming the last one (the two are async and would race; resume could win
     // and silently replace the file the user just clicked). (NEW-1)
-    if (bootDocIntentRef.current) return;
-    // Browsing now lives in the Library workspace, so Review resumes the last open drawing on
-    // mount (project deep-links included) — the `wrongProject` guard below keeps it from
-    // resuming a review that belongs to a DIFFERENT project than the URL names (that lands on
-    // the empty state instead, where the Library is one click away).
+    if (bootDocIntentRef.current) { setBootResolved(true); return; }
+    // Browsing lives in the Library workspace, so Review resumes the last open drawing on
+    // mount. Candidates come from the FIRST-RENDER pointer capture (the live keys may already
+    // be touched by this session): the URL's project → that project's own last doc first,
+    // then the legacy global pointers; no URL project → the legacy globals, then unfiled.
     (async () => {
-      let lastMode = "review", lastSingle = null, lastStitch = null;
-      try {
-        lastMode = localStorage.getItem("planyr:docreview:lastMode") || "review";
-        lastSingle = localStorage.getItem("planyr:docreview:lastSingleId");
-        lastStitch = localStorage.getItem("planyr:docreview:lastStitchId");
-      } catch (_) {}
+      const candidates = resolveResume({
+        routeProjectId: projectId,
+        map: bootPointers.current.map,
+        legacy: bootPointers.current.legacy,
+      });
+      if (!candidates.length) return;
       const uid = await currentUid();
       // Respect an explicit deep link (Work Item A): if the URL named a project, don't
-      // auto-resume a review that belongs to a DIFFERENT project — show the empty state
-      // instead. No URL project → resume freely (it reflects into the URL).
+      // auto-resume a review that belongs to a DIFFERENT project — try the next candidate,
+      // else the empty state. No URL project → resume freely (it reflects into the URL).
       const wrongProject = (rec) => projectId && rec && rec.projectId && rec.projectId !== projectId;
-      if (lastMode === "stitch" && lastStitch) {
-        const rec = reconcile(await loadReview(lastStitch), readDraft(uid, lastStitch));
-        if (rec && rec.kind === "stitch" && !wrongProject(rec)) { setPendingStitch(rec); setMode("stitch"); return; }
+      for (const c of candidates) {
+        const rec = reconcile(await loadReview(c.id), readDraft(uid, c.id));
+        if (!rec || wrongProject(rec)) continue;
+        // Route by the RECORD's kind (an entry's stored mode could be stale if re-filed).
+        if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
+        if (rec.kind === "single") { await loadSingleReview(rec); return; }
       }
-      if (lastSingle) {
-        const rec = reconcile(await loadReview(lastSingle), readDraft(uid, lastSingle));
-        if (rec && rec.kind === "single" && !wrongProject(rec)) await loadSingleReview(rec);
-      }
-    })().catch(() => {}); // B535: a resume failure (currentUid/loadReview/reconcile throwing) must
-    // not be an unhandled rejection — loadSingleReview owns its own "Opening…" overlay via finally,
-    // so swallowing here just falls to the empty state (the intended behavior per the comment above).
+    })().catch(() => {}) // B535: a resume failure (currentUid/loadReview/reconcile throwing) must
+      // not be an unhandled rejection — loadSingleReview owns its own "Opening…" overlay via
+      // finally, so swallowing here just falls to the empty state.
+      .finally(() => setBootResolved(true)); // arm the pointer writes only now — never before resume read them
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1451,8 +1524,11 @@ export default function DocReview({
     else if (!draft && !calInput && (e.key === "ArrowRight" || e.key === "PageDown")) { e.preventDefault(); goToPage(page + 1); }
   };
   useEffect(() => {
-    const onKey = (e) => onKeyRef.current && onKeyRef.current(e);
-    const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") setSpaceHeld(false); };
+    // Keep-alive gate: these listeners stay bound for the workspace's whole mounted life,
+    // which now spans hidden-tab time — a hidden Review must never eat Delete/Ctrl-Z/Space
+    // (or actually delete markups on the hidden canvas) while another module is on screen.
+    const onKey = (e) => { if (isActiveRef.current && onKeyRef.current) onKeyRef.current(e); };
+    const onKeyUp = (e) => { if (isActiveRef.current && (e.key === " " || e.code === "Space")) setSpaceHeld(false); };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
@@ -1527,6 +1603,7 @@ export default function DocReview({
 
   if (mode === "stitch") return (
     <Stitcher
+      isActive={isActive}
       onReview={() => setMode("review")}
       loadReq={pendingStitch}
       onConsumeLoad={() => setPendingStitch(null)}

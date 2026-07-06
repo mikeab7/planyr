@@ -36,6 +36,11 @@ import {
   QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
   dropItemsToEntries, flattenEntries, partitionAccepted,
 } from "../../../shared/files/uploadQueue.js";
+import { loadIdSet, saveIdSet } from "../../../shared/ui/persistedSet.js";
+
+// Cross-project category tree: remembered set of OPEN categories (default: all collapsed).
+// Category names are stable canonical labels, so one shared key works across sessions.
+const CATS_OPEN_KEY = "planyr:library:catsOpen:v1";
 
 const fmtDate = (f) => { const s = f.docDate || f.updatedAt; try { return s ? new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; } catch (_) { return ""; } };
 
@@ -71,7 +76,7 @@ const FileTypeIcon = ({ kind }) => (
 );
 
 export default function FileBrowser({
-  projectId = null, projectName = "", signedIn = false, cross = false,
+  projectId = null, projectName = "", signedIn = false, cross = false, isActive = true,
   onOpenReview, onNavigate, indexProvider = null,
   /* Unified Library (B650 follow-on) — "folder mode": the left column shows the project's REAL
    * folder tree (the `folderRail` node, a FolderTree) instead of the derived category tree, and
@@ -80,6 +85,8 @@ export default function FileBrowser({
    * see on screen is where the bytes go in Drive. Cross-project browsing keeps the classic
    * category tree (a folder tree is per-project). */
   folderMode = false, folderRail = null, folderRows = [], selectedFolderId = null, onFolderCounts = null,
+  // Library-Home pins: which file (review) ids are pinned + the ☆ toggle (both optional).
+  pinnedFileIds = null, onTogglePinFile = null,
 }) {
   const [projects, setProjects] = useState([]);
   const [reviews, setReviews] = useState([]);
@@ -88,7 +95,7 @@ export default function FileBrowser({
   const [facet, setFacet] = useState("all");
   const [showHolding, setShowHolding] = useState(false);   // "Needs filing" view active
   const [showSuperseded, setShowSuperseded] = useState(false);
-  const [openCats, setOpenCats] = useState({});            // category -> expanded?
+  const [openCats, setOpenCats] = useState(() => loadIdSet(CATS_OPEN_KEY)); // Set of open categories
   const [dropOver, setDropOver] = useState(false);
   const [queue, setQueue] = useState([]);
   const [refileSel, setRefileSel] = useState({});          // fileId -> { category, discipline }
@@ -96,7 +103,7 @@ export default function FileBrowser({
   const [share, setShare] = useState({});                  // fileId -> { status, url, error }
   const [delNotice, setDelNotice] = useState(null);        // { orphaned } after a delete left bytes behind
   const [moveNotice, setMoveNotice] = useState(null);      // refile moved metadata but not the Drive copy (B662 #3)
-  const [folderNote, setFolderNote] = useState(null);      // { filed, skipped } after a FOLDER drop/pick (B665)
+  const [folderNote, setFolderNote] = useState(null);      // { filed, skipped } after a FOLDER drop/pick (B664)
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const reqRef = useRef(0);
@@ -120,7 +127,10 @@ export default function FileBrowser({
       setProjects(p); setReviews(mergeFactsIntoReviews(r, ff));
     } finally { if (tok === reqRef.current) setBusy(false); }
   };
-  useEffect(() => { refresh(); }, [signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Keep-alive: the browser stays mounted while hidden, so returning to the Library tab
+  // revalidates the (cheap, token-guarded) file index instead of showing a stale list.
+  // A hidden browser skips the fetch; the next activation runs it.
+  useEffect(() => { if (isActive) refresh(); }, [signedIn, isActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const projName = (id) => (projects.find((p) => p.id === id) || {}).name || projectName || "";
 
@@ -256,7 +266,7 @@ export default function FileBrowser({
     if (accepted.length) { await runPool(accepted, processItem, 3); refresh(); }
   };
 
-  // A FOLDER drop/pick (B665): file the PDFs found anywhere in the tree; report ONE
+  // A FOLDER drop/pick (B664): file the PDFs found anywhere in the tree; report ONE
   // honest "skipped N" summary for the non-PDFs a project folder naturally contains,
   // instead of a red rejection row per stray file the user never hand-picked.
   const ingestFolder = async (allFiles) => {
@@ -384,12 +394,17 @@ export default function FileBrowser({
                 </div>
               )}
               {tree.map((n) => {
-                const expanded = openCats[n.category] ?? true;
+                const expanded = openCats.has(n.category);
                 const catActive = !showHolding && node.category === n.category && !node.subcategory;
                 return (
                   <div key={n.category}>
                     <TreeRow label={n.category} count={n.count} active={catActive} caret={expanded ? "▾" : "▸"}
-                      onCaret={() => setOpenCats((o) => ({ ...o, [n.category]: !expanded }))}
+                      onCaret={() => setOpenCats((o) => {
+                        const next = new Set(o);
+                        next.has(n.category) ? next.delete(n.category) : next.add(n.category);
+                        saveIdSet(CATS_OPEN_KEY, next);
+                        return next;
+                      })}
                       onClick={() => { setShowHolding(false); setNode({ category: n.category, subcategory: null }); }} bold />
                     {expanded && n.subs.map((s) => (
                       <TreeRow key={s.name} label={s.name} count={s.count} indent
@@ -443,7 +458,7 @@ export default function FileBrowser({
           </div>
         )}
 
-        {/* folder drop/pick summary (B665) — honest about the non-PDFs a folder held */}
+        {/* folder drop/pick summary (B664) — honest about the non-PDFs a folder held */}
         {folderNote && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
             border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)", fontSize: 11.5, lineHeight: 1.45 }}>
@@ -499,6 +514,14 @@ export default function FileBrowser({
                       </span>
                     </span>
                   </button>
+                  {onTogglePinFile && (
+                    <button onClick={() => onTogglePinFile(f)}
+                      title={pinnedFileIds && pinnedFileIds.has(f.id) ? "Unpin from the Library home" : "Pin to the Library home"}
+                      style={{ flex: "none", border: "none", background: "transparent", cursor: "pointer", fontSize: 14, padding: 2, lineHeight: 1,
+                        color: pinnedFileIds && pinnedFileIds.has(f.id) ? "var(--accent-library-text)" : "var(--text-tertiary)" }}>
+                      {pinnedFileIds && pinnedFileIds.has(f.id) ? "★" : "☆"}
+                    </button>
+                  )}
                   {spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
                   <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
@@ -529,7 +552,7 @@ export default function FileBrowser({
         {/* persistent processing queue (B260 lean) */}
         <DropQueue queue={queue} onDismiss={removeItem} onTriage={(id) => { setShowHolding(true); removeItem(id); }} />
 
-        {/* persistent drop strip — a whole FOLDER or loose files (B665) */}
+        {/* persistent drop strip — a whole FOLDER or loose files (B664) */}
         <input ref={fileInputRef} type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={onPick} />
         {/* webkitdirectory turns this picker into a folder picker; set imperatively so React
             can't drop the non-standard attribute. Its files list is already flat + recursed. */}
@@ -675,7 +698,7 @@ function DropQueue({ queue, onDismiss, onTriage }) {
   );
 }
 const miniBtn = { flex: "none", fontSize: 10, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 5, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "2px 8px" };
-// The two drop-strip pickers (B665): loose PDFs vs. a whole folder.
+// The two drop-strip pickers (B664): loose PDFs vs. a whole folder.
 const pickBtn = { flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 11px" };
 
 function Centered({ title, body }) {

@@ -15,6 +15,13 @@ import { useProfile } from "../shared/profile/useProfile.js";
 import { prefetchOnIdle } from "./modulePrefetch.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 import { useHashRoute, INITIAL_HASH_EMPTY } from "./route.js";
+import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
+
+// "Open where I left off": on an empty-hash boot, seed the URL from the stored last-route
+// pointer BEFORE the first render (so useHashRoute's initial read sees it). Runs at module
+// scope — after route.js captured INITIAL_HASH_EMPTY, so deep links (incl. "#/") still win
+// and resumeAllowed stays true for the Site Planner's own plan-level resume.
+seedBootRoute();
 
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
@@ -142,8 +149,18 @@ export default function Shell() {
   // says WHERE it happened (site-planner / doc-review / scheduler).
   useEffect(() => { setTelemetryModule(active); }, [active]);
 
-  const current = WORKSPACES.find((w) => w.id === active) || WORKSPACES[0];
-  const Active  = current.Comp;
+  // "Open where I left off" — persist every route change as the last-route pointer.
+  // Single choke point: catches tab clicks, breadcrumb picks, and programmatic navigates.
+  useEffect(() => { writeLastRoute(route); }, [route]);
+
+  // Keep-alive (owner request, 2026-07-05: "cleaner/faster switch between modules"): every
+  // workspace the user has VISITED stays mounted, hidden with display:none, instead of being
+  // torn down on each tab switch. Switching back is instant — the open drawing, map view,
+  // file list, and the booted Schedule iframe all survive. Hidden workspaces still follow
+  // the route's project (their route→state effects stay live); writing to the URL and global
+  // keyboard handling are gated on the `isActive` prop each workspace now receives.
+  const [visited, setVisited] = useState(() => new Set([active]));
+  useEffect(() => { setVisited((v) => (v.has(active) ? v : new Set(v).add(active))); }, [active]);
 
   // Profile (name/org) for the signed-in user — sourced from the profiles table via
   // the useProfile hook, with a never-blank display name (B297/B298).
@@ -271,30 +288,41 @@ export default function Shell() {
       {/* No shell-level header — each workspace renders AppHeader internally
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "var(--surface-page)" }}>
-        {/* Each workspace gets its own error boundary, keyed by id so switching
-            modules gives a fresh boundary — a render crash in one workspace is
-            contained (shell and the other workspaces keep working). */}
-        <ErrorBoundary key={active} label={current.label}>
-          <Suspense fallback={<ModuleLoader module={active} />}>
-            <Active
-              shellModule={active}
-              onShellSwitch={switchModule}
-              authControl={authControl}
-              accountActive={!!user}
-              projectId={projectId}
-              crossProject={cross}
-              onNavigate={navigate}
-              onProjectChange={(gid) => navigate({ projectId: gid || null, cross: false })}
-              resumeAllowed={INITIAL_HASH_EMPTY}
-              newProjectTick={newProjectTick}
-              docIntent={docIntent}
-              onGoDashboard={goDashboard}
-              onNewProject={newProject}
-              onOpenReviewInDocReview={openReviewInDocReview}
-              onScheduleLinkChanged={scheduleLinkChanged}
-            />
-          </Suspense>
-        </ErrorBoundary>
+        {/* Keep-alive render: every visited workspace stays mounted in an absolutely-
+            positioned wrapper; only the active one is displayed. Each gets its OWN error
+            boundary (stable key — a crash in one is contained and shows only when that tab
+            is active; "Try again" resets in place) and its own Suspense (the per-module
+            loader shows only on the first visit, while the lazy chunk loads). */}
+        {WORKSPACES.filter((w) => visited.has(w.id) || w.id === active).map((w) => {
+          const isActive = w.id === active;
+          const Comp = w.Comp;
+          return (
+            <div key={w.id} style={{ position: "absolute", inset: 0, display: isActive ? "flex" : "none", flexDirection: "column" }}>
+              <ErrorBoundary label={w.label}>
+                <Suspense fallback={<ModuleLoader module={w.id} />}>
+                  <Comp
+                    isActive={isActive}
+                    shellModule={w.id}
+                    onShellSwitch={switchModule}
+                    authControl={authControl}
+                    accountActive={!!user}
+                    projectId={projectId}
+                    crossProject={cross}
+                    onNavigate={navigate}
+                    onProjectChange={(gid) => navigate({ projectId: gid || null, cross: false })}
+                    resumeAllowed={INITIAL_HASH_EMPTY}
+                    newProjectTick={newProjectTick}
+                    docIntent={docIntent}
+                    onGoDashboard={goDashboard}
+                    onNewProject={newProject}
+                    onOpenReviewInDocReview={openReviewInDocReview}
+                    onScheduleLinkChanged={scheduleLinkChanged}
+                  />
+                </Suspense>
+              </ErrorBoundary>
+            </div>
+          );
+        })}
       </main>
       {authOpen && (
         <AuthPanel

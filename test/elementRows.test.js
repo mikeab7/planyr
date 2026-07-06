@@ -8,7 +8,7 @@ import {
   byRowOrder,
 } from "../src/workspaces/site-planner/lib/elementRows.js";
 
-// B666 — the JS mirror of the SQL explode (backfill) / rebuild (down-migration) must
+// B670 — the JS mirror of the SQL explode (backfill) / rebuild (down-migration) must
 // round-trip a site model with NOTHING lost: element count and ids identical, array order
 // preserved via z_index, deletedIds present as tombstones. This is the permanent guard on
 // the row↔blob equivalence the one-time SQL fidelity check proved on live data.
@@ -116,7 +116,7 @@ describe("rowsToModel — rows → model (mirror of site_elements_down.sql)", ()
     expect(back.deletedIds).toEqual(["e2", "ghost"]);
   });
 
-  it("unions header-side deletedIds (overlay/drawing tombstones stay blob-side after B668)", () => {
+  it("unions header-side deletedIds (overlay/drawing tombstones stay blob-side after B672)", () => {
     const back = rowsToModel({ id: "s", deletedIds: ["overlay-1"] }, [
       { site_id: "s", id: "e2", kind: "el", data: null, z_index: 0, rev: 2, deleted_at: "2026-07-06T00:00:00Z" },
     ]);

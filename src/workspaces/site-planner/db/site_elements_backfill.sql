@@ -1,13 +1,13 @@
--- Element-level sync, phase 1 (B666) — backfill: explode every site's `data` blob into
+-- Element-level sync, phase 1 (B670) — backfill: explode every site's `data` blob into
 -- `site_elements` rows. Run AFTER db/site_elements.sql. Idempotent AND re-runnable: it is
--- deliberately re-run at the phase-3 (B668) read cutover to capture any blob-side edits
+-- deliberately re-run at the phase-3 (B672) read cutover to capture any blob-side edits
 -- made between phases.
 --
 -- Re-run safety (why rows can't be clobbered):
 --  • INSERT passes only add rows that don't exist (`on conflict do nothing`).
 --  • UPDATE passes only touch a row when the BLOB is newer (`t.updated_at < s.updated_at`)
 --    AND the content actually differs (`is distinct from`) — a row the element write path
---    (B667) advanced past the blob is kept. Mixed clocks (sites.updated_at is client-stamped,
+--    (B671) advanced past the blob is kept. Mixed clocks (sites.updated_at is client-stamped,
 --    site_elements.updated_at is server-stamped) can only err toward KEEPING rows, and the
 --    dual-write bridge keeps both sides equivalent anyway.
 --  • Tombstone-wins: an id listed in the blob's deletedIds is EXCLUDED from the collection
