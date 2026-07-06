@@ -103,6 +103,15 @@ const PAIRS = [
   ["--text-secondary", "--surface-raised", "secondary text · card", T],
   ["--text-tertiary", "--surface-page", "tertiary/hint · page", T],
   ["--text-tertiary", "--surface-raised", "tertiary/hint · card", T],
+  // B686: the Site Planner "drafting parchment" surfaces (cream in light, slate in dark) —
+  // text + warn/danger must clear AA on both planner surfaces in both themes.
+  ["--text-primary", "--planner-panel", "body text · planner panel", T],
+  ["--text-primary", "--planner-raised", "body text · planner card", T],
+  ["--text-secondary", "--planner-panel", "secondary · planner panel", T],
+  ["--text-secondary", "--planner-raised", "secondary · planner card", T],
+  ["--text-tertiary", "--planner-raised", "tertiary · planner card", U],
+  ["--warn-text", "--planner-raised", "warn text · planner card", T],
+  ["--danger-text", "--planner-raised", "danger text · planner card", T],
   // Chrome (top bars, rail, status bar)
   ["--chrome-text", "--chrome-bg", "chrome text · chrome", T],
   ["--chrome-text", "--chrome-bg-elev", "chrome text · chrome-elev", T],
