@@ -433,7 +433,7 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
   // label that would physically OVERLAP is thinned, and it self-thins further on zoom-out. Deliberately
   // NOT a large fixed floor: a flat floor would dominate every normal zoom and make the spacing control
   // inert. (minSegPx already hides an instance whose own segment can't fit the text.)
-  const minGapPx = label.length * fs * 0.9;
+  const minGapPx = label.length * fs * 0.85;  // B682 — just above the label's real rendered width (all-caps Inter ≈ 0.78/char), so it ONLY prevents literal overlap and the spacing control stays responsive across the rest of its range (the live slider is the main responsiveness fix)
   const effSpacingFt = Math.max(Math.max(1, spacingFt || 0), minGapPx / Math.max(ppf, 1e-4));
   const out = [];
   inlineLabelPlaces(ptsFeet, effSpacingFt, offsetPx, f2p).forEach((pl, i) => {
@@ -1073,6 +1073,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
   const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
   const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
+  const [propsDismissed, setPropsDismissed] = useState(false); // B656 follow-up: ✕ hides the companion while the element stays selected; re-clicking the element reopens it
   useEffect(() => {
     let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }
     const on = () => setNarrow(mq.matches);
@@ -1652,6 +1653,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // distance thresholds a native double-click uses). The distance gate is what stops a "click here to
   // select, then press over THERE to drag" gesture from misfiring as an edit.
   const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0 });
+  const labelSessionRef = useRef(null);  // B682 — coalesces a live label-spacing slider drag into one undo frame
   const DBLTAP_MS = 350, DBLTAP_PX = 14;
   const isDoubleTap = (e, id) => {
     const now = Date.now(), p = lastTapRef.current;
@@ -2186,6 +2188,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [sel?.kind, sel?.id]);
   // B656: the phone companion overlay follows the selection's lifetime — deselect closes it.
   useEffect(() => { if (!companionSel) setNarrowProps(false); }, [companionSel]);
+  // B656 follow-up: any (re)selection clears a prior ✕-dismiss so the companion reopens.
+  // Keyed on `sel` identity, not kind/id — every canvas click re-fires setSel({...}) with a
+  // fresh object (startMoveEl), so re-clicking the already-selected element reopens the panel.
+  useEffect(() => { setPropsDismissed(false); }, [sel]);
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
   // so a later manual visit opens with the normal all-collapsed overview.
@@ -2216,14 +2222,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // EXACT delta we applied, so a mid-open rotation can never leave a residual sideways offset.
   const panelShiftRef = useRef(0);
   useEffect(() => {
-    const want = ((!!leftPanel || companionSel) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts)
+    const want = ((!!leftPanel || (companionSel && !propsDismissed)) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts; a ✕-dismissed companion must NOT hold the shift or it leaves a blank rail gap)
     if (want !== panelShiftRef.current) {
       const delta = want - panelShiftRef.current;
       panelShiftRef.current = want;
       setView((v) => ({ ...v, offX: v.offX - delta }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftPanel, narrow, companionSel]);
+  }, [leftPanel, narrow, companionSel, propsDismissed]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
@@ -6950,7 +6956,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B656: the Properties companion coexists with the open panel — it renders whenever a
   // qualifying selection exists. On a phone it stays closed unless a panel is already
   // open (B556: tap = select only) or the ✎ Properties pill explicitly opened it.
-  const companionOpen = companionSel && (!narrow || !!leftPanel || narrowProps);
+  const companionOpen = companionSel && !propsDismissed && (!narrow || !!leftPanel || narrowProps);
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
     padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
@@ -6985,21 +6991,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B653: link-styled jump from an inspector's "default" value to its Standards section.
   const linkBtn = { padding: 0, border: "none", background: "transparent", color: PAL.accentText, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
-  // B678 — the per-label style controls (repeat spacing · text size · background halo) shown under an
-  // "Inline label" field once the feature actually carries a label. `patch` is the feature-specific,
-  // NON-STICKY writer (direct setMarkups / setSelEl, never mkStyle) so a tweak never bleeds into the
-  // next drawn shape; each commit pushes ONE undo frame. A plain render-body function (NOT a component)
-  // so it can't remount its inputs. Defaults keep the per-type spacing / size 11 / halo on; the
-  // anti-overlap min-gap in inlineLabelEls only thins labels that would otherwise collide (so a short
-  // label at working zoom is unchanged) and self-thins further on zoom-out.
-  const inlineLabelControls = (feat, typeKey, patch) => {
+  // B678/B682 — the per-label style controls (repeat spacing · text size · background halo) shown under an
+  // "Inline label" field once the feature actually carries a label. `write(patch, {live})` is the
+  // feature-specific, NON-STICKY writer (direct setMarkups / setSelEl, never mkStyle) so a tweak never
+  // bleeds into the next drawn shape. `{live:true}` (the slider drag) coalesces the whole drag into ONE
+  // undo frame via `labelSessionRef`; a plain commit pushes one frame. A plain render-body function
+  // (NOT a component) so it can't remount its inputs. Defaults keep the per-type spacing / size 11 /
+  // halo on; the anti-overlap min-gap in inlineLabelEls only thins labels that would otherwise collide.
+  const inlineLabelControls = (feat, typeKey, write) => {
     if (!feat || !(feat.inlineLabel || "").trim()) return null;
     const haloOn = feat.labelHalo !== false;
+    const spacing = feat.labelSpacing ?? INLINE_LABEL_SPACING[typeKey];
     return (<>
-      <Field label="Label spacing (ft)"><NumInput style={{ ...numInput, width: 70 }} value={feat.labelSpacing ?? INLINE_LABEL_SPACING[typeKey]} min={10} step={10} coarse={50} onCommit={(n) => patch({ labelSpacing: n })} /></Field>
-      <Field label="Label text size"><NumInput style={{ ...numInput, width: 70 }} value={feat.labelSize ?? 11} min={5} max={48} step={1} coarse={4} onCommit={(n) => patch({ labelSize: n })} /></Field>
-      <Field label="Label background"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={haloOn} onChange={(e) => patch({ labelHalo: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{haloOn ? "Halo (legible over aerial)" : "None"}</span></label></Field>
+      {/* B682 — a LIVE slider (updates the plan as you drag) next to the number box, both editing the
+          same value, so the effect of a spacing change is immediately visible. Range spans utility-dense
+          → road-sparse; onChange fires live (coalesced), onPointerUp/onBlur closes the undo session. */}
+      <Field label="Label spacing (ft)"><span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <input type="range" min={30} max={2000} step={10} value={spacing} aria-label="Label spacing (ft)"
+          onChange={(e) => write({ labelSpacing: +e.target.value }, { live: true })}
+          onPointerUp={(e) => write({ labelSpacing: +e.target.value }, { live: false })}
+          onBlur={(e) => write({ labelSpacing: +e.target.value }, { live: false })}
+          style={{ width: 92, accentColor: PAL.accent }} />
+        <NumInput style={{ ...numInput, width: 58 }} value={spacing} min={10} step={10} coarse={50} onCommit={(n) => write({ labelSpacing: n })} />
+      </span></Field>
+      <Field label="Label text size"><NumInput style={{ ...numInput, width: 70 }} value={feat.labelSize ?? 11} min={5} max={48} step={1} coarse={4} onCommit={(n) => write({ labelSize: n })} /></Field>
+      <Field label="Label background"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={haloOn} onChange={(e) => write({ labelHalo: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{haloOn ? "Halo (legible over aerial)" : "None"}</span></label></Field>
     </>);
+  };
+  // B682 — build a NON-STICKY label writer that coalesces a live slider drag into one undo frame:
+  // {live:true} pushes history only when the session first opens; a plain commit pushes once and closes.
+  const coalesceLabelWrite = (key, applyFn) => (patch, opts = {}) => {
+    if (opts.live) { if (labelSessionRef.current !== key) { pushHistory(); labelSessionRef.current = key; } }
+    else { if (labelSessionRef.current !== key) pushHistory(); labelSessionRef.current = null; }
+    applyFn(patch);
   };
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
   // One shared square icon-button (B574) — identical width/height/padding/hit-target for the overlay
@@ -8900,7 +8924,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* B656: on a phone, selection alone never opens the overlay (B556) — this pill is
               the explicit affordance: tap it to open the Properties companion as an overlay. */}
           {narrow && companionSel && !leftPanel && !narrowProps && (
-            <button data-export="skip" onClick={() => setNarrowProps(true)}
+            <button data-export="skip" onClick={() => { setNarrowProps(true); setPropsDismissed(false); }}
               style={{ position: "absolute", left: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: 99, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
               ✎ Properties
             </button>
@@ -9294,7 +9318,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
               Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` — ${l}` : ""; })()}
             </span>
-            {narrow && narrowProps && !leftPanel && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit" }} title="Close" onClick={(e) => { e.stopPropagation(); setNarrowProps(false); }}>✕</button>}
+            {/* B656 follow-up: explicit close. On the phone-pill overlay it just closes the overlay (element stays
+                selected, pill returns); everywhere else it dismisses the companion but KEEPS the element selected —
+                re-clicking the element (or picking another) reopens it via the [sel] effect above. */}
+            <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — click it again to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsDismissed(true); }}>✕</button>
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
@@ -9349,7 +9376,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   onChange={(ev) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: ev.target.value } : m)))}
                   placeholder='e.g. 20&#39; DRAINAGE ESMT' style={txt} /></Field>
                 {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
-                {inlineLabelControls(e, "easement", (p) => { pushHistory(); setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m))); })}
+                {inlineLabelControls(e, "easement", coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} sf</b> · {(area / SQFT_PER_ACRE).toFixed(2)} ac</div>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
@@ -9383,7 +9410,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: e.target.value } : m)))}
                     placeholder={'e.g. 18" SANITARY SEWER'} style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
                   {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
-                  {inlineLabelControls(selMarkup, selMarkup.kind, (p) => { pushHistory(); setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m))); })}
+                  {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 </>)}
                 {closed && <>
                   <Field label="Fill"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
@@ -9498,7 +9525,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           onChange={(e) => setSelEl({ inlineLabel: e.target.value })}
                           placeholder="e.g. MAIN STREET" style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
                         {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
-                        {inlineLabelControls(selEl, "road", (p) => { pushHistory(); setSelEl(p); })}
+                        {inlineLabelControls(selEl, "road", coalesceLabelWrite(selEl.id, (p) => setSelEl(p)))}
                       </>)}
                       {cl && (
                         <Field label="Road class">

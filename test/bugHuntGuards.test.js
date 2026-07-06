@@ -336,18 +336,30 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // background halo is a toggle (on by default) — the paint-order stroke is conditional
     expect(src).toMatch(/const halo = !\(opts && opts\.halo === false\)/);
     expect(src).toMatch(/halo \? \{ paintOrder: "stroke", stroke: "#fff", strokeWidth: haloW \} : null/);
-    // screen-space self-thinning is an ANTI-OVERLAP floor (label width + margin), NOT a big fixed floor
-    // that would dominate every zoom and make the spacing control inert
-    expect(src).toMatch(/const minGapPx = label\.length \* fs \* 0\.9;/);
+    // screen-space self-thinning is an ANTI-OVERLAP floor (just above the label's own width), NOT a big
+    // fixed floor that would dominate every zoom and make the spacing control inert (B682: 0.7, was 0.9)
+    expect(src).toMatch(/const minGapPx = label\.length \* fs \* 0\.85;/);
     expect(src).not.toMatch(/const minGapPx = Math\.max\(150,/);
     expect(src).toMatch(/const effSpacingFt = Math\.max\([\s\S]{0,80}minGapPx \/ Math\.max\(ppf/);
     // every render site threads the feature's own spacing override + { size, halo } opts
     expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,80}\{ size: m\.labelSize, halo: m\.labelHalo \}/);
     expect(src).toMatch(/el\.labelSpacing \|\| INLINE_LABEL_SPACING\.road[\s\S]{0,80}\{ size: el\.labelSize, halo: el\.labelHalo \}/);
     // the panel controls exist and their writers stay NON-STICKY (direct setMarkups / setSelEl, never mkStyle)
-    expect(src).toMatch(/const inlineLabelControls = \(feat, typeKey, patch\) =>/);
+    expect(src).toMatch(/const inlineLabelControls = \(feat, typeKey, write\) =>/);
     expect(src).not.toMatch(/setSelMarkup\(\{ labelSpacing/);
     expect(src).not.toMatch(/setSelMarkup\(\{ labelSize/);
+  });
+
+  it("B682: label spacing has a LIVE slider (coalesced to one undo frame) beside the number box", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // a range input driving labelSpacing live, closing its undo session on release/blur
+    expect(src).toMatch(/<input type="range"[\s\S]{0,220}write\(\{ labelSpacing: \+e\.target\.value \}, \{ live: true \}\)/);
+    expect(src).toMatch(/onPointerUp=\{\(e\) => write\(\{ labelSpacing: \+e\.target\.value \}, \{ live: false \}\)\}/);
+    // the coalescing writer pushes history only when the live session opens, and stays NON-STICKY
+    expect(src).toMatch(/const coalesceLabelWrite = \(key, applyFn\) =>/);
+    expect(src).toMatch(/if \(opts\.live\) \{ if \(labelSessionRef\.current !== key\) \{ pushHistory\(\); labelSessionRef\.current = key; \}/);
+    expect(src).toMatch(/inlineLabelControls\(selMarkup, selMarkup\.kind, coalesceLabelWrite\(selMarkup\.id/);
+    expect(src).toMatch(/inlineLabelControls\(selEl, "road", coalesceLabelWrite\(selEl\.id/);
   });
 
   it("B679: double-tap (time + DISTANCE gated) opens the in-place editor; pointer capture eats the DOM dblclick", () => {
