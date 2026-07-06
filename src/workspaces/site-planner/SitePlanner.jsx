@@ -6985,21 +6985,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   });
   // primary buttons (inspector actions)
   const btn = (active) => ({
-    padding: "7px 13px", fontSize: 12.5, borderRadius: 9, cursor: "pointer",
+    padding: "7px 13px", fontSize: 12.5, borderRadius: 8, cursor: "pointer", // B657-5B: radius 8 = shared control scale
     border: `1px solid ${active ? PAL.accent : PAL.panelLine}`,
     background: active ? PAL.accent : PAL.panelBg, color: active ? PAL.onAccent : PAL.ink,
     fontWeight: 600, fontFamily: "inherit",
-    boxShadow: active ? "0 2px 6px rgba(232,89,12,0.28)" : "0 1px 2px rgba(28,25,20,0.05)",
+    boxShadow: active ? "0 2px 6px rgba(0,0,0,0.16)" : "0 1px 2px rgba(0,0,0,0.05)", // neutral shadow (was the retired ember glow)
   });
   // right-side tool-rail buttons (dark chrome, icon + label, active = ember)
   const rbtn = (active) => ({
     display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
-    padding: "8px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
+    padding: "8px 10px", fontSize: 12.5, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
     border: "1px solid transparent", fontFamily: "inherit",
     background: active ? PAL.ember : "transparent",
     color: active ? PAL.onAccent : PAL.chromeInk,
     fontWeight: active ? 650 : 500,
-    boxShadow: active ? "0 2px 8px rgba(232,89,12,0.32)" : "none",
+    boxShadow: active ? "0 2px 8px rgba(0,0,0,0.28)" : "none", // neutral shadow (was the retired ember glow)
   });
   // ghost buttons on the DARK top bar
   const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };

@@ -375,7 +375,7 @@ export default function FileBrowser({
                   default; exit by picking a single project in the breadcrumb. */}
               {onNavigate && !cross && projectId && (
                 <button onClick={() => onNavigate({ cross: true })} title="Browse files across ALL your projects"
-                  style={{ flex: "none", fontSize: 9.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", border: "1px solid var(--border-default)", borderRadius: 6, background: "var(--surface-page)", color: "var(--text-secondary)", padding: "2px 7px", whiteSpace: "nowrap" }}>
+                  style={{ flex: "none", fontSize: 9.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", border: "1px solid var(--border-default)", borderRadius: 8, background: "var(--surface-page)", color: "var(--text-secondary)", padding: "2px 7px", whiteSpace: "nowrap" }}>
                   ⊞ All
                 </button>
               )}
@@ -518,9 +518,9 @@ export default function FileBrowser({
                     </button>
                   )}
                   {spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
+                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
                   <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
+                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
                   {pendingDel === f.id ? (
                     <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "var(--text-secondary)" }}>
                       <button onClick={() => del(f.id)} title="Confirm delete" style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✓</button>
@@ -596,7 +596,7 @@ function TreeRow({ label, count, active, indent, bold, caret, onCaret, onClick }
 /* Re-file a file: pick a category + discipline (subcategory). A NEW subcategory can be
  * typed, not just chosen. Never auto-guesses. */
 function RefileRow({ value = {}, discipline, onChange, onFile }) {
-  const ctl = { fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 6, padding: "3px 5px", color: "var(--text-primary)", background: "var(--surface-page)" };
+  const ctl = { fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 8, padding: "3px 5px", color: "var(--text-primary)", background: "var(--surface-page)" };
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
       <span style={{ fontSize: 10.5, color: "var(--warn-text)", fontWeight: 700, flex: "none" }}>File as:</span>
@@ -607,7 +607,7 @@ function RefileRow({ value = {}, discipline, onChange, onFile }) {
       <input list="dr-disciplines" value={value.discipline ?? discipline ?? ""} placeholder="Discipline…"
         onChange={(e) => onChange({ ...value, discipline: e.target.value })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
       <datalist id="dr-disciplines">{DISCIPLINES.map((d) => <option key={d} value={d} />)}</datalist>
-      <button onClick={onFile} title="File this document" style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 6, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>File</button>
+      <button onClick={onFile} title="File this document" style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 8, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>File</button>
     </div>
   );
 }
@@ -618,7 +618,7 @@ function RefileRow({ value = {}, discipline, onChange, onFile }) {
 function ShareRow({ state = {}, onCreate, onClose }) {
   const [copied, setCopied] = useState(false);
   const wrap = { display: "flex", gap: 8, alignItems: "center", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" };
-  const btn = (accent) => ({ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 6, padding: "3px 11px",
+  const btn = (accent) => ({ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 8, padding: "3px 11px",
     border: `1px solid ${accent ? "var(--accent-library)" : "var(--border-default)"}`, background: accent ? "var(--accent-library)" : "var(--surface-page)", color: accent ? "var(--on-accent-library)" : "var(--text-secondary)" });
   if (state.status === "done") {
     const copy = () => { try { navigator.clipboard?.writeText(state.url).then(() => setCopied(true)).catch(() => {}); } catch (_) { /* clipboard blocked */ } };
@@ -626,7 +626,7 @@ function ShareRow({ state = {}, onCreate, onClose }) {
       <div style={wrap}>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, flex: "none" }}>Link:</span>
         <input readOnly value={state.url} onFocus={(e) => e.target.select()}
-          style={{ flex: 1, minWidth: 120, fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 6, padding: "3px 6px", color: "var(--text-primary)", background: "var(--surface-page)" }} />
+          style={{ flex: 1, minWidth: 120, fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 8, padding: "3px 6px", color: "var(--text-primary)", background: "var(--surface-page)" }} />
         <button onClick={copy} style={btn(true)}>{copied ? "Copied ✓" : "Copy"}</button>
         <button onClick={onClose} style={btn(false)}>Done</button>
       </div>
@@ -694,7 +694,7 @@ function DropQueue({ queue, onDismiss, onTriage }) {
 }
 const miniBtn = { flex: "none", fontSize: 10, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 5, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "2px 8px" };
 // The two drop-strip pickers (B664): loose PDFs vs. a whole folder.
-const pickBtn = { flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 11px" };
+const pickBtn = { flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 11px" };
 
 function Centered({ title, body }) {
   return (

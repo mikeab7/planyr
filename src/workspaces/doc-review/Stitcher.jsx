@@ -798,7 +798,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // Live screen position of the inline Calibrate box, derived from the stored WORLD points each
   // render so it follows the line under pan/zoom (the box doesn't block the wheel). (B304)
   const calPos = calInput ? worldToScreen({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: (calInput.pts[0].x + calInput.pts[1].x) / 2, y: (calInput.pts[0].y + calInput.pts[1].y) / 2 }) : null;
-  const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
+  const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, whiteSpace: "nowrap", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink }); // B657-5B: radius 8 = shared control scale
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 8px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
   const alignMsg = align && (align.seeded
     ? ["Seam detected — click where its FIRST end lands on the placed sheet", "Click where its SECOND end lands"][align.step]
