@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _57 open · 8 awaiting live verification._
+> _57 open · 9 awaiting live verification._
 
 ## 🔲 Open
 
@@ -72,6 +72,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B675 | Library pins follow the ACCOUNT (Supabase cloud sync) instead of per-device | [Library] | #library #persistence #auth | ⏳ live — awaiting |
 | B669 | Keep-alive module switching: visited workspaces stay mounted (hidden), switching is instant | [Shell / all modules] | #ui #perf #infra | ⏳ live — awaiting |
 | B668 | Library Home: pinned folders/files + recent drawings + project cards | [Library] | #library #ui #files | ⏳ live — awaiting |
 | B667 | Review remembers the last document PER PROJECT (+ the resume self-clobber fix) | [Doc Review] | #doc-review #persistence | ⏳ live — awaiting |
@@ -83,7 +84,7 @@
 
 ## By tag
 
-- **#auth** — B483
+- **#auth** — B483, B675
 - **#compare** — B471
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B667, B659
 - **#drive** — B663, B662, B629, B409
@@ -91,10 +92,10 @@
 - **#filing** — B411, B364, B273, B664, B659
 - **#gis** — B629, B370, B309, B178, B171, B147, B13, B95
 - **#infra** — B408, B406, B179, B63, B669
-- **#library** — B663, B662, B668, B664, B659
+- **#library** — B663, B662, B675, B668, B664, B659
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479, B669
-- **#persistence** — B671, B672, B673, B674, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B667
+- **#persistence** — B671, B672, B673, B674, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B675, B667
 - **#pond** — B655
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B656, B651
