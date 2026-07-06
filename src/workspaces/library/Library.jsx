@@ -32,7 +32,7 @@ import { cloudReady, listProjects as listCloudProjects } from "../doc-review/lib
 import { onAuthChange, getUser } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import { migrateAllProjects } from "./lib/folders.js";
-import { listPins, togglePin, subscribePins } from "../../shared/pins/pinStore.js";
+import { listPins, togglePin, subscribePins, migrateLocalPinsToCloud } from "../../shared/pins/pinStore.js";
 
 // One-time account migration marker (B663): "this account's existing projects were organized
 // into the standard tree on this device". Everything the migration does is idempotent server-
@@ -41,6 +41,13 @@ const MIGRATE_KEY = (uid) => `planyr:treeMigrateV1:${uid}`;
 // StrictMode double-mount / remount guard — PER ACCOUNT, so signing out and into a different
 // account in the same tab still runs that account's one-time migration.
 const migrationStartedFor = new Set();
+
+// One-time "move this device's local pins into the cloud" marker (B675) — same per-account
+// shape as MIGRATE_KEY. Pins used to live per-device in localStorage; the first time an
+// account opens the Library signed-in, its local pins are copied up to the cloud `pins`
+// table (non-destructive + idempotent) so they follow the account from then on.
+const PINS_MIGRATE_KEY = (uid) => `planyr:pinsMigrateV1:${uid}`;
+const pinsMigrationStartedFor = new Set();
 
 export default function Library({
   shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject,
@@ -84,6 +91,35 @@ export default function Library({
   const onTogglePinFile = useCallback((f) => {
     togglePin(uid, { type: "file", id: f.id, projectId: f.projectId || projectId || null, label: f.title || f.item || "Drawing" });
   }, [uid, projectId]);
+
+  // One-time local → cloud pin migration (B675), mirroring the B663 tree-migration marker.
+  // The first time an account opens the Library signed-in, copy this device's local pins up
+  // to the cloud so they follow the account. Non-destructive + idempotent (the store upserts),
+  // so an interrupted run safely retries next open. The marker is written ONLY on a clean run
+  // (failed === 0) AND only if the same account is still signed in (identity re-check).
+  useEffect(() => {
+    if (!signedIn) return;
+    let live = true;
+    (async () => {
+      let mid = null;
+      try { const u = await getUser(); mid = u && u.id; } catch (_) { /* keep null */ }
+      if (!live || !mid || pinsMigrationStartedFor.has(mid)) return;
+      let done = null;
+      try { done = localStorage.getItem(PINS_MIGRATE_KEY(mid)); } catch (_) { done = null; }
+      if (done) return;
+      pinsMigrationStartedFor.add(mid);
+      let res = { failed: 1 };
+      try { res = await migrateLocalPinsToCloud(mid); } catch (_) { res = { failed: 1 }; }
+      // Same-account re-check: a different account signing in mid-run must not get this
+      // account's done-marker (mirrors the folders migration identity pin).
+      let stillSame = false;
+      try { const u = await getUser(); stillSame = !!u && u.id === mid; } catch (_) { stillSame = false; }
+      if (res && res.failed === 0 && stillSame) {
+        try { localStorage.setItem(PINS_MIGRATE_KEY(mid), new Date().toISOString()); } catch (_) { /* harmless re-run later */ }
+      }
+    })();
+    return () => { live = false; };
+  }, [signedIn]);
 
   // Unified-view wiring: FolderTree publishes its rows up; FileBrowser places files by those
   // rows and publishes rolled-up per-folder counts back down. Selection filters the list.
