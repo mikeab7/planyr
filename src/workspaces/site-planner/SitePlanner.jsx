@@ -1043,7 +1043,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
-  const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
+  const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: parcel|yield|analysis|references|standards|null (B656: props is a companion, not a tab)
   // B653 cross-links: which Standards section a "default ↗" jump should open + scroll to
   // (parcels|building|parking|trailers|dockzones|roads|colors). Cleared when the panel closes.
   const [standardsFocus, setStandardsFocus] = useState(null);
@@ -1055,6 +1055,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // rotate/resize. The desktop layout is untouched (every mobile style is `narrow ?`-gated).
   const [narrow, setNarrow] = useState(() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } });
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
+  const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
+  const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
   useEffect(() => {
     let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }
     const on = () => setNarrow(mq.matches);
@@ -1081,7 +1083,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
   const capturePidRef = useRef(null);              // last pointerId the canvas captured — lets a gesture interrupted without a pointer-up still release capture (NEW-1)
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
-  const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
+  const [multi, setMulti] = useState([]);
+  // B656: the Properties companion follows the selection — these three kinds have an
+  // inspector. Derived from `sel` alone (not the resolved selectors) so early effects can use it.
+  const companionSel = !!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup");
   // B261: while a persistent group is selected, double-clicking a member "drills in" to
   // edit just that one element in place (without ungrouping). drillId = that member's id,
   // or null when we're operating on the group as a whole.
@@ -2137,18 +2142,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Bluebeam-style left rail: selecting something opens its menu (element →
-  // Properties, parcel → Parcel). Otherwise the rail stays collapsed.
-  // On a phone (narrow) the left menu is a full overlay that BURIES the canvas, so a
-  // tap must NOT force it open (owner request 2026-06-28) — tapping just selects (the
-  // handles appear) and the user opens Properties from the Element tab when they want
-  // it. If a panel is already open we still keep its content synced to the selection.
+  // B656: element/callout/markup selection no longer opens a rail TAB — the Properties
+  // companion derives straight from `sel` and coexists with whatever panel is open.
+  // Parcel selection still opens the Parcel panel (a list+detail destination), with the
+  // B556 phone guard intact: on a narrow screen a tap only selects, never pops the overlay.
   useEffect(() => {
     if (narrow && !leftPanel) return; // phone + panel closed → select only, don't pop the overlay
-    if (sel?.kind === "el" || sel?.kind === "callout" || sel?.kind === "markup") setLeftPanel("props");
-    else if (sel?.kind === "parcel") setLeftPanel("parcel");
+    if (sel?.kind === "parcel") setLeftPanel("parcel");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.kind, sel?.id]);
+  // B656: the phone companion overlay follows the selection's lifetime — deselect closes it.
+  useEffect(() => { if (!companionSel) setNarrowProps(false); }, [companionSel]);
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
   // so a later manual visit opens with the normal all-collapsed overview.
@@ -2179,14 +2183,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // EXACT delta we applied, so a mid-open rotation can never leave a residual sideways offset.
   const panelShiftRef = useRef(0);
   useEffect(() => {
-    const want = (!!leftPanel && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left
+    const want = ((!!leftPanel || companionSel) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts)
     if (want !== panelShiftRef.current) {
       const delta = want - panelShiftRef.current;
       panelShiftRef.current = want;
       setView((v) => ({ ...v, offX: v.offX - delta }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftPanel, narrow]);
+  }, [leftPanel, narrow, companionSel]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
@@ -3006,7 +3010,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!mk) { flashWarn("Couldn't build that easement — check the points / width.", 5000); return; }
     pushHistory();
     setMarkups((a) => [...a, mk]);
-    setSel({ kind: "markup", id: mk.id }); setLeftPanel("props"); setTool("select");
+    setSel({ kind: "markup", id: mk.id }); setTool("select"); // B656: selection alone surfaces the companion
     const ringOfEl = (e) => (e.points ? e.points : elCorners(e));
     const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(mk.pts, ringOfEl(e)));
     flashWarn(hits.length
@@ -4949,7 +4953,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const onMarkupContext = (e, id) => {
     e.preventDefault(); e.stopPropagation();
     if (!markups.some((m) => m.id === id)) return;
-    setSel({ kind: "markup", id }); setLeftPanel("props");
+    setSel({ kind: "markup", id }); // B656: selection alone surfaces the companion
     setParcelMenu(null); setOvMenu(null);
     setMapMenu({ x: e.clientX, y: e.clientY, kind: "markup", id });
   };
@@ -6896,10 +6900,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     { id: "yield", glyph: "∑", label: "Yield" },
     { id: "parcel", glyph: "⬡", label: "Parcel" },
     { id: "analysis", glyph: "⚐", label: "Analysis" },
-    { id: "props", glyph: "✎", label: "Element" },
     { id: "references", glyph: "▦", label: "References" }, // B654: Aerial + Overlay merged into one panel
     { id: "standards", glyph: "⚙", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
   ];
+  // B656: the Properties companion coexists with the open panel — it renders whenever a
+  // qualifying selection exists. On a phone it stays closed unless a panel is already
+  // open (B556: tap = select only) or the ✎ Properties pill explicitly opened it.
+  const companionOpen = companionSel && (!narrow || !!leftPanel || narrowProps);
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
     padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
@@ -8825,6 +8832,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
+          {/* B656: on a phone, selection alone never opens the overlay (B556) — this pill is
+              the explicit affordance: tap it to open the Properties companion as an overlay. */}
+          {narrow && companionSel && !leftPanel && !narrowProps && (
+            <button data-export="skip" onClick={() => setNarrowProps(true)}
+              style={{ position: "absolute", left: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: 99, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
+              ✎ Properties
+            </button>
+          )}
           {/* zoom controls (bottom-right, above the scale bar) */}
           {(() => {
             const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
@@ -9200,240 +9215,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             ))}
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
-          {leftPanel && (<>
-          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "#efe9dd", overflowY: "auto", padding: "13px 13px 24px",
+          {(leftPanel || companionOpen) && (<>
+          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "#efe9dd", display: "flex", flexDirection: "column", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
-          {/* References (B654) — the merged Aerial + Overlay panel: every backdrop the plan
-              sits over, in one list with one add flow and ONE shared calibration (the
-              ovCalib trace/align flow — the old separate "calibrate" tool is gone).
-              Row #1 is the aerial (image-only, always beneath everything); the rest are
-              sheet references (site plans / surveys, PDF or image). Persisted fields are
-              UNCHANGED (`underlay` + `sheetOverlays`) — this is a UI unification. */}
-          {leftPanel === "references" && (
-          <Section title="References">
-            {/* The whole block is a drop target (NEW-1): drop a PDF/image here or on the map,
-                or click to browse. Mirrors the Doc-Review FileBrowser dropzone pattern —
-                dashed border + accent highlight on hover, anti-flicker via currentTarget. */}
-            <div
-              onClick={() => { if (!overlayBusy) overlayFileRef.current?.click(); }}
-              onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
-              onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
-              onDragLeave={(e) => { if (e.currentTarget === e.target) setOverlayDropOver(false); }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
-              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
-              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image)…"}</button>
-              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
-              <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
-                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this reference</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
-              </div>
-            </div>
-
-            {/* Aerial backdrop — pinned reference #1. Opacity + lock lived on the underlay
-                object all along (render honours both); the CONTROLS are new here. */}
-            <div style={{ marginTop: 12 }}>
-              {!underlay ? (
-                <div style={{ border: "1px dashed #ddd6c5", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
-                    <span style={{ flex: 1 }} />
-                    <button style={chip} onClick={() => fileRef.current?.click()}>Load screenshot…</button>
-                  </div>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
-                </div>
-              ) : (
-                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "#ddd6c5", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-                    <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
-                    <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
-                  </div>
-                  {aerialSel && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
-                      <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
-                        <input type="range" min={0.1} max={1} step={0.05} value={underlay.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => setUnderlay((u) => (u ? { ...u, opacity: +e.target.value } : u))} />
-                        <span style={{ fontSize: 11, color: PAL.muted, width: 34, textAlign: "right" }}>{Math.round((underlay.opacity ?? 1) * 100)}%</span>
-                      </label>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button style={{ ...chip, flex: 1, ...(underlay.fromMap ? { opacity: 0.55, cursor: "not-allowed" } : null) }} disabled={!!underlay.fromMap}
-                          title={underlay.fromMap ? "This aerial came from the map — it's already to scale, so manual calibration is disabled" : "Click two ends of a known distance on the aerial, then enter its real length"}
-                          onClick={() => { setShowAerial(true); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); }}>Calibrate</button>
-                        <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
-                      </div>
-                      <div style={{ fontSize: 11, color: PAL.muted }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide{underlay.fromMap ? " · georeferenced from the map" : ""}</div>
-                      {origin && basemapOn && <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>}
-                    </div>
-                  )}
-                  {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
-                  {underlayLost && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>The saved aerial couldn't be recovered on this device (not in the offline cache or your account). Your boundary and tools are intact — <button style={{ ...chip, padding: "1px 7px", color: PAL.accent }} onClick={() => fileRef.current?.click()}>re-drop the screenshot</button> to restore the backdrop.</div>}
-                </div>
-              )}
-              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { onUnderlayFile(e.target.files?.[0]); e.target.value = ""; }} />
-            </div>
-            {!sheetOverlays.length ? null : (
-              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                {sheetOverlays.map((o) => {
-                  const on = selOverlay === o.id;
-                  return (
-                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                      {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
-                          sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
-                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
-                      {/* Hide / lock / remove — one shared square icon style (B574) so the three render identically. */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-                        <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
-                        <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                        <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}><XIcon /></button>
-                      </div>
-                      {on && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
-                          <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
-                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); }} />
-                            {/* Numeric percent alongside the slider (B575), two-way bound. While typing we hold a
-                                raw draft (so a half-typed value isn't clobbered); the slider + overlay update live;
-                                on blur the draft clears so the field follows the overlay again. Stored 0.1–1.0 ↔ 10–100%. */}
-                            <input type="number" min={10} max={100} step={5} aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct"
-                              style={{ ...numInput, width: 54, textAlign: "right" }}
-                              value={(ovEdit && ovEdit.id === o.id && ovEdit.opacityText != null) ? ovEdit.opacityText : Math.round((o.opacity ?? 1) * 100)}
-                              onChange={(e) => { const txt = e.target.value; setOvEditFor(o.id, { opacityText: txt }); const n = Math.round(+txt); if (txt !== "" && Number.isFinite(n)) patchOverlay(o.id, { opacity: Math.min(1, Math.max(0.1, n / 100)) }, false); }}
-                              onBlur={() => setOvEditFor(o.id, { opacityText: null })} />
-                            <span style={{ fontSize: 11, color: PAL.muted }}>%</span>
-                          </label>
-                          <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
-                            <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it" data-testid="overlay-rotation"
-                              onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
-                              onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
-                          </label>
-                          {/* Numeric width — kept ONLY for image overlays (B577). A PDF carries a `sheet`
-                              (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
-                              a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
-                              and this stays its one direct numeric size + ±10% nudge control. */}
-                          {!o.sheet && (
-                            <label style={ovRow}><span style={{ width: 48 }}>Width</span>
-                              <input style={numInput} value={Math.round(o.imgW * o.ftPerPx)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
-                              <span>ft</span>
-                              <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
-                              <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
-                            </label>
-                          )}
-                          {o.pageCount > 1 && (
-                            <div style={ovRow}><span style={{ width: 48 }}>Page</span>
-                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
-                              <span style={{ color: PAL.ink }}>{o.page} / {o.pageCount}</span>
-                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
-                              {!overlayDocs.current.has(o.id) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
-                            </div>
-                          )}
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
-                            <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
-                          </div>
-                          {/* B654: above/below moved into the panel (the right-click menu keeps them too) */}
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1 }} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
-                            <button style={{ ...chip, flex: 1 }} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
-                          </div>
-                          {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
-                          {(overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf")) && (
-                            <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
-                              <input type="checkbox" checked={o.knockout !== false} onChange={(e) => setOverlayKnockout(o.id, e.target.checked)} />
-                              <span>Knock out white paper</span>
-                            </label>
-                          )}
-                          {o.sheet && (() => {
-                            // Bluebeam-style scale entry (B576): the page→real ratio is the single source of
-                            // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
-                            // [page][unit] = [real][unit] fields. The mode lives in explicit editor state (ovEdit),
-                            // NOT derived from the current size — so picking Custom always reveals the fields.
-                            const ed = ovEdit && ovEdit.id === o.id ? ovEdit : null;
-                            const curFpi = scaleForFtPerPoint(o.ftPerPx);
-                            const matched = overlayScalePreset(o);
-                            const selVal = ed?.scaleMode ?? (matched ? matched.id : "custom");
-                            const pageUnit = ed?.pageUnit ?? "in";
-                            const realUnit = ed?.realUnit ?? "ft";
-                            // DISPLAY values (rounded for readability) vs COMMIT defaults (full precision). A field
-                            // the user never edited must re-apply its EXACT current value, never the rounded display
-                            // string — otherwise an idle focus→blur on a non-round scale (e.g. metric 1″=1m → 3.2808)
-                            // would quantize it to 3.3. The per-field *Dirty flags below then skip the commit entirely
-                            // when a field wasn't touched, so an idle blur is a true no-op (no scale change, no history).
-                            const pageVal = ed?.page ?? (matched ? trimNum(matched.pageIn) : "1");
-                            const realVal = ed?.real ?? (matched ? trimNum(matched.realFt) : fmtScaleNum(curFpi));
-                            const pageCommit = ed?.page ?? (matched ? matched.pageIn : 1);
-                            const realCommit = ed?.real ?? (matched ? matched.realFt : curFpi);
-                            const commit = (next) => {
-                              const fpi = feetPerInchFromPair({ pageVal: next.page ?? pageCommit, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? realCommit, realUnit: next.realUnit ?? realUnit });
-                              if (fpi) applyOverlayScale(o.id, fpi);
-                            };
-                            return (
-                              <div style={{ borderTop: `1px dashed #e3dccb`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                                <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
-                                <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
-                                  <select data-testid="overlay-scale-preset" style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selVal}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      if (v === "custom") { setOvEditFor(o.id, { scaleMode: "custom", page: pageVal, pageUnit, real: realVal, realUnit }); return; }
-                                      const p = SCALE_PRESETS.find((x) => x.id === v);
-                                      if (p) { setOvEditFor(o.id, { scaleMode: p.id, page: trimNum(p.pageIn), pageUnit: "in", real: trimNum(p.realFt), realUnit: "ft" }); applyOverlayScale(o.id, feetPerInchForPreset(p)); }
-                                    }}>
-                                    <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-                                    <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-                                    <option value="custom">Custom…</option>
-                                  </select>
-                                </label>
-                                {selVal === "custom" && (
-                                  <label style={ovRow} data-testid="overlay-scale-custom">
-                                    <input style={{ ...numInput, width: 48 }} value={pageVal} placeholder="0.5 or 1/2" title="Distance measured on the page (decimals or fractions)"
-                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", page: e.target.value, pageDirty: true })}
-                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.pageDirty) commit({ page: e.currentTarget.value }); }}
-                                      onBlur={(e) => { if (ed?.pageDirty) commit({ page: e.currentTarget.value }); }} />
-                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={pageUnit} title="Page unit"
-                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", pageUnit: e.target.value }); commit({ pageUnit: e.target.value }); }}>
-                                      {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                                    </select>
-                                    <span style={{ fontWeight: 700, color: PAL.ink }}>=</span>
-                                    <input style={{ ...numInput, width: 48 }} value={realVal} placeholder="real" title="Real-world distance"
-                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", real: e.target.value, realDirty: true })}
-                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.realDirty) commit({ real: e.currentTarget.value }); }}
-                                      onBlur={(e) => { if (ed?.realDirty) commit({ real: e.currentTarget.value }); }} />
-                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={realUnit} title="Real-world unit"
-                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", realUnit: e.target.value }); commit({ realUnit: e.target.value }); }}>
-                                      {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                                    </select>
-                                  </label>
-                                )}
-                                {o.detectedScale && (
-                                  <div style={{ fontSize: 11, color: PAL.muted }}>Read from sheet: <b style={{ color: PAL.ink }}>1″={o.detectedScale}′</b>{Math.round(scaleForFtPerPoint(o.ftPerPx)) !== o.detectedScale && <button style={{ ...chip, marginLeft: 6, padding: "3px 8px" }} onClick={() => applyOverlayScale(o.id, o.detectedScale)}>Apply</button>}</div>
-                                )}
-                                <div style={{ fontSize: 10.5, color: PAL.muted }}>Now ≈ <b style={{ color: PAL.ink }}>1″={fmtScaleNum(scaleForFtPerPoint(o.ftPerPx))}′</b> · {Math.round(o.imgW * o.ftPerPx)}′ wide</div>
-                              </div>
-                            );
-                          })()}
-                          <div style={{ display: "flex", gap: 6 }}>
-                            {/* Resize THIS drawing to ~60% of the current view and recentre it — the
-                                one-click rescue when a drawing came in far too big/small (then set the
-                                real scale above). Distinct from "Fit view", which zooms the canvas. */}
-                            <button style={{ ...chip, flex: 1 }} title="Resize this drawing to fit your current view (use when it came in far too big or small), then set the real scale above"
-                              onClick={() => { const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW)); const vc = p2fStatic(size.w / 2, size.h / 2); patchOverlay(o.id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2 }); }}>Size to view</button>
-                            <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Section>
-          )}
-
-          {/* Element menu — selection details + properties (or an empty hint) */}
-          {leftPanel === "props" && !selEl && !selCallout && !selMarkup && (
-            <Section title="Element">
-              <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Select an element, markup, or callout on the canvas to edit its properties here.</div>
-            </Section>
-          )}
+          {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
+              so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).
+              With no panel open it takes the full column. */}
+          {companionOpen && (
+          <div data-testid="property-panel" style={{ flex: leftPanel ? "0 1 auto" : "1 1 auto", maxHeight: leftPanel ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: leftPanel ? "1px solid #ddd6c5" : "none" }}>
+          <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
+            style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
+            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
+              Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` — ${l}` : ""; })()}
+            </span>
+            {narrow && narrowProps && !leftPanel && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit" }} title="Close" onClick={(e) => { e.stopPropagation(); setNarrowProps(false); }}>✕</button>}
+            <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
+          </div>
+          {!propsCollapsed && (<>
           {/* selected easement — first-class attributes (NEW-1) */}
-          {leftPanel === "props" && selMarkup && selMarkup.kind === "easement" && (() => {
+          {selMarkup && selMarkup.kind === "easement" && (() => {
             const e = selMarkup;
             const t = easementType(e.easeType);
             const area = easementArea(e);
@@ -9493,7 +9294,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
           {/* selected markup shape — geometry + style */}
-          {leftPanel === "props" && selMarkup && selMarkup.kind !== "easement" && (() => {
+          {selMarkup && selMarkup.kind !== "easement" && (() => {
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
@@ -9566,7 +9367,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
           {/* selected callout — text styling */}
-          {leftPanel === "props" && selCallout && (() => {
+          {selCallout && (() => {
             const cs = calloutStyle(selCallout);
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
             // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
@@ -9607,7 +9408,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
           {/* selected element */}
-          {leftPanel === "props" && selEl && (
+          {selEl && (
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
               {!selEl.points ? (
                 <>
@@ -10280,7 +10081,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
 
           {/* Bluebeam-style Properties — colors for the selected element + set defaults */}
-          {leftPanel === "props" && selEl && curStyle && (
+          {selEl && curStyle && (
             <Section title="Properties">
               <Field label="Fill">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -10304,6 +10105,234 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 New {TYPE[selEl.type].label.split(" / ")[0].toLowerCase()} elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
               </div>
             </Section>
+          )}
+
+          </>)}
+          </div>
+          )}
+          {leftPanel && (
+          <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px" }}>
+          {/* References (B654) — the merged Aerial + Overlay panel: every backdrop the plan
+              sits over, in one list with one add flow and ONE shared calibration (the
+              ovCalib trace/align flow — the old separate "calibrate" tool is gone).
+              Row #1 is the aerial (image-only, always beneath everything); the rest are
+              sheet references (site plans / surveys, PDF or image). Persisted fields are
+              UNCHANGED (`underlay` + `sheetOverlays`) — this is a UI unification. */}
+          {leftPanel === "references" && (
+          <Section title="References">
+            {/* The whole block is a drop target (NEW-1): drop a PDF/image here or on the map,
+                or click to browse. Mirrors the Doc-Review FileBrowser dropzone pattern —
+                dashed border + accent highlight on hover, anti-flicker via currentTarget. */}
+            <div
+              onClick={() => { if (!overlayBusy) overlayFileRef.current?.click(); }}
+              onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
+              onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
+              onDragLeave={(e) => { if (e.currentTarget === e.target) setOverlayDropOver(false); }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
+              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
+              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image)…"}</button>
+              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
+              <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
+                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this reference</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
+              </div>
+            </div>
+
+            {/* Aerial backdrop — pinned reference #1. Opacity + lock lived on the underlay
+                object all along (render honours both); the CONTROLS are new here. */}
+            <div style={{ marginTop: 12 }}>
+              {!underlay ? (
+                <div style={{ border: "1px dashed #ddd6c5", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
+                    <span style={{ flex: 1 }} />
+                    <button style={chip} onClick={() => fileRef.current?.click()}>Load screenshot…</button>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
+                </div>
+              ) : (
+                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "#ddd6c5", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                    <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
+                    <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
+                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
+                  </div>
+                  {aerialSel && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
+                      <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
+                        <input type="range" min={0.1} max={1} step={0.05} value={underlay.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => setUnderlay((u) => (u ? { ...u, opacity: +e.target.value } : u))} />
+                        <span style={{ fontSize: 11, color: PAL.muted, width: 34, textAlign: "right" }}>{Math.round((underlay.opacity ?? 1) * 100)}%</span>
+                      </label>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button style={{ ...chip, flex: 1, ...(underlay.fromMap ? { opacity: 0.55, cursor: "not-allowed" } : null) }} disabled={!!underlay.fromMap}
+                          title={underlay.fromMap ? "This aerial came from the map — it's already to scale, so manual calibration is disabled" : "Click two ends of a known distance on the aerial, then enter its real length"}
+                          onClick={() => { setShowAerial(true); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); }}>Calibrate</button>
+                        <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
+                      </div>
+                      <div style={{ fontSize: 11, color: PAL.muted }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide{underlay.fromMap ? " · georeferenced from the map" : ""}</div>
+                      {origin && basemapOn && <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>}
+                    </div>
+                  )}
+                  {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
+                  {underlayLost && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>The saved aerial couldn't be recovered on this device (not in the offline cache or your account). Your boundary and tools are intact — <button style={{ ...chip, padding: "1px 7px", color: PAL.accent }} onClick={() => fileRef.current?.click()}>re-drop the screenshot</button> to restore the backdrop.</div>}
+                </div>
+              )}
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { onUnderlayFile(e.target.files?.[0]); e.target.value = ""; }} />
+            </div>
+            {!sheetOverlays.length ? null : (
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                {sheetOverlays.map((o) => {
+                  const on = selOverlay === o.id;
+                  return (
+                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                      {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
+                          sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
+                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
+                      {/* Hide / lock / remove — one shared square icon style (B574) so the three render identically. */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                        <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
+                        <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
+                        <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}><XIcon /></button>
+                      </div>
+                      {on && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
+                          <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
+                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); }} />
+                            {/* Numeric percent alongside the slider (B575), two-way bound. While typing we hold a
+                                raw draft (so a half-typed value isn't clobbered); the slider + overlay update live;
+                                on blur the draft clears so the field follows the overlay again. Stored 0.1–1.0 ↔ 10–100%. */}
+                            <input type="number" min={10} max={100} step={5} aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct"
+                              style={{ ...numInput, width: 54, textAlign: "right" }}
+                              value={(ovEdit && ovEdit.id === o.id && ovEdit.opacityText != null) ? ovEdit.opacityText : Math.round((o.opacity ?? 1) * 100)}
+                              onChange={(e) => { const txt = e.target.value; setOvEditFor(o.id, { opacityText: txt }); const n = Math.round(+txt); if (txt !== "" && Number.isFinite(n)) patchOverlay(o.id, { opacity: Math.min(1, Math.max(0.1, n / 100)) }, false); }}
+                              onBlur={() => setOvEditFor(o.id, { opacityText: null })} />
+                            <span style={{ fontSize: 11, color: PAL.muted }}>%</span>
+                          </label>
+                          <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
+                            <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it" data-testid="overlay-rotation"
+                              onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
+                              onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
+                          </label>
+                          {/* Numeric width — kept ONLY for image overlays (B577). A PDF carries a `sheet`
+                              (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
+                              a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
+                              and this stays its one direct numeric size + ±10% nudge control. */}
+                          {!o.sheet && (
+                            <label style={ovRow}><span style={{ width: 48 }}>Width</span>
+                              <input style={numInput} value={Math.round(o.imgW * o.ftPerPx)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
+                              <span>ft</span>
+                              <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
+                              <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
+                            </label>
+                          )}
+                          {o.pageCount > 1 && (
+                            <div style={ovRow}><span style={{ width: 48 }}>Page</span>
+                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
+                              <span style={{ color: PAL.ink }}>{o.page} / {o.pageCount}</span>
+                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
+                              {!overlayDocs.current.has(o.id) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
+                            <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
+                          </div>
+                          {/* B654: above/below moved into the panel (the right-click menu keeps them too) */}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1 }} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
+                            <button style={{ ...chip, flex: 1 }} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
+                          </div>
+                          {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
+                          {(overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf")) && (
+                            <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
+                              <input type="checkbox" checked={o.knockout !== false} onChange={(e) => setOverlayKnockout(o.id, e.target.checked)} />
+                              <span>Knock out white paper</span>
+                            </label>
+                          )}
+                          {o.sheet && (() => {
+                            // Bluebeam-style scale entry (B576): the page→real ratio is the single source of
+                            // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
+                            // [page][unit] = [real][unit] fields. The mode lives in explicit editor state (ovEdit),
+                            // NOT derived from the current size — so picking Custom always reveals the fields.
+                            const ed = ovEdit && ovEdit.id === o.id ? ovEdit : null;
+                            const curFpi = scaleForFtPerPoint(o.ftPerPx);
+                            const matched = overlayScalePreset(o);
+                            const selVal = ed?.scaleMode ?? (matched ? matched.id : "custom");
+                            const pageUnit = ed?.pageUnit ?? "in";
+                            const realUnit = ed?.realUnit ?? "ft";
+                            // DISPLAY values (rounded for readability) vs COMMIT defaults (full precision). A field
+                            // the user never edited must re-apply its EXACT current value, never the rounded display
+                            // string — otherwise an idle focus→blur on a non-round scale (e.g. metric 1″=1m → 3.2808)
+                            // would quantize it to 3.3. The per-field *Dirty flags below then skip the commit entirely
+                            // when a field wasn't touched, so an idle blur is a true no-op (no scale change, no history).
+                            const pageVal = ed?.page ?? (matched ? trimNum(matched.pageIn) : "1");
+                            const realVal = ed?.real ?? (matched ? trimNum(matched.realFt) : fmtScaleNum(curFpi));
+                            const pageCommit = ed?.page ?? (matched ? matched.pageIn : 1);
+                            const realCommit = ed?.real ?? (matched ? matched.realFt : curFpi);
+                            const commit = (next) => {
+                              const fpi = feetPerInchFromPair({ pageVal: next.page ?? pageCommit, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? realCommit, realUnit: next.realUnit ?? realUnit });
+                              if (fpi) applyOverlayScale(o.id, fpi);
+                            };
+                            return (
+                              <div style={{ borderTop: `1px dashed #e3dccb`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                                <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
+                                <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
+                                  <select data-testid="overlay-scale-preset" style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selVal}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      if (v === "custom") { setOvEditFor(o.id, { scaleMode: "custom", page: pageVal, pageUnit, real: realVal, realUnit }); return; }
+                                      const p = SCALE_PRESETS.find((x) => x.id === v);
+                                      if (p) { setOvEditFor(o.id, { scaleMode: p.id, page: trimNum(p.pageIn), pageUnit: "in", real: trimNum(p.realFt), realUnit: "ft" }); applyOverlayScale(o.id, feetPerInchForPreset(p)); }
+                                    }}>
+                                    <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+                                    <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+                                    <option value="custom">Custom…</option>
+                                  </select>
+                                </label>
+                                {selVal === "custom" && (
+                                  <label style={ovRow} data-testid="overlay-scale-custom">
+                                    <input style={{ ...numInput, width: 48 }} value={pageVal} placeholder="0.5 or 1/2" title="Distance measured on the page (decimals or fractions)"
+                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", page: e.target.value, pageDirty: true })}
+                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.pageDirty) commit({ page: e.currentTarget.value }); }}
+                                      onBlur={(e) => { if (ed?.pageDirty) commit({ page: e.currentTarget.value }); }} />
+                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={pageUnit} title="Page unit"
+                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", pageUnit: e.target.value }); commit({ pageUnit: e.target.value }); }}>
+                                      {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                    <span style={{ fontWeight: 700, color: PAL.ink }}>=</span>
+                                    <input style={{ ...numInput, width: 48 }} value={realVal} placeholder="real" title="Real-world distance"
+                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", real: e.target.value, realDirty: true })}
+                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.realDirty) commit({ real: e.currentTarget.value }); }}
+                                      onBlur={(e) => { if (ed?.realDirty) commit({ real: e.currentTarget.value }); }} />
+                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={realUnit} title="Real-world unit"
+                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", realUnit: e.target.value }); commit({ realUnit: e.target.value }); }}>
+                                      {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                  </label>
+                                )}
+                                {o.detectedScale && (
+                                  <div style={{ fontSize: 11, color: PAL.muted }}>Read from sheet: <b style={{ color: PAL.ink }}>1″={o.detectedScale}′</b>{Math.round(scaleForFtPerPoint(o.ftPerPx)) !== o.detectedScale && <button style={{ ...chip, marginLeft: 6, padding: "3px 8px" }} onClick={() => applyOverlayScale(o.id, o.detectedScale)}>Apply</button>}</div>
+                                )}
+                                <div style={{ fontSize: 10.5, color: PAL.muted }}>Now ≈ <b style={{ color: PAL.ink }}>1″={fmtScaleNum(scaleForFtPerPoint(o.ftPerPx))}′</b> · {Math.round(o.imgW * o.ftPerPx)}′ wide</div>
+                              </div>
+                            );
+                          })()}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            {/* Resize THIS drawing to ~60% of the current view and recentre it — the
+                                one-click rescue when a drawing came in far too big/small (then set the
+                                real scale above). Distinct from "Fit view", which zooms the canvas. */}
+                            <button style={{ ...chip, flex: 1 }} title="Resize this drawing to fit your current view (use when it came in far too big or small), then set the real scale above"
+                              onClick={() => { const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW)); const vc = p2fStatic(size.w / 2, size.h / 2); patchOverlay(o.id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2 }); }}>Size to view</button>
+                            <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
           )}
 
           {/* Parcel menu — empty hint when no parcel is selected */}
@@ -10824,6 +10853,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </Section>
           </div>
           </>)}
+          </div>
+          )}
           </div>
           {/* drag handle to resize the menu (desktop only — on phones the panel is a fixed-width overlay) */}
           {!narrow && <div onPointerDown={startLeftResize} title="Drag to resize"
