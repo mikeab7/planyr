@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-06 @ `9922cce` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-06 @ `fd1a1b4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_194 source files mapped._
+_195 source files mapped._
 
 ## infra
 
@@ -195,6 +195,8 @@ _194 source files mapped._
   - _exports_: `SiteReviewModal`
 - **`src/workspaces/site-planner/components/TeamPanel.jsx`** — Team workspace management tab: roster, invite-by-email, role changes, rename/delete/leave team via RLS-scoped teams.js
   - _exports_: `default (TeamPanel)`
+- **`src/workspaces/site-planner/components/ViewMenu.jsx`** — On-canvas View (eye) menu card (B653): show/hide toggles (docks, column grid, dims, areas) + grid size & snap — snap's single interactive home
+  - _exports_: `default (ViewMenu)`
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
   - _exports_: `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `prettyKey`
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion

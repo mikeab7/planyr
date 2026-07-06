@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _56 open · 10 awaiting live verification._
+> _55 open · 10 awaiting live verification._
 
 ## 🔲 Open
 
@@ -15,7 +15,6 @@
 | B674 | Element-level sync, phase 5/5: remove the edit lock — multi-writer cutover + presence pill | [Site Planner / Shell] | #site-planner #ui #persistence | live |
 | B663 | ONE-TIME migration: every existing project gets the standard tree + existing files move into their tree folders in Drive | [Library / storage] | #library #drive | — |
 | B662 | Unified Library: the folder tree IS the view, and files live inside it (+ the live-502 chunked Drive sync fix) | [Library / Doc Review / storage] | #library #drive #persistence | — |
-| B653 | Split Setup into Standards + a canvas View menu | [Site Planner / Setup + UI] | #site-planner #ui | sandbox |
 | B654 | Merge Aerial + Overlay into one References panel | [Site Planner / references] | #site-planner #ui | sandbox |
 | B655 | Detention sizing card in the pond inspector, with a pumped-outfall toggle | [Site Planner / detention] | #site-planner #pond #yield | sandbox |
 | B656 | Properties inspector follows selection instead of occupying a rail tab | [Site Planner / UI] | #site-planner #ui #selection | sandbox |
@@ -99,8 +98,8 @@
 - **#pond** — B655
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B656, B651
-- **#site-planner** — B672, B673, B674, B653, B654, B655, B656, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95, B651
+- **#site-planner** — B672, B673, B674, B654, B655, B656, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B73, B95, B651
 - **#stitching** — B413
 - **#testing** — B269, B63
-- **#ui** — B673, B674, B653, B654, B656, B657, B115, B669, B668, B658
+- **#ui** — B673, B674, B654, B656, B657, B115, B669, B668, B658
 - **#yield** — B655, B553, B651
