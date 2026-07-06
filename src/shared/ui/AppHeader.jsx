@@ -241,6 +241,10 @@ export default function AppHeader({
   onDashboard,
   centerContent,
   saveSlot,
+  // B674 — the caller supports concurrent editing (per-element sync + multi-writer), so the B313
+  // "only one tab can edit" warning is FALSE for it and must not show. Default false: every other
+  // workspace (doc-review) keeps the warning until it, too, multi-writes.
+  multiEditOk = false,
   authControl,
   toolbarContent,
   // Optional Row-2 center group (B387). When provided, Row 2 renders a 3-zone layout
@@ -286,7 +290,7 @@ export default function AppHeader({
   const fullscreenRef = useRef(false); fullscreenRef.current = fullscreen; // live value for the once-bound key handler
   const headerRef = useRef(null); // visibility probe for the keep-alive gate below
   const { resolved } = useTheme();
-  const multiTab = useMultiTab(accountActive && currentProject ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only)
+  const multiTab = useMultiTab(accountActive && currentProject && !multiEditOk ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only; suppressed when the workspace multi-writes, B674)
   const narrow = useNarrow(); // V11 — phone-width header: scroll each row sideways instead of clipping its controls
   // On a phone, let a header row scroll horizontally and keep its zones at natural width
   // (no flex-shrink → no clipped slivers). On desktop these are no-ops, so the layout is

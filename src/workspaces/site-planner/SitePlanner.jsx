@@ -13,6 +13,9 @@ import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement } from "./lib/editorNames.js";
 import { toastForSyncEvent } from "./lib/conflictToasts.js";
 import { listMembers } from "./lib/teams.js";
+import { multiwriterEnabled } from "./lib/multiwriter.js";
+import { presenceSummary } from "./lib/presencePill.js";
+import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
@@ -1937,7 +1940,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     });
   }, []);
-  useEffect(() => { editorLockRef.current.setProject(siteId || null); }, [siteId]);
+  // B674 — multi-writer cutover: with the switch ON (default) this tab never takes the per-plan
+  // editor lock at all, so readOnly stays false and every tab/user edits concurrently through the
+  // rev-checked element path. The `planyr.multiwriter` = "off" localStorage hatch restores the old
+  // single-active-editor behavior client-side (the lock module itself stays — doc-review uses it,
+  // and it still serves the hatch + signed-out mode). Full deletion of the lock/takeover code waits
+  // out the ~30-day blob-backup soak (see OWNER-TODO).
+  useEffect(() => { editorLockRef.current.setProject(multiwriterEnabled() ? null : (siteId || null)); }, [siteId]);
   useEffect(() => () => { editorLockRef.current && editorLockRef.current.stop(); }, []);
 
   // B671 — per-element write engine. Runs ONLY when signed in (cloud-active): it diffs the live
@@ -1953,6 +1962,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[kind];
     if (setter) setter((a) => a.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   };
+  // B674 — who else is on this plan right now (Supabase Realtime Presence on the element channel).
+  const [peers, setPeers] = useState(null); // presenceSummary() result, or null when alone
   // B673 — the loud-but-non-blocking conflict surface: toast stack + name resolver + the
   // late-bound sync-event handler (assigned each render further down, once zoomToElement and
   // featBBox exist in scope).
@@ -2047,8 +2058,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // idempotent rev check (own echoes = no-op); EVERY successful (re)join instead does a full
     // refetch-replace — postgres_changes offers no gap guarantee across a reconnect, so the join is
     // the moment to re-true the whole canvas from rows. Supabase applies the SELECT RLS to events.
+    const uid = activeUid();
     const ch = supabase
-      .channel("site-elements:" + siteId)
+      .channel("site-elements:" + siteId, { config: { presence: { key: uid || "anon" } } })
+      .on("presence", { event: "sync" }, () => {
+        // B674 — the live "who's here" roster; keyed by uid so two windows of one account read as
+        // one person. Quiet when alone (summary null).
+        try { setPeers(presenceSummary(ch.presenceState(), uid)); } catch (_) {}
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + siteId }, (payload) => {
         if (elSyncRef.current !== eng) return;
         const row = payload && (payload.new && payload.new.id ? payload.new : payload.old);
@@ -2060,7 +2077,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       })
       .subscribe((status) => {
         if (elSyncRef.current !== eng) return;
-        if (status === "SUBSCRIBED") refetchReplace(eng); // initial load AND reconnect re-true from rows
+        if (status === "SUBSCRIBED") {
+          refetchReplace(eng); // initial load AND reconnect re-true from rows
+          // B674 — announce THIS session on the roster (display name only, never the email).
+          loadProfile(uid).then((prof) => {
+            const name = prof ? [prof.first_name, prof.last_name].filter(Boolean).join(" ").trim() : "";
+            try { ch.track({ uid, name: name || "Someone" }); } catch (_) {}
+          }).catch(() => { try { ch.track({ uid, name: "Someone" }); } catch (_) {} });
+        }
       });
     // Fallback: if the channel can't join (proxy/WebSocket blocked), a plain fetch still seeds the
     // engine + replaces the canvas once, so the read cutover and the write path work without realtime.
@@ -2072,6 +2096,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       clearTimeout(fallback);
       document.removeEventListener("visibilitychange", onVis);
       try { supabase.removeChannel(ch); } catch (_) {}
+      setPeers(null);
       eng.stop();
       if (elSyncRef.current === eng) elSyncRef.current = null;
     };
@@ -7914,6 +7939,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onNewProject={handleNewSite}
         onRenameProject={renameProjectFromHeader}
         saveState={headerSaveState}
+        multiEditOk={multiwriterEnabled()}
+        saveSlot={peers ? (
+          <span
+            title={peers.names.join(" · ")}
+            data-testid="presence-pill"
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "var(--surface-raised)",
+              border: "1px solid var(--border-strong)", borderRadius: 999, padding: "2px 9px",
+              fontSize: 11.5, fontWeight: 800, color: "var(--text-primary)", whiteSpace: "nowrap" }}
+          >
+            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: "var(--accent-site)" }} />
+            {peers.label}
+          </span>
+        ) : undefined}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
         onRetrySave={() => { retryCloudSave(); retryElems(); }}
