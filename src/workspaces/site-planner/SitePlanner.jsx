@@ -7748,7 +7748,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#efeadf",
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--planner-panel)",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
 
       <AppHeader
@@ -8838,15 +8838,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
                     <button onClick={() => { setTracePts([]); setTraceMode((m) => !m); }} title="Click along a visible pole line on the aerial; double-click or Enter to finish"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "#b45309" : PAL.panelLine}`, background: traceMode ? "#b45309" : "#fff", color: traceMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "#b45309" : PAL.panelLine}`, background: traceMode ? "#b45309" : "var(--surface-raised)", color: traceMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       {traceMode ? "✏ Tracing… (Esc / dbl-click to finish)" : "✏ Trace overhead electric"}
                     </button>
                     <button onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "#b45309" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "#b45309" : "#fff", color: routeMode?.util === "elec" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "#b45309" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "#b45309" : "var(--surface-raised)", color: routeMode?.util === "elec" ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       ⚡ Route electric service
                     </button>
                     <button onClick={startWaterRoute} title="Route water service from a main to a building, easement width from the jurisdiction rule below"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "#0891b2" : PAL.panelLine}`, background: routeMode?.util === "water" ? "#0891b2" : "#fff", color: routeMode?.util === "water" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "#0891b2" : PAL.panelLine}`, background: routeMode?.util === "water" ? "#0891b2" : "var(--surface-raised)", color: routeMode?.util === "water" ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       🚰 Route water service
                     </button>
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
@@ -8855,7 +8855,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </button>
                     <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
                       title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "#0e7490" : PAL.panelLine}`, background: xsecMode ? "#0e7490" : "#fff", color: xsecMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "#0e7490" : PAL.panelLine}`, background: xsecMode ? "#0e7490" : "var(--surface-raised)", color: xsecMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       {xsecMode ? "📏 Click both banks… (Esc to cancel)" : "📏 Cross-section (ditch)"}
                     </button>
                     {/* per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) */}
@@ -8865,7 +8865,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {rulesOpen && (() => {
                       const rule = easeRules[jurKey] || easeRules.generic;
                       return (
-                        <div style={{ background: "#faf8f3", borderRadius: 8, padding: "7px 9px", marginBottom: 2 }}>
+                        <div style={{ background: "var(--planner-raised)", borderRadius: 8, padding: "7px 9px", marginBottom: 2 }}>
                           <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
                             <span style={{ fontSize: 11, color: PAL.muted }}>Jurisdiction</span>
                             <select value={jurKey} onChange={(e) => setJurKey(e.target.value)} style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 11.5 }}>
@@ -8885,7 +8885,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       );
                     })()}
                     <button disabled title="Roadmap — not yet available"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "not-allowed", border: `1px dashed ${PAL.panelLine}`, background: "#faf8f3", color: PAL.muted, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "not-allowed", border: `1px dashed ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.muted, fontWeight: 600 }}>
                       🛰 AI corridor scan — coming soon
                     </button>
                   </div>
@@ -8907,7 +8907,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ["3", <>or draw one with the <b>Parcel</b> tool (right rail).</>],
                 ].map(([n, body]) => (
                   <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
-                    <span style={{ width: 17, height: 17, borderRadius: 99, background: "#f1ece1", color: "#6b6557", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
+                    <span style={{ width: 17, height: 17, borderRadius: 99, background: "var(--planner-raised)", color: "var(--text-secondary)", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
                     <span>{body}</span>
                   </div>
                 ))}
@@ -8973,7 +8973,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* print-frame toolbar */}
           {printMode && (() => {
-            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
+            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink });
             return (
               <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: PAL.muted }}>Print frame</span>
@@ -9289,7 +9289,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Type (default)</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 6px 4px" }}>
                 {EASEMENT_TYPES.map((ty) => (
-                  <button key={ty.key} title={ty.label} onClick={() => setEaseType(ty.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${easeType === ty.key ? ty.color : "#ddd6c5"}`, background: easeType === ty.key ? ty.color : "#fff", color: easeType === ty.key ? "#fff" : PAL.ink, fontWeight: easeType === ty.key ? 650 : 500 }}>
+                  <button key={ty.key} title={ty.label} onClick={() => setEaseType(ty.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${easeType === ty.key ? ty.color : "var(--border-default)"}`, background: easeType === ty.key ? ty.color : "var(--surface-raised)", color: easeType === ty.key ? "#fff" : PAL.ink, fontWeight: easeType === ty.key ? 650 : 500 }}>
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: easeType === ty.key ? "#fff" : ty.color }} /> {ty.label}
                   </button>
                 ))}
@@ -9331,13 +9331,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {(leftPanel || companionOpen) && (<>
-          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "#efe9dd", display: "flex", flexDirection: "column", minHeight: 0,
+          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
           {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
               so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).
               With no panel open it takes the full column. */}
           {companionOpen && (
-          <div data-testid="property-panel" style={{ flex: leftPanel ? "0 1 auto" : "1 1 auto", maxHeight: leftPanel ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: leftPanel ? "1px solid #ddd6c5" : "none" }}>
+          <div data-testid="property-panel" style={{ flex: leftPanel ? "0 1 auto" : "1 1 auto", maxHeight: leftPanel ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: leftPanel ? "1px solid var(--border-default)" : "none" }}>
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
@@ -9357,7 +9357,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const t = easementType(e.easeType);
             const area = easementArea(e);
             const isStrip = e.mode !== "boundary";
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             const txt = { ...numInput, width: 150, fontFamily: "inherit" };
             const check = (label, val, key) => (
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: PAL.ink, marginBottom: 7, cursor: "pointer" }}>
@@ -9495,7 +9495,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
             const cap = { fontSize: 9.5, color: PAL.muted, lineHeight: 1, textAlign: "center", letterSpacing: "0.02em" };
             const swatchCap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 3 };
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             return (
               <div data-testid="property-panel">
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
@@ -10029,7 +10029,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {det.availDepth != null && (
                       <div style={{ fontSize: 10.5, color: PAL.info, marginTop: 2, lineHeight: 1.4 }}>LiDAR available depth ≈ {f1(det.availDepth)}′ (screening only).</div>
                     )}
-                    <div style={{ marginTop: 7, background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
+                    <div style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
                       {pondRow("Top-of-bank area", `${f0(r.aTop)} sf`)}
                       {pondRow("Water-surface area", `${f0(r.aWater)} sf`)}
                       {pondRow("Bottom area", `${f0(r.aBottom)} sf`)}
@@ -10251,7 +10251,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {stepRow("Push banks out (ft)", expandVal, 5, pushBanksOut)}
                           {stepRow("Dig deeper (ft)", digVal, 1, digDeeper)}
                           <div style={{ fontSize: 10, color: PAL.muted, marginTop: 3 }}>Or drag the pond's edges on the map.</div>
-                          <div style={{ marginTop: 8, background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
+                          <div style={{ marginTop: 8, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
                             {pondRow("Existing storage", `${f2(baseVol / 43560)} ac-ft`)}
                             {pondRow("Proposed storage", `${f2(r.vol / 43560)} ac-ft`)}
                             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
@@ -10271,13 +10271,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
                               <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")}
                                 {...livePick((v) => setDetLive({ existFill: v }))}
-                                style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
                               <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
                                 {...livePick((v) => setDetLive({ addFill: v }))}
-                                style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
@@ -10354,7 +10354,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 object all along (render honours both); the CONTROLS are new here. */}
             <div style={{ marginTop: 12 }}>
               {!underlay ? (
-                <div style={{ border: "1px dashed #ddd6c5", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
                     <span style={{ flex: 1 }} />
@@ -10363,8 +10363,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
                 </div>
               ) : (
-                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "#ddd6c5", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
+                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "var(--border-default)", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
                     <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
@@ -10397,10 +10397,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {sheetOverlays.map((o) => {
                   const on = selOverlay === o.id;
                   return (
-                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
                       {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
                           sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
-                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
+                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
                       {/* Hide / lock / remove — one shared square icon style (B574) so the three render identically. */}
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                         <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
@@ -10487,7 +10487,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               if (fpi) applyOverlayScale(o.id, fpi);
                             };
                             return (
-                              <div style={{ borderTop: `1px dashed #e3dccb`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                              <div style={{ borderTop: `1px dashed var(--planner-border)`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                                 <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
                                 <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
                                   <select data-testid="overlay-scale-preset" style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selVal}
@@ -10604,11 +10604,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           onChange={(e) => setAddrQuery(e.target.value)}
                           onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") addByAddress(); }}
                           placeholder="123 Main St, Katy TX"
-                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "#e2dccb"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
+                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
                         <button
                           onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
                           title="Find this address and add its parcel"
-                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "#fff", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "var(--surface-raised)", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
                           {addrBusy ? "…" : "Find"}
                         </button>
                       </div>
@@ -10653,7 +10653,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
                         <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
-                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "#e2dccb"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
@@ -10662,7 +10662,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             to remove a parcel, alongside the Parcel tool's Remove mode. */}
                         <button title="Remove this parcel" aria-label={`Remove ${name}`}
                           onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
-                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid #e2dccb`, borderRadius: 8, background: "#fff", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
+                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid var(--border-default)`, borderRadius: 8, background: "var(--surface-raised)", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
                       </div>
                     );
                   })}
@@ -10705,7 +10705,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </>
                 )}
                 {identifyRes && (
-                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
+                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
                     {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
                       : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
                       : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
@@ -10724,7 +10724,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
                           </button>
                           {jurInfo && !jurInfo.busy && (
-                            <div style={{ marginTop: 7, borderTop: "1px dashed #ece4d4", paddingTop: 6 }}>
+                            <div style={{ marginTop: 7, borderTop: "1px dashed var(--planner-border)", paddingTop: 6 }}>
                               {jurInfo.error ? <span style={{ color: PAL.warn }}>{jurInfo.error}</span> : <>
                                 {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
                                 {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
@@ -10755,7 +10755,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {mine.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
                     {mine.map((d) => (
-                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid #e2dccb", background: "var(--surface-raised)" }}>
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
                         <button onClick={() => setOpenDrawingId(d.id)} title={d.src ? "Open & mark up" : "Re-attach the file to view (markups are saved)"}
                           style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {d.src ? "🖹" : "⚠"} {d.name}{d.markups?.length ? ` · ${d.markups.length} mk` : ""}
@@ -10775,7 +10775,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {(() => {
                 const ok = Object.keys(selParcel.attrs).find((k) => /^(owner|own_?name|owner_?name|owner1|name)$/i.test(k) && selParcel.attrs[k]);
                 return ok ? (
-                  <div style={{ marginBottom: 9, paddingBottom: 8, borderBottom: "1px solid #ece4d4" }}>
+                  <div style={{ marginBottom: 9, paddingBottom: 8, borderBottom: "1px solid var(--planner-border)" }}>
                     <div style={{ fontSize: 9.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Owner</div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: PAL.ink, lineHeight: 1.3, marginTop: 2 }}>{String(selParcel.attrs[ok])}</div>
                   </div>
@@ -10840,9 +10840,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
                 const county = m2 ? ca.acres * 10.7639 : ca.acres;
                 const diff = Math.abs(mine - county) / county;
-                const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["#6b6557", "≈"] : ["#b45309", "▲"];
+                const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
                 return (
-                  <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "6px 9px" }}>
+                  <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "6px 9px" }}>
                     <b>{mark} Geometry check</b> · county {f2(county)} ac vs {f2(mine)} ac ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
                     {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
                     {!m2 && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
@@ -11310,7 +11310,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const pts = s.profile.map((p) => `${(p.d / xsec.lenFt) * W},${H - ((p.el - s.minFt) / span) * (H - 6) - 3}`).join(" ");
             return (
               <div>
-                <svg width={W} height={H} style={{ display: "block", background: "#f8f6f0", borderRadius: 6 }}>
+                <svg width={W} height={H} style={{ display: "block", background: "var(--planner-raised)", borderRadius: 6 }}>
                   <polyline points={pts} fill="none" stroke="#0e7490" strokeWidth={1.6} />
                 </svg>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: "ui-monospace, monospace" }}>
@@ -11336,7 +11336,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <span>{pobMode ? "Click the point of beginning on the plan to anchor the description (Esc to cancel)." : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
           {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
           {deedAlignHint && !pobMode && !routeMode && <>
-            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "#fff", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>
+            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>
             <button onClick={() => setDeedAlignHint(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Dismiss</button>
           </>}
         </div>
@@ -12021,7 +12021,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
 function Section({ title, children, collapsed, accent }) {
   const [open, setOpen] = useState(!collapsed);
   return (
-    <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+    <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
       <div className="sec-head" onClick={() => setOpen((o) => !o)}
         role="button" tabIndex={0} aria-expanded={open} aria-label={title}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }} /* B531: keyboard-toggle the section */
@@ -12140,14 +12140,15 @@ const YIELD_PAL = {
   paving: "#B6AB9B",                               // warm taupe — paving / parking
   green: "#4FA587",                                // sage — open / green
   detention: "#6E94AB", detZeroFill: "#DCE5EB", detZeroBorder: "#C2D2DC", // dusty blue
-  panelBg: "#FBF8F2", border: "#E7DFD2", cardBg: "#F2ECE1",
-  text: "#3A352D", rowLabel: "#6F675B", muted: "#A89C8C", faint: "#B4A99B",
-  hairline: "#EBE3D6", track: "#ECE3D5", iconTile: "#F6E7DD",
-  // The Yield panel is a FIXED light-parchment surface (it doesn't flip with the theme),
-  // so warn/danger text here must be FIXED AA-on-parchment literals — NOT the theme-
-  // flipping var(--warn-text)/var(--danger) tokens, which go pale in dark mode over this
-  // permanently-light card (the B341 token-mix trap, in reverse).
-  warnText: "#8A5410", dangerText: "#B3361B",
+  // B685: surfaces/borders/text now theme with the app (parchment in light, slate in dark)
+  // via the shared --planner-* + text tokens. The chart hues above stay fixed (one semantic
+  // colour = one meaning across arcs/legend/dots). warn/danger text ride the theme tokens
+  // again now that the card itself flips — they're AA on the parchment in light AND on the
+  // dark card in dark.
+  panelBg: "var(--planner-raised)", border: "var(--planner-border)", cardBg: "var(--planner-panel)",
+  text: "var(--text-primary)", rowLabel: "var(--text-secondary)", muted: "var(--text-tertiary)", faint: "var(--text-tertiary)",
+  hairline: "var(--planner-border)", track: "var(--planner-border)", iconTile: "var(--planner-raised)",
+  warnText: "var(--warn-text)", dangerText: "var(--danger-text)",
 };
 
 function YieldPanel({
@@ -12229,7 +12230,7 @@ function YieldPanel({
           {/* B652 — non-blocking overlap warning: two or more ACTIVE parcels cover the same ground,
               so this acreage is being double-counted. Names the offending parcels; never blocks. */}
           {parcelOverlaps && (
-            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "#FBF1DF", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
+            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "rgba(234,179,8,0.13)", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
               <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap — acreage may be double-counted</div>
               <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac). Make one inactive in the Parcel panel so the site area isn't inflated.</div>
             </div>
