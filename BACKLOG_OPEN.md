@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _52 open · 11 awaiting live verification._
+> _52 open · 12 awaiting live verification._
 
 ## 🔲 Open
 
@@ -67,6 +67,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B684 | Export to Google Earth (KMZ) via right-click, in both the map viewer and the canvas | [Site Planner / Map] | #site-planner #export #coordinates | ⏳ live — awaiting |
 | B682 | Dragging a parcel's acreage label spawns a "bunch of copies" (id-less parcels + value-based union merge) | [Site Planner] | #site-planner #persistence #selection | ⏳ live — awaiting |
 | B675 | Planyr MCP connector: read-only `/api/mcp/<token>` endpoint gives Claude live cross-project context | [functions/api/mcp] | #infra #files | ⏳ live — awaiting |
 | B676 | Library pins follow the ACCOUNT (Supabase cloud sync) instead of per-device | [Library] | #library #persistence #auth | ⏳ live — awaiting |
@@ -83,8 +84,10 @@
 
 - **#auth** — B483, B676
 - **#compare** — B471
+- **#coordinates** — B684
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B667, B659
 - **#drive** — B663, B662, B629, B409
+- **#export** — B684
 - **#files** — B180, B181, B182, B183, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B664, B659
 - **#gis** — B629, B370, B309, B178, B171, B147, B13, B95
@@ -96,7 +99,7 @@
 - **#pond** — B655
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B672, B673, B674, B655, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B682, B651
+- **#site-planner** — B672, B673, B674, B655, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B684, B682, B651
 - **#stitching** — B413
 - **#testing** — B269, B63
 - **#ui** — B673, B674, B657, B115, B669, B668, B658

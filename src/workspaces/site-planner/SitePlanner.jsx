@@ -37,7 +37,7 @@ import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { pickInMarquee, selMods, nextSelection } from "../../shared/markup/selection.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
-import { projectToGrid } from "../../shared/coordinates/index.js";
+import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./lib/kmzExport.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -1404,8 +1404,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Geographic basemap + shared overlay layers under the canvas (Phase 1). Only
   // meaningful for a located site (one with a real-world origin).
   const origin = restored?.origin || null;
-  // EPSG:2278 grid origin for the coordinate HUD chip (B609).
-  const gridOrigin = useMemo(() => (origin ? projectToGrid(origin.lat, origin.lon) : null), [origin?.lat, origin?.lon]); // eslint-disable-line react-hooks/exhaustive-deps
   // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
   const [basemapOn, setBasemapOn] = useState(!!origin);
   const [layersOpen, setLayersOpen] = useState(false); // planner Layers control expanded
@@ -5818,6 +5816,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     a.click();
     URL.revokeObjectURL(a.href);
   };
+  // Export the drawn site to a Google Earth .kmz (B684). Reprojects every foot vertex to WGS84
+  // lat/long via the SAME feetToLatLng the map render uses (KML must be lon,lat — so we flip the
+  // [lat,lng] pair). `extrude` lifts building massing to its clear height for Earth's 3D view.
+  // LOUD-FAILURE: siteToFeatures throws if any vertex reprojects to NaN — caught → warn + abort,
+  // never a partial file. A plan not yet placed on the map has no geo anchor → can't export.
+  const exportKmz = (extrude = false) => {
+    if (!origin) { flashWarn("Place this plan on the map first (open it from a map location), then export to Google Earth.", 6000); return; }
+    try {
+      const project = (pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; };
+      const features = siteToFeatures({ parcels, els, measures, settings }, project, { extrudeBuildings: extrude, includeDimensions: false });
+      if (!features.length) { flashWarn("Nothing to export yet — draw a boundary or a building first.", 5000); return; }
+      const blob = new Blob([buildKmz(siteName || "Site plan", features)], { type: KMZ_MIME });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = kmzFilename(siteName || fileSlug());
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      flashWarn(`⚠ Couldn't build the Google Earth file: ${e.message || "unexpected error"}.`, 8000);
+    }
+  };
 
   /* ------------ export (PNG / print-to-PDF) ------------ */
   // Snapshot the live SVG cropped to the site, with editor chrome (grid,
@@ -9105,12 +9124,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
-          {/* EPSG:2278 coordinate HUD — floating chip bottom-left (B609; replaces the full status bar) */}
-          {cursor && gridOrigin && (
-            <div style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums" }}>
-              {f0(gridOrigin.x + cursor.x)}&thinsp;E&nbsp;&nbsp;&nbsp;{f0(gridOrigin.y + cursor.y)}&thinsp;N
-            </div>
-          )}
+          {/* GPS coordinate HUD — floating chip bottom-left (B683). Shows the cursor's WGS84
+              lat/long (the coordinate Google Earth / a phone GPS uses), reprojected from the
+              planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
+              EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
+          {cursor && origin && (() => {
+            const [la, ln] = feetToLatLng(cursor, origin.lat, origin.lon);
+            return (
+              <div style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums" }}>
+                {la.toFixed(6)}°,&nbsp;{ln.toFixed(6)}°
+              </div>
+            );
+          })()}
         </div>
 
         {/* phone-only floating button to summon the tool rail (B113) */}
@@ -11303,6 +11328,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           body = <>
             {row({ text: "Zoom to fit", on: () => { fit(); close(); } })}
             {row({ text: "Paste", hint: `${MOD}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (clip.current) pasteClip(); else if (overlayClip.current) pasteOverlay(); close(); } })}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+            {row({ text: "Export to Google Earth (KMZ)", dis: !origin, title: origin ? "Download this site as a Google Earth file" : "Place this plan on the map first", on: () => { exportKmz(false); close(); } })}
+            {row({ text: "Export with 3D buildings", dis: !origin, title: origin ? "Building massing lifted to real height in Earth's 3D view" : "Place this plan on the map first", on: () => { exportKmz(true); close(); } })}
           </>;
         }
         return (
