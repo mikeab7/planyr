@@ -9,7 +9,7 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, noteLocalContent } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
@@ -60,16 +60,25 @@ export function clearRecentlyDeleted(id) { if (id == null) recentlyDeleted.clear
 // fresher timestamp. Both sides are createSiteModel-normalized, so identical content → identical JSON.
 const sigArr = (x) => (Array.isArray(x) ? x : []);
 const sigById = (a, b) => String(a && a.id).localeCompare(String(b && b.id));
-function contentSig(m) {
+// B672 — a cloud row marked `elementsInRows` is a SLIM HEADER: its element collections live as
+// site_elements rows (per-element sync), so comparing/merging its (empty) element arrays against a
+// full local model would misread "in rows" as "deleted" and perma-re-push. For a slim row both the
+// signature and the boot re-push compare HEADER content only (overlays/drawings — the collections
+// still riding the blob); a full pre-cutover row keeps the original full-content compare, so the
+// first post-cutover push (full local vs full cloud sig mismatch is fine either way) writes the slim
+// header exactly once and the comparison converges.
+function contentSig(m, headerOnly) {
   return JSON.stringify([
-    sigArr(m && m.els).slice().sort(sigById),
-    sigArr(m && m.markups).slice().sort(sigById),
-    sigArr(m && m.measures).slice().sort(sigById),
-    sigArr(m && m.callouts).slice().sort(sigById),
-    sigArr(m && m.parcels).slice().sort(sigById),
+    ...(headerOnly ? [] : [
+      sigArr(m && m.els).slice().sort(sigById),
+      sigArr(m && m.markups).slice().sort(sigById),
+      sigArr(m && m.measures).slice().sort(sigById),
+      sigArr(m && m.callouts).slice().sort(sigById),
+      sigArr(m && m.parcels).slice().sort(sigById),
+      sigArr(m && m.deletedIds).slice().sort(),
+    ]),
     sigArr(m && m.sheetOverlays).slice().sort(sigById),
     sigArr(m && m.parcelDrawings).slice().sort(sigById),
-    sigArr(m && m.deletedIds).slice().sort(),
   ]);
 }
 export function mergePulledSites(existing, cloudModels, selfUid) {
@@ -77,12 +86,20 @@ export function mergePulledSites(existing, cloudModels, selfUid) {
   for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
   const cloudAt = {};
   const cloudSig = {};
+  const cloudSlim = {};
   for (const m of (cloudModels || [])) {
+    const slim = !!(m && m.elementsInRows);
     const n = createSiteModel(m); if (!n.id) continue;
     cloudAt[n.id] = n.updatedAt || 0;
-    cloudSig[n.id] = contentSig(n);
+    cloudSlim[n.id] = slim;
+    cloudSig[n.id] = contentSig(n, slim);
     const local = map[n.id];
-    map[n.id] = local ? mergeSiteContent(local, n) : n; // content-union — never drop drawn work
+    // Content-union — never drop drawn work. A slim row's empty element collections union to the
+    // local side; its deletedIds are EXCLUDED from the union (element-deletion truth lives in the
+    // site_elements tombstone rows now — a stale header tombstone must never drop an element the
+    // rows have restored). A full pre-cutover row merges exactly as before.
+    const forMerge = slim ? { ...n, deletedIds: [] } : n;
+    map[n.id] = local ? mergeSiteContent(local, forMerge) : n;
   }
   // TEAM: only re-push rows THIS user owns. A teammate's shared row (ownerId set to someone else)
   // is read-through only — re-pushing it from your device would churn versions / risk a false
@@ -96,7 +113,7 @@ export function mergePulledSites(existing, cloudModels, selfUid) {
   // SPURIOUS "changed in another session" conflict in any OTHER open tab. map[id] is the union (⊇ cloud),
   // so this can never push a thinner row; an identical re-open now pushes nothing (no version churn).
   const toPush = Object.keys(map).filter((id) =>
-    mine(map[id]) && (!(id in cloudAt) || contentSig(map[id]) !== cloudSig[id]));
+    mine(map[id]) && (!(id in cloudAt) || contentSig(map[id], cloudSlim[id]) !== cloudSig[id]));
   return { map, toPush };
 }
 
@@ -315,7 +332,6 @@ export async function reconcileSiteFromCloud(id) {
 // B556 — re-export so the planner can tell the thin-clobber baseline "this deliberately-restored
 // (possibly thinner) content is authoritative" after an undo/redo/version-restore, so the next push
 // isn't falsely rejected as a cross-session conflict. Per-tab + cloud-independent (safe logged out).
-export { noteLocalContent };
 // Synchronous best-effort cloud push for a forced reload (B452): a guarded keepalive
 // write that survives the navigation. Reads the freshly-saved local copy so the cloud
 // gets the very latest. No-op when logged out. Returns true if a request was dispatched.

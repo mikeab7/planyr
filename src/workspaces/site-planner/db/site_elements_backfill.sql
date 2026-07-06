@@ -42,7 +42,7 @@ cross join lateral jsonb_array_elements(coalesce(s.data->k.field, '[]'::jsonb))
 where t.site_id = s.id and t.kind = k.kind and t.id = e.value->>'id'
   and t.deleted_at is null
   and not (coalesce(s.data->'deletedIds', '[]'::jsonb) ? (e.value->>'id'))
-  and t.updated_at < s.updated_at
+  and t.updated_at <= s.updated_at
   and t.data is distinct from e.value;
 
 -- 3) INSERT tombstone rows for the blob's deletedIds (deletion syncs as a fact).

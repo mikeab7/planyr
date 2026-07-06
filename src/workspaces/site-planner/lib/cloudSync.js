@@ -7,7 +7,6 @@
 import { supabase, supabaseRest, currentAccessToken } from "./supabase.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
-import { contentCount } from "./siteModel.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
@@ -16,59 +15,31 @@ import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 // switch. Module-scope = naturally per-tab. Until the `version` column is migrated in,
 // every write degrades to a plain upsert (today's behaviour) and this stays empty.
 const siteVersions = {};
-// B459 — the CAS above guards the version NUMBER only, NEVER the content. So a tab holding a
-// stale/thin model at a MATCHING version would still silently overwrite a fuller cloud row (the
-// 8 South 5-building loss: a road-only model clobbered 5 saved buildings while the version matched).
-// Alongside the version we therefore remember the CONTENT we last synced — item count + tombstone
-// count — so a write can ALSO reject a "thinning clobber": a push that would drop ≥2 items the cloud
-// still has, with no delete-tombstone to explain the drop, is treated as a stale-tab clobber and
-// blocked LOUD (reload then union-merges the fuller cloud back). Legit incremental undo (≤1 unexplained
-// drop per push) and any tombstoned delete pass through untouched.
-const siteContent = {};   // id -> contentCount last synced
-const siteTombs = {};     // id -> deletedIds length last synced
-const arr = (x) => (Array.isArray(x) ? x : []);
 export function clearSiteVersions() {
-  for (const m of [siteVersions, siteContent, siteTombs]) for (const k of Object.keys(m)) delete m[k];
+  for (const k of Object.keys(siteVersions)) delete siteVersions[k];
 }
 export const _siteVersions = siteVersions; // test seam (read/seed in unit tests)
-export const _siteContent = siteContent;   // test seam (B459)
-export const _siteTombs = siteTombs;       // test seam (B459)
-
-// Pure (exported for unit tests): would pushing `m` thin the cloud row below the last-synced
-// content by more than a real delete explains? baseCount/baseTombs are the last-synced counts
-// for this id (null baseCount = no baseline yet → never block a first sync).
-export function wouldThinClobber(m, baseCount, baseTombs) {
-  if (baseCount == null) return false;
-  const deliberate = Math.max(0, arr(m && m.deletedIds).length - (baseTombs || 0)); // items a delete accounts for
-  const lost = (baseCount - deliberate) - contentCount(m);                          // items vanished with no delete
-  return lost >= 2;                                                                 // ≥2 unexplained = stale-tab clobber
-}
-// Record the content we just synced for `id`, so the next push's thin-clobber guard has a baseline.
-function rememberContent(model) {
-  if (!model || model.id == null) return;
-  siteContent[model.id] = contentCount(model);
-  siteTombs[model.id] = arr(model.deletedIds).length;
-}
-// B556 — let the ACTIVE tab deliberately SHRINK its own plan (undo of a multi-element add, or a
-// version Restore to a thinner copy) without the thin-clobber guard (B459) mistaking it for a
-// stale-tab clobber. A delete records a tombstone that already explains the drop; undo/redo/restore
-// can't (a redo must re-add the items, so they can't stay tombstoned), so instead the caller tells
-// THIS tab "the content I just restored is authoritative" and we move the content baseline onto it.
-// Only ADJUSTS an existing baseline (never fabricates one — a first sync is never blocked anyway).
-// Safe vs the 8 South stale-clobber: a passive stale tab never undoes/restores, so it never calls
-// this and its baseline stays at the cloud's fuller count; the cross-session CAS version guard also
-// still rejects a genuine concurrent change.
-export function noteLocalContent(id, model) {
-  if (id == null || !model || siteContent[id] == null) return;
-  siteContent[id] = contentCount(model);
-  siteTombs[id] = arr(model.deletedIds).length;
-}
+// B672 — the B459 thin-clobber guard (wouldThinClobber + the siteContent/siteTombs baselines +
+// noteLocalContent) is RETIRED. It existed to stop a stale tab's whole-doc push from silently
+// dropping elements the cloud still had — but under element-level sync the cloud row is a SLIM
+// HEADER that deliberately carries NO elements (see slimForCloud below), so every header push would
+// read as a "thinning clobber". Element safety now lives where the elements live: per-row rev
+// guards in commit_elements (a stale element write is rejected per element, and deletions are
+// explicit tombstone rows, never an absence). The 8 South bug class this guarded against cannot
+// recur through the header path because the header no longer carries the elements at all.
 
 // Don't push a huge embedded screenshot dataURL into a DB row — keep the underlay
 // placement but drop the inline image (map-sourced underlays use a URL, not a
 // dataURL, so those are preserved). Geometry/metrics are unaffected.
 const isDataUrl = (s) => typeof s === "string" && s.startsWith("data:");
-function slimForCloud(model) {
+// B672 — the cloud `sites.data` row is now a SLIM HEADER: the 5 vector element collections live
+// as individual `site_elements` rows (the element write path, B671) and are STRIPPED here, so the
+// header write can't fight the per-element commits. `elementsInRows: true` marks the row as slim —
+// the load/merge side (mergePulledSites) uses it to know "no elements here" means "they're in rows",
+// never "they were deleted". `deletedIds` rides along untouched (it still serves the header-side
+// collections — sheetOverlays/parcelDrawings/crossSections — and the signed-out store).
+// Exported for tests.
+export function slimForCloud(model) {
   if (!model) return model;
   let m = model;
   const u = m.underlay;
@@ -82,6 +53,9 @@ function slimForCloud(model) {
   // cloud row (re-attach on another device until Storage-backing lands).
   if (Array.isArray(m.parcelDrawings) && m.parcelDrawings.some((d) => d && isDataUrl(d.src)))
     m = { ...m, parcelDrawings: m.parcelDrawings.map((d) => (d && isDataUrl(d.src) ? { ...d, src: null, strippedForCloud: true } : d)) };
+  // Element collections → site_elements rows (B672 read cutover). The header keeps empty arrays
+  // (not missing fields) so createSiteModel-normalization of a loaded header stays shape-identical.
+  m = { ...m, els: [], markups: [], measures: [], callouts: [], parcels: [], elementsInRows: true };
   return m;
 }
 
@@ -96,16 +70,9 @@ export function cloudUpsert(uid, model) {
   return serializeSiteWrite(model.id, () => cloudUpsertCore(uid, model));
 }
 
-async function cloudUpsertCore(uid, model) {
+async function cloudUpsertCore(uid, model, isRetry) {
   if (!supabase || !uid || !model || !model.id) return { ok: false, error: "not ready" };
   const m = slimForCloud(model);
-  // B459 — refuse to silently overwrite a fuller cloud row with a stale/thin model (the CAS below
-  // only checks the version number). Block LOUD as a conflict; the cloud is left intact, so a reload
-  // union-merges the fuller copy back instead of losing it.
-  if (wouldThinClobber(m, siteContent[m.id], siteTombs[m.id])) {
-    reportClientEvent("cloud-conflict", "thin-clobber blocked (sites)", { id: m.id, reason: "thinned", have: contentCount(m), base: siteContent[m.id] });
-    return { ok: false, conflict: true, thinned: true };
-  }
   // Row carries NO user_id — casUpsert stamps the creator only on INSERT, so a teammate editing
   // a shared row never re-stamps the original owner (team feature). team_id rides along (null =
   // private); when set, RLS lets the project's team read/edit it.
@@ -117,8 +84,6 @@ async function cloudUpsertCore(uid, model) {
     data: m,
   };
   // Optimistic concurrency (B314): a conditional write guarded by the version we last synced.
-  // A stale write (another session advanced the row) is REJECTED as a conflict, not applied —
-  // the caller surfaces a loud "reload before saving" prompt instead of a silent overwrite.
   let r = await casUpsert(supabase, "sites", { uid, id: m.id, row, expected: siteVersions[m.id] });
   // Graceful degrade if the team_id column isn't migrated in yet (db/team_sharing.sql not run):
   // retry the SAME guarded write without it, so saving never regresses before sharing is enabled.
@@ -126,9 +91,22 @@ async function cloudUpsertCore(uid, model) {
     const { team_id, ...noTeam } = row;
     r = await casUpsert(supabase, "sites", { uid, id: m.id, row: noTeam, expected: siteVersions[m.id] });
   }
-  if (r.ok) { siteVersions[m.id] = r.version; rememberContent(m); return { ok: true }; }
+  if (r.ok) { siteVersions[m.id] = r.version; return { ok: true }; }
   if (r.conflict) {
-    reportClientEvent("cloud-conflict", "stale write rejected (sites CAS)", { id: m.id, reason: "cas-409", expected: siteVersions[m.id] });
+    // B672 — a stale header write self-heals SILENTLY: refresh the CAS token from the live row and
+    // re-push ONCE (whole-header last-write-wins — the header is rarely-contended meta/settings/
+    // overlays; the elements it used to carry are per-row rev-guarded in site_elements now). The
+    // old loud "changed in another session → Take over editing" banner class (B455/B460/B558/B596)
+    // is retired BY ARCHITECTURE — there is no whole-doc payload left to fight over. If the retry
+    // ALSO conflicts (a live write race), report + bail; the next autosave push heals it.
+    if (!isRetry) {
+      const fresh = await fetchSiteForReconcile(uid, m.id); // refreshes siteVersions[m.id]
+      if (fresh !== null || siteVersions[m.id] != null) {
+        reportClientEvent("cloud-conflict-healed", "stale header CAS → refetched version, re-pushing (sites)", { id: m.id });
+        return cloudUpsertCore(uid, model, true);
+      }
+    }
+    reportClientEvent("cloud-conflict", "stale write rejected twice (sites CAS)", { id: m.id, reason: "cas-409", expected: siteVersions[m.id] });
     return { ok: false, conflict: true };
   }
   if (r.degrade) {
@@ -142,7 +120,6 @@ async function cloudUpsertCore(uid, model) {
     let { error } = await supabase.from("sites").upsert(noTeam, { onConflict: "id" });
     if (error && /on conflict|no unique|constraint|exclusion/i.test(error.message || "")) // pre-PK-change DB: target is (user_id,id)
       ({ error } = await supabase.from("sites").upsert({ ...noTeam, user_id: uid }, { onConflict: "user_id,id" }));
-    if (!error) rememberContent(m); // B459 — keep the content baseline current even on the version-less degrade path
     return { ok: !error, error: error ? error.message : null };
   }
   reportClientEvent("cloud-write-failed", (r.error || "cloud write failed") + " (sites)", { id: m.id });
@@ -158,9 +135,7 @@ export function keepaliveCloudPush(uid, model) {
   if (!supabase || !uid || !model || !model.id) return false;
   const { url, anon } = supabaseRest();
   const token = currentAccessToken();
-  const m = slimForCloud(model);
-  // B459 — a forced-reload keepalive must NOT clobber a fuller cloud row with a thin model either.
-  if (wouldThinClobber(m, siteContent[m.id], siteTombs[m.id])) return false;
+  const m = slimForCloud(model); // slim header (B672) — elements ride the element keepalive instead
   // No user_id in the PATCH body — a guarded UPDATE must not re-stamp the row's creator.
   const row = {
     id: m.id,
@@ -245,7 +220,6 @@ export async function cloudList(uid) {
   const rows = data || [];
   for (const r of rows) if (r && r.data && r.data.id != null) {
     if (r.version != null) siteVersions[r.data.id] = r.version;
-    rememberContent(r.data); // B459 — baseline the cloud's content so a later thin push is caught
   }
   return rows.map((r) => {
     const m = r && r.data;

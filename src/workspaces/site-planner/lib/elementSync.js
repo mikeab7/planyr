@@ -278,6 +278,42 @@ export function createElementSync(opts = {}) {
 
   // Ops still pending, for the keepalive unload flush (elementApi.keepaliveCommit).
   function pendingOps() { return [...dirty.values()].map(opFor); }
+  // The pending local edits themselves — the B672 refetch-replace substitutes these back into the
+  // rebuilt canvas so a full refetch never discards work still in flight.
+  function dirtyEntries() { return [...dirty.values()].map((e) => ({ kind: e.kind, id: e.id, cls: e.cls, el: e.el })); }
+
+  // ---- B672: the realtime READ side -------------------------------------------
+  // Apply one incoming site_elements row (a postgres_changes event) against the shadow and return
+  // the canvas instruction. Idempotent by rev: our own committed changes echoing back are a no-op.
+  //   { action:'ignore' }                      — stale / own echo / dirty-local-wins
+  //   { action:'remove', kind, id, row }      — tombstoned remotely → take it off the canvas
+  //   { action:'upsert', kind, id, el, row }  — new/updated remotely → put row.data on the canvas
+  // A row for an element with a PENDING local edit keeps the LOCAL data on canvas (the dirty entry
+  // recommits through the normal rev-checked path) but ADOPTS the remote rev so that commit targets
+  // the fresh row instead of a guaranteed conflict; emits `remote-while-dirty` for B673.
+  function applyRemoteRow(row) {
+    if (!row || !row.kind || row.id == null) return { action: "ignore" };
+    const key = skey(row.kind, row.id);
+    const shad = shadow.get(key);
+    const rev = typeof row.rev === "number" ? row.rev : 0;
+    if (shad && rev <= shad.rev) return { action: "ignore" }; // own echo or stale replay
+    if (dirty.has(key)) {
+      // local edit in flight — local data stays on canvas; re-target its commit at the fresh rev
+      shadow.set(key, { kind: row.kind, id: row.id, json: shad ? shad.json : "", rev, z: row.z_index });
+      onEvent({ type: "remote-while-dirty", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
+      return { action: "ignore" };
+    }
+    if (row.deleted_at) {
+      if (!shad) return { action: "ignore" }; // tombstone for something we never showed
+      shadow.delete(key);
+      onEvent({ type: "remote-delete", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
+      return { action: "remove", kind: row.kind, id: row.id, row };
+    }
+    if (!row.data) return { action: "ignore" }; // malformed live row (CHECK should prevent this)
+    shadow.set(key, { kind: row.kind, id: row.id, json: stableStringify(row.data), rev, z: row.z_index });
+    onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
+    return { action: "upsert", kind: row.kind, id: row.id, el: row.data, row };
+  }
 
   function stop() {
     stopped = true;
@@ -287,7 +323,8 @@ export function createElementSync(opts = {}) {
 
   return {
     reconcile, flushGesture, retryNow, seed, stop,
-    pendingOps, pendingCount,
+    pendingOps, pendingCount, dirtyEntries, applyRemoteRow,
+    isSeeded: () => ready,
     // introspection for tests / B672-B673
     shadowSnapshot, isRecent,
     get state() { return state; },
