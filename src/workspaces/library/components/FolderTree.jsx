@@ -16,6 +16,11 @@ import {
   listFolders, ensureSeeded, addFolder, renameFolder, moveFolder,
   trashSubtree, syncFoldersToDrive, planFolderDelete,
 } from "../lib/folders.js";
+import { loadIdSet, saveIdSet, pruneSet } from "../../../shared/ui/persistedSet.js";
+
+/* Per-project remembered expansion (B-item: tree opens collapsed, not with every
+ * category flung open). One key per project so switching projects can't bleed state. */
+const treeOpenKey = (projectId) => `planyr:library:treeOpen:v1:${projectId}`;
 
 const T = {
   page: "var(--surface-page)", raised: "var(--surface-raised)", overlay: "var(--surface-overlay)",
@@ -38,6 +43,8 @@ const centered = (children) => (
 export default function FolderTree({
   projectId = null, signedIn = false, projectName = "",
   embedded = false, selectedId = null, onSelect = null, onRowsChange = null, fileCounts = null,
+  // Library-Home pins: which folder ids are pinned + the ☆ toggle (both optional).
+  pinnedIds = null, onTogglePin = null,
 }) {
   const [rows, setRowsRaw] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -49,6 +56,9 @@ export default function FolderTree({
   const [pendingDelete, setPendingDelete] = useState(null); // { id, name, folders, files, empty, loading }
   const [drive, setDrive] = useState({ state: "idle", msg: "" }); // idle|syncing|ok|off|error
   const syncTimer = useRef(null);
+  // Which project's stored expansion has been restored — persistence must not fire before the
+  // restore (the initial empty set would overwrite what the user had open last visit).
+  const expandedLoadedFor = useRef(null);
 
   // Every rows update also publishes upward (the unified view places files by these rows).
   const setRows = useCallback((list) => { setRowsRaw(list); onRowsChange?.(list); },
@@ -61,9 +71,11 @@ export default function FolderTree({
     return list;
   }, [signedIn, projectId, setRows]);
 
-  // Seed-on-first-open (idempotent) → load → expand the top level → kick a background mirror sync.
+  // Seed-on-first-open (idempotent) → load → restore this project's remembered expansion
+  // (default: everything collapsed) → kick a background mirror sync.
   useEffect(() => {
     let live = true;
+    expandedLoadedFor.current = null;
     if (!signedIn || !projectId) { setRows([]); return; }
     (async () => {
       setLoading(true); setError("");
@@ -73,13 +85,22 @@ export default function FolderTree({
       const list = await listFolders(projectId);
       if (!live) return;
       setRows(list);
-      setExpanded(new Set(childrenOf(list, null).map((r) => r.id))); // top level open
+      // Restore what the user last had open, pruning ids of since-deleted folders. A first
+      // visit restores the empty set = all collapsed (the tree no longer flings itself open).
+      setExpanded(pruneSet(loadIdSet(treeOpenKey(projectId)), new Set(list.map((r) => r.id))));
+      expandedLoadedFor.current = projectId;
       setLoading(false);
       scheduleSync(seed && seed.seeded ? 0 : 400); // seed → sync now so Drive materializes promptly
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn, projectId]);
+
+  // Persist expansion the moment it changes — but only after this project's restore ran,
+  // and only for the project the state belongs to (guards the project-switch transition).
+  useEffect(() => {
+    if (projectId && expandedLoadedFor.current === projectId) saveIdSet(treeOpenKey(projectId), expanded);
+  }, [expanded, projectId]);
 
   // Debounced one-way reconcile to Drive after edits. The server syncs one small chunk per
   // request (the 502 fix), so this reports live progress across the rounds.
@@ -250,11 +271,20 @@ export default function FolderTree({
           {!isEditing && !isMoving && (
             hoveredId === node.id ? (
               <span style={{ display: "flex", gap: 2 }}>
+                {onTogglePin && (
+                  <IconBtn title={pinnedIds && pinnedIds.has(node.id) ? "Unpin from the Library home" : "Pin to the Library home"}
+                    accent={pinnedIds && pinnedIds.has(node.id)} onClick={() => onTogglePin(node)}>
+                    {pinnedIds && pinnedIds.has(node.id) ? "★" : "☆"}
+                  </IconBtn>
+                )}
                 <IconBtn title="Add subfolder" onClick={() => onAdd(node.id)}>＋</IconBtn>
                 <IconBtn title="Rename" onClick={() => setEditing({ id: node.id, value: node.name })}>✎</IconBtn>
                 <IconBtn title="Move" onClick={() => setMoving(node.id)}>⇄</IconBtn>
                 <IconBtn title="Delete" danger onClick={() => askDelete(node)}>🗑</IconBtn>
               </span>
+            ) : pinnedIds && pinnedIds.has(node.id) ? (
+              // Quiet pinned marker when the row isn't hovered (so pins stay discoverable).
+              <span aria-hidden style={{ flex: "none", fontSize: 11, color: T.accentText, paddingRight: 4 }}>★</span>
             ) : count ? (
               // Rolled-up file count (files in this folder + everything under it).
               <span style={{ flex: "none", fontSize: 11, fontWeight: 600, color: T.faint, paddingRight: 4 }}>{count}</span>
@@ -322,11 +352,11 @@ export default function FolderTree({
   );
 }
 
-function IconBtn({ children, title, onClick, danger }) {
+function IconBtn({ children, title, onClick, danger, accent }) {
   return (
     <button title={title} onClick={onClick} style={{
       width: 24, height: 24, border: "none", background: "none", cursor: "pointer", borderRadius: 4,
-      color: danger ? "var(--danger)" : "var(--text-secondary)", fontSize: 13, lineHeight: 1,
+      color: danger ? "var(--danger)" : accent ? "var(--accent-library-text)" : "var(--text-secondary)", fontSize: 13, lineHeight: 1,
     }}>{children}</button>
   );
 }

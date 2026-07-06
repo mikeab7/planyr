@@ -29,7 +29,14 @@ export async function signIn(page) {
   // so this works deploy-independently. (The auth-submit testid stays for explicit future use.)
   await pwField.press("Enter");
   // Signed-in: the email field is gone and the app chrome shows the module tabs.
-  await expect(page.getByTestId("module-tab-site-planner")).toBeVisible({ timeout: 15_000 });
+  await expect(moduleTab(page, "site-planner")).toBeVisible({ timeout: 15_000 });
+}
+
+/* The ACTIVE workspace's module tab. Keep-alive keeps every visited workspace mounted —
+ * each with its own (hidden) header — so a bare getByTestId can match several tabs and
+ * trip Playwright's strict mode. Only the visible header's tab is the real one. */
+export function moduleTab(page, moduleId) {
+  return page.getByTestId(`module-tab-${moduleId}`).filter({ visible: true });
 }
 
 /* Switch to a workspace module by its tab. moduleId is the internal id
@@ -39,7 +46,7 @@ export async function signIn(page) {
  * can briefly sit over the header tabs and intercept the click. Retry the whole click→verify
  * until the tab actually becomes current, rather than failing on the first interception. */
 export async function openModule(page, moduleId) {
-  const tab = page.getByTestId(`module-tab-${moduleId}`);
+  const tab = moduleTab(page, moduleId);
   await tab.waitFor({ state: "visible", timeout: 20_000 });
   await expect(async () => {
     await tab.click({ timeout: 3_000 });

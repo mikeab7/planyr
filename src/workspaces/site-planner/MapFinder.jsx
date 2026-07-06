@@ -228,7 +228,7 @@ function ringsAcres(rings) {
 // the headline facts beyond address/account that help identify a tract at a glance.
 const OWNER_RE = /^(owner|own_?name|owner_?name|name|owner1)$/i;
 
-export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -503,16 +503,20 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     return () => { clearTimeout(t); if (map) map.off("moveend", debounced); unsub(); };
   }, [overlays]);
 
-  /* keep the map sized correctly when shown after being hidden */
+  /* keep the map sized correctly when shown after being hidden — both when the Site
+     workspace flips map↔plan (`visible`) AND when the whole workspace returns from a
+     hidden keep-alive tab (`isActive`: Leaflet sized itself at 0×0 while display:none). */
   useEffect(() => {
-    if (visible && mapRef.current) {
+    if (visible && isActive && mapRef.current) {
       const t = setTimeout(() => mapRef.current && mapRef.current.invalidateSize(), 60);
       return () => clearTimeout(t);
     }
-  }, [visible]);
+  }, [visible, isActive]);
 
   /* Returning to the map (e.g. after committing parcels and planning) clears any
-     committed selection and exits select-parcels mode back to the normal map. */
+     committed selection and exits select-parcels mode back to the normal map.
+     Deliberately keyed on `visible` (the map↔plan MODE flip) only — NOT `isActive` —
+     so peeking at another module tab and coming back never wipes a parcel selection. */
   useEffect(() => {
     if (visible) { clearHilites(); setSelected([]); setSelectMode(false); setParcelInfo(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -7,6 +7,12 @@ via the Shell `onOpenReviewInDocReview` intent.
 **Files**
 - `Library.jsx` — workspace root (lazy chunk). Since B662 the per-project surface is ONE unified
   view (no Files/Folders tabs): the folder tree as the left rail + the file list on the right.
+  With no project selected it renders the HOME surface (B668), not a pick-a-project note.
+- `components/LibraryHome.jsx` — the landing Home (B668): Pinned folder/file cards + Recent
+  drawings + project cards. Backed by the shared pin store (`/src/shared/pins/`, per-device,
+  swap-ready API) and the recents list (`/src/shared/recents/`); ☆ pin toggles live on
+  FolderTree rows + file cards. Tree expansion persists per project via the shared persisted
+  id-set helper in `/src/shared/ui/` (B665 — collapsed by default).
 - `components/FileBrowser.jsx` — the filing machinery (facets, list, drop zone, upload tray,
   needs-filing, refile/share/delete). `folderMode` swaps its left column for the real folder tree
   and filters the list by the selected folder (files place via the shared `resolveDrawingTarget`,

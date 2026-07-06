@@ -1,5 +1,22 @@
 ## ✅ Done
 
+### B666 — Open the app exactly where you left off (last module + project) `[Shell / routing]` (feature — owner request) #ui #persistence #infra  *(owner chat 2026-07-05 — "if I open Planyr, it should open me to the last project that I was working on"; owner picked "exactly where I left off" (last MODULE too) over always-the-map when asked; **B666** = B665 + 1. Branch `claude/module-nav-project-persistence-ryftwj`.)*
+`[x]` **Filed AND implemented + shipped same session per STANDING RULE #1. Verify: sandbox — proven by unit tests + headless e2e (the flow is fully drivable logged-out).**
+- Verify: sandbox
+- Origin: filed 2026-07-05 from chat
+- **What shipped:** new `src/app/lastRoute.js` — every route change writes a `{module, projectId, cross}` pointer (`planyr:lastRoute:v1`) from one Shell effect; an EMPTY-hash boot seeds the URL from it via `location.replace` BEFORE first render (Shell module scope, after `route.js` captures `INITIAL_HASH_EMPTY`), so a fresh tab lands on the last module + project. Explicit deep links — including a literal `#/` — always win. `resumeAllowed` stays true on a seeded boot, so the Site Planner's existing `pickResumeTarget` still picks the specific PLAN within the group (zero changes to `bootResume.js`); a deleted/foreign project in the pointer resolves to the map and the URL self-heals. Corrupt pointer → cleared + clean boot (LOUD in effect, never a wedged startup). `RESTORE_LAST_MODULE` const documents the owner's choice (one-line flip to project-only restore).
+- **DEDUPE-FIRST:** no prior last-route/module item (grepped `lastRoute` · `last module` · `resume`); `planarfit:currentSite:v1` (the Site plan pointer) is the composed-with prior art, untouched.
+- **Verified:** `test/lastRoute.test.js` 12 green · e2e `module-keepalive.spec.js` "open where you left off" pair green headless (empty-hash boot reopens `#/library`; explicit `#/` and `#/markup` honored verbatim) · build green.
+
+### B665 — Library folder tree opens COLLAPSED and remembers per-project expansion `[Library]` (bug/UX — owner request) #library #ui  *(owner chat 2026-07-05 — "it should not open to have every folder all the way open"; **B665** = highest real B# across both files (B664) + 1. Branch `claude/module-nav-project-persistence-ryftwj`.)*
+`[x]` **Filed AND implemented + shipped same session per STANDING RULE #1. Verify: sandbox — the persistence helper is unit-proven and the seed-line change is deterministic; the signed-in click-through rides V218 (the tree renders signed-in only).**
+- Verify: sandbox
+- Origin: filed 2026-07-05 from chat
+- **What shipped:** `FolderTree` no longer seeds every top-level category expanded — expansion restores from `planyr:library:treeOpen:v1:<projectId>` (default: all collapsed), persists on every toggle/add/move, prunes ids of deleted folders, and is guarded so the initial empty state can never overwrite the stored set before the restore runs. The cross-project category tree gets the same treatment (`planyr:library:catsOpen:v1`, default collapsed). New shared helper `src/shared/ui/persistedSet.js` (loadIdSet/saveIdSet/pruneSet — the MapFinder `sitesGroups` pattern, generalized + unit-tested; corrupt payloads read empty AND clear the key).
+- **DEDUPE-FIRST:** no prior tree-default/expansion item (grepped `expand` · `collaps` · `treeOpen`).
+- **Verified:** `test/persistedSet.test.js` 9 green · full suite green · build green.
+
+
 ### B664 — Review rail UX batch from live use: partial-title grouping, cryptic cal marks removed, resizable/collapsible rail, Takeoff as a tool, on-screen-first scan `[Doc Review / Markup]` (bug/UX batch — owner live walkthrough #2 of the GPL set) #doc-review #markup #ui #perf  *(owner chat 2026-07-05 with a live screenshot; **B664** = highest real B# across both files (B663) + 1. Follow-on to B659/B660 — all net-new reports from live use, not recurrences.)*
 `[x]` **Filed AND implemented + shipped same session per STANDING RULE #1. lint 0 · 2,616 tests green (+2 grouping cases) · build green · headless Playwright on the real GPL PDF: 10/10 checks.** Five reports:
 - Verify: sandbox

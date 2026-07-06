@@ -75,10 +75,15 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   });
 
   it("B534/B535: the Doc Review boot-resume IIFEs handle their own rejection (no unhandled promise)", () => {
+    // The boot-resume IIFEs must swallow their own rejection (.catch) — and since the
+    // per-project last-doc work they ALSO arm the pointer writes afterwards (.finally),
+    // so the guard matches the catch-then-finally chain shape.
     const stitch = read("../src/workspaces/doc-review/Stitcher.jsx");
     const dr = read("../src/workspaces/doc-review/DocReview.jsx");
-    expect(stitch).toMatch(/\}\)\(\)\.catch\(\(\) => \{\}\); \/\/ B534/);
-    expect(dr).toMatch(/\}\)\(\)\.catch\(\(\) => \{\}\); \/\/ B535/);
+    expect(stitch).toMatch(/\}\)\(\)\.catch\(\(\) => \{\}\) \/\/ B534/);
+    expect(stitch).toMatch(/\.finally\(\(\) => setBootResolved\(true\)\)/);
+    expect(dr).toMatch(/\}\)\(\)\.catch\(\(\) => \{\}\) \/\/ B535/);
+    expect(dr).toMatch(/\.finally\(\(\) => setBootResolved\(true\)\)/);
   });
 
   it("B536: addGroup skips a failed page render and reports it (no silent group-drop abort)", () => {
