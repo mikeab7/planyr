@@ -66,6 +66,34 @@ export function alignOverlaySimilarity(o, p1, p2, q1, q2) {
   return applySimilarityToOverlay(o, similarityTransform(p1, p2, q1, q2));
 }
 
+/* Aerial-underlay trace calibration (B654) — the shared-calibration port of the old
+ * inline `applyCalibration`: two clicked world points (a,b) a known real length apart
+ * → rescale the underlay about point `a` (pinned in world space). The underlay is
+ * axis-aligned (no rotation) but may carry independent x/y scales (`ftPerPxY` on a
+ * georeferenced map capture), so BOTH axes scale by the same factor. Returns the
+ * changed fields { ftPerPx, ftPerPxY?, x, y, calibrated:true } or null when the input
+ * can't calibrate: a from-map underlay (already georeferenced — a diagonal-derived
+ * scalar would mis-size it, B57a), a non-positive known length, or a zero-length pick. */
+export function calibrateUnderlayScale(u, a, b, knownFt) {
+  if (!u || u.fromMap || !a || !b || !(knownFt > 0) || !(u.ftPerPx > 0)) return null;
+  const measured = len(sub(b, a));
+  if (!(measured > 0)) return null;
+  const factor = knownFt / measured;
+  const sy = u.ftPerPxY || u.ftPerPx;
+  const ftPerPx = u.ftPerPx * factor;
+  const newSy = sy * factor;
+  // image-pixel coords of point a under the current placement — kept pinned after rescale
+  const aPxX = (a.x - u.x) / u.ftPerPx;
+  const aPxY = (a.y - u.y) / sy;
+  return {
+    ftPerPx,
+    ftPerPxY: u.ftPerPxY ? newSy : undefined,
+    x: a.x - aPxX * ftPerPx,
+    y: a.y - aPxY * newSy,
+    calibrated: true,
+  };
+}
+
 /* Best-fit similarity (uniform scale + rotation + translation) over N≥2 point pairs
  * [{from,to}], least-squares (closed-form Procrustes). Returns { scale, rotDeg, apply,
  * residual } — residual = RMS landing error in feet (≈0 for an exact fit or 2 points),

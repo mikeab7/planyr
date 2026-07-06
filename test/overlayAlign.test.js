@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   imagePointToWorld, scaleOverlayAbout, similarityTransform, alignOverlaySimilarity,
-  solveSimilarityLSQ, applySimilarityToOverlay,
+  solveSimilarityLSQ, applySimilarityToOverlay, calibrateUnderlayScale,
 } from "../src/workspaces/site-planner/lib/overlayAlign.js";
 
 const ov = (over = {}) => ({ x: 100, y: 50, imgW: 800, imgH: 600, ftPerPx: 0.5, rotation: 0, ...over });
@@ -97,5 +97,40 @@ describe("overlay align — solveSimilarityLSQ N-point fit + residual (B73)", ()
     const o2 = { ...o, ...applySimilarityToOverlay(o, T) };
     // each drawing point lands on its fitted target (residual is tiny here)
     ipts.forEach(([ix, iy], i) => near(imagePointToWorld(o2, ix, iy), T.apply(from[i]), 4));
+  });
+});
+
+describe("underlay calibration — calibrateUnderlayScale (B654)", () => {
+  const u = (over = {}) => ({ x: 0, y: 0, imgW: 1000, imgH: 800, ftPerPx: 0.6, ...over });
+  it("scales ftPerPx by known/measured and pins point a in world space", () => {
+    const und = u();
+    // a and b are 100 world-ft apart at the current scale; the user says it's really 250 ft
+    const a = { x: 60, y: 30 }, b = { x: 160, y: 30 };
+    const patch = calibrateUnderlayScale(und, a, b, 250);
+    expect(patch.calibrated).toBe(true);
+    expect(patch.ftPerPx).toBeCloseTo(0.6 * 2.5, 10);
+    // point a's image pixel must land back at the same world spot after the rescale
+    const aPx = { x: (a.x - und.x) / und.ftPerPx, y: (a.y - und.y) / und.ftPerPx };
+    expect(patch.x + aPx.x * patch.ftPerPx).toBeCloseTo(a.x, 8);
+    expect(patch.y + aPx.y * patch.ftPerPx).toBeCloseTo(a.y, 8);
+  });
+  it("scales an anisotropic (ftPerPxY) underlay's BOTH axes by the same factor", () => {
+    const und = u({ ftPerPxY: 0.5 });
+    const patch = calibrateUnderlayScale(und, { x: 0, y: 0 }, { x: 100, y: 0 }, 200);
+    expect(patch.ftPerPx).toBeCloseTo(1.2, 10);
+    expect(patch.ftPerPxY).toBeCloseTo(1.0, 10);
+  });
+  it("leaves ftPerPxY undefined when the underlay has none", () => {
+    const patch = calibrateUnderlayScale(u(), { x: 0, y: 0 }, { x: 50, y: 0 }, 100);
+    expect(patch.ftPerPxY).toBeUndefined();
+  });
+  it("refuses a from-map (georeferenced) underlay", () => {
+    expect(calibrateUnderlayScale(u({ fromMap: true }), { x: 0, y: 0 }, { x: 50, y: 0 }, 100)).toBe(null);
+  });
+  it("refuses non-positive lengths and zero-length picks", () => {
+    expect(calibrateUnderlayScale(u(), { x: 0, y: 0 }, { x: 50, y: 0 }, 0)).toBe(null);
+    expect(calibrateUnderlayScale(u(), { x: 0, y: 0 }, { x: 50, y: 0 }, -10)).toBe(null);
+    expect(calibrateUnderlayScale(u(), { x: 7, y: 7 }, { x: 7, y: 7 }, 100)).toBe(null);
+    expect(calibrateUnderlayScale(null, { x: 0, y: 0 }, { x: 1, y: 0 }, 100)).toBe(null);
   });
 });
