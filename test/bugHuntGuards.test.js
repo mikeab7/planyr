@@ -336,8 +336,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // background halo is a toggle (on by default) — the paint-order stroke is conditional
     expect(src).toMatch(/const halo = !\(opts && opts\.halo === false\)/);
     expect(src).toMatch(/halo \? \{ paintOrder: "stroke", stroke: "#fff", strokeWidth: haloW \} : null/);
-    // screen-space self-thinning: a minimum PIXEL gap floors the effective feet-spacing
-    expect(src).toMatch(/const minGapPx = Math\.max\(150,/);
+    // screen-space self-thinning is an ANTI-OVERLAP floor (label width + margin), NOT a big fixed floor
+    // that would dominate every zoom and make the spacing control inert
+    expect(src).toMatch(/const minGapPx = label\.length \* fs \* 0\.9;/);
+    expect(src).not.toMatch(/const minGapPx = Math\.max\(150,/);
     expect(src).toMatch(/const effSpacingFt = Math\.max\([\s\S]{0,80}minGapPx \/ Math\.max\(ppf/);
     // every render site threads the feature's own spacing override + { size, halo } opts
     expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,80}\{ size: m\.labelSize, halo: m\.labelHalo \}/);
@@ -348,23 +350,25 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).not.toMatch(/setSelMarkup\(\{ labelSize/);
   });
 
-  it("B679: manual double-tap opens the in-place editor (pointer capture eats the DOM dblclick)", () => {
+  it("B679: double-tap (time + DISTANCE gated) opens the in-place editor; pointer capture eats the DOM dblclick", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    expect(src).toMatch(/const isDoubleTap = \(id\) => \{/);
-    // callout / text box, markup line-polyline-easement, and centerline road all detect the double-tap
-    expect(src).toMatch(/if \(part === "box" && isDoubleTap\(id\)\) \{[\s\S]{0,60}beginEditCallout\(id\); return;/);
-    expect(src).toMatch(/m\.kind === "line" \|\| m\.kind === "polyline" \|\| m\.kind === "easement"\) && isDoubleTap\(id\)/);
-    expect(src).toMatch(/isCenterlineRoad\(el\) && isDoubleTap\(id\)\) \{[\s\S]{0,60}beginEditInline\("el", id\)/);
+    // reconstruct the browser's own double-click test — a second press on the same feature within the
+    // time window AND within the distance threshold (the distance gate kills the select-then-drag misfire)
+    expect(src).toMatch(/const isDoubleTap = \(e, id\) => \{/);
+    expect(src).toMatch(/const near = Math\.abs\(e\.clientX - p\.x\) <= DBLTAP_PX/);
+    // callout / text box (box part), and — only when UNLOCKED — markup line/polyline/easement and centerline road
+    expect(src).toMatch(/if \(part === "box" && isDoubleTap\(e, id\)\) \{[\s\S]{0,60}beginEditCallout\(id\); return;/);
+    expect(src).toMatch(/!m\.locked && \(m\.kind === "line" \|\| m\.kind === "polyline" \|\| m\.kind === "easement"\) && isDoubleTap\(e, id\)/);
+    expect(src).toMatch(/!el\.groupId && !el\.locked && isCenterlineRoad\(el\) && isDoubleTap\(e, id\)/);
   });
 
-  it("B680: callout editor overlays the box EXACTLY — no floor, committed box hidden while editing", () => {
+  it("B680: callout editor hides the committed box + chrome while editing (no doubling), keeps a typeable min", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    // the editor no longer floors its size to 64×30 (that pushed it OUTSIDE a small / zoomed-out box)
-    expect(src).not.toMatch(/const w = Math\.max\(64, tw \+ padX \* 2\)/);
-    expect(src).toMatch(/B680 — size the editor to EXACTLY the committed box/);
-    // the committed box + selection chrome are hidden while THIS callout's editor is open
+    // the committed box + selection chrome are hidden while THIS callout's editor is open → only ONE box
     expect(src).toMatch(/editCallout\?\.id !== c\.id && <rect x=\{bp\.x - w \/ 2\}/);
     expect(src).toMatch(/isSel && tool === "select" && editCallout\?\.id !== c\.id/);
+    // a screen-px minimum is kept ONLY for typeability — safe now the box is hidden (can't double it)
+    expect(src).toMatch(/const w = Math\.max\(64, tw \+ padX \* 2\), h = Math\.max\(30,/);
   });
 
   it("B681: callout align buttons use the Word-style SVG icon, not cryptic glyphs", () => {

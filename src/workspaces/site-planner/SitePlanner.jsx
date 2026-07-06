@@ -426,12 +426,14 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
   const k = Math.max(0.34, Math.min(1, ppf / 0.45));               // gentle, capped at 1 (matches the road-dim clamp)
   const fs = baseSize * k, haloW = Math.max(2, fs * 0.3), offsetPx = fs * 1.05;
   const minSegPx = label.length * fs * 0.6;                        // LOD: the on-screen segment must fit the text (CW_RATIO 0.6)
-  // B678 — screen-space self-thinning: keep restamps at least a comfortable PIXEL gap apart so a
-  // fixed feet-spacing can't cram them together when zoomed out. The label's own on-screen width sets
-  // the floor (never overlap); a fixed floor keeps even short labels from crowding. Convert the gap
-  // back to feet at the current zoom and take the looser of it and the requested feet-spacing — so
-  // zoom-in honours the feet-spacing, zoom-out thins automatically.
-  const minGapPx = Math.max(150, label.length * fs * 1.5);
+  // B678 — screen-space self-thinning is an ANTI-OVERLAP floor, nothing more: keep restamps at least
+  // the label's own on-screen width + ~50% breathing room apart (`len·fs·0.9` ≈ width·1.5), converted
+  // back to feet at the live zoom, and take the LOOSER of it and the requested feet-spacing. So a SHORT
+  // label (whose width is < the feet-spacing on screen) keeps its exact per-type/typed spacing — only a
+  // label that would physically OVERLAP is thinned, and it self-thins further on zoom-out. Deliberately
+  // NOT a large fixed floor: a flat floor would dominate every normal zoom and make the spacing control
+  // inert. (minSegPx already hides an instance whose own segment can't fit the text.)
+  const minGapPx = label.length * fs * 0.9;
   const effSpacingFt = Math.max(Math.max(1, spacingFt || 0), minGapPx / Math.max(ppf, 1e-4));
   const out = [];
   inlineLabelPlaces(ptsFeet, effSpacingFt, offsetPx, f2p).forEach((pl, i) => {
@@ -1632,18 +1634,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // preventDefault. Updates are throttled to one per animation frame so a heavy plan doesn't
   // re-render on every raw touchmove (the other half of the jank).
   const touchCountRef = useRef(0);       // # of fingers currently down (gates the pointer handlers)
-  // B679 — manual double-tap detector. A pointerdown that calls setPointerCapture (every move handler
-  // does, to keep dragging past the SVG edge) SUPPRESSES the browser's synthetic dblclick on the
-  // element, so the wired onDoubleClick never fires for the user (the B620 harness works around this
-  // by dispatching a raw dblclick). We reconstruct the gesture ourselves: a second pointerdown on the
-  // SAME feature within DBLTAP_MS is a double-tap → open the in-place text editor instead of moving.
-  const lastTapRef = useRef({ id: null, t: 0 });
-  const DBLTAP_MS = 400;
-  const isDoubleTap = (id) => {
-    const now = Date.now();
-    const prev = lastTapRef.current;
-    if (prev.id === id && now - prev.t < DBLTAP_MS) { lastTapRef.current = { id: null, t: 0 }; return true; }
-    lastTapRef.current = { id, t: now };
+  // B679 — double-click a feature to edit it in place. A pointerdown that calls setPointerCapture (every
+  // move handler does, to keep dragging past the SVG edge) SUPPRESSES the browser's synthetic dblclick on
+  // the element, so the wired onDoubleClick never fires for the user (the B620 harness works around this
+  // by dispatching a raw dblclick). `e.detail` is 0 on pointerdown (per the Pointer Events spec — click
+  // count only rides mouse events), so we reconstruct the browser's OWN double-click test ourselves:
+  // a second press on the SAME feature within DBLTAP_MS *and* within DBLTAP_PX of the first (the time +
+  // distance thresholds a native double-click uses). The distance gate is what stops a "click here to
+  // select, then press over THERE to drag" gesture from misfiring as an edit.
+  const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0 });
+  const DBLTAP_MS = 350, DBLTAP_PX = 14;
+  const isDoubleTap = (e, id) => {
+    const now = Date.now(), p = lastTapRef.current;
+    const near = Math.abs(e.clientX - p.x) <= DBLTAP_PX && Math.abs(e.clientY - p.y) <= DBLTAP_PX;
+    if (p.id === id && now - p.t < DBLTAP_MS && near) { lastTapRef.current = { id: null, t: 0, x: 0, y: 0 }; return true; }
+    lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY };
     return false;
   };
   const pinch2Ref = useRef(null);        // active baseline { mid, dist } (svg-relative) | null
@@ -2948,9 +2953,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
-    // B679 — double-click a line / polyline / easement → edit its inline label in place (pointer
-    // capture eats the DOM dblclick, so detect the double-tap here). Mirrors the callout path.
-    if (m && (m.kind === "line" || m.kind === "polyline" || m.kind === "easement") && isDoubleTap(id)) {
+    // B679 — double-click an UNLOCKED line / polyline / easement → edit its inline label in place
+    // (pointer capture eats the DOM dblclick, so read e.detail here). Locked features stay select-only.
+    if (m && !m.locked && (m.kind === "line" || m.kind === "polyline" || m.kind === "easement") && isDoubleTap(e, id)) {
       setSel({ kind: "markup", id }); beginEditInline("markup", id); return;
     }
     const mkMods = selMods(e); // Ctrl/⌘-click = toggle in/out, Shift-click = additive add (B569)
@@ -3085,8 +3090,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     // B679 — double-click a callout / text box (box part only) → edit its text in place. Pointer
-    // capture eats the DOM dblclick, so we detect the double-tap here instead of relying on it.
-    if (part === "box" && isDoubleTap(id)) { setSel({ kind: "callout", id }); beginEditCallout(id); return; }
+    // capture eats the DOM dblclick, so we read e.detail on the pointerdown instead.
+    if (part === "box" && isDoubleTap(e, id)) { setSel({ kind: "callout", id }); beginEditCallout(id); return; }
     const c = callouts.find((x) => x.id === id);
     setSel({ kind: "callout", id });
     pushHistory();
@@ -4866,9 +4871,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
-    // B679 — double-click a (non-grouped) centerline road → edit its inline label in place, matching
-    // onElDouble. Pointer capture eats the DOM dblclick, so detect the double-tap here too.
-    if (!el.groupId && isCenterlineRoad(el) && isDoubleTap(id)) { setSel({ kind: "el", id }); beginEditInline("el", id); return; }
+    // B679 — double-click a non-grouped, UNLOCKED centerline road → edit its inline label in place,
+    // matching onElDouble. Pointer capture eats the DOM dblclick, so read e.detail here too.
+    if (!el.groupId && !el.locked && isCenterlineRoad(el) && isDoubleTap(e, id)) { setSel({ kind: "el", id }); beginEditInline("el", id); return; }
     const fp = p2f(e.clientX, e.clientY);
     // Explicit attach/align flows (click a host/target) take precedence.
     if (attachFor) { attachTo(attachFor, el.id); setAttachFor(null); return; }
@@ -6953,8 +6958,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "Inline label" field once the feature actually carries a label. `patch` is the feature-specific,
   // NON-STICKY writer (direct setMarkups / setSelEl, never mkStyle) so a tweak never bleeds into the
   // next drawn shape; each commit pushes ONE undo frame. A plain render-body function (NOT a component)
-  // so it can't remount its inputs. Defaults reproduce the pre-B678 look (per-type spacing · size 11 ·
-  // halo on) — the screen-space min-gap in inlineLabelEls is what thins the restamps on zoom-out.
+  // so it can't remount its inputs. Defaults keep the per-type spacing / size 11 / halo on; the
+  // anti-overlap min-gap in inlineLabelEls only thins labels that would otherwise collide (so a short
+  // label at working zoom is unchanged) and self-thins further on zoom-out.
   const inlineLabelControls = (feat, typeKey, patch) => {
     if (!feat || !(feat.inlineLabel || "").trim()) return null;
     const haloOn = feat.labelHalo !== false;
@@ -8371,11 +8377,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const charW = fontPx * 0.56 * (st.bold ? 1.05 : 1), lineH = fontPx * st.lineHeight;
                 const padX = st.padX * zk, padY = st.padY * zk;
                 const tw = Math.max(fontPx, ...lines.map((l) => l.length * charW));
-                // B680 — size the editor to EXACTLY the committed box (same tw/padX/padY formula, no
-                // floor). The old Math.max(64,·)/Math.max(30,·) floors made the editor wider/taller than
-                // a small or zoomed-out callout, so its box sat offset OUTSIDE the callout, doubling it.
-                // (tw ≥ fontPx keeps the box a usable typing target even when empty.)
-                const w = tw + padX * 2, h = lines.length * lineH + padY * 2;
+                // B680 — the editor uses the committed box's own geometry (tw/padX/padY), so for a
+                // normal callout it overlays the box EXACTLY. The doubling the owner saw came from the
+                // committed box being VISIBLE behind an over-sized editor — now the committed box + its
+                // selection chrome are hidden while editing (below), so there is never a second box. A
+                // screen-px minimum (64×30) is kept ONLY so a tiny / zoomed-way-out / empty callout is
+                // still a usable typing target; because the box is hidden it can no longer double it.
+                const w = Math.max(64, tw + padX * 2), h = Math.max(30, lines.length * lineH + padY * 2);
                 const bp = f2p(c.box);
                 return (
                   <foreignObject x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} style={{ overflow: "visible" }}>

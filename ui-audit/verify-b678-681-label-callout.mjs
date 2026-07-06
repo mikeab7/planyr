@@ -23,16 +23,17 @@ mkdirSync(OUT, { recursive: true });
 const DEMO_ID = "verify-b677";
 
 const parcel = { id: "pc1", locked: false, points: [{ x: -900, y: -450 }, { x: 900, y: -450 }, { x: 900, y: 450 }, { x: -900, y: 450 }] };
-// three ~1400-ft horizontal lines, unique strokes so their labels are easy to find
-const lineA = { id: "lA", kind: "line", a: { x: -700, y: 150 }, b: { x: 700, y: 150 }, stroke: "#b30d6a", weight: 2, dash: "solid", fill: "#b30d6a", fillOpacity: 0, inlineLabel: "AAAAA" };                                   // default spacing (150)
+// ~1400-ft horizontal lines, unique strokes so their labels are easy to find
+const lineA = { id: "lA", kind: "line", a: { x: -700, y: 150 }, b: { x: 700, y: 150 }, stroke: "#b30d6a", weight: 2, dash: "solid", fill: "#b30d6a", fillOpacity: 0, inlineLabel: "AAAAA" };                                   // default spacing (150) — short label, should stay dense
 const lineB = { id: "lB", kind: "line", a: { x: -700, y: 0 },   b: { x: 700, y: 0 },   stroke: "#0d6ab3", weight: 2, dash: "solid", fill: "#0d6ab3", fillOpacity: 0, inlineLabel: "BBBBB", labelSpacing: 700 };                   // wide override → fewer
-const lineC = { id: "lC", kind: "line", a: { x: -700, y: -150 },b: { x: 700, y: -150 },stroke: "#2f7d0d", weight: 2, dash: "solid", fill: "#2f7d0d", fillOpacity: 0, inlineLabel: "CC", labelSpacing: 20, labelSize: 8, labelHalo: false }; // tight + small + no halo
-const calloutX = { id: "coX", text: "CALLOUTX", box: { x: -350, y: 320 }, tip: { x: -540, y: 400 }, fill: "#ffd9a8", stroke: "#7a3b00", color: "#3a1c00", size: 15 };
+const lineC = { id: "lC", kind: "line", a: { x: -700, y: -150 },b: { x: 700, y: -150 },stroke: "#2f7d0d", weight: 2, dash: "solid", fill: "#2f7d0d", fillOpacity: 0, inlineLabel: "STORMSEWER", labelSpacing: 20, labelSize: 8, labelHalo: false }; // LONG label + tight 20ft → anti-overlap floor must thin it; also small font + no halo
+const lineLK = { id: "lLK", kind: "line", a: { x: -700, y: -300 }, b: { x: 700, y: -300 }, stroke: "#8a5a00", weight: 2, dash: "solid", fill: "#8a5a00", fillOpacity: 0, inlineLabel: "LOCKEDLINE", locked: true }; // locked → double-click must NOT open the editor
+const calloutX = { id: "coX", text: "CALLOUTX", box: { x: -350, y: 320 }, tip: { x: -540, y: 400 }, fill: "#ffd9a8", stroke: "#7a3b00", color: "#3a1c00", size: 20 }; // size 20 → box comfortably > 64x30 at fit zoom (exact-overlay test), < 64x30 zoomed way out (floor test)
 const textBoxY = { id: "tbY", text: "TEXTBOXY", box: { x: 380, y: 320 }, noLeader: true, fill: "#a8d9ff", stroke: "#003a5a", color: "#00243a", size: 15 };
 
 const demoSite = {
   id: DEMO_ID, groupId: DEMO_ID, site: "Verify B678", name: "Plan 1", origin: null, county: null,
-  parcels: [parcel], els: [], measures: [], callouts: [calloutX, textBoxY], markups: [lineA, lineB, lineC],
+  parcels: [parcel], els: [], measures: [], callouts: [calloutX, textBoxY], markups: [lineA, lineB, lineC, lineLK],
   settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now(),
 };
 const seed = `(() => { try {
@@ -67,38 +68,54 @@ const readLabelTexts = (content) => page.evaluate((c) => {
     out.push({
       fontSize: parseFloat(cs.fontSize) || parseFloat(t.getAttribute("font-size")) || 0,
       hasHalo: (cs.paintOrder || t.style.paintOrder || "").includes("stroke") && /255,\s*255,\s*255/.test(cs.stroke || ""),
-      cx: b.x + b.width / 2,
+      cx: b.x + b.width / 2, w: b.width,
     });
   }
   return out;
 }, content);
+// smallest centre-to-centre gap between consecutive restamps of a label (screen px), + the label width
+const gapStats = (texts) => {
+  const s = [...texts].sort((p, q) => p.cx - q.cx);
+  let minGap = Infinity;
+  for (let i = 1; i < s.length; i++) minGap = Math.min(minGap, s[i].cx - s[i - 1].cx);
+  return { minGap, width: s[0]?.w || 0, n: s.length };
+};
 
-// ---- B678: spacing override reduces restamp frequency ----
+// ---- B678: the spacing control works UPWARD — a wider labelSpacing yields fewer restamps ----
 const aTexts = await readLabelTexts("AAAAA");
 const bTexts = await readLabelTexts("BBBBB");
 log(aTexts.length > bTexts.length && bTexts.length >= 1,
   `B678 wider labelSpacing → FEWER restamps (default line ${aTexts.length} vs wide-spacing line ${bTexts.length})`);
 
-// ---- B678: tight labelSpacing self-thins via the screen-space min-gap (no crowding) ----
-const cTexts = (await readLabelTexts("CC")).sort((p, q) => p.cx - q.cx);
-let minGap = Infinity;
-for (let i = 1; i < cTexts.length; i++) minGap = Math.min(minGap, cTexts[i].cx - cTexts[i - 1].cx);
-log(cTexts.length >= 2 && minGap >= 110,
-  `B678 tight labelSpacing (20 ft) SELF-THINS — restamps stay ≥110px apart on screen (min gap ${Number.isFinite(minGap) ? Math.round(minGap) : "n/a"}px, ${cTexts.length} shown)`);
+// ---- B678 (finding #1 fix): a SHORT label at the default 150ft spacing is NOT over-thinned ----
+log(aTexts.length >= 6,
+  `B678 short default-spacing label stays dense (${aTexts.length} restamps — NOT crushed to ~4 by an over-aggressive floor)`);
+
+// ---- B678: labels NEVER overlap — the anti-overlap floor keeps consecutive restamps ≥ label width apart ----
+const aGap = gapStats(aTexts);
+log(aTexts.length >= 2 && aGap.minGap >= aGap.width * 0.98,
+  `B678 default line: restamps never overlap (min gap ${Math.round(aGap.minGap)}px ≥ label width ${Math.round(aGap.width)}px)`);
+
+// ---- B678 (self-thin): a LONG label with a TIGHT 20ft spacing is thinned by the floor so it can't overlap ----
+const cTexts = await readLabelTexts("STORMSEWER");
+const cGap = gapStats(cTexts);
+log(cTexts.length >= 2 && cGap.minGap >= cGap.width * 0.98,
+  `B678 long label + tight 20ft spacing SELF-THINS to non-overlap (min gap ${Math.round(cGap.minGap)}px ≥ label width ${Math.round(cGap.width)}px, ${cTexts.length} shown)`);
 
 // ---- B678: labelSize override + labelHalo:false ----
 log(cTexts.length >= 1 && aTexts.length >= 1 && cTexts[0].fontSize < aTexts[0].fontSize,
   `B678 labelSize override shrinks the font (styled ${cTexts[0]?.fontSize?.toFixed(1)}px < default ${aTexts[0]?.fontSize?.toFixed(1)}px)`);
 log(cTexts.length >= 1 && !cTexts[0].hasHalo && aTexts[0].hasHalo,
   `B678 labelHalo:false removes the white halo (styled hasHalo=${cTexts[0]?.hasHalo}, default hasHalo=${aTexts[0]?.hasHalo})`);
-await page.screenshot({ path: OUT + "b677-inline-label-controls.png" });
+await page.screenshot({ path: OUT + "b678-inline-label-controls.png" });
 
-// ---- helper: a REAL physical double-click at a screen point (two down/up pairs) ----
+// ---- helper: a REAL physical double-click at a screen point — two down/up pairs at the SAME spot,
+//      close in time, exactly the gesture the time+distance-gated isDoubleTap reconstructs. ----
 const realDblClick = async (x, y) => {
   await page.mouse.move(x, y);
-  await page.mouse.down(); await page.mouse.up();
-  await page.waitForTimeout(60);
-  await page.mouse.down(); await page.mouse.up();
+  await page.mouse.down(); await page.mouse.up();   // click 1
+  await page.waitForTimeout(50);
+  await page.mouse.down(); await page.mouse.up();   // click 2 (same spot, <350ms → double-tap)
   await page.waitForTimeout(250);
 };
 // centre of a committed callout box, found by its unique fill
@@ -143,24 +160,52 @@ log(lineEditor != null && lineEditor.includes("AAAAA"),
 await page.keyboard.press("Escape");
 await page.waitForTimeout(200);
 
-// ---- B680: editor overlays the callout box EXACTLY, verified ZOOMED OUT (the floor-trigger regime) ----
+// ---- B679 (locked guard): double-clicking a LOCKED line must NOT open the editor ----
+const lockMid = await page.evaluate(() => {
+  const l = [...document.querySelectorAll("svg line")].find((x) => (x.getAttribute("stroke") || "").toLowerCase() === "#8a5a00");
+  if (!l) return null;
+  const x1 = +l.getAttribute("x1"), y1 = +l.getAttribute("y1"), x2 = +l.getAttribute("x2"), y2 = +l.getAttribute("y2");
+  const svg = l.ownerSVGElement.getBoundingClientRect();
+  return { x: svg.x + (x1 + x2) / 2, y: svg.y + (y1 + y2) / 2 };
+});
+if (lockMid) await realDblClick(lockMid.x, lockMid.y);
+const lockedOpenedEditor = await page.evaluate(() => !!document.querySelector("foreignObject input"));
+log(lockMid && !lockedOpenedEditor, `B679 double-click a LOCKED line does NOT open the editor (lock respected)`);
+if (lockedOpenedEditor) await page.keyboard.press("Escape");
+await page.waitForTimeout(150);
+
+// ---- B680 (normal zoom): a comfortably-sized callout box is overlaid EXACTLY (floor inert) ----
+cc = await calloutCenter("#ffd9a8");
+log(!!cc && cc.w >= 64 && cc.h >= 30,
+  `B680 normal-zoom callout box is above the typeable floor (box ${cc ? Math.round(cc.w) + "×" + Math.round(cc.h) : "n/a"} ≥ 64×30)`);
+if (cc && cc.w >= 64 && cc.h >= 30) {
+  await realDblClick(cc.x, cc.y);
+  const ta = await page.evaluate(() => { const t = document.querySelector("foreignObject textarea"); if (!t) return null; const b = t.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height }; });
+  const stillHasCommittedRect = await page.evaluate(() => [...document.querySelectorAll("svg rect")].some((x) => (x.getAttribute("fill") || "").toLowerCase() === "#ffd9a8"));
+  log(!!ta && Math.abs(ta.x - cc.x) <= 3 && Math.abs(ta.y - cc.y) <= 3 && Math.abs(ta.w - cc.w) <= 4 && Math.abs(ta.h - cc.h) <= 4,
+    `B680 editor overlays the box EXACTLY at normal zoom (box ${Math.round(cc.w)}×${Math.round(cc.h)} vs editor ${ta ? Math.round(ta.w) + "×" + Math.round(ta.h) : "n/a"}, Δcenter ${ta ? Math.round(Math.abs(ta.x - cc.x)) + "," + Math.round(Math.abs(ta.y - cc.y)) : "n/a"}px)`);
+  log(!stillHasCommittedRect, `B680 committed box hidden during edit — no second offset box (normal zoom)`);
+  await page.screenshot({ path: OUT + "b680-editor-overlay.png" });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+}
+
+// ---- B680 (zoomed out): tiny box → editor floors to a typeable min, committed box still hidden ----
 await page.mouse.move(720, 450);
 for (let i = 0; i < 9; i++) { await page.mouse.wheel(0, 400); await page.waitForTimeout(50); }
 await page.waitForTimeout(300);
 cc = await calloutCenter("#ffd9a8");                       // committed box rect BEFORE editing (zoomed out)
-log(!!cc && (cc.w < 64 || cc.h < 30),
-  `B680 zoomed out into the OLD floor regime — box ${cc ? Math.round(cc.w) + "×" + Math.round(cc.h) : "n/a"} (< 64×30, so the removed Math.max floor WOULD have mis-sized it)`);
+log(!!cc && cc.w < 64 && cc.h < 30,
+  `B680 zoomed out → tiny callout box ${cc ? Math.round(cc.w) + "×" + Math.round(cc.h) : "n/a"} (< 64×30, where the editor must NOT collapse)`);
 if (cc) {
   await realDblClick(cc.x, cc.y);
   const ta = await page.evaluate(() => { const t = document.querySelector("foreignObject textarea"); if (!t) return null; const b = t.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height }; });
-  // committed box hidden during edit → only ONE box remains (the editor)
   const stillHasCommittedRect = await page.evaluate(() => [...document.querySelectorAll("svg rect")].some((x) => (x.getAttribute("fill") || "").toLowerCase() === "#ffd9a8"));
+  log(!!ta && ta.w >= 62 && ta.h >= 28,
+    `B680 editor stays a typeable size when the box is tiny (editor ${ta ? Math.round(ta.w) + "×" + Math.round(ta.h) : "n/a"} ≥ ~64×30)`);
   log(!!ta && Math.abs(ta.x - cc.x) <= 3 && Math.abs(ta.y - cc.y) <= 3,
-    `B680 editor CENTERED on the callout box (Δcenter ${ta ? Math.round(Math.abs(ta.x - cc.x)) + "," + Math.round(Math.abs(ta.y - cc.y)) : "n/a"}px)`);
-  log(!!ta && Math.abs(ta.w - cc.w) <= 4 && Math.abs(ta.h - cc.h) <= 4,
-    `B680 editor SIZE matches the callout box (box ${Math.round(cc.w)}×${Math.round(cc.h)} vs editor ${ta ? Math.round(ta.w) + "×" + Math.round(ta.h) : "n/a"})`);
-  log(!stillHasCommittedRect, `B680 committed box hidden during edit — no second offset box`);
-  await page.screenshot({ path: OUT + "b679-editor-overlay.png" });
+    `B680 editor CENTERED on the callout box when zoomed out (Δcenter ${ta ? Math.round(Math.abs(ta.x - cc.x)) + "," + Math.round(Math.abs(ta.y - cc.y)) : "n/a"}px)`);
+  log(!stillHasCommittedRect, `B680 committed box hidden during edit — no second offset box (zoomed out)`);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
 }
