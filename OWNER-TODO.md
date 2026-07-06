@@ -64,12 +64,12 @@ _Last updated: 2026-07-06._
 ## Run this SQL (one-click in Supabase) — syncs your Library **pins** across your devices (B676)
 > **One file, for the main app project `lyeqzkuiwngunutlkkmi`; safe + idempotent (re-run the whole file
 > anytime). Claude hands you the file.**
-- [ ] Run `pins.sql`. Until you do, your Library pins (the ☆ folders/files on the Library home) stay on
-      **this one computer**; after, your pinned folders and files **follow your account to any device you
-      sign in on**. Nothing else changes — pins keep working per-device in the meantime, and on your first
-      signed-in visit after the table exists, this computer's existing pins copy up to the cloud automatically
-      (safe + non-destructive). The signed-in cross-device click-through is the Claude cohort's job
-      (`VERIFICATION.md` V222), not yours.
+- [x] ~~Run `pins.sql`.~~ — **DONE (owner ran it 2026-07-06; Claude verified the live schema in prod the
+      same day: `public.pins` table + all 7 columns + RLS enabled + all 4 own-row policies + the
+      `pins_user_created_idx` index all present).** Your Library pins (the ☆ folders/files on the Library
+      home) now **follow your account to any device you sign in on** — this computer's existing pins copy up
+      automatically on your first signed-in visit (safe + non-destructive). Nothing left on your plate; the
+      signed-in cross-device click-through is the Claude cohort's job (`VERIFICATION.md` V222), not yours.
 
 ## Things Claude needs FROM Michael to finish/verify
 - [x] **Drainage-manual transcription (B636 tail) — DONE (Cowork pulled the PDFs itself 2026-07-05; nothing needed from you).**
