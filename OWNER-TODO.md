@@ -5,7 +5,17 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-05._
+_Last updated: 2026-07-06._
+
+## 🔌 Turn on the new Claude connector (B675 — ~5 minutes, copy-paste)
+- [ ] **Add 3 settings in Cloudflare Pages, then add the connector in Claude.** Claude handed you the
+      walkthrough file in chat (2026-07-06) with the exact values ready to paste: (1) in Cloudflare Pages →
+      your planyr project → Settings → Environment variables (Production), add `PLANYR_MCP_TOKEN` (the random
+      secret from the file), `PLANYR_MCP_OWNER_ID` (your account id, in the file), and
+      `SUPABASE_SERVICE_ROLE_KEY` (copied from the Supabase dashboard — the file shows exactly where);
+      (2) redeploy; (3) in claude.ai → Settings → Connectors → add the connector web address from the file.
+      Until this is done the new endpoint stays invisible (it answers "Not found" to everyone) — nothing is
+      exposed by waiting. After you add the settings, the Claude cohort runs the technical checks (V220).
 
 ## Decisions only Michael can make
 - [ ] **Which big feature to build next.** In progress: he picked **Team Workspaces** (find/fix bugs) on 2026-06-27.
