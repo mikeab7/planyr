@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { planAutosave } from "../src/workspaces/doc-review/lib/autosavePlan.js";
-import { isStoredSource, storeSource } from "../src/workspaces/doc-review/lib/reviewStore.js";
+import { isStoredSource, storeSource, guessContentType } from "../src/workspaces/doc-review/lib/reviewStore.js";
 
 /* B324/NEW-4 — a genuine edit made inside the ~1.5 s post-open suspend window must still be
  * mirrored + flagged dirty (so it's recoverable and flushes to the cloud), while only the
@@ -63,5 +63,25 @@ describe("storeSource — Drive-first/Supabase-fallback, degrades gracefully (B3
   it("a result that didn't store anything is correctly judged not-persistable", async () => {
     const r = await storeSource("src2", { size: 10, type: "application/pdf" }, {});
     expect(isStoredSource(r)).toBe(false);
+  });
+});
+
+/* B685 — any file type stores with a sensible content type. The browser's own file.type wins
+ * when present; a typeless file (dragged CAD, some pickers) derives one from the extension so
+ * Drive/Supabase don't mislabel a DWG as a PDF; a truly unknown extension is the safe generic. */
+describe("guessContentType — sensible MIME for any file (B685)", () => {
+  it("prefers the browser-provided type when set", () => {
+    expect(guessContentType("whatever.bin", "image/png")).toBe("image/png");
+  });
+  it("derives from the extension when the type is empty", () => {
+    expect(guessContentType("plan.pdf", "")).toBe("application/pdf");
+    expect(guessContentType("site.DWG", "")).toBe("image/vnd.dwg"); // case-insensitive
+    expect(guessContentType("budget.xlsx", "")).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    expect(guessContentType("photo.jpeg", "")).toBe("image/jpeg");
+  });
+  it("falls back to the generic binary type for unknown / missing extensions", () => {
+    expect(guessContentType("mystery.qqq", "")).toBe("application/octet-stream");
+    expect(guessContentType("", "")).toBe("application/octet-stream");
+    expect(guessContentType(null, null)).toBe("application/octet-stream");
   });
 });

@@ -23,7 +23,7 @@ export const QUEUE_STATUS = {
   DONE: "done",                 // filed under a project — demotes to the trail after the beat
   NEEDS_FILING: "needs_filing", // filed but unrouted (no / low-confidence match) — stays until triaged
   FAILED: "failed",             // pipeline error — stays until retried
-  REJECTED: "rejected",         // unsupported file type — never entered the pipeline
+  REJECTED: "rejected",         // empty / unreadable file — never entered the pipeline
 };
 
 // How long a freshly-filed item stays in the active group before it demotes into the
@@ -34,12 +34,37 @@ export const RECENT_BEAT_MS = 3000;
 // The recently-filed trail collapses by default once it grows past this many entries.
 export const RECENT_COLLAPSE_AT = 3;
 
-// We accept PDFs into the pipeline. Anything else gets a clear per-file rejection row
-// (never silently discarded), so a mixed drop is honest about what it took and what it didn't.
+// We accept ANY file type into the pipeline (B685 — owner: "I should be able to upload any
+// file type"). The Library is a general document store, not a PDF-only inbox: DWG, images,
+// spreadsheets, Word docs, ZIPs — all belong. The only thing we reject is an empty / unreadable
+// file, which is a genuine mistake rather than a "type" (never silently discarded — it still
+// gets a clear per-file row). PDFs keep their special powers (title-block auto-filing, sheet
+// stitching); other types are simply stored, indexed, shareable, and downloadable.
 export function isAcceptedFile(file) {
-  if (!file) return false;
-  const name = (file.name || "").toLowerCase();
-  return file.type === "application/pdf" || /\.pdf$/.test(name);
+  return !!(file && file.size > 0);
+}
+
+// True when a file is (or names) a PDF — the only type the markup canvas can render and the
+// only type the title-block auto-filer reads. Callers use it to branch (open-in-Review vs.
+// download, read-title-block vs. skip) without re-implementing the check.
+export function isPdfName(nameOrFile) {
+  if (!nameOrFile) return false;
+  if (typeof nameOrFile === "string") return /\.pdf$/i.test(nameOrFile);
+  return nameOrFile.type === "application/pdf" || /\.pdf$/i.test(nameOrFile.name || "");
+}
+
+// OS / application junk a folder sweep drags along that the user never meant to file: hidden
+// dotfiles (.DS_Store, .git…), Windows thumbnail caches, Office lock files, and zero-byte
+// entries. Loose hand-picked files are always honoured (the user chose them); only FOLDER
+// drops filter these out, with one honest "skipped N system files" summary.
+export function isJunkFile(file) {
+  if (!file) return true;
+  const base = String(file.name || "").split("/").pop();
+  if (!base) return true;
+  if (base.startsWith(".")) return true;                 // .DS_Store, .gitignore, dotfiles
+  if (/^~\$/.test(base)) return true;                    // Office lock files (~$Report.docx)
+  if (/^(Thumbs\.db|desktop\.ini)$/i.test(base)) return true;
+  return !(file.size > 0);                               // zero-byte / unreadable
 }
 
 let _seq = 0;
@@ -51,8 +76,8 @@ export function makeUploadId() {
   return `up_${Date.now().toString(36)}_${_seq}`;
 }
 
-// One independent queue item per file. Accepted files start PROCESSING; unsupported types
-// start REJECTED with a plain reason (so the row explains itself rather than vanishing).
+// One independent queue item per file. Real files start PROCESSING; an empty / unreadable
+// file starts REJECTED with a plain reason (so the row explains itself rather than vanishing).
 export function makeQueueItem(file, { uploadId } = {}) {
   const accepted = isAcceptedFile(file);
   return {
@@ -61,7 +86,7 @@ export function makeQueueItem(file, { uploadId } = {}) {
     sizeMB: file && file.size ? file.size / (1024 * 1024) : 0,
     file: file || null,
     status: accepted ? QUEUE_STATUS.PROCESSING : QUEUE_STATUS.REJECTED,
-    error: accepted ? null : "Not a PDF — only PDFs can be filed.",
+    error: accepted ? null : "This file is empty or couldn’t be read.",
     warn: null,    // non-fatal note on an otherwise-filed item (e.g. upload / Drive degraded)
     filedAt: null, // set when it reaches a terminal "filed" state; drives the demote beat
     reviewId: null,
@@ -153,13 +178,14 @@ export function dropItemsToEntries(dataTransfer) {
   return out;
 }
 
-// Split a flat file list into the PDFs we'll file and the rest we'll skip. Used for
-// FOLDER drops/picks, where a real project folder legitimately holds non-PDF files
-// (DWG, spreadsheets, images): we file the PDFs and report ONE honest "skipped N"
-// summary instead of N red rejection rows the user never hand-picked.
+// Split a flat file list into the files we'll file and the OS/app junk we'll skip. Used for
+// FOLDER drops/picks, where sweeping a real project folder drags along hidden dotfiles,
+// thumbnail caches and lock files the user never meant to upload: we file every real file
+// (of ANY type — B685) and report ONE honest "skipped N system files" summary instead of a
+// row per stray. (Loose hand-picked files bypass this — the user chose exactly those.)
 export function partitionAccepted(files) {
   const accepted = [], skipped = [];
-  for (const f of [...(files || [])]) (isAcceptedFile(f) ? accepted : skipped).push(f);
+  for (const f of [...(files || [])]) (isJunkFile(f) ? skipped : accepted).push(f);
   return { accepted, skipped };
 }
 

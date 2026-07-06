@@ -50,6 +50,9 @@ export function factsRowToPatch(row = {}) {
     placement: mergePlacementFacts(emptyPlacementFacts(), row.placement),
     placed: !!(row.placement && row.placement.placed),
     needsFiling: !!row.needs_filing,
+    // The original upload's filename (B685) — carries the extension, so the Library can tell a
+    // PDF (open in Review) from any other file (offer a download) without loading the record.
+    sourceFile: row.source_file || "",
     sheetNumber: row.sheet_number || "",
     sheetTitle: row.sheet_title || "",
     matchConfidence: typeof row.match_confidence === "number" ? row.match_confidence : null,

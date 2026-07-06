@@ -81,6 +81,30 @@ const headerSafe = (s) => String(s || "").replace(/[^\x20-\x7E]/g, "-").trim() |
 const storageKeyFor = (uid, projectId, discipline, srcId) =>
   `${uid}/project-${projectId ? slug(projectId) : "unfiled"}/${discipline ? slug(discipline) : "other"}/${srcId}.pdf`;
 
+// Best-effort MIME for a stored file (B685 — any file type). The browser fills `file.type` for
+// most picks, but drag-dropped CAD files (.dwg/.dxf) and some pickers hand back an EMPTY type;
+// derive one from the extension so Drive/Supabase file the bytes with a sensible content type
+// (a wrong "application/pdf" on a DWG would mislabel it in Drive). Unknown → the safe generic
+// binary type, never a wrong specific one.
+const CONTENT_TYPE_BY_EXT = {
+  pdf: "application/pdf",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+  tif: "image/tiff", tiff: "image/tiff", bmp: "image/bmp", svg: "image/svg+xml", heic: "image/heic",
+  dwg: "image/vnd.dwg", dxf: "image/vnd.dxf", dwf: "model/vnd.dwf",
+  doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  csv: "text/csv", txt: "text/plain", rtf: "application/rtf",
+  zip: "application/zip", rar: "application/vnd.rar", "7z": "application/x-7z-compressed",
+  kml: "application/vnd.google-earth.kml+xml", kmz: "application/vnd.google-earth.kmz",
+};
+export function guessContentType(name = "", type = "") {
+  if (type) return type;
+  const m = /\.([a-z0-9]+)$/i.exec(String(name || ""));
+  const ext = m ? m[1].toLowerCase() : "";
+  return CONTENT_TYPE_BY_EXT[ext] || "application/octet-stream";
+}
+
 /* ------------------------- review records (Postgres) ------------------------ */
 
 // Per-tab `version` tokens for the optimistic-concurrency guard (B314), populated by
@@ -382,7 +406,7 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
   try {
     const resp = await fetch("/api/files", {
       method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": file.type || "application/pdf",
+      headers: { authorization: `Bearer ${token}`, "content-type": guessContentType(name, file.type),
         "x-planyr-key": driveKey, "x-planyr-folder": folder, "x-planyr-name": name,
         // Tree targeting (B650 follow-on): the server files the bytes into the project's
         // standard folder tree (Design → Drawings → discipline → Current) when it's mirrored;
@@ -413,7 +437,7 @@ export async function uploadLargeToDrive(file, { projectId = null, discipline = 
   const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
   const name = fileName || "document.pdf";
   const driveKey = `${folder}/${name}`; // the key the read-back GET uses (server prefixes the uid)
-  const contentType = file.type || "application/pdf";
+  const contentType = guessContentType(name, file.type);
   try {
     // 1) INIT — server mints a resumable session bound to this origin (for the cross-origin PUT).
     const initResp = await fetch("/api/files/resumable", {
@@ -503,7 +527,7 @@ export async function fileNewReview({ projectId = null, project = "", discipline
   const srcId = newSourceId();
   // Use the drawing's own date when auto-filing supplies one (YYYY-MM-DD); else today.
   const filedDate = (typeof docDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(docDate)) ? docDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
-  const itemLabel = item || (fileName || "Document").replace(/\.pdf$/i, "");
+  const itemLabel = item || (fileName || "Document").replace(/\.[a-z0-9]{1,8}$/i, "");
   // Store the bytes Drive-first, Supabase-fallback (the one shared policy — see storeSource).
   const stored = blob
     ? await storeSource(srcId, blob, { projectId, discipline, fileName })
@@ -565,7 +589,7 @@ export async function uploadSource(srcId, blob, projectId, discipline) {
   if (blob.size > MAX_BYTES) return { ok: false, oversize: true, storageKey: null };
   const key = storageKeyFor(uid, projectId, discipline, srcId);
   const { error } = await supabase.storage.from(BUCKET).upload(key, blob, {
-    contentType: "application/pdf", upsert: true,
+    contentType: guessContentType(blob && blob.name, blob && blob.type), upsert: true,
   });
   if (error) return { ok: false, error: error.message };
   return { ok: true, oversize: false, storageKey: key };
