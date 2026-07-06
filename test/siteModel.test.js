@@ -19,8 +19,9 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     expect(m.constraints).toEqual({ liveLayers: [] });
   });
 
-  it("accepts the legacy `elements` field as `els` (lossless back-compat)", () => {
-    expect(createSiteModel({ elements: [{ id: "a" }] }).els).toEqual([{ id: "a" }]);
+  it("accepts the legacy `elements` field as `els` (lossless back-compat + additive v12 z)", () => {
+    // The element is carried over verbatim; createSiteModel additively assigns the v12 `z` (B671).
+    expect(createSiteModel({ elements: [{ id: "a" }] }).els).toEqual([{ id: "a", z: 0 }]);
   });
 
   // B67 parcel-attached drawings: additive field, coerced + filterable by parcel.

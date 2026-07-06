@@ -59,7 +59,15 @@ export const toHex6 = (c) => {
 // cover a building (a dock dog-ear is a building bump-out that sits ON the court).
 const Z_LAYER = { road: 0, paving: 1, sidewalk: 1, landscape: 1, pond: 2, parking: 3, trailer: 3, building: 5 };
 export const zOrder = (el) => Z_LAYER[el.type] ?? 4;
-export const byZ = (a, b) => zOrder(a) - zOrder(b);
+// Paint order = the type layer, then the element's explicit `z` (the within-type tiebreak, B671),
+// then id. Before v12 this leaned on Array.sort being stable + array position as the tiebreak — but
+// array order isn't preserved across the cross-tab merge and has no per-row home once elements are
+// individual site_elements rows, so the tiebreak is now the explicit z (0 for any not-yet-migrated
+// element) with id as the final deterministic decider.
+export const byZ = (a, b) =>
+  zOrder(a) - zOrder(b) ||
+  (a.z || 0) - (b.z || 0) ||
+  (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
 
 // Outline of an element in planner feet: polygon points, or the rect's four
 // rotated corners.

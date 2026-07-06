@@ -30,8 +30,11 @@ describe("B487 — dog-ear children re-anchor to the host's current edge on load
   });
 
   it("leaves a correctly-anchored dog-ear untouched (idempotent — no version churn)", () => {
-    const good = { ...DRIFTED, ...dogEarGeom(HOST, DRIFTED.dogEar) };
-    const m = createSiteModel({ id: "s", els: [HOST, good] });
+    // z present (v12 shape) so ensureZ no-ops → this isolates the dog-ear re-anchor's identity
+    // preservation from the one-time z migration (which necessarily rebuilds objects to add z).
+    const goodHost = { ...HOST, z: 0 };
+    const good = { ...DRIFTED, ...dogEarGeom(HOST, DRIFTED.dogEar), z: 1024 };
+    const m = createSiteModel({ id: "s", els: [goodHost, good] });
     const fixed = m.els.find((e) => e.id === "e8986");
     // Object identity is preserved when nothing changes → cheap re-load.
     expect(fixed).toBe(good);

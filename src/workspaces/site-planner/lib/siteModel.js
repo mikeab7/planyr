@@ -19,8 +19,17 @@ import { dogEarGeom, dogEarSize, isDogEarSide } from "./dogEar.js";
 import { roadCenterline } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS } from "./roadClasses.js";
+import { ensureZ } from "./zOrder.js";
 
-export const SITE_MODEL_VERSION = 11;
+// v12 (B671): every drawn element carries an explicit `z` — the within-type-layer stacking
+// tiebreak that used to be IMPLICIT array position (see planStyle.byZ). `ensureZ` assigns a gapped
+// z (idx*Z_GAP, matching the site_elements SQL backfill) to any collection MISSING it, and returns
+// the same reference untouched when every element already has a distinct z — so a re-load of
+// already-migrated data churns nothing (no new objects, no spurious version bump). The array is
+// left in place (not reordered): render/hit-test read order from byZ (type layer, then z), and
+// leaving order alone keeps element object identity and the fixtures stable.
+
+export const SITE_MODEL_VERSION = 12;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
@@ -214,7 +223,7 @@ export function createSiteModel(p = {}) {
     // a fresh record (no prior version) starts in "pursuit".
     status: normStatus(p.status, isLegacyRecord(p) ? LEGACY_STATUS : DEFAULT_STATUS),
     // inputs
-    parcels: arr(p.parcels),
+    parcels: ensureZ(arr(p.parcels)),
     underlay: p.underlay || null,
     // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by
     // hand. Each: {id,name,src,imgW,imgH,page,pageCount,x,y,ftPerPx,rotation,opacity,locked}
@@ -229,10 +238,10 @@ export function createSiteModel(p = {}) {
     // each only touching records that need it: legacy rect roads → centerline model (B596);
     // bonded children re-anchored to their host's angle (B363); dog-ear children snapped to
     // their host's current edge (B487, Jacintoport orphan-bumpout).
-    els: normalizeDogEarPositions(normalizeBondedRotations(migrateRoads(Array.isArray(p.els) ? p.els : arr(p.elements)))),
-    markups: arr(p.markups),
-    measures: arr(p.measures),
-    callouts: arr(p.callouts),
+    els: ensureZ(normalizeDogEarPositions(normalizeBondedRotations(migrateRoads(Array.isArray(p.els) ? p.els : arr(p.elements))))),
+    markups: ensureZ(arr(p.markups)),
+    measures: ensureZ(arr(p.measures)),
+    callouts: ensureZ(arr(p.callouts)),
     // Delete-tombstones (B276): ids the user DELIBERATELY deleted. The cross-copy merge
     // (mergeSiteContent) unions drawn collections by id, which would otherwise RESURRECT a
     // deleted item from a stale/other copy that still has it (the documented B126 trade-off

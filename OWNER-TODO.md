@@ -7,6 +7,16 @@
 
 _Last updated: 2026-07-06._
 
+## 🔌 Turn on the new Claude connector (B675 — ~5 minutes, copy-paste)
+- [ ] **Add 3 settings in Cloudflare Pages, then add the connector in Claude.** Claude handed you the
+      walkthrough file in chat (2026-07-06) with the exact values ready to paste: (1) in Cloudflare Pages →
+      your planyr project → Settings → Environment variables (Production), add `PLANYR_MCP_TOKEN` (the random
+      secret from the file), `PLANYR_MCP_OWNER_ID` (your account id, in the file), and
+      `SUPABASE_SERVICE_ROLE_KEY` (copied from the Supabase dashboard — the file shows exactly where);
+      (2) redeploy; (3) in claude.ai → Settings → Connectors → add the connector web address from the file.
+      Until this is done the new endpoint stays invisible (it answers "Not found" to everyone) — nothing is
+      exposed by waiting. After you add the settings, the Claude cohort runs the technical checks (V220).
+
 ## Decisions only Michael can make
 - [ ] **Which big feature to build next.** In progress: he picked **Team Workspaces** (find/fix bugs) on 2026-06-27.
       The other candidates still waiting: **Revision compare** (overlay/diff two drawing versions), **Named markup
@@ -51,7 +61,7 @@ _Last updated: 2026-07-06._
       the mirror sync — fixed same-day (B662, chunked sync). Nothing on Michael's plate; the live Drive
       click-through is the Claude cohort's job (`VERIFICATION.md` V208/V209/V214, not his).
 
-## Run this SQL (one-click in Supabase) — syncs your Library **pins** across your devices (B675)
+## Run this SQL (one-click in Supabase) — syncs your Library **pins** across your devices (B676)
 > **One file, for the main app project `lyeqzkuiwngunutlkkmi`; safe + idempotent (re-run the whole file
 > anytime). Claude hands you the file.**
 - [ ] Run `pins.sql`. Until you do, your Library pins (the ☆ folders/files on the Library home) stay on
@@ -59,7 +69,7 @@ _Last updated: 2026-07-06._
       sign in on**. Nothing else changes — pins keep working per-device in the meantime, and on your first
       signed-in visit after the table exists, this computer's existing pins copy up to the cloud automatically
       (safe + non-destructive). The signed-in cross-device click-through is the Claude cohort's job
-      (`VERIFICATION.md` V220), not yours.
+      (`VERIFICATION.md` V222), not yours.
 
 ## Things Claude needs FROM Michael to finish/verify
 - [x] **Drainage-manual transcription (B636 tail) — DONE (Cowork pulled the PDFs itself 2026-07-05; nothing needed from you).**
