@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   QUEUE_STATUS, RECENT_BEAT_MS, RECENT_COLLAPSE_AT,
   isAcceptedFile, isPdfName, isJunkFile, makeQueueItem, makeQueueItems, splitQueue, hasPendingDemote, runPool,
-  entryToFiles, flattenEntries, dropItemsToEntries, partitionAccepted,
+  entryToFiles, flattenEntries, dropItemsToEntries, partitionAccepted, fileRelDirs,
 } from "../src/shared/files/uploadQueue.js";
 
 const pdf = (name = "a.pdf", size = 1000) => ({ name, size, type: "application/pdf" });
@@ -226,5 +226,27 @@ describe("uploadQueue — concurrency pool (Amendment A)", () => {
     await runPool([1, 2], async () => { count += 1; }, 0);
     expect(count).toBe(2);
     await expect(runPool([], async () => { throw new Error("should not run"); }, 3)).resolves.toBeUndefined();
+  });
+});
+
+describe("uploadQueue — structure-preserving folder drops (B699)", () => {
+  // Named fakes: the B699 walk stamps each file with WHERE it sat inside the dropped folder.
+  const namedDir = (name, batches) => ({
+    isFile: false, isDirectory: true, name,
+    createReader: () => { let i = 0; return { readEntries: (res) => res(i < batches.length ? batches[i++] : []) }; },
+  });
+
+  it("entryToFiles stamps relPath through nested named folders", async () => {
+    const d = pdf("deep.pdf"), r = pdf("root.pdf");
+    const tree = namedDir("Civil", [[fileEntry(r), namedDir("Old", [[fileEntry(d)]])]]);
+    const files = await entryToFiles(tree);
+    expect(files.map((f) => f.relPath)).toEqual(["Civil/root.pdf", "Civil/Old/deep.pdf"]);
+  });
+
+  it("fileRelDirs reads the directory chain from either capture path", () => {
+    expect(fileRelDirs({ relPath: "Civil/Old/deep.pdf" })).toEqual(["Civil", "Old"]);
+    expect(fileRelDirs({ webkitRelativePath: "Drop/05. Civil/plan.pdf" })).toEqual(["Drop", "05. Civil"]);
+    expect(fileRelDirs(pdf("loose.pdf"))).toEqual([]); // a hand-picked loose file has no chain
+    expect(fileRelDirs(null)).toEqual([]);
   });
 });
