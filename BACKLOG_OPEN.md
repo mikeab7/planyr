@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _48 open · 22 awaiting live verification._
+> _48 open · 26 awaiting live verification._
 
 ## 🔲 Open
 
@@ -63,6 +63,10 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B703 | Elevation layer painted Houston terrain as one flat green sheet — replaced with view-relative DRA ground relief | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
+| B704 | 1-ft labeled contour lines, client-generated from the raw 3DEP DEM in a Web Worker | [Site Planner / GIS] | #site-planner #gis #perf | ⏳ live — awaiting |
+| B705 | Drainage flow-direction arrows (which way the site sheets) | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
+| B706 | Hover ground-elevation readout on the cursor coordinate chips | [Site Planner] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B699 | Whole content pane is the drop target; drag-onto-folder files into it; ONE empty state; folder drops preserve your subfolder structure | [Library / storage] | #library #files #filing #drive | ⏳ live — awaiting |
 | B701 | Honest Drive-sync footer: backend-driven resting status, "Synced · N min ago", loud failure | [Library / storage] | #library #drive #persistence | ⏳ live — awaiting |
 | B695 | Name the boundaries: hover/click identify + zoom-gated county/city name labels | [Site Planner / map] | #site-planner #gis #ui | ⏳ live — awaiting |
@@ -96,16 +100,16 @@
 - **#export** — B684
 - **#files** — B180, B181, B182, B183, B699, B687, B685, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
-- **#gis** — B691, B629, B370, B309, B178, B171, B147, B13, B95, B695, B694, B693
+- **#gis** — B691, B629, B370, B309, B178, B171, B147, B13, B95, B703, B704, B705, B706, B695, B694, B693
 - **#infra** — B408, B406, B179, B63, B675, B669
 - **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268
-- **#perf** — B495, B484, B479, B694, B669
+- **#perf** — B495, B484, B479, B704, B694, B669
 - **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B701, B692, B682, B676, B667, B673, B674
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B695, B694, B693, B692, B684, B682, B651, B673, B674
+- **#site-planner** — B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674
 - **#stitching** — B413
 - **#testing** — B269, B63
-- **#ui** — B115, B695, B693, B669, B668, B658, B673, B674
+- **#ui** — B115, B706, B695, B693, B669, B668, B658, B673, B674
 - **#yield** — B553, B651

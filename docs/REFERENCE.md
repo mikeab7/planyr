@@ -83,6 +83,24 @@ One source of truth used across the planner. Layer `kind`s: `dynamic` (esri
   (`lib/easementRules.js`, VERIFY placeholders), ditch cross-section
   (`lib/elevation.js`, 3DEP `getSamples`) feeding `el.det.availDepth`. All elevation
   output labeled "screening only — verify with survey."
+- **Terrain pipeline (B703–B706):** the `TERRAIN` registry rows in `lib/layers.js` — ground
+  relief (an `esriImage` layer whose `rendering` is a custom Colormap-over-Stretch **DRA**
+  rendering-rule OBJECT: the server re-stretches blue→cream→red to each exported extent, so
+  colors are view-relative), plus client-generated **1-ft contours** and **drainage-direction
+  arrows**. Those two fetch the RAW DEM per snapped view tile (`lib/demGrid.js` —
+  `exportImage format=lerc pixelType=F32 renderingRule=None`, native SR 3857, decoded to
+  survey-ft NAVD88 with a validity mask) and compute in `lib/terrainWorker.js` (the repo's
+  first Web Worker; pure-module imports only, test-pinned): masked gaussian smooth →
+  `d3-contour` marching squares with border/void strip passes (`lib/contours.js`) →
+  windowed-gradient flow arrows (`lib/flowField.js`; classic D8 kept there as the future
+  flow-accumulation seed). Main-thread glue `lib/terrainLayers.js`: one deduped fetch+compute
+  per tile shared by both layers, `gisCache.swr` persists the JSON artifact only (grids live
+  in an in-memory LRU — never JSON.stringify a Float32Array through gisCache), proxy→direct
+  fallback with LERC magic-byte sniff, canvas-renderer polylines, zoom gate 16. The hover
+  elevation readout (`components/useGroundElevation.js`) bilinear-samples the UNSMOOTHED
+  cached grid (agrees with the cross-section tool) with a debounced `samplePoint` fallback.
+  The one pixel convention (cell value at cell CENTER) is pinned by the ramp calibration test
+  in `test/contours.test.js` — contours, readout, and cross-section can't drift by half a cell.
 - **Mapillary token is a secret** — `import.meta.env.VITE_MAPILLARY_TOKEN` (CI secret)
   or a user-entered localStorage value. Never commit it.
 - **Print/PNG caveat:** the SVG clone can't capture live Leaflet basemap/overlay
