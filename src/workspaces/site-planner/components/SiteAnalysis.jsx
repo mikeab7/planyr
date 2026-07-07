@@ -31,7 +31,9 @@ const STATUS = {
   unavailable: { dot: "#b45309", bg: "#fbf0df", border: "#eccfa0", label: "Unavailable", glyph: "↻" },
   unknown: { dot: "#a16207", bg: "#fbf3df", border: "#ecdcae", label: "Unknown", glyph: "⚠" },
   info: { dot: "#1d4ed8", bg: "#e8eefb", border: "#cdd9f3", label: "Info", glyph: "ℹ" },
-  pending: { dot: "#8a8473", bg: "#f1efe9", border: "#e0dacb", label: "Not connected", glyph: "○" },
+  // "Not connected" is an inert/off state → a QUIET cool neutral (not a warm cream, and never
+  // a semantic hue). The five entries above stay their intentional semantic colours (B689).
+  pending: { dot: "#4B5263", bg: "#F3F5F8", border: "#E1E5EB", label: "Not connected", glyph: "○" },
 };
 
 export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isLayerOn, onToggleLayer, layerStatus = {}, runAnalysis = runSiteAnalysis }) {
@@ -54,9 +56,11 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { run(); }, [sig]);
 
-  const muted = PAL?.muted || "#8a8473";
-  const ink = PAL?.ink || "#2c2a26";
-  const line = PAL?.panelLine || "#e7e2d6";
+  // Fallbacks are dead paths (SitePlanner always passes a full theme-aware PAL); keep them COOL
+  // to match the light-mode text/border tokens PAL provides, never the retired warm creams (B689).
+  const muted = PAL?.muted || "#353B49";
+  const ink = PAL?.ink || "#1B1E26";
+  const line = PAL?.panelLine || "#E1E5EB";
 
   if (state.empty) {
     return (

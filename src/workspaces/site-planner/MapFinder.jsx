@@ -183,7 +183,10 @@ const ID_RE = /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo
 // findAttr (imported from lib/appraisal.js) is the shared "first non-empty attr
 // matching this regex, as a string" helper — formerly a local findVal duplicate.
 const shoelace = (pts) => {
-  if (!Array.isArray(pts)) return 0; // a husk parcel (no points) must read as 0 ac, never crash the list render
+  // B690 — a stored parcel can lack `points` (attr-only / legacy / a malformed row round-tripped
+  // verbatim through site_elements). The map layer skips those (p.points?.length below); the
+  // acreage sums must too, or ONE bad record crashes the whole finder into the error boundary.
+  if (!Array.isArray(pts) || !pts.length) return 0;
   let a = 0;
   for (let i = 0; i < pts.length; i++) { const j = (i + 1) % pts.length; a += pts[i].x * pts[j].y - pts[j].x * pts[i].y; }
   return Math.abs(a) / 2;

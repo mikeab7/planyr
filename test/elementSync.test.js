@@ -294,6 +294,114 @@ describe("seed + keepalive", () => {
   });
 });
 
+// B672 recurrence (V229 #5) — the refetch-replace lost-update race. A tab whose socket dropped
+// holds a STALE canvas; when it rejoins, the refetch seeds the shadow at the FRESH revs. The old
+// wiring then reconciled against the stale canvas (stateRef), committing old geometry as valid
+// rev-guarded updates that clobbered every other session. These tests pin the engine invariants
+// the fix relies on: (1) refetch + substitute + reconcile is a FIXED POINT (no echo commits),
+// (2) an in-flight commit is protected from remote rows and refetches exactly like a dirty one.
+describe("refetch-replace safety (V229 #5 lost-update class)", () => {
+  it("reconciling the substituted refetch result against the fresh seed commits NOTHING", async () => {
+    const h = makeHarness();
+    // tab converged at rev 2, then its socket drops; meanwhile another session advances e1 to rev 10
+    h.sync.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 2, z_index: 0 }]);
+    const freshRows = [{ kind: "el", id: "e1", data: { id: "e1", cx: 99 }, rev: 10, z_index: 0 }];
+    h.sync.seed(freshRows); // the rejoin refetch re-seeds the shadow at fresh revs
+    // the FIX: the caller diffs the substituted collections (rows ∪ dirty) — here just the rows —
+    // never the stale canvas. That diff must be a no-op: no stale update sneaks out at rev 10.
+    h.sync.reconcile({ els: freshRows.map((r) => r.data) }, {});
+    await tick(); h.runTimers(); await tick();
+    expect(h.commits).toHaveLength(0);
+    // (the OLD wiring would have called reconcile({ els: [{ id: "e1", cx: 0 }] }) here — a diff vs
+    // the rev-10 shadow → an update carrying cx:0 at expected:10 → the reproduced data loss)
+  });
+
+  it("dirtyEntries() includes the batch in flight, so a refetch substitution keeps a mid-commit edit", async () => {
+    let release; const gate = new Promise((r) => { release = r; });
+    const commits = [];
+    const s = createElementSync({
+      siteId: "s", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      commit: async (ops) => { commits.push(ops); await gate; return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick();
+    expect(commits).toHaveLength(1);                       // the edit is ON THE WIRE, dirty is empty
+    const pending = s.dirtyEntries();                      // what refetch-replace substitutes
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ kind: "el", id: "e1" });
+    expect(pending[0].el.cx).toBe(50);                     // the in-flight data, not the stale row
+    release(); await tick(); await tick();
+    expect(s.dirtyEntries()).toHaveLength(0);              // settled after the result lands
+  });
+
+  it("a foreign row landing while a commit is in flight keeps local data and re-targets the rev", async () => {
+    let release; const gate = new Promise((r) => { release = r; });
+    const events = [];
+    const commits = [];
+    const s = createElementSync({
+      siteId: "s", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => { commits.push(ops); await gate; return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // in flight at expected:1
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 77 }, rev: 5, z_index: 0 });
+    expect(instr.action).toBe("ignore");                   // local (in-flight) data stays on canvas
+    expect(events.some((e) => e.type === "remote-while-dirty")).toBe(true);
+    release(); await tick(); await tick();
+    // the ok result (rev 2) must NOT drag the shadow rev back below the adopted remote rev 5
+    expect(s.shadowSnapshot().get("el:e1").rev).toBe(5);
+  });
+
+  it("our own commit echoing back mid-flight (same data) is silent — no event, no canvas action", async () => {
+    let release; const gate = new Promise((r) => { release = r; });
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => { await gate; return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick();
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 50, z: 0 }, rev: 2, z_index: 0 });
+    expect(instr.action).toBe("ignore");
+    expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // identical data → quiet
+    release(); await tick(); await tick();
+    // and a follow-up reconcile of the same canvas commits nothing (fully converged)
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); await tick();
+    expect(s.pendingCount()).toBe(0);
+  });
+
+  it("a foreign IDENTICAL row drops a queued duplicate update instead of re-writing it", async () => {
+    const h = makeHarness();
+    h.sync.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    h.sync.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); // update queued (debounced, unsent)
+    expect(h.sync.pendingCount()).toBe(1);
+    // another session commits EXACTLY the same values first
+    const instr = h.sync.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 50, z: 0 }, rev: 2, z_index: 0 });
+    expect(instr.action).toBe("ignore");
+    expect(h.sync.pendingCount()).toBe(0);                 // the duplicate write was dropped
+    h.runTimers(); await tick();
+    expect(h.commits).toHaveLength(0);                     // nothing hits the RPC at all
+  });
+
+  it("reconcile does not re-enqueue data that is already in flight (refetch-during-commit no-op)", async () => {
+    let release; const gate = new Promise((r) => { release = r; });
+    const commits = [];
+    const s = createElementSync({
+      siteId: "s", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      commit: async (ops) => { commits.push(ops); await gate; return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // in flight
+    // the refetch-replace's post-substitution reconcile sees the same in-flight data on canvas
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {});
+    expect(s.pendingCount()).toBe(0);                      // not re-enqueued
+    release(); await tick(); await tick();
+    expect(commits).toHaveLength(1);                       // exactly one write total
+  });
+});
+
 describe("stableStringify", () => {
   it("is key-order-insensitive and recurses", () => {
     expect(stableStringify({ b: 1, a: { d: 4, c: 3 } })).toBe(stableStringify({ a: { c: 3, d: 4 }, b: 1 }));

@@ -316,6 +316,10 @@ const elCorners = (el) => {
   });
 };
 const polyArea = (pts) => {
+  // B690 — same guard as the finder's shoelace: a parcel/element without a usable ring
+  // contributes 0 area instead of crashing the canvas (points can be absent on a
+  // malformed/legacy record that round-tripped verbatim through storage or element rows).
+  if (!Array.isArray(pts) || !pts.length) return 0;
   let a = 0;
   for (let i = 0; i < pts.length; i++) {
     const j = (i + 1) % pts.length;
@@ -2011,9 +2015,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 5000);
       return;
     }
+    // Mid-gesture/mid-edit: never yank the canvas OR reconcile half-made state — defer the whole
+    // replace until the interaction settles (the buffered-event drain covers per-row updates).
+    if (busyRef.current) {
+      setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 1200);
+      return;
+    }
     pendingRemoteRef.current = []; // the refetch supersedes any buffered per-row events
     eng.seed(r.rows);
     const model = rowsToModel({}, r.rows);
+    // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that
+    // edit on the canvas too (it re-trues from its own RPC result, not from pre-commit rows).
     const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
     const sub = (kind, list) => {
       let out = list;
@@ -2024,20 +2036,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       return out;
     };
-    const replace = (setter, next) => setter((prev) => (stableStringify(prev) === stableStringify(next) ? prev : next));
-    replace(setEls, sub("el", model.els)); replace(setMarkups, sub("markup", model.markups)); replace(setMeasures, sub("measure", model.measures));
-    replace(setCallouts, sub("callout", model.callouts));
-    // husk parcels (no points) stay off the canvas; the reconcile below then diffs them absent
-    // vs the seeded shadow and tombstones the bad rows in the cloud (see isHuskParcel).
-    replace(setParcels, sub("parcel", model.parcels).filter((pc) => !isHuskParcel("parcel", pc)));
+    const next = {
+      els: sub("el", model.els), markups: sub("markup", model.markups), measures: sub("measure", model.measures),
+      callouts: sub("callout", model.callouts),
+      // husk parcels (no points) stay off the canvas AND out of the reconcile input: the diff
+      // below then sees them absent vs the seeded shadow and tombstones the bad rows in the
+      // cloud — the husk heals into a proper delete (B690 root-cause leg; see isHuskParcel).
+      parcels: sub("parcel", model.parcels).filter((pc) => !isHuskParcel("parcel", pc)),
+    };
+    const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
+    replace(setEls, next.els); replace(setMarkups, next.markups); replace(setMeasures, next.measures);
+    replace(setCallouts, next.callouts); replace(setParcels, next.parcels);
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
     // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
     const liveIds = new Set(r.rows.filter((row) => row && !row.deleted_at).map((row) => row.id));
     setDeletedIds((prev) => (prev.some((id) => liveIds.has(id)) ? prev.filter((id) => !liveIds.has(id)) : prev));
-    // one reconcile pass so any edit made during the fetch window commits normally
-    const s = stateRef.current;
-    try { eng.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy: !!drag.current }); } catch (_) {}
+    // One reconcile pass — against EXACTLY the collections just placed on the canvas (rows ∪ pending
+    // local edits), NEVER stateRef: stateRef still holds the PRE-replace canvas here, and on a tab
+    // whose socket dropped that canvas is genuinely STALE — diffing it against the fresh shadow
+    // committed old geometry as valid rev-guarded updates and clobbered everyone (V229 #5, the
+    // reproduced lost-update). Edits made during the fetch window are already in the dirty queue
+    // (every canvas edit reconciles through the autosave effect), so nothing is lost by diffing
+    // the substituted result instead.
+    try { eng.reconcile(next, { busy: false }); } catch (_) {}
   };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
@@ -2073,8 +2095,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ch = supabase
       .channel("site-elements:" + siteId, { config: { presence: { key: uid || "anon" } } })
       .on("presence", { event: "sync" }, () => {
-        // B674 — the live "who's here" roster; keyed by uid so two windows of one account read as
-        // one person. Quiet when alone (summary null).
+        // B674 — the live "who's here" roster; counts SESSIONS (two windows of one account =
+        // "2 here" — V231 #13), names grouped by person. Quiet when this window is alone.
         try { setPeers(presenceSummary(ch.presenceState(), uid)); } catch (_) {}
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + siteId }, (payload) => {
@@ -5692,7 +5714,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const d = JSON.parse(fr.result);
         if (!d || (!Array.isArray(d.parcels) && !Array.isArray(d.els))) throw new Error();
         // Normalize the import through the model funnel: junk entries (nulls / points-less husk
-        // parcels — the B689 crash class) are dropped, ids/z are ensured, migrations applied —
+        // parcels — the B690 crash class) are dropped, ids/z are ensured, migrations applied —
         // a hand-edited or stale export can't poison the canvas or the next save.
         const im = createSiteModel(d);
         ensureIdAbove([
@@ -9531,7 +9553,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {(leftPanel || companionOpen) && (<>
-          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
+          <div data-testid="left-menu-panel" style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
           {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
               so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).
