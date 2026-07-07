@@ -2,12 +2,20 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, noteLocalContent } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { createElementSync } from "./lib/elementSync.js";
+import { createElementSync, stableStringify } from "./lib/elementSync.js";
+import { rowsToModel, KIND_TO_FIELD } from "./lib/elementRows.js";
+import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
+import { createNameResolver, describeElement } from "./lib/editorNames.js";
+import { toastForSyncEvent } from "./lib/conflictToasts.js";
+import { listMembers } from "./lib/teams.js";
+import { multiwriterEnabled } from "./lib/multiwriter.js";
+import { presenceSummary } from "./lib/presencePill.js";
+import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
@@ -1749,13 +1757,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // user must reload to get the latest before saving, so it gets its own loud "reload" banner.
   // Work is NOT lost: the edit is saved on this device, and reload union-merges it with the
   // other session's change (mergeSiteContent), then re-pushes the combined result.
-  const [cloudConflict, setCloudConflict] = useState(false);
+  // B672 — the doc-level cloudConflict state + its blocking "changed in another session … Take
+  // over editing" banner are RETIRED BY ARCHITECTURE (the B455/B460/B558/B596 false-conflict
+  // class). Elements are per-row rev-guarded in site_elements (a real collision surfaces per
+  // element, B673); the header row self-heals a stale CAS inside cloudUpsert (refetch + one
+  // re-push). A residual header conflict (a live write race that also lost the retry) is treated
+  // as a transient failed write — retried on the next edit, never a blocking banner.
   // B455/NEW-7 — single-active-editor lockout. When the same plan is open in another tab of
   // THIS browser, only the lock-holder edits; a background tab goes read-only so it can't push
   // a save over the active tab's newer cloud row (the structural fix for the stale-tab clobber).
-  // Degrades open where Web Locks is unavailable. cloudConflict + readOnly gate the cloud push.
+  // Degrades open where Web Locks is unavailable. readOnly gates the cloud push.
   const [readOnly, setReadOnly] = useState(false);
-  const conflictRef = useRef(false); conflictRef.current = cloudConflict;
   const readOnlyRef = useRef(false); readOnlyRef.current = readOnly;
   const siteIdRef = useRef(siteId); siteIdRef.current = siteId; // current id for the lock telemetry closure
   const prevReadOnlyRef = useRef(false); // so a read-only enter/leave fires telemetry exactly once per transition
@@ -1767,7 +1779,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSaveStatus("saving");
     const wd = setTimeout(() => setCloudSaveFailed(true), 6000);
     return pushSiteToCloud(id)
-      .then((c) => { clearTimeout(wd); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudConflict(!!c.conflict); setCloudSaveFailed(!c.ok && !c.conflict); })
+      .then((c) => { clearTimeout(wd); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); })
       .catch(() => { clearTimeout(wd); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
   };
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
@@ -1840,7 +1852,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // local save above still ran (work preserved), and reload union-merges it. Pushing
       // here is exactly the stale-tab clobber we're preventing.
       if (isCloudActive()) {
-        if (conflictRef.current || readOnlyRef.current) {
+        if (readOnlyRef.current) {
           setSaveStatus("unsaved");
           // B468/NEW-5 — an edit happened but its cloud push was suppressed (read-only tab or an
           // active conflict). The immediate local mirror above still saved it; record WHY it didn't
@@ -1861,13 +1873,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               reportClientEvent("save-local-failed-cloud-ok", "device storage full; saved to cloud instead", { id: siteId });
             } else {
               // B474 review (#17/#18): the latest edit reached NEITHER device nor cloud — clear any stale
-              // amber "saved to your account" so it can't keep falsely claiming safety. And if the cloud
-              // push hit a CONFLICT (not a dead cloud), route to the blocking conflict UI ("reload/take
-              // over to merge") rather than the "will retry on your next edit" banner, which can never
-              // clear while the conflict gates every future push.
+              // amber "saved to your account" so it can't keep falsely claiming safety. (B672: a header
+              // CAS conflict now self-heals inside cloudUpsert; a residual conflict is treated the same
+              // as any failed write — loud banner + retry, never a blocking take-over prompt.)
               setSaveStatus("unsaved"); setSavedToCloudOnly(false);
-              if (r && r.conflict) { setCloudConflict(true); reportClientEvent("save-suppressed", "device full AND cloud push hit a conflict — routed to conflict UI", { id: siteId }); }
-              else { setCloudSaveFailed(true); reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
+              setCloudSaveFailed(true); reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "", conflict: !!(r && r.conflict) });
             }
           }).catch(() => { setSaveStatus("unsaved"); setSavedToCloudOnly(false); setCloudSaveFailed(true); });  // B506: a rejected cloud push must not strand the badge on "saving"
         }
@@ -1907,7 +1917,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B452 — a FORCED reload (chunk-recovery / ErrorBoundary) flushes through this registry
     // before navigating: the synchronous local save above PLUS a keepalive cloud push that
     // survives the navigation, so the last edits don't sit only in memory + the local mirror.
-    const offFlush = registerFlush(() => { flush(); if (isCloudActive() && !conflictRef.current && !readOnlyRef.current) keepaliveFlushSite(siteId); });
+    const offFlush = registerFlush(() => { flush(); if (isCloudActive() && !readOnlyRef.current) keepaliveFlushSite(siteId); });
     return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); offFlush(); };
   }, [siteId]); // eslint-disable-line
   // B455/NEW-7 — hold the single-active-editor lock for this plan. A second tab on the same
@@ -1930,7 +1940,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     });
   }, []);
-  useEffect(() => { editorLockRef.current.setProject(siteId || null); }, [siteId]);
+  // B674 — multi-writer cutover: with the switch ON (default) this tab never takes the per-plan
+  // editor lock at all, so readOnly stays false and every tab/user edits concurrently through the
+  // rev-checked element path. The `planyr.multiwriter` = "off" localStorage hatch restores the old
+  // single-active-editor behavior client-side (the lock module itself stays — doc-review uses it,
+  // and it still serves the hatch + signed-out mode). Full deletion of the lock/takeover code waits
+  // out the ~30-day blob-backup soak (see OWNER-TODO).
+  useEffect(() => { editorLockRef.current.setProject(multiwriterEnabled() ? null : (siteId || null)); }, [siteId]);
   useEffect(() => () => { editorLockRef.current && editorLockRef.current.stop(); }, []);
 
   // B671 — per-element write engine. Runs ONLY when signed in (cloud-active): it diffs the live
@@ -1946,6 +1962,72 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[kind];
     if (setter) setter((a) => a.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   };
+  // B674 — who else is on this plan right now (Supabase Realtime Presence on the element channel).
+  const [peers, setPeers] = useState(null); // presenceSummary() result, or null when alone
+  // B673 — the loud-but-non-blocking conflict surface: toast stack + name resolver + the
+  // late-bound sync-event handler (assigned each render further down, once zoomToElement and
+  // featBBox exist in scope).
+  const { toasts, pushToast, dismissToast } = useToasts();
+  const nameResolverRef = useRef(null);
+  const syncEventRef = useRef(() => {});
+  // B672 — instructions from remote rows that arrived MID-GESTURE (busyRef): buffered here and
+  // drained at the next reconcile/flush so a remote apply never yanks the canvas mid-drag.
+  const pendingRemoteRef = useRef([]);
+  // Put one applyRemoteRow instruction onto the canvas. The engine already updated its shadow, so
+  // the autosave-effect diff that this setState triggers sees the element as unchanged (no echo
+  // commit). Insertion respects the collection's z (byZ reads z, not array position).
+  const applyRemoteInstr = (instr) => {
+    if (!instr || instr.action === "ignore") return;
+    const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
+    if (!setter) return;
+    if (instr.action === "remove") setter((a) => a.filter((x) => x.id !== instr.id));
+    else if (instr.action === "upsert") setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+  };
+  const drainRemote = () => {
+    if (!pendingRemoteRef.current.length) return;
+    const q = pendingRemoteRef.current; pendingRemoteRef.current = [];
+    for (const instr of q) applyRemoteInstr(instr);
+  };
+  // B672 — the READ cutover: full refetch of the site's live rows + REPLACE local canonical state.
+  // Runs on every channel join/rejoin and tab wake — never trust event gaps. Elements with a
+  // pending local commit keep their LOCAL data (they re-commit through the rev-checked path).
+  // A failed fetch changes NOTHING (B54 discipline — the mirror-booted canvas stays) and retries;
+  // the engine stays un-seeded until a fetch lands, so no commit can target unknown revs. Setters
+  // keep the previous reference when a collection is value-identical, so an idle tab-wake refetch
+  // re-trues nothing and therefore saves nothing (no version churn).
+  const refetchReplace = async (eng) => {
+    const r = await fetchElements(supabase, siteId);
+    if (elSyncRef.current !== eng) return;
+    if (!r || !r.ok) {
+      reportClientEvent("element-refetch-failed", "site_elements refetch failed — retrying", { id: siteId, error: (r && r.error) || "" });
+      setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 5000);
+      return;
+    }
+    pendingRemoteRef.current = []; // the refetch supersedes any buffered per-row events
+    eng.seed(r.rows);
+    const model = rowsToModel({}, r.rows);
+    const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
+    const sub = (kind, list) => {
+      let out = list;
+      for (const d of dirtyByKey.values()) {
+        if (d.kind !== kind) continue;
+        if (d.cls === "delete") out = out.filter((x) => x.id !== d.id);
+        else out = out.some((x) => x.id === d.id) ? out.map((x) => (x.id === d.id ? d.el : x)) : [...out, d.el];
+      }
+      return out;
+    };
+    const replace = (setter, next) => setter((prev) => (stableStringify(prev) === stableStringify(next) ? prev : next));
+    replace(setEls, sub("el", model.els)); replace(setMarkups, sub("markup", model.markups)); replace(setMeasures, sub("measure", model.measures));
+    replace(setCallouts, sub("callout", model.callouts)); replace(setParcels, sub("parcel", model.parcels));
+    // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
+    // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
+    // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
+    const liveIds = new Set(r.rows.filter((row) => row && !row.deleted_at).map((row) => row.id));
+    setDeletedIds((prev) => (prev.some((id) => liveIds.has(id)) ? prev.filter((id) => !liveIds.has(id)) : prev));
+    // one reconcile pass so any edit made during the fetch window commits normally
+    const s = stateRef.current;
+    try { eng.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy: !!drag.current }); } catch (_) {}
+  };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
       if (elSyncRef.current) { elSyncRef.current.stop(); elSyncRef.current = null; }
@@ -1959,28 +2041,72 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setTimer: (fn, ms) => setTimeout(fn, ms),
       clearTimer: (h) => clearTimeout(h),
       onStatus: (s) => setElemSync(s),
+      onEvent: (ev) => { try { syncEventRef.current(ev); } catch (_) {} }, // B673 — late-bound (the handler needs helpers defined further down)
       patchElement: applyZPatch,
       report: reportClientEvent,
+      selfUid: activeUid(),
     });
     elSyncRef.current = eng;
-    // Seed the shadow from the site's current rows (Phase-1 backfill) BEFORE diffing, so a plain
-    // load doesn't try to re-create every existing element. On a fetch failure seed empty (the
-    // engine still works — it just re-syncs from scratch). After seeding, reconcile once to catch
-    // any edit made during the fetch window. (B671 still READS from the blob — this fetch only
-    // primes the write engine; the read cutover is B672.)
-    fetchElements(supabase, siteId).then((r) => {
-      if (elSyncRef.current !== eng) return;
-      eng.seed(r && r.ok ? r.rows : []);
-      const s = stateRef.current;
-      try { eng.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy: !!drag.current }); } catch (_) {}
+    // B673 — who to blame in a conflict toast: self → "you (another window)"; teammates via the
+    // list_team_members roster RPC (profiles RLS is own-row-only); cached per site session.
+    nameResolverRef.current = createNameResolver({
+      selfUid: activeUid(),
+      teamIdOf: () => { try { return loadSite(siteId)?.teamId || null; } catch (_) { return null; } },
+      fetchRoster: listMembers,
     });
-    return () => { eng.stop(); if (elSyncRef.current === eng) elSyncRef.current = null; };
+    // Realtime channel for this site's element rows (B672). Events are applied per-row through the
+    // idempotent rev check (own echoes = no-op); EVERY successful (re)join instead does a full
+    // refetch-replace — postgres_changes offers no gap guarantee across a reconnect, so the join is
+    // the moment to re-true the whole canvas from rows. Supabase applies the SELECT RLS to events.
+    const uid = activeUid();
+    const ch = supabase
+      .channel("site-elements:" + siteId, { config: { presence: { key: uid || "anon" } } })
+      .on("presence", { event: "sync" }, () => {
+        // B674 — the live "who's here" roster; keyed by uid so two windows of one account read as
+        // one person. Quiet when alone (summary null).
+        try { setPeers(presenceSummary(ch.presenceState(), uid)); } catch (_) {}
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + siteId }, (payload) => {
+        if (elSyncRef.current !== eng) return;
+        const row = payload && (payload.new && payload.new.id ? payload.new : payload.old);
+        if (!row) return;
+        const instr = eng.applyRemoteRow(row);
+        if (instr.action === "ignore") return;
+        if (busyRef.current) pendingRemoteRef.current.push(instr); // never yank the canvas mid-gesture
+        else applyRemoteInstr(instr);
+      })
+      .subscribe((status) => {
+        if (elSyncRef.current !== eng) return;
+        if (status === "SUBSCRIBED") {
+          refetchReplace(eng); // initial load AND reconnect re-true from rows
+          // B674 — announce THIS session on the roster (display name only, never the email).
+          loadProfile(uid).then((prof) => {
+            const name = prof ? [prof.first_name, prof.last_name].filter(Boolean).join(" ").trim() : "";
+            try { ch.track({ uid, name: name || "Someone" }); } catch (_) {}
+          }).catch(() => { try { ch.track({ uid, name: "Someone" }); } catch (_) {} });
+        }
+      });
+    // Fallback: if the channel can't join (proxy/WebSocket blocked), a plain fetch still seeds the
+    // engine + replaces the canvas once, so the read cutover and the write path work without realtime.
+    const fallback = setTimeout(() => { if (elSyncRef.current === eng && !eng.isSeeded()) refetchReplace(eng); }, 4000);
+    // Tab wake = a classic event-gap window → refetch (visibilitychange is the B672-mandated hook).
+    const onVis = () => { if (document.visibilityState === "visible" && elSyncRef.current === eng) refetchReplace(eng); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearTimeout(fallback);
+      document.removeEventListener("visibilitychange", onVis);
+      try { supabase.removeChannel(ch); } catch (_) {}
+      setPeers(null);
+      eng.stop();
+      if (elSyncRef.current === eng) elSyncRef.current = null;
+    };
   }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Diff the live collections and enqueue per-element commits. `busy` (a geometry gesture is in
   // flight) defers the diff — flushElems() at gesture end (onUp) commits the settled result.
   const reconcileElems = (busy) => {
     const e = elSyncRef.current;
     if (!e || !isCloudActive()) return;
+    if (!busy) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
     const s = stateRef.current;
     try { e.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
   };
@@ -1992,7 +2118,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     const off = registerFlush(() => {
       const e = elSyncRef.current;
-      if (!e || !isCloudActive() || conflictRef.current || readOnlyRef.current) return;
+      if (!e || !isCloudActive() || readOnlyRef.current) return;
       const ops = e.pendingOps();
       if (!ops.length) return;
       const { url, anon } = supabaseRest();
@@ -2012,6 +2138,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!siteId) return undefined;
     const onStore = (e) => {
       if (e && e.key && !e.key.startsWith("planarfit:sites:")) return;
+      // B672 — signed-in tabs converge through the site_elements realtime channel + refetch-replace
+      // (rows are canonical); the localStorage union fold below would fight that (it can resurrect
+      // an element a row-tombstone just removed). It remains the signed-OUT cross-tab convergence.
+      if (isCloudActive()) return;
       if (busyRef.current) return;
       const stored = loadSite(siteId);
       if (!stored) return;
@@ -2054,11 +2184,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pushHistory = () => { histRef.current.push(stateRef.current); touchHist(); };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
-    // B556 — an undo/redo (or a cancelled drag) is a DELIBERATE local restore; if it shrinks the plan
-    // (e.g. undo of a building add, which removed building + parking + sidewalk at once) tell the
-    // thin-clobber baseline this is authoritative so the resulting push isn't mistaken for a stale
-    // cross-session clobber and falsely re-shown as "changed in another session".
-    if (siteId) noteLocalContent(siteId, s);
+    // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard itself — an
+    // undo/redo shrink now just diffs into per-element deletes through the rev-checked path.)
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
@@ -3589,6 +3716,60 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { x0, y0, x1, y1 };
+  };
+  // B673 — zoom the canvas to one element (the conflict toast's "Show" action) and select it so
+  // the highlight makes "which element are they talking about" unmistakable. Same framing math as
+  // frameToActiveParcels, over the element's bbox with generous margin for context.
+  const zoomToElement = (kind, id) => {
+    const field = KIND_TO_FIELD[kind];
+    const el = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
+    if (!el) return;
+    const b = featBBox(el);
+    if (!b) return;
+    const marginFrac = 1.2;
+    const bw = Math.max(b.x1 - b.x0, 10), bh = Math.max(b.y1 - b.y0, 10);
+    const minX = b.x0 - bw * marginFrac, maxX = b.x1 + bw * marginFrac;
+    const minY = b.y0 - bh * marginFrac, maxY = b.y1 + bh * marginFrac;
+    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
+    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
+    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
+    if (kind === "el" || kind === "markup" || kind === "callout" || kind === "parcel") setSel({ kind, id });
+  };
+  // B673 — the conflict policy matrix, wired: elementSync event → (maybe) a toast. The mapping
+  // itself is the pure toastForSyncEvent (unit-tested); this glue resolves the editor's display
+  // name (async, cached roster), labels the element, applies any canvas side-effect, and pushes.
+  syncEventRef.current = (ev) => {
+    const kind = ev && ev.kind, id = ev && ev.id;
+    if (!kind || !id) return;
+    const field = KIND_TO_FIELD[kind];
+    const localEl = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
+    const elForLabel = localEl || ev.local || (ev.remote && ev.remote.data) || null;
+    const label = describeElement(kind, elForLabel, stateRef.current ? stateRef.current.els : []);
+    const spec = toastForSyncEvent(ev, { name: "", label });
+    if (!spec) return;
+    if (spec.removeFromCanvas) applyRemoteInstr({ action: "remove", kind, id }); // deletion is showing; Restore re-adds
+    if (ev.type === "restore-conflict" && ev.remote) {
+      // someone got there first — their current row is the truth on canvas
+      if (ev.remote.deleted_at) applyRemoteInstr({ action: "remove", kind, id });
+      else if (ev.remote.data) applyRemoteInstr({ action: "upsert", kind, id, el: ev.remote.data });
+    }
+    const uid = (ev.remote && (ev.remote.deleted_by || ev.remote.updated_by)) || null;
+    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve("a teammate");
+    Promise.resolve(resolve).then((name) => {
+      const finalSpec = toastForSyncEvent(ev, { name, label });
+      if (!finalSpec) return;
+      const localCopy = ev.local || localEl || null;
+      const action =
+        finalSpec.action === "zoom" ? { label: "Show", onClick: () => zoomToElement(kind, id) } :
+        finalSpec.action === "restore" && localCopy ? {
+          label: "Restore",
+          onClick: () => {
+            applyRemoteInstr({ action: "upsert", kind, id, el: localCopy }); // back on canvas now
+            const e = elSyncRef.current; if (e) { try { e.restore(kind, id, localCopy); } catch (_) {} }
+          },
+        } : null;
+      pushToast({ text: finalSpec.text, action });
+    }).catch(() => {});
   };
   const onUp = (e) => {
     if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)
@@ -5702,10 +5883,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // multi-device single-editor lease stays the deferred per-sharing item.)
   const takeOverEditing = async () => {
     if (editorLockRef.current) editorLockRef.current.takeOver(); // same-browser: steal the per-plan lock + broadcast a yield → the other tab steps down to read-only and stops pushing
-    reportClientEvent("readonly-takeover", "user took over editing in this tab", { id: siteId, conflict: conflictRef.current });
+    reportClientEvent("readonly-takeover", "user took over editing in this tab", { id: siteId });
     flushSite();             // persist live work to the device mirror first
     setReadOnly(false);      // optimistic; the lock's onChange confirms the hand-off
-    setCloudConflict(false); // clear the gate so the reconciled save is allowed to push
     if (!isCloudActive() || !siteId) { flashWarn("You're now editing here.", 5000); return; }
     setSaveStatus("saving");
     // Reconcile THIS plan from the cloud: refresh the optimistic-version token + fetch the latest copy.
@@ -5742,7 +5922,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (back && got >= want) {
       // Device write is good → clear any alarm, push to cloud as usual, show provable confirmation.
       setLocalSaveFailed(false); setSavedToCloudOnly(false);
-      if (isCloudActive() && !readOnlyRef.current && !conflictRef.current) cloudPushWithWatchdog(siteId);
+      if (isCloudActive() && !readOnlyRef.current) cloudPushWithWatchdog(siteId);
       setSaveNowMsg(`Saved ✓ ${got} item${got === 1 ? "" : "s"} on this device${isCloudActive() ? " + cloud" : ""}`);
       setTimeout(() => setSaveNowMsg(""), 4500);
       return;
@@ -5751,7 +5931,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // cloud (no ~5MB cap). If it lands, the work is safe in the account even though this device can't
     // hold it — say so honestly (amber, not red). If the cloud is unreachable too, go loud.
     reportClientEvent("save-verify-failed", "Save now: on-device write did not persist", { id: siteId, want, got });
-    if (isCloudActive() && !readOnlyRef.current && !conflictRef.current) {
+    if (isCloudActive() && !readOnlyRef.current) {
       setSaveNowMsg("Saving to your account…");
       pushModelToCloud({ id: siteId, ...metaRef.current, ...liveRef.current }).then((r) => {
         setSaveNowMsg("");
@@ -5786,14 +5966,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
     // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
     // restore above silently skipped it: the canvas kept the CURRENT drawings while every other
-    // collection reverted (a mixed-version state), and noteLocalContent(v) below then recorded v's
-    // drawings as the local baseline — so live ≠ baseline. The stored version DOES capture
-    // parcelDrawings (sigOf + snapshotVersion store the full model), so restore + durably persist
-    // them via persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    // collection reverted (a mixed-version state). The stored version DOES capture parcelDrawings
+    // (sigOf + snapshotVersion store the full model), so restore + durably persist them via
+    // persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard — a restore to a
+    // thinner version now diffs into per-element deletes through the rev-checked path.)
     persistDrawings(v.parcelDrawings || []);
-    // B556 — restoring an older (possibly thinner) version is a deliberate local restore; rebase the
-    // thin-clobber baseline onto it so the next push isn't falsely rejected as a cross-session conflict.
-    if (siteId) noteLocalContent(siteId, v);
     setSel(null); setMulti([]); setVersionsOpen(false);
   };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
@@ -7737,18 +7915,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // lock this tab isn't writing to the cloud, even though read queries (the connection) succeed —
     // so the connection being fine is NOT the same as "your edits are saving". Surfaced as its own
     // amber "Read-only — not saving" badge state, ahead of the synced/offline resting states.
-    if (cloudActive && readOnly && !cloudConflict) return "readonly";
+    if (cloudActive && readOnly) return "readonly";
     // B671 — the per-element write engine feeds the SAME badge: a dropped element commit is
     // crash-severity (LOUD-FAILURE) → "error"; in-flight / retrying element commits → "saving".
     if (cloudActive && elemSync.state === "failed") return "error";
     if (saveStatus === "saving" || (cloudActive && (elemSync.state === "syncing" || elemSync.state === "retrying"))) return "saving";
-    if (cloudSaveFailed || cloudConflict) return "error";
+    if (cloudSaveFailed) return "error";
     if (cloudActive && !connOk) return "offline";
     return cloudActive ? "synced" : "local";
   })();
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#efeadf",
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--planner-panel)",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
 
       <AppHeader
@@ -7761,10 +7939,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onNewProject={handleNewSite}
         onRenameProject={renameProjectFromHeader}
         saveState={headerSaveState}
+        multiEditOk={multiwriterEnabled()}
+        saveSlot={peers ? (
+          <span
+            title={peers.names.join(" · ")}
+            data-testid="presence-pill"
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "var(--surface-raised)",
+              border: "1px solid var(--border-strong)", borderRadius: 999, padding: "2px 9px",
+              fontSize: 11.5, fontWeight: 800, color: "var(--text-primary)", whiteSpace: "nowrap" }}
+          >
+            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: "var(--accent-site)" }} />
+            {peers.label}
+          </span>
+        ) : undefined}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
-        onRetrySave={cloudConflict ? undefined : (() => { retryCloudSave(); retryElems(); })}
-        saveDetail={cloudConflict ? "This project was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : (elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined)}
+        onRetrySave={() => { retryCloudSave(); retryElems(); }}
+        saveDetail={elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined}
         centerContent={null}
         planSlot={plannerPlanCrumb}
         authControl={authControl}
@@ -7772,25 +7963,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         toolbarContent={plannerToolbar}
       />
 
-      {/* B455/NEW-7 — a conflict is now BLOCKING (no dismiss): further cloud saves are gated
-          until you reload, so a stale copy can't be re-pushed over the newer one. Your edits
-          stay on this device and union-merge in on reload. */}
-      {/* B474 review (#8): gated on !localSaveFailed — when the on-device write ALSO failed (full storage),
-          "your edits are safe on this device" is FALSE, so suppress this and let the truthful red
-          local-save-failed banner be the only message (no contradictory pair, no false reassurance). */}
-      {cloudConflict && !localSaveFailed && (
-        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6001, maxWidth: "min(680px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#1e3a5f", color: "#fff", border: "1px solid #60a5fa", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>⚠ Your changes <b>aren't reaching the cloud</b> — this plan was changed in <b>another session</b> (another tab, or another computer). Your edits are safe on this device. <b>Take over editing here</b> to pull in the latest and resume saving — nothing is lost.</span>
-          <button onClick={takeOverEditing} data-testid="conflict-takeover-btn" title="Pull in the latest from the other session and make this the active editor (your work merges in — nothing is lost)" style={{ flex: "none", cursor: "pointer", background: "#60a5fa", color: "#0a1a2f", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
-        </div>
-      )}
+      {/* B672 — the "changed in another session … Take over editing" conflict banner is GONE:
+          the whole-doc conflict class it surfaced (B455/B460/B558/B596) is retired by per-element
+          sync — elements are per-row rev-guarded, the header self-heals a stale CAS (cloudUpsert). */}
+      {/* B673 — its successor: the loud-but-NON-BLOCKING per-element conflict toasts (both sides of
+          a collision get told, with Show / Restore actions; nothing is ever silently overwritten). */}
+      <ToastHost toasts={toasts} onDismiss={dismissToast} />
       {/* B455/NEW-7 + B464/B466 (NEW-1/NEW-3) — single-active-editor read-only banner, now LOUD and
           ACTIONABLE. Another tab of this browser is the active editor, so this tab is read-only and
           its edits are NOT syncing to the cloud (they ARE kept on this device — B458). Reloading does
           NOT clear it while the other tab is open (the lock is still held), which is the trap the owner
           hit — so we say so and offer "Take over editing here" (steal the lock + push the pent-up work)
           instead. Closes automatically (lock hand-off) when the other tab is closed. */}
-      {readOnly && !cloudConflict && !localSaveFailed && (
+      {readOnly && !localSaveFailed && (
         <div role="alert" data-testid="readonly-banner" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
           <button onClick={takeOverEditing} data-testid="takeover-btn" title="Make this the active tab and save your changes to the cloud now" style={{ flex: "none", cursor: "pointer", background: "#d6b24a", color: "#2a2410", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
@@ -8838,15 +9023,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
                     <button onClick={() => { setTracePts([]); setTraceMode((m) => !m); }} title="Click along a visible pole line on the aerial; double-click or Enter to finish"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "#b45309" : PAL.panelLine}`, background: traceMode ? "#b45309" : "#fff", color: traceMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "#b45309" : PAL.panelLine}`, background: traceMode ? "#b45309" : "var(--surface-raised)", color: traceMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       {traceMode ? "✏ Tracing… (Esc / dbl-click to finish)" : "✏ Trace overhead electric"}
                     </button>
                     <button onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "#b45309" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "#b45309" : "#fff", color: routeMode?.util === "elec" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "#b45309" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "#b45309" : "var(--surface-raised)", color: routeMode?.util === "elec" ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       ⚡ Route electric service
                     </button>
                     <button onClick={startWaterRoute} title="Route water service from a main to a building, easement width from the jurisdiction rule below"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "#0891b2" : PAL.panelLine}`, background: routeMode?.util === "water" ? "#0891b2" : "#fff", color: routeMode?.util === "water" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "#0891b2" : PAL.panelLine}`, background: routeMode?.util === "water" ? "#0891b2" : "var(--surface-raised)", color: routeMode?.util === "water" ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       🚰 Route water service
                     </button>
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
@@ -8855,7 +9040,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </button>
                     <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
                       title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "#0e7490" : PAL.panelLine}`, background: xsecMode ? "#0e7490" : "#fff", color: xsecMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "#0e7490" : PAL.panelLine}`, background: xsecMode ? "#0e7490" : "var(--surface-raised)", color: xsecMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       {xsecMode ? "📏 Click both banks… (Esc to cancel)" : "📏 Cross-section (ditch)"}
                     </button>
                     {/* per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) */}
@@ -8865,7 +9050,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {rulesOpen && (() => {
                       const rule = easeRules[jurKey] || easeRules.generic;
                       return (
-                        <div style={{ background: "#faf8f3", borderRadius: 8, padding: "7px 9px", marginBottom: 2 }}>
+                        <div style={{ background: "var(--planner-raised)", borderRadius: 8, padding: "7px 9px", marginBottom: 2 }}>
                           <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
                             <span style={{ fontSize: 11, color: PAL.muted }}>Jurisdiction</span>
                             <select value={jurKey} onChange={(e) => setJurKey(e.target.value)} style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 11.5 }}>
@@ -8885,7 +9070,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       );
                     })()}
                     <button disabled title="Roadmap — not yet available"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "not-allowed", border: `1px dashed ${PAL.panelLine}`, background: "#faf8f3", color: PAL.muted, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "not-allowed", border: `1px dashed ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.muted, fontWeight: 600 }}>
                       🛰 AI corridor scan — coming soon
                     </button>
                   </div>
@@ -8907,7 +9092,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ["3", <>or draw one with the <b>Parcel</b> tool (right rail).</>],
                 ].map(([n, body]) => (
                   <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
-                    <span style={{ width: 17, height: 17, borderRadius: 99, background: "#f1ece1", color: "#6b6557", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
+                    <span style={{ width: 17, height: 17, borderRadius: 99, background: "var(--planner-raised)", color: "var(--text-secondary)", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
                     <span>{body}</span>
                   </div>
                 ))}
@@ -8973,7 +9158,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* print-frame toolbar */}
           {printMode && (() => {
-            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
+            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink });
             return (
               <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: PAL.muted }}>Print frame</span>
@@ -9289,7 +9474,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Type (default)</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 6px 4px" }}>
                 {EASEMENT_TYPES.map((ty) => (
-                  <button key={ty.key} title={ty.label} onClick={() => setEaseType(ty.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${easeType === ty.key ? ty.color : "#ddd6c5"}`, background: easeType === ty.key ? ty.color : "#fff", color: easeType === ty.key ? "#fff" : PAL.ink, fontWeight: easeType === ty.key ? 650 : 500 }}>
+                  <button key={ty.key} title={ty.label} onClick={() => setEaseType(ty.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${easeType === ty.key ? ty.color : "var(--border-default)"}`, background: easeType === ty.key ? ty.color : "var(--surface-raised)", color: easeType === ty.key ? "#fff" : PAL.ink, fontWeight: easeType === ty.key ? 650 : 500 }}>
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: easeType === ty.key ? "#fff" : ty.color }} /> {ty.label}
                   </button>
                 ))}
@@ -9331,13 +9516,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {(leftPanel || companionOpen) && (<>
-          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "#efe9dd", display: "flex", flexDirection: "column", minHeight: 0,
+          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
           {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
               so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).
               With no panel open it takes the full column. */}
           {companionOpen && (
-          <div data-testid="property-panel" style={{ flex: leftPanel ? "0 1 auto" : "1 1 auto", maxHeight: leftPanel ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: leftPanel ? "1px solid #ddd6c5" : "none" }}>
+          <div data-testid="property-panel" style={{ flex: leftPanel ? "0 1 auto" : "1 1 auto", maxHeight: leftPanel ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: leftPanel ? "1px solid var(--border-default)" : "none" }}>
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
@@ -9357,7 +9542,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const t = easementType(e.easeType);
             const area = easementArea(e);
             const isStrip = e.mode !== "boundary";
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             const txt = { ...numInput, width: 150, fontFamily: "inherit" };
             const check = (label, val, key) => (
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: PAL.ink, marginBottom: 7, cursor: "pointer" }}>
@@ -9495,7 +9680,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
             const cap = { fontSize: 9.5, color: PAL.muted, lineHeight: 1, textAlign: "center", letterSpacing: "0.02em" };
             const swatchCap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 3 };
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             return (
               <div data-testid="property-panel">
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
@@ -10029,7 +10214,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {det.availDepth != null && (
                       <div style={{ fontSize: 10.5, color: PAL.info, marginTop: 2, lineHeight: 1.4 }}>LiDAR available depth ≈ {f1(det.availDepth)}′ (screening only).</div>
                     )}
-                    <div style={{ marginTop: 7, background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
+                    <div style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
                       {pondRow("Top-of-bank area", `${f0(r.aTop)} sf`)}
                       {pondRow("Water-surface area", `${f0(r.aWater)} sf`)}
                       {pondRow("Bottom area", `${f0(r.aBottom)} sf`)}
@@ -10251,7 +10436,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {stepRow("Push banks out (ft)", expandVal, 5, pushBanksOut)}
                           {stepRow("Dig deeper (ft)", digVal, 1, digDeeper)}
                           <div style={{ fontSize: 10, color: PAL.muted, marginTop: 3 }}>Or drag the pond's edges on the map.</div>
-                          <div style={{ marginTop: 8, background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
+                          <div style={{ marginTop: 8, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
                             {pondRow("Existing storage", `${f2(baseVol / 43560)} ac-ft`)}
                             {pondRow("Proposed storage", `${f2(r.vol / 43560)} ac-ft`)}
                             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
@@ -10271,13 +10456,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
                               <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")}
                                 {...livePick((v) => setDetLive({ existFill: v }))}
-                                style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
                               <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
                                 {...livePick((v) => setDetLive({ addFill: v }))}
-                                style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
@@ -10354,7 +10539,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 object all along (render honours both); the CONTROLS are new here. */}
             <div style={{ marginTop: 12 }}>
               {!underlay ? (
-                <div style={{ border: "1px dashed #ddd6c5", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
                     <span style={{ flex: 1 }} />
@@ -10363,8 +10548,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
                 </div>
               ) : (
-                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "#ddd6c5", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
+                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "var(--border-default)", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
                     <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
@@ -10397,10 +10582,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {sheetOverlays.map((o) => {
                   const on = selOverlay === o.id;
                   return (
-                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
                       {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
                           sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
-                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
+                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
                       {/* Hide / lock / remove — one shared square icon style (B574) so the three render identically. */}
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                         <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
@@ -10487,7 +10672,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               if (fpi) applyOverlayScale(o.id, fpi);
                             };
                             return (
-                              <div style={{ borderTop: `1px dashed #e3dccb`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                              <div style={{ borderTop: `1px dashed var(--planner-border)`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                                 <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
                                 <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
                                   <select data-testid="overlay-scale-preset" style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selVal}
@@ -10604,11 +10789,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           onChange={(e) => setAddrQuery(e.target.value)}
                           onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") addByAddress(); }}
                           placeholder="123 Main St, Katy TX"
-                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "#e2dccb"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
+                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
                         <button
                           onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
                           title="Find this address and add its parcel"
-                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "#fff", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "var(--surface-raised)", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
                           {addrBusy ? "…" : "Find"}
                         </button>
                       </div>
@@ -10653,7 +10838,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
                         <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
-                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "#e2dccb"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
@@ -10662,7 +10847,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             to remove a parcel, alongside the Parcel tool's Remove mode. */}
                         <button title="Remove this parcel" aria-label={`Remove ${name}`}
                           onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
-                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid #e2dccb`, borderRadius: 8, background: "#fff", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
+                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid var(--border-default)`, borderRadius: 8, background: "var(--surface-raised)", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
                       </div>
                     );
                   })}
@@ -10705,7 +10890,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </>
                 )}
                 {identifyRes && (
-                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
+                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
                     {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
                       : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
                       : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
@@ -10724,7 +10909,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
                           </button>
                           {jurInfo && !jurInfo.busy && (
-                            <div style={{ marginTop: 7, borderTop: "1px dashed #ece4d4", paddingTop: 6 }}>
+                            <div style={{ marginTop: 7, borderTop: "1px dashed var(--planner-border)", paddingTop: 6 }}>
                               {jurInfo.error ? <span style={{ color: PAL.warn }}>{jurInfo.error}</span> : <>
                                 {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
                                 {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
@@ -10755,7 +10940,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {mine.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
                     {mine.map((d) => (
-                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid #e2dccb", background: "var(--surface-raised)" }}>
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
                         <button onClick={() => setOpenDrawingId(d.id)} title={d.src ? "Open & mark up" : "Re-attach the file to view (markups are saved)"}
                           style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {d.src ? "🖹" : "⚠"} {d.name}{d.markups?.length ? ` · ${d.markups.length} mk` : ""}
@@ -10775,7 +10960,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {(() => {
                 const ok = Object.keys(selParcel.attrs).find((k) => /^(owner|own_?name|owner_?name|owner1|name)$/i.test(k) && selParcel.attrs[k]);
                 return ok ? (
-                  <div style={{ marginBottom: 9, paddingBottom: 8, borderBottom: "1px solid #ece4d4" }}>
+                  <div style={{ marginBottom: 9, paddingBottom: 8, borderBottom: "1px solid var(--planner-border)" }}>
                     <div style={{ fontSize: 9.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Owner</div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: PAL.ink, lineHeight: 1.3, marginTop: 2 }}>{String(selParcel.attrs[ok])}</div>
                   </div>
@@ -10840,9 +11025,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
                 const county = m2 ? ca.acres * 10.7639 : ca.acres;
                 const diff = Math.abs(mine - county) / county;
-                const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["#6b6557", "≈"] : ["#b45309", "▲"];
+                const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
                 return (
-                  <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "6px 9px" }}>
+                  <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "6px 9px" }}>
                     <b>{mark} Geometry check</b> · county {f2(county)} ac vs {f2(mine)} ac ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
                     {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
                     {!m2 && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
@@ -11310,7 +11495,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const pts = s.profile.map((p) => `${(p.d / xsec.lenFt) * W},${H - ((p.el - s.minFt) / span) * (H - 6) - 3}`).join(" ");
             return (
               <div>
-                <svg width={W} height={H} style={{ display: "block", background: "#f8f6f0", borderRadius: 6 }}>
+                <svg width={W} height={H} style={{ display: "block", background: "var(--planner-raised)", borderRadius: 6 }}>
                   <polyline points={pts} fill="none" stroke="#0e7490" strokeWidth={1.6} />
                 </svg>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: "ui-monospace, monospace" }}>
@@ -11336,7 +11521,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <span>{pobMode ? "Click the point of beginning on the plan to anchor the description (Esc to cancel)." : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
           {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
           {deedAlignHint && !pobMode && !routeMode && <>
-            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "#fff", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>
+            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>
             <button onClick={() => setDeedAlignHint(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Dismiss</button>
           </>}
         </div>
@@ -12021,7 +12206,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
 function Section({ title, children, collapsed, accent }) {
   const [open, setOpen] = useState(!collapsed);
   return (
-    <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+    <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
       <div className="sec-head" onClick={() => setOpen((o) => !o)}
         role="button" tabIndex={0} aria-expanded={open} aria-label={title}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }} /* B531: keyboard-toggle the section */
@@ -12140,14 +12325,15 @@ const YIELD_PAL = {
   paving: "#B6AB9B",                               // warm taupe — paving / parking
   green: "#4FA587",                                // sage — open / green
   detention: "#6E94AB", detZeroFill: "#DCE5EB", detZeroBorder: "#C2D2DC", // dusty blue
-  panelBg: "#FBF8F2", border: "#E7DFD2", cardBg: "#F2ECE1",
-  text: "#3A352D", rowLabel: "#6F675B", muted: "#A89C8C", faint: "#B4A99B",
-  hairline: "#EBE3D6", track: "#ECE3D5", iconTile: "#F6E7DD",
-  // The Yield panel is a FIXED light-parchment surface (it doesn't flip with the theme),
-  // so warn/danger text here must be FIXED AA-on-parchment literals — NOT the theme-
-  // flipping var(--warn-text)/var(--danger) tokens, which go pale in dark mode over this
-  // permanently-light card (the B341 token-mix trap, in reverse).
-  warnText: "#8A5410", dangerText: "#B3361B",
+  // B686: surfaces/borders/text now theme with the app (parchment in light, slate in dark)
+  // via the shared --planner-* + text tokens. The chart hues above stay fixed (one semantic
+  // colour = one meaning across arcs/legend/dots). warn/danger text ride the theme tokens
+  // again now that the card itself flips — they're AA on the parchment in light AND on the
+  // dark card in dark.
+  panelBg: "var(--planner-raised)", border: "var(--planner-border)", cardBg: "var(--planner-panel)",
+  text: "var(--text-primary)", rowLabel: "var(--text-secondary)", muted: "var(--text-tertiary)", faint: "var(--text-tertiary)",
+  hairline: "var(--planner-border)", track: "var(--planner-border)", iconTile: "var(--planner-raised)",
+  warnText: "var(--warn-text)", dangerText: "var(--danger-text)",
 };
 
 function YieldPanel({
@@ -12229,7 +12415,7 @@ function YieldPanel({
           {/* B652 — non-blocking overlap warning: two or more ACTIVE parcels cover the same ground,
               so this acreage is being double-counted. Names the offending parcels; never blocks. */}
           {parcelOverlaps && (
-            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "#FBF1DF", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
+            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "rgba(234,179,8,0.13)", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
               <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap — acreage may be double-counted</div>
               <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac). Make one inactive in the Parcel panel so the site area isn't inflated.</div>
             </div>

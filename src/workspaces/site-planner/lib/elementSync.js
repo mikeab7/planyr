@@ -125,8 +125,11 @@ export function createElementSync(opts = {}) {
             elc = { ...el, z };
             if (patchElement) patchElement(kind, el.id, { z }); // reflect it on the canvas
           }
-          if (!pend || pend.cls !== "create" || stableStringify(pend.el) !== stableStringify(elc)) {
-            enqueue(key, { kind, id: el.id, cls: "create", el: elc, z: elc.z });
+          // a queued RESTORE also occupies the no-shadow state — don't downgrade it to a create
+          // (though the RPC would auto-restore a create over a same-kind tombstone anyway)
+          if (!pend || (pend.cls !== "create" && pend.cls !== "restore") || stableStringify(pend.el) !== stableStringify(elc)) {
+            if (!(pend && pend.cls === "restore" && stableStringify(pend.el) === stableStringify(elc)))
+              enqueue(key, { kind, id: el.id, cls: pend && pend.cls === "restore" ? "restore" : "create", el: elc, z: elc.z });
             sawCreateOrDelete = true;
           }
           continue;
@@ -152,7 +155,7 @@ export function createElementSync(opts = {}) {
     schedule(sawCreateOrDelete);
   }
 
-  // Latest-wins merge into the dirty queue, resolving create/delete transitions.
+  // Latest-wins merge into the dirty queue, resolving create/delete/restore transitions.
   function enqueue(key, entry) {
     const prev = dirty.get(key);
     if (prev) {
@@ -160,8 +163,18 @@ export function createElementSync(opts = {}) {
       if (prev.cls === "create" && entry.cls === "delete") { dirty.delete(key); return; }
       // was created, now edited → keep 'create' with the newest element
       if (prev.cls === "create" && entry.cls === "update") { dirty.set(key, { ...entry, cls: "create" }); return; }
+      // a queued restore that gets edited before sending keeps restoring (with the newest data)
+      if (prev.cls === "restore" && entry.cls === "update") { dirty.set(key, { ...entry, cls: "restore" }); return; }
     }
     dirty.set(key, entry);
+  }
+
+  // B673 — explicit user action from the "deleted by ⟨name⟩" toast: clear the tombstone and write
+  // OUR data at a new rev. Immediate (like create/delete — a deliberate act, never debounced).
+  function restore(kind, id, el) {
+    if (stopped || !ready || !el) return;
+    enqueue(skey(kind, id), { kind, id, cls: "restore", el, z: el.z });
+    schedule(true);
   }
 
   // Decide when to fire: create/delete are immediate; a pure update batch trails by debounceMs.
@@ -204,6 +217,7 @@ export function createElementSync(opts = {}) {
   function opFor(e) {
     if (e.cls === "create") return { op: "create", id: e.id, kind: e.kind, z: e.z, data: e.el };
     if (e.cls === "delete") return { op: "delete", id: e.id, kind: e.kind, expected: revOf(e) };
+    if (e.cls === "restore") return { op: "restore", id: e.id, kind: e.kind, z: e.z, data: e.el };
     return { op: "update", id: e.id, kind: e.kind, z: e.z, expected: revOf(e), data: e.el };
   }
   const revOf = (e) => { const s = shadow.get(skey(e.kind, e.id)); return s ? s.rev : 1; };
@@ -223,7 +237,12 @@ export function createElementSync(opts = {}) {
         recent.set(key, { at: now(), rev: r.rev });
       } else if (r.status === "conflict") {
         const row = r.row || {};
-        if (e.cls === "delete") {
+        if (e.cls === "restore") {
+          // someone restored/edited it first — the live row is the truth; adopt it, don't re-push
+          shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(row.data), rev: row.rev, z: row.z_index });
+          report("element-restore-conflict", "restore raced a live row", { siteId, id: e.id, kind: e.kind });
+          onEvent({ type: "restore-conflict", id: e.id, kind: e.kind, remote: row });
+        } else if (e.cls === "delete") {
           // delete-vs-edit: delete WINS — re-issue at the fresh rev (per the B673 matrix)
           shadow.set(key, { kind: e.kind, id: e.id, json: shadow.get(key)?.json || "", rev: row.rev, z: e.z });
           enqueue(key, { kind: e.kind, id: e.id, cls: "delete", el: null, z: e.z });
@@ -278,6 +297,42 @@ export function createElementSync(opts = {}) {
 
   // Ops still pending, for the keepalive unload flush (elementApi.keepaliveCommit).
   function pendingOps() { return [...dirty.values()].map(opFor); }
+  // The pending local edits themselves — the B672 refetch-replace substitutes these back into the
+  // rebuilt canvas so a full refetch never discards work still in flight.
+  function dirtyEntries() { return [...dirty.values()].map((e) => ({ kind: e.kind, id: e.id, cls: e.cls, el: e.el })); }
+
+  // ---- B672: the realtime READ side -------------------------------------------
+  // Apply one incoming site_elements row (a postgres_changes event) against the shadow and return
+  // the canvas instruction. Idempotent by rev: our own committed changes echoing back are a no-op.
+  //   { action:'ignore' }                      — stale / own echo / dirty-local-wins
+  //   { action:'remove', kind, id, row }      — tombstoned remotely → take it off the canvas
+  //   { action:'upsert', kind, id, el, row }  — new/updated remotely → put row.data on the canvas
+  // A row for an element with a PENDING local edit keeps the LOCAL data on canvas (the dirty entry
+  // recommits through the normal rev-checked path) but ADOPTS the remote rev so that commit targets
+  // the fresh row instead of a guaranteed conflict; emits `remote-while-dirty` for B673.
+  function applyRemoteRow(row) {
+    if (!row || !row.kind || row.id == null) return { action: "ignore" };
+    const key = skey(row.kind, row.id);
+    const shad = shadow.get(key);
+    const rev = typeof row.rev === "number" ? row.rev : 0;
+    if (shad && rev <= shad.rev) return { action: "ignore" }; // own echo or stale replay
+    if (dirty.has(key)) {
+      // local edit in flight — local data stays on canvas; re-target its commit at the fresh rev
+      shadow.set(key, { kind: row.kind, id: row.id, json: shad ? shad.json : "", rev, z: row.z_index });
+      onEvent({ type: "remote-while-dirty", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
+      return { action: "ignore" };
+    }
+    if (row.deleted_at) {
+      if (!shad) return { action: "ignore" }; // tombstone for something we never showed
+      shadow.delete(key);
+      onEvent({ type: "remote-delete", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
+      return { action: "remove", kind: row.kind, id: row.id, row };
+    }
+    if (!row.data) return { action: "ignore" }; // malformed live row (CHECK should prevent this)
+    shadow.set(key, { kind: row.kind, id: row.id, json: stableStringify(row.data), rev, z: row.z_index });
+    onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
+    return { action: "upsert", kind: row.kind, id: row.id, el: row.data, row };
+  }
 
   function stop() {
     stopped = true;
@@ -286,8 +341,9 @@ export function createElementSync(opts = {}) {
   }
 
   return {
-    reconcile, flushGesture, retryNow, seed, stop,
-    pendingOps, pendingCount,
+    reconcile, flushGesture, retryNow, seed, stop, restore,
+    pendingOps, pendingCount, dirtyEntries, applyRemoteRow,
+    isSeeded: () => ready,
     // introspection for tests / B672-B673
     shadowSnapshot, isRecent,
     get state() { return state; },
