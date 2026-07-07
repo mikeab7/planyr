@@ -1,0 +1,358 @@
+/* Floodplain mitigation engine (B707) — screening estimate of the COMPENSATING
+ * STORAGE a jurisdiction requires when fill lands in the mapped floodplain, plus the
+ * hard geometry flags (floodway, unstudied Zone A) that are not volume questions.
+ *
+ * Pure and Node-testable: NFHL features are PASSED IN (the caller fetches them via
+ * vectorLayers.fetchCached over the B96 SWR cache, site-bbox keyed — see
+ * SitePlanner's checkDrainage); every elevation is a pluggable input so a LiDAR /
+ * MAAPnext grid later is a provider swap with ZERO engine rework. All elevations are
+ * feet NAVD88. Mitigation is a SEPARATE ledger from detention — nothing here nets
+ * the two (the same acre-foot can't count twice).
+ *
+ * ★ Honest states (LOUD-FAILURE, the silent-error principle): a missing elevation or
+ * a failed source makes the affected volume read UNKNOWN (null) — NEVER zero — while
+ * the pure-geometry outputs (intersect acreage, floodway/unstudied flags) still
+ * compute and render. An unverified rule stamps every output.
+ *
+ * Screening exclusions (deliberate, surfaced as copy): perimeter tie-in slopes;
+ * stage-band distribution ("hydraulically equivalent" — this checks TOTAL volume
+ * only); hydrograph routing; conveyance hydraulics (Harris' offsetScope notes when
+ * conveyance also governs).
+ */
+import { pointInRing } from "./pondGeom.js";
+import { lngLatRingToFeet } from "./arcgis.js";
+import { isSFHA } from "./siteAnalysis.js";
+import { SQFT_PER_ACRE } from "../../../shared/coordinates/index.js";
+import { triggerClasses } from "./floodplainRules.js";
+
+// NFHL publishes -9999 for "no static BFE" / "no depth" (same sentinel detentionRules guards).
+export const BFE_SENTINEL_MIN = -9000;
+const CF_PER_CY = 27;
+
+const num = (v) => (v == null || v === "" ? null : Number(v));
+const realElev = (v) => { const n = num(v); return n != null && isFinite(n) && n > BFE_SENTINEL_MIN ? n : null; };
+
+// Shaded Zone X = the 0.2%-annual-chance (500-yr) band (same regex family as siteAnalysis).
+const isShadedX = (subtype) => /0\.2\s*pct|0\.2\s*%|\b500[-\s]?(?:yr|year)/i.test(String(subtype || ""));
+const isFloodway = (subtype) => /floodway/i.test(String(subtype || ""));
+
+/* Classify ONE NFHL S_Fld_Haz_Ar feature's attributes into a mitigation class.
+ *   floodway — regulatory floodway: fill/structures are a HARD STOP (prohibit_fill),
+ *              never a mitigable volume; kept out of the volume ledger by design.
+ *   1pct     — the SFHA (A/AE/AH/AO/V…): AH is treated as AE (ponding with a BFE);
+ *              AO is sheet flow — no BFE, carries a DEPTH attribute instead, so its
+ *              WSE = existing grade + DEPTH; bare Zone A with no published BFE is
+ *              flagged unstudied (WSE undeterminable from the map alone).
+ *   02pct    — the shaded-X 0.2% (500-yr) band (COH's extended fill trigger).
+ *   none     — unshaded X / D / open water etc. (no mitigation trigger). Zone D stays
+ *              the Site-Analysis screen's "unknown" — it carries no WSE to price.
+ * Pure. */
+export function classifyNfhlFeature(attrs = {}) {
+  const zone = String(attrs.FLD_ZONE == null ? "" : attrs.FLD_ZONE).trim().toUpperCase();
+  const subtype = String(attrs.ZONE_SUBTY == null ? "" : attrs.ZONE_SUBTY).trim();
+  const sfha = String(attrs.SFHA_TF == null ? "" : attrs.SFHA_TF).trim().toUpperCase() === "T" || isSFHA(zone);
+  const staticBfeFt = realElev(attrs.STATIC_BFE);
+  const aoDepthFt = zone === "AO" ? realElev(attrs.DEPTH) : null;
+  const vdatum = attrs.V_DATUM != null && String(attrs.V_DATUM).trim() !== "" ? String(attrs.V_DATUM).trim() : null;
+  let cls = "none";
+  if (isFloodway(subtype)) cls = "floodway";
+  else if (sfha) cls = "1pct";
+  else if (isShadedX(subtype)) cls = "02pct";
+  return {
+    cls, zone, subtype, staticBfeFt, aoDepthFt, vdatum,
+    // Bare Zone A (or AO with no depth) — in the SFHA but its water surface can't be
+    // read off the map: "unstudied — BFE undetermined".
+    unstudiedA: cls === "1pct" && staticBfeFt == null && (zone === "A" || (zone === "AO" && aoDepthFt == null)),
+  };
+}
+
+/* GeoJSON FeatureCollection (vectorLayers.fetchCached output — Polygon per feature,
+ * rings = outers AND holes, unsplit) → mitigation zones in the planner's site-feet
+ * frame. Rings convert via the SAME lngLatRingToFeet the map render uses; point-in-
+ * zone tests below run EVEN-ODD ACROSS ALL RINGS so an island inside a floodplain
+ * polygon is correctly outside it (never billed for mitigation). Pure. */
+export function zonesFromFeatureCollection(fc, origin) {
+  const out = [];
+  if (!fc || !Array.isArray(fc.features) || !origin) return out;
+  for (const f of fc.features) {
+    const c = classifyNfhlFeature(f.properties || {});
+    if (c.cls === "none") continue;
+    const coords = (f.geometry && f.geometry.coordinates) || [];
+    const rings = coords
+      .filter((r) => Array.isArray(r) && r.length >= 3)
+      .map((r) => lngLatRingToFeet(r, origin.lon, origin.lat));
+    if (!rings.length) continue;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const ring of rings) for (const p of ring) {
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    }
+    out.push({ ...c, rings, bbox: [minX, minY, maxX, maxY] });
+  }
+  return out;
+}
+
+// Even-odd containment across ALL of a zone's rings (outers + holes, unsplit).
+export const pointInZone = (pt, zone) => {
+  let inside = false;
+  for (const ring of zone.rings) if (pointInRing(pt, ring)) inside = !inside;
+  return inside;
+};
+
+const ringBBox = (ring) => {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of ring) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }
+  return [minX, minY, maxX, maxY];
+};
+const bboxOverlap = (a, b) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
+
+/* Grid-sampled intersection of one footprint ring with one zone (pondGeom idiom):
+ * adaptive cell size targeting ≤ maxCells over the OVERLAP bbox, floored at minCellFt
+ * (screening tolerance), cell-center sampling. Returns { areaSf, sumDepthArea } where
+ * sumDepthArea = Σ cellArea × depthAt(cell) (0 when depthAt is null — callers price
+ * volume separately from area). Pure. */
+export function gridIntersect(ring, zone, depthAt = null, opts = {}) {
+  const maxCells = opts.maxCells || 1500;
+  const minCellFt = opts.minCellFt || 2;
+  const fb = ringBBox(ring);
+  if (!bboxOverlap(fb, zone.bbox)) return { areaSf: 0, sumDepthArea: 0 };
+  const x0 = Math.max(fb[0], zone.bbox[0]), y0 = Math.max(fb[1], zone.bbox[1]);
+  const x1 = Math.min(fb[2], zone.bbox[2]), y1 = Math.min(fb[3], zone.bbox[3]);
+  const w = x1 - x0, h = y1 - y0;
+  if (!(w > 0) || !(h > 0)) return { areaSf: 0, sumDepthArea: 0 };
+  const cell = Math.max(minCellFt, Math.sqrt((w * h) / maxCells));
+  const nx = Math.max(1, Math.ceil(w / cell)), ny = Math.max(1, Math.ceil(h / cell));
+  const dx = w / nx, dy = h / ny, cellArea = dx * dy;
+  let areaSf = 0, sumDepthArea = 0;
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < ny; j++) {
+      const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
+      if (!pointInRing(pt, ring)) continue;
+      if (!pointInZone(pt, zone)) continue;
+      areaSf += cellArea;
+      if (depthAt) {
+        const d = depthAt(pt);
+        if (d != null && isFinite(d) && d > 0) sumDepthArea += cellArea * d;
+      }
+    }
+  }
+  return { areaSf, sumDepthArea };
+}
+
+/* The governing (highest) 1% water surface across the zones that touch a ring —
+ * static BFE where published, else the manual BFE. B708's pond split consumes this.
+ * Returns { wseFt, provider } — provider "static-bfe" | "manual" | null. Pure. */
+export function wse1pctForRing(ring, zones, { bfeFt = null } = {}) {
+  const fb = ringBBox(ring);
+  let best = null, provider = null;
+  for (const z of zones) {
+    if (z.cls !== "1pct" && z.cls !== "floodway") continue;
+    if (!bboxOverlap(fb, z.bbox)) continue;
+    const { areaSf } = gridIntersect(ring, z, null, { maxCells: 400 });
+    if (!(areaSf > 0)) continue;
+    if (z.staticBfeFt != null && (best == null || z.staticBfeFt > best)) { best = z.staticBfeFt; provider = "static-bfe"; }
+  }
+  if (best == null && bfeFt != null && isFinite(bfeFt)) {
+    // Only meaningful when the ring actually touches a 1% zone at all.
+    const touches = zones.some((z) => (z.cls === "1pct" || z.cls === "floodway") && bboxOverlap(fb, z.bbox) && gridIntersect(ring, z, null, { maxCells: 400 }).areaSf > 0);
+    if (touches) { best = bfeFt; provider = "manual"; }
+  }
+  return { wseFt: best, provider };
+}
+
+/* Does a ring intersect any trigger-class zone for this rule? (B708/B712 helper.) */
+export function ringInTrigger(ring, zones, rule) {
+  const classes = new Set(triggerClasses(rule));
+  classes.add("floodway"); // the floodway is inside the 1% — always a trigger-relevant touch
+  const fb = ringBBox(ring);
+  for (const z of zones) {
+    if (!classes.has(z.cls)) continue;
+    if (!bboxOverlap(fb, z.bbox)) continue;
+    if (gridIntersect(ring, z, null, { maxCells: 400 }).areaSf > 0) return true;
+  }
+  return false;
+}
+
+/* ---------------------------------------------------------------------------------
+ * computeMitigation — the volume core.
+ *   V = ratio × Σ cellArea × max(0, min(WSE, padElev) − existGrade)
+ * over every fill-footprint cell inside a TRIGGER-class zone. The floodway is
+ * deliberately EXCLUDED from the volume ledger: fill there is prohibited
+ * (floodwayPolicy), so its intersect reads as acres + a hard flag, never a
+ * mitigation price. Zones of one class never overlap (NFHL S_Fld_Haz_Ar is a planar
+ * partition), so per-zone sums don't double-count. Overlapping FOOTPRINTS would —
+ * the caller passes the same non-overlapping element set the yield math uses.
+ *
+ *   footprints — [{ id, label, ring, padElevFt? }] in site feet
+ *   zones      — zonesFromFeatureCollection output
+ *   rule       — one floodplainRules record
+ *   elev       — { padElevFt, existGradeFt, bfeFt, wse02Ft, avgFillDepthFt,
+ *                  sources: { padElev?, existGrade? } }  (all optional; sources are
+ *                  plain provenance labels the caller sets, e.g. "manual" | "3dep")
+ * Pure. */
+export function computeMitigation({ footprints = [], zones = [], rule = null, elev = {}, opts = {} } = {}) {
+  const classes = rule ? triggerClasses(rule) : ["1pct"];
+  const ratio = rule && isFinite(rule.ratio) ? rule.ratio : 1;
+  const expert = elev.avgFillDepthFt != null && isFinite(elev.avgFillDepthFt) && elev.avgFillDepthFt >= 0;
+
+  const flags = new Set();
+  if (rule && rule.verified === false) flags.add("rule_unverified");
+  if (zones.some((z) => z.unstudiedA)) flags.add("unstudied_a");
+  if (zones.some((z) => z.vdatum && z.vdatum.toUpperCase() !== "NAVD88" && z.vdatum.toUpperCase() !== "NAVD 88")) flags.add("datum_mismatch");
+
+  // Per-class accumulators. Volume stays null (UNKNOWN) until it is actually priceable.
+  const perClass = {};
+  for (const cls of [...classes, "floodway"]) perClass[cls] = { acres: 0, volumeCf: null, unknown: null };
+
+  const padDefault = realElev(elev.padElevFt);
+  const grade = realElev(elev.existGradeFt);
+  const wse02 = realElev(elev.wse02Ft);
+  const manualBfe = realElev(elev.bfeFt);
+  const wseProviders = new Set();
+
+  for (const z of zones) {
+    const bucket = perClass[z.cls];
+    if (!bucket) continue; // a class outside this rule's trigger (e.g. 02pct under a 1pct-only rule)
+
+    // The zone's water surface (feet NAVD88), by provider precedence:
+    //   1% zones: published static BFE → manual BFE → (AO) grade + DEPTH → unknown.
+    //   0.2% band: manual 0.2% WSE only in v1 (not an NFHL attribute; named hook for
+    //   HCFCD/MAAPnext WSE grids later).
+    let wse = null, wseSrc = null;
+    if (z.cls === "1pct") {
+      if (z.staticBfeFt != null) { wse = z.staticBfeFt; wseSrc = "static-bfe"; }
+      else if (manualBfe != null) { wse = manualBfe; wseSrc = "manual"; }
+      else if (z.aoDepthFt != null && grade != null) { wse = grade + z.aoDepthFt; wseSrc = "ao-depth"; }
+    } else if (z.cls === "02pct") {
+      if (wse02 != null) { wse = wse02; wseSrc = "manual"; }
+    }
+
+    for (const fp of footprints) {
+      const ring = fp.ring;
+      if (!Array.isArray(ring) || ring.length < 3) continue;
+
+      if (z.cls === "floodway") {
+        // Geometry + hard flag only — fill in the floodway is prohibited, not priced.
+        const { areaSf } = gridIntersect(ring, z, null, opts);
+        if (areaSf > 0) { bucket.acres += areaSf / SQFT_PER_ACRE; flags.add("floodway_intersect"); }
+        continue;
+      }
+
+      const pad = realElev(fp.padElevFt) ?? padDefault;
+
+      if (expert) {
+        // Expert bypass: "average depth of fill below the flood elevation (ft)" —
+        // volume = ratio × intersect area × that constant depth. Geometry unchanged.
+        const { areaSf } = gridIntersect(ring, z, null, opts);
+        if (areaSf > 0) {
+          bucket.acres += areaSf / SQFT_PER_ACRE;
+          bucket.volumeCf = (bucket.volumeCf || 0) + areaSf * elev.avgFillDepthFt;
+        }
+        continue;
+      }
+
+      const priceable = wse != null && pad != null && grade != null;
+      const depthAt = priceable ? () => Math.max(0, Math.min(wse, pad) - grade) : null;
+      const { areaSf, sumDepthArea } = gridIntersect(ring, z, depthAt, opts);
+      if (!(areaSf > 0)) continue;
+      bucket.acres += areaSf / SQFT_PER_ACRE;
+      if (priceable) {
+        bucket.volumeCf = (bucket.volumeCf || 0) + sumDepthArea;
+        if (wseSrc) wseProviders.add(wseSrc);
+      } else if (!bucket.unknown) {
+        bucket.unknown =
+          wse == null
+            ? (z.cls === "02pct"
+                ? "0.2% water-surface elevation not entered (not an NFHL attribute — FEMA FIS profile / HCFCD model data)"
+                : z.unstudiedA
+                  ? "unstudied Zone A — BFE undetermined from the map"
+                  : "no published BFE on this reach — enter the BFE (the common case on AE polygons)")
+            : pad == null
+              ? "pad / finished-floor elevation not entered"
+              : "existing-grade elevation unavailable";
+      }
+    }
+  }
+
+  // Apply the mitigation ratio to the priced classes; roll up totals honestly:
+  // any trigger class with intersect acreage but an unknown volume makes the TOTAL
+  // volume unknown too (a partial sum would read as smaller-than-real — the silent-
+  // error class this engine exists to prevent). A genuinely-zero intersect is a real
+  // 0, not an UNKNOWN — UNKNOWN is reserved for missing elevations / failed sources.
+  // The floodway ledger stays separate: its acres never price and never poison the
+  // trigger-volume total (fill there is prohibited outright, not mitigable).
+  let triggerAcres = 0, totalVolumeCf = 0, anyUnknown = null;
+  for (const cls of classes) {
+    const b = perClass[cls];
+    if (b.volumeCf != null) { b.volumeCf *= ratio; totalVolumeCf += b.volumeCf; }
+    if (b.acres > 0 && b.volumeCf == null) anyUnknown = b.unknown || "elevation inputs missing";
+    triggerAcres += b.acres;
+  }
+  const floodwayAcres = perClass.floodway ? perClass.floodway.acres : 0;
+  const totalAcres = triggerAcres + floodwayAcres;
+  const volumeKnown = !anyUnknown; // zero trigger acres → a real 0, not UNKNOWN
+
+  return {
+    trigger: rule ? rule.trigger : "1pct",
+    ratio,
+    perClass,
+    intersectAcres: totalAcres,
+    triggerAcres,
+    floodwayAcres,
+    volumeCf: volumeKnown ? totalVolumeCf : null,
+    volumeAcFt: volumeKnown ? totalVolumeCf / SQFT_PER_ACRE : null,
+    cutCy: volumeKnown ? totalVolumeCf / CF_PER_CY : null,
+    unknownReason: anyUnknown,
+    expertBypass: expert,
+    flags: [...flags],
+    providers: {
+      padElev: (elev.sources && elev.sources.padElev) || (padDefault != null ? "manual" : null),
+      existGrade: (elev.sources && elev.sources.existGrade) || (grade != null ? "manual" : null),
+      wse1pct: wseProviders.has("static-bfe") && wseProviders.size > 1 ? "mixed"
+        : wseProviders.has("static-bfe") ? "static-bfe"
+        : wseProviders.has("ao-depth") ? "ao-depth"
+        : wseProviders.has("manual") ? "manual" : null,
+      wse02pct: wse02 != null ? "manual" : null,
+      expert: expert ? "avg-fill-depth" : null,
+    },
+  };
+}
+
+/* Straddle helper: worst case across per-candidate results (highest known volume;
+ * any candidate with an UNKNOWN volume keeps the whole answer flagged). Pure. */
+export function pickWorstCase(results) {
+  if (!results || !results.length) return null;
+  let best = results[0];
+  for (const r of results) {
+    if (r.result.volumeCf != null && (best.result.volumeCf == null || r.result.volumeCf > best.result.volumeCf)) best = r;
+  }
+  const anyUnknown = results.some((r) => r.result.volumeCf == null && r.result.intersectAcres > 0);
+  return { ...best, straddle: true, anyUnknown };
+}
+
+/* Lon/lat envelope for the NFHL pull: the active-parcel rings PLUS the drawn
+ * elements' extent (fill can sit outside a parcel), padded so edge-touching zones
+ * aren't clipped. Site-scoped — never the map view. Pure. */
+export function floodGeoBbox(lonLatRings, padDeg = 0.001) {
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+  for (const ring of lonLatRings || []) for (const [lng, lat] of ring) {
+    if (lng < w) w = lng; if (lng > e) e = lng;
+    if (lat < s) s = lat; if (lat > n) n = lat;
+  }
+  if (!isFinite(w)) return null;
+  return { w: w - padDeg, s: s - padDeg, e: e + padDeg, n: n + padDeg };
+}
+
+/* Standing copy (single source so panel/print never drift). */
+export const NAVD88_NOTE =
+  "All elevations are feet NAVD88. Older documents may cite NGVD29 — Houston-area subsidence makes mixed datums a multi-foot silent error; convert before entering.";
+export const NEWER_MODEL_NOTE =
+  "Jurisdictions may enforce newer model elevations (e.g. MAAPnext) HIGHER than the effective FIRM — when in doubt, enter the higher water surface.";
+export const EXCLUSIONS_NOTE =
+  "Screening checks total volume only. Not modeled: perimeter tie-in slopes; stage-band distribution (“hydraulically equivalent” placement); hydrograph routing; conveyance hydraulics.";
+export const OFFSITE_NOTE =
+  "Floodplain sites often pass OFFSITE flow — upstream contributing area and conveyance through the site are your engineer's check, not modeled here.";
+export const EXPERT_BYPASS_LABEL = "average depth of fill below the flood elevation (ft)";

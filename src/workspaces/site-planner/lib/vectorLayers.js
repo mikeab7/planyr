@@ -49,7 +49,13 @@ export const VECTOR_SOURCES = {
     // one-line registry edit here (and in imageFallback.layers below).
     query: {
       url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query",
-      outFields: ["FLD_ZONE", "ZONE_SUBTY", "SFHA_TF", "STATIC_BFE"],
+      // DEPTH (Zone AO sheet-flow depth) + V_DATUM (datum honesty) joined for the
+      // floodplain-mitigation engine (B707). keyRev busts the 30-day cache when the
+      // field list changes — without it, stale attribute-less entries would serve
+      // for a whole TTL (the same "registry retune must bust the cache" rule the
+      // tier comment on vectorKey documents).
+      keyRev: 2,
+      outFields: ["FLD_ZONE", "ZONE_SUBTY", "SFHA_TF", "STATIC_BFE", "DEPTH", "V_DATUM"],
       where: "1=1",
       pageSize: 1000,
       maxFeatures: 4000,
@@ -447,9 +453,12 @@ export function decideVectorOrImage(source, { zoom, bboxAreaDeg, lastVectorError
 export function vectorKey(source, bbox, tier = null) {
   const r = (n) => Number(n).toFixed(3);
   const det = tier ? `@${tier.offsetDeg}p${(tier.precision) || 5}` : "";
-  if (tier && tier.scope === "all") return `vec:${source.id}:all${det}`;
+  // A registry FIELD-LIST change must bust the cache too (B707: fema gained
+  // DEPTH/V_DATUM) — sources without keyRev keep their existing keys untouched.
+  const rev = source.query && source.query.keyRev ? `!r${source.query.keyRev}` : "";
+  if (tier && tier.scope === "all") return `vec:${source.id}:all${det}${rev}`;
   const box = `${r(bbox.w)},${r(bbox.s)},${r(bbox.e)},${r(bbox.n)}`;
-  return `vec:${source.id}:${box}${det}`;
+  return `vec:${source.id}:${box}${det}${rev}`;
 }
 
 /* Fetch a source's simplified GeoJSON over a bbox THROUGH the browser-local SWR
@@ -471,9 +480,14 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
   const effBbox = tier && tier.scope !== "all" && tier.cellDeg ? snapBbox(bbox, tier.cellDeg) : bbox;
   const key = vectorKey(source, effBbox, tier);
   const fetcher = async () => {
-    const { features } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
+    const { features, truncated } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
     const fc = featuresToGeoJson(features, { source });
-    return tier ? fc : simplifyGeoJson(fc);
+    const out = tier ? fc : simplifyGeoJson(fc);
+    // Surface the maxFeatures cap on the stored payload (B707): a capped pull is an
+    // UNDERCOUNT — consumers (the mitigation engine) must flag it, never read it as
+    // "everything". Silent truncation is the fabricated-all-clear class.
+    if (truncated) out.truncated = true;
+    return out;
   };
   const { cached, stale, fresh } = cache.swr(key, fetcher, { ttl: source.query.ttl, onFresh });
   if (cached) {

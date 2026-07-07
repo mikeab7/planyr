@@ -48,7 +48,7 @@ describe("VECTOR_SOURCES — registry shape", () => {
   it("FEMA + wetlands carry query, imageFallback, style, and a screening note", () => {
     expect(VECTOR_SOURCES.fema.style).toBe("fema");
     expect(VECTOR_SOURCES.fema.query.url).toContain("/NFHL/MapServer/28/query");
-    expect(VECTOR_SOURCES.fema.query.outFields).toEqual(["FLD_ZONE", "ZONE_SUBTY", "SFHA_TF", "STATIC_BFE"]);
+    expect(VECTOR_SOURCES.fema.query.outFields).toEqual(["FLD_ZONE", "ZONE_SUBTY", "SFHA_TF", "STATIC_BFE", "DEPTH", "V_DATUM"]);
     expect(VECTOR_SOURCES.fema.imageFallback.layers).toEqual([27, 28]);
     expect(VECTOR_SOURCES.fema.note).toMatch(/screening only/i);
     expect(VECTOR_SOURCES.wetlands.style).toBe("nwi");
@@ -125,7 +125,7 @@ describe("buildVectorQuery — envelope intersect, paged", () => {
     expect(p.inSR).toBe(4326);
     expect(p.outSR).toBe(4326);
     expect(p.spatialRel).toBe("esriSpatialRelIntersects");
-    expect(p.outFields).toBe("FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE"); // joined
+    expect(p.outFields).toBe("FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE,DEPTH,V_DATUM"); // joined
     expect(p.returnGeometry).toBe("true");
     expect(p.geometryPrecision).toBe(5);
     expect(p.resultOffset).toBe(2000);
@@ -160,7 +160,7 @@ describe("buildVectorQuery — envelope intersect, paged", () => {
 
 describe("vectorKey — tier-stamped cache keys (B694)", () => {
   it("tierless keeps the original 3-dp bbox key", () => {
-    expect(vectorKey(VECTOR_SOURCES.fema, BBOX)).toBe("vec:fema:-95.500,29.700,-95.400,29.800");
+    expect(vectorKey(VECTOR_SOURCES.fema, BBOX)).toBe("vec:fema:-95.500,29.700,-95.400,29.800!r2");
   });
   it("an 'all' tier has ONE view-independent key", () => {
     const tier = VECTOR_SOURCES.jur_county.query.tiers[0];
@@ -192,7 +192,7 @@ describe("buildQueryUrl — encodes params onto a base URL", () => {
     const url = buildQueryUrl(VECTOR_SOURCES.fema.query.url, p);
     const parsed = new URL(url);
     expect(JSON.parse(parsed.searchParams.get("geometry")).xmin).toBe(-95.5);
-    expect(parsed.searchParams.get("outFields")).toBe("FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE");
+    expect(parsed.searchParams.get("outFields")).toBe("FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE,DEPTH,V_DATUM");
   });
 });
 
@@ -393,6 +393,22 @@ describe("fetchCached — SWR through the browser cache", () => {
     // this same cache now serves it from storage without a refetch (warm path below).
   });
 
+  it("a maxFeatures-capped pull carries `truncated` on the stored payload (B707 — an undercount must surface, never read as everything)", async () => {
+    const cache = freshCache();
+    // Server keeps saying "more" — fetchVectorFeatures hard-caps at maxFeatures (4000)
+    // only after many pages; exercise the flag cheaply by a huge single page + limit
+    // via the wetlands source's smaller page interplay is overkill — instead return
+    // pageSize features + exceededTransferLimit until the fema cap trips.
+    const page = () => ({
+      features: Array.from({ length: VECTOR_SOURCES.fema.query.pageSize }, () => ({ attributes: { FLD_ZONE: "AE" }, geometry: { rings: [square(0, 0, 1)] } })),
+      exceededTransferLimit: true,
+    });
+    const fetchJson = fakeFetch({ [FEMA]: page });
+    const r = await fetchCached(VECTOR_SOURCES.fema, BBOX, { cache, fetchJson });
+    expect(r.data.truncated).toBe(true);
+    expect(r.data.features.length).toBe(VECTOR_SOURCES.fema.query.maxFeatures);
+  });
+
   it("warm + fresh → serves the cached copy WITHOUT a refetch", async () => {
     const clock = makeClock();
     const cache = freshCache(clock);
@@ -423,7 +439,7 @@ describe("fetchCached — SWR through the browser cache", () => {
     // a background revalidation was kicked off; let it settle, then the cache holds VE
     await new Promise((res) => setTimeout(res, 0));
     expect(fetchJson.calls).toBe(2);
-    expect(cache.read("vec:fema:-95.500,29.700,-95.400,29.800").data.features[0].properties.FLD_ZONE).toBe("VE");
+    expect(cache.read("vec:fema:-95.500,29.700,-95.400,29.800!r2").data.features[0].properties.FLD_ZONE).toBe("VE");
   });
 
   it("rounds the bbox to 3 decimals so a sub-tile pan reuses the same entry", async () => {
