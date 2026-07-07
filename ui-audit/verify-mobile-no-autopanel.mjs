@@ -24,14 +24,11 @@ const check = (n, ok, d="") => { results.push(ok); console.log(`${ok?"PASS":"FAI
 // desktop panel — detect by the presence of the inspector heading text.
 async function panelOpen(page) {
   return page.evaluate(() => {
-    // The open left menu is the cream (#efe9dd = rgb(239,233,221)) panel that follows the 54px
-    // icon rail; when closed only the rail exists. Match the COMPUTED bg color (the DOM serializes
-    // the inline hex to rgb) on a div wider than the rail.
-    const els = [...document.querySelectorAll("div")];
-    return els.some((d) => {
-      const bg = getComputedStyle(d).backgroundColor;
-      return bg === "rgb(239, 233, 221)" && d.getBoundingClientRect().width > 100;
-    });
+    // The open left menu is the flyout column that follows the 54px icon rail; it carries
+    // data-testid="left-menu-panel" and is unmounted when closed (only the rail exists).
+    // (B689 — was a brittle match on the panel's cream surface colour, since retired.)
+    const d = document.querySelector('[data-testid="left-menu-panel"]');
+    return !!d && d.getBoundingClientRect().width > 100;
   });
 }
 

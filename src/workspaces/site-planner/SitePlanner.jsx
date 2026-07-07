@@ -9516,7 +9516,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {(leftPanel || companionOpen) && (<>
-          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
+          <div data-testid="left-menu-panel" style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
           {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
               so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).
