@@ -73,6 +73,49 @@ else console.log("SKIP ⏭   drawing a building  —  tool rail not reachable he
 // 4) no uncaught page errors
 ok("no uncaught page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | ") || "clean");
 
+// 5) B690 — COLD START: a truly fresh client (NO seeded localStorage at all) must boot the Site
+// module without tripping its error boundary. The pre-B690 smokes always seeded a site, which is
+// exactly why the fresh-client crash (V231 #18) escaped to production — never remove this check.
+{
+  const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const p2 = await ctx2.newPage();
+  const errs2 = [];
+  p2.on("pageerror", (e) => errs2.push(String(e)));
+  await p2.goto(BASE, { waitUntil: "domcontentloaded" });
+  await p2.waitForTimeout(2500);
+  const body2 = await p2.evaluate(() => document.body.innerText || "");
+  const boundaryHit2 = /hit an error and couldn't load|your work is saved/i.test(body2); // all three ErrorBoundary card variants
+  ok("cold start (no seed) boots without the error boundary", !boundaryHit2 && errs2.length === 0,
+    errs2.slice(0, 2).join(" | ") || (boundaryHit2 ? "error boundary card shown" : "clean"));
+  await ctx2.close();
+}
+
+// 6) B690 — BAD RECORD: a stored site whose parcels array holds a parcel with NO `points`
+// (attr-only / legacy / malformed row round-tripped verbatim) must render in the finder as
+// "no boundary" instead of crashing the whole Site module (the V231 #18 crash class:
+// shoelace(undefined.length) inside siteAcres).
+{
+  const bad = { id: "bad-parcel-demo", groupId: "bad-parcel-demo", site: "Bad Parcel Demo", name: "Plan 1",
+    origin: { lat: 29.78, lon: -95.7 }, county: null,
+    parcels: [{ id: "px1", addr: "attr-only parcel", acct: "123" }], // ← no points, by design
+    els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now() };
+  const ctx3 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const p3 = await ctx3.newPage();
+  const errs3 = [];
+  p3.on("pageerror", (e) => errs3.push(String(e)));
+  await p3.addInitScript(`(() => { try {
+    localStorage.setItem('planarfit:sites:v1', JSON.stringify({ 'bad-parcel-demo': ${JSON.stringify(bad)} }));
+  } catch (e) {} })();`);
+  await p3.goto(BASE, { waitUntil: "domcontentloaded" });
+  await p3.waitForTimeout(2500);
+  const body3 = await p3.evaluate(() => document.body.innerText || "");
+  const boundaryHit3 = /hit an error and couldn't load|your work is saved/i.test(body3); // negative-control-verified: the unguarded build shows "hit an error and couldn't load … reading 'length'" here
+  const listed = /Bad Parcel Demo/i.test(body3);
+  ok("points-less parcel record renders (no crash)", !boundaryHit3 && errs3.length === 0 && listed,
+    errs3.slice(0, 2).join(" | ") || (boundaryHit3 ? "error boundary card shown" : listed ? "listed with 'no boundary'" : "site not listed"));
+  await ctx3.close();
+}
+
 await browser.close();
 const passed = results.filter((r) => r.pass).length;
 console.log(`\n${passed}/${results.length} checks passed`);

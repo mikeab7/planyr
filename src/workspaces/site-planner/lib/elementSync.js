@@ -62,6 +62,11 @@ export function createElementSync(opts = {}) {
   const shadow = new Map();
   // key -> { kind, id, cls: 'create'|'update'|'delete', el|null, z }  (pending, latest-wins)
   const dirty = new Map();
+  // key -> the batch entry currently IN FLIGHT (sent, no result yet). flush() clears `dirty`
+  // up-front, so without this a mid-commit element looks "clean" to applyRemoteRow / the
+  // refetch-replace substitution — a foreign row (or the refetch) could clobber the very edit
+  // being committed (the V229 #5 lost-update class). In-flight is protected exactly like dirty.
+  const inflightKeys = new Map();
   // key -> { at, rev }  (elements this tab committed recently; feeds the B673 15s window)
   const recent = new Map();
 
@@ -114,6 +119,7 @@ export function createElementSync(opts = {}) {
         seen.add(key);
         const shad = shadow.get(key);
         const pend = dirty.get(key);
+        const inf = inflightKeys.get(key); // an identical op already sent needs no re-enqueue
         if (!shad) {
           // brand-new element (or one the shadow never saw) → create. Assign a z ON TOP of its
           // collection if it has none, so the z_index column AND data.z agree (the B672 rebuild
@@ -127,6 +133,7 @@ export function createElementSync(opts = {}) {
           }
           // a queued RESTORE also occupies the no-shadow state — don't downgrade it to a create
           // (though the RPC would auto-restore a create over a same-kind tombstone anyway)
+          if (inf && inf.el && stableStringify(inf.el) === stableStringify(elc)) continue; // being created right now
           if (!pend || (pend.cls !== "create" && pend.cls !== "restore") || stableStringify(pend.el) !== stableStringify(elc)) {
             if (!(pend && pend.cls === "restore" && stableStringify(pend.el) === stableStringify(elc)))
               enqueue(key, { kind, id: el.id, cls: pend && pend.cls === "restore" ? "restore" : "create", el: elc, z: elc.z });
@@ -136,6 +143,7 @@ export function createElementSync(opts = {}) {
         }
         const json = stableStringify(el);
         if (shad.json !== json) {
+          if (inf && inf.el && stableStringify(inf.el) === json) continue; // this exact data is already in flight
           // changed since last commit → update (unless an identical update is already queued)
           if (!pend || pend.cls === "delete" || stableStringify(pend.el) !== json) {
             enqueue(key, { kind, id: el.id, cls: "update", el, z: el.z });
@@ -147,6 +155,8 @@ export function createElementSync(opts = {}) {
     for (const [key, shad] of shadow) {
       if (seen.has(key)) continue;
       const pend = dirty.get(key);
+      const inf = inflightKeys.get(key);
+      if (inf && inf.cls === "delete") continue; // the delete is already on the wire
       if (!pend || pend.cls !== "delete") {
         enqueue(key, { kind: shad.kind, id: shad.id, cls: "delete", el: null, z: shad.z });
         sawCreateOrDelete = true;
@@ -197,12 +207,17 @@ export function createElementSync(opts = {}) {
     clearDebounce();
     const batch = [...dirty.values()];
     dirty.clear();
+    for (const e of batch) inflightKeys.set(skey(e.kind, e.id), e); // protected like dirty until the result lands
     inflight = true;
     setState("syncing");
     serialize(siteId, async () => {
       const ops = batch.map(opFor);
-      const res = await commit(ops);
-      inflight = false;
+      let res;
+      try { res = await commit(ops); }
+      finally {
+        inflight = false;
+        for (const e of batch) inflightKeys.delete(skey(e.kind, e.id));
+      }
       if (!res || !res.ok) return onTransportFailure(batch, res);
       attempt = 0;
       processResults(batch, res.results || []);
@@ -232,7 +247,11 @@ export function createElementSync(opts = {}) {
       if (r.status === "ok") {
         if (e.cls === "delete") { shadow.delete(key); }
         else {
-          shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(e.el), rev: r.rev, z: e.z });
+          // keep the shadow rev MONOTONIC: a foreign realtime row may have advanced it past this
+          // commit's rev while the op was in flight (applyRemoteRow's in-flight branch) — adopting
+          // the older r.rev back would make the next commit a guaranteed spurious conflict.
+          const cur = shadow.get(key);
+          shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(e.el), rev: cur && cur.rev > r.rev ? cur.rev : r.rev, z: e.z });
         }
         recent.set(key, { at: now(), rev: r.rev });
       } else if (r.status === "conflict") {
@@ -298,8 +317,15 @@ export function createElementSync(opts = {}) {
   // Ops still pending, for the keepalive unload flush (elementApi.keepaliveCommit).
   function pendingOps() { return [...dirty.values()].map(opFor); }
   // The pending local edits themselves — the B672 refetch-replace substitutes these back into the
-  // rebuilt canvas so a full refetch never discards work still in flight.
-  function dirtyEntries() { return [...dirty.values()].map((e) => ({ kind: e.kind, id: e.id, cls: e.cls, el: e.el })); }
+  // rebuilt canvas so a full refetch never discards work still in flight. Includes the batch
+  // currently IN FLIGHT (dirty wins on overlap): a refetch landing mid-commit must not rebuild the
+  // canvas from rows that predate the commit and then re-commit that stale canvas (V229 #5).
+  function dirtyEntries() {
+    const out = new Map();
+    for (const [k, e] of inflightKeys) out.set(k, e);
+    for (const [k, e] of dirty) out.set(k, e);
+    return [...out.values()].map((e) => ({ kind: e.kind, id: e.id, cls: e.cls, el: e.el }));
+  }
 
   // ---- B672: the realtime READ side -------------------------------------------
   // Apply one incoming site_elements row (a postgres_changes event) against the shadow and return
@@ -316,10 +342,21 @@ export function createElementSync(opts = {}) {
     const shad = shadow.get(key);
     const rev = typeof row.rev === "number" ? row.rev : 0;
     if (shad && rev <= shad.rev) return { action: "ignore" }; // own echo or stale replay
-    if (dirty.has(key)) {
-      // local edit in flight — local data stays on canvas; re-target its commit at the fresh rev
-      shadow.set(key, { kind: row.kind, id: row.id, json: shad ? shad.json : "", rev, z: row.z_index });
-      onEvent({ type: "remote-while-dirty", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
+    const pend = dirty.get(key) || inflightKeys.get(key); // an in-flight commit is as "ours" as a dirty one
+    if (pend) {
+      // A pending local commit exists for this element. If the incoming row carries EXACTLY the
+      // data we're committing (our own commit echoing back ahead of its RPC result, or a foreign
+      // write that happens to be identical), adopt it silently — canvas already shows it, and a
+      // queued identical update can be dropped outright. Otherwise: local data stays on canvas,
+      // the commit re-targets the fresh rev (LWW re-commit), and B673 gets the heads-up event.
+      const sameData = !row.deleted_at && row.data && pend.el && stableStringify(row.data) === stableStringify(pend.el);
+      shadow.set(key, { kind: row.kind, id: row.id, json: sameData ? stableStringify(row.data) : (shad ? shad.json : ""), rev, z: row.z_index });
+      if (sameData) {
+        const q = dirty.get(key);
+        if (q && q.el && stableStringify(q.el) === stableStringify(row.data)) dirty.delete(key); // server already has it
+      } else {
+        onEvent({ type: "remote-while-dirty", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
+      }
       return { action: "ignore" };
     }
     if (row.deleted_at) {

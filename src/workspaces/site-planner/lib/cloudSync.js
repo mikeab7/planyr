@@ -8,6 +8,7 @@ import { supabase, supabaseRest, currentAccessToken } from "./supabase.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+import { stableStringify } from "./elementSync.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -15,10 +16,30 @@ import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 // switch. Module-scope = naturally per-tab. Until the `version` column is migrated in,
 // every write degrades to a plain upsert (today's behaviour) and this stays empty.
 const siteVersions = {};
+// B672 recurrence (Observation A) — per-tab memory of the slim-header CONTENT last synced per site,
+// so the autosave's header push becomes a no-op when nothing header-side changed. Under element-level
+// sync the autosave effect re-runs on EVERY element edit, but the slim header it pushes is byte-
+// identical except `updatedAt` — yet each push bumped `sites.version`, invalidating every other open
+// tab's CAS token and triggering a silent refetch+re-push heal PER EDIT (the cross-tab version
+// ping-pong the Cowork run logged). Skipping content-identical pushes removes the header write from
+// the element-edit path entirely. Trade-off (documented in the B-item): `sites.updated_at` now only
+// advances on a REAL header change (meta/settings/overlays), not on element edits — element recency
+// lives on the site_elements rows.
+const lastHeaderSig = {};
 export function clearSiteVersions() {
   for (const k of Object.keys(siteVersions)) delete siteVersions[k];
+  for (const k of Object.keys(lastHeaderSig)) delete lastHeaderSig[k];
 }
 export const _siteVersions = siteVersions; // test seam (read/seed in unit tests)
+export const _lastHeaderSig = lastHeaderSig; // test seam
+// The signature: the slim header exactly as a push would store it, minus the volatile updatedAt.
+// Exported for tests and for cloudList's seeding (sig of the row the cloud already has).
+export function headerSig(model) {
+  const m = slimForCloud(model);
+  if (!m) return "";
+  const { updatedAt, ...rest } = m;
+  return stableStringify(rest);
+}
 // B672 — the B459 thin-clobber guard (wouldThinClobber + the siteContent/siteTombs baselines +
 // noteLocalContent) is RETIRED. It existed to stop a stale tab's whole-doc push from silently
 // dropping elements the cloud still had — but under element-level sync the cloud row is a SLIM
@@ -73,6 +94,11 @@ export function cloudUpsert(uid, model) {
 async function cloudUpsertCore(uid, model, isRetry) {
   if (!supabase || !uid || !model || !model.id) return { ok: false, error: "not ready" };
   const m = slimForCloud(model);
+  // B672 recurrence (Observation A) — identical header content already synced → skip the write
+  // entirely (see lastHeaderSig above). Only when a version token exists (a prior sync happened
+  // and CAS is live); pre-migration/degrade DBs keep today's always-push behavior.
+  const sig = headerSig(model);
+  if (!isRetry && lastHeaderSig[m.id] === sig && siteVersions[m.id] != null) return { ok: true, skipped: true };
   // Row carries NO user_id — casUpsert stamps the creator only on INSERT, so a teammate editing
   // a shared row never re-stamps the original owner (team feature). team_id rides along (null =
   // private); when set, RLS lets the project's team read/edit it.
@@ -91,7 +117,7 @@ async function cloudUpsertCore(uid, model, isRetry) {
     const { team_id, ...noTeam } = row;
     r = await casUpsert(supabase, "sites", { uid, id: m.id, row: noTeam, expected: siteVersions[m.id] });
   }
-  if (r.ok) { siteVersions[m.id] = r.version; return { ok: true }; }
+  if (r.ok) { siteVersions[m.id] = r.version; lastHeaderSig[m.id] = sig; return { ok: true }; }
   if (r.conflict) {
     // B672 — a stale header write self-heals SILENTLY: refresh the CAS token from the live row and
     // re-push ONCE (whole-header last-write-wins — the header is rarely-contended meta/settings/
@@ -120,6 +146,7 @@ async function cloudUpsertCore(uid, model, isRetry) {
     let { error } = await supabase.from("sites").upsert(noTeam, { onConflict: "id" });
     if (error && /on conflict|no unique|constraint|exclusion/i.test(error.message || "")) // pre-PK-change DB: target is (user_id,id)
       ({ error } = await supabase.from("sites").upsert({ ...noTeam, user_id: uid }, { onConflict: "user_id,id" }));
+    if (!error) lastHeaderSig[m.id] = sig;
     return { ok: !error, error: error ? error.message : null };
   }
   reportClientEvent("cloud-write-failed", (r.error || "cloud write failed") + " (sites)", { id: m.id });
@@ -133,6 +160,9 @@ async function cloudUpsertCore(uid, model, isRetry) {
 // Returns true if a request was dispatched.
 export function keepaliveCloudPush(uid, model) {
   if (!supabase || !uid || !model || !model.id) return false;
+  // Header content unchanged since the last synced push → nothing to save on unload (the element
+  // keepalive handles element edits). Same skip rule as cloudUpsertCore (Observation A).
+  if (lastHeaderSig[model.id] === headerSig(model) && siteVersions[model.id] != null) return false;
   const { url, anon } = supabaseRest();
   const token = currentAccessToken();
   const m = slimForCloud(model); // slim header (B672) — elements ride the element keepalive instead
@@ -180,6 +210,7 @@ export async function cloudDelete(uid, id) {
   // Nothing to remove server-side (logged out / unconfigured) is success, not a failure to alarm on.
   if (!supabase || !uid || !id) return { ok: true, removed: 0, skipped: true };
   delete siteVersions[id]; // stop tracking a removed row's version
+  delete lastHeaderSig[id];
   // Scope by id only and let RLS decide who may delete (own row, OR team-admin on a shared row).
   // A user_id filter would block an admin from deleting a teammate's shared project, which the
   // policy permits — RLS is the security boundary here, not the client filter (team feature).
@@ -226,6 +257,10 @@ export async function cloudList(uid) {
     if (!m) return null;
     if (r && "team_id" in r) m.teamId = r.team_id || null;   // DB column is the source of truth for sharing
     if (r && "user_id" in r) m.ownerId = r.user_id || null;  // who created/owns it (for "owned by teammate")
+    // Seed the header-content baseline from what the cloud ALREADY has (post-overlay, so it matches
+    // the shape a local push would send). If the local copy turns out identical, even the boot
+    // re-push skips — no per-load version churn. Any real local difference still pushes.
+    if (r.version != null && m.id != null) { try { lastHeaderSig[m.id] = headerSig(m); } catch (_) {} }
     return m;
   }).filter(Boolean);
 }
