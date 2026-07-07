@@ -341,7 +341,7 @@ export const WATERSHED_OVERLAYS = [
     verifiedOn: "2026-07-03",
     source: { name: "HCFCD supplemental western-Harris criteria", section: "Upper Cypress Creek retention", url: "https://www.hcfcd.org/Resources/Technical-Manuals" },
     params: { retentionAcFtPerAc: 0.17, giReductionAcFtPerAc: 0.2, transcribed: false },
-    note: "Additional RETENTION may be required on top of detention (0.17 ac-ft/ac context; green-infrastructure techniques can reduce required detention by up to 0.20 ac-ft/ac). Exact applicability needs the supplemental criteria + the overflow-area boundary — verify with HCFCD.",
+    note: "Special watershed criteria apply — the base rate table does not govern alone. Additional RETENTION may be required on top of detention (0.17 ac-ft/ac context; green-infrastructure techniques can reduce required detention by up to 0.20 ac-ft/ac). Exact applicability needs the supplemental criteria + the overflow-area boundary — verify with HCFCD.",
   },
   {
     id: "hcfcd-addicks-barker-retention",
@@ -350,7 +350,7 @@ export const WATERSHED_OVERLAYS = [
     verifiedOn: "2026-07-03",
     source: { name: "HCFCD supplemental western-Harris criteria", section: "Addicks/Barker reservoir watersheds", url: "https://www.hcfcd.org/Resources/Technical-Manuals" },
     params: { retentionAcFtPerAc: 0.17, giReductionAcFtPerAc: 0.2, transcribed: false },
-    note: "Addicks/Barker reservoir watershed — supplemental retention requirements apply per HCFCD's western-Harris criteria (0.17 ac-ft/ac retention context). Verify with HCFCD.",
+    note: "Special watershed criteria apply — the base rate table does not govern alone. Addicks/Barker reservoir watershed — supplemental retention requirements apply per HCFCD's western-Harris criteria (0.17 ac-ft/ac retention context). Verify with HCFCD.",
   },
 ];
 
