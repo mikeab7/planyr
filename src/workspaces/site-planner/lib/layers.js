@@ -165,16 +165,45 @@ export const EVIDENCE = {
  * the layer keeps its id (`elevation`) and every saved toggle state survives. */
 export const TERRAIN = {
   elevation: {
-    kind: "esriImage", label: "Elevation / hillshade (USGS 3DEP)",
+    kind: "esriImage", label: "Ground relief (low = blue, high = red)",
     url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
-    // B603: the rasterFunction name must EXACTLY match one of the service's published
-    // rasterFunctionInfos[].name, or exportImage returns an error tile and the overlay
-    // renders blank. The 3DEP templates are named "Hillshade <modifier>" ("Hillshade Gray",
-    // "Hillshade Multidirectional", "Hillshade Elevation Tinted"). This was "Elevation Tinted
-    // Hillshade" — the USGS press-release PROSE wording, which is NOT a valid template name,
-    // so the tinted-hillshade overlay never painted. Do NOT reorder back to the prose form.
-    rendering: "Hillshade Elevation Tinted", opacity: 0.55,
-    note: "USGS 3DEP LiDAR bare-earth DEM — verify with survey. The cross-section tool samples it.",
+    // B703: a custom rendering-rule CHAIN (object, passed through whole by
+    // imageLayerOptions) instead of a named template. The old named template
+    // ("Hillshade Elevation Tinted", fixed from the invalid prose name by B603) colors
+    // elevation on a FIXED national ramp (sea level → Rockies), so the whole Houston
+    // MSA (~0–150 ft) fell in ONE green band — a useless flat sheet at site scale.
+    // This chain re-stretches per exported extent instead: Stretch with DRA (Dynamic
+    // Range Adjustment — the server maps the ramp to the min/max elevation of EACH
+    // export, so a 4-ft-relief site spans the full ramp) under a blue→cream→red
+    // Colormap. Probe-verified against the live service 2026-07-07 (allowRasterFunction
+    // true, ArcGIS 11.3; rendered PNGs checked at neighborhood + pad scale — ditches/
+    // ponds deep blue, embankments red; PercentClip 2/2 beat 0.5/0.5; a hillshade
+    // Local-multiply blend washed out the tint, so no z-factor term). If a STRING is
+    // ever restored here it must EXACTLY match a published rasterFunctionInfos[].name
+    // (the B603 lesson — the prose form "Elevation Tinted Hillshade" is not valid).
+    rendering: {
+      rasterFunction: "Colormap",
+      rasterFunctionArguments: {
+        ColorRamp: {
+          type: "multipart",
+          colorRamps: [
+            { type: "algorithmic", algorithm: "esriCIELabAlgorithm", fromColor: [49, 54, 149, 255], toColor: [116, 173, 209, 255] },
+            { type: "algorithmic", algorithm: "esriCIELabAlgorithm", fromColor: [116, 173, 209, 255], toColor: [255, 255, 191, 255] },
+            { type: "algorithmic", algorithm: "esriCIELabAlgorithm", fromColor: [255, 255, 191, 255], toColor: [215, 48, 39, 255] },
+          ],
+        },
+        Raster: {
+          rasterFunction: "Stretch",
+          rasterFunctionArguments: {
+            StretchType: 6, MinPercent: 2, MaxPercent: 2, DRA: true,
+            Min: 0, Max: 255, UseGamma: false,
+          },
+          outputPixelType: "U8",
+        },
+      },
+    },
+    opacity: 0.55, source: "USGS 3DEP",
+    note: "Colors are RELATIVE TO THE CURRENT VIEW — the ramp re-stretches to the lowest/highest ground on screen, so blue here ≠ blue after panning. LiDAR bare-earth (NAVD88); screening only — verify with survey. The cross-section tool samples the same data.",
   },
 };
 
