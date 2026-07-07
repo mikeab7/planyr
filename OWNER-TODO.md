@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-06._
+_Last updated: 2026-07-07._
 
 ## 🔌 Turn on the new Claude connector (B675 — ~5 minutes, copy-paste)
 - [ ] **Add 3 settings in Cloudflare Pages, then add the connector in Claude.** Claude handed you the
@@ -120,9 +120,13 @@ _Last updated: 2026-07-06._
       changes the conclusion. **One optional call for you:** the Grand Port depth bays run as tight as 45–48′,
       below the current 50–58′ flex band floor. Want me to drop the band floor to ~45′ so a building's *depth*
       can flex tighter to match? Default = leave it at 50–58′ (your stated range). Say the word and it's a one-liner.
-- [ ] **A second test account** — to verify Team Workspaces end-to-end (invite → accept → shared edit → member
-      can't delete → make-private revokes). Claude can audit the code + fix bugs without it, but the live
-      two-person round-trip needs a 2nd login.
+- [ ] **A second test account** *(now also blocking the live-editing checks — bumped 2026-07-07)* — to verify
+      Team Workspaces end-to-end (invite → accept → shared edit → member can't delete → make-private revokes),
+      **and now the new live co-editing notices too**: when two people change the same thing, each side gets a
+      note naming the other person — with two windows of ONE account those notes can only ever say "you
+      (another window)", so the whole named-notice checklist (V230) is stuck until a second account exists on a
+      team-shared site. Creating it is ~2 minutes: any email you control → sign up at planyr.io → invite it to
+      a team project. The Claude cohort runs everything after that.
 - [ ] **One real, heavy PDF** (a big construction set) — to profile the **PDF/map stutter (B484)** and pin exactly
       where it hangs. Without a profile from a real file, the fix would be a guess.
 - [ ] **A >50 MB file** (optional) — to confirm the "50 MB per-file cloud limit" banner text. The automated

@@ -2,7 +2,7 @@
  * surface before file browsing moved into its own Library tab).
  *
  * The old flat chip row jammed three axes (what kind / what state / how used) into one
- * list, so nothing nested. Today's shape (B689/B691/B692/B694 refactor):
+ * list, so nothing nested. Today's shape (B697/B699/B700/B702 refactor):
  *   • a FOLDER TREE (left, folder mode) or CATEGORY TREE (cross-project) — the one true
  *     hierarchy. Selecting a folder filters the list; dropping onto a folder row files
  *     straight into it.
@@ -90,7 +90,7 @@ export default function FileBrowser({
   folderMode = false, folderRail = null, folderRows = [], selectedFolderId = null, onFolderCounts = null,
   // Library-Home pins: which file (review) ids are pinned + the ☆ toggle (both optional).
   pinnedFileIds = null, onTogglePinFile = null,
-  /* Folder-row drops (B691): the FolderTree rail lives in the parent, so it registers a
+  /* Folder-row drops (B699): the FolderTree rail lives in the parent, so it registers a
    * callback here — `registerTreeDrop(fn)` hands the rail a way to route a drop event
    * into THIS browser's ingest pipeline; `treeDragTarget` is the folder label currently
    * hovered by a drag (keeps the drop-overlay pill honest). */
@@ -106,7 +106,7 @@ export default function FileBrowser({
   const [showHolding, setShowHolding] = useState(false);   // "Needs filing" view active
   const [showSuperseded, setShowSuperseded] = useState(false);
   const [openCats, setOpenCats] = useState(() => loadIdSet(CATS_OPEN_KEY)); // Set of open categories
-  const [searchQ, setSearchQ] = useState("");               // type-to-filter (B694)
+  const [searchQ, setSearchQ] = useState("");               // type-to-filter (B702)
   const [sort, setSort] = useState(() => { try { return localStorage.getItem(SORT_KEY) || "recency"; } catch (_) { return "recency"; } });
   const [dropOver, setDropOver] = useState(false);
   const [queue, setQueue] = useState([]);
@@ -120,7 +120,7 @@ export default function FileBrowser({
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const reqRef = useRef(0);
-  // Whole-pane drop target (B691): a DEPTH COUNTER, not a naive dragleave — entering any
+  // Whole-pane drop target (B699): a DEPTH COUNTER, not a naive dragleave — entering any
   // child fires enter/leave pairs, and the naive `currentTarget === target` check made the
   // highlight flicker. The counter only clears when every enter has matched a leave.
   const dragDepth = useRef(0);
@@ -139,7 +139,7 @@ export default function FileBrowser({
   // NO drop/dragend in the page) would strand the depth counter above zero and pin the
   // overlay on; so would an element unmounting under the cursor mid-drag (its dragleave
   // never fires). Reset on window-level drag end / drop, AND when the drag leaves the
-  // window itself (dragleave with no relatedTarget) — the counter self-heals (B691).
+  // window itself (dragleave with no relatedTarget) — the counter self-heals (B699).
   useEffect(() => {
     const reset = () => { dragDepth.current = 0; setDropOver(false); };
     const onWinLeave = (e) => { if (e.relatedTarget == null) reset(); };
@@ -250,7 +250,7 @@ export default function FileBrowser({
   const processItem = async (item, targetFolderId = null, { forceNeedsFiling = false } = {}) => {
     patchItem(item.uploadId, { status: QUEUE_STATUS.PROCESSING, error: null, warn: null });
     try {
-      // The file came from a dropped subfolder that matches NO tree folder (B691): the user's
+      // The file came from a dropped subfolder that matches NO tree folder (B699): the user's
       // own structure is the routing signal here, and it points nowhere we know — so it needs
       // a human decision, not a title-block guess. Straight to the holding area.
       if (forceNeedsFiling) {
@@ -355,10 +355,10 @@ export default function FileBrowser({
     if (accepted.length) { await runPool(accepted, (it) => processItem(it, targetFolderId, opts), 3); refresh(); }
   };
 
-  /* A FOLDER drop/pick (B664/B685/B691): file every real file found anywhere in the tree (any
+  /* A FOLDER drop/pick (B664/B685/B699): file every real file found anywhere in the tree (any
    * type); report ONE honest summary for the OS junk (dotfiles, thumbnail caches, lock files)
    * a folder sweep drags along, instead of filing noise the user never picked.
-   * Structure preservation (B691, decision baked into the brief): with no explicit target, the
+   * Structure preservation (B699, decision baked into the brief): with no explicit target, the
    * user's OWN subfolder layout routes each file — a subfolder matching an existing tree folder
    * files straight into it; a subfolder matching nothing goes to Needs filing (the tree is
    * never auto-extended, a file is never guessed); loose root-level files keep the classic
@@ -397,7 +397,7 @@ export default function FileBrowser({
     if (needs.length) await ingest(needs, null, { forceNeedsFiling: true });
   };
 
-  // One drop router for the pane AND the folder-rail rows (B691). Extract entries
+  // One drop router for the pane AND the folder-rail rows (B699). Extract entries
   // SYNCHRONOUSLY (the dataTransfer item list dies after the handler returns), then walk
   // any folders asynchronously. A dropped folder recurses into its subfolders; loose files
   // keep the classic per-file path (which shows rejection rows).
@@ -550,7 +550,7 @@ export default function FileBrowser({
               <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {cross ? "All projects" : projName(projectId) || "Project"} · Files
               </span>
-              {/* The "⊞ All (projects)" un-scoping button is gone (B692): a project-scoped pane
+              {/* The "⊞ All (projects)" un-scoping button is gone (B700): a project-scoped pane
                   never silently changes what "here" means. Cross-project browsing lives at the
                   Dashboard level; the route (#/all/library) still works. */}
             </div>
@@ -594,7 +594,7 @@ export default function FileBrowser({
 
       {/* ---- RIGHT: toolbar + list (the whole pane is the drop target) ---- */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
-        {/* Toolbar: search + sort + upload pickers + the loud Needs-filing count (B689/B694).
+        {/* Toolbar: search + sort + upload pickers + the loud Needs-filing count (B697/B702).
             The old All / On-the-map / Reference facet chips are gone — the per-file badges
             below carry those facts, so the chips only duplicated (and mislabeled) them. */}
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--border-default)", flexWrap: "wrap" }}>
@@ -675,7 +675,7 @@ export default function FileBrowser({
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 12px 4px" }}>
           {busy && shown.length === 0 && <div style={{ fontSize: 12, color: "var(--text-secondary)", padding: 12 }}>Loading…</div>}
           {!busy && shown.length === 0 && (
-            // ONE empty state (B691) — the old pane carried a second "No files here yet. Drop
+            // ONE empty state (B699) — the old pane carried a second "No files here yet. Drop
             // files below…" line AND a dedicated drop card saying the same thing again.
             showHolding ? (
               <div style={{ fontSize: 12.5, color: "var(--text-secondary)", padding: 16, lineHeight: 1.55 }}>
@@ -772,7 +772,7 @@ export default function FileBrowser({
 
         {/* Hidden pickers (the toolbar + empty-state buttons click these). Any file type
             (B685) — no `accept` filter, so the OS picker never hides a DWG/spreadsheet/image.
-            The dedicated bottom drop card is GONE (B691): the whole pane is the drop target. */}
+            The dedicated bottom drop card is GONE (B699): the whole pane is the drop target. */}
         <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={onPick} />
         {/* webkitdirectory turns this picker into a folder picker; set imperatively so React
             can't drop the non-standard attribute. Its files list is already flat + recursed. */}

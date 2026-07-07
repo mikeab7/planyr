@@ -137,7 +137,7 @@ export async function entryToFiles(entry, prefix = "") {
     if (entry.isFile) {
       const file = await new Promise((res, rej) => entry.file(res, rej));
       if (!file) return [];
-      // Stamp WHERE inside the dropped folder this file sat (B691 — structure-preserving
+      // Stamp WHERE inside the dropped folder this file sat (B699 — structure-preserving
       // folder drops read it via fileRelDirs). Expando on the File; a host object that
       // refuses the write just degrades that file to the auto-file path, never an error.
       try { file.relPath = prefix + (file.name || entry.name || ""); } catch (_) { /* degrade */ }

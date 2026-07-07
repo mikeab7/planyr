@@ -4,12 +4,13 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _47 open · 19 awaiting live verification._
+> _48 open · 22 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B691 | Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy | [Site Planner / GIS] | #site-planner #gis | live |
 | B663 | ONE-TIME migration: every existing project gets the standard tree + existing files move into their tree folders in Drive | [Library / storage] | #library #drive | — |
 | B662 | Unified Library: the folder tree IS the view, and files live inside it (+ the live-502 chunked Drive sync fix) | [Library / Doc Review / storage] | #library #drive #persistence | — |
 | B650 | Per-project standard folder tree, user-editable in-app, with continuous one-way sync to Google Drive | [Doc Review / Library / storage · drive-integration / persistence] | — | — |
@@ -62,8 +63,12 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B691 | Whole content pane is the drop target; drag-onto-folder files into it; ONE empty state; folder drops preserve your subfolder structure | [Library / storage] | #library #files #filing #drive | ⏳ live — awaiting |
-| B693 | Honest Drive-sync footer: backend-driven resting status, "Synced · N min ago", loud failure | [Library / storage] | #library #drive #persistence | ⏳ live — awaiting |
+| B699 | Whole content pane is the drop target; drag-onto-folder files into it; ONE empty state; folder drops preserve your subfolder structure | [Library / storage] | #library #files #filing #drive | ⏳ live — awaiting |
+| B701 | Honest Drive-sync footer: backend-driven resting status, "Synced · N min ago", loud failure | [Library / storage] | #library #drive #persistence | ⏳ live — awaiting |
+| B695 | Name the boundaries: hover/click identify + zoom-gated county/city name labels | [Site Planner / map] | #site-planner #gis #ui | ⏳ live — awaiting |
+| B694 | County / city / ETJ boundary layers ride the cached vector tier: instant paint, no 503 stalls | [Site Planner / GIS] | #site-planner #gis #perf | ⏳ live — awaiting |
+| B693 | Aerial basemap control: honest disabled state without a placement; folded into the shared panel as a Basemap group (Off / Aerial / USGS) | [Site Planner] | #site-planner #ui #gis | ⏳ live — awaiting |
+| B692 | ROOT-CAUSE fix for the B690 husk-parcel crash: sanitize the model funnel so a null/points-less entry can never be manufactured, persisted, or re-ingested | [Site Planner / model] | #site-planner #persistence | ⏳ live — awaiting |
 | B687 | Dropping into a selected Library folder files it there (folder pick wins over auto-sort) | [Library / Doc Review / storage · drive] | #library #files #filing #drive #doc-review | ⏳ live — awaiting |
 | B685 | Library upload was PDF-only; accept ANY file type | [Library / Doc Review] | #library #files #filing #doc-review | ⏳ live — awaiting |
 | B684 | Export to Google Earth (KMZ) via right-click, in both the map viewer and the canvas | [Site Planner / Map] | #site-planner #export #coordinates | ⏳ live — awaiting |
@@ -78,7 +83,6 @@
 | B651 | Parcel split double-counts acreage; make split REPLACE the parent (parent + children can never both be active) | [Site Planner] | #site-planner #yield #selection | ⏳ live — awaiting |
 | B659 | Sheet reader + file organizer revamp: rotated/offset pages, set-aware titles, left-edge & vertical title blocks, title-first grouping, date-first names | [Doc Review / Library] | #doc-review #library #files #filing | ⏳ live — awaiting |
 | B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) (×2) | [Scheduler / robustness] | #scheduler | ⏳ live — awaiting |
-| B672 | Element-level sync, phase 3/5: realtime read path + rejoin refetch (read cutover; blob frozen) | [Site Planner] | #site-planner #persistence | ⏳ live — awaiting |
 | B673 | Element-level sync, phase 4/5: loud-conflict surface + delete/edit matrix | [Site Planner] | #site-planner #ui #persistence | ⏳ live — awaiting |
 | B674 | Element-level sync, phase 5/5: remove the edit lock — multi-writer cutover + presence pill | [Site Planner / Shell] | #site-planner #ui #persistence | ⏳ live — awaiting |
 
@@ -88,20 +92,20 @@
 - **#compare** — B471
 - **#coordinates** — B684
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B687, B685, B667, B659
-- **#drive** — B663, B662, B629, B409, B691, B693, B687
+- **#drive** — B663, B662, B629, B409, B699, B701, B687
 - **#export** — B684
-- **#files** — B180, B181, B182, B183, B691, B687, B685, B675, B668, B664, B659
-- **#filing** — B411, B364, B273, B691, B687, B685, B664, B659
-- **#gis** — B629, B370, B309, B178, B171, B147, B13, B95
+- **#files** — B180, B181, B182, B183, B699, B687, B685, B675, B668, B664, B659
+- **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
+- **#gis** — B691, B629, B370, B309, B178, B171, B147, B13, B95, B695, B694, B693
 - **#infra** — B408, B406, B179, B63, B675, B669
-- **#library** — B663, B662, B691, B693, B687, B685, B676, B668, B664, B659
+- **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268
-- **#perf** — B495, B484, B479, B669
-- **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B693, B682, B676, B667, B672, B673, B674
+- **#perf** — B495, B484, B479, B694, B669
+- **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B701, B692, B682, B676, B667, B673, B674
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B684, B682, B651, B672, B673, B674
+- **#site-planner** — B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B695, B694, B693, B692, B684, B682, B651, B673, B674
 - **#stitching** — B413
 - **#testing** — B269, B63
-- **#ui** — B115, B669, B668, B658, B673, B674
+- **#ui** — B115, B695, B693, B669, B668, B658, B673, B674
 - **#yield** — B553, B651

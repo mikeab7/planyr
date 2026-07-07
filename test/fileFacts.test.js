@@ -214,7 +214,7 @@ describe("fileFacts — index provider interface (backend stubbed)", () => {
   });
 });
 
-describe("fileFacts — search + sort (B694)", () => {
+describe("fileFacts — search + sort (B702)", () => {
   const facts = buildFileFacts([
     { id: "1", title: "Goose Creek - Civil - 2026.01.10", item: "Civil set", discipline: "Civil", sheet_number: "C-101", sheet_title: "GRADING PLAN", source_file: "gc-civil.pdf", doc_date: "2026-01-10", projectId: "p1" },
     { id: "2", title: "Sheet 10", item: "Arch", discipline: "Architectural", sheet_number: "A-1", doc_date: "2026-02-01", projectId: "p1" },

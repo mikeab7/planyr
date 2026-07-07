@@ -179,7 +179,7 @@ describe("suggestNextNumberedName", () => {
   });
 });
 
-describe("matchDropPathToFolder (B691 — structure-preserving folder drops)", () => {
+describe("matchDropPathToFolder (B699 — structure-preserving folder drops)", () => {
   const tree = [
     { id: "design", parentId: null, name: "02. Design", order: 2 },
     { id: "drawings", parentId: "design", name: "01. Drawings", order: 1 },

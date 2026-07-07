@@ -24,7 +24,7 @@ import { relTime } from "../../../shared/projects/projectModel.js";
  * category flung open). One key per project so switching projects can't bleed state. */
 const treeOpenKey = (projectId) => `planyr:library:treeOpen:v1:${projectId}`;
 
-/* Per-project "last CONFIRMED Drive sync on this device" (B693 — the honest resting
+/* Per-project "last CONFIRMED Drive sync on this device" (B701 — the honest resting
  * footer). Written ONLY when a real reconcile returns ok; read at mount so a mirrored-
  * but-untouched project shows "Synced · N min ago" instead of nothing. The mount sync
  * re-verifies against the real backend within seconds either way. */
@@ -56,7 +56,7 @@ export default function FolderTree({
   embedded = false, selectedId = null, onSelect = null, onRowsChange = null, fileCounts = null,
   // Library-Home pins: which folder ids are pinned + the ☆ toggle (both optional).
   pinnedIds = null, onTogglePin = null,
-  /* Folder rows as DROP TARGETS (B691): dragging files over a row highlights it and
+  /* Folder rows as DROP TARGETS (B699): dragging files over a row highlights it and
    * dropping hands the raw drop event up — `onFileDrop(folderId|null, event)` — for the
    * file browser to ingest straight into that folder (null = the "All files" row → the
    * auto-file path). `onDragTarget(label|null)` keeps the drop-overlay pill honest. */
@@ -111,7 +111,7 @@ export default function FolderTree({
       setExpanded(pruneSet(loadIdSet(treeOpenKey(projectId)), new Set(list.map((r) => r.id))));
       expandedLoadedFor.current = projectId;
       setLoading(false);
-      // Resting mirror status (B693): every live folder already has its Drive id AND this
+      // Resting mirror status (B701): every live folder already has its Drive id AND this
       // device saw a confirmed sync → show the honest "Synced · N min ago" instead of a
       // blank footer. Anything less stays idle until the real reconcile below reports.
       let at = 0;
@@ -291,7 +291,7 @@ export default function FolderTree({
           onMouseEnter={() => setHoveredId(node.id)}
           onMouseLeave={() => setHoveredId((h) => (h === node.id ? null : h))}
           onContextMenu={(e) => { if (isEditing || isMoving) return; e.preventDefault(); e.stopPropagation(); setMenu({ node, x: e.clientX, y: e.clientY }); }}
-          /* Drop a drag straight INTO this folder (B691) — the Explorer gesture. ARM on
+          /* Drop a drag straight INTO this folder (B699) — the Explorer gesture. ARM on
            * dragenter (Chromium fires the new row's dragenter BEFORE the old row's
            * dragleave, so hopping rows re-targets before the clear can fire — no flicker)
            * and keep dragover as the belt-and-suspenders re-arm; leave clears only if this
@@ -370,7 +370,7 @@ export default function FolderTree({
     <div data-testid="folder-tree" style={{ height: "100%", display: "flex", flexDirection: "column", background: embedded ? "transparent" : T.page, color: T.text, overflow: "hidden" }}>
       {embedded ? (
         // Rail header (the unified Library) — the project name lives in the breadcrumb above,
-        // so this stays a quiet label. Folder creation is right-click → New folder (B690):
+        // so this stays a quiet label. Folder creation is right-click → New folder (B698):
         // one word ("folder"), one gesture, matching File Explorer — no header button.
         <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "11px 10px 7px 14px" }}>
           <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -391,7 +391,7 @@ export default function FolderTree({
       )}
 
       <div style={{ flex: 1, overflow: "auto", padding: "4px 6px 8px" }}
-        /* Right-click on EMPTY tree space → "New folder" at the top level (B690, the File
+        /* Right-click on EMPTY tree space → "New folder" at the top level (B698, the File
          * Explorer convention). A row's own context menu handled the event already (it
          * stops propagation), and the closest() check catches the row's inner elements. */
         onContextMenu={(e) => {
@@ -400,7 +400,7 @@ export default function FolderTree({
           setMenu({ node: null, x: e.clientX, y: e.clientY });
         }}>
         {/* "All files" — clears the folder filter (embedded only; standalone has no file list).
-            As a drop target it means "auto-file by title block" (B691). */}
+            As a drop target it means "auto-file by title block" (B699). */}
         {embedded && !loading && (
           <div
             onClick={() => onSelect?.(null)}
@@ -462,7 +462,7 @@ export default function FolderTree({
 }
 
 /* Right-click actions for a folder row — or, with `menu.node` null, for EMPTY tree space
- * (just "New folder" at the top level, the File Explorer convention — B690). Rendered in a
+ * (just "New folder" at the top level, the File Explorer convention — B698). Rendered in a
  * body portal (like the project-manage menu in ProjectBreadcrumb) so it floats above the
  * tree at the cursor: a full-screen backdrop closes it on any click / right-click, and each
  * item runs its action then dismisses. Positioned at the click point, clamped so it never
@@ -500,7 +500,7 @@ function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRen
             <span aria-hidden style={glyph}>{pinned ? "★" : "☆"}</span>{pinned ? "Unpin from Library home" : "Pin to Library home"}
           </button>
         )}
-        {/* On a row this creates INSIDE it; on empty space, at the top level (B690). */}
+        {/* On a row this creates INSIDE it; on empty space, at the top level (B698). */}
         <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onAdd(node ? node.id : null))} style={item()}>
           <span aria-hidden style={glyph}>＋</span>New folder
         </button>
@@ -519,7 +519,7 @@ function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRen
   );
 }
 
-/* The rail-foot mirror status (B693 — honest, backend-driven, per the B125 badge rules):
+/* The rail-foot mirror status (B701 — honest, backend-driven, per the B125 badge rules):
  *   ok      → "✓ Synced to Google Drive · N min ago" — ONLY after a confirmed reconcile
  *             (or the resting restore of one); the timestamp ticks live.
  *   syncing → progress text, no button.

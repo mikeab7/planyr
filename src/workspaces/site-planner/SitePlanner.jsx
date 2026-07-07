@@ -29,6 +29,7 @@ import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESE
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
@@ -101,11 +102,10 @@ import { createHistoryStack } from "./lib/history.js";
  * Mercator is conformal, so a uniform pixels-per-foot aligns to it with no x/y
  * distortion over a site — only the basemap's zoom/center are derived from the
  * planner view. */
-const GEO_BASEMAP = {
-  tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-  maxNative: 19,
-  attr: "Imagery &copy; Esri, Maxar",
-};
+// The aerial source registry is shared with the map finder (lib/basemaps.js, B693) —
+// the planner's Basemap control offers the same Esri/USGS sources as the finder's
+// Imagery dropdown, plus "Off". (The old single-source GEO_BASEMAP constant became
+// BASEMAPS.esri.)
 // How far the basemap container overhangs the viewport on each side (px). The
 // extra margin (with keepBuffer tiles loaded) means a pan/zoom that CSS-transforms
 // the basemap reveals already-loaded imagery instead of the backdrop (B65).
@@ -316,6 +316,10 @@ const elCorners = (el) => {
   });
 };
 const polyArea = (pts) => {
+  // B690 — same guard as the finder's shoelace: a parcel/element without a usable ring
+  // contributes 0 area instead of crashing the canvas (points can be absent on a
+  // malformed/legacy record that round-tripped verbatim through storage or element rows).
+  if (!Array.isArray(pts) || !pts.length) return 0;
   let a = 0;
   for (let i = 0; i < pts.length; i++) {
     const j = (i + 1) % pts.length;
@@ -1414,7 +1418,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // meaningful for a located site (one with a real-world origin).
   const origin = restored?.origin || null;
   // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
-  const [basemapOn, setBasemapOn] = useState(!!origin);
+  // Aerial basemap SOURCE (B693): "off" | "esri" | "usgs" — a three-way control in the
+  // Layers panel's Basemap group (was a bare on/off checkbox). Located sites default to
+  // the Esri aerial, exactly like the old boolean defaulted on.
+  const [basemapSrc, setBasemapSrc] = useState(origin ? "esri" : "off");
+  const basemapOn = basemapSrc !== "off" && !!origin;
+  const [basemapStatus, setBasemapStatus] = useState(null); // "loading" | "loaded" | "failed" | null — the Basemap row's status dot
+  const geoSrcRef = useRef(null); // which BASEMAPS source the live tile layers were built from
+  // "Make sure the aerial is on" (identify mode, analysis-layer framing, geocoded add):
+  // keeps the user's chosen source if one is already on, else the Esri default.
+  const ensureBasemapOn = useCallback(() => setBasemapSrc((s) => (s === "off" ? "esri" : s)), []);
   const [layersOpen, setLayersOpen] = useState(false); // planner Layers control expanded
   const [viewMenuOpen, setViewMenuOpen] = useState(false); // on-canvas View (eye) menu expanded (B653)
   const geoWrapRef = useRef(null);
@@ -1454,51 +1467,70 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
-  /* aerial basemap tile layer (toggle) */
+  /* aerial basemap tile layer (toggle + source switch, B693) */
   useEffect(() => {
     const map = geoMapRef.current;
     if (!map) return;
-    if (basemapOn && !geoBaseRef.current) {
-      // Coarse "instant" backfill UNDER the detail layer: capped at a low native
-      // zoom so it only ever fetches a handful of large-area tiles. They load
-      // (and cache) near-instantly and fill the whole view with blurry imagery,
-      // so a fresh load / hard zoom-out never sits on the gray backdrop while the
-      // heavy detail tiles stream in on top. No detectRetina (light + blurry is
-      // fine for a placeholder); generous keepBuffer to cover the overscan. (B65)
-      const bf = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: GEO_BASEMAP.attr, keepBuffer: 6 }));
-      bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
-      // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
-      // one-zoom-higher native tiles and renders them at half size (downsampled =
-      // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
-      // map's *fractional* zoom (zoomSnap:0, driven by ppfToZoom) since it prefers
-      // downsampling a higher-zoom tile over upscaling a lower one. It only changes
-      // which tiles are fetched + their display size — never the map's CRS zoom —
-      // so the SVG↔aerial scale lock is untouched. (B170)
-      // Add the heavy detail layer only AFTER the coarse backfill has painted (or a
-      // short fallback), so its many retina tiles don't flood the connection and
-      // starve the few coarse tiles — that's what left a fresh load gray for ~10s
-      // on a real connection. (B65)
-      // maxNativeZoom drops by 1 on a retina display because detectRetina fetches
-      // one zoom HIGHER than the display zoom; without this the detail layer asks
-      // for z20 at deep zoom, which Esri World Imagery (native to z19) answers with
-      // the gray "Map data not yet available" placeholder. Capping the native fetch
-      // at z19 makes it upscale the deepest real imagery instead. (B182)
-      const detailMaxNative = L.Browser.retina ? GEO_BASEMAP.maxNative - 1 : GEO_BASEMAP.maxNative;
-      const addDetail = () => {
-        // bail if the map went away, detail's already added, or the aerial was
-        // toggled off during the wait (backfill ref nulled by the cleanup below).
-        if (!geoMapRef.current || geoBaseRef.current || !geoBackfillRef.current) return;
-        const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
-        t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
-      };
-      bf.once("load", addDetail);
-      setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires
-    } else if (!basemapOn && geoBaseRef.current) {
-      try { map.removeLayer(geoBaseRef.current); } catch (_) {}
+    const want = basemapOn ? basemapSrc : null;
+    // Tear down when turned off OR when the source changed (a switch rebuilds below).
+    // Checking BOTH refs fixes the old leak: a fast off-toggle inside the ~600ms
+    // backfill→detail window used to key on the detail ref alone and strand the
+    // backfill layer on the map.
+    if (geoSrcRef.current !== want && (geoBaseRef.current || geoBackfillRef.current)) {
+      try { if (geoBaseRef.current) map.removeLayer(geoBaseRef.current); } catch (_) {}
       try { if (geoBackfillRef.current) map.removeLayer(geoBackfillRef.current); } catch (_) {}
       geoBaseRef.current = null; geoBackfillRef.current = null;
     }
-  }, [basemapOn, origin]);
+    geoSrcRef.current = want;
+    if (!want) { setBasemapStatus(null); return; }
+    if (geoBaseRef.current || geoBackfillRef.current) return; // already built for this source
+    const bm = BASEMAPS[want] || BASEMAPS.esri;
+    setBasemapStatus("loading");
+    // Coarse "instant" backfill UNDER the detail layer: capped at a low native
+    // zoom so it only ever fetches a handful of large-area tiles. They load
+    // (and cache) near-instantly and fill the whole view with blurry imagery,
+    // so a fresh load / hard zoom-out never sits on the gray backdrop while the
+    // heavy detail tiles stream in on top. No detectRetina (light + blurry is
+    // fine for a placeholder); generous keepBuffer to cover the overscan. (B65)
+    const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: 6 }));
+    bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
+    // Honest status dot for the Basemap row: "loaded" only on a REAL painted tile
+    // (`tileload`) — Leaflet's layer-level `load` fires even when every tile errored
+    // (errored tiles count as settled), which would show a green dot over a gray
+    // canvas when the source is down. A tile that exhausted its retries → failed,
+    // until a later successful tile flips it back.
+    bf.on("tileload", () => { if (geoBackfillRef.current === bf) setBasemapStatus("loaded"); });
+    bf.on("tileerror", (e) => { if (geoBackfillRef.current === bf && e && e.tile && (e.tile._pfTries || 0) >= 2) setBasemapStatus("failed"); });
+    // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
+    // one-zoom-higher native tiles and renders them at half size (downsampled =
+    // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
+    // map's *fractional* zoom (zoomSnap:0, driven by ppfToZoom) since it prefers
+    // downsampling a higher-zoom tile over upscaling a lower one. It only changes
+    // which tiles are fetched + their display size — never the map's CRS zoom —
+    // so the SVG↔aerial scale lock is untouched. (B170)
+    // Add the heavy detail layer only AFTER the coarse backfill has painted (or a
+    // short fallback), so its many retina tiles don't flood the connection and
+    // starve the few coarse tiles — that's what left a fresh load gray for ~10s
+    // on a real connection. (B65)
+    // maxNativeZoom drops by 1 on a retina display because detectRetina fetches
+    // one zoom HIGHER than the display zoom; without this the detail layer asks
+    // for one level past the provider's ceiling (bm.maxNative — Esri z19, USGS z16),
+    // which both providers answer with the gray "Map data not yet available"
+    // placeholder as HTTP 200. Capping the native fetch at the ceiling makes it
+    // upscale the deepest real imagery instead. Per-source via bm.maxNative. (B182/B220)
+    const detailMaxNative = L.Browser.retina ? bm.maxNative - 1 : bm.maxNative;
+    const addDetail = () => {
+      // bail if the map went away, detail's already added, or the aerial was toggled
+      // off / switched source during the wait (THIS backfill instance is gone then —
+      // an identity check, so a stale timer can't build a layer for the old source).
+      if (!geoMapRef.current || geoBaseRef.current || geoBackfillRef.current !== bf) return;
+      const t = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: bm.attr, keepBuffer: 4 }));
+      t.on("tileload", () => { if (geoBaseRef.current === t) setBasemapStatus("loaded"); });
+      t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
+    };
+    bf.once("load", addDetail);
+    setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires
+  }, [basemapSrc, basemapOn, origin]);
 
   /* keep the basemap sized when the canvas resizes or the planner is shown */
   useEffect(() => {
@@ -1973,6 +2005,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B672 — instructions from remote rows that arrived MID-GESTURE (busyRef): buffered here and
   // drained at the next reconcile/flush so a remote apply never yanks the canvas mid-drag.
   const pendingRemoteRef = useRef([]);
+  // A parcel is geometry — a "husk" row whose data has no usable points array must never reach
+  // the canvas (unrenderable + crashes acreage math). Keeping it OUT of local state while the
+  // engine's shadow still has the row makes the next reconcile diff tombstone it in the cloud —
+  // the husk heals into a proper delete instead of poisoning every reader (husk-parcel crash).
+  const isHuskParcel = (kind, el) => kind === "parcel" && !(el && Array.isArray(el.points) && el.points.length);
   // Put one applyRemoteRow instruction onto the canvas. The engine already updated its shadow, so
   // the autosave-effect diff that this setState triggers sees the element as unchanged (no echo
   // commit). Insertion respects the collection's z (byZ reads z, not array position).
@@ -1981,7 +2018,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
     if (!setter) return;
     if (instr.action === "remove") setter((a) => a.filter((x) => x.id !== instr.id));
-    else if (instr.action === "upsert") setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+    else if (instr.action === "upsert") {
+      if (isHuskParcel(instr.kind, instr.el)) return;
+      setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+    }
   };
   const drainRemote = () => {
     if (!pendingRemoteRef.current.length) return;
@@ -2003,9 +2043,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 5000);
       return;
     }
+    // Mid-gesture/mid-edit: never yank the canvas OR reconcile half-made state — defer the whole
+    // replace until the interaction settles (the buffered-event drain covers per-row updates).
+    if (busyRef.current) {
+      setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 1200);
+      return;
+    }
     pendingRemoteRef.current = []; // the refetch supersedes any buffered per-row events
     eng.seed(r.rows);
     const model = rowsToModel({}, r.rows);
+    // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that
+    // edit on the canvas too (it re-trues from its own RPC result, not from pre-commit rows).
     const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
     const sub = (kind, list) => {
       let out = list;
@@ -2016,17 +2064,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       return out;
     };
-    const replace = (setter, next) => setter((prev) => (stableStringify(prev) === stableStringify(next) ? prev : next));
-    replace(setEls, sub("el", model.els)); replace(setMarkups, sub("markup", model.markups)); replace(setMeasures, sub("measure", model.measures));
-    replace(setCallouts, sub("callout", model.callouts)); replace(setParcels, sub("parcel", model.parcels));
+    const next = {
+      els: sub("el", model.els), markups: sub("markup", model.markups), measures: sub("measure", model.measures),
+      callouts: sub("callout", model.callouts),
+      // husk parcels (no points) stay off the canvas AND out of the reconcile input: the diff
+      // below then sees them absent vs the seeded shadow and tombstones the bad rows in the
+      // cloud — the husk heals into a proper delete (B690 root-cause leg; see isHuskParcel).
+      parcels: sub("parcel", model.parcels).filter((pc) => !isHuskParcel("parcel", pc)),
+    };
+    const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
+    replace(setEls, next.els); replace(setMarkups, next.markups); replace(setMeasures, next.measures);
+    replace(setCallouts, next.callouts); replace(setParcels, next.parcels);
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
     // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
     const liveIds = new Set(r.rows.filter((row) => row && !row.deleted_at).map((row) => row.id));
     setDeletedIds((prev) => (prev.some((id) => liveIds.has(id)) ? prev.filter((id) => !liveIds.has(id)) : prev));
-    // one reconcile pass so any edit made during the fetch window commits normally
-    const s = stateRef.current;
-    try { eng.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy: !!drag.current }); } catch (_) {}
+    // One reconcile pass — against EXACTLY the collections just placed on the canvas (rows ∪ pending
+    // local edits), NEVER stateRef: stateRef still holds the PRE-replace canvas here, and on a tab
+    // whose socket dropped that canvas is genuinely STALE — diffing it against the fresh shadow
+    // committed old geometry as valid rev-guarded updates and clobbered everyone (V229 #5, the
+    // reproduced lost-update). Edits made during the fetch window are already in the dirty queue
+    // (every canvas edit reconciles through the autosave effect), so nothing is lost by diffing
+    // the substituted result instead.
+    try { eng.reconcile(next, { busy: false }); } catch (_) {}
   };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
@@ -2062,8 +2123,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ch = supabase
       .channel("site-elements:" + siteId, { config: { presence: { key: uid || "anon" } } })
       .on("presence", { event: "sync" }, () => {
-        // B674 — the live "who's here" roster; keyed by uid so two windows of one account read as
-        // one person. Quiet when alone (summary null).
+        // B674 — the live "who's here" roster; counts SESSIONS (two windows of one account =
+        // "2 here" — V231 #13), names grouped by person. Quiet when this window is alone.
         try { setPeers(presenceSummary(ch.presenceState(), uid)); } catch (_) {}
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + siteId }, (payload) => {
@@ -2294,8 +2355,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
     if (!layerId) return;
     setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
-    if (wantOn) { setBasemapOn(true); frameToActiveParcels(); }
-  }, [setOverlays, frameToActiveParcels]);
+    if (wantOn) { ensureBasemapOn(); frameToActiveParcels(); }
+  }, [setOverlays, frameToActiveParcels, ensureBasemapOn]);
 
   // Auto-select the single restored parcel so its handles are ready to use.
   useEffect(() => {
@@ -5680,14 +5741,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const d = JSON.parse(fr.result);
         if (!d || (!Array.isArray(d.parcels) && !Array.isArray(d.els))) throw new Error();
+        // Normalize the import through the model funnel: junk entries (nulls / points-less husk
+        // parcels — the B690 crash class) are dropped, ids/z are ensured, migrations applied —
+        // a hand-edited or stale export can't poison the canvas or the next save.
+        const im = createSiteModel(d);
         ensureIdAbove([
-          ...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id),
-          ...(d.markups || []).map((m) => m.id), ...(d.measures || []).map((m) => m.id),
-          ...(d.callouts || []).map((c) => c.id), ...(d.deletedIds || []),
+          ...im.parcels.map((p) => p.id), ...im.els.map((e) => e.id),
+          ...im.markups.map((m) => m.id), ...im.measures.map((m) => m.id),
+          ...im.callouts.map((c) => c.id), ...im.deletedIds,
         ]); // B591 — seed past all imported ids + tombstones (not just parcels+els)
         pushHistory();
-        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
-        setCallouts(d.callouts || []); setMarkups(d.markups || []); // symmetric with exportJSON (was dropped → data loss / bleed-through)
+        setParcels(im.parcels); setEls(im.els); setMeasures(im.measures);
+        setCallouts(im.callouts); setMarkups(im.markups); // symmetric with exportJSON (was dropped → data loss / bleed-through)
         setSettings((s) => ({ ...s, ...(d.settings || {}), snap: s.snap })); // snap is a global pref, not imported
         setUnderlay(d.underlay || null);
         setSel(null);
@@ -5819,7 +5884,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!q || addrBusy) return;
     if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring a parcel in from the map first." }); return; }
     setAddParcelMenu(false);
-    setBasemapOn(true); setJurInfo(null);
+    ensureBasemapOn(); setJurInfo(null);
     setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
     try {
       const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
@@ -5840,7 +5905,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!origin) return;
     const dropOutline = () => { if (parcelOutlineRef.current) { try { geoMapRef.current?.removeLayer(parcelOutlineRef.current); } catch (_) {} parcelOutlineRef.current = null; } };
     if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); dropOutline(); return; }
-    setBasemapOn(true); // make sure the aerial is on so the lit outlines have context
+    ensureBasemapOn(); // make sure the aerial is on so the lit outlines have context
     let cancelled = false;
     resolveCountyLayer().then((url) => {
       const map = geoMapRef.current;
@@ -9006,32 +9071,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, display: "flex", gap: 8, alignItems: "flex-start" }}>
           <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
             setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
-          {/* Layers control (located sites) — same shared layers as the map finder */}
-          {origin && (
+          {/* Layers control — same shared layers as the map finder. ALWAYS rendered
+              (B693): an unlocated plan gets the control DISABLED with the plain reason
+              ("place it on the map first"), never a silently-missing / dead control.
+              The aerial toggle itself moved into LayerPanel's Basemap group. */}
+          {(
             <div data-wheelscroll="1" style={{ width: layersOpen ? 226 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
               <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
                 <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
               {layersOpen && (
                 <div style={{ padding: "2px 11px 10px", maxHeight: "62vh", overflowY: "auto" }}>
-                  <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", fontSize: 12.5, color: PAL.ink, paddingBottom: 6, marginBottom: 6, borderBottom: `1px solid ${PAL.panelLine}` }}>
-                    <input type="checkbox" checked={basemapOn} onChange={(e) => setBasemapOn(e.target.checked)} />
-                    <span style={{ flex: 1 }}>Aerial basemap</span>
-                  </label>
-                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage} />
-                  {/* utility-evidence drawing tools */}
+                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage}
+                    basemap={{
+                      value: origin ? basemapSrc : "off",
+                      onChange: setBasemapSrc,
+                      status: basemapStatus,
+                      // Disabled with the reason while unlocated; the control re-enables
+                      // the moment a placement lands (a placement reloads the plan with
+                      // its new origin, and the aerial comes on by default).
+                      disabledReason: origin ? null : "Place this site on the map first (the Map button, top-left) — the aerial needs a real-world location to anchor to.",
+                    }}
+                    gisNote={origin ? null : "GIS layers (flood, wetlands, boundaries, utilities) appear here once the site is placed on the map."} />
+                  {/* utility-evidence drawing tools (map-dependent — a located site only).
+                      Active states ride the theme tokens (accent + on-accent), never raw
+                      hexes — the B341/B508 chrome-region rule (B696 sweep). */}
+                  {origin && (
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
                     <button onClick={() => { setTracePts([]); setTraceMode((m) => !m); }} title="Click along a visible pole line on the aerial; double-click or Enter to finish"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "#b45309" : PAL.panelLine}`, background: traceMode ? "#b45309" : "var(--surface-raised)", color: traceMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "var(--accent)" : PAL.panelLine}`, background: traceMode ? "var(--accent)" : "var(--surface-raised)", color: traceMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       {traceMode ? "✏ Tracing… (Esc / dbl-click to finish)" : "✏ Trace overhead electric"}
                     </button>
                     <button onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "#b45309" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "#b45309" : "var(--surface-raised)", color: routeMode?.util === "elec" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "var(--accent)" : "var(--surface-raised)", color: routeMode?.util === "elec" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       ⚡ Route electric service
                     </button>
                     <button onClick={startWaterRoute} title="Route water service from a main to a building, easement width from the jurisdiction rule below"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "#0891b2" : PAL.panelLine}`, background: routeMode?.util === "water" ? "#0891b2" : "var(--surface-raised)", color: routeMode?.util === "water" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "water" ? "var(--accent)" : "var(--surface-raised)", color: routeMode?.util === "water" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       🚰 Route water service
                     </button>
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
@@ -9040,7 +9117,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </button>
                     <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
                       title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "#0e7490" : PAL.panelLine}`, background: xsecMode ? "#0e7490" : "var(--surface-raised)", color: xsecMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "var(--accent)" : PAL.panelLine}`, background: xsecMode ? "var(--accent)" : "var(--surface-raised)", color: xsecMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       {xsecMode ? "📏 Click both banks… (Esc to cancel)" : "📏 Cross-section (ditch)"}
                     </button>
                     {/* per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) */}
@@ -9061,7 +9138,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <span style={{ fontSize: 11, color: PAL.muted }}>Water easement</span>
                             <NumInput style={{ ...numInput, width: 52 }} value={rule.waterWidth} min={1} onCommit={(n) => setRule(jurKey, { waterWidth: n })} /> <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
                             <span style={{ flex: 1 }} />
-                            <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "#15803d" : "#b45309", cursor: "pointer", fontWeight: 600 }}>
+                            <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "var(--accent)" : "var(--warn-text)", cursor: "pointer", fontWeight: 600 }}>
                               <input type="checkbox" checked={rule.verified} onChange={(e) => setRule(jurKey, { verified: e.target.checked })} /> {rule.verified ? "verified" : "VERIFY"}
                             </label>
                           </div>
@@ -9074,6 +9151,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       🛰 AI corridor scan — coming soon
                     </button>
                   </div>
+                  )}
                   <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 6 }}>Layers sit beneath your drawing and stay locked to the plan as you pan and zoom.</div>
                 </div>
               )}
@@ -9516,7 +9594,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {(leftPanel || companionOpen) && (<>
-          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
+          <div data-testid="left-menu-panel" style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
           {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
               so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).
@@ -10767,7 +10845,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
                   {/* Identify from county GIS — the headline path (needs a georeferenced frame). */}
                   {origin ? (
-                    <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); setBasemapOn(true); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
+                    <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
                       <div style={{ fontWeight: 650 }}>🔍 Identify from county GIS</div>
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>County parcel lines light up on the aerial — click lots to add them (one or many).</div>
                     </button>

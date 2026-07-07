@@ -294,7 +294,7 @@ export function browseFiles(facts, { category = null, subcategory = null, facet 
 export const holdingArea = (facts) => facts.filter((f) => stateOf(f) === FILE_STATES.NEEDS_FILING)
   .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
-/* -------------------- populated-state search + sort (B694) --------------------
+/* -------------------- populated-state search + sort (B702) --------------------
  * Type-to-filter over the fields the filing index already carries (B299 built that
  * index precisely so the library answers queries without re-reading PDFs): display
  * name, sheet number, sheet title, discipline, and the original filename. Case-

@@ -188,7 +188,7 @@ export function resolveDrawingTarget(rows, discipline, { archive = false } = {})
 }
 
 /* Map ONE dropped file's relative directory chain (the SUBFOLDERS under the dropped
- * container — callers strip the container itself) onto an existing tree folder (B691 —
+ * container — callers strip the container itself) onto an existing tree folder (B699 —
  * "Choose a folder" / whole-folder drops preserve the user's own structure). Deepest
  * directory first, walking up: the first segment whose label uniquely matches a live
  * folder wins (prefix- and case-insensitive, plural-tolerant — the same labelEq the

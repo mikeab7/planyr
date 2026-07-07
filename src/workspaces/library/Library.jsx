@@ -137,7 +137,7 @@ export default function Library({
   const onRowsChange = useCallback((rows) => setFolderRows(rows), []);
   const onFolderCounts = useCallback((counts) => setFolderCounts(counts), []);
 
-  // Folder-row drops (B691): the tree's rows hand a raw drop event across to FileBrowser's
+  // Folder-row drops (B699): the tree's rows hand a raw drop event across to FileBrowser's
   // ingest pipeline through this ref (FileBrowser registers its handler on mount), and the
   // hovered-folder label rides state so the drop overlay pill can name the real target.
   const treeDropRef = useRef(null);

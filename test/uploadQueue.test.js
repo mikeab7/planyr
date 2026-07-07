@@ -229,8 +229,8 @@ describe("uploadQueue — concurrency pool (Amendment A)", () => {
   });
 });
 
-describe("uploadQueue — structure-preserving folder drops (B691)", () => {
-  // Named fakes: the B691 walk stamps each file with WHERE it sat inside the dropped folder.
+describe("uploadQueue — structure-preserving folder drops (B699)", () => {
+  // Named fakes: the B699 walk stamps each file with WHERE it sat inside the dropped folder.
   const namedDir = (name, batches) => ({
     isFile: false, isDirectory: true, name,
     createReader: () => { let i = 0; return { readEntries: (res) => res(i < batches.length ? batches[i++] : []) }; },

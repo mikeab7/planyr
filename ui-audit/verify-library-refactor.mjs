@@ -1,5 +1,5 @@
 /**
- * B689–B694 Library refactor — logged-out headless smoke.
+ * B697–B702 Library refactor — logged-out headless smoke.
  *
  * The Library's list/tree render signed-in only (the sandbox blocks sign-in), so this
  * proves the refactored chunk PARSES and renders its signed-out state with zero page
@@ -30,8 +30,8 @@ async function run() {
   check(await page.locator('[data-testid="library-root"]').count() === 1, "Library workspace mounts at #/library");
   const body = await page.locator('[data-testid="library-root"]').innerText();
   check(/sign in/i.test(body), "signed-out state renders (list/tree are account-gated)");
-  check(!/＋ Category/.test(body), "no '＋ Category' button anywhere (B690)");
-  check(!/⊞ All/.test(body), "no '⊞ All (projects)' in-pane button (B692)");
+  check(!/＋ Category/.test(body), "no '＋ Category' button anywhere (B698)");
+  check(!/⊞ All/.test(body), "no '⊞ All (projects)' in-pane button (B700)");
   check(pageErrors.length === 0, `zero page/console errors (got ${pageErrors.length}${pageErrors.length ? `: ${pageErrors[0]}` : ""})`);
 
   await browser.close();

@@ -1,18 +1,25 @@
 /* Shared layer-toggle UI — rendered on BOTH the map finder and the site planner
  * so the controls never diverge. Given the per-layer `overlays` state + setter, the
- * shared `layerStatus`, and the per-layer `coverage` map, it lists the statewide
- * overlays, the jurisdiction boundaries, the utility-evidence layers, and the current
- * county's jurisdiction layers — each with a checkbox, opacity slider, a live status
- * indicator (loading/loaded/empty/failed/needs-setup) and a disclaimer note.
+ * shared `layerStatus`, and the per-layer `coverage` map, it lists the layer groups
+ * — each row with a checkbox, opacity slider, a live status indicator
+ * (loading/loaded/empty/failed/needs-setup) and a note.
+ *
+ * Group order (B696) is most-site-specific first: Basemap (the planner's aerial
+ * source control, B693, + terrain) → the current county's local layers → statewide
+ * Jurisdictions → Utility evidence → Environmental & hazards. Each group carries ONE
+ * screening disclaimer line; row notes keep only row-specific facts (source, zoom
+ * gate) so the boilerplate isn't repeated five times.
  *
  * Coverage-aware picker (NEW-2/B284): a "Relevance" control (Show all / Dim / Hide) +
  * an adjustable "nearby range" decide how OUT-OF-COVERAGE layers (ones whose data
  * doesn't reach the current view — e.g. City-of-Houston sewer when you're in Dallas)
  * are presented. This affects ONLY this list's ordering/visibility — never the map: a
- * layer you turn on always renders everything its source returns for the view.
+ * layer you turn on always renders everything its source returns for the view. It's a
+ * meta-filter, so it sits BELOW the groups (B696), not above them.
  */
 import { useEffect, useState } from "react";
-import { STATEWIDE, JURISDICTIONS, EVIDENCE, jurisdictionFor, layerVintage } from "../lib/layers.js";
+import { STATEWIDE, JURISDICTIONS, EVIDENCE, TERRAIN, jurisdictionFor, layerVintage } from "../lib/layers.js";
+import { PLANNER_BASEMAP_CHOICES } from "../lib/basemaps.js";
 import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
 import { formatAge } from "../lib/gisCache.js";
 import {
@@ -23,6 +30,7 @@ import {
 // be theme tokens — the old warm cream-era hexes were dark-on-dark in dark mode (B341).
 const MUTED = "var(--text-secondary)", LINE = "var(--border-default)", INK = "var(--text-primary)";
 const groupHdr = { fontSize: 10, color: MUTED, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "6px 0 4px" };
+const groupNote = { fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "0 0 4px" };
 const STATUS = {
   loading: { color: "var(--warn-text)", label: "loading…" },
   loaded: { color: "var(--status-active)", label: "loaded" },
@@ -32,7 +40,7 @@ const STATUS = {
 };
 const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
 
-export default function LayerPanel({ overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false }) {
+export default function LayerPanel({ overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false, basemap = null, gisNote = null }) {
   const jur = jurisdictionFor(county);
   const set = (k, patch) => setOverlays((o) => ({ ...o, [k]: { ...o[k], ...patch } }));
   const [tok, setTok] = useState(() => mapillaryToken());
@@ -80,10 +88,6 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
         <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
           <input type="checkbox" checked={st.on} onChange={(e) => set(k, { on: e.target.checked })} />
           <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{cfg.label}</span>
-          {age && (ls.state === "loaded" || ls.state === "empty") && (
-            <span title={`Cached copy — refreshed ${age}${ls.stale ? " · showing last-good while it refreshes" : ""}. Screening only; verify against the source.`}
-              style={{ fontSize: 9.5, color: ls.stale ? "var(--warn-text)" : MUTED, flex: "none", whiteSpace: "nowrap" }}>{age}</span>
-          )}
           {meta && (
             <span title={meta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: meta.color,
               animation: ls.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
@@ -99,12 +103,18 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             onChange={(e) => set(k, { opacity: +e.target.value })}
             style={{ width: "100%", marginTop: 2 }} />
         )}
-        {/* B236: source VINTAGE — the data's own currency, kept distinct from the
-            "refreshed Xm ago" cache-age above (that's when WE pulled the copy). */}
+        {/* B236 vintage + B75 refreshed-age, folded into ONE line (the B96 note):
+            "as of" = the DATA's own currency; "refreshed" = when WE last pulled the
+            cached copy. Both honest, both here, never conflated. */}
         {st.on && (
-          <div title={`Source vintage — ${cfg.label}'s own effective / publication date (when the underlying data is current as of). This is NOT when we last fetched it${age ? ` (that's the “${age}” stamp by the name)` : ""}.`}
+          <div title={`Source vintage — ${cfg.label}'s own effective / publication date (when the underlying data is current as of). "refreshed" is when we last pulled our cached copy — screening only; verify against the source.`}
             style={{ fontSize: 9.5, color: MUTED, lineHeight: 1.35, marginTop: 1, fontStyle: vintage ? "normal" : "italic" }}>
             as of: {vintage || "vintage unknown"}
+            {age && (ls.state === "loaded" || ls.state === "empty") && (
+              <span style={{ color: ls.stale ? "var(--warn-text)" : MUTED, fontStyle: "normal" }}>
+                {" "}· refreshed {age}{ls.stale ? " (updating…)" : ""}
+              </span>
+            )}
           </div>
         )}
         {/* NEW-1: honest out-of-coverage caption for an ON layer (e.g. COH sewer in
@@ -179,10 +189,109 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     background: active ? "var(--accent)" : "transparent", color: active ? "var(--on-accent)" : INK, border: "none",  // B508: theme tokens, not hardcoded warm-dark hex (was dark-on-dark in dark mode)
   });
 
+  // The planner's aerial-source control (B693): segmented Off / Aerial / USGS over the
+  // shared BASEMAPS registry (same sources as the map finder's Imagery dropdown, so the
+  // two surfaces always offer the same choices). Disabled — with the plain reason — when
+  // the plan has no map placement (no origin: there is nothing to anchor imagery to);
+  // it re-enables the moment a placement lands. Rendered only when the host passes the
+  // `basemap` prop (the finder keeps its own Imagery dropdown).
+  const bmStatus = basemap && basemap.status ? STATUS[basemap.status] : null;
+  const basemapControl = basemap && (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div role="group" aria-label="Aerial basemap source" title={basemap.disabledReason || "Which aerial imagery draws under the plan."}
+          style={{ display: "flex", flex: 1, border: `1px solid ${LINE}`, borderRadius: 6, overflow: "hidden", opacity: basemap.disabledReason ? 0.5 : 1 }}>
+          {PLANNER_BASEMAP_CHOICES.map((c, i) => (
+            <button key={c.key} title={c.title} aria-pressed={basemap.value === c.key}
+              disabled={!!basemap.disabledReason} aria-disabled={!!basemap.disabledReason}
+              onClick={() => !basemap.disabledReason && basemap.onChange(c.key)}
+              style={{ ...segBtn(basemap.value === c.key), cursor: basemap.disabledReason ? "not-allowed" : "pointer", borderLeft: i !== 0 ? `1px solid ${LINE}` : "none" }}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+        {bmStatus && !basemap.disabledReason && basemap.value !== "off" && (
+          <span title={bmStatus.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: bmStatus.color,
+            animation: basemap.status === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+        )}
+      </div>
+      {basemap.disabledReason && (
+        <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 3 }}>{basemap.disabledReason}</div>
+      )}
+    </div>
+  );
+
+  // An unlocated plan (B693): the map-dependent layer list can't do anything yet, so
+  // show ONLY the (disabled) Basemap control + the plain reason — never silent no-op
+  // toggles that flip state with nothing on screen to show for it.
+  if (gisNote) {
+    return (
+      <div>
+        {groupHead("basemap", "Basemap", 0)}
+        {!collapsed.basemap && basemapControl}
+        <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.45, marginTop: 4 }}>{gisNote}</div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      {/* Relevance control (NEW-2): list ordering/visibility only; never the map. */}
-      <div style={{ margin: "0 0 8px" }}>
+      {/* ——— Basemap (B693) + terrain (B696: terrain isn't utility evidence) ——— */}
+      {groupHead("basemap", "Basemap", onCount(TERRAIN) + (basemap && basemap.value !== "off" && !basemap.disabledReason ? 1 : 0))}
+      {!collapsed.basemap && <>
+        {basemapControl}
+        {groupRows(Object.entries(TERRAIN), "basemap")}
+      </>}
+
+      {/* ——— The current county's local layers — most site-specific, so first after the base ——— */}
+      {groupHead("jurisdiction", jur ? jur.label : "This jurisdiction", jur ? onCount(jur.layers || {}) : 0)}
+      {!collapsed.jurisdiction && <>
+        <div style={groupNote}>Local agency layers for this county — screening only; verify with the agency.</div>
+        {jur && Object.keys(jur.layers || {}).length > 0
+          ? groupRows(Object.entries(jur.layers), "jurisdiction")
+          : <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.4 }}>{(jur && jur.note) || "No local GIS layers wired for this jurisdiction yet."}</div>}
+      </>}
+
+      {groupHead("jurbounds", "Jurisdictions", onCount(JURISDICTIONS))}
+      {!collapsed.jurbounds && <>
+        <div style={groupNote}>
+          District lines for screening — a boundary means a district <b>has jurisdiction</b> (can tax/regulate), not that it serves/connects utilities here.
+        </div>
+        {groupRows(Object.entries(JURISDICTIONS), "jurbounds")}
+      </>}
+
+      {groupHead("evidence", "Utility evidence", onCount(EVIDENCE))}
+      {!collapsed.evidence && <>
+        <div style={groupNote}>Field evidence for screening — hints at what's nearby, never proof of service. Verify with the utility.</div>
+        {groupRows(Object.entries(EVIDENCE), "evidence")}
+      </>}
+      {/* B308: the layer works for everyone via the same-origin proxy (no token needed).
+          The box is now an OPTIONAL power-user override — paste your own token to query
+          Mapillary directly from this device instead of going through Planyr. */}
+      {!collapsed.evidence && overlays.mapillary?.on && (
+        <div style={{ marginBottom: 5 }}>
+          <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginBottom: 3 }}>
+            Works automatically — no token needed. <i>(Advanced)</i> use your own Mapillary token instead:
+          </div>
+          <input type="password" value={tok} placeholder="Your own token (optional, MLY|…)" autoComplete="off"
+            onChange={(e) => { setTok(e.target.value); setMapillaryToken(e.target.value.trim()); }}
+            style={{ width: "100%", boxSizing: "border-box", padding: "5px 7px", fontSize: 11, fontFamily: "ui-monospace, monospace", border: `1px solid ${LINE}`, borderRadius: 6, color: INK }} />
+          <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 2 }}>
+            {tok ? "Using your token on this device only." : "Leave blank to use Planyr's built-in access. Source: Mapillary."}
+          </div>
+        </div>
+      )}
+
+      {/* Renamed from "Map layers" (B696) — these are the environmental/hazard screens. */}
+      {groupHead("statewide", "Environmental & hazards", onCount(STATEWIDE))}
+      {!collapsed.statewide && <>
+        <div style={groupNote}>Screening only — verify with the issuing agency (FEMA / USFWS / RRC) before relying on it.</div>
+        {groupRows(Object.entries(STATEWIDE), "statewide")}
+      </>}
+
+      {/* Relevance control (NEW-2): a meta-filter over the LIST above (ordering/visibility
+          only; never the map) — so it sits below the layers, not as the panel's lead (B696). */}
+      <div style={{ margin: "8px 0 0", borderTop: `1px solid ${LINE}`, paddingTop: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
           <span style={{ ...groupHdr, margin: 0, flex: "none" }}>Relevance</span>
           <div role="group" aria-label="Relevance" title="How to show layers whose data doesn't reach this view. Affects this list only — never the map."
@@ -206,41 +315,6 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
           </label>
         )}
       </div>
-
-      {groupHead("statewide", "Map layers", onCount(STATEWIDE))}
-      {!collapsed.statewide && groupRows(Object.entries(STATEWIDE), "statewide")}
-
-      {groupHead("jurbounds", "Jurisdictions", onCount(JURISDICTIONS))}
-      {!collapsed.jurbounds && <>
-        <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "0 0 4px" }}>
-          District lines for screening — a boundary means a district <b>has jurisdiction</b> (can tax/regulate), not that it serves/connects utilities here.
-        </div>
-        {groupRows(Object.entries(JURISDICTIONS), "jurbounds")}
-      </>}
-
-      {groupHead("evidence", "Utility evidence", onCount(EVIDENCE))}
-      {!collapsed.evidence && groupRows(Object.entries(EVIDENCE), "evidence")}
-      {/* B308: the layer works for everyone via the same-origin proxy (no token needed).
-          The box is now an OPTIONAL power-user override — paste your own token to query
-          Mapillary directly from this device instead of going through Planyr. */}
-      {!collapsed.evidence && overlays.mapillary?.on && (
-        <div style={{ marginBottom: 5 }}>
-          <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginBottom: 3 }}>
-            Works automatically — no token needed. <i>(Advanced)</i> use your own Mapillary token instead:
-          </div>
-          <input type="password" value={tok} placeholder="Your own token (optional, MLY|…)" autoComplete="off"
-            onChange={(e) => { setTok(e.target.value); setMapillaryToken(e.target.value.trim()); }}
-            style={{ width: "100%", boxSizing: "border-box", padding: "5px 7px", fontSize: 11, fontFamily: "ui-monospace, monospace", border: `1px solid ${LINE}`, borderRadius: 6, color: INK }} />
-          <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 2 }}>
-            {tok ? "Using your token on this device only." : "Leave blank to use Planyr's built-in access. Source: Mapillary."}
-          </div>
-        </div>
-      )}
-
-      {groupHead("jurisdiction", jur ? jur.label : "This jurisdiction", jur ? onCount(jur.layers || {}) : 0)}
-      {!collapsed.jurisdiction && (jur && Object.keys(jur.layers || {}).length > 0
-        ? groupRows(Object.entries(jur.layers), "jurisdiction")
-        : <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.4 }}>{(jur && jur.note) || "No local GIS layers wired for this jurisdiction yet."}</div>)}
     </div>
   );
 }

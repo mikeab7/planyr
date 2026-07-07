@@ -15,16 +15,16 @@ via the Shell `onOpenReviewInDocReview` intent.
   id-set helper in `/src/shared/ui/` (B665 — collapsed by default).
 - `components/FileBrowser.jsx` — the filing machinery (search + sort toolbar, badged list,
   whole-pane drop target, upload tray, needs-filing, refile/share/delete — the facet chips and
-  bottom drop card were removed in B689/B691). `folderMode` swaps its left column for the real
+  bottom drop card were removed in B697/B699). `folderMode` swaps its left column for the real
   folder tree and filters the list by the selected folder (files place via the shared
   `resolveDrawingTarget`, superseded → 02. Archive); folder drops preserve the dropped subfolder
   structure (`matchDropPathToFolder`; unmatched → Needs filing). Cross-project browsing keeps
-  the classic category tree (route-only since B692 — no in-pane "All projects" button).
+  the classic category tree (route-only since B700 — no in-pane "All projects" button).
 - `components/FolderTree.jsx` — the per-project standard folder tree editor (B650): right-click
   → New folder / rename (inline) / move / delete with an enumerated delete-safety confirmation
-  (header "＋ Category" buttons removed, B690); rows are drop targets (B691); the rail foot shows
+  (header "＋ Category" buttons removed, B698); rows are drop targets (B699); the rail foot shows
   the honest Drive-mirror status — "Synced · N min ago" / progress / not-connected / loud error
-  (B693). `embedded` mode = the unified view's left rail (selection, per-folder counts,
+  (B701). `embedded` mode = the unified view's left rail (selection, per-folder counts,
   publishes rows up).
 - `lib/folders.js` — the folder-index store: reads/writes the tree in Supabase (`project_folders`,
   own-row RLS) and triggers the one-way Google Drive mirror via `/api/folders` (loops the server's
