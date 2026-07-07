@@ -14,8 +14,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `coverage.js` (coverage engine);
   `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; `gisCache.js` — screening cache;
   `vectorLayers.js` (pure vector engine + boundary registry) + `vectorOverlay.js` (cached boundary
-  render / identify / labels glue) + `boundaryLabels.js` (pure label math) — the B690/B691 tier;
-  `basemaps.js` — the shared Esri/USGS aerial-source registry (B689).
+  render / identify / labels glue) + `boundaryLabels.js` (pure label math) — the B694/B695 tier;
+  `basemaps.js` — the shared Esri/USGS aerial-source registry (B693).
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `labelLayout.js` — LOD label tiering. `roadGeometry.js` — centerline road curves (pure).
 - `detentionRules.js` — Houston-MSA detention criteria as versioned rule records + the

@@ -1,4 +1,4 @@
-/* Shared aerial basemap SOURCE registry (B689) — the single list of free aerial
+/* Shared aerial basemap SOURCE registry (B693) — the single list of free aerial
  * imagery sources, used by BOTH surfaces: the map finder's Imagery dropdown and the
  * planner's Basemap control (Off / Aerial / USGS in the shared Layers panel), so the
  * two never offer different choices. Moved here from MapFinder.jsx when the planner

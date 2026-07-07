@@ -119,7 +119,7 @@ export const STATEWIDE = {
  * for siting around overhead electric and fire protection. LIVE, view-driven
  * (OSM/Mapillary refetch as you pan); HIFLD/COH are agency image services. Each
  * declares a `kind` the sync helper dispatches on. Shown on both pages.
- * Row order is BY ASSET (B692): the electric block first (OSM power, HIFLD
+ * Row order is BY ASSET (B696): the electric block first (OSM power, HIFLD
  * transmission), then the fire block (OSM hydrants, COH hydrants, street-imagery
  * detections) — so related evidence reads together in the panel. */
 export const EVIDENCE = {
@@ -160,7 +160,7 @@ export const EVIDENCE = {
   },
 };
 
-/* Terrain — rendered inside the panel's Basemap group (B692: terrain isn't utility
+/* Terrain — rendered inside the panel's Basemap group (B696: terrain isn't utility
  * evidence). Same overlay machinery as everything else; only its GROUP moved, so
  * the layer keeps its id (`elevation`) and every saved toggle state survives. */
 export const TERRAIN = {
@@ -188,11 +188,11 @@ export const TERRAIN = {
  * Service area ≠ taxing/authority boundary. Labelled so a MUD outline never reads as
  * "a MUD provides water here." Screening only — verify with the district. */
 const HGAC_ETJ = ETJ_SOURCES.find((s) => s.id === "etj_hgac");
-/* County / city / ETJ are `kind: "vector"` (B690): they render through the cached
+/* County / city / ETJ are `kind: "vector"` (B694): they render through the cached
  * vector tier (vectorOverlay.js + VECTOR_SOURCES rows keyed by the SAME ids) — the
  * last-good boundary set paints instantly from the browser cache, a TxDOT/TxGIO
  * hiccup only slows the background refresh, and hover/click name-identify + the
- * zoom-gated name labels ride the same cached pull (B691). The `url` here is kept
+ * zoom-gated name labels ride the same cached pull (B695). The `url` here is kept
  * as the LIVE-fallback esri-leaflet path (engaged only if the vector pull dies with
  * nothing cached — never a blank layer). */
 export const JURISDICTIONS = {
@@ -453,9 +453,9 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         const lyr = mapillaryLayer(report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else if (cfg.kind === "vector") {
-        // Cached boundary layer (B690): paints the last-good copy from the browser
+        // Cached boundary layer (B694): paints the last-good copy from the browser
         // cache instantly, refreshes in the background, and carries hover/click
-        // identify + zoom-gated name labels (B691). No health probe — the pull
+        // identify + zoom-gated name labels (B695). No health probe — the pull
         // self-reports, and a hard failure engages the injected LIVE fallback (the
         // previous esri-leaflet path, with its retry/backoff) so nothing blanks.
         const lyr = cachedVectorLayer(k, cfg, st.opacity, pane, onStatus, {

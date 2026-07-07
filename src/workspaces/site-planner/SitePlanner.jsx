@@ -102,7 +102,7 @@ import { createHistoryStack } from "./lib/history.js";
  * Mercator is conformal, so a uniform pixels-per-foot aligns to it with no x/y
  * distortion over a site — only the basemap's zoom/center are derived from the
  * planner view. */
-// The aerial source registry is shared with the map finder (lib/basemaps.js, B689) —
+// The aerial source registry is shared with the map finder (lib/basemaps.js, B693) —
 // the planner's Basemap control offers the same Esri/USGS sources as the finder's
 // Imagery dropdown, plus "Off". (The old single-source GEO_BASEMAP constant became
 // BASEMAPS.esri.)
@@ -316,6 +316,10 @@ const elCorners = (el) => {
   });
 };
 const polyArea = (pts) => {
+  // B690 — same guard as the finder's shoelace: a parcel/element without a usable ring
+  // contributes 0 area instead of crashing the canvas (points can be absent on a
+  // malformed/legacy record that round-tripped verbatim through storage or element rows).
+  if (!Array.isArray(pts) || !pts.length) return 0;
   let a = 0;
   for (let i = 0; i < pts.length; i++) {
     const j = (i + 1) % pts.length;
@@ -1414,7 +1418,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // meaningful for a located site (one with a real-world origin).
   const origin = restored?.origin || null;
   // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
-  // Aerial basemap SOURCE (B689): "off" | "esri" | "usgs" — a three-way control in the
+  // Aerial basemap SOURCE (B693): "off" | "esri" | "usgs" — a three-way control in the
   // Layers panel's Basemap group (was a bare on/off checkbox). Located sites default to
   // the Esri aerial, exactly like the old boolean defaulted on.
   const [basemapSrc, setBasemapSrc] = useState(origin ? "esri" : "off");
@@ -1463,7 +1467,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
-  /* aerial basemap tile layer (toggle + source switch, B689) */
+  /* aerial basemap tile layer (toggle + source switch, B693) */
   useEffect(() => {
     const map = geoMapRef.current;
     if (!map) return;
@@ -2001,6 +2005,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B672 — instructions from remote rows that arrived MID-GESTURE (busyRef): buffered here and
   // drained at the next reconcile/flush so a remote apply never yanks the canvas mid-drag.
   const pendingRemoteRef = useRef([]);
+  // A parcel is geometry — a "husk" row whose data has no usable points array must never reach
+  // the canvas (unrenderable + crashes acreage math). Keeping it OUT of local state while the
+  // engine's shadow still has the row makes the next reconcile diff tombstone it in the cloud —
+  // the husk heals into a proper delete instead of poisoning every reader (husk-parcel crash).
+  const isHuskParcel = (kind, el) => kind === "parcel" && !(el && Array.isArray(el.points) && el.points.length);
   // Put one applyRemoteRow instruction onto the canvas. The engine already updated its shadow, so
   // the autosave-effect diff that this setState triggers sees the element as unchanged (no echo
   // commit). Insertion respects the collection's z (byZ reads z, not array position).
@@ -2009,7 +2018,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
     if (!setter) return;
     if (instr.action === "remove") setter((a) => a.filter((x) => x.id !== instr.id));
-    else if (instr.action === "upsert") setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+    else if (instr.action === "upsert") {
+      if (isHuskParcel(instr.kind, instr.el)) return;
+      setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+    }
   };
   const drainRemote = () => {
     if (!pendingRemoteRef.current.length) return;
@@ -2031,9 +2043,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 5000);
       return;
     }
+    // Mid-gesture/mid-edit: never yank the canvas OR reconcile half-made state — defer the whole
+    // replace until the interaction settles (the buffered-event drain covers per-row updates).
+    if (busyRef.current) {
+      setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 1200);
+      return;
+    }
     pendingRemoteRef.current = []; // the refetch supersedes any buffered per-row events
     eng.seed(r.rows);
     const model = rowsToModel({}, r.rows);
+    // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that
+    // edit on the canvas too (it re-trues from its own RPC result, not from pre-commit rows).
     const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
     const sub = (kind, list) => {
       let out = list;
@@ -2044,17 +2064,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       return out;
     };
-    const replace = (setter, next) => setter((prev) => (stableStringify(prev) === stableStringify(next) ? prev : next));
-    replace(setEls, sub("el", model.els)); replace(setMarkups, sub("markup", model.markups)); replace(setMeasures, sub("measure", model.measures));
-    replace(setCallouts, sub("callout", model.callouts)); replace(setParcels, sub("parcel", model.parcels));
+    const next = {
+      els: sub("el", model.els), markups: sub("markup", model.markups), measures: sub("measure", model.measures),
+      callouts: sub("callout", model.callouts),
+      // husk parcels (no points) stay off the canvas AND out of the reconcile input: the diff
+      // below then sees them absent vs the seeded shadow and tombstones the bad rows in the
+      // cloud — the husk heals into a proper delete (B690 root-cause leg; see isHuskParcel).
+      parcels: sub("parcel", model.parcels).filter((pc) => !isHuskParcel("parcel", pc)),
+    };
+    const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
+    replace(setEls, next.els); replace(setMarkups, next.markups); replace(setMeasures, next.measures);
+    replace(setCallouts, next.callouts); replace(setParcels, next.parcels);
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
     // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
     const liveIds = new Set(r.rows.filter((row) => row && !row.deleted_at).map((row) => row.id));
     setDeletedIds((prev) => (prev.some((id) => liveIds.has(id)) ? prev.filter((id) => !liveIds.has(id)) : prev));
-    // one reconcile pass so any edit made during the fetch window commits normally
-    const s = stateRef.current;
-    try { eng.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy: !!drag.current }); } catch (_) {}
+    // One reconcile pass — against EXACTLY the collections just placed on the canvas (rows ∪ pending
+    // local edits), NEVER stateRef: stateRef still holds the PRE-replace canvas here, and on a tab
+    // whose socket dropped that canvas is genuinely STALE — diffing it against the fresh shadow
+    // committed old geometry as valid rev-guarded updates and clobbered everyone (V229 #5, the
+    // reproduced lost-update). Edits made during the fetch window are already in the dirty queue
+    // (every canvas edit reconciles through the autosave effect), so nothing is lost by diffing
+    // the substituted result instead.
+    try { eng.reconcile(next, { busy: false }); } catch (_) {}
   };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
@@ -2090,8 +2123,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ch = supabase
       .channel("site-elements:" + siteId, { config: { presence: { key: uid || "anon" } } })
       .on("presence", { event: "sync" }, () => {
-        // B674 — the live "who's here" roster; keyed by uid so two windows of one account read as
-        // one person. Quiet when alone (summary null).
+        // B674 — the live "who's here" roster; counts SESSIONS (two windows of one account =
+        // "2 here" — V231 #13), names grouped by person. Quiet when this window is alone.
         try { setPeers(presenceSummary(ch.presenceState(), uid)); } catch (_) {}
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + siteId }, (payload) => {
@@ -5708,14 +5741,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const d = JSON.parse(fr.result);
         if (!d || (!Array.isArray(d.parcels) && !Array.isArray(d.els))) throw new Error();
+        // Normalize the import through the model funnel: junk entries (nulls / points-less husk
+        // parcels — the B690 crash class) are dropped, ids/z are ensured, migrations applied —
+        // a hand-edited or stale export can't poison the canvas or the next save.
+        const im = createSiteModel(d);
         ensureIdAbove([
-          ...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id),
-          ...(d.markups || []).map((m) => m.id), ...(d.measures || []).map((m) => m.id),
-          ...(d.callouts || []).map((c) => c.id), ...(d.deletedIds || []),
+          ...im.parcels.map((p) => p.id), ...im.els.map((e) => e.id),
+          ...im.markups.map((m) => m.id), ...im.measures.map((m) => m.id),
+          ...im.callouts.map((c) => c.id), ...im.deletedIds,
         ]); // B591 — seed past all imported ids + tombstones (not just parcels+els)
         pushHistory();
-        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
-        setCallouts(d.callouts || []); setMarkups(d.markups || []); // symmetric with exportJSON (was dropped → data loss / bleed-through)
+        setParcels(im.parcels); setEls(im.els); setMeasures(im.measures);
+        setCallouts(im.callouts); setMarkups(im.markups); // symmetric with exportJSON (was dropped → data loss / bleed-through)
         setSettings((s) => ({ ...s, ...(d.settings || {}), snap: s.snap })); // snap is a global pref, not imported
         setUnderlay(d.underlay || null);
         setSel(null);
@@ -9035,7 +9072,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
             setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
-              (B689): an unlocated plan gets the control DISABLED with the plain reason
+              (B693): an unlocated plan gets the control DISABLED with the plain reason
               ("place it on the map first"), never a silently-missing / dead control.
               The aerial toggle itself moved into LayerPanel's Basemap group. */}
           {(
@@ -9058,7 +9095,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     gisNote={origin ? null : "GIS layers (flood, wetlands, boundaries, utilities) appear here once the site is placed on the map."} />
                   {/* utility-evidence drawing tools (map-dependent — a located site only).
                       Active states ride the theme tokens (accent + on-accent), never raw
-                      hexes — the B341/B508 chrome-region rule (B692 sweep). */}
+                      hexes — the B341/B508 chrome-region rule (B696 sweep). */}
                   {origin && (
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
@@ -9557,7 +9594,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {(leftPanel || companionOpen) && (<>
-          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
+          <div data-testid="left-menu-panel" style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
           {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
               so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).

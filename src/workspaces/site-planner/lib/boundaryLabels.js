@@ -1,4 +1,4 @@
-/* Pure label-placement helpers for the boundary overlays (B691) — county / city /
+/* Pure label-placement helpers for the boundary overlays (B695) — county / city /
  * ETJ name labels at polygon anchors, zoom-gated and collision-dropped.
  *
  * Plain-English: given the cached boundary shapes (GeoJSON from vectorLayers.js),

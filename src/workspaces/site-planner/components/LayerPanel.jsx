@@ -4,8 +4,8 @@
  * — each row with a checkbox, opacity slider, a live status indicator
  * (loading/loaded/empty/failed/needs-setup) and a note.
  *
- * Group order (B692) is most-site-specific first: Basemap (the planner's aerial
- * source control, B689, + terrain) → the current county's local layers → statewide
+ * Group order (B696) is most-site-specific first: Basemap (the planner's aerial
+ * source control, B693, + terrain) → the current county's local layers → statewide
  * Jurisdictions → Utility evidence → Environmental & hazards. Each group carries ONE
  * screening disclaimer line; row notes keep only row-specific facts (source, zoom
  * gate) so the boilerplate isn't repeated five times.
@@ -15,7 +15,7 @@
  * doesn't reach the current view — e.g. City-of-Houston sewer when you're in Dallas)
  * are presented. This affects ONLY this list's ordering/visibility — never the map: a
  * layer you turn on always renders everything its source returns for the view. It's a
- * meta-filter, so it sits BELOW the groups (B692), not above them.
+ * meta-filter, so it sits BELOW the groups (B696), not above them.
  */
 import { useEffect, useState } from "react";
 import { STATEWIDE, JURISDICTIONS, EVIDENCE, TERRAIN, jurisdictionFor, layerVintage } from "../lib/layers.js";
@@ -189,7 +189,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     background: active ? "var(--accent)" : "transparent", color: active ? "var(--on-accent)" : INK, border: "none",  // B508: theme tokens, not hardcoded warm-dark hex (was dark-on-dark in dark mode)
   });
 
-  // The planner's aerial-source control (B689): segmented Off / Aerial / USGS over the
+  // The planner's aerial-source control (B693): segmented Off / Aerial / USGS over the
   // shared BASEMAPS registry (same sources as the map finder's Imagery dropdown, so the
   // two surfaces always offer the same choices). Disabled — with the plain reason — when
   // the plan has no map placement (no origin: there is nothing to anchor imagery to);
@@ -221,7 +221,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     </div>
   );
 
-  // An unlocated plan (B689): the map-dependent layer list can't do anything yet, so
+  // An unlocated plan (B693): the map-dependent layer list can't do anything yet, so
   // show ONLY the (disabled) Basemap control + the plain reason — never silent no-op
   // toggles that flip state with nothing on screen to show for it.
   if (gisNote) {
@@ -236,7 +236,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
 
   return (
     <div>
-      {/* ——— Basemap (B689) + terrain (B692: terrain isn't utility evidence) ——— */}
+      {/* ——— Basemap (B693) + terrain (B696: terrain isn't utility evidence) ——— */}
       {groupHead("basemap", "Basemap", onCount(TERRAIN) + (basemap && basemap.value !== "off" && !basemap.disabledReason ? 1 : 0))}
       {!collapsed.basemap && <>
         {basemapControl}
@@ -282,7 +282,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
         </div>
       )}
 
-      {/* Renamed from "Map layers" (B692) — these are the environmental/hazard screens. */}
+      {/* Renamed from "Map layers" (B696) — these are the environmental/hazard screens. */}
       {groupHead("statewide", "Environmental & hazards", onCount(STATEWIDE))}
       {!collapsed.statewide && <>
         <div style={groupNote}>Screening only — verify with the issuing agency (FEMA / USFWS / RRC) before relying on it.</div>
@@ -290,7 +290,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
       </>}
 
       {/* Relevance control (NEW-2): a meta-filter over the LIST above (ordering/visibility
-          only; never the map) — so it sits below the layers, not as the panel's lead (B692). */}
+          only; never the map) — so it sits below the layers, not as the panel's lead (B696). */}
       <div style={{ margin: "8px 0 0", borderTop: `1px solid ${LINE}`, paddingTop: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
           <span style={{ ...groupHdr, margin: 0, flex: "none" }}>Relevance</span>

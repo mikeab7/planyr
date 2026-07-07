@@ -58,7 +58,7 @@ describe("VECTOR_SOURCES — registry shape", () => {
   });
 });
 
-describe("VECTOR_SOURCES — boundary rows (B690)", () => {
+describe("VECTOR_SOURCES — boundary rows (B694)", () => {
   it("county / city / ETJ carry tiers, label fields, and the live-fallback flag", () => {
     for (const id of ["jur_county", "jur_city", "jur_etj"]) {
       const s = VECTOR_SOURCES[id];
@@ -89,7 +89,7 @@ describe("VECTOR_SOURCES — boundary rows (B690)", () => {
 });
 
 // ----------------------------------------------------------------------------
-describe("pickTier / snapBbox — detail tiers (B690)", () => {
+describe("pickTier / snapBbox — detail tiers (B694)", () => {
   const county = VECTOR_SOURCES.jur_county;
   it("no tiers (FEMA/NWI) → null: original single-detail behavior", () => {
     expect(pickTier(VECTOR_SOURCES.fema, 15)).toBe(null);
@@ -158,7 +158,7 @@ describe("buildVectorQuery — envelope intersect, paged", () => {
   });
 });
 
-describe("vectorKey — tier-stamped cache keys (B690)", () => {
+describe("vectorKey — tier-stamped cache keys (B694)", () => {
   it("tierless keeps the original 3-dp bbox key", () => {
     expect(vectorKey(VECTOR_SOURCES.fema, BBOX)).toBe("vec:fema:-95.500,29.700,-95.400,29.800");
   });
@@ -446,7 +446,7 @@ describe("fetchCached — SWR through the browser cache", () => {
 });
 
 // ----------------------------------------------------------------------------
-describe("fetchCached — tiered boundary sources (B690)", () => {
+describe("fetchCached — tiered boundary sources (B694)", () => {
   const COUNTY = "Texas_County_Boundaries";
   const countyResp = (name = "Harris") => ({
     features: [{ attributes: { CNTY_NM: name, FIPS_ST_CNTY_CD: 48201 }, geometry: { rings: [square(-95.8, 29.5, 1)] } }],

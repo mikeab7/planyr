@@ -74,13 +74,14 @@ const selChromeCount = () => page.evaluate(() => {
   }
   return n;
 });
-// a rendered left panel column is a flex child with the #efe9dd surface and real width
+// the open left-menu column is the flyout mounted beside the 54px rail; it carries
+// data-testid="left-menu-panel" and is unmounted when no panel is open (B689 — was a
+// brittle match on the panel's surface colour, which broke once the shell shared it).
 const panelColumnWidth = () => page.evaluate(() => {
-  for (const d of document.querySelectorAll("div")) {
-    const bg = getComputedStyle(d).backgroundColor;
-    if (bg === "rgb(239, 233, 221)") { const b = d.getBoundingClientRect(); if (b.width > 120 && b.height > 300) return Math.round(b.width); }
-  }
-  return 0;
+  const d = document.querySelector('[data-testid="left-menu-panel"]');
+  if (!d) return 0;
+  const b = d.getBoundingClientRect();
+  return (b.width > 120 && b.height > 300) ? Math.round(b.width) : 0;
 });
 // capture the building's baseline screen centre once; compensation keeps it a valid target
 const B = await buildingCenter();

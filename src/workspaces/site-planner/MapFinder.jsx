@@ -37,7 +37,7 @@ const PAL = {
   chrome: "var(--chrome-bg)", chromeLine: "var(--chrome-divider)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)",
 };
 
-// The aerial-source registry (BASEMAPS) lives in lib/basemaps.js (B689) — it's shared
+// The aerial-source registry (BASEMAPS) lives in lib/basemaps.js (B693) — it's shared
 // with the planner's Basemap control so both surfaces always offer the same sources.
 // Its B220 rule travels with it: every source carries `maxNative`, and the imagery
 // layer below clamps fetches to that ceiling (minus the retina offset).
@@ -163,6 +163,10 @@ const ID_RE = /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo
 // findAttr (imported from lib/appraisal.js) is the shared "first non-empty attr
 // matching this regex, as a string" helper — formerly a local findVal duplicate.
 const shoelace = (pts) => {
+  // B690 — a stored parcel can lack `points` (attr-only / legacy / a malformed row round-tripped
+  // verbatim through site_elements). The map layer skips those (p.points?.length below); the
+  // acreage sums must too, or ONE bad record crashes the whole finder into the error boundary.
+  if (!Array.isArray(pts) || !pts.length) return 0;
   let a = 0;
   for (let i = 0; i < pts.length; i++) { const j = (i + 1) % pts.length; a += pts[i].x * pts[j].y - pts[j].x * pts[i].y; }
   return Math.abs(a) / 2;
@@ -529,7 +533,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
-      // Boundary hover/click identify (B691) — read live per event; parcel-select mode
+      // Boundary hover/click identify (B695) — read live per event; parcel-select mode
       // owns the map's clicks, so the identify yields while it's on (the B98 rule).
       identifyOk: () => !selectModeRef.current,
     });
@@ -789,7 +793,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const map = mapRef.current;
     if (!map) return;
     // Flag select mode on the container so the boundary overlays' interactive fills
-    // (`.pf-boundary-hit`, B691) drop Leaflet's pointer cursor and inherit the +/−
+    // (`.pf-boundary-hit`, B695) drop Leaflet's pointer cursor and inherit the +/−
     // parcel cursor — the tool owns the cursor, not the fill (see index.css).
     try { map.getContainer().classList.toggle("pf-select-mode", !!selectMode); } catch (_) {}
     if (selectMode) {

@@ -1,5 +1,5 @@
 /* Cached-vector boundary overlay — the Leaflet glue over the pure vector engine
- * (B690/B691). This is the render consumer vectorLayers.js was built for: a
+ * (B694/B695). This is the render consumer vectorLayers.js was built for: a
  * view-driven layer that PAINTS the last-good cached copy instantly (no waiting on
  * TxDOT/TxGIO), refreshes in the background, and always reports the copy's age
  * through the same onStatus channel the Layers panel already renders.

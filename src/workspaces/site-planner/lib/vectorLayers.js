@@ -28,7 +28,7 @@ import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 // `imageFallback` is the MapServer export used when vectors aren't appropriate.
 // Adding a layer = adding a registry ROW, never new code (the jurisdiction.js rule).
 //
-// Detail TIERS (B690): a source may declare `query.tiers` — ordered coarse→fine, the
+// Detail TIERS (B694): a source may declare `query.tiers` — ordered coarse→fine, the
 // first tier whose `maxZoom` covers the current zoom wins (no maxZoom = catch-all).
 // A tier sets the SERVER-side generalization (`offsetDeg` → maxAllowableOffset: the
 // agency thins the vertices before they ever cross the wire — same effect as our
@@ -78,7 +78,7 @@ export const VECTOR_SOURCES = {
     note: "NWI is for screening only — not a jurisdictional determination.",
   },
 
-  /* Jurisdiction BOUNDARY layers (B690) — county / city / ETJ move off live per-pan
+  /* Jurisdiction BOUNDARY layers (B694) — county / city / ETJ move off live per-pan
    * esri-leaflet fetches onto this cached tier so they PAINT INSTANTLY from the
    * last-good copy (and a TxDOT/TxGIO 503 can only slow the background refresh,
    * never the paint). Endpoints come from the same GIS_SOURCES registry rows the
@@ -87,16 +87,16 @@ export const VECTOR_SOURCES = {
    * flat-image fallback service; their `liveFallback` marks that a vector failure
    * falls back to the previous live esri-leaflet featureLayer path instead (see
    * vectorOverlay.js), so a CORS/query failure never blanks the layer.
-   * Label/identify fields (B691) ride the same pull: CNTY_NM / city_name / CITY are
+   * Label/identify fields (B695) ride the same pull: CNTY_NM / city_name / CITY are
    * the exact columns jurisdiction.js already reads. */
   jur_county: {
     id: "jur_county",
     label: "County boundaries",
     labelField: "CNTY_NM",
-    // County-name labels on the map (B691): on at region zoom, off at parcel zoom
+    // County-name labels on the map (B695): on at region zoom, off at parcel zoom
     // (you're inside one county there — the label is noise).
     labelZoom: { min: 6, max: 11 },
-    // Click-identify popover (B691): name line + the has-jurisdiction wording the
+    // Click-identify popover (B695): name line + the has-jurisdiction wording the
     // Layers panel already teaches (one disclaimer, reused — never a new claim).
     nameTemplate: "{name} County",
     identifyNote: "This county has jurisdiction here (it can tax/regulate) — a boundary is not a utility service area. Screening only.",
@@ -182,7 +182,7 @@ export const VECTOR_SOURCES = {
 };
 
 // ---------------------------------------------------------------------------
-// Detail tiers (B690) — pure helpers.
+// Detail tiers (B694) — pure helpers.
 // ---------------------------------------------------------------------------
 
 /* Pick the detail tier for a zoom: the first tier whose maxZoom covers it (tiers are
@@ -458,7 +458,7 @@ export function vectorKey(source, bbox, tier = null) {
  * freshly-fetched copy; `ts`/`stale` come from the cache entry. The whole pull→
  * GeoJSON→simplify pipeline is the cache's fetcher, so it only runs on a miss/stale.
  *
- * Tiered sources (B690): pass `zoom` so the detail tier is picked here — a "bbox"
+ * Tiered sources (B694): pass `zoom` so the detail tier is picked here — a "bbox"
  * tier snaps the bbox outward to its grid cell (pan-stable key), an "all" tier
  * ignores the view entirely (one source-level entry). Tiered pulls skip the client
  * Douglas–Peucker: the server already generalized to the tier's maxAllowableOffset.
