@@ -4,18 +4,12 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _54 open · 26 awaiting live verification._
+> _48 open · 28 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B707 | Floodplain mitigation engine: rules matrix + elevation-based compensating-storage volume | [Site Planner / Stormwater] | #site-planner #gis #pond | live |
-| B708 | Elevation-anchored ponds: banded storage split at the flood WSE, credit rules, drainability | [Site Planner] | #site-planner #pond | sandbox |
-| B709 | Pond design-criteria conformance + true land take (maintenance-berm ring) | [Site Planner] | #site-planner #pond #yield | sandbox |
-| B710 | Buildability pathway: required-FFE check + fill-to-elevate rules + LOMR-F flag | [Site Planner] | #site-planner #gis | sandbox |
-| B711 | Special-watershed flag: copy amendment to the SHIPPED B635 overlays | [Site Planner] | #site-planner #gis | sandbox |
-| B712 | Floodplain surfacing & integration: mitigation/buildability card, combined detention readout, inputs, cost lines, print | [Site Planner] | #site-planner #ui #yield #export #gis | live |
 | B691 | Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy | [Site Planner / GIS] | #site-planner #gis | live |
 | B663 | ONE-TIME migration: every existing project gets the standard tree + existing files move into their tree folders in Drive | [Library / storage] | #library #drive | — |
 | B662 | Unified Library: the folder tree IS the view, and files live inside it (+ the live-502 chunked Drive sync fix) | [Library / Doc Review / storage] | #library #drive #persistence | — |
@@ -69,6 +63,8 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B707 | Floodplain mitigation engine: rules matrix + elevation-based compensating-storage volume | [Site Planner / Stormwater] | #site-planner #gis #pond | ⏳ live — awaiting |
+| B712 | Floodplain surfacing & integration: mitigation/buildability card, combined detention readout, inputs, cost lines, print | [Site Planner] | #site-planner #ui #yield #export #gis | ⏳ live — awaiting |
 | B703 | Elevation layer painted Houston terrain as one flat green sheet — replaced with view-relative DRA ground relief | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B704 | 1-ft labeled contour lines, client-generated from the raw 3DEP DEM in a Web Worker | [Site Planner / GIS] | #site-planner #gis #perf | ⏳ live — awaiting |
 | B705 | Drainage flow-direction arrows (which way the site sheets) | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
@@ -106,17 +102,17 @@
 - **#export** — B712, B684
 - **#files** — B180, B181, B182, B183, B699, B687, B685, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
-- **#gis** — B707, B710, B711, B712, B691, B629, B370, B309, B178, B171, B147, B13, B95, B703, B704, B705, B706, B695, B694, B693
+- **#gis** — B691, B629, B370, B309, B178, B171, B147, B13, B95, B707, B712, B703, B704, B705, B706, B695, B694, B693
 - **#infra** — B408, B406, B179, B63, B675, B669
 - **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479, B704, B694, B669
 - **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B701, B692, B682, B676, B667, B673, B674
-- **#pond** — B707, B708, B709
+- **#pond** — B707
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B707, B708, B709, B710, B711, B712, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674
+- **#site-planner** — B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674
 - **#stitching** — B413
 - **#testing** — B269, B63
-- **#ui** — B712, B115, B706, B695, B693, B669, B668, B658, B673, B674
-- **#yield** — B709, B712, B553, B651
+- **#ui** — B115, B712, B706, B695, B693, B669, B668, B658, B673, B674
+- **#yield** — B553, B712, B651
