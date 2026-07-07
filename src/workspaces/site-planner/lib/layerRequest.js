@@ -34,11 +34,19 @@ export function dynamicLayerOptions(cfg, opacity, pane, { proxy = false } = {}) 
   return o;
 }
 
-/* esri imageMapLayer (ImageServer) options. */
+/* esri imageMapLayer (ImageServer) options. `cfg.rendering` is either the NAME of a
+ * server-published rasterFunction template (string — must match rasterFunctionInfos[].name
+ * exactly, see the B603 warning in layers.js) or a WHOLE rendering-rule object (B703 —
+ * a custom raster-function chain, e.g. the view-relative DRA stretch; passed through
+ * verbatim, esri-leaflet JSON-serializes it into the exportImage request). */
 export function imageLayerOptions(cfg, opacity, pane, { proxy = false } = {}) {
   const o = { url: layerUrl(cfg, proxy), opacity };
   if (pane) o.pane = pane;
-  if (cfg.rendering) o.renderingRule = { rasterFunction: cfg.rendering };
+  if (cfg.rendering) {
+    o.renderingRule = typeof cfg.rendering === "string"
+      ? { rasterFunction: cfg.rendering }
+      : cfg.rendering;
+  }
   return o;
 }
 

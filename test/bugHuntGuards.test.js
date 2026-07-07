@@ -65,13 +65,19 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/M_TO_FT = 3937 \/ 1200/);        // US survey foot, matching the EPSG:2278 spine
   });
 
-  it("B603: the 3DEP elevation overlay uses the exact ArcGIS rasterFunction template name", () => {
+  it("B603/B703: the 3DEP elevation overlay uses a view-relative DRA chain, not a fixed national tint", () => {
     const src = read("../src/workspaces/site-planner/lib/layers.js");
     // The USGS press-release PROSE ("Elevation Tinted Hillshade") is NOT a valid
-    // rasterFunctionInfos[].name — exportImage errors on it and the overlay renders blank.
+    // rasterFunctionInfos[].name — exportImage errors on it and the overlay renders blank
+    // (the B603 bug). Any future STRING here must exactly match a published template name.
     expect(src).not.toMatch(/rendering: "Elevation Tinted Hillshade"/);
-    // The real 3DEP template name (verbatim, "Hillshade <modifier>" like its siblings).
-    expect(src).toMatch(/rendering: "Hillshade Elevation Tinted"/);
+    // B703 superseded the named template entirely: a fixed-national-ramp tint paints the
+    // whole Houston MSA one flat green band. The rule must stay a custom chain with DRA
+    // (per-export re-stretch) — probe-verified against the live service 2026-07-07.
+    expect(src).not.toMatch(/rendering: "Hillshade Elevation Tinted"/);
+    expect(src).toMatch(/rasterFunction: "Stretch"/);
+    expect(src).toMatch(/DRA: true/);
+    expect(src).toMatch(/rasterFunction: "Colormap"/);
   });
 
   it("B534/B535: the Doc Review boot-resume IIFEs handle their own rejection (no unhandled promise)", () => {

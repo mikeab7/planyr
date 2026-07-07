@@ -35,6 +35,7 @@ import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import ViewMenu from "./components/ViewMenu.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
@@ -1417,6 +1418,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Geographic basemap + shared overlay layers under the canvas (Phase 1). Only
   // meaningful for a located site (one with a real-world origin).
   const origin = restored?.origin || null;
+  // B706: ground elevation under the cursor (ft NAVD88) for the coordinate chip —
+  // reprojected with the SAME feetToLatLng the chip displays, sampled from the cached
+  // terrain grid (instant) or one debounced 3DEP point call at cursor rest.
+  const cursorLL = useMemo(() => {
+    if (!cursor || !origin) return null;
+    const [la, ln] = feetToLatLng(cursor, origin.lat, origin.lon);
+    return { lat: la, lng: ln };
+  }, [cursor, origin]);
+  const cursorElFt = useGroundElevation(cursorLL);
   // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
   // Aerial basemap SOURCE (B693): "off" | "esri" | "usgs" — a three-way control in the
   // Layers panel's Basemap group (was a bare on/off checkbox). Located sites default to
@@ -9392,14 +9402,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               lat/long (the coordinate Google Earth / a phone GPS uses), reprojected from the
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
               EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
-          {cursor && origin && (() => {
-            const [la, ln] = feetToLatLng(cursor, origin.lat, origin.lon);
-            return (
-              <div style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums" }}>
-                {la.toFixed(6)}°,&nbsp;{ln.toFixed(6)}°
-              </div>
-            );
-          })()}
+          {cursorLL && (
+            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums" }}>
+              {cursorLL.lat.toFixed(6)}°,&nbsp;{cursorLL.lng.toFixed(6)}°
+              {cursorElFt != null && <span data-ground-el> · El ≈ {cursorElFt.toFixed(1)} ft NAVD88</span>}
+            </div>
+          )}
         </div>
 
         {/* phone-only floating button to summon the tool rail (B113) */}

@@ -58,6 +58,16 @@ describe("layer option builders", () => {
       .toEqual({ url: "u", opacity: 0.55, pane: "p", renderingRule: { rasterFunction: "Hillshade" } });
     expect(imageLayerOptions({ url: "u" }, 0.5)).toEqual({ url: "u", opacity: 0.5 });
   });
+  it("imageLayerOptions passes an OBJECT rendering rule through whole (B703 custom chain)", () => {
+    const chain = {
+      rasterFunction: "Colormap",
+      rasterFunctionArguments: {
+        Raster: { rasterFunction: "Stretch", rasterFunctionArguments: { DRA: true } },
+      },
+    };
+    const o = imageLayerOptions({ url: "u", rendering: chain }, 0.55, "p");
+    expect(o.renderingRule).toBe(chain); // verbatim, NOT re-wrapped as { rasterFunction: {…} }
+  });
   it("featureLayerOptions builds a non-interactive vector style at the given opacity", () => {
     const o = featureLayerOptions({ url: "u", color: "#123456", weight: 3 }, 0.7, "p");
     expect(o.url).toBe("u");
