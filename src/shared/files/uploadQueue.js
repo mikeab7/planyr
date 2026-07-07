@@ -131,16 +131,22 @@ function readAllDirectoryEntries(reader) {
 // depth). Unknown entries yield nothing. Never throws — one unreadable entry resolves
 // to [] rather than aborting the whole drop (LOUD-FAILURE: a bad file is skipped, not
 // a silent total loss; the caller's per-file rows still account for what landed).
-export async function entryToFiles(entry) {
+export async function entryToFiles(entry, prefix = "") {
   if (!entry) return [];
   try {
     if (entry.isFile) {
       const file = await new Promise((res, rej) => entry.file(res, rej));
-      return file ? [file] : [];
+      if (!file) return [];
+      // Stamp WHERE inside the dropped folder this file sat (B691 — structure-preserving
+      // folder drops read it via fileRelDirs). Expando on the File; a host object that
+      // refuses the write just degrades that file to the auto-file path, never an error.
+      try { file.relPath = prefix + (file.name || entry.name || ""); } catch (_) { /* degrade */ }
+      return [file];
     }
     if (entry.isDirectory) {
       const children = await readAllDirectoryEntries(entry.createReader());
-      const nested = await Promise.all(children.map(entryToFiles));
+      const dirPrefix = `${prefix}${entry.name || ""}/`;
+      const nested = await Promise.all(children.map((c) => entryToFiles(c, dirPrefix)));
       return nested.flat();
     }
   } catch (_) { /* an unreadable entry contributes nothing instead of failing the drop */ }
@@ -149,8 +155,17 @@ export async function entryToFiles(entry) {
 
 // Flatten a list of dropped entries (files and/or folders) into one flat File[].
 export async function flattenEntries(entries) {
-  const nested = await Promise.all([...(entries || [])].map(entryToFiles));
+  const nested = await Promise.all([...(entries || [])].map((e) => entryToFiles(e)));
   return nested.flat();
+}
+
+/* The directory chain a picked/dropped file arrived under, ["dir", "subdir", ...] —
+ * either capture path: an <input webkitdirectory> pick populates webkitRelativePath
+ * natively; the entry-API drop walk above stamps relPath. Loose files → []. */
+export function fileRelDirs(file) {
+  const p = String((file && (file.relPath || file.webkitRelativePath)) || "");
+  const parts = p.split("/").filter(Boolean);
+  return parts.slice(0, -1);
 }
 
 // SYNC — pull the folder-aware entries out of a drop event's dataTransfer BEFORE any

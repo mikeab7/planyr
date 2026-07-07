@@ -1769,7 +1769,10 @@ export default function DocReview({
         onDashboard={onGoDashboard}
         currentProject={markupProject}
         cross={crossProject}
-        onSelectProject={(id) => onNavigate?.({ projectId: id })}
+        // cross:false is load-bearing (same fix as the Library): navigate() merges with
+        // the live route and buildHash drops projectId while cross is true, so picking a
+        // project from the breadcrumb in "All projects" mode was a silent no-op.
+        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
         onNewProject={onNewProject}
         // The compact Row-1 CloudSyncBadge (NEW-1) reads this normalized state; docSaveState
         // keeps the "a failed write is LOUD, never silent" contract (unit-locked).

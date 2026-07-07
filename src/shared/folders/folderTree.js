@@ -151,6 +151,9 @@ export function suggestNextNumberedName(siblings = [], label = "New Folder") {
 export const stripPrefix = (name) =>
   String(name ?? "").replace(/^\s*\d{1,3}\.\s*/, "").trim().toLowerCase();
 
+// "05. Civil" → "Civil" — the DISPLAY form of a folder label (prefix stripped, case kept).
+export const displayLabel = (name) => String(name ?? "").replace(/^\s*\d{1,3}\.\s*/, "").trim();
+
 // Word-normalize for comparison: any run of non-alphanumerics becomes one space, so
 // "Site Plans" ≡ "site-plans" ≡ "site_plans" — the stored Drive keys carry SLUGGED
 // discipline segments while folder labels carry spaces; both must resolve to one folder.
@@ -182,6 +185,53 @@ export function resolveDrawingTarget(rows, discipline, { archive = false } = {})
   if (!disc) return { row: drawings, driveFolderId: drawings.driveFolderId || null };
   const leaf = childByLabel(rows, disc.id, archive ? "archive" : "current") || disc;
   return { row: leaf, driveFolderId: leaf.driveFolderId || null };
+}
+
+/* Map ONE dropped file's relative directory chain (the SUBFOLDERS under the dropped
+ * container — callers strip the container itself) onto an existing tree folder (B691 —
+ * "Choose a folder" / whole-folder drops preserve the user's own structure). Deepest
+ * directory first, walking up: the first segment whose label uniquely matches a live
+ * folder wins (prefix- and case-insensitive, plural-tolerant — the same labelEq the
+ * upload resolver uses), with a CONTRADICTION guard: if the segment's own parent in the
+ * dropped path is a KNOWN folder label that does NOT corroborate the match's real parent,
+ * the match is rejected and the walk continues (so "Design/Reports" can never file into
+ * Testing Contractor's "02. Reports" just because that label happens to be unique — it
+ * walks up and files into Design instead). An unknown intermediate ("My Stuff/Civil") is
+ * tolerated. An AMBIGUOUS segment (several folders called "Current") is accepted only
+ * when its parent segment pins exactly one candidate; otherwise the walk continues.
+ * Nothing matched → null. The caller sends null-mapped files to Needs filing — the tree
+ * is never auto-extended and a file is never guessed into a folder. */
+export function matchDropPathToFolder(rows, relDirs = []) {
+  const live = liveRows(rows);
+  const rowById = new Map(live.map((r) => [r.id, r]));
+  const candidatesFor = (segment) => {
+    const label = stripPrefix(segment);
+    if (!norm(label)) return [];
+    return live.filter((r) => labelEq(stripPrefix(r.name), label));
+  };
+  const parentCorroborates = (cand, parentSeg) => {
+    const p = cand.parentId != null ? rowById.get(cand.parentId) : null;
+    return !!p && labelEq(stripPrefix(p.name), stripPrefix(parentSeg));
+  };
+  for (let i = relDirs.length - 1; i >= 0; i--) {
+    const cands = candidatesFor(String(relDirs[i] ?? ""));
+    if (!cands.length) continue;
+    const parentSeg = i > 0 ? String(relDirs[i - 1] ?? "") : "";
+    if (cands.length === 1) {
+      if (!parentSeg) return cands[0];
+      // The path names this match's parent: accept when it corroborates, reject when it
+      // is a DIFFERENT known folder (a contradiction — walking up beats guessing), and
+      // tolerate a name the tree simply doesn't know (an arbitrary grouping folder).
+      if (parentCorroborates(cands[0], parentSeg)) return cands[0];
+      if (candidatesFor(parentSeg).length > 0) continue;
+      return cands[0];
+    }
+    // Ambiguous label: only a parent segment that pins exactly ONE candidate accepts it;
+    // otherwise keep walking up (the parent IS in the path — using it isn't a guess).
+    const byParent = parentSeg ? cands.filter((c) => parentCorroborates(c, parentSeg)) : [];
+    if (byParent.length === 1) return byParent[0];
+  }
+  return null;
 }
 
 /* Turn a template into the exact insert rows that seed a project (B650). Pure — the id

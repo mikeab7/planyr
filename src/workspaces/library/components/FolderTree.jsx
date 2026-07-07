@@ -11,17 +11,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   treeify, childrenOf, subtreeIds, wouldCreateCycle,
-  validateFolderName, suggestNextNumberedName, liveRows,
+  validateFolderName, suggestNextNumberedName, liveRows, displayLabel,
 } from "../../../shared/folders/folderTree.js";
 import {
   listFolders, ensureSeeded, addFolder, renameFolder, moveFolder,
   trashSubtree, syncFoldersToDrive, planFolderDelete,
 } from "../lib/folders.js";
 import { loadIdSet, saveIdSet, pruneSet } from "../../../shared/ui/persistedSet.js";
+import { relTime } from "../../../shared/projects/projectModel.js";
 
 /* Per-project remembered expansion (B-item: tree opens collapsed, not with every
  * category flung open). One key per project so switching projects can't bleed state. */
 const treeOpenKey = (projectId) => `planyr:library:treeOpen:v1:${projectId}`;
+
+/* Per-project "last CONFIRMED Drive sync on this device" (B693 — the honest resting
+ * footer). Written ONLY when a real reconcile returns ok; read at mount so a mirrored-
+ * but-untouched project shows "Synced · N min ago" instead of nothing. The mount sync
+ * re-verifies against the real backend within seconds either way. */
+const driveSyncAtKey = (projectId) => `planyr:library:driveSyncAt:v1:${projectId}`;
+
+// Is this drag carrying OS files (vs. a text/element drag we must ignore)?
+const hasFilesDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
 
 const T = {
   page: "var(--surface-page)", raised: "var(--surface-raised)", overlay: "var(--surface-overlay)",
@@ -46,6 +56,11 @@ export default function FolderTree({
   embedded = false, selectedId = null, onSelect = null, onRowsChange = null, fileCounts = null,
   // Library-Home pins: which folder ids are pinned + the ☆ toggle (both optional).
   pinnedIds = null, onTogglePin = null,
+  /* Folder rows as DROP TARGETS (B691): dragging files over a row highlights it and
+   * dropping hands the raw drop event up — `onFileDrop(folderId|null, event)` — for the
+   * file browser to ingest straight into that folder (null = the "All files" row → the
+   * auto-file path). `onDragTarget(label|null)` keeps the drop-overlay pill honest. */
+  onFileDrop = null, onDragTarget = null,
 }) {
   const [rows, setRowsRaw] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -54,9 +69,12 @@ export default function FolderTree({
   const [editing, setEditing] = useState(null); // { id, value }
   const [moving, setMoving] = useState(null); // id being re-parented
   const [hoveredId, setHoveredId] = useState(null);
-  const [menu, setMenu] = useState(null); // right-click actions: { node, x, y }
+  const [menu, setMenu] = useState(null); // right-click actions: { node, x, y } (node null = empty space)
   const [pendingDelete, setPendingDelete] = useState(null); // { id, name, folders, files, empty, loading }
-  const [drive, setDrive] = useState({ state: "idle", msg: "" }); // idle|syncing|ok|off|error
+  const [drive, setDrive] = useState({ state: "idle", msg: "", at: 0 }); // idle|syncing|ok|off|error
+  const [dropTargetId, setDropTargetId] = useState(undefined); // undefined = none; null = the "All files" row
+  const dropTargetRef = useRef(undefined); // ref mirror — dragover/dragleave race without re-render lag
+  const setDropTarget = (id, label) => { dropTargetRef.current = id; setDropTargetId(id); onDragTarget?.(label); };
   const syncTimer = useRef(null);
   // Which project's stored expansion has been restored — persistence must not fire before the
   // restore (the initial empty set would overwrite what the user had open last visit).
@@ -78,6 +96,7 @@ export default function FolderTree({
   useEffect(() => {
     let live = true;
     expandedLoadedFor.current = null;
+    setDrive({ state: "idle", msg: "", at: 0 }); // a project switch must not inherit the last project's status
     if (!signedIn || !projectId) { setRows([]); return; }
     (async () => {
       setLoading(true); setError("");
@@ -92,6 +111,15 @@ export default function FolderTree({
       setExpanded(pruneSet(loadIdSet(treeOpenKey(projectId)), new Set(list.map((r) => r.id))));
       expandedLoadedFor.current = projectId;
       setLoading(false);
+      // Resting mirror status (B693): every live folder already has its Drive id AND this
+      // device saw a confirmed sync → show the honest "Synced · N min ago" instead of a
+      // blank footer. Anything less stays idle until the real reconcile below reports.
+      let at = 0;
+      try { at = Number(localStorage.getItem(driveSyncAtKey(projectId))) || 0; } catch (_) { at = 0; }
+      const liveList = liveRows(list);
+      if (at && liveList.length > 0 && liveList.every((r) => r.driveFolderId)) {
+        setDrive({ state: "ok", msg: "", at });
+      }
       scheduleSync(seed && seed.seeded ? 0 : 400); // seed → sync now so Drive materializes promptly
     })();
     return () => { live = false; };
@@ -114,9 +142,14 @@ export default function FolderTree({
       const r = await syncFoldersToDrive(projectId, {
         onProgress: ({ done, total }) => setDrive({ state: "syncing", msg: `Mirroring to Google Drive… ${done} of ${total}` }),
       });
-      if (r.skipped) setDrive({ state: "off", msg: "Saved in Planyr. Google Drive mirror is off." });
-      else if (r.ok) setDrive({ state: "ok", msg: "Mirrored to Google Drive." });
-      else setDrive({ state: "error", msg: r.error || "Drive sync had a problem." });
+      if (r.skipped) setDrive({ state: "off", msg: "Saved in Planyr — Google Drive isn't connected.", at: 0 });
+      else if (r.ok) {
+        // A CONFIRMED reconcile — the only thing that may claim "Synced" (LOUD-FAILURE:
+        // the label is driven by the real backend result, never a static checkmark).
+        const at = Date.now();
+        try { localStorage.setItem(driveSyncAtKey(projectId), String(at)); } catch (_) { /* footer still shows this session's time */ }
+        setDrive({ state: "ok", msg: "", at });
+      } else setDrive({ state: "error", msg: r.error || "Drive sync had a problem.", at: 0 });
     }, delay);
   }, [projectId]);
 
@@ -241,6 +274,7 @@ export default function FolderTree({
     const onNameDouble = embedded
       ? () => { onSelect?.(node.id); if (kids.length) setExpanded((s) => new Set(s).add(node.id)); }
       : undefined;
+    const isDropTarget = !!onFileDrop && dropTargetId === node.id;
     return (
       <div key={node.id}>
         <div
@@ -249,12 +283,39 @@ export default function FolderTree({
           style={{
             display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", paddingLeft: 8 + depth * 16,
             borderRadius: 6, color: T.text, minHeight: 30,
-            background: isSelected ? "var(--hover-menu)"
-              : (hoveredId === node.id || (menu && menu.node.id === node.id)) ? T.raised : "transparent",
+            outline: isDropTarget ? `1.5px dashed ${T.accent}` : "none", outlineOffset: -1.5,
+            background: isDropTarget ? "var(--hover-menu)"
+              : isSelected ? "var(--hover-menu)"
+              : (hoveredId === node.id || (menu && menu.node && menu.node.id === node.id)) ? T.raised : "transparent",
           }}
           onMouseEnter={() => setHoveredId(node.id)}
           onMouseLeave={() => setHoveredId((h) => (h === node.id ? null : h))}
-          onContextMenu={(e) => { if (isEditing || isMoving) return; e.preventDefault(); setMenu({ node, x: e.clientX, y: e.clientY }); }}
+          onContextMenu={(e) => { if (isEditing || isMoving) return; e.preventDefault(); e.stopPropagation(); setMenu({ node, x: e.clientX, y: e.clientY }); }}
+          /* Drop a drag straight INTO this folder (B691) — the Explorer gesture. ARM on
+           * dragenter (Chromium fires the new row's dragenter BEFORE the old row's
+           * dragleave, so hopping rows re-targets before the clear can fire — no flicker)
+           * and keep dragover as the belt-and-suspenders re-arm; leave clears only if this
+           * row is STILL the current target (the ref mirror) and only when the pointer
+           * really left this row's subtree (child spans can't flicker it). */
+          onDragEnter={onFileDrop ? (e) => {
+            if (!hasFilesDrag(e)) return;
+            e.preventDefault();
+            if (dropTargetRef.current !== node.id) setDropTarget(node.id, displayLabel(node.name));
+          } : undefined}
+          onDragOver={onFileDrop ? (e) => {
+            if (!hasFilesDrag(e)) return;
+            e.preventDefault(); e.stopPropagation();
+            if (dropTargetRef.current !== node.id) setDropTarget(node.id, displayLabel(node.name));
+          } : undefined}
+          onDragLeave={onFileDrop ? (e) => {
+            if (e.currentTarget.contains(e.relatedTarget)) return;
+            if (dropTargetRef.current === node.id) setDropTarget(undefined, null);
+          } : undefined}
+          onDrop={onFileDrop ? (e) => {
+            e.preventDefault(); e.stopPropagation();
+            setDropTarget(undefined, null);
+            onFileDrop(node.id, e);
+          } : undefined}
         >
           <button
             onClick={() => kids.length && toggle(node.id)}
@@ -309,21 +370,17 @@ export default function FolderTree({
     <div data-testid="folder-tree" style={{ height: "100%", display: "flex", flexDirection: "column", background: embedded ? "transparent" : T.page, color: T.text, overflow: "hidden" }}>
       {embedded ? (
         // Rail header (the unified Library) — the project name lives in the breadcrumb above,
-        // so this stays a quiet label + the add-category action.
+        // so this stays a quiet label. Folder creation is right-click → New folder (B690):
+        // one word ("folder"), one gesture, matching File Explorer — no header button.
         <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "11px 10px 7px 14px" }}>
           <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {projectName || "Project"} · Folders
           </span>
-          <div style={{ flex: 1 }} />
-          <button onClick={() => onAdd(null)} title="Add a top-level category"
-            style={{ flex: "none", font: "inherit", fontSize: 9.5, fontWeight: 700, padding: "2px 7px", border: "1px solid var(--border-default)", borderRadius: 6, background: T.page, color: T.sub, cursor: "pointer", whiteSpace: "nowrap" }}>＋ Category</button>
         </div>
       ) : (
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
           <b style={{ fontSize: 13, letterSpacing: ".02em" }}>{projectName || "Project"} · Folders</b>
           <span style={{ color: T.faint, fontSize: 12 }}>{liveCount} folder{liveCount === 1 ? "" : "s"}</span>
-          <div style={{ flex: 1 }} />
-          <button onClick={() => onAdd(null)} style={{ font: "inherit", fontSize: 12, padding: "4px 10px", border: "none", borderRadius: 6, background: T.accent, color: T.onAccent, cursor: "pointer" }}>＋ Category</button>
         </div>
       )}
 
@@ -333,20 +390,52 @@ export default function FolderTree({
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: "auto", padding: "4px 6px 8px" }}>
-        {/* "All files" — clears the folder filter (embedded only; standalone has no file list). */}
+      <div style={{ flex: 1, overflow: "auto", padding: "4px 6px 8px" }}
+        /* Right-click on EMPTY tree space → "New folder" at the top level (B690, the File
+         * Explorer convention). A row's own context menu handled the event already (it
+         * stops propagation), and the closest() check catches the row's inner elements. */
+        onContextMenu={(e) => {
+          if (e.target.closest && e.target.closest('[data-testid="folder-row"]')) return;
+          e.preventDefault();
+          setMenu({ node: null, x: e.clientX, y: e.clientY });
+        }}>
+        {/* "All files" — clears the folder filter (embedded only; standalone has no file list).
+            As a drop target it means "auto-file by title block" (B691). */}
         {embedded && !loading && (
           <div
             onClick={() => onSelect?.(null)}
+            onDragEnter={onFileDrop ? (e) => {
+              if (!hasFilesDrag(e)) return;
+              e.preventDefault();
+              if (dropTargetRef.current !== null) setDropTarget(null, "All files — auto-sort (a folder keeps its own layout)");
+            } : undefined}
+            onDragOver={onFileDrop ? (e) => {
+              if (!hasFilesDrag(e)) return;
+              e.preventDefault(); e.stopPropagation();
+              if (dropTargetRef.current !== null) setDropTarget(null, "All files — auto-sort (a folder keeps its own layout)");
+            } : undefined}
+            onDragLeave={onFileDrop ? (e) => {
+              if (e.currentTarget.contains(e.relatedTarget)) return;
+              if (dropTargetRef.current === null) setDropTarget(undefined, null);
+            } : undefined}
+            onDrop={onFileDrop ? (e) => {
+              e.preventDefault(); e.stopPropagation();
+              setDropTarget(undefined, null);
+              onFileDrop(null, e);
+            } : undefined}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 2, borderRadius: 6, cursor: "pointer",
-              background: selectedId == null ? "var(--hover-menu)" : "transparent", color: T.text }}>
+              outline: onFileDrop && dropTargetId === null ? `1.5px dashed ${T.accent}` : "none", outlineOffset: -1.5,
+              background: (onFileDrop && dropTargetId === null) || selectedId == null ? "var(--hover-menu)" : "transparent", color: T.text }}>
             <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700 }}>All files</span>
             {totalFiles != null && <span style={{ flex: "none", fontSize: 11, fontWeight: 600, color: T.faint, paddingRight: 4 }}>{totalFiles}</span>}
           </div>
         )}
         {loading ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>Loading folders…</div>
-          : tree.length === 0 ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>No folders yet.</div>
+          : tree.length === 0 ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>No folders yet. Right-click here to create one.</div>
             : tree.map((n) => renderRow(n, 0))}
+        {/* Guaranteed right-clickable empty space even when the rows fill the rail — without
+            it a full tree would leave NO reachable spot for a top-level "New folder". */}
+        {!loading && <div aria-hidden style={{ minHeight: 44 }} />}
       </div>
 
       {/* Drive-mirror status pinned at the rail's foot, always visible while syncing. */}
@@ -372,13 +461,15 @@ export default function FolderTree({
   );
 }
 
-/* Right-click actions for a folder row. Rendered in a body portal (like the project-manage menu
- * in ProjectBreadcrumb) so it floats above the tree at the cursor: a full-screen backdrop closes
- * it on any click / right-click, and each item runs its action then dismisses. Positioned at the
- * click point, clamped so it never spills past the viewport edge. */
+/* Right-click actions for a folder row — or, with `menu.node` null, for EMPTY tree space
+ * (just "New folder" at the top level, the File Explorer convention — B690). Rendered in a
+ * body portal (like the project-manage menu in ProjectBreadcrumb) so it floats above the
+ * tree at the cursor: a full-screen backdrop closes it on any click / right-click, and each
+ * item runs its action then dismisses. Positioned at the click point, clamped so it never
+ * spills past the viewport edge. */
 function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRename, onMove, onDelete }) {
-  const node = menu.node;
-  const pinned = !!(pinnedIds && pinnedIds.has(node.id));
+  const node = menu.node; // null = empty-space menu
+  const pinned = !!(node && pinnedIds && pinnedIds.has(node.id));
   const W = 210, H = 232; // approx footprint for edge clamping
   const left = Math.max(6, Math.min(menu.x, window.innerWidth - W - 8));
   const top = Math.max(6, Math.min(menu.y, window.innerHeight - H - 8));
@@ -403,38 +494,66 @@ function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRen
           background: T.raised, color: T.text, border: `1px solid ${T.borderStrong}`,
           borderRadius: 10, boxShadow: "0 12px 40px rgba(0,0,0,.35)",
         }}>
-        <div style={{ padding: "4px 10px 6px", fontSize: 11, fontWeight: 700, color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</div>
-        {onTogglePin && (
+        <div style={{ padding: "4px 10px 6px", fontSize: 11, fontWeight: 700, color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node ? node.name : "Folders"}</div>
+        {node && onTogglePin && (
           <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onTogglePin(node))} style={item()}>
             <span aria-hidden style={glyph}>{pinned ? "★" : "☆"}</span>{pinned ? "Unpin from Library home" : "Pin to Library home"}
           </button>
         )}
-        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onAdd(node.id))} style={item()}>
-          <span aria-hidden style={glyph}>＋</span>Add subfolder
+        {/* On a row this creates INSIDE it; on empty space, at the top level (B690). */}
+        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onAdd(node ? node.id : null))} style={item()}>
+          <span aria-hidden style={glyph}>＋</span>New folder
         </button>
-        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onRename(node))} style={item()}>
+        {node && <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onRename(node))} style={item()}>
           <span aria-hidden style={glyph}>✎</span>Rename
-        </button>
-        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onMove(node.id))} style={item()}>
+        </button>}
+        {node && <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onMove(node.id))} style={item()}>
           <span aria-hidden style={glyph}>⇄</span>Move
-        </button>
-        <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onDelete(node))} style={item({ color: T.dangerText })}>
+        </button>}
+        {node && <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onDelete(node))} style={item({ color: T.dangerText })}>
           <span aria-hidden style={glyph}>🗑</span>Delete
-        </button>
+        </button>}
       </div>
     </>,
     document.body,
   );
 }
 
+/* The rail-foot mirror status (B693 — honest, backend-driven, per the B125 badge rules):
+ *   ok      → "✓ Synced to Google Drive · N min ago" — ONLY after a confirmed reconcile
+ *             (or the resting restore of one); the timestamp ticks live.
+ *   syncing → progress text, no button.
+ *   off     → amber "Google Drive isn't connected" — a graceful skip, named as such.
+ *   error   → red, PERSISTENT failure text + a loud Retry. Never silently green.
+ * "Sync now" is the demoted secondary action (quiet tertiary link): it forces a full
+ * reconcile pass — every folder re-checked against Drive, anything missing re-mirrored. */
 function DriveBadge({ drive, onSync }) {
+  // Ticking clock for "· N min ago" (60s beat — relTime is minute-grained).
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (drive.state !== "ok" || !drive.at) return;
+    const t = setInterval(() => bump((n) => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, [drive.state, drive.at]);
   if (drive.state === "idle") return null;
   const color = drive.state === "error" ? "var(--danger-text)" : drive.state === "off" ? "var(--warn-text)" : "var(--text-tertiary)";
+  const glyph = { syncing: "↻", off: "☁︎", error: "!", ok: "✓" }[drive.state] || "";
+  const label = drive.state === "ok"
+    ? `Synced to Google Drive${drive.at ? ` · ${relTime(drive.at)}` : ""}`
+    : drive.msg;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 12, color, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
-      <span>{drive.state === "syncing" ? "↻" : drive.state === "off" ? "☁︎" : drive.state === "error" ? "!" : "✓"}</span>
-      <span style={{ flex: 1, minWidth: 0, lineHeight: 1.4 }}>{drive.msg}</span>
-      {drive.state !== "syncing" && <button onClick={onSync} style={{ flex: "none", border: "none", background: "none", color: "var(--accent-library-text)", cursor: "pointer", font: "inherit" }}>{drive.state === "error" ? "Retry" : "Sync now"}</button>}
+      <span>{glyph}</span>
+      <span style={{ flex: 1, minWidth: 0, lineHeight: 1.4 }}>{label}</span>
+      {drive.state !== "syncing" && (
+        <button onClick={onSync}
+          title="Force a full re-check: verifies every folder against Google Drive and re-mirrors anything missing"
+          style={{ flex: "none", border: "none", background: "none", cursor: "pointer", font: "inherit",
+            color: drive.state === "error" ? "var(--danger-text)" : "var(--text-tertiary)",
+            fontWeight: drive.state === "error" ? 700 : 400, textDecoration: "underline" }}>
+          {drive.state === "error" ? "Retry" : "Sync now"}
+        </button>
+      )}
     </div>
   );
 }

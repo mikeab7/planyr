@@ -294,6 +294,35 @@ export function browseFiles(facts, { category = null, subcategory = null, facet 
 export const holdingArea = (facts) => facts.filter((f) => stateOf(f) === FILE_STATES.NEEDS_FILING)
   .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
+/* -------------------- populated-state search + sort (B694) --------------------
+ * Type-to-filter over the fields the filing index already carries (B299 built that
+ * index precisely so the library answers queries without re-reading PDFs): display
+ * name, sheet number, sheet title, discipline, and the original filename. Case-
+ * insensitive substring (the B235 pattern). Blank query → everything, untouched. */
+export function searchFiles(facts, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return facts;
+  return facts.filter((f) =>
+    [f.title, f.item, f.sheetNumber, f.sheetTitle, f.discipline, f.sourceFile]
+      .some((v) => v && String(v).toLowerCase().includes(q)));
+}
+
+// File-list sort modes. Newest-first (the document's OWN date, B659) stays the default;
+// the name sort is numeric-aware so "Sheet 2" orders before "Sheet 10".
+export const SORTS = [
+  { id: "recency", label: "Newest first" },
+  { id: "name", label: "Name A–Z" },
+];
+export function sortFiles(facts, sortId = "recency") {
+  const out = [...facts];
+  if (sortId === "name") {
+    const nameOf = (f) => String(f.title || f.item || "");
+    return out.sort((a, b) =>
+      nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: "base" }) || docRecency(a, b));
+  }
+  return out.sort(docRecency);
+}
+
 /* --------------------------- index provider ------------------------------ */
 /* The auto-filing index (read a title block → match a project → capture facts incl. the
  * NEW-2 placement flags) is the backend tranche. The UI talks to it ONLY through this
