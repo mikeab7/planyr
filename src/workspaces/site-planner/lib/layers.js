@@ -20,6 +20,7 @@ import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
 } from "./layerRequest.js";
+import { cachedVectorLayer } from "./vectorOverlay.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 
 export { JURISDICTION_LAYERS };
@@ -117,17 +118,34 @@ export const STATEWIDE = {
 /* Utility-evidence layers — power & hydrant evidence from crowd/agency sources,
  * for siting around overhead electric and fire protection. LIVE, view-driven
  * (OSM/Mapillary refetch as you pan); HIFLD/COH are agency image services. Each
- * declares a `kind` the sync helper dispatches on. Shown on both pages. */
+ * declares a `kind` the sync helper dispatches on. Shown on both pages.
+ * Row order is BY ASSET (B692): the electric block first (OSM power, HIFLD
+ * transmission), then the fire block (OSM hydrants, COH hydrants, street-imagery
+ * detections) — so related evidence reads together in the panel. */
 export const EVIDENCE = {
   osm_power: {
     kind: "overpass", label: "Power lines & poles (OSM)", opacity: 0.9,
     query: { lines: true, poles: true, substations: true },
     note: "OpenStreetMap — transmission solid, distribution dashed; poles/towers as dots. Loads at zoom ≥ 14.",
   },
+  hifld_tx: {
+    kind: "esriFeature", label: "Transmission lines (HIFLD)",
+    // US DOE / NETL hosted HIFLD transmission lines (layer 18) — vector, crisp at
+    // any zoom, on a federal-government server. Loads zoomed in (national dataset).
+    url: "https://arcgis.netl.doe.gov/server/rest/services/Hosted/Energy_Transition_Atlas_493d6/FeatureServer/18",
+    minZoom: 10, color: "#b91c1c", weight: 2.4, opacity: 0.9,
+    note: "HIFLD ≥69 kV electric transmission (US DOE/NETL). Loads at zoom ≥ 10; verify live.",
+  },
   osm_hydrants: {
     kind: "overpass", label: "Fire hydrants (OSM)", opacity: 0.9,
     query: { hydrants: true },
     note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
+  },
+  coh_hydrants: {
+    kind: "dynamic", label: "Fire hydrants (City of Houston)",
+    url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HoustonMap/Public_safety/MapServer",
+    layers: [9], opacity: 0.95, county: "harris",
+    note: "City of Houston Public Works fire hydrants.",
   },
   mapillary: {
     // NEW-3/B285: plain-language name; the "Mapillary" brand is demoted to a small
@@ -140,20 +158,12 @@ export const EVIDENCE = {
     source: "Mapillary", opacity: 0.95,
     note: "Pole & fire-hydrant detections from crowdsourced street-level photos. Loads at zoom ≥ 16.",
   },
-  hifld_tx: {
-    kind: "esriFeature", label: "Transmission lines (HIFLD)",
-    // US DOE / NETL hosted HIFLD transmission lines (layer 18) — vector, crisp at
-    // any zoom, on a federal-government server. Loads zoomed in (national dataset).
-    url: "https://arcgis.netl.doe.gov/server/rest/services/Hosted/Energy_Transition_Atlas_493d6/FeatureServer/18",
-    minZoom: 10, color: "#b91c1c", weight: 2.4, opacity: 0.9,
-    note: "HIFLD ≥69 kV electric transmission (US DOE/NETL). Loads at zoom ≥ 10; verify live.",
-  },
-  coh_hydrants: {
-    kind: "dynamic", label: "Fire hydrants (City of Houston)",
-    url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HoustonMap/Public_safety/MapServer",
-    layers: [9], opacity: 0.95, county: "harris",
-    note: "City of Houston Public Works fire hydrants.",
-  },
+};
+
+/* Terrain — rendered inside the panel's Basemap group (B692: terrain isn't utility
+ * evidence). Same overlay machinery as everything else; only its GROUP moved, so
+ * the layer keeps its id (`elevation`) and every saved toggle state survives. */
+export const TERRAIN = {
   elevation: {
     kind: "esriImage", label: "Elevation / hillshade (USGS 3DEP)",
     url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
@@ -164,7 +174,7 @@ export const EVIDENCE = {
     // Hillshade" — the USGS press-release PROSE wording, which is NOT a valid template name,
     // so the tinted-hillshade overlay never painted. Do NOT reorder back to the prose form.
     rendering: "Hillshade Elevation Tinted", opacity: 0.55,
-    note: "USGS 3DEP LiDAR bare-earth DEM — screening only, verify with survey. The cross-section tool samples it.",
+    note: "USGS 3DEP LiDAR bare-earth DEM — verify with survey. The cross-section tool samples it.",
   },
 };
 
@@ -178,21 +188,28 @@ export const EVIDENCE = {
  * Service area ≠ taxing/authority boundary. Labelled so a MUD outline never reads as
  * "a MUD provides water here." Screening only — verify with the district. */
 const HGAC_ETJ = ETJ_SOURCES.find((s) => s.id === "etj_hgac");
+/* County / city / ETJ are `kind: "vector"` (B690): they render through the cached
+ * vector tier (vectorOverlay.js + VECTOR_SOURCES rows keyed by the SAME ids) — the
+ * last-good boundary set paints instantly from the browser cache, a TxDOT/TxGIO
+ * hiccup only slows the background refresh, and hover/click name-identify + the
+ * zoom-gated name labels ride the same cached pull (B691). The `url` here is kept
+ * as the LIVE-fallback esri-leaflet path (engaged only if the vector pull dies with
+ * nothing cached — never a blank layer). */
 export const JURISDICTIONS = {
   jur_county: {
-    kind: "esriFeature", label: "County boundaries",
+    kind: "vector", label: "County boundaries",
     url: JURISDICTION_SOURCES.county.url, minZoom: 6, color: "#374151", weight: 2.4, opacity: 0.85,
-    note: "Texas county lines (TxDOT). A has-jurisdiction boundary, not a service area. Screening only — verify with the jurisdiction.",
+    note: "Texas county lines (TxDOT). A has-jurisdiction boundary, not a service area.",
   },
   jur_city: {
-    kind: "esriFeature", label: "City limits",
+    kind: "vector", label: "City limits",
     url: JURISDICTION_SOURCES.city.url, minZoom: 9, color: "#1d4ed8", weight: 1.8, opacity: 0.85,
-    note: "Texas city limits (TxGIO). Inside = in the city; a parcel in no city is unincorporated. The boundary is jurisdiction, NOT proof of utility service. Screening only.",
+    note: "Texas city limits (TxGIO). Inside = in the city; a parcel in no city is unincorporated. NOT proof of utility service.",
   },
   jur_etj: {
-    kind: "esriFeature", label: "City ETJ (Houston region)",
+    kind: "vector", label: "City ETJ (Houston region)",
     url: HGAC_ETJ.url, minZoom: 9, color: "#7c3aed", weight: 1.6, opacity: 0.85,
-    note: "City extraterritorial jurisdiction across the H-GAC 13-county region (blank elsewhere — there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service. Screening only.",
+    note: "City extraterritorial jurisdiction across the H-GAC 13-county region (blank elsewhere — there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
   },
   jur_mud: {
     // Statewide MUD / WCID / water-district boundaries from TCEQ (the agency with
@@ -206,7 +223,7 @@ export const JURISDICTIONS = {
     // 2026-06-19 — V44 PASS, see VERIFICATION.md.)
     kind: "dynamic", label: "MUD / water districts (TCEQ, statewide)",
     url: GIS_SOURCES.mud.serviceUrl, layers: null, opacity: 0.55, // registry row (B629) — render + identify share one source of truth
-    note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. A boundary is a TAXING / authority district, NOT proof that water or sewer is connected to a parcel. Screening only — verify against the district / tax statement.",
+    note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. Verify against the district / tax statement.",
   },
   jur_road_authority: {
     // NEW-2/B571 — the road-authority overlay: the actual fronting roads drawn and
@@ -223,7 +240,7 @@ export const JURISDICTIONS = {
     url: JURISDICTION_SOURCES.road.url, minZoom: 14, weight: 3, opacity: 0.95,
     fields: ["OBJECTID", "RDWAY_MAINT_AGCY", "HSYS"],
     styleFn: roadAuthorityStyle, legend: ROAD_AUTHORITY_LEGEND,
-    note: "Who maintains each road, from the TxDOT Roadway Inventory — City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Screening only — verify the access/ROW desk with the jurisdiction.",
+    note: "Who maintains each road, from the TxDOT Roadway Inventory — City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Verify access/ROW with the jurisdiction.",
   },
 };
 
@@ -235,7 +252,7 @@ export const JLAYERS = {};
 Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...JURISDICTIONS, ...EVIDENCE, ...JLAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...JLAYERS };
 
 /* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
  * date or maintenance cadence, as documented by the provider. This is the
@@ -435,6 +452,30 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         // token (e.g. a preview deploy) — never a hard failure, never an error toast.
         const lyr = mapillaryLayer(report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
+      } else if (cfg.kind === "vector") {
+        // Cached boundary layer (B690): paints the last-good copy from the browser
+        // cache instantly, refreshes in the background, and carries hover/click
+        // identify + zoom-gated name labels (B691). No health probe — the pull
+        // self-reports, and a hard failure engages the injected LIVE fallback (the
+        // previous esri-leaflet path, with its retry/backoff) so nothing blanks.
+        const lyr = cachedVectorLayer(k, cfg, st.opacity, pane, onStatus, {
+          interactive: !!opts.identifyOk,
+          identifyOk: opts.identifyOk,
+          buildFallback: () => {
+            const fb = EL.featureLayer(featureLayerOptions(cfg, st.opacity, pane));
+            // esri-leaflet FeatureLayers have no setOpacity (raster-only) — same
+            // flat-style shim the primary esriFeature branch installs below, so the
+            // panel's opacity slider keeps working after a fallback engagement.
+            fb.setOpacity = (oo) => { try { fb.setStyle({ opacity: oo }); } catch (_) {} };
+            attachFeatureRetry(fb, k, cfg, onStatus);
+            // "loading", not "loaded" — the fallback was engaged BECAUSE a pull just
+            // failed; its own load/requesterror events settle the dot honestly.
+            onStatus && onStatus(k, "loading");
+            return fb;
+          },
+        });
+        if (lyr) { lyr.addTo(map); refs[k] = lyr; }
+        else fail(k, cfg, `${cfg.label}: no vector source registered`); // registry drift — loud, never a silent no-op
       } else {
         // image / feature service — probe health first
         probeService(cfg.url).then(({ ok, error, unreachable }) => {

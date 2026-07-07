@@ -337,6 +337,11 @@ input[type="range"] { height: 18px; }
   50% { opacity: .35; transform: scale(.7); }
 }
 
+/* Boundary-overlay hit fills (B691): while parcel-select mode owns the map's cursor,
+   Leaflet's `.leaflet-interactive { cursor: pointer }` on the (viewport-covering)
+   county/city fills must not override the +/− select cursor — the tool wins (B98). */
+.pf-select-mode path.pf-boundary-hit { cursor: inherit; }
+
 /* spinner — e.g. the "Preparing PDF…" indicator */
 @keyframes spin { to { transform: rotate(360deg); } }
 

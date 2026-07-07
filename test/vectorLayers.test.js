@@ -4,6 +4,7 @@ import {
   buildVectorQuery, buildQueryUrl, fetchVectorFeatures,
   featuresToGeoJson, simplifyGeoJson, styleFor,
   decideVectorOrImage, fetchCached,
+  pickTier, snapBbox, vectorKey,
 } from "../src/workspaces/site-planner/lib/vectorLayers.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
 
@@ -57,6 +58,62 @@ describe("VECTOR_SOURCES — registry shape", () => {
   });
 });
 
+describe("VECTOR_SOURCES — boundary rows (B690)", () => {
+  it("county / city / ETJ carry tiers, label fields, and the live-fallback flag", () => {
+    for (const id of ["jur_county", "jur_city", "jur_etj"]) {
+      const s = VECTOR_SOURCES[id];
+      expect(s.id).toBe(id);
+      expect(s.liveFallback).toBe(true);
+      expect(s.labelField).toBeTruthy();
+      expect(s.labelZoom.min).toBeLessThan(s.labelZoom.max);
+      expect(s.query.url).toMatch(/\/query$/);
+      expect(s.query.tiers.length).toBeGreaterThan(1);
+      expect(s.query.tiers[s.query.tiers.length - 1].maxZoom).toBeUndefined(); // catch-all fine tier
+    }
+    // The identify's exact column names (jurisdiction.js) — one source of truth.
+    expect(VECTOR_SOURCES.jur_county.labelField).toBe("CNTY_NM");
+    expect(VECTOR_SOURCES.jur_city.labelField).toBe("city_name");
+    expect(VECTOR_SOURCES.jur_etj.labelField).toBe("CITY");
+    expect(VECTOR_SOURCES.jur_etj.titleCaseLabel).toBe(true);
+    // County + ETJ coarse tiers are source-level ("all"); city is always bbox-scoped.
+    expect(VECTOR_SOURCES.jur_county.query.tiers[0].scope).toBe("all");
+    expect(VECTOR_SOURCES.jur_etj.query.tiers[0].scope).toBe("all");
+    expect(VECTOR_SOURCES.jur_city.query.tiers.every((t) => t.scope === "bbox")).toBe(true);
+  });
+  it("boundaries are always vector: no minVectorZoom / area gate can flip them to image", () => {
+    for (const id of ["jur_county", "jur_city", "jur_etj"]) {
+      expect(decideVectorOrImage(VECTOR_SOURCES[id], { zoom: 5, bboxAreaDeg: 50 })).toBe("vector");
+      expect(decideVectorOrImage(VECTOR_SOURCES[id], { lastVectorError: new Error("x") })).toBe("image"); // fallback trigger
+    }
+  });
+});
+
+// ----------------------------------------------------------------------------
+describe("pickTier / snapBbox — detail tiers (B690)", () => {
+  const county = VECTOR_SOURCES.jur_county;
+  it("no tiers (FEMA/NWI) → null: original single-detail behavior", () => {
+    expect(pickTier(VECTOR_SOURCES.fema, 15)).toBe(null);
+  });
+  it("zoom within maxZoom → the coarse tier; beyond → the catch-all fine tier", () => {
+    expect(pickTier(county, 6).scope).toBe("all");
+    expect(pickTier(county, 11).scope).toBe("all");   // == maxZoom still coarse
+    expect(pickTier(county, 12).scope).toBe("bbox");
+    expect(pickTier(county, 18).scope).toBe("bbox");
+  });
+  it("no zoom hint → the coarsest tier (cheapest always-valid answer)", () => {
+    expect(pickTier(county)).toBe(county.query.tiers[0]);
+  });
+  it("snapBbox expands OUTWARD to the grid and kills float dust", () => {
+    const b = snapBbox({ w: -95.43, s: 29.71, e: -95.38, n: 29.79 }, 0.25);
+    expect(b).toEqual({ w: -95.5, s: 29.5, e: -95.25, n: 30 });
+    // outward: snapped box always contains the input box
+    expect(b.w).toBeLessThanOrEqual(-95.43);
+    expect(b.e).toBeGreaterThanOrEqual(-95.38);
+    // exact multiples survive (no shrink): already-aligned edges stay put
+    expect(snapBbox({ w: -95.5, s: 29.5, e: -95.25, n: 30 }, 0.25)).toEqual({ w: -95.5, s: 29.5, e: -95.25, n: 30 });
+  });
+});
+
 // ----------------------------------------------------------------------------
 describe("buildVectorQuery — envelope intersect, paged", () => {
   it("builds the envelope geometry, 4326 in/out, and paging fields", () => {
@@ -78,6 +135,44 @@ describe("buildVectorQuery — envelope intersect, paged", () => {
   });
   it("defaults offset to 0 when not given", () => {
     expect(buildVectorQuery(VECTOR_SOURCES.wetlands, BBOX).resultOffset).toBe(0);
+  });
+  it("an 'all' tier drops the spatial filter and asks the server to generalize", () => {
+    const tier = VECTOR_SOURCES.jur_county.query.tiers[0];
+    const p = buildVectorQuery(VECTOR_SOURCES.jur_county, null, { tier });
+    expect(p.geometry).toBeUndefined();          // statewide — no envelope
+    expect(p.geometryType).toBeUndefined();
+    expect(p.spatialRel).toBeUndefined();
+    expect(p.maxAllowableOffset).toBe(0.002);    // server-side thinning
+    expect(p.geometryPrecision).toBe(4);
+    expect(p.outFields).toBe("CNTY_NM,FIPS_ST_CNTY_CD");
+  });
+  it("a 'bbox' tier keeps the envelope and adds its own offset/precision", () => {
+    const tier = VECTOR_SOURCES.jur_county.query.tiers[1];
+    const p = buildVectorQuery(VECTOR_SOURCES.jur_county, BBOX, { tier });
+    expect(JSON.parse(p.geometry).xmin).toBe(-95.5);
+    expect(p.maxAllowableOffset).toBe(0.0002);
+    expect(p.geometryPrecision).toBe(5);
+  });
+  it("no tier → no maxAllowableOffset (FEMA/NWI behavior unchanged)", () => {
+    expect(buildVectorQuery(VECTOR_SOURCES.fema, BBOX).maxAllowableOffset).toBeUndefined();
+  });
+});
+
+describe("vectorKey — tier-stamped cache keys (B690)", () => {
+  it("tierless keeps the original 3-dp bbox key", () => {
+    expect(vectorKey(VECTOR_SOURCES.fema, BBOX)).toBe("vec:fema:-95.500,29.700,-95.400,29.800");
+  });
+  it("an 'all' tier has ONE view-independent key", () => {
+    const tier = VECTOR_SOURCES.jur_county.query.tiers[0];
+    expect(vectorKey(VECTOR_SOURCES.jur_county, null, tier)).toBe("vec:jur_county:all@0.002p4");
+    expect(vectorKey(VECTOR_SOURCES.jur_county, BBOX, tier)).toBe("vec:jur_county:all@0.002p4"); // bbox ignored
+  });
+  it("a 'bbox' tier stamps offset AND precision so coarse/fine (or a retuned precision) never collide", () => {
+    const fine = VECTOR_SOURCES.jur_county.query.tiers[1];
+    expect(vectorKey(VECTOR_SOURCES.jur_county, BBOX, fine)).toBe("vec:jur_county:-95.500,29.700,-95.400,29.800@0.0002p5");
+    // a precision retune busts the cache even with the same offset
+    expect(vectorKey(VECTOR_SOURCES.jur_county, BBOX, { ...fine, precision: 4 }))
+      .not.toBe(vectorKey(VECTOR_SOURCES.jur_county, BBOX, fine));
   });
 });
 
@@ -341,5 +436,78 @@ describe("fetchCached — SWR through the browser cache", () => {
     const r = await fetchCached(VECTOR_SOURCES.fema, nudged, { cache, fetchJson });
     expect(fetchJson.calls).toBe(1);
     expect(r.data.features[0].properties.FLD_ZONE).toBe("AE");
+  });
+
+  it("cold + failed fetch THROWS (loud) instead of resolving a silent null", async () => {
+    const cache = freshCache();
+    const fetchJson = fakeFetch({ [FEMA]: () => { throw new Error("service down"); } });
+    await expect(fetchCached(VECTOR_SOURCES.fema, BBOX, { cache, fetchJson })).rejects.toThrow(/service down/);
+  });
+});
+
+// ----------------------------------------------------------------------------
+describe("fetchCached — tiered boundary sources (B690)", () => {
+  const COUNTY = "Texas_County_Boundaries";
+  const countyResp = (name = "Harris") => ({
+    features: [{ attributes: { CNTY_NM: name, FIPS_ST_CNTY_CD: 48201 }, geometry: { rings: [square(-95.8, 29.5, 1)] } }],
+  });
+
+  it("low zoom: ONE statewide entry serves ANY view — second view is a pure cache hit", async () => {
+    const cache = freshCache();
+    const urls = [];
+    const fetchJson = fakeFetch({ [COUNTY]: (url) => { urls.push(url); return countyResp(); } });
+    const houston = { w: -95.8, s: 29.5, e: -95.0, n: 30.1 };
+    const dallas = { w: -97.2, s: 32.5, e: -96.5, n: 33.1 };
+    const r1 = await fetchCached(VECTOR_SOURCES.jur_county, houston, { cache, fetchJson, zoom: 8 });
+    const r2 = await fetchCached(VECTOR_SOURCES.jur_county, dallas, { cache, fetchJson, zoom: 10 });
+    expect(fetchJson.calls).toBe(1); // Dallas view served from the Houston-triggered statewide pull
+    expect(r1.data.features[0].properties.CNTY_NM).toBe("Harris");
+    expect(r2.data.features[0].properties.CNTY_NM).toBe("Harris");
+    // the statewide pull carried NO envelope and asked the server to generalize
+    const q = new URL(urls[0]).searchParams;
+    expect(q.get("geometry")).toBe(null);
+    expect(q.get("maxAllowableOffset")).toBe("0.002");
+  });
+
+  it("high zoom: fine bbox tier — snapped grid key, so a pan within the cell is a hit", async () => {
+    const cache = freshCache();
+    const fetchJson = fakeFetch({ [COUNTY]: () => countyResp() });
+    await fetchCached(VECTOR_SOURCES.jur_county, { w: -95.43, s: 29.71, e: -95.38, n: 29.76 }, { cache, fetchJson, zoom: 15 });
+    expect(fetchJson.calls).toBe(1);
+    // pan a little — still inside the same 0.25° cell → no refetch
+    await fetchCached(VECTOR_SOURCES.jur_county, { w: -95.42, s: 29.72, e: -95.37, n: 29.77 }, { cache, fetchJson, zoom: 15 });
+    expect(fetchJson.calls).toBe(1);
+    // coarse + fine tiers never collide: the statewide key is separate
+    expect(cache.read(vectorKey(VECTOR_SOURCES.jur_county, null, VECTOR_SOURCES.jur_county.query.tiers[0]))).toBe(null);
+  });
+
+  it("stale statewide entry: paints last-good NOW, onFresh delivers the refresh", async () => {
+    const clock = makeClock();
+    const cache = freshCache(clock);
+    let name = "Harris";
+    const fetchJson = fakeFetch({ [COUNTY]: () => countyResp(name) });
+    await fetchCached(VECTOR_SOURCES.jur_county, BBOX, { cache, fetchJson, zoom: 8 }); // prime
+    clock.advance(31 * 24 * 3600 * 1000); // past the 30-day ttl
+    name = "Renamed";
+    let freshResult = null;
+    const r = await fetchCached(VECTOR_SOURCES.jur_county, BBOX, {
+      cache, fetchJson, zoom: 8, onFresh: (fr) => { freshResult = fr; },
+    });
+    expect(r.stale).toBe(true);
+    expect(r.data.features[0].properties.CNTY_NM).toBe("Harris"); // last-good painted now
+    await new Promise((res) => setTimeout(res, 0));
+    expect(freshResult).not.toBe(null);           // the background refresh reported in
+    expect(freshResult.updated).toBe(true);
+    expect(freshResult.data.features[0].properties.CNTY_NM).toBe("Renamed");
+  });
+
+  it("tiered pulls skip the client Douglas–Peucker (server already generalized)", async () => {
+    const cache = freshCache();
+    // A ring with collinear midpoints that client DP would strip — it must survive
+    // a tiered pull untouched (the server was asked to generalize instead).
+    const dense = [[0, 0], [0.5, 0], [1, 0], [1, 1], [0, 1], [0, 0]];
+    const fetchJson = fakeFetch({ [COUNTY]: () => ({ features: [{ attributes: { CNTY_NM: "X" }, geometry: { rings: [dense] } }] }) });
+    const r = await fetchCached(VECTOR_SOURCES.jur_county, BBOX, { cache, fetchJson, zoom: 8 });
+    expect(r.data.features[0].geometry.coordinates[0]).toEqual(dense);
   });
 });

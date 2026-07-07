@@ -12,7 +12,10 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   selectors, persist via `storage.js`. **Additive only** — bump the version, extend `migrate`.
 - `storage.js` — thin model layer (migrate on read, merge+renormalize on save).
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `coverage.js` (coverage engine);
-  `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; `gisCache.js` — screening cache.
+  `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; `gisCache.js` — screening cache;
+  `vectorLayers.js` (pure vector engine + boundary registry) + `vectorOverlay.js` (cached boundary
+  render / identify / labels glue) + `boundaryLabels.js` (pure label math) — the B690/B691 tier;
+  `basemaps.js` — the shared Esri/USGS aerial-source registry (B689).
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `labelLayout.js` — LOD label tiering. `roadGeometry.js` — centerline road curves (pure).
 - `detentionRules.js` — Houston-MSA detention criteria as versioned rule records + the

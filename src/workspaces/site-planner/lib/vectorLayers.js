@@ -20,11 +20,23 @@
  * `decideVectorOrImage` falls back to the flat image service so the map stays fast.
  */
 
+import { GIS_SOURCES } from "../../../shared/gis/sources.js";
+
 // ---------------------------------------------------------------------------
 // Source registry — one row per layer. `query` drives the vector pull (endpoint,
 // fields, paging, ttl, and the zoom/area gates that decide vector vs. flat image);
 // `imageFallback` is the MapServer export used when vectors aren't appropriate.
 // Adding a layer = adding a registry ROW, never new code (the jurisdiction.js rule).
+//
+// Detail TIERS (B690): a source may declare `query.tiers` — ordered coarse→fine, the
+// first tier whose `maxZoom` covers the current zoom wins (no maxZoom = catch-all).
+// A tier sets the SERVER-side generalization (`offsetDeg` → maxAllowableOffset: the
+// agency thins the vertices before they ever cross the wire — same effect as our
+// client Douglas–Peucker, minus the payload) and its cache scope: "all" = ONE
+// source-level pull/entry (a statewide/region-wide boundary set — measured 2026-07-07:
+// 254 TX counties @0.002° = 337 KB, H-GAC ETJ @0.001° = 204 KB, both under the 512 KB
+// gisCache entry cap, so no per-county splitting); "bbox" = per-view pulls whose bbox
+// snaps OUTWARD to a `cellDeg` grid so small pans reuse the same cache entry.
 // ---------------------------------------------------------------------------
 export const VECTOR_SOURCES = {
   fema: {
@@ -65,33 +77,171 @@ export const VECTOR_SOURCES = {
     imageFallback: { url: "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer", layers: [0] },
     note: "NWI is for screening only — not a jurisdictional determination.",
   },
+
+  /* Jurisdiction BOUNDARY layers (B690) — county / city / ETJ move off live per-pan
+   * esri-leaflet fetches onto this cached tier so they PAINT INSTANTLY from the
+   * last-good copy (and a TxDOT/TxGIO 503 can only slow the background refresh,
+   * never the paint). Endpoints come from the same GIS_SOURCES registry rows the
+   * jurisdiction *identify* uses — the B176 invariant: one source of truth, so the
+   * boundary you see is the boundary the identify reports. These sources have NO
+   * flat-image fallback service; their `liveFallback` marks that a vector failure
+   * falls back to the previous live esri-leaflet featureLayer path instead (see
+   * vectorOverlay.js), so a CORS/query failure never blanks the layer.
+   * Label/identify fields (B691) ride the same pull: CNTY_NM / city_name / CITY are
+   * the exact columns jurisdiction.js already reads. */
+  jur_county: {
+    id: "jur_county",
+    label: "County boundaries",
+    labelField: "CNTY_NM",
+    // County-name labels on the map (B691): on at region zoom, off at parcel zoom
+    // (you're inside one county there — the label is noise).
+    labelZoom: { min: 6, max: 11 },
+    // Click-identify popover (B691): name line + the has-jurisdiction wording the
+    // Layers panel already teaches (one disclaimer, reused — never a new claim).
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — a boundary is not a utility service area. Screening only.",
+    sourceName: "TxDOT TPP (statewide)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.county.serviceUrl + "/query",
+      outFields: ["CNTY_NM", "FIPS_ST_CNTY_CD"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000, // county lines ~never change
+      minVectorZoom: 0,           // boundaries are ALWAYS vector — that's the point
+      maxAreaDeg: Infinity,
+      tiers: [
+        // ONE statewide entry serves every low/mid zoom instantly (254 features, ~340 KB).
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        // Zoomed in near a line: a fine per-view pull (a handful of counties).
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Texas county lines (TxDOT).",
+  },
+  jur_city: {
+    id: "jur_city",
+    label: "City limits",
+    labelField: "city_name",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated or another city. NOT proof of utility service. Screening only.",
+    sourceName: "TxGIO (statewide)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.city.serviceUrl + "/query",
+      outFields: ["city_name"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000, // annexations move city limits occasionally
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      // Statewide city limits are too heavy for one entry (unlike counties), so the
+      // city tier is ALWAYS bbox-scoped. Cell sizing matters: at z9 a snapped metro
+      // cell can hold hundreds of cities (a full DFW cell measured ~560 KB stored
+      // @0.001°/4dp — over the 512 KB entry cap → L1-only, no persistence), so the
+      // widest tier thins harder (0.003° ≈ 300 m — fine for metro-zoom screening
+      // lines); a mid tier takes over where the viewport is a single metro slice.
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Texas city limits (TxGIO).",
+  },
+  jur_etj: {
+    id: "jur_etj",
+    label: "City ETJ (Houston region)",
+    labelField: "CITY",
+    titleCaseLabel: true, // H-GAC publishes ALL-CAPS city names
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — ETJ",
+    identifyNote: "This city's ETJ (extraterritorial jurisdiction) — its limited reach OUTSIDE its city limits. Not annexation and not utility service. Screening only.",
+    sourceName: "H-GAC (Houston-Galveston Area Council)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.etj_hgac.serviceUrl + "/query",
+      outFields: ["CITY"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000, // ETJ is volatile-ish (SB2038 releases, annexations)
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        // The whole 13-county H-GAC region fits ONE entry (608 features, ~200 KB @0.001°).
+        { maxZoom: 12, scope: "all", offsetDeg: 0.001, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "City ETJ across the H-GAC 13-county region.",
+  },
 };
+
+// ---------------------------------------------------------------------------
+// Detail tiers (B690) — pure helpers.
+// ---------------------------------------------------------------------------
+
+/* Pick the detail tier for a zoom: the first tier whose maxZoom covers it (tiers are
+ * ordered coarse→fine; a tier with no maxZoom is the catch-all). Sources without
+ * tiers (FEMA/NWI) return null and keep their original single-detail behavior. With
+ * no zoom hint, the coarsest tier wins (cheapest, always-valid answer). Pure. */
+export function pickTier(source, zoom) {
+  const tiers = source && source.query && source.query.tiers;
+  if (!tiers || !tiers.length) return null;
+  if (typeof zoom !== "number") return tiers[0];
+  for (const t of tiers) if (t.maxZoom == null || zoom <= t.maxZoom) return t;
+  return tiers[tiers.length - 1];
+}
+
+/* Snap a bbox OUTWARD to a `cellDeg` grid, so nearby views land on the same cache
+ * entry (a pan within the cell = a cache hit, not a new pull). Rounded to 6 dp to
+ * kill float dust. Pure. */
+export function snapBbox(bbox, cellDeg) {
+  const r6 = (n) => Math.round(n * 1e6) / 1e6;
+  return {
+    w: r6(Math.floor(bbox.w / cellDeg) * cellDeg),
+    s: r6(Math.floor(bbox.s / cellDeg) * cellDeg),
+    e: r6(Math.ceil(bbox.e / cellDeg) * cellDeg),
+    n: r6(Math.ceil(bbox.n / cellDeg) * cellDeg),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Query building
 // ---------------------------------------------------------------------------
 
 /* Build the /query params for a vector source against a lon/lat bbox {w,s,e,n}.
- * An envelope intersect, paged via resultOffset/resultRecordCount. Pure. */
-export function buildVectorQuery(source, bbox, { offset = 0 } = {}) {
+ * An envelope intersect, paged via resultOffset/resultRecordCount. A `tier` adds
+ * server-side generalization (maxAllowableOffset — the agency thins vertices before
+ * sending) and, when tier.scope === "all", drops the spatial filter entirely (one
+ * source-level pull; bbox may be null then). Pure. */
+export function buildVectorQuery(source, bbox, { offset = 0, tier = null } = {}) {
   const q = source.query;
-  return {
+  const p = {
     where: q.where,
-    geometry: JSON.stringify({
-      xmin: bbox.w, ymin: bbox.s, xmax: bbox.e, ymax: bbox.n,
-      spatialReference: { wkid: 4326 },
-    }),
-    geometryType: "esriGeometryEnvelope",
-    inSR: 4326,
     outSR: 4326,
-    spatialRel: "esriSpatialRelIntersects",
     outFields: q.outFields.join(","),
     returnGeometry: "true",
-    geometryPrecision: 5,
+    geometryPrecision: (tier && tier.precision) || 5,
     resultOffset: offset,
     resultRecordCount: q.pageSize,
     f: "json",
   };
+  if (!tier || tier.scope !== "all") {
+    p.geometry = JSON.stringify({
+      xmin: bbox.w, ymin: bbox.s, xmax: bbox.e, ymax: bbox.n,
+      spatialReference: { wkid: 4326 },
+    });
+    p.geometryType = "esriGeometryEnvelope";
+    p.inSR = 4326;
+    p.spatialRel = "esriSpatialRelIntersects";
+  }
+  if (tier && tier.offsetDeg) p.maxAllowableOffset = tier.offsetDeg;
+  return p;
 }
 
 /* Compose a full /query URL from a base + params (skips null/undefined). Mirrors
@@ -117,7 +267,7 @@ async function defaultFetchJson(url) {
  * the server says `exceededTransferLimit === true` AND we're under the feature cap —
  * bumping the offset by the page size each round. Hard-caps at maxFeatures and flags
  * `truncated` when there was more than we kept. `fetchJson` is injected. */
-export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFetchJson, maxFeatures } = {}) {
+export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFetchJson, maxFeatures, tier = null } = {}) {
   const q = source.query;
   const cap = maxFeatures ?? q.maxFeatures;
   const features = [];
@@ -125,7 +275,7 @@ export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFet
   let truncated = false;
   // Loop guard: paging can't exceed cap/pageSize rounds + 1; never spin forever.
   for (;;) {
-    const j = await fetchJson(buildQueryUrl(q.url, buildVectorQuery(source, bbox, { offset })));
+    const j = await fetchJson(buildQueryUrl(q.url, buildVectorQuery(source, bbox, { offset, tier })));
     if (j && j.error) throw new Error(j.error.message || "ArcGIS query error.");
     const batch = (j && j.features) || [];
     if (!batch.length) break; // empty page → nothing left (also guards a server that wrongly keeps flagging more)
@@ -287,10 +437,17 @@ export function decideVectorOrImage(source, { zoom, bboxAreaDeg, lastVectorError
 // ---------------------------------------------------------------------------
 
 // A stable cache key per source + bbox (bbox rounded to 3 decimals so a tiny pan
-// reuses the same entry). Pure.
-function vectorKey(source, bbox) {
+// reuses the same entry). A tier stamps its FULL detail level — offset AND
+// precision — into the key (coarse and fine pulls must never overwrite each other,
+// and a registry precision retune must bust the cache rather than serve old-detail
+// geometry for a whole TTL); a source-level "all" tier has ONE key regardless of
+// view. Exported for the overlay + tests. Pure.
+export function vectorKey(source, bbox, tier = null) {
   const r = (n) => Number(n).toFixed(3);
-  return `vec:${source.id}:${r(bbox.w)},${r(bbox.s)},${r(bbox.e)},${r(bbox.n)}`;
+  const det = tier ? `@${tier.offsetDeg}p${(tier.precision) || 5}` : "";
+  if (tier && tier.scope === "all") return `vec:${source.id}:all${det}`;
+  const box = `${r(bbox.w)},${r(bbox.s)},${r(bbox.e)},${r(bbox.n)}`;
+  return `vec:${source.id}:${box}${det}`;
 }
 
 /* Fetch a source's simplified GeoJSON over a bbox THROUGH the browser-local SWR
@@ -299,14 +456,24 @@ function vectorKey(source, bbox) {
  * `gisCache` singleton; tests pass a fresh `createGisCache`). Returns the SWR result
  * reshaped as { data, ts, stale } — `data` is the cached copy if present else the
  * freshly-fetched copy; `ts`/`stale` come from the cache entry. The whole pull→
- * GeoJSON→simplify pipeline is the cache's fetcher, so it only runs on a miss/stale. */
-export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetchJson, now } = {}) {
-  const key = vectorKey(source, bbox);
+ * GeoJSON→simplify pipeline is the cache's fetcher, so it only runs on a miss/stale.
+ *
+ * Tiered sources (B690): pass `zoom` so the detail tier is picked here — a "bbox"
+ * tier snaps the bbox outward to its grid cell (pan-stable key), an "all" tier
+ * ignores the view entirely (one source-level entry). Tiered pulls skip the client
+ * Douglas–Peucker: the server already generalized to the tier's maxAllowableOffset.
+ * Pass `onFresh` to learn when a stale entry's background refresh lands (so a map
+ * layer can swap the new geometry in without waiting for the next pan). */
+export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetchJson, now, zoom, onFresh } = {}) {
+  const tier = pickTier(source, zoom);
+  const effBbox = tier && tier.scope !== "all" && tier.cellDeg ? snapBbox(bbox, tier.cellDeg) : bbox;
+  const key = vectorKey(source, effBbox, tier);
   const fetcher = async () => {
-    const { features } = await fetchVectorFeatures(source, bbox, { fetchJson });
-    return simplifyGeoJson(featuresToGeoJson(features, { source }));
+    const { features } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
+    const fc = featuresToGeoJson(features, { source });
+    return tier ? fc : simplifyGeoJson(fc);
   };
-  const { cached, stale, fresh } = cache.swr(key, fetcher, { ttl: source.query.ttl });
+  const { cached, stale, fresh } = cache.swr(key, fetcher, { ttl: source.query.ttl, onFresh });
   if (cached) {
     // Last-good copy exists: hand it back NOW; if it was stale the background refresh
     // is already running (kicked off by swr) and will swap into the cache. `stale`
@@ -315,6 +482,7 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
   }
   // Cold cache (no copy to paint): await the first fetch so the caller has geometry.
   const r = await fresh;
+  if (r && r.error && !r.data) throw r.error; // cold + failed fetch: surface it (LOUD) — the overlay decides the fallback
   const ts = r.ts != null ? r.ts : (now ? now() : Date.now());
   return { data: r.data, ts, stale: false };
 }
