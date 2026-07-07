@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { presenceSummary } from "../src/workspaces/site-planner/lib/presencePill.js";
 
-// B674 — the "N here" pill summary: distinct PEOPLE (presence keys = uids), quiet when alone,
-// self first as "You", window-count nuance when one account has several sessions.
+// B674 recurrence (V231 #13) — the "N here" pill counts SESSIONS (connected windows/tabs/devices),
+// not people: two windows of one account are two concurrent editors and must show "2 here" (the
+// original people-count showed NOTHING for that case, hiding multi-writer exactly when it starts).
+// Names still group by person — self first as "You", "(k windows)" on multi-session entries.
 
 describe("presenceSummary", () => {
   it("alone (or empty) → null, no pill", () => {
@@ -21,13 +23,33 @@ describe("presenceSummary", () => {
     expect(s.names).toEqual(["You", "Sam Alvarez"]);
   });
 
-  it("two windows of the SAME account collapse to one person, labeled with the window count", () => {
+  it("two windows of the SAME account → '2 here' (the V231 #13 case: sessions, not people)", () => {
+    const s = presenceSummary({
+      me: [{ uid: "me", name: "Michael" }, { uid: "me", name: "Michael" }],
+    }, "me");
+    expect(s).not.toBeNull(); // the people-count regression returned null here
+    expect(s.count).toBe(2);
+    expect(s.label).toBe("2 here");
+    expect(s.names).toEqual(["You (2 windows)"]);
+  });
+
+  it("two windows of one account + a teammate → '3 here', window count on the multi-session entry", () => {
     const s = presenceSummary({
       me: [{ uid: "me", name: "Michael" }, { uid: "me", name: "Michael" }],
       u2: [{ uid: "u2", name: "Sam" }],
     }, "me");
-    expect(s.count).toBe(2); // people, not sessions
-    expect(s.names[0]).toBe("You (2 windows)");
+    expect(s.count).toBe(3); // sessions: my two windows + Sam's one
+    expect(s.label).toBe("3 here");
+    expect(s.names).toEqual(["You (2 windows)", "Sam"]);
+  });
+
+  it("a teammate with two windows gets the window suffix too", () => {
+    const s = presenceSummary({
+      me: [{ name: "Michael" }],
+      u2: [{ name: "Zoe" }, { name: "Zoe" }],
+    }, "me");
+    expect(s.count).toBe(3);
+    expect(s.names).toEqual(["You", "Zoe (2 windows)"]);
   });
 
   it("three people sort teammates alphabetically after You; a missing name reads 'Someone'", () => {

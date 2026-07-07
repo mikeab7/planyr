@@ -316,6 +316,10 @@ const elCorners = (el) => {
   });
 };
 const polyArea = (pts) => {
+  // B690 — same guard as the finder's shoelace: a parcel/element without a usable ring
+  // contributes 0 area instead of crashing the canvas (points can be absent on a
+  // malformed/legacy record that round-tripped verbatim through storage or element rows).
+  if (!Array.isArray(pts) || !pts.length) return 0;
   let a = 0;
   for (let i = 0; i < pts.length; i++) {
     const j = (i + 1) % pts.length;
@@ -2003,9 +2007,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 5000);
       return;
     }
+    // Mid-gesture/mid-edit: never yank the canvas OR reconcile half-made state — defer the whole
+    // replace until the interaction settles (the buffered-event drain covers per-row updates).
+    if (busyRef.current) {
+      setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 1200);
+      return;
+    }
     pendingRemoteRef.current = []; // the refetch supersedes any buffered per-row events
     eng.seed(r.rows);
     const model = rowsToModel({}, r.rows);
+    // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that
+    // edit on the canvas too (it re-trues from its own RPC result, not from pre-commit rows).
     const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
     const sub = (kind, list) => {
       let out = list;
@@ -2016,17 +2028,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       return out;
     };
-    const replace = (setter, next) => setter((prev) => (stableStringify(prev) === stableStringify(next) ? prev : next));
-    replace(setEls, sub("el", model.els)); replace(setMarkups, sub("markup", model.markups)); replace(setMeasures, sub("measure", model.measures));
-    replace(setCallouts, sub("callout", model.callouts)); replace(setParcels, sub("parcel", model.parcels));
+    const next = {
+      els: sub("el", model.els), markups: sub("markup", model.markups), measures: sub("measure", model.measures),
+      callouts: sub("callout", model.callouts), parcels: sub("parcel", model.parcels),
+    };
+    const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
+    replace(setEls, next.els); replace(setMarkups, next.markups); replace(setMeasures, next.measures);
+    replace(setCallouts, next.callouts); replace(setParcels, next.parcels);
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
     // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
     const liveIds = new Set(r.rows.filter((row) => row && !row.deleted_at).map((row) => row.id));
     setDeletedIds((prev) => (prev.some((id) => liveIds.has(id)) ? prev.filter((id) => !liveIds.has(id)) : prev));
-    // one reconcile pass so any edit made during the fetch window commits normally
-    const s = stateRef.current;
-    try { eng.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy: !!drag.current }); } catch (_) {}
+    // One reconcile pass — against EXACTLY the collections just placed on the canvas (rows ∪ pending
+    // local edits), NEVER stateRef: stateRef still holds the PRE-replace canvas here, and on a tab
+    // whose socket dropped that canvas is genuinely STALE — diffing it against the fresh shadow
+    // committed old geometry as valid rev-guarded updates and clobbered everyone (V229 #5, the
+    // reproduced lost-update). Edits made during the fetch window are already in the dirty queue
+    // (every canvas edit reconciles through the autosave effect), so nothing is lost by diffing
+    // the substituted result instead.
+    try { eng.reconcile(next, { busy: false }); } catch (_) {}
   };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
@@ -2062,8 +2083,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ch = supabase
       .channel("site-elements:" + siteId, { config: { presence: { key: uid || "anon" } } })
       .on("presence", { event: "sync" }, () => {
-        // B674 — the live "who's here" roster; keyed by uid so two windows of one account read as
-        // one person. Quiet when alone (summary null).
+        // B674 — the live "who's here" roster; counts SESSIONS (two windows of one account =
+        // "2 here" — V231 #13), names grouped by person. Quiet when this window is alone.
         try { setPeers(presenceSummary(ch.presenceState(), uid)); } catch (_) {}
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + siteId }, (payload) => {

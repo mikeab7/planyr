@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { slimForCloud } from "../src/workspaces/site-planner/lib/cloudSync.js";
+import { slimForCloud, headerSig } from "../src/workspaces/site-planner/lib/cloudSync.js";
 import { mergePulledSites } from "../src/workspaces/site-planner/lib/storage.js";
 
 // B672 — the cloud `sites.data` row is a SLIM HEADER: element collections live as site_elements
@@ -96,5 +96,32 @@ describe("mergePulledSites — slim cloud rows (elementsInRows)", () => {
     const { map, toPush } = mergePulledSites({}, [slimCloud()], null);
     expect(map.s1.els).toEqual([]); // mirror boots empty; refetchReplace paints from rows
     expect(toPush).not.toContain("s1");
+  });
+});
+
+// B672 recurrence (Observation A) — the header-content signature that lets cloudUpsert SKIP a
+// push whose slim header is unchanged. Under element sync the autosave runs on every element
+// edit; without this skip each edit bumped sites.version and CAS-ping-ponged every other tab.
+describe("headerSig — element edits don't touch the sites row", () => {
+  it("is INSENSITIVE to element-collection changes and to updatedAt (the element-edit autosave case)", () => {
+    const before = fullModel();
+    const after = fullModel({
+      els: [{ id: "e1", type: "building", z: 0, cx: 500 }], // element moved…
+      updatedAt: 99999,                                     // …and the model timestamp advanced
+    });
+    expect(headerSig(after)).toBe(headerSig(before)); // → same header content → push skipped
+  });
+
+  it("CHANGES when real header content changes (an overlay move, a settings flip, a rename)", () => {
+    const base = fullModel();
+    expect(headerSig(fullModel({ sheetOverlays: [{ id: "ov1", x: 99, y: 2 }] }))).not.toBe(headerSig(base));
+    expect(headerSig(fullModel({ settings: { grid: false } }))).not.toBe(headerSig(base));
+    expect(headerSig(fullModel({ name: "Concept B" }))).not.toBe(headerSig(base));
+  });
+
+  it("is key-order-insensitive (a cloud round-trip through jsonb can't fake a change)", () => {
+    const a = fullModel({ settings: { grid: true, snap: 5 } });
+    const b = fullModel({ settings: { snap: 5, grid: true } });
+    expect(headerSig(a)).toBe(headerSig(b));
   });
 });
