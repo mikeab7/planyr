@@ -38,12 +38,14 @@ export function sortByZ(list) {
   return [...(list || [])].sort(byZAsc);
 }
 
-// True if any element lacks a numeric z, or two elements share the same z (a tie that array
-// order used to break — now ambiguous and in need of a renormalize).
+// True if any element lacks a numeric z, two elements share the same z (a tie that array
+// order used to break — now ambiguous and in need of a renormalize), or an entry isn't an
+// object at all (a null/hole from a bad JSON round-trip — normalizeZ drops those).
 export function needsZ(list) {
   const seen = new Set();
   for (const el of list || []) {
-    const z = num(el && el.z);
+    if (!el || typeof el !== "object") return true;
+    const z = num(el.z);
     if (z == null) return true;
     if (seen.has(z)) return true;
     seen.add(z);
@@ -54,8 +56,11 @@ export function needsZ(list) {
 // Reassign every element a fresh gapped z by its CURRENT array position (idx * Z_GAP). Returns a
 // NEW array of NEW element objects (never mutates inputs). This is the renormalize used both on
 // migrate (mirror of the SQL backfill's `(ordinality-1)*1024`) and when gaps are exhausted.
+// Non-object entries (null / JSON-round-tripped holes) are DROPPED, never spread — `{...null, z}`
+// would manufacture a `{z}` husk with no id/points that poisons every consumer downstream (the
+// husk-parcel crash: siteAcres read husk.points.length and error-boundaried the whole planner).
 export function normalizeZ(list) {
-  return (list || []).map((el, i) => ({ ...el, z: i * Z_GAP }));
+  return (list || []).filter((el) => el && typeof el === "object").map((el, i) => ({ ...el, z: i * Z_GAP }));
 }
 
 // Idempotent: if every element already has a distinct numeric z, return the list UNCHANGED (same
