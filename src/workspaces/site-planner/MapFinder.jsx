@@ -8,6 +8,7 @@ import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./li
 import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import {
   resolveLayerUrl,
   identifyParcelEager,
@@ -282,6 +283,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   const [mapMenu, setMapMenu] = useState(null);       // {x, y} — right-click-on-empty-map menu (KMZ export) (B684)
   const [hoverLL, setHoverLL] = useState(null);       // {lat, lng} — live "you are here" GPS readout (B683)
+  const hoverElFt = useGroundElevation(hoverLL);      // ground elevation at the cursor, ft NAVD88 (B706)
   const [renaming, setRenaming] = useState(null);     // {id, name} — the site row being inline-renamed (B158)
   const skipRenameBlurRef = useRef(false);            // Esc cancels without the trailing blur committing
   const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
@@ -1191,10 +1193,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
         {/* Live GPS readout (B683): the cursor's WGS84 lat/long, bottom-center so it clears the
             zoom control (corner) and the scale bar (bottom-right). Display-only; the app's frame
-            stays EPSG:2278 feet. */}
+            stays EPSG:2278 feet. B706 appends the ground elevation when a reading exists (cached
+            terrain grid, else one debounced 3DEP point sample) — suppressed over no-data. */}
         {hoverLL && (
-          <div style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 900, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.9)", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 9px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+          <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 900, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.9)", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 9px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
             {hoverLL.lat.toFixed(6)}°,&nbsp;{hoverLL.lng.toFixed(6)}°
+            {hoverElFt != null && <span data-ground-el> · El ≈ {hoverElFt.toFixed(1)} ft NAVD88</span>}
           </div>
         )}
 
