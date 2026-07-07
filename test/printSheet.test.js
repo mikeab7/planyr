@@ -15,6 +15,22 @@ const ROWS = [
   { name: "Cross Dock", sf: 620000, clearHeight: 40, slab: 7 },
 ];
 
+describe("printSheetLayout — metrics band grows with pair count (B712)", () => {
+  it("the historical default (9 pairs, letter-landscape) keeps the original 64 c-in band", () => {
+    expect(printSheetLayout({}).metrics.h).toBe(64);
+    expect(printSheetLayout({ metricsCount: 9 }).metrics.h).toBe(64);
+  });
+  it("extra detention/mitigation pairs deepen the band instead of clipping the note", () => {
+    const base = printSheetLayout({ metricsCount: 9 });
+    const more = printSheetLayout({ paper: "letter", orient: "portrait", metricsCount: 12 });
+    const basePortrait = printSheetLayout({ paper: "letter", orient: "portrait", metricsCount: 9 });
+    expect(more.metrics.h).toBeGreaterThan(basePortrait.metrics.h);
+    // the plan area gives up exactly what the band gains
+    expect(basePortrait.plan.h - more.plan.h).toBe(more.metrics.h - basePortrait.metrics.h);
+    expect(base.metrics.h).toBe(64);
+  });
+});
+
 describe("printSheetLayout — regions for the single-SVG sheet (B200)", () => {
   it("page sizes match paper/orientation aspect", () => {
     expect(pageSize("letter", "landscape")).toMatchObject({ w: 1100, h: 850 });

@@ -321,6 +321,42 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   };
 }
 
+/* Combine per-footprint computeMitigation results into one ledger (B712's
+ * per-element memoization: during a drag only the dragged element recomputes, so
+ * results merge here). Sums are additive (NFHL classes are a planar partition);
+ * an UNKNOWN volume in ANY part keeps the combined volume UNKNOWN (a partial sum
+ * would read smaller-than-real); flags union; providers keep the first real label.
+ * Pure. */
+export function combineMitigation(results) {
+  const list = (results || []).filter(Boolean);
+  if (!list.length) return null;
+  const out = JSON.parse(JSON.stringify(list[0]));
+  for (const r of list.slice(1)) {
+    for (const [cls, b] of Object.entries(r.perClass)) {
+      const t = out.perClass[cls] || (out.perClass[cls] = { acres: 0, volumeCf: null, unknown: null });
+      t.acres += b.acres;
+      if (b.unknown && !t.unknown) t.unknown = b.unknown;
+      // A bucket that never intersected (acres 0, volume null, no unknown) adds 0.
+      if (t.unknown) t.volumeCf = null;
+      else if (b.volumeCf != null || t.volumeCf != null) t.volumeCf = (t.volumeCf || 0) + (b.volumeCf || 0);
+    }
+    out.intersectAcres += r.intersectAcres;
+    out.triggerAcres += r.triggerAcres;
+    out.floodwayAcres += r.floodwayAcres;
+    if (r.unknownReason && !out.unknownReason) out.unknownReason = r.unknownReason;
+    // A no-unknown result always carries a NUMBER (a real 0 for zero intersect), so
+    // outside the unknown case the sum is plain addition.
+    out.volumeCf = out.unknownReason ? null : (out.volumeCf || 0) + (r.volumeCf || 0);
+    for (const f of r.flags) if (!out.flags.includes(f)) out.flags.push(f);
+    for (const [k, v] of Object.entries(r.providers)) if (v && !out.providers[k]) out.providers[k] = v;
+    out.expertBypass = out.expertBypass || r.expertBypass;
+  }
+  if (out.unknownReason) out.volumeCf = null;
+  out.volumeAcFt = out.volumeCf != null ? out.volumeCf / SQFT_PER_ACRE : null;
+  out.cutCy = out.volumeCf != null ? out.volumeCf / CF_PER_CY : null;
+  return out;
+}
+
 /* Straddle helper: worst case across per-candidate results (highest known volume;
  * any candidate with an UNKNOWN volume keeps the whole answer flagged). Pure. */
 export function pickWorstCase(results) {

@@ -36,12 +36,18 @@ export const pageSize = (paper, orient) => PAGE[`${paper}:${orient}`] || PAGE["l
 // Lay the sheet out for the given paper/orientation and whether a buildings table
 // is present. Returns boxes (in centi-inch units) for every region so the caller
 // can position the nested plan SVG and so composition is deterministic + testable.
-export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0 } = {}) {
+export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9 } = {}) {
   const page = pageSize(paper, orient);
   const M = 28; // ≈0.28 in border inset
   const inner = { x: M, y: M, w: page.w - 2 * M, h: page.h - 2 * M };
   const titleH = 56;
-  const metricsH = 64;
+  // The metrics band grows with the pair count (B712 added detention/mitigation
+  // pairs) instead of clipping a third wrapped row into the note line. Estimated
+  // the same way buildMetricsSvg flows pairs (~150 c-in per "Label: value" + gap);
+  // the historical default (9 pairs, letter-landscape) lands on the original 64.
+  const perMetricRow = Math.max(1, Math.floor((page.w - 2 * M - 8) / 150));
+  const metricRows = Math.max(2, Math.ceil((metricsCount || 0) / perMetricRow));
+  const metricsH = 18 + metricRows * 17 + 12;
   const gap = 14;
   const contentTop = inner.y + titleH + gap;
   const contentBot = inner.y + inner.h - metricsH - gap;

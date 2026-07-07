@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   classifyNfhlFeature,
+  combineMitigation,
   zonesFromFeatureCollection,
   pointInZone,
   gridIntersect,
@@ -243,6 +244,34 @@ describe("computeMitigation — the volume core", () => {
     const r = computeMitigation({ footprints: [a, b], zones: [zone], rule: harris,
       elev: { padElevFt: 94, existGradeFt: 90 } });
     expect(r.volumeCf).toBeCloseTo(10000 * 2 + 10000 * 4, -2);
+  });
+});
+
+describe("combineMitigation — per-element results merge into one ledger", () => {
+  const zone95 = () => mkZone("1pct", [rect(0, 0, 300, 100)], { staticBfeFt: 95 });
+  it("sums acres + volumes across footprints exactly like one whole-set compute", () => {
+    const a = { id: "a", ring: rect(0, 0, 100, 100) };
+    const b = { id: "b", ring: rect(100, 0, 100, 100) };
+    const whole = computeMitigation({ footprints: [a, b], zones: [zone95()], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } });
+    const combined = combineMitigation([
+      computeMitigation({ footprints: [a], zones: [zone95()], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } }),
+      computeMitigation({ footprints: [b], zones: [zone95()], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } }),
+    ]);
+    expect(combined.volumeCf).toBeCloseTo(whole.volumeCf, 4);
+    expect(combined.intersectAcres).toBeCloseTo(whole.intersectAcres, 6);
+    expect(combined.cutCy).toBeCloseTo(whole.cutCy, 4);
+  });
+  it("one UNKNOWN part keeps the combined volume UNKNOWN (never a partial sum)", () => {
+    const priced = computeMitigation({ footprints: [{ id: "a", ring: rect(0, 0, 100, 100) }], zones: [zone95()], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } });
+    const unknown = computeMitigation({ footprints: [{ id: "b", ring: rect(100, 0, 100, 100) }], zones: [mkZone("1pct", [rect(0, 0, 300, 100)])], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } });
+    const combined = combineMitigation([priced, unknown]);
+    expect(combined.volumeCf).toBeNull();
+    expect(combined.unknownReason).toMatch(/BFE/);
+    expect(combined.intersectAcres).toBeGreaterThan(priced.intersectAcres);
+  });
+  it("empty / null inputs → null", () => {
+    expect(combineMitigation([])).toBeNull();
+    expect(combineMitigation([null])).toBeNull();
   });
 });
 
