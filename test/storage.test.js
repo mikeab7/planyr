@@ -415,7 +415,8 @@ describe("summarizeVersion — real building counts + content summary (B456/NEW-
   });
 
   it("builds a distinguishing summary across collections", () => {
-    const { summary } = summarizeVersion({ parcels: [{ id: "p1" }, { id: "p2" }], els: [road, bld("a")], measures: [{ id: "m" }] });
+    const tri = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }]; // parcels are geometry — the funnel drops points-less ones
+    const { summary } = summarizeVersion({ parcels: [{ id: "p1", points: tri }, { id: "p2", points: tri }], els: [road, bld("a")], measures: [{ id: "m" }] });
     expect(summary).toBe("2 parcels · 1 road · 1 building · 1 markup");
   });
 

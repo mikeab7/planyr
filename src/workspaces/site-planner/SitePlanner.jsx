@@ -1973,6 +1973,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B672 — instructions from remote rows that arrived MID-GESTURE (busyRef): buffered here and
   // drained at the next reconcile/flush so a remote apply never yanks the canvas mid-drag.
   const pendingRemoteRef = useRef([]);
+  // A parcel is geometry — a "husk" row whose data has no usable points array must never reach
+  // the canvas (unrenderable + crashes acreage math). Keeping it OUT of local state while the
+  // engine's shadow still has the row makes the next reconcile diff tombstone it in the cloud —
+  // the husk heals into a proper delete instead of poisoning every reader (husk-parcel crash).
+  const isHuskParcel = (kind, el) => kind === "parcel" && !(el && Array.isArray(el.points) && el.points.length);
   // Put one applyRemoteRow instruction onto the canvas. The engine already updated its shadow, so
   // the autosave-effect diff that this setState triggers sees the element as unchanged (no echo
   // commit). Insertion respects the collection's z (byZ reads z, not array position).
@@ -1981,7 +1986,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
     if (!setter) return;
     if (instr.action === "remove") setter((a) => a.filter((x) => x.id !== instr.id));
-    else if (instr.action === "upsert") setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+    else if (instr.action === "upsert") {
+      if (isHuskParcel(instr.kind, instr.el)) return;
+      setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+    }
   };
   const drainRemote = () => {
     if (!pendingRemoteRef.current.length) return;
@@ -2018,7 +2026,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
     const replace = (setter, next) => setter((prev) => (stableStringify(prev) === stableStringify(next) ? prev : next));
     replace(setEls, sub("el", model.els)); replace(setMarkups, sub("markup", model.markups)); replace(setMeasures, sub("measure", model.measures));
-    replace(setCallouts, sub("callout", model.callouts)); replace(setParcels, sub("parcel", model.parcels));
+    replace(setCallouts, sub("callout", model.callouts));
+    // husk parcels (no points) stay off the canvas; the reconcile below then diffs them absent
+    // vs the seeded shadow and tombstones the bad rows in the cloud (see isHuskParcel).
+    replace(setParcels, sub("parcel", model.parcels).filter((pc) => !isHuskParcel("parcel", pc)));
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
     // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
@@ -5680,14 +5691,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const d = JSON.parse(fr.result);
         if (!d || (!Array.isArray(d.parcels) && !Array.isArray(d.els))) throw new Error();
+        // Normalize the import through the model funnel: junk entries (nulls / points-less husk
+        // parcels — the B689 crash class) are dropped, ids/z are ensured, migrations applied —
+        // a hand-edited or stale export can't poison the canvas or the next save.
+        const im = createSiteModel(d);
         ensureIdAbove([
-          ...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id),
-          ...(d.markups || []).map((m) => m.id), ...(d.measures || []).map((m) => m.id),
-          ...(d.callouts || []).map((c) => c.id), ...(d.deletedIds || []),
+          ...im.parcels.map((p) => p.id), ...im.els.map((e) => e.id),
+          ...im.markups.map((m) => m.id), ...im.measures.map((m) => m.id),
+          ...im.callouts.map((c) => c.id), ...im.deletedIds,
         ]); // B591 — seed past all imported ids + tombstones (not just parcels+els)
         pushHistory();
-        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
-        setCallouts(d.callouts || []); setMarkups(d.markups || []); // symmetric with exportJSON (was dropped → data loss / bleed-through)
+        setParcels(im.parcels); setEls(im.els); setMeasures(im.measures);
+        setCallouts(im.callouts); setMarkups(im.markups); // symmetric with exportJSON (was dropped → data loss / bleed-through)
         setSettings((s) => ({ ...s, ...(d.settings || {}), snap: s.snap })); // snap is a global pref, not imported
         setUnderlay(d.underlay || null);
         setSel(null);

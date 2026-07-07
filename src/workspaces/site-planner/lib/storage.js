@@ -8,9 +8,10 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
-import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs } from "./siteModel.js";
+import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
  * the working store switches to a per-user local cache (pulled from Supabase on
@@ -678,7 +679,16 @@ export const siteNameOf = (s) => (s && (s.site || s.name)) || "Untitled site";
 export function loadSitesList() {
   // Normalize every record to the Site Model so the whole app (site list, map
   // markers, plan switcher) reads consistent model objects from one source.
-  return Object.values(readSites()).map(migrate).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const raw = Object.values(readSites());
+  // LOUD-FAILURE: migrate() silently drops malformed entries (nulls / points-less husk parcels —
+  // the class that error-boundaried the planner on every load). Surface that a stored record
+  // needed sanitizing as a telemetry event so corruption is a visible signal, not a quiet edit.
+  // (reportClientEvent dedups/rate-caps, so the boot-frequency call path is safe.)
+  try {
+    const junk = raw.reduce((n, r) => n + countJunkEntries(r), 0);
+    if (junk > 0) reportClientEvent("model-sanitized", "dropped malformed collection entries on load", { junk, records: raw.length });
+  } catch (_) {}
+  return raw.map(migrate).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 // Every plan belonging to one site (group), newest first.
 export function loadPlansOfGroup(groupId) {

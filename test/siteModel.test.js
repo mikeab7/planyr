@@ -68,7 +68,7 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
 
   it("selectors classify the flat markups array by meaning", () => {
     const m = createSiteModel({
-      parcels: [{ id: "p1", setbacks: { front: 25 } }],
+      parcels: [{ id: "p1", points: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }], setbacks: { front: 25 } }],
       markups: [
         { kind: "encumbrance", id: "e1" }, // title easement => constraint
         { kind: "utilRoute", id: "u1" },   // service route => utility
@@ -94,7 +94,8 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
   // B100: only ACTIVE parcels drive the calcs; a missing `active` means active (back-compat),
   // so existing sites count every parcel until one is explicitly toggled off.
   it("activeParcelsOf excludes only explicitly-inactive parcels", () => {
-    const m = createSiteModel({ parcels: [{ id: "a" }, { id: "b", active: true }, { id: "c", active: false }] });
+    const tri = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }]; // parcels are geometry — the funnel drops points-less ones
+    const m = createSiteModel({ parcels: [{ id: "a", points: tri }, { id: "b", points: tri, active: true }, { id: "c", points: tri, active: false }] });
     expect(parcelsOf(m).map((p) => p.id)).toEqual(["a", "b", "c"]); // all retained on the model
     expect(activeParcelsOf(m).map((p) => p.id)).toEqual(["a", "b"]); // c (active:false) excluded
   });

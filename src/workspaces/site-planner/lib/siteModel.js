@@ -64,6 +64,41 @@ const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVer
 // expected (e.g. `parcels` as a string), which then throws on `.reduce`/`.map` and blanks the app.
 // Coerce every collection so one malformed record can't crash the planner on load.
 const arr = (v) => (Array.isArray(v) ? v : []);
+// Collection entries must be objects. A null entry (JSON.stringify turns an undefined entry or an
+// array hole into null) used to survive normalization and then either crash a migration pass
+// (null.attachedTo) or get spread by normalizeZ into a `{z}` husk that crashed every points-reader
+// (the husk-parcel crash — the planner error-boundaried on EVERY load once one null was persisted).
+// Reference-stable: returns the input array untouched when it's already clean, so an unchanged
+// record never churns React state or re-triggers a save.
+const isEntry = (el) => !!el && typeof el === "object" && !Array.isArray(el);
+const objArr = (v) => {
+  const a = arr(v);
+  for (const el of a) if (!isEntry(el)) return a.filter(isEntry);
+  return a;
+};
+// A parcel is GEOMETRY — one with no usable `points` array is unrenderable, unselectable dead
+// weight that crashes acreage/canvas math (there is no legitimate points-less parcel: every
+// creation path — map hand-off, in-planner draw, split — is born with points). Drop them here at
+// the one funnel every load/save/merge passes through; dropping BEFORE the cross-copy union also
+// lets a sibling copy's healthy same-id parcel win the merge instead of being shadowed by a husk.
+const validParcel = (pc) => Array.isArray(pc.points) && pc.points.length > 0;
+const parcelArr = (v) => {
+  const a = objArr(v);
+  for (const pc of a) if (!validParcel(pc)) return a.filter(validParcel);
+  return a;
+};
+// LOUD-FAILURE hook: how many entries the funnel above would drop from a RAW record — callers
+// that read persisted stores (loadSitesList/loadSite) report a nonzero count as a telemetry
+// event, so sanitization is a visible signal, never a silent data edit.
+export function countJunkEntries(p) {
+  if (!p || typeof p !== "object") return 0;
+  let n = 0;
+  for (const f of ["els", "markups", "measures", "callouts", "sheetOverlays", "parcelDrawings"])
+    for (const el of arr(p[f])) if (!isEntry(el)) n++;
+  for (const pc of arr(p.parcels)) if (!isEntry(pc) || !validParcel(pc)) n++;
+  for (const cs of arr(p.elevation && p.elevation.crossSections)) if (!isEntry(cs)) n++;
+  return n;
+}
 
 const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 
@@ -265,25 +300,25 @@ export function createSiteModel(p = {}) {
     // a fresh record (no prior version) starts in "pursuit".
     status: normStatus(p.status, isLegacyRecord(p) ? LEGACY_STATUS : DEFAULT_STATUS),
     // inputs
-    parcels: ensureZ(withStableParcelIds(arr(p.parcels))),
+    parcels: ensureZ(withStableParcelIds(parcelArr(p.parcels))),
     underlay: p.underlay || null,
     // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by
     // hand. Each: {id,name,src,imgW,imgH,page,pageCount,x,y,ftPerPx,rotation,opacity,locked}
-    sheetOverlays: arr(p.sheetOverlays),
+    sheetOverlays: objArr(p.sheetOverlays),
     // parcel-attached drawings (B67): a PDF/JPEG attached to a parcel as an IMMUTABLE
     // backdrop, marked up on an editable layer above it in PIXEL-RELATIVE (0..1) coords
     // so zoom/pan can't corrupt geometry. Each: {id,parcelId,name,kind:'pdf'|'image',
     // page,pageCount,intrinsic:{w,h},src(local raster dataURL),markups:[],createdAt,updatedAt}.
-    parcelDrawings: arr(p.parcelDrawings),
+    parcelDrawings: objArr(p.parcelDrawings),
     settings: obj(p.settings),
     // drawn layout + shapes (kept flat; selectors classify markups). Three idempotent passes,
     // each only touching records that need it: legacy rect roads → centerline model (B596);
     // bonded children re-anchored to their host's angle (B363); dog-ear children snapped to
     // their host's current edge (B487, Jacintoport orphan-bumpout).
-    els: ensureZ(normalizeDogEarPositions(normalizeBondedRotations(migrateRoads(Array.isArray(p.els) ? p.els : arr(p.elements))))),
-    markups: ensureZ(arr(p.markups)),
-    measures: ensureZ(arr(p.measures)),
-    callouts: ensureZ(arr(p.callouts)),
+    els: ensureZ(normalizeDogEarPositions(normalizeBondedRotations(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements))))),
+    markups: ensureZ(objArr(p.markups)),
+    measures: ensureZ(objArr(p.measures)),
+    callouts: ensureZ(objArr(p.callouts)),
     // Delete-tombstones (B276): ids the user DELIBERATELY deleted. The cross-copy merge
     // (mergeSiteContent) unions drawn collections by id, which would otherwise RESURRECT a
     // deleted item from a stale/other copy that still has it (the documented B126 trade-off
@@ -292,7 +327,7 @@ export function createSiteModel(p = {}) {
     // Ids are never reused (fresh uid() per add), so a plain id list is safe; bounded + deduped.
     deletedIds: [...new Set(arr(p.deletedIds).filter((x) => typeof x === "string"))].slice(-MAX_TOMBSTONES),
     // elevation references (newly persisted; empty for legacy records)
-    elevation: { crossSections: arr(p.elevation && p.elevation.crossSections) },
+    elevation: { crossSections: objArr(p.elevation && p.elevation.crossSections) },
     // constraint metadata. `liveLayers` is RESERVED for future per-site layer
     // memory — populated later; today layer state is a global app preference.
     constraints: { liveLayers: arr(p.constraints && p.constraints.liveLayers) },
