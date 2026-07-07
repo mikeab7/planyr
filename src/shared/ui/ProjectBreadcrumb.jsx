@@ -35,6 +35,7 @@ import {
   listProjects, filterProjects, relTime, warmProjectsIfEmpty,
   renameProject as storeRename, deleteProject as storeDelete,
 } from "../projects/projects.js";
+import { resolveCurrentName } from "../projects/projectModel.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
 // chrome tokens, not the retired warm-dark hexes (white-on-light was the B341 bug).
@@ -257,6 +258,11 @@ export default function ProjectBreadcrumb({
 
   const onDash = !currentProject; // we're at the all-projects view
   const filtered = filterProjects(projects, q);
+  // Show the current project's LIVE name (auto-update-name): after an inline rename here — or a
+  // rename in another tab — the freshly-refreshed `projects` list carries the new name even when
+  // the parent's `currentProject` prop is still the pre-rename value (Review/Library derive it
+  // from the route id, not the store). Falls back to the prop when the list can't resolve it.
+  const currentName = resolveCurrentName(currentProject, projects);
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, flex: "none" }}>
@@ -292,7 +298,7 @@ export default function ProjectBreadcrumb({
           </span>
         )}
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {cross ? "All projects" : (currentProject?.name || "Select a project")}
+          {cross ? "All projects" : (currentName || "Select a project")}
         </span>
         {atRisk(saveState) && (
           <span title="Saved on this device — the cloud is unreachable" aria-hidden

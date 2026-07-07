@@ -53,6 +53,21 @@ export function suggestNameMatch(name, list = [], { exclude = null } = {}) {
   return hits.length === 1 ? hits[0] : null;
 }
 
+// Resolve the header crumb's display name for the CURRENTLY-OPEN project (auto-update-name).
+//
+// The crumb name must track a live rename of the current project. Some workspaces (Review,
+// Library) derive their `currentProject` prop from the route id and DON'T re-derive its name
+// from the store when a rename happens in the switcher — so that prop goes stale while the
+// dropdown's own (freshly refreshed) `projects` list already carries the new name. Prefer the
+// list's name for the current project; fall back to the prop's name (cold/empty list, or a
+// project not present in the list), so this is never a regression. Cross-tab renames (which
+// also refresh the list) get the same live update for free.
+export function resolveCurrentName(currentProject, projects = []) {
+  if (!currentProject) return "";
+  const hit = (projects || []).find((p) => p && p.id === currentProject.id);
+  return (hit && hit.name) || currentProject.name || "";
+}
+
 // Case-insensitive name filter for the dropdown search field. Empty query → all.
 export function filterProjects(projects = [], query = "") {
   const q = String(query || "").trim().toLowerCase();

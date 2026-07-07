@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName } from "../src/shared/projects/projectModel.js";
+import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, resolveCurrentName } from "../src/shared/projects/projectModel.js";
 
 describe("groupProjects", () => {
   it("collapses plans of one site into a single project entry", () => {
@@ -98,6 +98,28 @@ describe("filterProjects", () => {
   it("filters case-insensitively by name substring", () => {
     expect(filterProjects(projects, "ka").map((p) => p.id)).toEqual(["g3"]);
     expect(filterProjects(projects, "o").map((p) => p.id)).toEqual(["g1", "g2"]);
+  });
+});
+
+describe("resolveCurrentName — header crumb tracks a live rename (auto-update-name)", () => {
+  const projects = [
+    { id: "g1", name: "Eight South" },
+    { id: "g2", name: "Katy Freeway" },
+  ];
+  it("prefers the live list name over a stale currentProject prop", () => {
+    // The switcher list already carries the new name; the parent's prop is pre-rename.
+    expect(resolveCurrentName({ id: "g1", name: "8 South" }, projects)).toBe("Eight South");
+  });
+  it("falls back to the prop name when the project isn't in the list yet (cold/empty)", () => {
+    expect(resolveCurrentName({ id: "g9", name: "New Site" }, projects)).toBe("New Site");
+    expect(resolveCurrentName({ id: "g9", name: "New Site" }, [])).toBe("New Site");
+  });
+  it("returns empty string when there is no current project (Dashboard)", () => {
+    expect(resolveCurrentName(null, projects)).toBe("");
+    expect(resolveCurrentName(undefined)).toBe("");
+  });
+  it("never throws on junk entries in the list", () => {
+    expect(resolveCurrentName({ id: "g1", name: "x" }, [null, undefined, {}])).toBe("x");
   });
 });
 
