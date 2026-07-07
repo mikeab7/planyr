@@ -20,12 +20,14 @@
   --text-secondary: #353B49;
   --text-tertiary:  #4B5263;
 
-  /* Site Planner "drafting parchment" surfaces (B686) — warm cream in light, dark slate
-     in dark, so the inspector keeps its parchment look in light yet themes to dark with
-     the chrome instead of staying a bright cream panel against dark chrome. */
-  --planner-panel:  #efe9dd;   /* the inspector column / backdrop */
-  --planner-raised: #f8f6f0;   /* section + readout cards sitting on the panel */
-  --planner-border: #ece6d9;   /* hairlines on the parchment */
+  /* Site Planner inspector surfaces (B686 → B689). B689: the LIGHT-mode inspector now
+     uses the cool app surfaces — the owner rejected the warm "parchment" cream; the open
+     left menu must match the cool tool rail + chrome (panel = --chrome-bg, cards white),
+     not read as a lone warm panel. Dark keeps B686's recessed slate hierarchy unchanged
+     (values live in [data-theme="dark"] below). */
+  --planner-panel:  #EAEEF3;   /* inspector column / left-menu backdrop — matches the tool rail (chrome-bg) */
+  --planner-raised: #FFFFFF;   /* section + readout cards sitting on the panel */
+  --planner-border: #E1E5EB;   /* cool hairlines */
 
   /* Chrome — top bars, tool rail, status bar. Themes WITH the app (B318): light
      theme = light chrome, dark theme = dark chrome (no dark bar over a white app). */
