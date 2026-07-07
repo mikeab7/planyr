@@ -18,6 +18,10 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `basemaps.js` — the shared Esri/USGS aerial-source registry (B693).
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `labelLayout.js` — LOD label tiering. `roadGeometry.js` — centerline road curves (pure).
+- Terrain pipeline (B703–B706): `demGrid.js` / `contours.js` / `flowField.js` (pure math,
+  worker-safe) + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
+  + `terrainLayers.js` (Leaflet glue, grid LRU for the hover elevation readout);
+  `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft).
 - `detentionRules.js` — Houston-MSA detention criteria as versioned rule records + the
   drainage-authority resolver, tier/regime assessors, pond auto-size solvers (B636–B642,
   code-labeled B629–B635; pure, injectable fetch/cache — mirror of `jurisdiction.js`). `pondGeom.js` holds

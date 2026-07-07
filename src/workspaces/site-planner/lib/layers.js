@@ -17,6 +17,7 @@ import { JURISDICTION_LAYERS } from "./counties.js";
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
+import { contourLayer, flowLayer, TERRAIN_MIN_ZOOM } from "./terrainLayers.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
 } from "./layerRequest.js";
@@ -205,6 +206,24 @@ export const TERRAIN = {
     opacity: 0.55, source: "USGS 3DEP",
     note: "Colors are RELATIVE TO THE CURRENT VIEW — the ramp re-stretches to the lowest/highest ground on screen, so blue here ≠ blue after panning. LiDAR bare-earth (NAVD88); screening only — verify with survey. The cross-section tool samples the same data.",
   },
+  /* B704: labeled 1-ft contour lines generated CLIENT-SIDE from the raw 3DEP grid
+   * (the public service's canned contour renderings are raster-only and unlabeled —
+   * useless across most Houston sites). Raw grid fetched per view, decoded/smoothed/
+   * traced in the terrain Web Worker (terrainLayers.js + terrainWorker.js). No `url`:
+   * kind dispatch handles it, and the pipeline reuses DEP_URL from elevation.js. */
+  contours: {
+    kind: "contours", label: "Contour lines (1 ft)",
+    source: "USGS 3DEP", opacity: 0.9,
+    note: `1-ft lines traced from LiDAR bare-earth ground heights (NAVD88), heavier line every 5 ft. Lines BREAK where the LiDAR has no data (water). Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — verify with survey; agrees with the cross-section tool (same data).`,
+  },
+  /* B705: downhill drainage-direction arrows from the same worker grid — which way
+   * the tract sheets. Flat/ambiguous ground gets NO arrow (never invent a direction).
+   * Seed of the future storm-outfall flow-accumulation feature (D8 in flowField.js). */
+  flowdir: {
+    kind: "flowdir", label: "Drainage direction (screening)",
+    source: "USGS 3DEP", opacity: 0.9,
+    note: `Downhill direction of the ground surface — bolder/longer arrow = steeper fall. Flat or unclear spots get no arrow rather than a guess. Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — confirm drainage with your civil engineer.`,
+  },
 };
 
 /* Jurisdiction BOUNDARY overlays (B176) — toggleable district lines for screening:
@@ -307,6 +326,8 @@ export const LAYER_VINTAGE = {
   hifld_tx: "HIFLD (US DOE/NETL) — periodically updated",
   coh_hydrants: "City of Houston Public Works — current edition",
   elevation: "LiDAR collection varies by county (USGS 3DEP)",
+  contours: "LiDAR collection varies by county (USGS 3DEP)",
+  flowdir: "LiDAR collection varies by county (USGS 3DEP)",
   // Jurisdiction boundaries
   jur_county: "TxDOT county boundaries — current edition",
   jur_city: "TxGIO city limits — current edition",
@@ -480,6 +501,14 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         // reports a quiet "unconfigured" (gray) only if the proxy itself has no server
         // token (e.g. a preview deploy) — never a hard failure, never an error toast.
         const lyr = mapillaryLayer(report);
+        lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
+      } else if (cfg.kind === "contours" || cfg.kind === "flowdir") {
+        // Client-generated terrain layers (B704/B705): view-driven layerGroups that
+        // fetch the raw DEM grid themselves (shared tile + worker — toggling both
+        // costs ONE fetch). No health probe — the pipeline self-reports through
+        // `report`, with proxy→direct fallback inside. Plain vector groups, so the
+        // layerGroup constraint on esri RASTER layers doesn't apply.
+        const lyr = cfg.kind === "contours" ? contourLayer(cfg, report) : flowLayer(cfg, report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else if (cfg.kind === "vector") {
         // Cached boundary layer (B694): paints the last-good copy from the browser
