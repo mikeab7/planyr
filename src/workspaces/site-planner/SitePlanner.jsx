@@ -5770,7 +5770,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const floodGeo = drainCtxData?.floodGeo || null;
   const fmZones = (floodGeo && floodGeo.zones) || [];
   const floodJurKey = fmSettings.jurKey
-    || (drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(siteCounty));
+    || (drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(restored?.county));
   const fmRule = floodRules[floodJurKey] || floodRules.generic;
   const fmElev = {
     padElevFt: Number.isFinite(fmSettings.padFfeFt) ? fmSettings.padFfeFt : null,
