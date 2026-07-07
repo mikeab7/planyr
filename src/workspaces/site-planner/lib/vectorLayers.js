@@ -329,8 +329,10 @@ function perpDist(p, a, b) {
 }
 
 // Classic recursive Douglas–Peucker over an open point list. Always keeps the two
-// endpoints. Pure.
-function douglasPeucker(pts, tol) {
+// endpoints. Pure. Coordinate-agnostic (works in degrees, pixels, feet — tolerance is
+// in the same units as the points); exported for the B704 contour pipeline, which runs
+// it in GRID/PIXEL space (a degree-space tolerance would be anisotropic on the ground).
+export function douglasPeucker(pts, tol) {
   if (pts.length <= 2) return pts.slice();
   let maxD = -1, idx = -1;
   const a = pts[0], b = pts[pts.length - 1];
