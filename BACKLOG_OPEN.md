@@ -4,12 +4,14 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _48 open · 29 awaiting live verification._
+> _50 open · 29 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B715 | Site acreage double-counts overlapping active parcels: the area sum has no union/dissolve (Martini reads ~176.6 ac vs ~88.6 geometric) | [Site Planner / Yield · Analysis] | #site-planner #yield | live |
+| B716 | Clean up phantom drawn parcels on the Martini site (`smqsfzqc72pw`): soft-delete 2 attr-less outlines + 1 degenerate dup sliver → site reads ~88.6 ac | [Site Planner / data] | #site-planner #persistence | live |
 | B691 | Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy | [Site Planner / GIS] | #site-planner #gis | live |
 | B663 | ONE-TIME migration: every existing project gets the standard tree + existing files move into their tree folders in Drive | [Library / storage] | #library #drive | — |
 | B662 | Unified Library: the folder tree IS the view, and files live inside it (+ the live-502 chunked Drive sync fix) | [Library / Doc Review / storage] | #library #drive #persistence | — |
@@ -108,12 +110,12 @@
 - **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479, B704, B694, B669
-- **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B701, B692, B682, B676, B667, B673, B674, B714
+- **#persistence** — B716, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B701, B692, B682, B676, B667, B673, B674, B714
 - **#pond** — B707
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B715, B716, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413
 - **#testing** — B269, B63
 - **#ui** — B115, B712, B706, B695, B693, B669, B668, B658, B673, B674
-- **#yield** — B553, B712, B651
+- **#yield** — B715, B553, B712, B651
