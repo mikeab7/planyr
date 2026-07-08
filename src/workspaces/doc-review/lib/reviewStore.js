@@ -134,7 +134,7 @@ export function upsertReview(record) {
   return serializeReviewWrite(record.id, () => upsertReviewCore(record));
 }
 
-// B692 — the core column payload a review save sends (pure; exported for tests). team_id rides
+// B713 — the core column payload a review save sends (pure; exported for tests). team_id rides
 // ONLY on a brand-new row (isNew): an ordinary update must never carry the sharing pointer, so a
 // stale in-memory record can't silently unshare a project (see cloudSync.siteRowFor for the full
 // story — same bug class, same rule).
@@ -164,7 +164,7 @@ async function upsertReviewCore(record) {
   // No user_id here: casUpsert stamps the creator only on INSERT, so a teammate editing a
   // SHARED review never re-stamps the owner.
   const expected = reviewVersions[record.id];
-  // B692 — team_id is INSERT-ONLY (mirrors cloudSync.siteRowFor): a content save from a tab whose
+  // B713 — team_id is INSERT-ONLY (mirrors cloudSync.siteRowFor): a content save from a tab whose
   // in-memory record predates a share must never be able to revert the sharing column. Share and
   // unshare go ONLY through lib/sharing.js's explicit column update; a brand-new row still stamps
   // the record's teamId so a review created inside a shared project is born shared.
@@ -220,7 +220,7 @@ export function keepaliveFlushReview(record) {
   if (!supabase || !record || !record.id) return false;
   const { url, anon } = supabaseRest();
   const token = currentAccessToken();
-  // Core-column row, NO team_id (B692) — the keepalive is always an update, and an update must
+  // Core-column row, NO team_id (B713) — the keepalive is always an update, and an update must
   // never carry the sharing pointer (a stale in-memory teamId would silently unshare).
   const row = reviewRowFor(record);
   return keepaliveCasPush({ url, anon, token, table: "doc_reviews", id: record.id, row, expected: reviewVersions[record.id] });
@@ -384,7 +384,7 @@ export async function upsertFileFacts(row) {
   // index columns. onConflict = the PK "id" (post the phase-2 migration). Degrade gracefully if
   // any optional column (team_id / category / state) or the old composite PK isn't where we
   // expect, so indexing never regresses on a partial migration.
-  // B692 — team_id rides ONLY when a caller explicitly set it: this is a plain UPSERT, and the
+  // B713 — team_id rides ONLY when a caller explicitly set it: this is a plain UPSERT, and the
   // regular filing callers (toFactsRow) never carry teamId, so the old `teamId || t0 || null`
   // rewrote a SHARED fact row back to private on every refile. Omitting the key leaves the
   // column untouched on update; sharing stamps it project-wide via lib/sharing.js.

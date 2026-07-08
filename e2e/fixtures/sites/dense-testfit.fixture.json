@@ -20,7 +20,7 @@
     "parcels": [
       {
         "id": "e2e-parcel-1",
-        "ring": [
+        "points": [
           {
             "x": 0,
             "y": 0

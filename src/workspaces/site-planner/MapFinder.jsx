@@ -5,8 +5,10 @@ import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS, SNAP
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import {
   resolveLayerUrl,
   identifyParcelEager,
@@ -36,31 +38,10 @@ const PAL = {
   chrome: "var(--chrome-bg)", chromeLine: "var(--chrome-divider)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)",
 };
 
-// Free aerial sources (no API key). Both are ArcGIS MapServers that support
-// both XYZ tiles (for the map) and `export` (for the planner underlay capture).
-// `maxNative` = each provider's native imagery ceiling (Esri z19 ≈ 0.3 m/px; USGS
-// z16). This is REQUIRED per source and must not be dropped in a refactor: past its
-// ceiling a provider returns the gray "Map data not yet available" placeholder as an
-// HTTP 200 (not an error), so Leaflet's error-tile fallback never fires and the whole
-// view goes blank. The imagery layer below clamps fetches to this ceiling (minus the
-// retina offset) and lets maxZoom upscale the deepest real tile beyond it. Any new
-// source MUST carry its own `maxNative`. (B220 — recurrence of B182)
-const BASEMAPS = {
-  esri: {
-    label: "Esri",
-    tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    export: "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export",
-    maxNative: 19,
-    attr: "Imagery &copy; Esri, Maxar",
-  },
-  usgs: {
-    label: "USGS",
-    tiles: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
-    export: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/export",
-    maxNative: 16,
-    attr: "Imagery &copy; USGS",
-  },
-};
+// The aerial-source registry (BASEMAPS) lives in lib/basemaps.js (B693) — it's shared
+// with the planner's Basemap control so both surfaces always offer the same sources.
+// Its B220 rule travels with it: every source carries `maxNative`, and the imagery
+// layer below clamps fetches to that ceiling (minus the retina offset).
 // Subtle road/place labels overlay (drawn faint over the imagery).
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
@@ -302,6 +283,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   const [mapMenu, setMapMenu] = useState(null);       // {x, y} — right-click-on-empty-map menu (KMZ export) (B684)
   const [hoverLL, setHoverLL] = useState(null);       // {lat, lng} — live "you are here" GPS readout (B683)
+  const hoverElFt = useGroundElevation(hoverLL);      // ground elevation at the cursor, ft NAVD88 (B706)
   const [renaming, setRenaming] = useState(null);     // {id, name} — the site row being inline-renamed (B158)
   const skipRenameBlurRef = useRef(false);            // Esc cancels without the trailing blur committing
   const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
@@ -553,6 +535,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
+      // Boundary hover/click identify (B695) — read live per event; parcel-select mode
+      // owns the map's clicks, so the identify yields while it's on (the B98 rule).
+      identifyOk: () => !selectModeRef.current,
     });
     sync();
     // periodic re-probe so stopped services self-heal when the City/County restart
@@ -809,6 +794,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     selectModeRef.current = selectMode;
     const map = mapRef.current;
     if (!map) return;
+    // Flag select mode on the container so the boundary overlays' interactive fills
+    // (`.pf-boundary-hit`, B695) drop Leaflet's pointer cursor and inherit the +/−
+    // parcel cursor — the tool owns the cursor, not the fill (see index.css).
+    try { map.getContainer().classList.toggle("pf-select-mode", !!selectMode); } catch (_) {}
     if (selectMode) {
       // Warm the cached parcel snapshots (instant from IndexedDB, SWR-refresh from Drive) so a
       // county whose live server is down still draws + clicks from the local copy (B629).
@@ -1204,10 +1193,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
         {/* Live GPS readout (B683): the cursor's WGS84 lat/long, bottom-center so it clears the
             zoom control (corner) and the scale bar (bottom-right). Display-only; the app's frame
-            stays EPSG:2278 feet. */}
+            stays EPSG:2278 feet. B706 appends the ground elevation when a reading exists (cached
+            terrain grid, else one debounced 3DEP point sample) — suppressed over no-data. */}
         {hoverLL && (
-          <div style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 900, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.9)", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 9px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+          <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 900, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.9)", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 9px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
             {hoverLL.lat.toFixed(6)}°,&nbsp;{hoverLL.lng.toFixed(6)}°
+            {hoverElFt != null && <span data-ground-el> · El ≈ {hoverElFt.toFixed(1)} ft NAVD88</span>}
           </div>
         )}
 

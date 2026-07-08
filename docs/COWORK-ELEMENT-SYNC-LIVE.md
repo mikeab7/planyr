@@ -12,12 +12,13 @@ confirmations that move V229–V231 (and their B-items) to Done. **None of this 
 > #18 is now sandbox-covered — a live pass is a quick spot confirmation). **Still entirely open:
 > V230 (all of 7–11) — it REQUIRES a second account on a team-shared site** (two windows of one
 > account can only ever produce "you (another window)", which exercises none of the named-toast /
-> roster logic) — **plus #14–17 and #4's make-3-edits half.**
+> roster logic) — **plus #14–17 and #4's make-3-edits half.** Michael provides the second test
+> account / team invite (tracked in OWNER-TODO); everything else here is self-service.
 >
 > **📌 Update (2026-07-08): the second account is UNBLOCKED.** The owner's share attempt surfaced
-> B692 (any owner autosave silently reverted `sites.team_id` → the collaborator got a red cloud +
+> B713 (any owner autosave silently reverted `sites.team_id` → the collaborator got a red cloud +
 > empty site) — fixed + shipped, and Goose Creek (smqfy48tlk9j) is re-linked to team "HIP Houston"
-> with `michael.butler@hillwood.com` as the second account. **Run V232 (VERIFICATION.md) first**
+> with `michael.butler@hillwood.com` as the second account. **Run V244 (VERIFICATION.md) first**
 > (share survives autosaves; collaborator can read/write), then V230's 7–11 with those two
 > accounts. Reload every open Planyr tab before starting — a pre-fix tab still running old code
 > can re-break the share.

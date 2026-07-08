@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { slimForCloud, headerSig, siteRowFor } from "../src/workspaces/site-planner/lib/cloudSync.js";
 import { reviewRowFor } from "../src/workspaces/doc-review/lib/reviewStore.js";
 
-// B692 — the share-revert clobber class. Sharing lives in the team_id COLUMN, set ONLY by the
+// B713 — the share-revert clobber class. Sharing lives in the team_id COLUMN, set ONLY by the
 // explicit share/unshare flow (lib/sharing.js) and overlaid back onto models at read time. An
 // ordinary content save must therefore NEVER carry the sharing pointer: a tab whose in-memory
 // model predates a share would push its stale teamId (null) and silently unshare the project —

@@ -29,13 +29,16 @@ import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESE
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import ViewMenu from "./components/ViewMenu.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
+import FloodMitigationCard from "./components/FloodMitigationCard.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
@@ -77,8 +80,17 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
-import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage } from "./lib/pondGeom.js";
-import { ringsArea } from "./lib/pondOffset.js";
+import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight } from "./lib/pondGeom.js";
+import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
+import { gisCache } from "./lib/gisCache.js";
+import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
+import {
+  zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger,
+  floodGeoBbox, pickWorstCase, NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
+} from "./lib/floodplainMitigation.js";
+import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, triggerClasses } from "./lib/floodplainRules.js";
+import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
+import { loadBuildabilityRules, assessBuildability } from "./lib/buildability.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt,
@@ -101,11 +113,10 @@ import { createHistoryStack } from "./lib/history.js";
  * Mercator is conformal, so a uniform pixels-per-foot aligns to it with no x/y
  * distortion over a site — only the basemap's zoom/center are derived from the
  * planner view. */
-const GEO_BASEMAP = {
-  tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-  maxNative: 19,
-  attr: "Imagery &copy; Esri, Maxar",
-};
+// The aerial source registry is shared with the map finder (lib/basemaps.js, B693) —
+// the planner's Basemap control offers the same Esri/USGS sources as the finder's
+// Imagery dropdown, plus "Off". (The old single-source GEO_BASEMAP constant became
+// BASEMAPS.esri.)
 // How far the basemap container overhangs the viewport on each side (px). The
 // extra margin (with keepBuffer tiles loaded) means a pan/zoom that CSS-transforms
 // the basemap reveals already-loaded imagery instead of the backdrop (B65).
@@ -584,6 +595,65 @@ function ringHas(p, ring) {
 }
 const rectRing = (c, w, h) => { const hw = w / 2, hh = h / 2; return [{ x: c.x - hw, y: c.y - hh }, { x: c.x + hw, y: c.y - hh }, { x: c.x + hw, y: c.y + hh }, { x: c.x - hw, y: c.y + hh }]; };
 const ringOf = (e) => (e.points ? e.points : elCorners(e));
+
+/* B707/B712 — which drawn elements count as FILL for the mitigation screen: the
+ * same set the yield math treats as impervious (buildings incl. bump-outs, paving,
+ * parking, trailer courts). Ponds are CUT, never fill; roads ride their strip math
+ * elsewhere and are deliberately out of the v1 screening set. */
+const FM_FILL_TYPES = new Set(["building", "paving", "parking", "trailer"]);
+
+/* Per-element mitigation memo (the pondGeom _detMemo idiom): the metrics pass runs
+ * per render, so during a drag only the dragged element's signature changes and
+ * everything else returns from cache — the whole-site grid never recomputes per
+ * frame. Sig covers the footprint geometry + every elevation/rule input + the
+ * flood-geometry fetch stamp. */
+const _mitMemo = new Map();
+const MIT_MEMO_MAX = 64;
+// Cheap position-sensitive ring checksum: an AREA-PRESERVING vertex edit (slide a
+// middle vertex along a wall line) must still bust the memo — count + first point +
+// area alone would serve stale intersect geometry for it.
+const ringHash = (ring) => {
+  let h = 0;
+  for (let i = 0; i < ring.length; i++) h += (ring[i].x * 7 + ring[i].y * 3) * (i + 1);
+  return Math.round(h);
+};
+function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
+  const sig = [
+    fp.id, fp.ring.length, ringHash(fp.ring), polyArea(fp.ring).toFixed(0),
+    fp.padElevFt ?? "", zonesSig, rule ? `${rule.trigger}|${rule.ratio}|${rule.verified}` : "",
+    elev.padElevFt ?? "", elev.existGradeFt ?? "", elev.bfeFt ?? "", elev.wse02Ft ?? "", elev.avgFillDepthFt ?? "",
+  ].join("~");
+  if (_mitMemo.has(sig)) {
+    const hit = _mitMemo.get(sig);
+    _mitMemo.delete(sig); _mitMemo.set(sig, hit);
+    return hit;
+  }
+  const val = computeMitigation({ footprints: [fp], zones, rule, elev });
+  _mitMemo.set(sig, val);
+  if (_mitMemo.size > MIT_MEMO_MAX) _mitMemo.delete(_mitMemo.keys().next().value);
+  return val;
+}
+
+/* Per-pond flood facts (governing WSE + in-trigger), memoized like the fill memo —
+ * the metrics pass asks for these for EVERY pond each render, and the underlying
+ * grid tests would otherwise jank drags on exactly the in-floodplain sites this
+ * feature targets. */
+const _pondFactsMemo = new Map();
+function pondFloodFacts(ring, zones, rule, { bfeFt, existGradeFt }, zonesSig) {
+  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", existGradeFt ?? ""].join("~");
+  if (_pondFactsMemo.has(sig)) {
+    const hit = _pondFactsMemo.get(sig);
+    _pondFactsMemo.delete(sig); _pondFactsMemo.set(sig, hit);
+    return hit;
+  }
+  const val = {
+    wseFt: wse1pctForRing(ring, zones, { bfeFt, existGradeFt }).wseFt,
+    inTrigger: ringInTrigger(ring, zones, rule),
+  };
+  _pondFactsMemo.set(sig, val);
+  if (_pondFactsMemo.size > MIT_MEMO_MAX) _pondFactsMemo.delete(_pondFactsMemo.keys().next().value);
+  return val;
+}
 // A building's walls (with midpoints + lengths), its centre and area.
 function buildingWalls(b) {
   const corners = ringOf(b), ctr = centroid(corners), n = corners.length, walls = [];
@@ -1417,8 +1487,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Geographic basemap + shared overlay layers under the canvas (Phase 1). Only
   // meaningful for a located site (one with a real-world origin).
   const origin = restored?.origin || null;
+  // B706: ground elevation under the cursor (ft NAVD88) for the coordinate chip —
+  // reprojected with the SAME feetToLatLng the chip displays, sampled from the cached
+  // terrain grid (instant) or one debounced 3DEP point call at cursor rest.
+  const cursorLL = useMemo(() => {
+    if (!cursor || !origin) return null;
+    const [la, ln] = feetToLatLng(cursor, origin.lat, origin.lon);
+    return { lat: la, lng: ln };
+  }, [cursor, origin]);
+  const cursorElFt = useGroundElevation(cursorLL);
   // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
-  const [basemapOn, setBasemapOn] = useState(!!origin);
+  // Aerial basemap SOURCE (B693): "off" | "esri" | "usgs" — a three-way control in the
+  // Layers panel's Basemap group (was a bare on/off checkbox). Located sites default to
+  // the Esri aerial, exactly like the old boolean defaulted on.
+  const [basemapSrc, setBasemapSrc] = useState(origin ? "esri" : "off");
+  const basemapOn = basemapSrc !== "off" && !!origin;
+  const [basemapStatus, setBasemapStatus] = useState(null); // "loading" | "loaded" | "failed" | null — the Basemap row's status dot
+  const geoSrcRef = useRef(null); // which BASEMAPS source the live tile layers were built from
+  // "Make sure the aerial is on" (identify mode, analysis-layer framing, geocoded add):
+  // keeps the user's chosen source if one is already on, else the Esri default.
+  const ensureBasemapOn = useCallback(() => setBasemapSrc((s) => (s === "off" ? "esri" : s)), []);
   const [layersOpen, setLayersOpen] = useState(false); // planner Layers control expanded
   const [viewMenuOpen, setViewMenuOpen] = useState(false); // on-canvas View (eye) menu expanded (B653)
   const geoWrapRef = useRef(null);
@@ -1436,6 +1524,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [routeMode, setRouteMode] = useState(null); // utility routing: {util, snapTo, stage, source, width, ruleNote}
   const [easeRules, setEaseRules] = useState(loadEasementRules);
+  // B707/B709/B710 — the floodplain-suite rule files (editable, verified-flagged,
+  // localStorage-persisted; the easementRules pattern).
+  const [floodRules, setFloodRules] = useState(loadFloodplainRules);
+  const [pondCriteria] = useState(loadPondCriteria);
+  const [buildRules] = useState(loadBuildabilityRules);
+  // Wetlands presence lifted from the Site Analysis screen's own finding (B710's
+  // Section-404 cross-flag consumes it — no new fetch).
+  const [analysisWetlands, setAnalysisWetlands] = useState(null);
   const [jurKey, setJurKey] = useState(() => defaultJurForCounty(restored?.county || "harris"));
   const [rulesOpen, setRulesOpen] = useState(false);
   const [xsecMode, setXsecMode] = useState(false);   // ditch cross-section: click two points
@@ -1458,51 +1554,70 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
-  /* aerial basemap tile layer (toggle) */
+  /* aerial basemap tile layer (toggle + source switch, B693) */
   useEffect(() => {
     const map = geoMapRef.current;
     if (!map) return;
-    if (basemapOn && !geoBaseRef.current) {
-      // Coarse "instant" backfill UNDER the detail layer: capped at a low native
-      // zoom so it only ever fetches a handful of large-area tiles. They load
-      // (and cache) near-instantly and fill the whole view with blurry imagery,
-      // so a fresh load / hard zoom-out never sits on the gray backdrop while the
-      // heavy detail tiles stream in on top. No detectRetina (light + blurry is
-      // fine for a placeholder); generous keepBuffer to cover the overscan. (B65)
-      const bf = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: GEO_BASEMAP.attr, keepBuffer: 6 }));
-      bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
-      // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
-      // one-zoom-higher native tiles and renders them at half size (downsampled =
-      // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
-      // map's *fractional* zoom (zoomSnap:0, driven by ppfToZoom) since it prefers
-      // downsampling a higher-zoom tile over upscaling a lower one. It only changes
-      // which tiles are fetched + their display size — never the map's CRS zoom —
-      // so the SVG↔aerial scale lock is untouched. (B170)
-      // Add the heavy detail layer only AFTER the coarse backfill has painted (or a
-      // short fallback), so its many retina tiles don't flood the connection and
-      // starve the few coarse tiles — that's what left a fresh load gray for ~10s
-      // on a real connection. (B65)
-      // maxNativeZoom drops by 1 on a retina display because detectRetina fetches
-      // one zoom HIGHER than the display zoom; without this the detail layer asks
-      // for z20 at deep zoom, which Esri World Imagery (native to z19) answers with
-      // the gray "Map data not yet available" placeholder. Capping the native fetch
-      // at z19 makes it upscale the deepest real imagery instead. (B182)
-      const detailMaxNative = L.Browser.retina ? GEO_BASEMAP.maxNative - 1 : GEO_BASEMAP.maxNative;
-      const addDetail = () => {
-        // bail if the map went away, detail's already added, or the aerial was
-        // toggled off during the wait (backfill ref nulled by the cleanup below).
-        if (!geoMapRef.current || geoBaseRef.current || !geoBackfillRef.current) return;
-        const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
-        t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
-      };
-      bf.once("load", addDetail);
-      setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires
-    } else if (!basemapOn && geoBaseRef.current) {
-      try { map.removeLayer(geoBaseRef.current); } catch (_) {}
+    const want = basemapOn ? basemapSrc : null;
+    // Tear down when turned off OR when the source changed (a switch rebuilds below).
+    // Checking BOTH refs fixes the old leak: a fast off-toggle inside the ~600ms
+    // backfill→detail window used to key on the detail ref alone and strand the
+    // backfill layer on the map.
+    if (geoSrcRef.current !== want && (geoBaseRef.current || geoBackfillRef.current)) {
+      try { if (geoBaseRef.current) map.removeLayer(geoBaseRef.current); } catch (_) {}
       try { if (geoBackfillRef.current) map.removeLayer(geoBackfillRef.current); } catch (_) {}
       geoBaseRef.current = null; geoBackfillRef.current = null;
     }
-  }, [basemapOn, origin]);
+    geoSrcRef.current = want;
+    if (!want) { setBasemapStatus(null); return; }
+    if (geoBaseRef.current || geoBackfillRef.current) return; // already built for this source
+    const bm = BASEMAPS[want] || BASEMAPS.esri;
+    setBasemapStatus("loading");
+    // Coarse "instant" backfill UNDER the detail layer: capped at a low native
+    // zoom so it only ever fetches a handful of large-area tiles. They load
+    // (and cache) near-instantly and fill the whole view with blurry imagery,
+    // so a fresh load / hard zoom-out never sits on the gray backdrop while the
+    // heavy detail tiles stream in on top. No detectRetina (light + blurry is
+    // fine for a placeholder); generous keepBuffer to cover the overscan. (B65)
+    const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: 6 }));
+    bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
+    // Honest status dot for the Basemap row: "loaded" only on a REAL painted tile
+    // (`tileload`) — Leaflet's layer-level `load` fires even when every tile errored
+    // (errored tiles count as settled), which would show a green dot over a gray
+    // canvas when the source is down. A tile that exhausted its retries → failed,
+    // until a later successful tile flips it back.
+    bf.on("tileload", () => { if (geoBackfillRef.current === bf) setBasemapStatus("loaded"); });
+    bf.on("tileerror", (e) => { if (geoBackfillRef.current === bf && e && e.tile && (e.tile._pfTries || 0) >= 2) setBasemapStatus("failed"); });
+    // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
+    // one-zoom-higher native tiles and renders them at half size (downsampled =
+    // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
+    // map's *fractional* zoom (zoomSnap:0, driven by ppfToZoom) since it prefers
+    // downsampling a higher-zoom tile over upscaling a lower one. It only changes
+    // which tiles are fetched + their display size — never the map's CRS zoom —
+    // so the SVG↔aerial scale lock is untouched. (B170)
+    // Add the heavy detail layer only AFTER the coarse backfill has painted (or a
+    // short fallback), so its many retina tiles don't flood the connection and
+    // starve the few coarse tiles — that's what left a fresh load gray for ~10s
+    // on a real connection. (B65)
+    // maxNativeZoom drops by 1 on a retina display because detectRetina fetches
+    // one zoom HIGHER than the display zoom; without this the detail layer asks
+    // for one level past the provider's ceiling (bm.maxNative — Esri z19, USGS z16),
+    // which both providers answer with the gray "Map data not yet available"
+    // placeholder as HTTP 200. Capping the native fetch at the ceiling makes it
+    // upscale the deepest real imagery instead. Per-source via bm.maxNative. (B182/B220)
+    const detailMaxNative = L.Browser.retina ? bm.maxNative - 1 : bm.maxNative;
+    const addDetail = () => {
+      // bail if the map went away, detail's already added, or the aerial was toggled
+      // off / switched source during the wait (THIS backfill instance is gone then —
+      // an identity check, so a stale timer can't build a layer for the old source).
+      if (!geoMapRef.current || geoBaseRef.current || geoBackfillRef.current !== bf) return;
+      const t = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: bm.attr, keepBuffer: 4 }));
+      t.on("tileload", () => { if (geoBaseRef.current === t) setBasemapStatus("loaded"); });
+      t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
+    };
+    bf.once("load", addDetail);
+    setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires
+  }, [basemapSrc, basemapOn, origin]);
 
   /* keep the basemap sized when the canvas resizes or the planner is shown */
   useEffect(() => {
@@ -1977,6 +2092,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B672 — instructions from remote rows that arrived MID-GESTURE (busyRef): buffered here and
   // drained at the next reconcile/flush so a remote apply never yanks the canvas mid-drag.
   const pendingRemoteRef = useRef([]);
+  // A parcel is geometry — a "husk" row whose data has no usable points array must never reach
+  // the canvas (unrenderable + crashes acreage math). Keeping it OUT of local state while the
+  // engine's shadow still has the row makes the next reconcile diff tombstone it in the cloud —
+  // the husk heals into a proper delete instead of poisoning every reader (husk-parcel crash).
+  const isHuskParcel = (kind, el) => kind === "parcel" && !(el && Array.isArray(el.points) && el.points.length);
   // Put one applyRemoteRow instruction onto the canvas. The engine already updated its shadow, so
   // the autosave-effect diff that this setState triggers sees the element as unchanged (no echo
   // commit). Insertion respects the collection's z (byZ reads z, not array position).
@@ -1985,7 +2105,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[instr.kind];
     if (!setter) return;
     if (instr.action === "remove") setter((a) => a.filter((x) => x.id !== instr.id));
-    else if (instr.action === "upsert") setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+    else if (instr.action === "upsert") {
+      if (isHuskParcel(instr.kind, instr.el)) return;
+      setter((a) => (a.some((x) => x.id === instr.id) ? a.map((x) => (x.id === instr.id ? instr.el : x)) : [...a, instr.el]));
+    }
   };
   const drainRemote = () => {
     if (!pendingRemoteRef.current.length) return;
@@ -2030,7 +2153,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
     const next = {
       els: sub("el", model.els), markups: sub("markup", model.markups), measures: sub("measure", model.measures),
-      callouts: sub("callout", model.callouts), parcels: sub("parcel", model.parcels),
+      callouts: sub("callout", model.callouts),
+      // husk parcels (no points) stay off the canvas AND out of the reconcile input: the diff
+      // below then sees them absent vs the seeded shadow and tombstones the bad rows in the
+      // cloud — the husk heals into a proper delete (B690 root-cause leg; see isHuskParcel).
+      parcels: sub("parcel", model.parcels).filter((pc) => !isHuskParcel("parcel", pc)),
     };
     const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
     replace(setEls, next.els); replace(setMarkups, next.markups); replace(setMeasures, next.measures);
@@ -2315,8 +2442,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
     if (!layerId) return;
     setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
-    if (wantOn) { setBasemapOn(true); frameToActiveParcels(); }
-  }, [setOverlays, frameToActiveParcels]);
+    if (wantOn) { ensureBasemapOn(); frameToActiveParcels(); }
+  }, [setOverlays, frameToActiveParcels, ensureBasemapOn]);
 
   // Auto-select the single restored parcel so its handles are ready to use.
   useEffect(() => {
@@ -5561,9 +5688,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const drainCentroid = drainActive.length
     ? drainActive.flatMap((p) => p.points).reduce((s, pt, _i, arr) => [s[0] + pt.x / arr.length, s[1] + pt.y / arr.length], [0, 0])
     : [0, 0];
+  // B712: the fill/pond elements DEFINE the flood-fetch envelope + the mitigation
+  // footprints, so their coarse envelope joins the signature — fill drawn or dragged
+  // beyond the checked envelope must surface the "re-check" hint, never screen
+  // against never-fetched flood zones as a silent all-clear.
+  const drainElsSig = (() => {
+    let n = 0, minX = 0, minY = 0, maxX = 0, maxY = 0, first = true;
+    for (const e of els) {
+      if (!FM_FILL_TYPES.has(e.type) && e.type !== "pond") continue;
+      let r; try { r = ringOf(e); } catch (_) { continue; }
+      if (!r || r.length < 3) continue;
+      n++;
+      for (const pt of r) {
+        if (first) { minX = maxX = pt.x; minY = maxY = pt.y; first = false; continue; }
+        if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
+        if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+      }
+    }
+    return n + "@" + [minX, minY, maxX, maxY].map((v) => Math.round(v / 50)).join(",");
+  })();
   const drainSigNow = drainActive.length + ":" + Math.round(siteSqft) + ":" +
     Math.round(drainCentroid[0] / 50) + "," + Math.round(drainCentroid[1] / 50) + ":" +
-    (origin ? `${origin.lat.toFixed(4)},${origin.lon.toFixed(4)}` : "nogeo");
+    (origin ? `${origin.lat.toFixed(4)},${origin.lon.toFixed(4)}` : "nogeo") + ":" + drainElsSig;
   const checkDrainage = async () => {
     if (!origin) { setDrainCtx((prev) => ({ error: "This plan isn't georeferenced — bring the parcel in from the map first.", prev: prev?.ctx ? prev : prev?.prev })); return; }
     const act = parcels.filter((p) => p.active !== false && p.points && p.points.length >= 3);
@@ -5585,9 +5731,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const vals = (elev || []).filter((v) => v != null && isFinite(v)).sort((a, b) => a - b);
         return vals.length ? vals[Math.floor(vals.length / 2)] : null;
       };
-      const ctx = await resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround });
+      // B707/B712: the NFHL polygon pull rides this same explicit click (house
+      // rule: never auto-fetch on an edit), the B96 SWR cache, and the same
+      // drainSigNow staleness clock. Envelope = active parcels + the drawn
+      // fill/pond elements (fill can sit outside a parcel), padded so an
+      // edge-touching zone isn't clipped. Zones convert to site feet ONCE here
+      // (origin is stable per check; an origin change flips the sig).
+      const bboxPts = [];
+      for (const p of act) for (const pt of p.points) bboxPts.push(pt);
+      for (const e of els) {
+        if (!FM_FILL_TYPES.has(e.type) && e.type !== "pond") continue;
+        try { const r = ringOf(e); if (r && r.length >= 3) for (const pt of r) bboxPts.push(pt); } catch (_) { /* a road mid-edit can lack corners */ }
+      }
+      let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
+      for (const pt of bboxPts) { if (pt.x < mnX) mnX = pt.x; if (pt.x > mxX) mxX = pt.x; if (pt.y < mnY) mnY = pt.y; if (pt.y > mxY) mxY = pt.y; }
+      const llA = feetToLatLng({ x: mnX, y: mnY }, origin.lat, origin.lon);
+      const llB = feetToLatLng({ x: mxX, y: mxY }, origin.lat, origin.lon);
+      const fmBbox = isFinite(mnX) ? floodGeoBbox([[[llA[1], llA[0]], [llB[1], llB[0]]]]) : null;
+      // Failure isolation (the channel-state pattern): a flood-geometry outage
+      // must never nuke the whole drainage check — it reads "failed" (an honest
+      // UNKNOWN downstream), never a fabricated all-clear.
+      const floodGeoP = fmBbox
+        ? fetchCached(VECTOR_SOURCES.fema, fmBbox, { cache: gisCache })
+            .then((r) => ({
+              zones: zonesFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }),
+              ts: r.ts ?? null,
+              truncated: !!(r.data && r.data.truncated),
+              state: "loaded",
+            }))
+            .catch(() => ({ zones: [], ts: null, truncated: false, state: "failed" }))
+        : Promise.resolve({ zones: [], ts: null, truncated: false, state: "empty" });
+      const [ctx, floodGeo] = await Promise.all([
+        resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
+        floodGeoP,
+      ]);
       if (tok !== drainTok.current) return;
-      setDrainCtx({ ctx, sig, multiParcel: act.length > 1 });
+      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1 });
     } catch (e) {
       if (tok === drainTok.current) setDrainCtx((prev) => ({ error: String((e && e.message) || e), prev: prev?.prev }));
     }
@@ -5627,26 +5806,129 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const outfallNote = detRegime && detRegime.regime === "A"
     ? screenOutfall({ channel: drainCtxData.channel, ditch: xsecOnChannel ? xsec.stats : null, siteGradeFt: drainCtxData.groundElevFt })
     : null;
-  // Regime B: the permanent pool below the static water surface stores nothing, so the
-  // required-vs-provided comparison must credit only USABLE volume — otherwise a green
-  // "Surplus" can show while the site is actually short (and it'd contradict the pond
-  // auto-size button in the same render).
-  let siteDeadCf = 0;
-  if (detRegime && detRegime.regime === "B") {
-    for (const e of els) {
-      if (e.type !== "pond") continue;
-      const det = e.det || {}, dep = det.depth ?? 8, fb = det.freeboard ?? 1, sl = det.slope ?? 3;
-      const pool = deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: dep, freeboardFt: fb });
-      if (pool) siteDeadCf += detentionStorage(ringOf(e), dep, dep - pool, sl).vol;
-    }
+  // Per-pond usable split (B708). usablePondVolume is the ONE shared helper for
+  // this metrics loop, the pond auto-size solver, and the per-pond card — so a
+  // green "Surplus" can never contradict the solver in the same render. Anchored
+  // ponds (det.tobElev + a known flood WSE / pool) split at their REAL water
+  // surfaces; unanchored ponds keep the Regime-B site-level pool estimate; an
+  // anchored pond whose ctx elevations are missing FALLS BACK to the estimate —
+  // never a silent zero-dead. (Pre-B708 this block was the estimate only.)
+  const fmSettings = settings.floodMitigation || {};
+  const floodGeo = drainCtxData?.floodGeo || null;
+  const fmZones = (floodGeo && floodGeo.zones) || [];
+  const floodJurKey = fmSettings.jurKey
+    || (drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(restored?.county));
+  const fmRule = floodRules[floodJurKey] || floodRules.generic;
+  const fmElev = {
+    padElevFt: Number.isFinite(fmSettings.padFfeFt) ? fmSettings.padFfeFt : null,
+    existGradeFt: Number.isFinite(fmSettings.existGradeFt) ? fmSettings.existGradeFt : (drainCtxData?.groundElevFt ?? null),
+    bfeFt: Number.isFinite(fmSettings.bfeFt) ? fmSettings.bfeFt : null,
+    wse02Ft: Number.isFinite(fmSettings.wse02Ft) ? fmSettings.wse02Ft : null,
+    avgFillDepthFt: Number.isFinite(fmSettings.avgFillDepthFt) ? fmSettings.avgFillDepthFt : null,
+    sources: {
+      existGrade: Number.isFinite(fmSettings.existGradeFt) ? "manual" : (drainCtxData?.groundElevFt != null ? "3dep" : null),
+      padElev: Number.isFinite(fmSettings.padFfeFt) ? "manual" : null,
+    },
+  };
+  const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
+  const pondSplitFor = (e) => {
+    const det = e.det || {};
+    const pring = ringOf(e);
+    const facts = fmZones.length
+      ? pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt }, fmZonesSig)
+      : { wseFt: null, inTrigger: false };
+    const estPool = detRegime && detRegime.regime === "B"
+      ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: det.depth ?? 8, freeboardFt: det.freeboard ?? 1 })
+      : null;
+    return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool }), wseFt: facts.wseFt, inTrigger: facts.inTrigger };
+  };
+  let siteDeadCf = 0, siteMitCandidateCf = 0, pondFullyInundated = false, unanchoredInTrigger = 0, pondExcavationCf = 0;
+  for (const e of els) {
+    if (e.type !== "pond") continue;
+    const ps = pondSplitFor(e);
+    siteDeadCf += ps.deadCf;
+    pondExcavationCf += excavationVolume(ringOf(e), e.det || {});
+    if (ps.mode === "anchored" && ps.bands) {
+      siteMitCandidateCf += ps.bands.mitigationCandidateCf;
+      if (ps.bands.fullyInundated) pondFullyInundated = true;
+    } else if (ps.inTrigger) unanchoredInTrigger++;
   }
   const providedUsableCf = Math.max(0, providedDetCf - siteDeadCf);
+
+  // ---- B707/B712: the floodplain-mitigation ledger — a SEPARATE ledger from
+  // detention; nothing here nets the two (the same acre-foot can't count twice).
+  // Fill footprints = the yield impervious set (or the whole site as pad via the
+  // toggle); the per-element memo keeps this cheap per render.
+  const fmFootprints = (() => {
+    if (!fmZones.length) return [];
+    if (fmSettings.wholeSiteAsPad) return drainActive.map((p) => ({ id: "site:" + p.id, ring: p.points, padElevFt: null }));
+    const list = [];
+    for (const e of els) {
+      if (!FM_FILL_TYPES.has(e.type)) continue;
+      const r = ringOf(e);
+      if (r && r.length >= 3) list.push({ id: e.id, ring: r, padElevFt: Number.isFinite(e.padElevFt) ? e.padElevFt : null });
+    }
+    return list;
+  })();
+  const fmCompute = (rule) => combineMitigation(fmFootprints.map((fp) => mitigationForFootprint(fp, fmZones, rule, fmElev, fmZonesSig)));
+  // A jurisdiction straddle prices EVERY candidate and shows the worst case — never
+  // a silent default (the detReqCandidates discipline).
+  const fmCandidates = !fmSettings.jurKey && !drainAuthorityId && drainCtxData?.authority?.ambiguous?.length
+    ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => {
+        const jk = defaultFloodJurForAuthority(aid);
+        const rule = floodRules[jk] || floodRules.generic;
+        return { jurKey: jk, rule, result: fmCompute(rule) };
+      }).filter((c) => c.result)
+    : null;
+  const fmWorst = fmCandidates && fmCandidates.length ? pickWorstCase(fmCandidates) : null;
+  const fmResult = fmWorst ? fmWorst.result : fmCompute(fmRule);
+
+  // Buildability (B710): FFE / pathway / LOMR-F / §404 screens off the same zones +
+  // WSE inputs. Wetlands presence comes from the Site Analysis screen's own finding
+  // (lifted via onFindings — no new fetch).
+  const fmGoverningBfe = fmZones.reduce((best, z) => (z.staticBfeFt != null && (best == null || z.staticBfeFt > best) ? z.staticBfeFt : best), null) ?? fmElev.bfeFt;
+  const fmBuildingIn1pct = fmZones.length
+    ? els.some((e) => {
+        if (e.type !== "building") return false;
+        const r = ringOf(e);
+        return r && r.length >= 3 && ringInTrigger(r, fmZones, { trigger: "1pct" });
+      })
+    : false;
+  const fmFloodplainPresent = fmZones.some((z) => z.cls === "1pct" || z.cls === "floodway");
+  const fmBuild = floodGeo && floodGeo.state === "loaded"
+    ? assessBuildability({
+        rule: buildRules[floodJurKey] || buildRules.generic,
+        padFfeFt: fmElev.padElevFt,
+        wse1pctFt: fmGoverningBfe,
+        wse02Ft: fmElev.wse02Ft,
+        buildingIn1pct: fmBuildingIn1pct,
+        floodplainPresent: fmFloodplainPresent,
+        wetlandsPresent: analysisWetlands === "present",
+      })
+    : null;
   const drainage = siteSqft > 0 && origin ? {
     status: !drainCtx ? "idle" : drainCtx.busy ? "busy" : drainCtx.error ? "error" : "ready",
     error: drainCtx?.error || null,
     providedCf: providedDetCf, providedUsableCf, deadCf: siteDeadCf, pondCount,
     req: detReq, reqCandidates: detReqCandidates,
     tier: detTier, regime: detRegime, outfall: outfallNote,
+    // B707/B708/B710/B712 — the floodplain-mitigation ledger + pond split + buildability.
+    mitigation: fmResult,
+    mitigationRule: fmRule,
+    mitigationStraddle: fmWorst ? { candidates: fmCandidates, anyUnknown: fmWorst.anyUnknown } : null,
+    mitCandidateCf: siteMitCandidateCf,
+    pondFullyInundated,
+    unanchoredInTrigger,
+    pondExcavationCf,
+    floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length } : null,
+    buildability: fmBuild,
+    floodMit: {
+      settings: fmSettings,
+      jurKey: floodJurKey,
+      rules: floodRules,
+      onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
+      onRuleChange: (jk, patch) => setFloodRules((r) => { const next = { ...r, [jk]: { ...r[jk], ...patch } }; saveFloodplainRules(next); return next; }),
+    },
     watersheds: drainCtxData?.watershedOverlays || [],
     mudDistricts: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "mud"),
     ambiguous: drainCtxData?.authority?.ambiguous || [],
@@ -5701,14 +5983,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const d = JSON.parse(fr.result);
         if (!d || (!Array.isArray(d.parcels) && !Array.isArray(d.els))) throw new Error();
+        // Normalize the import through the model funnel: junk entries (nulls / points-less husk
+        // parcels — the B690 crash class) are dropped, ids/z are ensured, migrations applied —
+        // a hand-edited or stale export can't poison the canvas or the next save.
+        const im = createSiteModel(d);
         ensureIdAbove([
-          ...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id),
-          ...(d.markups || []).map((m) => m.id), ...(d.measures || []).map((m) => m.id),
-          ...(d.callouts || []).map((c) => c.id), ...(d.deletedIds || []),
+          ...im.parcels.map((p) => p.id), ...im.els.map((e) => e.id),
+          ...im.markups.map((m) => m.id), ...im.measures.map((m) => m.id),
+          ...im.callouts.map((c) => c.id), ...im.deletedIds,
         ]); // B591 — seed past all imported ids + tombstones (not just parcels+els)
         pushHistory();
-        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
-        setCallouts(d.callouts || []); setMarkups(d.markups || []); // symmetric with exportJSON (was dropped → data loss / bleed-through)
+        setParcels(im.parcels); setEls(im.els); setMeasures(im.measures);
+        setCallouts(im.callouts); setMarkups(im.markups); // symmetric with exportJSON (was dropped → data loss / bleed-through)
         setSettings((s) => ({ ...s, ...(d.settings || {}), snap: s.snap })); // snap is a global pref, not imported
         setUnderlay(d.underlay || null);
         setSel(null);
@@ -5840,7 +6126,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!q || addrBusy) return;
     if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring a parcel in from the map first." }); return; }
     setAddParcelMenu(false);
-    setBasemapOn(true); setJurInfo(null);
+    ensureBasemapOn(); setJurInfo(null);
     setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
     try {
       const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
@@ -5861,7 +6147,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!origin) return;
     const dropOutline = () => { if (parcelOutlineRef.current) { try { geoMapRef.current?.removeLayer(parcelOutlineRef.current); } catch (_) {} parcelOutlineRef.current = null; } };
     if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); dropOutline(); return; }
-    setBasemapOn(true); // make sure the aerial is on so the lit outlines have context
+    ensureBasemapOn(); // make sure the aerial is on so the lit outlines have context
     let cancelled = false;
     resolveCountyLayer().then((url) => {
       const map = geoMapRef.current;
@@ -6222,7 +6508,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Thin line work + restyle labels to the SAME physical weights the PDF uses, by
     // scaling against a notional letter-landscape plan box (PNG has no paper of its own),
     // so a downloaded PNG looks as crisp/professional as the PDF (NEW-2 / NEW-3).
-    const lp = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: buildingRows().length });
+    const lp = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: buildingRows().length, metricsPairs: printMetricPairs() });
     restyleExportClone(clone, sheetFitScale(w, h, lp.plan.w, lp.plan.h));
     const xml = new XMLSerializer().serializeToString(clone);
     const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
@@ -6260,6 +6546,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // jpegToPdf, and download it. Generating the PDF ourselves is what removes the injected
   // chrome; the page size is declared explicitly (no Letter-on-Tabloid float); paper is
   // forced white (the cream is a screen-only page colour).
+  // B712 (PDF-PARITY): ONE builder for the printed metrics band so the sheet and the
+  // on-screen Yield readout can't drift. Detention/mitigation pairs join only when
+  // the drainage screen has run — and an unpriceable mitigation prints UNKNOWN,
+  // never a silent omission.
+  const printMetricPairs = () => {
+    const pairs = [
+      ["Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac (${f0(siteSqft)} sf)`],
+      ["Building", `${f0(bldg)} sf`],
+      ["Lot coverage", `${f0(cov)}%`],
+      ["FAR (1-story)", f2(far)],
+      ["Car stalls", `${f0(stalls)}${ratio ? ` (${f2(ratio)}/1k sf)` : ""}`],
+      ["Trailer stalls", f0(trailers)],
+      ["Impervious", `${f0(impPct)}%`],
+      ["Detention", `${f0(pondArea)} sf`],
+      ["Open / green", `${f2(open / SQFT_PER_ACRE)} ac`],
+    ];
+    const d = drainage;
+    const reqAcFt = d && d.req && d.req.kind === "point" && d.req.requiredAcFt > 0 ? d.req.requiredAcFt : null;
+    // The sheet carries the SAME cautions the readout shows (PDF-PARITY): an
+    // unanchored in-floodplain pond marks the provided figure, a truncated pull
+    // marks mitigation as a floor, a failed pull prints UNKNOWN, a straddle with
+    // an unknown candidate never prints as a clean definite number.
+    if (reqAcFt != null) {
+      const caution = d.unanchoredInTrigger > 0 ? " ⚠ unanchored pond" : "";
+      pairs.push(["Det. req / prov (usable)", `${f2(reqAcFt)} / ${f2(d.providedUsableCf / 43560)} ac-ft${caution}`]);
+    }
+    const mit = d && d.mitigation;
+    const geoFailed = d && d.floodGeo && d.floodGeo.state === "failed";
+    if (geoFailed) {
+      pairs.push(["Floodplain mitigation", "UNKNOWN (source unavailable)"]);
+    } else if (mit && mit.intersectAcres > 0) {
+      let v = mit.volumeCf != null ? `${f2(mit.volumeAcFt)} ac-ft` : "UNKNOWN";
+      if (mit.volumeCf != null && d.floodGeo && d.floodGeo.truncated) v += " (floor — capped pull)";
+      if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
+      pairs.push(["Floodplain mitigation", v]);
+      if (reqAcFt != null && mit.volumeCf != null) pairs.push(["Combined basin", `${f2(reqAcFt + mit.volumeAcFt)} ac-ft`]);
+    }
+    return pairs;
+  };
   const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
@@ -6276,7 +6601,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the layout's plan box (it keeps its own viewBox); the title block, buildings table
       // (B197) and metrics live in the SAME outer SVG coordinate system.
       const rows = buildingRows();
-      const layout = printSheetLayout({ paper, orient, buildingCount: rows.length });
+      const metricPairs = printMetricPairs();
+      const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsPairs: metricPairs });
       // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
       // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
       // is identical regardless of the zoom the user was at when they hit print.
@@ -6286,23 +6612,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       plan.setAttribute("width", layout.plan.w); plan.setAttribute("height", layout.plan.h);
       plan.setAttribute("preserveAspectRatio", "xMidYMid meet");
       const planSvg = new XMLSerializer().serializeToString(plan);
-      const metricPairs = [
-        ["Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac (${f0(siteSqft)} sf)`],
-        ["Building", `${f0(bldg)} sf`],
-        ["Lot coverage", `${f0(cov)}%`],
-        ["FAR (1-story)", f2(far)],
-        ["Car stalls", `${f0(stalls)}${ratio ? ` (${f2(ratio)}/1k sf)` : ""}`],
-        ["Trailer stalls", f0(trailers)],
-        ["Impervious", `${f0(impPct)}%`],
-        ["Detention", `${f0(pondArea)} sf`],
-        ["Open / green", `${f2(open / SQFT_PER_ACRE)} ac`],
-      ];
       const sheetSvg = buildPrintSheetSvg({
         layout, planSvg,
         title: siteLabel, sub: planLabel,
         date: formatDateStamp(),
         metrics: metricPairs,
-        note: "Concept site plan — planning-level estimates, not a survey.",
+        note: drainage && drainage.mitigation && drainage.mitigation.intersectAcres > 0
+          ? "Concept site plan — planning-level estimates, not a survey. Detention & floodplain-mitigation volumes are screening figures — confirm with your engineer and the reviewing authority."
+          : "Concept site plan — planning-level estimates, not a survey.",
         buildings: rows.map((r) => ({ name: r.name, sf: r.sf, clearHeight: r.clearHeight.value, slab: r.slab.value })),
         pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
       });
@@ -6344,7 +6661,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // exist — the right-hand buildings-table column. So the frame the owner draws is
   // exactly what fills the printed plan area (WYSIWYG), computed from the same layout
   // the print routine uses.
-  const printAspect = () => { const L = printSheetLayout({ paper: printPaper, orient: printOrient, buildingCount: nBuildings }); return L.plan.w / L.plan.h; };
+  const printAspect = () => { const L = printSheetLayout({ paper: printPaper, orient: printOrient, buildingCount: nBuildings, metricsPairs: printMetricPairs() }); return L.plan.w / L.plan.h; };
   // A frame of the given aspect, centred at cx,cy, that contains a w×h area.
   const fitFrame = (cx, cy, w, h, aspect) => { const wFt = Math.max(w, h * aspect, 40); return { cx, cy, wFt, hFt: wFt / aspect }; };
   const enterPrintMode = () => {
@@ -6358,7 +6675,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Re-fit the frame's aspect when paper/orientation changes (keep it around the
   // same coverage). Skip the initial render.
-  const printAspectKey = `${printPaper}:${printOrient}:${nBuildings > 0}`;
+  const printAspectKey = `${printPaper}:${printOrient}:${nBuildings > 0}:${printMetricPairs().length}`;
   const prevAspectKey = useRef(printAspectKey);
   useEffect(() => {
     if (prevAspectKey.current === printAspectKey) return;
@@ -9027,32 +9344,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, display: "flex", gap: 8, alignItems: "flex-start" }}>
           <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
             setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
-          {/* Layers control (located sites) — same shared layers as the map finder */}
-          {origin && (
+          {/* Layers control — same shared layers as the map finder. ALWAYS rendered
+              (B693): an unlocated plan gets the control DISABLED with the plain reason
+              ("place it on the map first"), never a silently-missing / dead control.
+              The aerial toggle itself moved into LayerPanel's Basemap group. */}
+          {(
             <div data-wheelscroll="1" style={{ width: layersOpen ? 226 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
               <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
                 <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
               {layersOpen && (
                 <div style={{ padding: "2px 11px 10px", maxHeight: "62vh", overflowY: "auto" }}>
-                  <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", fontSize: 12.5, color: PAL.ink, paddingBottom: 6, marginBottom: 6, borderBottom: `1px solid ${PAL.panelLine}` }}>
-                    <input type="checkbox" checked={basemapOn} onChange={(e) => setBasemapOn(e.target.checked)} />
-                    <span style={{ flex: 1 }}>Aerial basemap</span>
-                  </label>
-                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage} />
-                  {/* utility-evidence drawing tools */}
+                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage}
+                    basemap={{
+                      value: origin ? basemapSrc : "off",
+                      onChange: setBasemapSrc,
+                      status: basemapStatus,
+                      // Disabled with the reason while unlocated; the control re-enables
+                      // the moment a placement lands (a placement reloads the plan with
+                      // its new origin, and the aerial comes on by default).
+                      disabledReason: origin ? null : "Place this site on the map first (the Map button, top-left) — the aerial needs a real-world location to anchor to.",
+                    }}
+                    gisNote={origin ? null : "GIS layers (flood, wetlands, boundaries, utilities) appear here once the site is placed on the map."} />
+                  {/* utility-evidence drawing tools (map-dependent — a located site only).
+                      Active states ride the theme tokens (accent + on-accent), never raw
+                      hexes — the B341/B508 chrome-region rule (B696 sweep). */}
+                  {origin && (
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
                     <button onClick={() => { setTracePts([]); setTraceMode((m) => !m); }} title="Click along a visible pole line on the aerial; double-click or Enter to finish"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "#b45309" : PAL.panelLine}`, background: traceMode ? "#b45309" : "var(--surface-raised)", color: traceMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "var(--accent)" : PAL.panelLine}`, background: traceMode ? "var(--accent)" : "var(--surface-raised)", color: traceMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       {traceMode ? "✏ Tracing… (Esc / dbl-click to finish)" : "✏ Trace overhead electric"}
                     </button>
                     <button onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "#b45309" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "#b45309" : "var(--surface-raised)", color: routeMode?.util === "elec" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "var(--accent)" : "var(--surface-raised)", color: routeMode?.util === "elec" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       ⚡ Route electric service
                     </button>
                     <button onClick={startWaterRoute} title="Route water service from a main to a building, easement width from the jurisdiction rule below"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "#0891b2" : PAL.panelLine}`, background: routeMode?.util === "water" ? "#0891b2" : "var(--surface-raised)", color: routeMode?.util === "water" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "water" ? "var(--accent)" : "var(--surface-raised)", color: routeMode?.util === "water" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       🚰 Route water service
                     </button>
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
@@ -9061,7 +9390,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </button>
                     <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
                       title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "#0e7490" : PAL.panelLine}`, background: xsecMode ? "#0e7490" : "var(--surface-raised)", color: xsecMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "var(--accent)" : PAL.panelLine}`, background: xsecMode ? "var(--accent)" : "var(--surface-raised)", color: xsecMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       {xsecMode ? "📏 Click both banks… (Esc to cancel)" : "📏 Cross-section (ditch)"}
                     </button>
                     {/* per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) */}
@@ -9082,7 +9411,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <span style={{ fontSize: 11, color: PAL.muted }}>Water easement</span>
                             <NumInput style={{ ...numInput, width: 52 }} value={rule.waterWidth} min={1} onCommit={(n) => setRule(jurKey, { waterWidth: n })} /> <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
                             <span style={{ flex: 1 }} />
-                            <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "#15803d" : "#b45309", cursor: "pointer", fontWeight: 600 }}>
+                            <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "var(--accent)" : "var(--warn-text)", cursor: "pointer", fontWeight: 600 }}>
                               <input type="checkbox" checked={rule.verified} onChange={(e) => setRule(jurKey, { verified: e.target.checked })} /> {rule.verified ? "verified" : "VERIFY"}
                             </label>
                           </div>
@@ -9095,6 +9424,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       🛰 AI corridor scan — coming soon
                     </button>
                   </div>
+                  )}
                   <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 6 }}>Layers sit beneath your drawing and stay locked to the plan as you pan and zoom.</div>
                 </div>
               )}
@@ -9335,14 +9665,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               lat/long (the coordinate Google Earth / a phone GPS uses), reprojected from the
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
               EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
-          {cursor && origin && (() => {
-            const [la, ln] = feetToLatLng(cursor, origin.lat, origin.lon);
-            return (
-              <div style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums" }}>
-                {la.toFixed(6)}°,&nbsp;{ln.toFixed(6)}°
-              </div>
-            );
-          })()}
+          {cursorLL && (
+            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums" }}>
+              {cursorLL.lat.toFixed(6)}°,&nbsp;{cursorLL.lng.toFixed(6)}°
+              {cursorElFt != null && <span data-ground-el> · El ≈ {cursorElFt.toFixed(1)} ft NAVD88</span>}
+            </div>
+          )}
         </div>
 
         {/* phone-only floating button to summon the tool rail (B113) */}
@@ -10235,6 +10563,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {det.availDepth != null && (
                       <div style={{ fontSize: 10.5, color: PAL.info, marginTop: 2, lineHeight: 1.4 }}>LiDAR available depth ≈ {f1(det.availDepth)}′ (screening only).</div>
                     )}
+                    {/* B708 — NAVD88 anchors (manual v1; named LiDAR/HCFCD flowline hooks —
+                        the det.availDepth precedent). null-discipline: never undefined. */}
+                    {det.contours === false && (
+                      <Field label="Top-of-bank elev. (ft)">
+                        <NumInput style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
+                      </Field>
+                    )}
+                    <Field label="Permanent pool elev. (ft)">
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput style={{ ...numInput, width: 64 }} value={det.poolElev ?? ""} placeholder="dry bottom" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
+                        {det.poolElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — dry-bottom basin" onClick={() => setDet({ poolElev: null })}>Clear</button>}
+                      </span>
+                    </Field>
+                    <Field label="Receiving flowline elev. (ft)">
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
+                        {det.receivingFlowlineElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear" onClick={() => setDet({ receivingFlowlineElev: null })}>Clear</button>}
+                      </span>
+                    </Field>
+                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
+                      Elevations are feet NAVD88 — older documents may cite NGVD29; convert before entering (Houston subsidence makes mixed datums a multi-foot silent error). Screening only.
+                    </div>
                     <div style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
                       {pondRow("Top-of-bank area", `${f0(r.aTop)} sf`)}
                       {pondRow("Water-surface area", `${f0(r.aWater)} sf`)}
@@ -10250,6 +10600,66 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         ⚠ This footprint can't hold an {f1(depth)}′ pond at {slope}:1 side slopes — the opposing slopes meet at about {f1(r.maxDepth)}′ deep. The volume above is for that {f1(r.maxDepth)}′ basin. Reduce the depth, flatten the side slope, or enlarge the footprint.
                       </div>
                     )}
+                    {/* B708/B709 — the anchored flood-WSE split, criteria conformance, the
+                        maintenance-berm land take, and the drawdown / berm-as-fill screens.
+                        Salience tracks importance: flags are loud + solid, never faded. */}
+                    {(() => {
+                      const split = pondSplitFor(selEl);
+                      const critRule = pondCriteria[floodJurKey] || pondCriteria.generic;
+                      const crit = checkPondCriteria(det, critRule);
+                      const dd = drawdownWarning(det);
+                      const berm = bermAsFillHeight(det, fmElev.existGradeFt);
+                      const bermRingArr = critRule && critRule.maintBermWidthFt > 0 ? offsetOutward(ring, critRule.maintBermWidthFt) : [];
+                      const bermRing = bermRingArr[0] || null;
+                      const landTakeSf = bermRing ? ringsArea([bermRing]) : null;
+                      const bermOverlaps = bermRing
+                        ? els.filter((e2) => e2.id !== selEl.id && ["building", "parking", "trailer"].includes(e2.type) && ringsOverlap(bermRing, ringOf(e2)))
+                        : [];
+                      const warnLine = (txt, key, danger) => (
+                        <div key={key} style={{ fontSize: 10.5, color: danger ? PAL.danger : "var(--warn-text)", lineHeight: 1.45, marginTop: 4, fontWeight: 700 }}>{txt}</div>
+                      );
+                      const noteLine = (txt, key) => (
+                        <div key={key} style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 3 }}>{txt}</div>
+                      );
+                      const out = [];
+                      if (split.mode === "anchored" && split.bands && split.wseFt != null) {
+                        out.push(
+                          <div key="split" style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
+                            {pondRow("Usable detention (above flood WSE)", `${f2(split.usableCf / 43560)} ac-ft`)}
+                            {pondRow("Below flood WSE", `${f2(split.bands.mitigationCandidateCf / 43560)} ac-ft`)}
+                            {split.bands.poolDeadCf > 0 && pondRow("Permanent pool (dead)", `${f2(split.bands.poolDeadCf / 43560)} ac-ft`)}
+                          </div>
+                        );
+                        out.push(noteLine(`Flood WSE ${f1(split.wseFt)}′ NAVD88. Below the WSE earns no detention credit (the flood already occupies it) — it is candidate compensating storage; hydraulic connection + stage distribution: engineer confirms.`, "split-note"));
+                        if (split.bands.fullyInundated) out.push(warnLine("⚠ The flood WSE is at or above this pond's top of bank — the basin is fully inundated in the design flood; usable detention is ZERO.", "inund", true));
+                      } else if (split.mode === "anchored" && split.bands && split.bands.poolDeadCf > 0) {
+                        out.push(noteLine(`Permanent pool below ${f1(det.poolElev)}′ holds ${f2(split.bands.poolDeadCf / 43560)} ac-ft of dead storage (no detention credit). Groundwater can hold a wet bottom near mapped channels.`, "pool-note"));
+                      } else if (split.inTrigger) {
+                        out.push(warnLine(det.tobElev != null
+                          ? "⚠ This pond sits in the mapped floodplain and its top of bank is anchored, but the reach's flood elevation is unknown — enter the BFE (drainage inputs in Yield) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention."
+                          : "⚠ This pond sits in the mapped floodplain but isn't anchored — set the pond's top-of-bank elevation (and the reach's flood elevation) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention.", "unanchored", false));
+                      }
+                      if (split.inTrigger) {
+                        out.push(noteLine("Cut outside or above the trigger floodplain earns no screening mitigation credit — compensating storage must be hydraulically connected at flood stages.", "credit-loc"));
+                      }
+                      if (crit.slope) out.push(warnLine(`⚠ ${crit.slope.slope}:1 interior side slopes are steeper than the ${crit.slope.maxSideSlope}:1 criteria cap (${critRule.label}).`, "crit-slope", false));
+                      if (crit.freeboard) out.push(warnLine(`⚠ ${f1(crit.freeboard.freeboard)}′ freeboard is under the ${f1(crit.freeboard.minFreeboardFt)}′ criteria minimum (${critRule.label}).`, "crit-fb", false));
+                      if (landTakeSf != null) {
+                        out.push(noteLine(`Pond land take incl. the ${critRule.maintBermWidthFt}′ maintenance berm: ${f2(landTakeSf / SQFT_PER_ACRE)} ac (water footprint ${f2(polyArea(ring) / SQFT_PER_ACRE)} ac).`, "landtake"));
+                        if (bermOverlaps.length) out.push(warnLine(`⚠ The maintenance-berm ring overlaps ${bermOverlaps.length === 1 ? `a ${TYPE[bermOverlaps[0].type].label.toLowerCase()}` : `${bermOverlaps.length} other elements`} — the criteria shelf runs into your layout.`, "berm-overlap", false));
+                      }
+                      if ((crit.slope || crit.freeboard || landTakeSf != null) && critRule && critRule.verified === false) {
+                        out.push(noteLine("Criteria values are unverified placeholders — edit & confirm in settings against the PCPM / county DCM.", "crit-unv"));
+                      }
+                      if (dd) out.push(warnLine(`⚠ Gravity drawdown unlikely below ${f1(dd.flowlineElev)}′ — the pond bottom sits ${f1(dd.belowByFt)}′ below the receiving flowline. Pump station or a shallower basin (≤ ${f1(dd.suggestedMaxDepthFt)}′ deep).`, "drawdown", false));
+                      if (berm != null) {
+                        out.push(warnLine(`⚠ Bermed basin — the top of bank sits ${f1(berm)}′ above existing grade. The berm itself is fill${split.inTrigger ? " requiring mitigation" : ""} and may block conveyance.`, "berm-fill", false));
+                      }
+                      if (split.inTrigger) {
+                        out.push(noteLine("Floodway note: fill/structures in the regulatory floodway are prohibited outright; pond CUT in the floodway can be permissible with a no-rise review — informational, never a green light.", "fw-note"));
+                      }
+                      return out.length ? <>{out}</> : null;
+                    })()}
                     {/* B655 — per-pond required-vs-provided screening card. Editable inputs feed the
                         Modified Rational (rate-based) method in detentionRules.js; the authority
                         site total (detReq) is shown for reference. A pumped outfall credits its
@@ -10265,7 +10675,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const pumpCfs = pumpRaw == null ? null : pumpUnit === "gpm" ? pumpRaw / 448.831 : pumpRaw;
                       const rateReq = computeRateBasedDetention({ acres: da, impPct: imp, allowableReleaseCfs: rel, returnPeriodYr: storm });
                       const credit = pumped ? computePumpedCredit({ acres: da, impPct: imp, gravityReleaseCfs: rel ?? 0, pumpRateCfs: pumpCfs, returnPeriodYr: storm }) : null;
-                      const providedAcFt = r.vol / 43560;
+                      // B708: the card credits USABLE volume via the ONE shared split helper —
+                      // the same number the site rollup and the auto-size solver use, so the
+                      // three can never disagree. Gross only when nothing splits it.
+                      const cardSplit = pondSplitFor(selEl);
+                      const providedAcFt = cardSplit.usableCf / 43560;
                       // The pond delta uses the RESPONSIVE rate-based number (pumped-adjusted); the
                       // authority site total is a reference badge. Null when no release rate yet.
                       const reqAcFt = credit && credit.requiredWithPumpAcFt != null ? credit.requiredWithPumpAcFt
@@ -10315,7 +10729,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             </Field>
                           )}
                           <div style={{ marginTop: 7, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
-                            {pondRow("Provided (this pond)", `${f2(providedAcFt)} ac-ft`)}
+                            {pondRow(cardSplit.deadCf > 0 ? "Provided (this pond, usable)" : "Provided (this pond)", `${f2(providedAcFt)} ac-ft`)}
+                            {cardSplit.deadCf > 0 && (
+                              <div style={{ ...smallNote, color: PAL.warn }}>
+                                {f2(cardSplit.deadCf / 43560)} ac-ft below the {cardSplit.mode === "anchored" ? "flood WSE / permanent pool" : "estimated permanent pool (Regime B)"} earns no detention credit.
+                              </div>
+                            )}
                             {rateReq.kind === "rate-based"
                               ? pondRow(`Required · ${storm}-yr rate-based`, `${f2(rateReq.requiredAcFt)} ac-ft`)
                               : <div style={{ ...smallNote, color: PAL.warn }}>Enter an allowable release rate to screen the required volume.</div>}
@@ -10361,9 +10780,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           const poolDepthFt = regimeB
                             ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: depth, freeboardFt: fb })
                             : 0;
-                          const deadOf = (g, dep, poolFt) => (poolFt ? detentionStorage(g, dep, dep - poolFt, slope).vol : 0);
-                          const thisDeadCf = regimeB && poolDepthFt ? deadOf(ring, depth, poolDepthFt) : 0;
-                          const thisUsableCf = r.vol - thisDeadCf;
+                          // B708: current usable via the ONE shared helper (anchored split when
+                          // the pond carries a real WSE; the Regime-B estimate otherwise) — the
+                          // same number the metrics loop and the B655 card show.
+                          const thisSplit = pondSplitFor(selEl);
+                          const anchoredThis = thisSplit.mode === "anchored";
+                          const thisDeadCf = thisSplit.deadCf;
+                          const thisUsableCf = thisSplit.usableCf;
                           // Target THIS pond's usable so the SITE meets required: other ponds'
                           // usable is the site total minus this pond's current usable.
                           const otherUsableCf = Math.max(0, providedUsableCf - thisUsableCf);
@@ -10373,7 +10796,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           const authDefaults = drainAuthorityId ? pondDefaultsFor(drainAuthorityId) : null;
                           const defaultsDiffer = authDefaults && (authDefaults.sideSlope !== slope || authDefaults.freeboardFt !== fb);
                           const sizeForRequired = () => {
-                            if (regimeB && poolDepthFt == null) {
+                            // An ANCHORED pond needs no estimated pool — its split is real.
+                            if (!anchoredThis && regimeB && poolDepthFt == null) {
                               flashWarn("In this floodplain the permanent-pool depth can't be established (missing BFE or ground elevation) — refusing to size against an unknown usable volume.", 7500);
                               return;
                             }
@@ -10390,7 +10814,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             const volumeAt = (N) => {
                               const gr = grossAt(N);
                               if (!gr) return null;
-                              return { ...gr.res, vol: gr.res.vol - deadOf(gr.g, depth, poolDepthFt) };
+                              // Same shared split at the CANDIDATE footprint: anchored ponds keep
+                              // their real WSE (screening: the current reach's governing WSE), the
+                              // rest subtract the Regime-B pool that grows with the footprint.
+                              const u = usablePondVolume(gr.g, { ...det, depth, freeboard: fb, slope }, { wseFt: thisSplit.wseFt, estimatePoolDepthFt: poolDepthFt });
+                              return { ...gr.res, vol: u.usableCf };
                             };
                             const s = solvePondExpansion({ requiredCf: targetUsableCf, volumeAt });
                             if (s.ok) {
@@ -10406,7 +10834,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               // Depth fallback: as you dig deeper the floor drops below the fixed
                               // water surface, so the permanent pool grows with depth too.
                               const poolAt = (dd) => (regimeB ? Math.max(0, Math.min(detRegime.elevations.bfeFt - (detRegime.elevations.groundFt - dd), dd - fb)) : 0);
-                              const usableAtDepth = (dd) => { const g = detentionStorage(ring, dd, fb, slope); return { ...g, vol: g.vol - deadOf(ring, dd, poolAt(dd)) }; };
+                              const usableAtDepth = (dd) => {
+                                const g = detentionStorage(ring, dd, fb, slope);
+                                const u = usablePondVolume(ring, { ...det, depth: dd, freeboard: fb, slope }, { wseFt: thisSplit.wseFt, estimatePoolDepthFt: poolAt(dd) });
+                                return { ...g, vol: u.usableCf };
+                              };
                               const dAlt = solvePondDepth({ requiredCf: targetUsableCf, volumeAtDepth: usableAtDepth, startDepthFt: depth });
                               flashWarn(
                                 s.reason === "geometry-failed"
@@ -10766,8 +11198,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
                 const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
                 const acres = act.reduce((s, p) => s + polyArea(p.points), 0) / SQFT_PER_ACRE;
-                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
-                  isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} />;
+                return (
+                  <>
+                    <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
+                      isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus}
+                      onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
+                    {/* B712 — the floodplain mitigation & buildability card. A SIBLING card,
+                        deliberately NOT injected into the auto-refreshing flood finding above:
+                        this data is button-gated (the drainage check) with its own staleness
+                        clock — two freshness models in one card would lie about data age. */}
+                    <FloodMitigationCard drainage={drainage} PAL={PAL} onCheck={drainage?.onCheck} />
+                  </>
+                );
               })()}
             </Section>
           )}
@@ -10788,7 +11230,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
                   {/* Identify from county GIS — the headline path (needs a georeferenced frame). */}
                   {origin ? (
-                    <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); setBasemapOn(true); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
+                    <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
                       <div style={{ fontWeight: 650 }}>🔍 Identify from county GIS</div>
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>County parcel lines light up on the aerial — click lots to add them (one or many).</div>
                     </button>
@@ -11151,6 +11593,51 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {cost.total != null && metricRow("Subtotal", usd(cost.total), "priced lines")}
                 <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
                   Paving is face-of-curb to face-of-curb (curb excluded); curb-&amp;-gutter trims the gutter pan from paving. Screening — verify against bids.
+                </div>
+              </Section>
+            );
+          })()}
+          {(() => {
+            // B712 — earthwork cost lines: the floodplain-mitigation CUT + pond
+            // excavation, in CY, priced ONLY by the user (the road-cost pattern —
+            // never a hardcoded rate). An unchecked drainage screen renders an
+            // explicit not-checked state; an un-priceable mitigation volume renders
+            // UNKNOWN — NEVER a silent 0 CY in a priced takeoff.
+            const prices = settings.prices || {};
+            const pondCy = pondExcavationCf / 27;
+            const drainageChecked = !!drainCtxData;
+            const mitKnown = fmResult && fmResult.volumeCf != null;
+            const mitCy = mitKnown ? fmResult.cutCy : null;
+            const fmGeoFailed = drainageChecked && drainCtxData?.floodGeo?.state === "failed";
+            const mitRelevant = drainageChecked && ((fmResult && fmResult.intersectAcres > 0) || fmGeoFailed);
+            if (!(pondCy > 0) && !mitRelevant) return null;
+            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
+            const pEarthRaw = prices.earthworkCy;
+            const pEarth = pEarthRaw == null || pEarthRaw === "" ? null : Number.isFinite(+pEarthRaw) && +pEarthRaw >= 0 ? +pEarthRaw : null;
+            const setPrice = (k, v) => setSettings((sx) => ({ ...sx, prices: { ...(sx.prices || {}), [k]: v } }));
+            const pricedCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0);
+            return (
+              <Section title="Earthwork cost (screening)" accent="#0e7490" collapsed>
+                {pondCy > 0 && metricRow("Pond excavation", `${f0(pondCy)} CY`, pEarth != null ? usd(pondCy * pEarth) : "set $/CY")}
+                {mitRelevant && (mitKnown
+                  ? metricRow("Floodplain mitigation cut", `${f0(mitCy)} CY`, pEarth != null ? usd(mitCy * pEarth) : "set $/CY")
+                  : metricRow("Floodplain mitigation cut", "UNKNOWN", fmGeoFailed ? "flood source unavailable" : "enter elevations"))}
+                {!drainageChecked && (
+                  <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "4px 0 0", fontWeight: 700 }}>
+                    Floodplain mitigation not screened yet — run ⛆ Check drainage criteria; this takeoff is INCOMPLETE until then, not zero.
+                  </div>
+                )}
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
+                <Field label="Excavation / cut">
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
+                    <NumInput style={{ ...numInput, width: 70 }} value={prices.earthworkCy ?? null} min={0} placeholder="—" onCommit={(n) => setPrice("earthworkCy", n)} />
+                    <span style={{ fontSize: 11, color: PAL.muted }}>/CY</span>
+                  </span>
+                </Field>
+                {pEarth != null && pricedCy > 0 && metricRow("Subtotal", usd(pricedCy * pEarth), "priced lines")}
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
+                  Pond excavation is the full basin cut (top of bank → achievable floor). The mitigation cut usually serves as pad borrow — the same dirt raises the pad. Screening quantities; volumes stay separate ledgers.
                 </div>
               </Section>
             );
@@ -12590,7 +13077,39 @@ function YieldPanel({
             if (d.authorityFlags.includes("city-criteria-unverified")) out.push(warnNote("This city's own detention criteria aren't modeled — the county requirement is shown as a screening floor. Verify with the city.", "city-unv"));
             if (d.authorityFlags.includes("jurisdiction-partial")) out.push(warnNote("The city/ETJ lookup was incomplete (an outage) — if this parcel is inside Houston or its ETJ, the reviewing authority would be the City. Re-check.", "jur-partial"));
             out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
-            if (d.deadCf > 0) out.push(keyedNote(`Usable ${f2(usableAcFt)} ac-ft after ${f2(d.deadCf / 43560)} ac-ft permanent pool (Regime B — dead storage below the water table doesn't count).`, "usable"));
+            if (d.deadCf > 0) out.push(keyedNote(`Usable ${f2(usableAcFt)} ac-ft after ${f2(d.deadCf / 43560)} ac-ft below the flood WSE / permanent pool (anchored ponds split at their real water surfaces; the rest use the Regime-B estimate — dead storage earns no credit).`, "usable"));
+            {
+              // B712 — the mitigation ledger joins the readout. ADDITIVE with detention:
+              // the same acre-foot can't count twice, and the copy names which band went
+              // where. Honest states: UNKNOWN volume renders as UNKNOWN with its reason
+              // (geometry still shown), a floodway hit is a hard stop, an unanchored
+              // in-floodplain pond forces the gross-volume caution.
+              const mit = d.mitigation;
+              if (mit && mit.intersectAcres > 0) {
+                if (mit.volumeCf != null) {
+                  out.push(row("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`, mit.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : ""));
+                  if (d.mitigationStraddle && d.mitigationStraddle.anyUnknown) out.push(warnNote("Jurisdiction straddle with an UNKNOWN candidate — the worst PRICED case is shown; the unknown candidate could govern. Enter its elevations.", "mit-straddle-unk"));
+                  if (req && req.kind === "point" && req.requiredAcFt > 0) {
+                    out.push(row("Combined basin volume", `${f2(req.requiredAcFt + mit.volumeAcFt)} ac-ft`));
+                  }
+                  out.push(keyedNote("Volumes are additive; the same acre-foot can't count twice. Mitigation cut must be hydraulically connected at flood stages — detail in Site Analysis → Floodplain mitigation.", "mit-add"));
+                } else {
+                  out.push(row("Floodplain mitigation", "UNKNOWN"));
+                  out.push(warnNote(`Mitigation volume UNKNOWN — ${mit.unknownReason}. The floodplain geometry still stands (${f2(mit.intersectAcres)} ac of fill footprint intersects).`, "mit-unk"));
+                }
+                if (mit.flags.includes("floodway_intersect")) out.push(
+                  <div key="mit-fw" style={{ fontSize: 11, color: Y.dangerText, lineHeight: 1.45, margin: "4px 0 0", fontWeight: 800 }}>
+                    ⚑ FILL IN THE FLOODWAY IS PROHIBITED — {f2(mit.floodwayAcres)} ac of fill footprint sits in the regulatory floodway. Relocate it; no mitigation ratio prices floodway fill.
+                  </div>
+                );
+                if (mit.flags.includes("rule_unverified")) out.push(warnNote("Mitigation rule unverified — edit & confirm in the inputs below.", "mit-unv"));
+                if (d.mitCandidateCf > 0) out.push(keyedNote(`Candidate compensating storage in drawn ponds (below the flood WSE): ${f2(d.mitCandidateCf / 43560)} ac-ft — hydraulic connection + stage distribution: engineer confirms.`, "mit-cand"));
+              }
+              if (d.unanchoredInTrigger > 0) out.push(warnNote(`${d.unanchoredInTrigger} pond${d.unanchoredInTrigger > 1 ? "s" : ""} in the mapped floodplain ${d.unanchoredInTrigger > 1 ? "are" : "is"} not elevation-anchored — the gross volume above OVERSTATES usable detention. Set each pond's top-of-bank elevation.`, "mit-unanch"));
+              if (d.pondFullyInundated) out.push(warnNote("A pond's top of bank sits at/below the flood WSE — fully inundated in the design flood; its usable detention is ZERO.", "mit-inund"));
+              if (d.floodGeo && d.floodGeo.state === "failed") out.push(warnNote("Flood-zone GEOMETRY is unavailable — mitigation can't be screened right now (an outage is never an all-clear). Re-check.", "fmgeo-fail"));
+              if (d.floodGeo && d.floodGeo.truncated) out.push(warnNote("The flood-zone pull hit the feature cap — mitigation figures may UNDERCOUNT; treat them as a floor.", "fmgeo-trunc"));
+            }
             if (req && req.kind === "point" && req.requiredAcFt > 0) {
               const diff = usableAcFt - req.requiredAcFt; // compare USABLE volume (Regime B credits nothing below the pool)
               out.push(
@@ -12626,6 +13145,67 @@ function YieldPanel({
             if (d.channelFailed) out.push(warnNote("HCFCD channel data is unavailable — channel adjacency unknown.", "chanfail"));
             if (d.multiParcel) out.push(keyedNote("Checked against the largest active parcel.", "multi"));
             if (d.stale) out.push(warnNote("Site boundary changed since this check — re-check drainage criteria.", "stale"));
+            // B712 — the mitigation inputs: jurisdiction defaulted from the resolved
+            // drainage authority (stored only on override — the B74 pattern) + the
+            // elevation set. ALL blank by default (the road-cost unit-price pattern);
+            // a blank input reads UNKNOWN downstream, never zero. Inline editors only.
+            if (d.floodMit) {
+              const fm = d.floodMit;
+              const fmRuleRow = fm.rules[fm.jurKey] || fm.rules.generic;
+              const fmInputStyle = { width: 78, padding: "3px 6px", border: `1px solid ${Y.border}`, borderRadius: 6, background: "transparent", color: Y.text, fontSize: 11.5, fontFamily: "inherit", textAlign: "right" };
+              // NumInput never commits a cleared field (it restores the old value), so
+              // every "blank = auto/unknown" input carries an explicit Clear chip — the
+              // expert bypass especially must never be one-way.
+              const fmRow = (label, key, placeholder, title) => (
+                <div key={"fm-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                  <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    {Number.isFinite(fm.settings[key]) && (
+                      <button
+                        type="button"
+                        title="Clear — back to blank (auto / unknown)"
+                        onClick={() => fm.onChange({ [key]: null })}
+                        style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}
+                      >×</button>
+                    )}
+                    <NumInput style={fmInputStyle} value={Number.isFinite(fm.settings[key]) ? fm.settings[key] : ""} placeholder={placeholder || "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null })} />
+                  </span>
+                </div>
+              );
+              out.push(
+                <div key="fm-inputs" style={{ marginTop: 8, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4 }}>Floodplain mitigation inputs (ft NAVD88)</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <span style={{ fontSize: 11, color: Y.muted }}>Jurisdiction</span>
+                    <select value={fm.jurKey} onChange={(e) => fm.onChange({ jurKey: e.target.value })} style={{ ...fmInputStyle, width: 168, textAlign: "left", cursor: "pointer" }}>
+                      {Object.entries(fm.rules).map(([k, r2]) => <option key={k} value={k}>{r2.label}</option>)}
+                    </select>
+                  </div>
+                  {fmRow("Pad / finished floor (FFE)", "padFfeFt", "—", "The plan-level pad elevation; a selected element's own padElevFt overrides it")}
+                  {fmRow("Existing grade", "existGradeFt", "3DEP auto", "Blank = the 3DEP bare-earth median sampled by this drainage check")}
+                  {fmRow("BFE (1% WSE)", "bfeFt", "often needed", "Many AE reaches publish NO static BFE — manual entry is the COMMON path (FIRM panel / effective model)")}
+                  {fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIS / HCFCD", "Not an NFHL attribute — from the FEMA FIS profile or HCFCD model data; hook for MAAPnext grids later")}
+                  {fmRow("Expert: average depth of fill below the flood elevation (ft)", "avgFillDepthFt", "bypass", "Expert bypass: volume = intersect area × this constant depth")}
+                  <label style={{ display: "flex", gap: 7, alignItems: "center", fontSize: 11, color: Y.text, cursor: "pointer", padding: "3px 0" }}>
+                    <input type="checkbox" checked={!!fm.settings.wholeSiteAsPad} onChange={(e) => fm.onChange({ wholeSiteAsPad: e.target.checked || null })} />
+                    Treat the entire site as pad (fill everywhere, not just drawn elements)
+                  </label>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderTop: `1px solid ${Y.hairline}`, marginTop: 3 }}>
+                    <span style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4 }}>
+                      {fmRuleRow.label}: {fmRuleRow.trigger === "1pct_plus_02pct" ? "1% + 0.2%" : "1%"} trigger @
+                      <NumInput style={{ ...fmInputStyle, width: 44, margin: "0 4px" }} value={fmRuleRow.ratio} min={0.01} onCommit={(n) => Number.isFinite(n) && n > 0 && fm.onRuleChange(fm.jurKey, { ratio: n })} />:1
+                    </span>
+                    <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 10.5, color: fmRuleRow.verified ? Y.text : "var(--warn-text)", cursor: "pointer", whiteSpace: "nowrap", fontWeight: 700 }}>
+                      <input type="checkbox" checked={!!fmRuleRow.verified} onChange={(e) => fm.onRuleChange(fm.jurKey, { verified: e.target.checked })} />
+                      verified
+                    </label>
+                  </div>
+                  <div style={{ fontSize: 10, color: Y.muted, lineHeight: 1.45, marginTop: 3 }}>
+                    Feet NAVD88 (convert NGVD29 documents first — mixed datums are a multi-foot silent error). Blank inputs read UNKNOWN, never zero. Jurisdictions may enforce newer model elevations than the effective FIRM — when in doubt, enter the higher. Only tick “verified” after confirming the CURRENT ordinance text.
+                  </div>
+                </div>
+              );
+            }
             out.push(
               <div key="recheck" style={{ marginTop: 5 }}>
                 <button disabled={d.status === "busy"} onClick={d.onCheck} style={{ padding: "3px 9px", border: `1px solid ${Y.border}`, borderRadius: 7, background: "transparent", color: Y.muted, fontSize: 10.5, cursor: d.status === "busy" ? "default" : "pointer" }}>↻ Re-check</button>

@@ -186,7 +186,9 @@ function siteFixture() {
       status: "active",
       county: "Harris",
       updatedAt: 1783000000000, // fixed epoch — keep the fixture byte-deterministic (no Date.now())
-      parcels: [{ id: "e2e-parcel-1", ring: ring(1320, 1320), active: true }],
+      // `points` is the parcel schema's geometry field (a `ring:` typo here used to ship a
+      // points-less husk parcel that the model funnel now drops — caught by the sanitize fix).
+      parcels: [{ id: "e2e-parcel-1", points: ring(1320, 1320), active: true }],
       els,
       markups,
       measures,

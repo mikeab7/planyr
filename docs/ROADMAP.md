@@ -15,7 +15,8 @@ Two parallel tracks now.
    **B642**; the flowline/design-tailwater sourcing half is **B641** in the backlog
    Later/Roadmap, its LiDAR-screening slice already shipped. Code/tests/branch keep the
    provisional B629–B635 labels — see the B636 note in BACKLOG-DONE.md)*, then sanitary sewer,
-   fire flow, finished-floor-vs-base-flood, environmental screen (TCEQ LPST / EPA),
+   fire flow, finished-floor-vs-base-flood *(filed 2026-07-07 as **B710**, part of the
+   floodplain-mitigation suite B707–B712 — see BACKLOG.md)*, environmental screen (TCEQ LPST / EPA),
    entitlement/zoning status.
 3. Tier 2: earthwork / cut-fill, soils.
 4. Tier 3: swept-path, driveway access.

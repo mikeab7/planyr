@@ -137,6 +137,18 @@ export default function Library({
   const onRowsChange = useCallback((rows) => setFolderRows(rows), []);
   const onFolderCounts = useCallback((counts) => setFolderCounts(counts), []);
 
+  // Folder-row drops (B699): the tree's rows hand a raw drop event across to FileBrowser's
+  // ingest pipeline through this ref (FileBrowser registers its handler on mount), and the
+  // hovered-folder label rides state so the drop overlay pill can name the real target.
+  const treeDropRef = useRef(null);
+  const registerTreeDrop = useCallback((fn) => { treeDropRef.current = fn; }, []);
+  const onTreeFileDrop = useCallback((folderId, e) => { treeDropRef.current?.(folderId, e); }, []);
+  const [treeDragTarget, setTreeDragTarget] = useState(null);
+  // Every rail click bumps this — even re-selecting the same folder — so FileBrowser can
+  // clear an active search/holding view (a click that changes nothing reads as broken).
+  const [navTick, setNavTick] = useState(0);
+  const onSelectFolder = useCallback((id) => { setSelectedFolderId(id); setNavTick((t) => t + 1); }, []);
+
   // Selection is per project — switching projects resets to "All files".
   useEffect(() => { setSelectedFolderId(null); setFolderRows([]); setFolderCounts(null); }, [projectId]);
 
@@ -246,7 +258,10 @@ export default function Library({
         onDashboard={onGoDashboard}
         currentProject={libraryProject}
         cross={crossProject}
-        onSelectProject={(id) => onNavigate?.({ projectId: id })}
+        // cross:false is load-bearing: navigate() MERGES with the live route, and
+        // buildHash DROPS projectId while cross is true — without it, picking a project
+        // from the breadcrumb in "All projects" mode was a silent no-op.
+        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
         onNewProject={onNewProject}
         authControl={authControl}
         accountActive={accountActive}
@@ -299,6 +314,9 @@ export default function Library({
           onFolderCounts={onFolderCounts}
           pinnedFileIds={new Set(pins.filter((p) => p.type === "file").map((p) => p.id))}
           onTogglePinFile={onTogglePinFile}
+          registerTreeDrop={registerTreeDrop}
+          treeDragTarget={treeDragTarget}
+          navTick={navTick}
           folderRail={folderMode ? (
             <FolderTree
               embedded
@@ -306,11 +324,13 @@ export default function Library({
               signedIn={signedIn}
               projectName={projectName}
               selectedId={selectedFolderId}
-              onSelect={setSelectedFolderId}
+              onSelect={onSelectFolder}
               onRowsChange={onRowsChange}
               fileCounts={folderCounts}
               pinnedIds={new Set(pins.filter((p) => p.type === "folder").map((p) => p.id))}
               onTogglePin={onTogglePinFolder}
+              onFileDrop={onTreeFileDrop}
+              onDragTarget={setTreeDragTarget}
             />
           ) : null}
         />

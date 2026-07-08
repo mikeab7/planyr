@@ -5,6 +5,7 @@ import {
   needsFiling, createIndexProvider, stubIndexProvider,
   CATEGORIES, categoryFor, categoryOf, FILE_STATES, stateOf, onMap, isReference,
   deriveTree, browseFiles, holdingArea, FACETS,
+  searchFiles, sortFiles, SORTS,
 } from "../src/shared/files/fileFacts.js";
 import { emptyPlacementFacts } from "../src/shared/placement/placementFacts.js";
 
@@ -210,5 +211,38 @@ describe("fileFacts — index provider interface (backend stubbed)", () => {
     const facts = await p.capturePlacementFacts({});
     expect(facts.captured).toBe(true);
     expect(facts.boundary.present).toBe(true);
+  });
+});
+
+describe("fileFacts — search + sort (B702)", () => {
+  const facts = buildFileFacts([
+    { id: "1", title: "Goose Creek - Civil - 2026.01.10", item: "Civil set", discipline: "Civil", sheet_number: "C-101", sheet_title: "GRADING PLAN", source_file: "gc-civil.pdf", doc_date: "2026-01-10", projectId: "p1" },
+    { id: "2", title: "Sheet 10", item: "Arch", discipline: "Architectural", sheet_number: "A-1", doc_date: "2026-02-01", projectId: "p1" },
+    { id: "3", title: "Sheet 2", item: "Arch", discipline: "Architectural", updatedAt: "2026-03-01", projectId: "p1" },
+  ]);
+
+  it("searchFiles matches name, sheet number, sheet title, and filename — case-insensitive", () => {
+    expect(searchFiles(facts, "goose").map((f) => f.id)).toEqual(["1"]);
+    expect(searchFiles(facts, "c-101").map((f) => f.id)).toEqual(["1"]);
+    expect(searchFiles(facts, "grading").map((f) => f.id)).toEqual(["1"]);
+    expect(searchFiles(facts, "gc-civil").map((f) => f.id)).toEqual(["1"]);
+    expect(searchFiles(facts, "sheet").map((f) => f.id).sort()).toEqual(["2", "3"]);
+  });
+
+  it("a blank query returns everything untouched", () => {
+    expect(searchFiles(facts, "")).toBe(facts);
+    expect(searchFiles(facts, "   ")).toBe(facts);
+  });
+
+  it("sortFiles: newest-first is the default (document date, upload-time fallback)", () => {
+    expect(sortFiles(facts).map((f) => f.id)).toEqual(["3", "2", "1"]);
+    expect(sortFiles(facts, "recency").map((f) => f.id)).toEqual(["3", "2", "1"]);
+  });
+
+  it("sortFiles: name A–Z is numeric-aware (Sheet 2 before Sheet 10) and non-mutating", () => {
+    const before = facts.map((f) => f.id);
+    expect(sortFiles(facts, "name").map((f) => f.id)).toEqual(["1", "3", "2"]);
+    expect(facts.map((f) => f.id)).toEqual(before); // input order untouched
+    expect(SORTS.map((s) => s.id)).toEqual(["recency", "name"]);
   });
 });

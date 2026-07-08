@@ -6,7 +6,8 @@ export const DEP_URL = "https://elevation.nationalmap.gov/arcgis/rest/services/3
 // B533: US survey foot (exact 3937/1200 ft/m), matching FT_PER_M in shared/coordinates and the
 // EPSG:2278 State Plane spine — not the international foot (3.280839895). 3DEP returns metres;
 // converting with the survey foot keeps elevation consistent with all other project geometry.
-const M_TO_FT = 3937 / 1200;
+// Exported for the B704 terrain pipeline (demGrid.js) so every 3DEP consumer converts identically.
+export const M_TO_FT = 3937 / 1200;
 
 /* Sample elevations along a polyline. `path` is [[lng,lat], …] (WGS84).
  * Returns an array of elevations in FEET, ordered along the line. `timeoutMs`
@@ -34,6 +35,31 @@ export async function sampleProfile(path, sampleCount = 48, timeoutMs = 12000) {
     const v = parseFloat(s.value);
     return isFinite(v) ? v * M_TO_FT : null;
   });
+}
+
+/* Sample the ground elevation at ONE point (B706 hover readout). Returns FEET, or
+ * null for no-data (water/void) — the caller suppresses the readout rather than show
+ * a made-up number. `fetchImpl` is injectable for tests; `signal` lets the caller
+ * abort a superseded request (cursor moved on) — an abort surfaces as a throw, which
+ * the caller treats as "no reading", never as a value. Point probe verified against
+ * the live service 2026-07-07 (getSamples, esriGeometryPoint, 1 m resolution). */
+export async function samplePoint(lat, lng, { timeoutMs = 8000, fetchImpl, signal } = {}) {
+  const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
+  const u = `${DEP_URL}/getSamples?geometry=${encodeURIComponent(geometry)}&geometryType=esriGeometryPoint` +
+    `&interpolation=RSP_BilinearInterpolation&returnFirstValueOnly=true&f=json`;
+  const ctrl = !signal && typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  let r;
+  try {
+    r = await (fetchImpl || fetch)(u, { signal: signal || (ctrl && ctrl.signal) || undefined });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (!r.ok) throw new Error(`3DEP HTTP ${r.status}`);
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || "3DEP error");
+  const v = parseFloat(j.samples && j.samples[0] && j.samples[0].value);
+  return isFinite(v) ? v * M_TO_FT : null; // no-data → null (B58 convention)
 }
 
 /* Reduce a profile to ditch screening stats. `lenFt` is the line's ground length.
