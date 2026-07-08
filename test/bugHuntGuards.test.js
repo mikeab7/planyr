@@ -289,14 +289,26 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const common = \{ stroke: nStroke, strokeWidth: vsw,/);
   });
 
-  it("B617: linear stroke weights scale with zoom (strokeZoom), NOT fixed screen px", () => {
+  it("B617: linear markup stroke weights scale with zoom (strokeZoom), NOT fixed screen px", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // the pure clamp helper exists and is clamped both ends (floor + relative ceil)
     expect(src).toMatch(/const strokeZoom = \(base, zk\) => Math\.max\(STROKE_ZOOM_FLOOR, Math\.min\(base \* zk, base \* 3\.5\)\);/);
     // the markup layer computes the zoom-scaled width and uses it
     expect(src).toMatch(/const vsw = strokeZoom\(nsw, zk\);/);
-    // roads-as-lines: the centerline road pavement edge + curb stripes scale too
-    expect(src).toMatch(/stroke=\{stroke\} strokeWidth=\{strokeZoom\(isSel \? st\.weight \+ 1 : st\.weight, zk\)\}/);
+  });
+
+  it("B719: a centerline road's pavement edge + curb stripes are drawn TO SCALE (true 6\" curb), not strokeZoom", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the floor constant exists and curbStrokePx is imported from the pure road-geometry lib
+    expect(src).toMatch(/const CURB_STROKE_MIN_PX = 0\.75;/);
+    expect(src).toMatch(/import \{[^}]*curbStrokePx[^}]*\} from "\.\/lib\/roadGeometry\.js";/);
+    // the road pavement edge (back-of-curb outline) uses the real-world curb width, NOT strokeZoom
+    expect(src).toMatch(/key="edge"[^\n]*strokeWidth=\{curbStrokePx\(roadCurbWidth\(el\), ppf, CURB_STROKE_MIN_PX\)\}/);
+    // the face-of-curb stripes too
+    expect(src).toMatch(/key=\{`curb\$\{i\}`\}[^\n]*strokeWidth=\{curbStrokePx\(roadCurbWidth\(el\), ppf, CURB_STROKE_MIN_PX\)\}/);
+    // and the legacy rect road border/stripes are on the same to-scale width (no strokeZoom for roads)
+    expect(src).toMatch(/cw = curbStrokePx\(el\.curb \?\? CURB, ppf, CURB_STROKE_MIN_PX\)/);
+    expect(src).not.toMatch(/el\.type === "road" \? strokeZoom\(/);
   });
 
   it("B619: selecting an object never recolors it to the app accent (handle-based selection)", () => {

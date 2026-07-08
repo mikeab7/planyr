@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   roadCenterline, minRadiusOfCurvature, roadMinRadius, polylineLength,
+  insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx,
 } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import {
   speedMinRadius, classMinRadius, classDefaultRadius, roadClassOf, ROAD_CLASS_SEEDS,
@@ -184,5 +185,97 @@ describe("roadClasses — civil thresholds", () => {
     const s = { roadClasses: [{ key: "truck", label: "T", defaultRadius: 99, minRadius: 77 }] };
     expect(roadClassOf(s, "truck").defaultRadius).toBe(99);
     expect(classMinRadius(roadClassOf(s, "truck"))).toBe(77);
+  });
+});
+
+describe("insertRoadVertex — control-point add (B718)", () => {
+  const pts = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]; // 3-pt L
+  const vtx = [{}, { treatment: "arc" }, {}];
+
+  it("splices the point at edgeIndex+1 and a {} treatment at the SAME index", () => {
+    const r = insertRoadVertex(pts, vtx, 0, { x: 50, y: 0 }); // split first segment
+    expect(r).not.toBeNull();
+    expect(r.index).toBe(1);
+    expect(r.pts).toEqual([{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]);
+    expect(r.vtx).toHaveLength(r.pts.length);          // arrays stay length-matched
+    expect(r.vtx[1]).toEqual({});                        // new interior entry is empty ({} → arc)
+    expect(r.vtx[0]).toEqual({});                        // endpoint untouched
+    expect(r.vtx[3]).toEqual({});                        // last endpoint untouched
+    expect(r.vtx[2]).toEqual({ treatment: "arc" });      // the old interior treatment shifted right
+  });
+
+  it("normalizes a short/absent vtx list to match pts", () => {
+    const r = insertRoadVertex(pts, undefined, 1, { x: 100, y: 50 });
+    expect(r.pts).toHaveLength(4);
+    expect(r.vtx).toHaveLength(4);
+    r.vtx.forEach((v) => expect(v).toEqual({}));
+  });
+
+  it("a point inserted on a straight (collinear) segment does not bend the alignment", () => {
+    const straight = [{ x: 0, y: 0 }, { x: 200, y: 0 }];
+    const r = insertRoadVertex(straight, [{}, {}], 0, { x: 100, y: 0 }); // on the line
+    // new interior {} → treatmentAt = "arc", but collinear → arcCorner passes straight through
+    const dense = roadCenterline(r.pts, r.vtx, { defaultRadius: 50 });
+    dense.forEach((p) => expect(Math.abs(p.y)).toBeLessThan(1e-6)); // still on y=0 → no jump
+  });
+
+  it("returns null for an out-of-range edge index or a bad point", () => {
+    expect(insertRoadVertex(pts, vtx, -1, { x: 1, y: 1 })).toBeNull();
+    expect(insertRoadVertex(pts, vtx, 2, { x: 1, y: 1 })).toBeNull(); // 2 == pts.length-1, no segment after
+    expect(insertRoadVertex(pts, vtx, 0, { x: NaN, y: 0 })).toBeNull();
+    expect(insertRoadVertex([{ x: 0, y: 0 }], vtx, 0, { x: 1, y: 1 })).toBeNull();
+  });
+});
+
+describe("removeRoadVertex / canRemoveRoadVertex — control-point delete (B718)", () => {
+  const pts = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
+  const vtx = [{}, { treatment: "arc" }, { treatment: "sharp" }, {}];
+
+  it("removes an interior vertex from BOTH arrays, staying length-matched", () => {
+    const r = removeRoadVertex(pts, vtx, 1);
+    expect(r.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]);
+    expect(r.vtx).toEqual([{}, { treatment: "sharp" }, {}]);
+    expect(r.vtx).toHaveLength(r.pts.length);
+  });
+
+  it("blocks removing an endpoint (index 0 or last) → null", () => {
+    expect(removeRoadVertex(pts, vtx, 0)).toBeNull();
+    expect(removeRoadVertex(pts, vtx, pts.length - 1)).toBeNull();
+  });
+
+  it("blocks dropping below 2 points → null", () => {
+    const two = [{ x: 0, y: 0 }, { x: 10, y: 0 }];
+    expect(removeRoadVertex(two, [{}, {}], 0)).toBeNull();
+    expect(removeRoadVertex(two, [{}, {}], 1)).toBeNull();
+  });
+
+  it("removing the sole interior of a 3-pt road yields a valid 2-pt straight road", () => {
+    const three = [{ x: 0, y: 0 }, { x: 50, y: 20 }, { x: 100, y: 0 }];
+    const r = removeRoadVertex(three, [{}, { treatment: "arc" }, {}], 1);
+    expect(r.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }]);
+    expect(r.vtx).toEqual([{}, {}]);
+    expect(roadCenterline(r.pts, r.vtx)).toHaveLength(2); // renders as a straight road
+  });
+
+  it("canRemoveRoadVertex mirrors the guard (interior-only, above 2)", () => {
+    expect(canRemoveRoadVertex(pts, 1)).toBe(true);
+    expect(canRemoveRoadVertex(pts, 0)).toBe(false);
+    expect(canRemoveRoadVertex(pts, pts.length - 1)).toBe(false);
+    expect(canRemoveRoadVertex([{ x: 0, y: 0 }, { x: 1, y: 1 }], 0)).toBe(false);
+  });
+});
+
+describe("curbStrokePx — to-scale 6\" curb border (B719)", () => {
+  it("returns curbFt*ppf when above the floor (scales proportionally with zoom)", () => {
+    expect(curbStrokePx(0.5, 4, 0.75)).toBeCloseTo(2.0);   // zoomed in → thicker, to scale
+    expect(curbStrokePx(1.0, 10, 0.75)).toBeCloseTo(10.0); // a 12" curb visibly doubles a 6"
+  });
+  it("floors to minPx when the true width goes sub-pixel (overview zoom)", () => {
+    expect(curbStrokePx(0.5, 1, 0.75)).toBe(0.75); // 0.5px → floored
+    expect(curbStrokePx(0.5, 0.3, 0.75)).toBe(0.75);
+  });
+  it("is defensive against non-finite inputs", () => {
+    expect(curbStrokePx(undefined, 2, 0.75)).toBe(0.75);
+    expect(curbStrokePx(0.5, NaN, 0.75)).toBe(0.75);
   });
 });

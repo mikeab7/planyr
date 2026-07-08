@@ -75,7 +75,7 @@ import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js
 import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, roadMinRadius } from "./lib/roadGeometry.js";
+import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx } from "./lib/roadGeometry.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
@@ -292,6 +292,10 @@ const SEL_HANDLE_FILL = "#ffffff";
 // outlines); pond/building filled-area edges keep their fixed pixel edge (the fill carries the shape).
 const STROKE_ZOOM_FLOOR = 0.6;
 const strokeZoom = (base, zk) => Math.max(STROKE_ZOOM_FLOOR, Math.min(base * zk, base * 3.5));
+// B719 — a road's curb/edge line represents a real 6" curb, drawn TO SCALE (curbFt × ppf),
+// not a fixed pixel stroke. This floor keeps the line visible when 6" goes sub-pixel at
+// overview zoom; there is deliberately NO ceiling (a 6" curb reads thicker as you zoom in).
+const CURB_STROKE_MIN_PX = 0.75;
 // Snap an angle to the nearest 45° (for Shift-constrained drawing).
 const snap45 = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, r = Math.hypot(dx, dy), ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4); return { x: a.x + r * Math.cos(ang), y: a.y + r * Math.sin(ang) }; };
 
@@ -3540,7 +3544,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const editablePath = () => {
     if (tool !== "select" || !sel) return null;
     if (sel.kind === "parcel") { const pc = parcels.find((p) => p.id === sel.id); return pc && !pc.locked ? { layer: "parcel", id: pc.id, pts: pc.points, closed: true, min: 3 } : null; }
-    if (sel.kind === "el") { const el = els.find((x) => x.id === sel.id); return el && el.points && !el.locked ? { layer: "el", id: el.id, pts: el.points, closed: true, min: 3 } : null; }
+    if (sel.kind === "el") {
+      const el = els.find((x) => x.id === sel.id);
+      if (!el || el.locked) return null;
+      // B718: a centerline road is vertex-editable too — its editable "path" is its centerline
+      // (`pts`, open). A wide `edgeTolFt` (≈ strip half-width) lets a Shift-/right-click land
+      // ANYWHERE on the pavement strip and project onto the centerline; endpoints are protected.
+      if (isCenterlineRoad(el)) return { layer: "road", id: el.id, pts: el.pts, closed: false, min: 2, edgeTolFt: (+el.travelW || 0) / 2 + roadCurbWidth(el) + 11 / view.ppf, noEndpointDelete: true };
+      return el.points ? { layer: "el", id: el.id, pts: el.points, closed: true, min: 3 } : null;
+    }
     if (sel.kind === "measure") { const m = measures[sel.i]; if (!m) return null; const closed = measMode(m) === "area"; const min = closed ? 3 : measMode(m) === "count" ? 1 : 2; return { layer: "measure", id: sel.i, pts: measPts(m), closed, min }; }
     if (sel.kind === "markup") {
       const m = markups.find((x) => x.id === sel.id); if (!m || m.locked) return null;
@@ -3552,7 +3564,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Nearest vertex / nearest edge of `path` to a feet point, each within a screen-PIXEL
   // tolerance (so the grab radius is zoom-independent). A corner wins a tie over its edges.
   const hitEditPath = (path, fp) => {
-    const vTol = 9 / view.ppf, eTol = 11 / view.ppf, n = path.pts.length;
+    // vertex grab stays a fixed screen radius; edge tolerance honors a per-path override
+    // (roads use ≈ strip half-width so a click anywhere on the pavement hits the centerline).
+    const vTol = 9 / view.ppf, eTol = path.edgeTolFt != null ? path.edgeTolFt : 11 / view.ppf, n = path.pts.length;
     let v = null;
     path.pts.forEach((p, i) => { const d = Math.hypot(fp.x - p.x, fp.y - p.y); if (d <= vTol && (!v || d < v.d)) v = { index: i, d }; });
     let e = null;
@@ -3566,6 +3580,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Insert a control point at `ptFeet` (the nearest point on edge `edgeIndex`) into whichever
   // layer owns the path, and select the new point so Delete can remove it.
   const insertVtx = (layer, id, edgeIndex, ptFeet) => {
+    if (layer === "road") { // B718: reuse the shared engine, but keep pts + the parallel vtx treatment list in
+      // lock-step (insertRoadVertex) and re-sync the strip bbox (reRoad). No grid-snap — the projected point
+      // is already ON the centerline, so an aerial-traced alignment doesn't kink at the new control point.
+      pushHistory();
+      setEls((a) => a.map((x) => {
+        if (x.id !== id || !isCenterlineRoad(x)) return x;
+        const r = insertRoadVertex(x.pts, x.vtx, edgeIndex, ptFeet);
+        return r ? reRoad({ ...x, pts: r.pts, vtx: r.vtx }) : x;
+      }));
+      setSelVtx({ layer, id, index: edgeIndex + 1 });      // arm the new point for the Delete key
+      setRoadVtxSel({ id, idx: edgeIndex + 1 });            // and surface its per-vertex curve control in the panel
+      return;
+    }
     const np = snapPt(ptFeet);
     const ins = (arr) => { const a = [...arr]; a.splice(edgeIndex + 1, 0, np); return a; };
     pushHistory();
@@ -3578,6 +3605,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Delete control point `index` from its path, but never below the geometry's minimum.
   const deleteVtx = (layer, id, index) => {
+    if (layer === "road") { // B718: interior-only + never below 2 points (removeRoadVertex guards both); keep vtx in sync.
+      const el = els.find((x) => x.id === id);
+      if (!el || !isCenterlineRoad(el) || !canRemoveRoadVertex(el.pts, index)) return; // endpoint / min-2 → no-op
+      pushHistory();
+      setEls((a) => a.map((x) => {
+        if (x.id !== id || !isCenterlineRoad(x)) return x;
+        const r = removeRoadVertex(x.pts, x.vtx, index);
+        return r ? reRoad({ ...x, pts: r.pts, vtx: r.vtx }) : x;
+      }));
+      setSelVtx(null);
+      setRoadVtxSel(null); // avoid a stale/off-by-one treatment target after the splice
+      return;
+    }
     const rm = (arr) => arr.filter((_, j) => j !== index);
     pushHistory();
     if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id && pc.points.length > 3 ? { ...pc, points: rm(pc.points) } : pc));
@@ -3600,7 +3640,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // …unless the press is inside ANOTHER parcel's body — then it's a Shift-click to merge that
       // neighbor (which often shares this very edge), not a vertex-insert on the selected path.
       // Let it fall through to the merge-toggle (onBgDown / startMoveParcel). (NEW-2)
-      const onOtherParcel = parcels.some((pc) => pc.id !== (path.layer === "parcel" ? path.id : null) && pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
+      // B718: scope this to when a PARCEL is the editable path — the old `pc.id !== null` form was
+      // true for EVERY parcel when editing a road/el (path.id≠parcel-id), so a road inside a parcel
+      // (the normal case) could never Shift-insert. Gate on the parcel layer, per the comment above.
+      const onOtherParcel = path.layer === "parcel" && parcels.some((pc) => pc.id !== path.id && pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
       if (!onOtherParcel) {
         e.preventDefault(); e.stopPropagation();
         altSnapOffRef.current = !!e.altKey;
@@ -3609,7 +3652,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return;
       }
     }
-    if (e.button === 0 && !e.shiftKey) setSelVtx(v ? { layer: path.layer, id: path.id, index: v.index } : null);
+    if (e.button === 0 && !e.shiftKey) {
+      // B718: for a road, only arm an INTERIOR vertex for the Delete key. A road ENDPOINT (or the
+      // body) leaves selVtx null so pressing Delete still removes the WHOLE road (today's behavior)
+      // instead of silently no-op-ing on a protected endpoint. Endpoint DRAG still runs via
+      // startRoadVtx (bubble phase — capture doesn't stopPropagation here).
+      const roadEndpoint = path.layer === "road" && v && (v.index === 0 || v.index === path.pts.length - 1);
+      setSelVtx(v && !roadEndpoint ? { layer: path.layer, id: path.id, index: v.index } : null);
+    }
   };
   const onCanvasVtxContextCapture = (e) => {
     const path = editablePath();
@@ -3618,8 +3668,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { v, e: edge } = hitEditPath(path, fp);
     if (v) { // near a vertex (corner) → Delete control point — a corner ALWAYS wins over its edges
       e.preventDefault(); e.stopPropagation();
-      setSelVtx({ layer: path.layer, id: path.id, index: v.index });
-      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: path.pts.length > path.min, x: e.clientX, y: e.clientY });
+      // B718: roads protect endpoints — canDelete is interior-only + above the 2-point minimum, and
+      // a protected endpoint is NOT armed for the Delete key (leave selVtx null → whole-road delete).
+      const canDel = path.noEndpointDelete ? canRemoveRoadVertex(path.pts, v.index) : path.pts.length > path.min;
+      setSelVtx(path.noEndpointDelete && !canDel ? null : { layer: path.layer, id: path.id, index: v.index });
+      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, x: e.clientX, y: e.clientY });
     } else if (edge) { // on an edge (away from any corner) → Add control point here
       e.preventDefault(); e.stopPropagation();
       setVtxMenu({ mode: "edge", layer: path.layer, id: path.id, index: edge.index, ptFeet: edge.pt, x: e.clientX, y: e.clientY });
@@ -12633,15 +12686,18 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       // Pavement+curb surface = bufferPolyline of the tessellated centerline at travelW + 2 curbs.
       rparts.push(<path key="surf" d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />);
       if (texFill) rparts.push(<path key="tex" d={dPath} fill={texFill} stroke="none" pointerEvents="none" />);
-      // B617: the pavement edge + curb stripes are stroke-only linework (roads-as-lines) → scale with zoom.
-      rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={strokeZoom(isSel ? st.weight + 1 : st.weight, zk)} />);
+      // B719: the pavement edge (back-of-curb) is drawn as a TO-SCALE 6" curb line (curbFt × ppf,
+      // floored), not a fixed pixel weight — so the road border reads as a thin curb at site zoom
+      // and grows proportionally on zoom-in, instead of the old fat ~5–7px band. Selection is cued
+      // by the blue vertex handles (B619), so no on-select weight bump here.
+      rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX)} />);
     }
     // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges),
     // so the striping follows the offset edges — NOT the old w>=h axis logic (B70 contract held:
     // a 24′ travel road still reads 25′ wide because the strip ring is travelW + a curb each side).
     roadCurbLines(el, settings).forEach((cl, i) => {
       if (!cl || cl.length < 2) return;
-      rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={strokeZoom(1, zk)} pointerEvents="none" />);
+      rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX)} pointerEvents="none" />);
     });
     // Travel-width dimension anchored to the CENTERLINE MIDPOINT (excludes the curb — reads the
     // true travel width). B149 detail tier (a road width hides at site-overview zoom); kept while
@@ -12710,7 +12766,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const rectExistF = el.det?.existFill ?? waterFill;
   const rectAddF = el.det?.addFill ?? POND_ADD_FILL_DEFAULT;
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : waterFill} fillOpacity={waterOp}
-    stroke={st.stroke /* B619: no accent recolor on select */} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : el.type === "road" ? strokeZoom(isSel ? st.weight + 0.75 : st.weight, zk) : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
+    stroke={st.stroke /* B619: no accent recolor on select */} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : el.type === "road" ? curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX) /* B719: legacy rect road border to scale */ : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
   // Baseline ghost fill (existing basin) sits on top of the added-tint rect; stroke layer added below.
   if (ghostPath) parts.push(<g key="ghostfill" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}><path d={ghostPath} fill={rectExistF} fillOpacity={waterOp} stroke="none" pointerEvents="none" /></g>);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
@@ -12831,7 +12887,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     }
   }
   if (el.type === "road") { // curb lines inside each long edge; pavement between
-    const cp = (el.curb ?? CURB) * ppf, cw = strokeZoom(1, zk); // B617: curb stripes scale with zoom
+    const cp = (el.curb ?? CURB) * ppf, cw = curbStrokePx(el.curb ?? CURB, ppf, CURB_STROKE_MIN_PX); // B719: curb stripe drawn to scale (true 6")
     if (el.w >= el.h) {
       parts.push(<line key="cu0" x1={tl.x} y1={tl.y + cp} x2={tl.x + w} y2={tl.y + cp} stroke={st.stroke} strokeWidth={cw} />);
       parts.push(<line key="cu1" x1={tl.x} y1={tl.y + h - cp} x2={tl.x + w} y2={tl.y + h - cp} stroke={st.stroke} strokeWidth={cw} />);
