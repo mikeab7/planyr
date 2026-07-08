@@ -6192,6 +6192,7 @@ function App() {
 
   const flatTasks = useMemo(() => {
     if (!proj) return [];
+    const settings = data?.settings; // cfRules for computeDisplayHealth — Focus must classify by the SAME status the grid shows (B717)
     const childSet = new Set(proj.tasks.filter(t => t.parentId !== null).map(t => t.parentId));
     const byId = {};
     const kidsBy = new Map();
@@ -6211,7 +6212,12 @@ function App() {
       const kids = kidsOf(id);
       let res;
       if (kids.length === 0) {
-        const h = byId[id].health;
+        // B717 single-source-of-truth: classify a leaf by the SAME status the grid shows
+        // (computeDisplayHealth applies cfRules), NOT the raw stored health. Otherwise an
+        // overdue Not-Started task renders red "Needs Attn." via overdueRed yet is classed
+        // "upcoming" off its raw gray health → Focus wrongly hides it. Now red/yellow-promoted
+        // (overdueRed / dueSoonYellow) both map to "active" and survive Focus, matching the grid.
+        const h = computeDisplayHealth(byId[id], settings);
         res = h === "green" ? "done" : h === "gray" ? "upcoming" : h === "paused" ? "paused" : "active";
       } else {
         const ss = kids.map(k => rolledStatus(k.id));
@@ -6274,7 +6280,7 @@ function App() {
     };
     walk(null, 0);
     return out;
-  }, [proj]);
+  }, [proj, data?.settings, NOW]); // settings→cfRules, NOW→overdue rollover: keep Focus in sync with the grid's display health (B717)
 
   // Keep a ref in sync so the keydown handler can read tasks without a stale closure
   useEffect(() => { flatTasksRef.current = flatTasks; }, [flatTasks]);
