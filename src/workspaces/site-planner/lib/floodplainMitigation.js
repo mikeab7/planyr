@@ -330,6 +330,22 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   };
 }
 
+/* Effective pad elevation for one fill element (B713 — the dock-high pattern):
+ * industrial buildings are dock-high, so the truck court (and its dock-stack
+ * trailer strip) sits ~4 ft BELOW the slab finished floor. Pricing the court at
+ * slab FF overstates its fill by dockDropFt × its whole area. Precedence:
+ *   el.padElevFt (explicit per-element override)
+ *   → slab FF − dockDropFt for dock-stack elements (truckCourt / forCourt tags)
+ *   → slab FF for everything else
+ *   → null (UNKNOWN downstream) when no plan FFE is entered.
+ * The buffer strip (forTrailer) is landscape — pervious, never fill. Pure. */
+export function effectivePadElev(el, { padFfeFt = null, dockDropFt = 4 } = {}) {
+  if (el && el.padElevFt != null && isFinite(el.padElevFt)) return el.padElevFt;
+  if (padFfeFt == null || !isFinite(padFfeFt)) return null;
+  const drop = dockDropFt != null && isFinite(dockDropFt) ? dockDropFt : 4;
+  return el && (el.truckCourt || el.forCourt) ? padFfeFt - drop : padFfeFt;
+}
+
 /* Combine per-footprint computeMitigation results into one ledger (B712's
  * per-element memoization: during a drag only the dragged element recomputes, so
  * results merge here). Sums are additive (NFHL classes are a planar partition);

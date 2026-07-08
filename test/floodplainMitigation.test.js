@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import {
   classifyNfhlFeature,
   combineMitigation,
+  effectivePadElev,
   zonesFromFeatureCollection,
   pointInZone,
   gridIntersect,
@@ -279,6 +280,30 @@ describe("combineMitigation — per-element results merge into one ledger", () =
   it("empty / null inputs → null", () => {
     expect(combineMitigation([])).toBeNull();
     expect(combineMitigation([null])).toBeNull();
+  });
+});
+
+describe("effectivePadElev — dock-high industrial pads (B713)", () => {
+  it("a dock-stack truck court / trailer strip prices at slab FF − the dock drop", () => {
+    expect(effectivePadElev({ truckCourt: { side: "left" } }, { padFfeFt: 100 })).toBe(96); // default 4′
+    expect(effectivePadElev({ forCourt: "c1" }, { padFfeFt: 100, dockDropFt: 4 })).toBe(96);
+    expect(effectivePadElev({ truckCourt: { side: "top" } }, { padFfeFt: 100, dockDropFt: 3.5 })).toBe(96.5);
+  });
+  it("ordinary fill prices at the slab FF; an explicit override beats everything", () => {
+    expect(effectivePadElev({}, { padFfeFt: 100 })).toBe(100);
+    expect(effectivePadElev({ truckCourt: {}, padElevFt: 97.2 }, { padFfeFt: 100 })).toBe(97.2);
+  });
+  it("no plan FFE → null (UNKNOWN downstream), never a fabricated elevation", () => {
+    expect(effectivePadElev({ truckCourt: {} }, {})).toBeNull();
+    expect(effectivePadElev({}, { padFfeFt: null })).toBeNull();
+  });
+  it("integration: slab + dock court in one zone — the court bills 4 ft LESS of fill", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 200, 100)], { staticBfeFt: 100 });
+    const grade = 90, ffe = 100;
+    const slab = { id: "b", ring: rect(0, 0, 100, 100), padElevFt: effectivePadElev({}, { padFfeFt: ffe }) };
+    const court = { id: "c", ring: rect(100, 0, 100, 100), padElevFt: effectivePadElev({ truckCourt: {} }, { padFfeFt: ffe }) };
+    const r = computeMitigation({ footprints: [slab, court], zones: [zone], rule: harris, elev: { existGradeFt: grade } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 10 + 10000 * 6, -2); // 10 ft under the slab, 6 under the court
   });
 });
 

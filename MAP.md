@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-08 @ `6baa4ad` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-08 @ `9d1992f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -270,7 +270,7 @@ _216 source files mapped._
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export
   - _exports_: `PRINT_WEIGHTS`, `printStrokeWidth`, `PT_PER_CENTI_INCH`, `sheetFitScale`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
-  - _exports_: `BFE_SENTINEL_MIN`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `floodGeoBbox`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wse1pctForRing`, `zonesFromFeatureCollection`
+  - _exports_: `BFE_SENTINEL_MIN`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `effectivePadElev`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `floodGeoBbox`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wse1pctForRing`, `zonesFromFeatureCollection`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
   - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed
