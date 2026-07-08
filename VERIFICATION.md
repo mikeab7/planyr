@@ -68,6 +68,15 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V232 — B692: sharing survives the owner's autosaves — the two-account share round-trip works end to end ⏳ **TWO SIGNED-IN ACCOUNTS (both exist: the owner + michael.butler@hillwood.com, already admins on team "HIP Houston"; Goose Creek group smqfy48tlk9j re-linked to the team by the data heal)**
+- **Verified here (sandbox, 2026-07-08):** `test/teamShareGuard.test.js` 8/8 (sites/doc_reviews update rows carry NO team_id key; inserts inherit; slim jsonb strips teamId/ownerId; headerSig share-neutral) · full suite green · build green. Root cause + fix in B692.
+- **Pending signed-in steps (planyr.io, owner + hillwood account — reload EVERY open Planyr tab first so no pre-fix tab is still running):**
+  1. **The regression that bit:** owner opens Goose Creek and makes several edits (each triggers an autosave) → in the DB (or via the hillwood account's view) the site STAYS shared — `team_id` never reverts to null. The hillwood session keeps a green cloud and keeps seeing elements across reloads.
+  2. Hillwood account opens the shared site → sees the parcels/elements, makes an edit → it lands (green cloud) and propagates to the owner's session (<~2s).
+  3. Owner right-click → Share on a DIFFERENT (private) project → hillwood sees it appear; owner keeps editing → still shared minutes later. Unshare ("make private") → it disappears for hillwood.
+  4. NEW-2 sanity (no realtime leak): on a genuinely UNSHARED site, the hillwood account (own window) receives NO realtime updates while the owner edits it.
+  5. This unblocks **V230** (the named conflict toasts) — run its steps 7–11 same sitting with these two accounts.
+
 ### V231 — B674: MULTI-WRITER cutover — concurrent editing, presence pill, the escape hatch, and the no-banner/no-resurrection regressions ⏳ **TWO–THREE SIGNED-IN SESSIONS** (the owner's full 9-scenario matrix; run via the consolidated runbook `docs/COWORK-ELEMENT-SYNC-LIVE.md`, which stitches V229+V230+V231 into one sitting)
 - **Verified here (sandbox, 2026-07-06):** lint 0 · 2,860 tests (+8: multiwriter flag precedence / literal-"off"-only / blocked-storage fallback; presenceSummary alone-quiet / two-people / same-account-window-collapse / sort + "Someone" fallback) · build green · headless smoke 3/3 (signed-out untouched — the lock is simply never acquired under multi-writer, so readOnly stays false and the old banners are unreachable dead paths kept for the `planyr.multiwriter=off` hatch).
 - **🔶 Cowork live run 2026-07-07 (build 40884e6, site smqfy48tlk9j, two SAME-ACCOUNT sessions — partial):**
