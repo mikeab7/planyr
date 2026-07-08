@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-08 @ `c4ebedb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-08 @ `f729d8a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -352,7 +352,7 @@ _219 source files mapped._
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)
   - _exports_: `classDefaultRadius`, `classMinRadius`, `DEFAULT_ROAD_CLASS`, `ROAD_CLASS_SEEDS`, `roadClassesOf`, `roadClassOf`, `speedMinRadius`
 - **`src/workspaces/site-planner/lib/roadGeometry.js`** — Pure centerline road geometry: tessellate clicked alignment into arc fillets/smooth splines/sharp corners, min radius of curvature
-  - _exports_: `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `minRadiusOfCurvature`, `polylineLength`, `roadCenterline`, `roadMinRadius`
+  - _exports_: `canRemoveRoadVertex`, `curbStrokePx`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `insertRoadVertex`, `minRadiusOfCurvature`, `polylineLength`, `removeRoadVertex`, `roadCenterline`, `roadMinRadius`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export

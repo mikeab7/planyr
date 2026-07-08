@@ -208,3 +208,63 @@ export function minRadiusOfCurvature(dense) {
 export function roadMinRadius(pts, vtx, opts = {}) {
   return minRadiusOfCurvature(roadCenterline(pts, vtx, opts));
 }
+
+/* ---- Control-point add/remove on a centerline road (B718) ----------------------------
+ * A centerline road carries a `pts` alignment and a PARALLEL `vtx` treatment list (same
+ * length; endpoints `{}`, interior `{treatment,radius?}`). These two pure helpers keep the
+ * arrays in lock-step so the on-canvas add/remove (which reuses the shared B230 vertex
+ * engine) can't desync them. Kept here — the module that already owns pts/vtx semantics —
+ * so the splice/guard logic is unit-tested, not buried in the React component. */
+
+// Normalize a possibly-short/absent vtx list to the same length as pts (endpoints/missing → {}).
+function normVtx(pts, vtx) {
+  const n = (pts || []).length;
+  const out = [];
+  for (let i = 0; i < n; i++) out.push((vtx && vtx[i]) || {});
+  return out;
+}
+
+/* Insert a control point `pt` into the alignment, splitting the segment `edgeIndex`
+ * (0-based, between pts[edgeIndex] and pts[edgeIndex+1]). Returns fresh `{ pts, vtx }`
+ * with a matching `{}` treatment entry spliced in at the same index — a new INTERIOR
+ * vertex, so `treatmentAt` resolves it to the default "arc" (which renders straight until
+ * dragged, because the inserted point is collinear on its sparse segment → no jump).
+ * Returns `null` when the edge index is out of range. */
+export function insertRoadVertex(pts, vtx, edgeIndex, pt) {
+  if (!Array.isArray(pts) || pts.length < 2) return null;
+  if (!(edgeIndex >= 0 && edgeIndex < pts.length - 1)) return null;
+  if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null;
+  const at = edgeIndex + 1;
+  const nextPts = [...pts];
+  nextPts.splice(at, 0, { x: pt.x, y: pt.y });
+  const nextVtx = normVtx(pts, vtx);
+  nextVtx.splice(at, 0, {});
+  return { pts: nextPts, vtx: nextVtx, index: at };
+}
+
+/* Remove control point `index` from the alignment. Returns fresh `{ pts, vtx }`, or `null`
+ * (a no-op) when the removal is disallowed: an ENDPOINT (index 0 or last) or a road already
+ * at the 2-point minimum. Guards exactly the two conditions in the brief — "never remove an
+ * endpoint, never drop below 2 points." */
+export function removeRoadVertex(pts, vtx, index) {
+  if (!Array.isArray(pts) || pts.length <= 2) return null;
+  if (!(index > 0 && index < pts.length - 1)) return null; // interior only (blocks endpoints)
+  const nextPts = pts.filter((_, j) => j !== index);
+  const nextVtx = normVtx(pts, vtx).filter((_, j) => j !== index);
+  return { pts: nextPts, vtx: nextVtx };
+}
+
+/* Whether control point `index` of a road may be removed (drives the context menu's
+ * enabled/"min reached" state). Interior-only + above the 2-point minimum. */
+export function canRemoveRoadVertex(pts, index) {
+  return Array.isArray(pts) && pts.length > 2 && index > 0 && index < pts.length - 1;
+}
+
+/* Curb / border stroke width in PIXELS for a true real-world curb of `curbFt` feet at the
+ * current `ppf` (pixels-per-foot), floored to `minPx` so it stays visible when the true
+ * width goes sub-pixel at overview zoom. NO ceiling — a 6" curb SHOULD read thicker as you
+ * zoom in (tied to the drawing's real scale, B719). */
+export function curbStrokePx(curbFt, ppf, minPx = 0.75) {
+  const w = (Number.isFinite(curbFt) ? curbFt : 0) * (Number.isFinite(ppf) ? ppf : 0);
+  return Math.max(minPx, w);
+}
