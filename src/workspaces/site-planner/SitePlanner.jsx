@@ -209,6 +209,30 @@ const ToolIcon = ({ id, size = 15 }) => (
   </svg>
 );
 
+// B721 — left-rail workspace icons. The old text glyphs (∑ ⬡ ⚐ ▦ ⚙) render at
+// inconsistent weights with font fallback — worst on Windows (the owner's platform) —
+// so the rail looked ragged next to the right rail's real SVG ToolIcons. These inline
+// SVGs match the EyeIcon / ToolIcon family (currentColor, stroke 2, ~16px) so both rails
+// land on one visual system. Keys match the leftTabs ids.
+const RAIL_ICONS = {
+  // Parcel — a land-boundary polygon (same family as the parcel ToolIcon glyph)
+  parcel: <path d="M4 8 L12 4 L20 8.5 L18.5 19 L6 20 Z" />,
+  // Analysis — a flag on a staff (site constraint / context screen)
+  analysis: <><line x1="6" y1="3" x2="6" y2="21" /><path d="M6 4 H18 L15 8 L18 12 H6 Z" /></>,
+  // Yield — an ascending bar chart (the headline metrics)
+  yield: <><line x1="3.5" y1="20.5" x2="20.5" y2="20.5" /><rect x="5" y="12" width="3.2" height="8" rx="0.5" /><rect x="10.4" y="8" width="3.2" height="12" rx="0.5" /><rect x="15.8" y="4" width="3.2" height="16" rx="0.5" /></>,
+  // References — two stacked backdrop sheets (aerial + plan overlays)
+  references: <><rect x="3" y="8" width="12.5" height="12.5" rx="1.5" /><path d="M8 8 V5 A2 2 0 0 1 10 3 H19 A2 2 0 0 1 21 5 V16 A2 2 0 0 1 19 18 H15.5" /></>,
+  // Standards — a gear (default settings for new elements)
+  standards: <><circle cx="12" cy="12" r="3.4" /><path d="M12 2.5 V5.2 M12 18.8 V21.5 M21.5 12 H18.8 M5.2 12 H2.5 M18.7 5.3 L16.8 7.2 M7.2 16.8 L5.3 18.7 M18.7 18.7 L16.8 16.8 M7.2 7.2 L5.3 5.3" /></>,
+};
+const RailIcon = ({ id, size = 17 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }} aria-hidden="true">
+    {RAIL_ICONS[id] || <circle cx="12" cy="12" r="6" />}
+  </svg>
+);
+
 const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • drag to move (snap only ALIGNS to the grid/edges, never bonds; hold Alt to bypass) • Shift-click or marquee to pick several, then Group (Ctrl+G) so they move/copy/select as one unit; double-click a group member to edit it in place • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
   { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: H, or hold Space to pan temporarily (press V for Select)" },
@@ -1113,6 +1137,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [callouts, setCallouts] = useState(() => restored?.callouts || []);  // {id, tip:{x,y}, box:{x,y}, text}
   const [markups, setMarkups] = useState(() => restored?.markups || []);   // neutral shapes: line/polyline/rect/ellipse/polygon
   const [combineSel, setCombineSel] = useState([]);   // parcel ids picked for the Combine tool
+  const [mergePick, setMergePick] = useState(false);  // B720: click-to-pick merge mode (plain clicks toggle parcels — no Shift needed)
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
   const [editInline, setEditInline] = useState(null);     // B620: {kind:'markup'|'el', id, text} while typing a feature's inline label in place
@@ -2657,7 +2682,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
@@ -2940,6 +2965,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (tool === "select") {
+      // B720 — merge pick mode: a PLAIN click on a parcel body toggles it into the merge
+      // set (same as Shift-click), no Shift needed. Topmost parcel under the point wins.
+      // A click on empty canvas falls through to pan (never clears the merge selection).
+      if (mergePick && settings.parcelSelect) {
+        const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
+        if (hit) { toggleMerge(hit.id); setSel({ kind: "parcel", id: hit.id }); return; }
+      }
       if (e.shiftKey) {
         // Shift-click a parcel BODY → toggle it into the merge selection. B420 makes the
         // parcel interior click-through (only its boundary hit-stroke grabs), so a Shift-press
@@ -3128,6 +3160,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (pc && pc.active === false) return s;
     return [...s, id];
   });
+  // B720 — click-to-pick merge mode. After pressing "Merge" in the Parcel-panel ops row,
+  // plain clicks (canvas body, boundary stroke, or list rows) toggle parcels into the merge
+  // set — no Shift knowledge required. Reuses toggleMerge (keeps the B170 inactive-parcel
+  // exclusion), the existing top-center banner + blue "picked" highlight, and mergeParcels.
+  // Esc / Done exits. Shift-click in plain Select still works for power users.
+  const startMergePick = () => {
+    if (tool !== "select") selectTool("select"); // pick mode lives in Select — a draw tool switches first (edge case)
+    setMergePick(true);
+  };
+  const exitMergePick = () => { setMergePick(false); setCombineSel([]); };
   // Fuse the selected parcels (any that share a boundary) into one parcel on the
   // editable layer — a working merge for test-fit/yield, NOT a recorded legal
   // consolidation. Merges greedily so a connected group of 2+ collapses to one.
@@ -3160,6 +3202,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setParcels((arr) => [...arr.filter((p) => !combineSel.includes(p.id)), np]);
     tombstone(goneIds);
     setCombineSel([]);
+    setMergePick(false); // B720: a completed merge exits pick mode
     setSel({ kind: "parcel", id: np.id });
     setTool("select");
   };
@@ -5328,6 +5371,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // stop propagation: let the press fall through to the background pan (no select, no move),
     // exactly as if the click had landed on empty canvas.
     if (!settings.parcelSelect) return;
+    if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
     if (e.shiftKey) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // Shift-click: multi-select to merge
     e.stopPropagation();
     if (!pc.locked) {
@@ -5692,7 +5736,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // already counted in `bldg`; there is no remaining bump∩court overlap to remove.
   const impervious = bldg + paving + parkArea + trailArea;
   const cov = siteSqft ? (bldg / siteSqft) * 100 : 0;
-  const far = siteSqft ? bldg / siteSqft : 0; // single-story assumption
   const impPct = siteSqft ? (impervious / siteSqft) * 100 : 0;
   const detPct = siteSqft ? (pondArea / siteSqft) * 100 : 0;
   const ratio = bldg ? stalls / (bldg / 1000) : 0;
@@ -6610,7 +6653,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ["Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac (${f0(siteSqft)} sf)`],
       ["Building", `${f0(bldg)} sf`],
       ["Lot coverage", `${f0(cov)}%`],
-      ["FAR (1-story)", f2(far)],
       ["Car stalls", `${f0(stalls)}${ratio ? ` (${f2(ratio)}/1k sf)` : ""}`],
       ["Trailer stalls", f0(trailers)],
       ["Impervious", `${f0(impPct)}%`],
@@ -7537,12 +7579,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ----------------------------- UI ----------------------------- */
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
+  // B721 — workflow order (was build order Yield/Parcel/Analysis…): you pick the land
+  // first (Parcel), screen it (Analysis), read the result (Yield), bring in backdrops
+  // (References), then defaults (Standards). Icons are real inline SVGs (RailIcon), keyed
+  // by id. There's no "Element" tab — element editing is the Properties companion (B656)
+  // that auto-appears when you select something on the canvas.
   const leftTabs = [
-    { id: "yield", glyph: "∑", label: "Yield" },
-    { id: "parcel", glyph: "⬡", label: "Parcel" },
-    { id: "analysis", glyph: "⚐", label: "Analysis" },
-    { id: "references", glyph: "▦", label: "References" }, // B654: Aerial + Overlay merged into one panel
-    { id: "standards", glyph: "⚙", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
+    { id: "parcel", label: "Parcel" },
+    { id: "analysis", label: "Analysis" },
+    { id: "yield", label: "Yield" },
+    { id: "references", label: "References" }, // B654: Aerial + Overlay merged into one panel
+    { id: "standards", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
   ];
   // B656: the Properties companion coexists with the open panel — it renders whenever a
   // qualifying selection exists. On a phone it stays closed unless a panel is already
@@ -7631,6 +7678,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
     if (id !== "easement") { setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); }
     if (id !== "select") setMulti([]);
+    setMergePick(false); // B720: switching tools exits merge pick mode (startMergePick re-arms it after selecting Select)
     if (id !== "select") setCombineSel([]); // merge selection only lives in the Select tool
     if (id !== "callout") setCalloutDraft(null);
     if (!MARKUP_TOOLS.includes(id)) { setMkRect(null); setMkPoly(null); }
@@ -8586,15 +8634,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // B651 — count the CURRENT lots only: a superseded (split) parent is history, not a
             // counted parcel, so splitting one lot into two still reads "Parcels · 2".
             <Section>
-              {/* ＋ Add parcel (B383) — the one front-door for adding land once you're in the
-                  planner, so you never have to back out to the map. Opens a menu of add methods
-                  (reuses the AnchoredMenu portal flyout the right-rail Boundary menu uses). */}
-              <div ref={addParcelAnchor} style={{ position: "relative", marginBottom: 9 }}>
+              {/* B720 — parcel ops row: Add ▾ · Split · Merge, unified at the top of the panel.
+                  Add ▾ (B383) opens the add-methods menu (draw / identify / address); Split arms
+                  the cut tool; Merge enters click-to-pick mode (plain clicks toggle parcels — no
+                  Shift). Replaces the old scattered layout (Add on top, Split + Merge as separate
+                  full-width blocks below the list, Merge needing Shift-click knowledge). */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
+              <div ref={addParcelAnchor} style={{ position: "relative", flex: 1 }}>
                 <button
                   aria-haspopup="menu" aria-expanded={addParcelMenu}
-                  style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
-                  onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — identify from county GIS or draw a boundary">
-                  ＋ Add parcel <span style={{ opacity: 0.8, fontSize: 11 }}>▾</span>
+                  style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
+                  onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — draw a boundary, identify from county GIS, or add by address">
+                  ＋ Add <span style={{ opacity: 0.8, fontSize: 11 }}>▾</span>
                 </button>
                 <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
                   {/* Identify from county GIS — the headline path (needs a georeferenced frame). */}
@@ -8643,10 +8694,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </button>
                 </AnchoredMenu>
               </div>
+              {parcels.length >= 1 && (
+                <button
+                  title="Split a parcel — draw a cut line across one to divide it in two"
+                  style={{ ...chip, flex: 1, ...(tool === "split" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
+                  onClick={() => selectTool("split")}>✂ Split</button>
+              )}
+              {parcels.length > 1 && (
+                <button
+                  title="Merge parcels — click the parcels you want to combine, then Merge"
+                  style={{ ...chip, flex: 1, ...(mergePick ? { background: "#2563eb", color: "#fff", borderColor: "#2563eb" } : {}) }}
+                  onClick={mergePick ? exitMergePick : startMergePick}>⧉ Merge{combineSel.length >= 2 ? ` (${combineSel.length})` : ""}</button>
+              )}
+              </div>
               {parcels.length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add parcel</b> above, or draw one with the Parcel tool (right rail).</div>
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add</b> above, or draw one with the Parcel tool (right rail).</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {/* B720 — "Active" microlabel over the checkbox column: the checkbox reads as
+                      "counted in the totals," NOT "pick for a bulk action" (merge picking is the
+                      blue row highlight, never the checkbox). */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 1 }}>
+                    <span style={{ flex: "none", fontSize: 8, fontWeight: 700, letterSpacing: "0.02em", textTransform: "uppercase", color: PAL.muted, lineHeight: 1, paddingLeft: 1 }}>Active</span>
+                    <span style={{ flex: 1 }} />
+                  </div>
                   {/* B651 — lineage-aware list: children of a split nest under their parent (indented),
                       and the split parent is greyed + labelled "· split" as a SUPERSEDED, non-counting
                       row (it's inactive, so excluded from yield/coverage/detention) with the original
@@ -8669,7 +8740,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
-                        <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
+                        <button onClick={(e) => { if (mergePick || e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
                           style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
@@ -8685,26 +8756,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </div>
               )}
-              {/* Split a parcel (B416) — the inverse of Merge below. Surfaced HERE in the
-                  panel (not only the right-rail Boundary ▾ menu) so a user reaching for
-                  parcel ops — after B383 moved ＋ Add parcel / parcel actions into this
-                  panel — finds it where they look. Same selectTool("split") as the rail. */}
-              {parcels.length >= 1 && (
-                <div style={{ marginTop: 8 }}>
-                  <button
-                    title="Split a parcel — draw a cut line across one to divide it in two"
-                    style={{ ...chip, width: "100%", ...(tool === "split" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
-                    onClick={() => selectTool("split")}>✂ Split a parcel</button>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Click points to draw a cut across a parcel; double-click or Enter to finish. It divides in two — then delete the piece you don't want.</div>
-                </div>
-              )}
-              {parcels.length > 1 && (
-                <div style={{ marginTop: 8 }}>
-                  <button style={{ ...chip, width: "100%", ...(combineSel.length >= 2 ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : { opacity: 0.55 }) }}
-                    disabled={combineSel.length < 2} onClick={mergeParcels}>Merge parcels{combineSel.length >= 2 ? ` (${combineSel.length})` : ""}</button>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Shift-click parcels (here or on the map, or right-click) to multi-select, then Merge. Working merge for test-fit — not a recorded consolidation.</div>
-                </div>
-              )}
+              {/* B720 — Split + Merge moved UP into the ops row at the top of the panel; the old
+                  standalone full-width blocks (and the "Shift-click … then Merge" how-to) were
+                  removed. Context now comes from the top-center banner while a mode is active:
+                  the split-note banner for Split, the pick banner for Merge. Merge stays a
+                  working test-fit fuse, not a recorded legal consolidation. */}
               {/* identify result + armed status (B383) — the body of the ＋ Add parcel menu's
                   "Identify from county GIS" path. The entry point lives in ＋ Add parcel above;
                   no duplicate toggle down here. The status row is the off-switch (so is Esc). */}
@@ -8925,7 +8981,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* metrics */}
           {_pid === "yield" && (<>
           <YieldPanel
-            siteSqft={siteSqft} bldg={bldg} cov={cov} far={far} stalls={stalls} ratio={ratio}
+            siteSqft={siteSqft} bldg={bldg} cov={cov} stalls={stalls} ratio={ratio}
+            providedDetCf={providedDetCf} pondCount={pondCount}
             trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
             bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
             inactiveCount={parcels.filter((p) => p.active === false).length}
@@ -9019,15 +9076,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               standardsFocus (the remount key opens the focused section). */}
           {_pid === "standards" && (<>
           <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.55, margin: "2px 2px 10px" }}>
-            <b style={{ color: PAL.ink }}>Starting values for new elements</b> — editable per element after you place it.
+            <b style={{ color: PAL.ink }}>Defaults for new elements</b> — select an element to override just that one.
             Show/hide toggles and grid &amp; snap moved to the <b>View</b> (eye) menu on the canvas.
           </div>
 
           <div data-std-sec="parcels">
           <Section key={`std-parcels:${standardsFocus === "parcels"}`} title="Parcels" collapsed={standardsFocus !== "parcels"}>
             <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
-            {/* "Show setback line" lives in the Parcel panel (Boundary › Setbacks per edge › Show),
-                next to the object it acts on — see B164. Not duplicated here. */}
+            {/* B721 cross-link (consistent with B164's placement): per-edge setbacks are a
+                property of the parcel itself, not a global default — say so here so nobody hunts
+                for a per-edge control on this panel. */}
+            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "-2px 2px 2px" }}>Per-edge setbacks live on the parcel — select it on the canvas.</div>
           </Section>
           </div>
 
@@ -10344,6 +10403,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
+          {/* B718 — persistent Yield KPI strip. The left rail shows one panel at a time, so the
+              headline yield numbers vanish whenever another panel (Parcel, Element…) is open —
+              exactly when you're dragging a building and want to watch coverage. This bottom-center
+              pill keeps them on the canvas. It reads the SAME engine outputs the Yield panel does
+              (siteSqft / bldg / cov / stalls / ratio — never re-derives geometry, one source of
+              truth). Click opens the Yield panel. Hidden on a clean empty canvas; in the narrow
+              overlay layout (left panel covers the canvas) it truncates to Site · Coverage. */}
+          {siteSqft > 0 && (() => {
+            const items = narrow
+              ? [["Site", `${f2(siteSqft / SQFT_PER_ACRE)} ac`], ["Cover", `${f0(cov)}%`]]
+              : [
+                  ["Site", `${f2(siteSqft / SQFT_PER_ACRE)} ac`],
+                  ["Bldg", `${f0(bldg / 1000)}k sf`],
+                  ["Cover", `${f0(cov)}%`],
+                  ["Stalls", `${f0(stalls)}${ratio ? ` · ${f2(ratio)}/1k` : ""}`],
+                ];
+            const nodes = [];
+            items.forEach(([label, value], i) => {
+              if (i > 0) nodes.push(<span key={`d${i}`} style={{ width: 1, height: 22, background: "rgba(255,255,255,0.18)", flex: "none" }} />);
+              nodes.push(
+                <span key={label} style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.15 }}>
+                  <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.78)" }}>{label}</span>
+                  <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, fontWeight: 700, color: "#fff", fontVariantNumeric: "tabular-nums" }}>{value}</span>
+                </span>
+              );
+            });
+            return (
+              <button data-export="skip" data-testid="yield-kpi-strip" onClick={() => setLeftPanel("yield")} title="Open the Yield panel"
+                style={{ position: "absolute", left: "50%", bottom: 40, transform: "translateX(-50%)", zIndex: 6, display: "flex", alignItems: "center", gap: 11, background: "rgba(25,22,19,0.92)", border: "none", borderRadius: 99, padding: "6px 15px", boxShadow: "0 6px 22px rgba(0,0,0,0.28)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                {nodes}
+              </button>
+            );
+          })()}
+
           {/* B656: on a phone, selection alone never opens the overlay (B556) — this pill is
               the explicit affordance: tap it to open the Properties companion as an overlay. */}
           {narrow && companionSel && !leftPanel && !narrowProps && (
@@ -10476,13 +10569,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               the map" bug — NEW-1). stopPropagation is belt-and-suspenders for any future
               reparenting under a pointer-handling ancestor. whiteSpace:nowrap keeps the
               count label on one line so the buttons can never crowd onto it (NEW-3). */}
-          {tool === "select" && combineSel.length > 0 && (
+          {tool === "select" && (mergePick || combineSel.length > 0) && (
             <div onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
               style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
-              <span>{combineSel.length < 2 ? `Shift-click another parcel to merge — ${combineSel.length} selected` : `${combineSel.length} parcels selected`}</span>
+              {/* B720: in pick mode a PLAIN click picks (no Shift); the banner says so and always
+                  shows a Done exit. Shift-select keeps its original copy. */}
+              <span>{mergePick
+                ? (combineSel.length < 2 ? `Click parcels to merge — ${combineSel.length} picked` : `${combineSel.length} parcels picked`)
+                : (combineSel.length < 2 ? `Shift-click another parcel to merge — ${combineSel.length} selected` : `${combineSel.length} parcels selected`)}</span>
               <button className="dbtn" style={{ ...btn(combineSel.length >= 2), padding: "5px 12px", opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }}
                 disabled={combineSel.length < 2} onClick={mergeParcels}>Merge parcels ⏎</button>
-              <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => setCombineSel([])}>Clear</button>
+              <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => { setCombineSel([]); setMergePick(false); }}>{mergePick ? "Done" : "Clear"}</button>
             </div>
           )}
 
@@ -10574,10 +10671,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><ToolIcon id="deed" size={13} /> Deed / Title — metes &amp; bounds…</span>
               </button>
               <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
-              <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
-                <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
-                <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
-              </div>
+              {/* B720 — the Merge/Reshape how-to prose was removed: Merge now has a first-class
+                  "Merge" button + click-to-pick mode in the Parcel panel ops row, so this menu no
+                  longer needs to explain where Merge lives. It stays a Draw/Deed/Split shortcut. */}
             </AnchoredMenu>
           </div>
 
@@ -10728,7 +10824,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   if (isFloating(tb.id)) { closeFloating(tb.id); return; } // re-clicking a floating panel's icon closes it
                   setLeftPanel((p) => (p === tb.id ? null : tb.id));
                 }}>
-                <span style={{ fontSize: 16, lineHeight: 1 }}>{tb.glyph}</span>
+                <span style={{ display: "grid", placeItems: "center", height: 18, lineHeight: 1 }}><RailIcon id={tb.id} /></span>
                 {/* long labels ("Standards") overflow the 54px rail at 10.5px — shrink, never clip */}
                 <span style={tb.label.length > 8 ? { fontSize: 9, letterSpacing: 0 } : undefined}>{tb.label}</span>
               </button>
@@ -12972,7 +13068,8 @@ const YIELD_PAL = {
 };
 
 function YieldPanel({
-  siteSqft, bldg, cov, far, stalls, ratio, trailers, impPct, pondArea, detPct, open,
+  siteSqft, bldg, cov, stalls, ratio, trailers, impPct, pondArea, detPct, open,
+  providedDetCf, pondCount, // B719: site-wide provided detention VOLUME (cf) + pond count — the same accumulator the drainage screen uses
   bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
   drainage, // B630–B632: required-vs-provided detention + tier + regime (null until a site exists)
   parcelOverlaps, // B652: {count,names,overlapAcres} when active parcels overlap, else null
@@ -13102,7 +13199,9 @@ function YieldPanel({
           {groupHead(Y.green, "Land")}
           {row("Site area", `${f2(acres)} ac`, `(${f0(siteSqft)} sf)`)}
           {inactiveCount > 0 && note(`Excludes ${inactiveCount} inactive parcel${inactiveCount > 1 ? "s" : ""} — toggle in the Parcel panel.`)}
-          {row("FAR", f2(far), "(1-story)")}
+          {/* B722: the FAR (1-story) row was dropped — for single-story industrial it's
+              arithmetically identical to Coverage, so it was noise. Reinstate it only if a
+              multi-story / mezzanine input ever lands. */}
           {row("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
 
           {groupHead(Y.building, "Building")}
@@ -13115,9 +13214,24 @@ function YieldPanel({
           {row("Trailer stalls", f0(trailers))}
 
           {groupHead(Y.detention, "Stormwater")}
-          {row("Impervious", `${f0(impPct)}%`)}
+          {/* B722: an undefined percentage feeds real detention decisions — define exactly what
+              the engine sums, verified against the impervious accumulator (bldg + paving/roads/
+              sidewalks + parking + trailer, each incl. derived curbs). Pond surface is a SEPARATE
+              tally (it's neither impervious nor open) — it does NOT count here. */}
+          <div key="Impervious" title="What counts as impervious: building footprints (incl. bump-outs) + paving, roads & sidewalks + car parking + trailer storage — each including its derived curbs. Detention pond surface is tallied separately below and is NOT counted as impervious." style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "help" }}>
+            <span style={{ fontSize: 12, color: Y.rowLabel, borderBottom: `1px dotted ${Y.muted}` }}>Impervious<span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span></span>
+            <span style={{ fontFamily: YMONO, fontSize: 13, color: Y.text, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>{f0(impPct)}%</span>
+          </div>
           {row("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
           {row("Detention %", `${f0(detPct)}%`)}
+          {/* B719: site-wide detention STORAGE (volume) — Σ detentionStorage() across every pond,
+              in acre-feet (the number that actually sizes a pond; cf is the secondary). Same
+              accumulator (providedDetCf) the drainage screen reads as "Detention provided", so the
+              rollup can never disagree with the sum of the per-pond panel readouts. This is the
+              "Provided" half of the future required-vs-provided check — the sibling "Required
+              (screening)" / "Headroom" rows slot in right here without rework. */}
+          {row("Detention storage", `${f2(providedDetCf / 43560)} ac-ft`, pondCount ? `· ${f0(providedDetCf)} cf` : "· no ponds drawn")}
+          {pondCount > 0 && note("Prismoidal, screening only — confirm with your engineer.")}
           {/* B630–B632: required-vs-provided detention, analysis tier, hydraulic regime.
               GIS facts load on the explicit button (house rule); every number carries its
               rule record via ruleBadge — a bare number here is a defect. */}
