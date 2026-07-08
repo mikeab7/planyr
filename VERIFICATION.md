@@ -68,8 +68,8 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V244 — B713: sharing survives the owner's autosaves — the two-account share round-trip works end to end ⏳ **TWO SIGNED-IN ACCOUNTS (both exist: the owner + michael.butler@hillwood.com, already admins on team "HIP Houston"; Goose Creek group smqfy48tlk9j re-linked to the team by the data heal)**
-- **Verified here (sandbox, 2026-07-08):** `test/teamShareGuard.test.js` 8/8 (sites/doc_reviews update rows carry NO team_id key; inserts inherit; slim jsonb strips teamId/ownerId; headerSig share-neutral) · full suite green · build green. Root cause + fix in B713.
+### V244 — B714: sharing survives the owner's autosaves — the two-account share round-trip works end to end ⏳ **TWO SIGNED-IN ACCOUNTS (both exist: the owner + michael.butler@hillwood.com, already admins on team "HIP Houston"; Goose Creek group smqfy48tlk9j re-linked to the team by the data heal)**
+- **Verified here (sandbox, 2026-07-08):** `test/teamShareGuard.test.js` 8/8 (sites/doc_reviews update rows carry NO team_id key; inserts inherit; slim jsonb strips teamId/ownerId; headerSig share-neutral) · full suite green · build green. Root cause + fix in B714.
 - **Pending signed-in steps (planyr.io, owner + hillwood account — reload EVERY open Planyr tab first so no pre-fix tab is still running):**
   1. **The regression that bit:** owner opens Goose Creek and makes several edits (each triggers an autosave) → in the DB (or via the hillwood account's view) the site STAYS shared — `team_id` never reverts to null. The hillwood session keeps a green cloud and keeps seeing elements across reloads.
   2. Hillwood account opens the shared site → sees the parcels/elements, makes an edit → it lands (green cloud) and propagates to the owner's session (<~2s).
@@ -94,6 +94,7 @@ was never clicked" quietly ships broken.
 7. The maintenance-berm land-take line and berm-overlap warning behave on a pond next to a building.
 8. Print/PDF export: the detention/mitigation pairs appear; the metrics band doesn't clip its note (PDF-PARITY).
 9. Block the NFHL host (devtools offline for that origin) → the geometry-outage warning renders; nothing reads clear.
+10. (B714) On a dock-high layout with pad FFE entered: the truck court's inspector shows "auto FF−4"; the mitigation volume visibly drops vs pricing the court at slab FF.
 
 ### V240 — B704: 1-ft contours over a known ditch/pond AGREE with the cross-section tool ⏳ **LIVE APP (planyr.io), any teammate** (GIS endpoint + zoom/data-density classes)
 - **Verified here (sandbox, 2026-07-07):** ramp CALIBRATION test pins the whole geometric chain (d3 cell-center convention ↔ mercator transform ↔ bilinear sampler); cone/void/fixture unit suites green; headless on the built app with REAL Katy bytes: one LERC fetch, worker decode, 30 halo labels, real canvas ink, honest zoom-gate message below z16.

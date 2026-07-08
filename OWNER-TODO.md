@@ -122,7 +122,7 @@ _Last updated: 2026-07-07._
       can flex tighter to match? Default = leave it at 50–58′ (your stated range). Say the word and it's a one-liner.
 - [x] ~~**A second test account**~~ — **DONE (confirmed 2026-07-08): `michael.butler@hillwood.com` exists and
       is an admin on team "HIP Houston" alongside your main account.** Your share attempt on Goose Creek
-      surfaced a real bug — any autosave from your open tab silently reverted the share (B713, fixed +
+      surfaced a real bug — any autosave from your open tab silently reverted the share (B714, fixed +
       shipped 2026-07-08; the site was re-linked to the team for you). Nothing left on your plate here —
       the two-account click-throughs (V244 share round-trip + V230 named conflict notices) are the Claude
       cohort's job. **One habit that matters: after a Planyr update ships, reload your open Planyr tabs**

@@ -77,7 +77,7 @@ export function slimForCloud(model) {
   // Element collections → site_elements rows (B672 read cutover). The header keeps empty arrays
   // (not missing fields) so createSiteModel-normalization of a loaded header stays shape-identical.
   m = { ...m, els: [], markups: [], measures: [], callouts: [], parcels: [], elementsInRows: true };
-  // B713 — the sharing pointer never rides the stored jsonb: the `team_id` COLUMN is the single
+  // B714 — the sharing pointer never rides the stored jsonb: the `team_id` COLUMN is the single
   // source of truth (set only by the explicit share/unshare flow; overlaid back onto the model by
   // cloudList on every read). A model held in a tab's memory since before a share carries a STALE
   // teamId — embedding it here (and worse, in the row's team_id column, fixed in cloudUpsertCore)
@@ -87,7 +87,7 @@ export function slimForCloud(model) {
   return noShare;
 }
 
-// B713 — the column payload an ordinary content push sends (pure; exported for tests). The
+// B714 — the column payload an ordinary content push sends (pure; exported for tests). The
 // sharing pointer `team_id` is DELIBERATELY absent from updates: a content save must never be
 // able to change who a project is shared with (an open tab's in-memory model predates any share
 // made after it loaded — pushing its stale teamId is exactly how a fresh share got silently
@@ -186,7 +186,7 @@ export function keepaliveCloudPush(uid, model) {
   const token = currentAccessToken();
   const m = slimForCloud(model); // slim header (B672) — elements ride the element keepalive instead
   // No user_id in the PATCH body (a guarded UPDATE must not re-stamp the creator) and no team_id
-  // (B713 — the keepalive is always an update; a stale teamId here could silently unshare).
+  // (B714 — the keepalive is always an update; a stale teamId here could silently unshare).
   const row = siteRowFor(m);
   return keepaliveCasPush({ url, anon, token, table: "sites", id: m.id, row, expected: siteVersions[m.id] });
 }

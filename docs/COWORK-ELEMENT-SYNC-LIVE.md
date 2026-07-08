@@ -16,7 +16,7 @@ confirmations that move V229–V231 (and their B-items) to Done. **None of this 
 > account / team invite (tracked in OWNER-TODO); everything else here is self-service.
 >
 > **📌 Update (2026-07-08): the second account is UNBLOCKED.** The owner's share attempt surfaced
-> B713 (any owner autosave silently reverted `sites.team_id` → the collaborator got a red cloud +
+> B714 (any owner autosave silently reverted `sites.team_id` → the collaborator got a red cloud +
 > empty site) — fixed + shipped, and Goose Creek (smqfy48tlk9j) is re-linked to team "HIP Houston"
 > with `michael.butler@hillwood.com` as the second account. **Run V244 (VERIFICATION.md) first**
 > (share survives autosaves; collaborator can read/write), then V230's 7–11 with those two
