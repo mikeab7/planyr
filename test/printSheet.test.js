@@ -16,6 +16,23 @@ const ROWS = [
 ];
 
 describe("printSheetLayout — metrics band grows with pair count (B712)", () => {
+  it("REAL pair widths size the band: wide detention/mitigation pairs get their row", () => {
+    const base = [
+      ["Site area", "24.79 ac (1,080,000 sf)"], ["Building", "72,000 sf"], ["Lot coverage", "7%"],
+      ["FAR (1-story)", "0.07"], ["Car stalls", "0"], ["Trailer stalls", "0"],
+      ["Impervious", "7%"], ["Detention", "66,000 sf"], ["Open / green", "21.63 ac"],
+    ];
+    const wide = [...base,
+      ["Det. req / prov (usable)", "12.34 / 8.49 ac-ft ⚠ unanchored pond"],
+      ["Floodplain mitigation", "3.21 ac-ft (straddle — a candidate is unknown)"],
+      ["Combined basin", "15.55 ac-ft"],
+    ];
+    const a = printSheetLayout({ metricsPairs: base });
+    const b = printSheetLayout({ metricsPairs: wide });
+    expect(a.metrics.h).toBe(64); // the historical two-row band
+    expect(b.metrics.h).toBeGreaterThan(a.metrics.h); // wide pairs get a real third row
+    expect(b.plan.h).toBeLessThan(a.plan.h);
+  });
   it("the historical default (9 pairs, letter-landscape) keeps the original 64 c-in band", () => {
     expect(printSheetLayout({}).metrics.h).toBe(64);
     expect(printSheetLayout({ metricsCount: 9 }).metrics.h).toBe(64);

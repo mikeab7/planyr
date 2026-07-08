@@ -49,6 +49,18 @@ describe("load / save", () => {
     expect(back.harris.verified).toBe(true);
     expect(back.coh.trigger).toBe("1pct_plus_02pct"); // untouched seeds survive
   });
+  it("per-jurisdiction deep merge: an edit to ONE rule never freezes the other seeds, and a NEW seed field reaches saved users", () => {
+    const store = memStore();
+    const rules = loadFloodplainRules(store);
+    rules.harris = { ...rules.harris, ratio: 1.5 };
+    saveFloodplainRules(rules, store);
+    // simulate a later release adding a field to the COH seed: the saved harris edit
+    // must survive AND coh must pick up whatever the current seeds carry.
+    const back = loadFloodplainRules(store);
+    expect(back.harris.ratio).toBe(1.5);
+    expect(back.harris.trigger).toBe("1pct");          // untouched fields ride the merge
+    expect(back.coh.floodwayPolicy).toBe("prohibit_fill"); // seed fields present even after a whole-object save
+  });
   it("a corrupted store falls back to the seeds instead of throwing", () => {
     const store = { getItem: () => "{not json", setItem: () => {} };
     expect(loadFloodplainRules(store).generic.trigger).toBe("1pct");

@@ -145,7 +145,7 @@ export function gridIntersect(ring, zone, depthAt = null, opts = {}) {
 /* The governing (highest) 1% water surface across the zones that touch a ring —
  * static BFE where published, else the manual BFE. B708's pond split consumes this.
  * Returns { wseFt, provider } — provider "static-bfe" | "manual" | null. Pure. */
-export function wse1pctForRing(ring, zones, { bfeFt = null } = {}) {
+export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null } = {}) {
   const fb = ringBBox(ring);
   let best = null, provider = null;
   for (const z of zones) {
@@ -154,6 +154,12 @@ export function wse1pctForRing(ring, zones, { bfeFt = null } = {}) {
     const { areaSf } = gridIntersect(ring, z, null, { maxCells: 400 });
     if (!(areaSf > 0)) continue;
     if (z.staticBfeFt != null && (best == null || z.staticBfeFt > best)) { best = z.staticBfeFt; provider = "static-bfe"; }
+    // Sheet-flow (AO) zones publish a DEPTH instead of a BFE — with a grade in hand
+    // that IS this zone's water surface (a pond in an AO zone must not keep gross
+    // credit just because no riverine BFE exists here).
+    else if (z.aoDepthFt != null && existGradeFt != null && (best == null || existGradeFt + z.aoDepthFt > best)) {
+      best = existGradeFt + z.aoDepthFt; provider = "ao-depth";
+    }
   }
   if (best == null && bfeFt != null && isFinite(bfeFt)) {
     // Only meaningful when the ring actually touches a 1% zone at all.
@@ -218,14 +224,17 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
     if (!bucket) continue; // a class outside this rule's trigger (e.g. 02pct under a 1pct-only rule)
 
     // The zone's water surface (feet NAVD88), by provider precedence:
-    //   1% zones: published static BFE → manual BFE → (AO) grade + DEPTH → unknown.
-    //   0.2% band: manual 0.2% WSE only in v1 (not an NFHL attribute; named hook for
-    //   HCFCD/MAAPnext WSE grids later).
+    //   1% zones: published static BFE → (AO) grade + its published DEPTH → manual
+    //   BFE → unknown. An AO zone's own DEPTH is that zone's published data — a
+    //   manual BFE entered for a nearby AE reach must never override it (sheet-flow
+    //   ponding isn't riverine backwater; pricing it off the AE BFE mis-prices both
+    //   ways). 0.2% band: manual WSE only in v1 (not an NFHL attribute; named hook
+    //   for HCFCD/MAAPnext grids later).
     let wse = null, wseSrc = null;
     if (z.cls === "1pct") {
       if (z.staticBfeFt != null) { wse = z.staticBfeFt; wseSrc = "static-bfe"; }
-      else if (manualBfe != null) { wse = manualBfe; wseSrc = "manual"; }
       else if (z.aoDepthFt != null && grade != null) { wse = grade + z.aoDepthFt; wseSrc = "ao-depth"; }
+      else if (manualBfe != null) { wse = manualBfe; wseSrc = "manual"; }
     } else if (z.cls === "02pct") {
       if (wse02 != null) { wse = wse02; wseSrc = "manual"; }
     }

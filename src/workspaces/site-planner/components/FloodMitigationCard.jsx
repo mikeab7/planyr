@@ -55,6 +55,13 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
     <div style={box}>
       <div style={head}>Floodplain mitigation &amp; buildability</div>
 
+      {/* the same staleness/prior-answer honesty the Yield readout carries */}
+      {d.stale && (
+        <div style={warnStyle}>⚠ The site boundary or drawn fill changed since this check — re-check drainage criteria; the figures below are from the previous layout.</div>
+      )}
+      {d.showingPrior && (
+        <div style={d.status === "busy" ? noteStyle : warnStyle}>{d.status === "busy" ? "Re-checking… showing the previous result." : `Re-check failed${d.error ? ` (${d.error})` : ""} — showing the previous result.`}</div>
+      )}
       {geo && geo.state === "failed" && (
         <div style={dangerStyle}>⚠ The flood-zone geometry source is unavailable — mitigation reads UNKNOWN, never a clear. Re-check shortly.</div>
       )}

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-07 @ `b973f72` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-08 @ `6baa4ad` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -338,7 +338,7 @@ _216 source files mapped._
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
   - _exports_: `presenceSummary`
 - **`src/workspaces/site-planner/lib/printSheet.js`** — Pure single-SVG print sheet composer: page geometry, buildings table, metrics band, title block, export filename builder
-  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `formatDateStamp`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`
+  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/registerGisSw.js`** — Boot-time unregister of the retired browser GIS imagery service worker (superseded by server-side Drive cache), fail-safe

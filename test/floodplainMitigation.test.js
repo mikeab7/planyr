@@ -199,6 +199,13 @@ describe("computeMitigation — the volume core", () => {
     expect(r.volumeCf).toBeCloseTo(10000 * 2, -2); // WSE = 90 + 2
     expect(r.providers.wse1pct).toBe("ao-depth");
   });
+  it("an AO zone's own DEPTH beats a manual BFE (sheet flow isn't riverine backwater)", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)], { zone: "AO", aoDepthFt: 2 });
+    const r = computeMitigation({ footprints: [fp100], zones: [zone], rule: harris,
+      elev: { padElevFt: 100, existGradeFt: 90, bfeFt: 99 } }); // a nearby AE reach's BFE
+    expect(r.volumeCf).toBeCloseTo(10000 * 2, -2); // 90+2 governs, never 99
+    expect(r.providers.wse1pct).toBe("ao-depth");
+  });
 
   it("the floodway is a hard flag + acres, never a mitigation price", () => {
     const zone = mkZone("floodway", [rect(0, 0, 50, 100)], { subtype: "FLOODWAY" });
@@ -295,6 +302,9 @@ describe("straddle + pond-side helpers", () => {
     expect(wse1pctForRing(rect(0, 0, 150, 100), zones, { bfeFt: 99 })).toEqual({ wseFt: 96, provider: "static-bfe" });
     const noBfe = [mkZone("1pct", [rect(0, 0, 100, 100)])];
     expect(wse1pctForRing(rect(0, 0, 100, 100), noBfe, { bfeFt: 93 })).toEqual({ wseFt: 93, provider: "manual" });
+    // a pond in a sheet-flow (AO) zone gets a WSE from grade + DEPTH — no riverine BFE exists there
+    const ao = [mkZone("1pct", [rect(0, 0, 100, 100)], { zone: "AO", aoDepthFt: 2 })];
+    expect(wse1pctForRing(rect(0, 0, 100, 100), ao, { existGradeFt: 90 })).toEqual({ wseFt: 92, provider: "ao-depth" });
     expect(wse1pctForRing(rect(5000, 0, 10, 10), noBfe, { bfeFt: 93 }).wseFt).toBeNull(); // not touching → no WSE
   });
   it("ringInTrigger respects the rule's trigger classes (floodway always counts)", () => {

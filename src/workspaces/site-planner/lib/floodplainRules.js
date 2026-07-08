@@ -100,7 +100,13 @@ export function loadFloodplainRules(store) {
   try {
     const s = store || (typeof localStorage !== "undefined" ? localStorage : null);
     const v = s ? JSON.parse(s.getItem(LS)) : null;
-    return v ? { ...clone(), ...v } : clone();
+    if (!v) return clone();
+    // PER-JURISDICTION deep merge: a whole-object save must not freeze the OTHER
+    // jurisdictions' seeds, and a future seed correction / new field must still
+    // reach users who edited one rule (a top-level spread would shadow it forever).
+    const out = clone();
+    for (const [k, r] of Object.entries(v)) out[k] = { ...(out[k] || {}), ...(r || {}) };
+    return out;
   } catch (_) { return clone(); }
 }
 export function saveFloodplainRules(rules, store) {

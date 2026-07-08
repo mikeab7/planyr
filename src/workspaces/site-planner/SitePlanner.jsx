@@ -609,10 +609,17 @@ const FM_FILL_TYPES = new Set(["building", "paving", "parking", "trailer"]);
  * flood-geometry fetch stamp. */
 const _mitMemo = new Map();
 const MIT_MEMO_MAX = 64;
+// Cheap position-sensitive ring checksum: an AREA-PRESERVING vertex edit (slide a
+// middle vertex along a wall line) must still bust the memo — count + first point +
+// area alone would serve stale intersect geometry for it.
+const ringHash = (ring) => {
+  let h = 0;
+  for (let i = 0; i < ring.length; i++) h += (ring[i].x * 7 + ring[i].y * 3) * (i + 1);
+  return Math.round(h);
+};
 function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
-  const r0 = fp.ring[0];
   const sig = [
-    fp.id, fp.ring.length, r0 ? `${r0.x.toFixed(1)},${r0.y.toFixed(1)}` : "", polyArea(fp.ring).toFixed(0),
+    fp.id, fp.ring.length, ringHash(fp.ring), polyArea(fp.ring).toFixed(0),
     fp.padElevFt ?? "", zonesSig, rule ? `${rule.trigger}|${rule.ratio}|${rule.verified}` : "",
     elev.padElevFt ?? "", elev.existGradeFt ?? "", elev.bfeFt ?? "", elev.wse02Ft ?? "", elev.avgFillDepthFt ?? "",
   ].join("~");
@@ -624,6 +631,27 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
   const val = computeMitigation({ footprints: [fp], zones, rule, elev });
   _mitMemo.set(sig, val);
   if (_mitMemo.size > MIT_MEMO_MAX) _mitMemo.delete(_mitMemo.keys().next().value);
+  return val;
+}
+
+/* Per-pond flood facts (governing WSE + in-trigger), memoized like the fill memo —
+ * the metrics pass asks for these for EVERY pond each render, and the underlying
+ * grid tests would otherwise jank drags on exactly the in-floodplain sites this
+ * feature targets. */
+const _pondFactsMemo = new Map();
+function pondFloodFacts(ring, zones, rule, { bfeFt, existGradeFt }, zonesSig) {
+  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", existGradeFt ?? ""].join("~");
+  if (_pondFactsMemo.has(sig)) {
+    const hit = _pondFactsMemo.get(sig);
+    _pondFactsMemo.delete(sig); _pondFactsMemo.set(sig, hit);
+    return hit;
+  }
+  const val = {
+    wseFt: wse1pctForRing(ring, zones, { bfeFt, existGradeFt }).wseFt,
+    inTrigger: ringInTrigger(ring, zones, rule),
+  };
+  _pondFactsMemo.set(sig, val);
+  if (_pondFactsMemo.size > MIT_MEMO_MAX) _pondFactsMemo.delete(_pondFactsMemo.keys().next().value);
   return val;
 }
 // A building's walls (with midpoints + lengths), its centre and area.
@@ -5660,9 +5688,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const drainCentroid = drainActive.length
     ? drainActive.flatMap((p) => p.points).reduce((s, pt, _i, arr) => [s[0] + pt.x / arr.length, s[1] + pt.y / arr.length], [0, 0])
     : [0, 0];
+  // B712: the fill/pond elements DEFINE the flood-fetch envelope + the mitigation
+  // footprints, so their coarse envelope joins the signature — fill drawn or dragged
+  // beyond the checked envelope must surface the "re-check" hint, never screen
+  // against never-fetched flood zones as a silent all-clear.
+  const drainElsSig = (() => {
+    let n = 0, minX = 0, minY = 0, maxX = 0, maxY = 0, first = true;
+    for (const e of els) {
+      if (!FM_FILL_TYPES.has(e.type) && e.type !== "pond") continue;
+      let r; try { r = ringOf(e); } catch (_) { continue; }
+      if (!r || r.length < 3) continue;
+      n++;
+      for (const pt of r) {
+        if (first) { minX = maxX = pt.x; minY = maxY = pt.y; first = false; continue; }
+        if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
+        if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+      }
+    }
+    return n + "@" + [minX, minY, maxX, maxY].map((v) => Math.round(v / 50)).join(",");
+  })();
   const drainSigNow = drainActive.length + ":" + Math.round(siteSqft) + ":" +
     Math.round(drainCentroid[0] / 50) + "," + Math.round(drainCentroid[1] / 50) + ":" +
-    (origin ? `${origin.lat.toFixed(4)},${origin.lon.toFixed(4)}` : "nogeo");
+    (origin ? `${origin.lat.toFixed(4)},${origin.lon.toFixed(4)}` : "nogeo") + ":" + drainElsSig;
   const checkDrainage = async () => {
     if (!origin) { setDrainCtx((prev) => ({ error: "This plan isn't georeferenced — bring the parcel in from the map first.", prev: prev?.ctx ? prev : prev?.prev })); return; }
     const act = parcels.filter((p) => p.active !== false && p.points && p.points.length >= 3);
@@ -5783,14 +5830,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       padElev: Number.isFinite(fmSettings.padFfeFt) ? "manual" : null,
     },
   };
+  const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
   const pondSplitFor = (e) => {
     const det = e.det || {};
     const pring = ringOf(e);
-    const wse = fmZones.length ? wse1pctForRing(pring, fmZones, { bfeFt: fmElev.bfeFt }).wseFt : null;
+    const facts = fmZones.length
+      ? pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt }, fmZonesSig)
+      : { wseFt: null, inTrigger: false };
     const estPool = detRegime && detRegime.regime === "B"
       ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: det.depth ?? 8, freeboardFt: det.freeboard ?? 1 })
       : null;
-    return { ...usablePondVolume(pring, det, { wseFt: wse, estimatePoolDepthFt: estPool }), wseFt: wse, inTrigger: fmZones.length ? ringInTrigger(pring, fmZones, fmRule) : false };
+    return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool }), wseFt: facts.wseFt, inTrigger: facts.inTrigger };
   };
   let siteDeadCf = 0, siteMitCandidateCf = 0, pondFullyInundated = false, unanchoredInTrigger = 0, pondExcavationCf = 0;
   for (const e of els) {
@@ -5820,11 +5870,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return list;
   })();
-  const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
   const fmCompute = (rule) => combineMitigation(fmFootprints.map((fp) => mitigationForFootprint(fp, fmZones, rule, fmElev, fmZonesSig)));
   // A jurisdiction straddle prices EVERY candidate and shows the worst case — never
   // a silent default (the detReqCandidates discipline).
-  const fmCandidates = !drainAuthorityId && drainCtxData?.authority?.ambiguous?.length
+  const fmCandidates = !fmSettings.jurKey && !drainAuthorityId && drainCtxData?.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => {
         const jk = defaultFloodJurForAuthority(aid);
         const rule = floodRules[jk] || floodRules.generic;
@@ -6459,7 +6508,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Thin line work + restyle labels to the SAME physical weights the PDF uses, by
     // scaling against a notional letter-landscape plan box (PNG has no paper of its own),
     // so a downloaded PNG looks as crisp/professional as the PDF (NEW-2 / NEW-3).
-    const lp = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: buildingRows().length, metricsCount: printMetricPairs().length });
+    const lp = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: buildingRows().length, metricsPairs: printMetricPairs() });
     restyleExportClone(clone, sheetFitScale(w, h, lp.plan.w, lp.plan.h));
     const xml = new XMLSerializer().serializeToString(clone);
     const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
@@ -6515,10 +6564,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ];
     const d = drainage;
     const reqAcFt = d && d.req && d.req.kind === "point" && d.req.requiredAcFt > 0 ? d.req.requiredAcFt : null;
-    if (reqAcFt != null) pairs.push(["Det. req / prov (usable)", `${f2(reqAcFt)} / ${f2(d.providedUsableCf / 43560)} ac-ft`]);
+    // The sheet carries the SAME cautions the readout shows (PDF-PARITY): an
+    // unanchored in-floodplain pond marks the provided figure, a truncated pull
+    // marks mitigation as a floor, a failed pull prints UNKNOWN, a straddle with
+    // an unknown candidate never prints as a clean definite number.
+    if (reqAcFt != null) {
+      const caution = d.unanchoredInTrigger > 0 ? " ⚠ unanchored pond" : "";
+      pairs.push(["Det. req / prov (usable)", `${f2(reqAcFt)} / ${f2(d.providedUsableCf / 43560)} ac-ft${caution}`]);
+    }
     const mit = d && d.mitigation;
-    if (mit && mit.intersectAcres > 0) {
-      pairs.push(["Floodplain mitigation", mit.volumeCf != null ? `${f2(mit.volumeAcFt)} ac-ft` : "UNKNOWN"]);
+    const geoFailed = d && d.floodGeo && d.floodGeo.state === "failed";
+    if (geoFailed) {
+      pairs.push(["Floodplain mitigation", "UNKNOWN (source unavailable)"]);
+    } else if (mit && mit.intersectAcres > 0) {
+      let v = mit.volumeCf != null ? `${f2(mit.volumeAcFt)} ac-ft` : "UNKNOWN";
+      if (mit.volumeCf != null && d.floodGeo && d.floodGeo.truncated) v += " (floor — capped pull)";
+      if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
+      pairs.push(["Floodplain mitigation", v]);
       if (reqAcFt != null && mit.volumeCf != null) pairs.push(["Combined basin", `${f2(reqAcFt + mit.volumeAcFt)} ac-ft`]);
     }
     return pairs;
@@ -6540,7 +6602,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // (B197) and metrics live in the SAME outer SVG coordinate system.
       const rows = buildingRows();
       const metricPairs = printMetricPairs();
-      const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsCount: metricPairs.length });
+      const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsPairs: metricPairs });
       // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
       // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
       // is identical regardless of the zoom the user was at when they hit print.
@@ -6599,7 +6661,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // exist — the right-hand buildings-table column. So the frame the owner draws is
   // exactly what fills the printed plan area (WYSIWYG), computed from the same layout
   // the print routine uses.
-  const printAspect = () => { const L = printSheetLayout({ paper: printPaper, orient: printOrient, buildingCount: nBuildings, metricsCount: printMetricPairs().length }); return L.plan.w / L.plan.h; };
+  const printAspect = () => { const L = printSheetLayout({ paper: printPaper, orient: printOrient, buildingCount: nBuildings, metricsPairs: printMetricPairs() }); return L.plan.w / L.plan.h; };
   // A frame of the given aspect, centred at cx,cy, that contains a w×h area.
   const fitFrame = (cx, cy, w, h, aspect) => { const wFt = Math.max(w, h * aspect, 40); return { cx, cy, wFt, hFt: wFt / aspect }; };
   const enterPrintMode = () => {
@@ -6613,7 +6675,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Re-fit the frame's aspect when paper/orientation changes (keep it around the
   // same coverage). Skip the initial render.
-  const printAspectKey = `${printPaper}:${printOrient}:${nBuildings > 0}`;
+  const printAspectKey = `${printPaper}:${printOrient}:${nBuildings > 0}:${printMetricPairs().length}`;
   const prevAspectKey = useRef(printAspectKey);
   useEffect(() => {
     if (prevAspectKey.current === printAspectKey) return;
@@ -10509,10 +10571,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </Field>
                     )}
                     <Field label="Permanent pool elev. (ft)">
-                      <NumInput style={{ ...numInput, width: 64 }} value={det.poolElev ?? ""} placeholder="dry bottom" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput style={{ ...numInput, width: 64 }} value={det.poolElev ?? ""} placeholder="dry bottom" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
+                        {det.poolElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — dry-bottom basin" onClick={() => setDet({ poolElev: null })}>Clear</button>}
+                      </span>
                     </Field>
                     <Field label="Receiving flowline elev. (ft)">
-                      <NumInput style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
+                        {det.receivingFlowlineElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear" onClick={() => setDet({ receivingFlowlineElev: null })}>Clear</button>}
+                      </span>
                     </Field>
                     <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
                       Elevations are feet NAVD88 — older documents may cite NGVD29; convert before entering (Houston subsidence makes mixed datums a multi-foot silent error). Screening only.
@@ -10567,7 +10635,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       } else if (split.mode === "anchored" && split.bands && split.bands.poolDeadCf > 0) {
                         out.push(noteLine(`Permanent pool below ${f1(det.poolElev)}′ holds ${f2(split.bands.poolDeadCf / 43560)} ac-ft of dead storage (no detention credit). Groundwater can hold a wet bottom near mapped channels.`, "pool-note"));
                       } else if (split.inTrigger) {
-                        out.push(warnLine("⚠ This pond sits in the mapped floodplain but isn't anchored — set the pond's top-of-bank elevation (and the reach's flood elevation) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention.", "unanchored", false));
+                        out.push(warnLine(det.tobElev != null
+                          ? "⚠ This pond sits in the mapped floodplain and its top of bank is anchored, but the reach's flood elevation is unknown — enter the BFE (drainage inputs in Yield) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention."
+                          : "⚠ This pond sits in the mapped floodplain but isn't anchored — set the pond's top-of-bank elevation (and the reach's flood elevation) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention.", "unanchored", false));
                       }
                       if (split.inTrigger) {
                         out.push(noteLine("Cut outside or above the trigger floodplain earns no screening mitigation credit — compensating storage must be hydraulically connected at flood stages.", "credit-loc"));
@@ -11538,7 +11608,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const drainageChecked = !!drainCtxData;
             const mitKnown = fmResult && fmResult.volumeCf != null;
             const mitCy = mitKnown ? fmResult.cutCy : null;
-            const mitRelevant = drainageChecked && fmResult && fmResult.intersectAcres > 0;
+            const fmGeoFailed = drainageChecked && drainCtxData?.floodGeo?.state === "failed";
+            const mitRelevant = drainageChecked && ((fmResult && fmResult.intersectAcres > 0) || fmGeoFailed);
             if (!(pondCy > 0) && !mitRelevant) return null;
             const usd = (n) => `$${Math.round(n).toLocaleString()}`;
             const pEarthRaw = prices.earthworkCy;
@@ -11550,7 +11621,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {pondCy > 0 && metricRow("Pond excavation", `${f0(pondCy)} CY`, pEarth != null ? usd(pondCy * pEarth) : "set $/CY")}
                 {mitRelevant && (mitKnown
                   ? metricRow("Floodplain mitigation cut", `${f0(mitCy)} CY`, pEarth != null ? usd(mitCy * pEarth) : "set $/CY")
-                  : metricRow("Floodplain mitigation cut", "UNKNOWN", "enter elevations"))}
+                  : metricRow("Floodplain mitigation cut", "UNKNOWN", fmGeoFailed ? "flood source unavailable" : "enter elevations"))}
                 {!drainageChecked && (
                   <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "4px 0 0", fontWeight: 700 }}>
                     Floodplain mitigation not screened yet — run ⛆ Check drainage criteria; this takeoff is INCOMPLETE until then, not zero.
@@ -13016,7 +13087,8 @@ function YieldPanel({
               const mit = d.mitigation;
               if (mit && mit.intersectAcres > 0) {
                 if (mit.volumeCf != null) {
-                  out.push(row("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`, mit.expertBypass ? "expert avg-depth" : ""));
+                  out.push(row("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`, mit.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : ""));
+                  if (d.mitigationStraddle && d.mitigationStraddle.anyUnknown) out.push(warnNote("Jurisdiction straddle with an UNKNOWN candidate — the worst PRICED case is shown; the unknown candidate could govern. Enter its elevations.", "mit-straddle-unk"));
                   if (req && req.kind === "point" && req.requiredAcFt > 0) {
                     out.push(row("Combined basin volume", `${f2(req.requiredAcFt + mit.volumeAcFt)} ac-ft`));
                   }
@@ -13081,10 +13153,23 @@ function YieldPanel({
               const fm = d.floodMit;
               const fmRuleRow = fm.rules[fm.jurKey] || fm.rules.generic;
               const fmInputStyle = { width: 78, padding: "3px 6px", border: `1px solid ${Y.border}`, borderRadius: 6, background: "transparent", color: Y.text, fontSize: 11.5, fontFamily: "inherit", textAlign: "right" };
+              // NumInput never commits a cleared field (it restores the old value), so
+              // every "blank = auto/unknown" input carries an explicit Clear chip — the
+              // expert bypass especially must never be one-way.
               const fmRow = (label, key, placeholder, title) => (
                 <div key={"fm-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
                   <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
-                  <NumInput style={fmInputStyle} value={Number.isFinite(fm.settings[key]) ? fm.settings[key] : ""} placeholder={placeholder || "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null })} />
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    {Number.isFinite(fm.settings[key]) && (
+                      <button
+                        type="button"
+                        title="Clear — back to blank (auto / unknown)"
+                        onClick={() => fm.onChange({ [key]: null })}
+                        style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}
+                      >×</button>
+                    )}
+                    <NumInput style={fmInputStyle} value={Number.isFinite(fm.settings[key]) ? fm.settings[key] : ""} placeholder={placeholder || "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null })} />
+                  </span>
                 </div>
               );
               out.push(
@@ -13108,7 +13193,7 @@ function YieldPanel({
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderTop: `1px solid ${Y.hairline}`, marginTop: 3 }}>
                     <span style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4 }}>
                       {fmRuleRow.label}: {fmRuleRow.trigger === "1pct_plus_02pct" ? "1% + 0.2%" : "1%"} trigger @
-                      <NumInput style={{ ...fmInputStyle, width: 44, margin: "0 4px" }} value={fmRuleRow.ratio} min={0} onCommit={(n) => Number.isFinite(n) && n > 0 && fm.onRuleChange(fm.jurKey, { ratio: n })} />:1
+                      <NumInput style={{ ...fmInputStyle, width: 44, margin: "0 4px" }} value={fmRuleRow.ratio} min={0.01} onCommit={(n) => Number.isFinite(n) && n > 0 && fm.onRuleChange(fm.jurKey, { ratio: n })} />:1
                     </span>
                     <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 10.5, color: fmRuleRow.verified ? Y.text : "var(--warn-text)", cursor: "pointer", whiteSpace: "nowrap", fontWeight: 700 }}>
                       <input type="checkbox" checked={!!fmRuleRow.verified} onChange={(e) => fm.onRuleChange(fm.jurKey, { verified: e.target.checked })} />
