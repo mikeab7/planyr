@@ -35,7 +35,7 @@ When a new report matches an existing **Done or ⏳ Verify** item (search titles
 
 Add a new tag to this legend **in the same commit** you first use it (this prevents tag sprawl; CI's `build-backlog-index --check` fails on an off-legend tag):
 
-`#persistence` `#gis` `#gantt` `#export` `#site-planner` `#doc-review` `#scheduler` `#selection` `#pond` `#drive` `#testing` `#ui` `#markup` `#infra` `#auth` `#perf` `#files` `#compare` `#stitching` `#yield` `#filing` `#library` `#road` `#coordinates`
+`#persistence` `#gis` `#gantt` `#export` `#site-planner` `#doc-review` `#scheduler` `#selection` `#pond` `#drive` `#testing` `#ui` `#markup` `#infra` `#auth` `#perf` `#files` `#compare` `#stitching` `#yield` `#filing` `#library` `#road` `#coordinates` `#thoroughfare` `#entitlements`
 
 ### Item template
 
@@ -50,6 +50,73 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
+
+<!-- Thoroughfare-Plan / ROW-exposure epic — filed 2026-07-08 from chat (provisional NEW-1…NEW-7 → B720–B726).
+     One cohesive feature spine: a jurisdiction-agnostic Major-Thoroughfare-Plan data model (B720) → ingestion
+     (B721 Houston MTFP, B722 surrounding jurisdictions) → map overlay (B723) → parcel ROW-dedication analysis
+     (B724) → auto entitlement issues (B725) → versioning/freshness (B726). Shared tag #thoroughfare groups the
+     whole epic in BACKLOG_OPEN.md's by-tag rollup. Adversarially dedupe-verified 2026-07-08 (4 independent
+     sweeps of BACKLOG.md + BACKLOG-DONE.md): all seven are net-new — no existing item builds a server-side
+     thoroughfare/ROW reference dataset. Nearest prior art to BUILD ON is noted per item. -->
+
+### B720 — Canonical thoroughfare-segment data model + jurisdiction registry `[Site Planner / GIS · data model]` (feature) #thoroughfare #gis #persistence #coordinates  *(filed 2026-07-08 from chat, provisional NEW-1; foundation of the Thoroughfare-Plan / ROW-exposure epic B720–B726)*
+`[ ]` Add a PostGIS `thoroughfare_segments` table storing normalized thoroughfare centerlines across ALL jurisdictions, plus the two lookups that make it jurisdiction-agnostic. **Design crux: ROW width is usually NOT in the source GIS attributes (Houston encodes it via Chapter 42 ordinance, not the feature) — it must come from a standards lookup, not the feature row.**
+- Verify: live — PostGIS geometry columns + spatial indexes need the extension enabled on the real Supabase project to confirm (owner enables PostGIS); the DDL idempotency + the standards/crosswalk seed are unit-testable in sandbox.
+- Origin: filed 2026-07-08 from chat (provisional NEW-1)
+- **`thoroughfare_segments`:** `geom` (LINESTRING, SRID 4326 + a projected copy for measurement — ties to `src/shared/coordinates/` EPSG:2278), `jurisdiction`, `source_feature_id`, `street_name`, `classification` (normalized enum: `freeway` · `major_thoroughfare` · `collector_major` · `collector_minor` · `transit_corridor` · `other`), `raw_classification` (verbatim source value), `status` (`existing`|`proposed`), `ultimate_row_ft`, `existing_row_ft` (nullable), `building_line_ft` (nullable), `plan_name`, `plan_adopted_date`, `source_url`, `ingested_at`. Spatial index on `geom`.
+- **`jurisdiction_row_standards`** lookup: (`jurisdiction`, `classification`) → `ultimate_row_ft`, `building_line_ft` — because most plans (Houston especially) encode ROW via ordinance, not GIS attributes.
+- **`jurisdictions`** registry: `name`, `type` (city|county|mpo), `source_type` (featureserver|pdf|manual), refresh config — a new city is added as **config, not code** (feeds B721/B722).
+- DEDUPE-FIRST (verified net-new — no PostGIS/thoroughfare reference dataset exists in the backlog). Nearest prior art to reuse, NOT dupes: **B369** (Done — the config-driven GIS Source Registry `src/shared/gis/sources.js`; the "add a row, not bespoke code" pattern this registry mirrors, but that registers live-query endpoints, not a stored jurisdictions/standards dataset) · **B93** (Done — jurisdiction identify: point-in-polygon city/ETJ/county; this is a plan-*source* registry, distinct) · **B13** (Open — county resolution / per-area jurisdiction, feeds this) · **B602** (Open — client-side `roadClasses` config for user-DRAWN roads; shares the word "classification" only).
+
+### B721 — Ingestion adapter #1: City of Houston Major Thoroughfare & Freeway Plan (MTFP) `[Site Planner / GIS · ingestion]` (feature) #thoroughfare #gis  *(filed 2026-07-08 from chat, provisional NEW-2; epic B720–B726)*
+`[ ]` Build the FIRST ingestion adapter against the COH MTFP on COHGIS and land normalized rows in `thoroughfare_segments` (B720). Idempotent refresh keyed on `source_feature_id` (re-running updates in place — no duplicates); capture plan version / amendment date.
+- Verify: live — GIS endpoint behavior against a live ArcGIS REST service (mandatory LIVE-VERIFY class); the COHGIS host may also be egress-blocked from the build sandbox, so a code-complete adapter is confirmed only against the real endpoint.
+- Origin: filed 2026-07-08 from chat (provisional NEW-2)
+- **Endpoint:** ArcGIS REST layer `mycity2.houstontx.gov/pubgis02/rest/services/HoustonMap/Transportation/MapServer/1` (also on the COHGIS Open Data hub as GeoJSON/Shapefile).
+- **Field map → canonical:** `NAME`/`FULL_NAME` → `street_name`; `ROW_STATUS` → `classification`; `ST_STATUS` → `status` (existing/proposed); `HIER_TABLE` → functional class.
+- **ROW width:** derive `ultimate_row_ft` + `building_line_ft` from a Chapter-42 classification→width table SEEDED into `jurisdiction_row_standards` (B720) — the source attributes do NOT carry width.
+- DEDUPE-FIRST (net-new — no MTFP / thoroughfare-plan ingestion exists). Build on: **B629** (Open — the Drive-backed county PARCEL snapshot cache: the closest scheduled-ArcGIS-ingestion + idempotent-refresh + keep-last-good pattern to reuse) · **B245**/**B369** (Done — the "each source is a registry row on the shared ArcGIS-REST connector" pattern) · **B287** (Done — retry/backoff on jurisdiction vector services). None is the same deliverable.
+
+### B722 — Config-driven ingestion adapters: surrounding jurisdictions (Harris · Fort Bend · Pearland · Montgomery · H-GAC) `[Site Planner / GIS · ingestion]` (feature) #thoroughfare #gis  *(filed 2026-07-08 from chat, provisional NEW-3; epic B720–B726)*
+`[ ]` Generalize B721 into a config-driven adapter framework — one config per jurisdiction (endpoint, field map, classification crosswalk, standards table) — so new sources are data, not code.
+- Verify: live — multiple live jurisdiction feeds (GIS endpoint class, mandatory).
+- Origin: filed 2026-07-08 from chat (provisional NEW-3)
+- **Phase-1 live-ArcGIS targets:** Harris County (Transportation Plan hub), Fort Bend County, City of Pearland, Montgomery County (MCTX GIS / H-GAC regional).
+- **PDF-only plans** (Sugar Land 2012, Montgomery County 2016 map) → a separate LOW-FIDELITY path: `source_type=pdf`, manual/digitized entry, segments flagged **lower-confidence** in the UI (surfaces in B723/B725).
+- Each adapter carries its own **classification crosswalk** (that jurisdiction's category names → our normalized enum).
+- Evaluate **H-GAC Regional Thoroughfare Plan** as an ETJ / outlying-county gap-filler (Brazoria, Waller, Chambers). **Log per-source coverage** so real-vs-missing is visible.
+- DEDUPE-FIRST (net-new). Build on **B369/B370** (the config-driven source-registry pattern this adapter framework extends) and B629's scheduled-ingestion shape. Related but distinct: B93/B13 (which jurisdiction a parcel sits in) · B629 (county parcel geometry — a different dataset).
+
+### B723 — Map layer: "Thoroughfare Plan" overlay `[Site Planner / GIS · map layer]` (feature) #thoroughfare #gis #site-planner #ui  *(filed 2026-07-08 from chat, provisional NEW-4; epic B720–B726)*
+`[ ]` Add a toggleable "Thoroughfare Plan" overlay rendering `thoroughfare_segments` (B720). Style by classification (color) and status (**solid = existing, dashed = proposed**); label or scale by `ultimate_row_ft`. Legend + jurisdiction filter + an "as-of / data source" provenance note.
+- Verify: live — zoom-/data-density-dependent rendering (mandatory LIVE-VERIFY class).
+- Origin: filed 2026-07-08 from chat (provisional NEW-4)
+- **Click popup:** street name · classification · ultimate ROW · plan name + adopted date · source link · confidence.
+- DEDUPE-FIRST (net-new data layer). Reuse wholesale: **B571** (Done — road-authority rendered overlay: the exact color-coded vector overlay + legend + click popup + min-zoom gate + screening/vintage-note pattern; different dataset — thoroughfare-plan/future roads vs existing-road ownership) · register the layer into **B370/B369** (the GIS layer registry). B176 (Done — jurisdictions overlay) is the older overlay precedent.
+
+### B724 — Parcel analysis: frontage detection + ROW-dedication estimate `[Site Planner / analysis]` (feature) #thoroughfare #site-planner #yield #gis  *(filed 2026-07-08 from chat, provisional NEW-5; epic B720–B726)*
+`[ ]` For a subject parcel, spatially relate it to `thoroughfare_segments`: detect frontage/adjacency (**buffer-and-intersect** — a narrow band around the parcel and the segments touching it) and detect bisecting segments (a proposed alignment crossing the parcel interior). Compute the dedication exposure and show the math + assumptions (centerline-based estimate, needs survey confirmation).
+- Verify: live — spatial computation on REAL parcel data (mandatory real-project-data class).
+- Origin: filed 2026-07-08 from chat (provisional NEW-5)
+- **Per hit:** half-ROW from the centerline − apparent/known existing ROW → estimate dedication area (sq ft / acres), resulting **NET developable area**, and the effective building-line setback increase.
+- **Bisecting-alignment case handled separately** — an interior strip sterilized by a future road.
+- Expose as parcel analysis metrics; assumptions shown inline (screening aid, not a survey).
+- DEDUPE-FIRST (net-new analysis). Build ON **B147** (the Site Analysis multi-parcel constraint surface — add a new "Thoroughfare / ROW" finding category here rather than a parallel panel). Consumes B720 data + the parcel geometry (B629 county parcel cache is the source it relates against). Feeds B725. Distinct from **B95**'s `developableArea()` synthesis (that's platting/zoning/tax authority, not thoroughfare ROW).
+
+### B725 — Auto-generated entitlement issues from thoroughfare-plan exposure `[Site Planner / entitlements]` (feature) #thoroughfare #entitlements #site-planner  *(filed 2026-07-08 from chat, provisional NEW-6; epic B720–B726)*
+`[ ]` When a parcel triggers thoroughfare-plan conditions in B724, auto-create entitlement issues/flags that update automatically when the parcel or the underlying plan data changes.
+- Verify: live — issue accuracy depends on B724's real-parcel analysis (mandatory real-project-data class).
+- Origin: filed 2026-07-08 from chat (provisional NEW-6)
+- **Issue types:** (a) fronts a designated major thoroughfare → ROW dedication likely at plat; (b) proposed alignment bisects parcel → interior strip reserved; (c) building-line / setback increase from ultimate ROW; (d) corner clip / sight-triangle at intersections of two designated roads; (e) driveway / access-spacing limits along a major thoroughfare.
+- **Each issue carries:** severity · plain-English description · estimated impact (area/setback from B724) · jurisdiction + plan citation · a "confirm with jurisdiction / survey" caveat · a link back to the map segment (B723).
+- DEDUPE-FIRST (net-new issue class). Renders as a new finding category on **B147**'s Site Analysis surface (severity/source/caveat presentation reused) and plugs into the SAME verdict-engine / `developableArea()` synthesis concept as **B95** (Open, DEFERRED — jurisdiction→development-consequence summary), EXTENDING it with thoroughfare-specific issues; not a dup (B95 = platting/zoning/drainage/tax/access authority, no spatial geometry).
+
+### B726 — Thoroughfare-plan versioning + data-freshness tracking `[Site Planner / GIS · data ops]` (task) #thoroughfare #entitlements #gis #infra  *(filed 2026-07-08 from chat, provisional NEW-7; epic B720–B726)*
+`[ ]` Track each plan's adopted/amended date + version on ingest; store an "as-of" date per segment and per jurisdiction. Schedule periodic re-ingestion (Houston runs annual MTFP amendment cycles) and surface staleness. **This matters legally — entitlement flags (B725) need a defensible "as-of" date.**
+- Verify: live — freshness against live sources + scheduled re-ingestion (GIS endpoint class).
+- Origin: filed 2026-07-08 from chat (provisional NEW-7)
+- **Surfacing:** a data-freshness badge on the layer (B723) and in each entitlement issue (B725); an alert when a source hasn't refreshed within its expected window.
+- DEDUPE-FIRST (net-new — plan-vintage/as-of provenance, a different mechanism from the live-query cache). Related: **B96** (Done — the browser stale-while-revalidate cache + `formatAge` data-age stamps: reuse the freshness-badge vocabulary/UI, but that ages a live query, not an ingested plan's adopted date) · complements B721/B722 ingestion (records the version they capture) and the KNOWN-ISSUES per-layer GIS-liveness umbrella (up/down status, not plan vintage).
 
 ### B691 — Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy `[Site Planner / GIS]` (bug) #site-planner #gis  *(surfaced 2026-07-07 in the Cowork element-sync live run — console showed the layer's `…/FLOODZONE/Contours_1Foot/MapServer?f=json` probe failing CORS on planyr.io)*
 `[ ]` The Fort Bend contours source doesn't send CORS headers, so the browser refuses the response and the layer reads dead even when the county server is up. Same class as other locked-down county endpoints: route the request through the existing same-origin server-side GIS proxy pattern (a Pages Function fetches server-side, where CORS doesn't apply, and relays JSON to the app) instead of calling the county host directly from the page. Scope: this layer's probe + tile/feature requests; keep the honest per-layer status + self-heal re-probe semantics.
