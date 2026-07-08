@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-08 @ `a532b6a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-08 @ `c4ebedb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_216 source files mapped._
+_219 source files mapped._
 
 ## infra
 
@@ -164,12 +164,18 @@ _216 source files mapped._
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
 - **`src/shared/ui/controls.jsx`** — shared control primitives (B657-5B): one radius/padding/typography scale + Button/ToggleChip/IconButton/Field/Section/MenuItem, token-driven, with a threaded `accent` prop so each module keeps its hue.
   - _exports_: `Button`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `PAD`, `RADIUS`, `Section`, `ToggleChip`
+- **`src/shared/ui/floatingPanel.js`** — NEW-1 poppable panels: pure geometry + docked-only decision (clamp-to-map-viewport, first-open cascade, narrow reconcile) + the 760px breakpoint constant; unit-tested, shared by the live drag path and tests
+  - _exports_: `clampToBounds`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`
+- **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
+  - _exports_: `default (FloatingPanel)`
 - **`src/shared/ui/moduleAccent.js`** — MODULE_ACCENT: single source of truth for per-workspace accent hexes (Site/Schedule/Review/Library) as pure React-free constants
   - _exports_: `MODULE_ACCENT`
 - **`src/shared/ui/ModuleLoader.jsx`** — Per-module assembling skeleton loader: Site parcel-draws itself, Gantt bars/milestones/playhead animate; 250ms show-delay, reduced-motion fallback
   - _exports_: `default (ModuleLoader)`, `SHOW_DELAY_MS`
 - **`src/shared/ui/moduleLoaderTheme.js`** — Pure loader theming: resolves a module id to accent+skin-kind+caption (LOADER_SKINS), never-throw fallback, SHOW_DELAY_MS constant
   - _exports_: `LOADER_SKINS`, `resolveLoaderTheme`, `SHOW_DELAY_MS`
+- **`src/shared/ui/PanelChrome.jsx`** — NEW-1/NEW-2 shared panel title bar for both docked + floating hosts: title + detach(PiP)/dock/close icons + double-click-to-toggle + optional drag handle
+  - _exports_: `default (PanelChrome)`
 - **`src/shared/ui/persistedSet.js`** — Tiny localStorage Set-of-ids persistence (loadIdSet/saveIdSet/pruneSet) for remembered UI state like Library tree expansion; corrupt payloads read empty + clear
   - _exports_: `loadIdSet`, `pruneSet`, `saveIdSet`
 - **`src/shared/ui/ProjectBreadcrumb.jsx`** — Row-1 Dashboard/Project breadcrumb + switcher dropdown: search, recents, New project, inline rename/delete kebab, at-risk-save surfacing, cloud-cache warm

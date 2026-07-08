@@ -40,6 +40,9 @@ import ViewMenu from "./components/ViewMenu.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import FloodMitigationCard from "./components/FloodMitigationCard.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
+import PanelChrome from "../../shared/ui/PanelChrome.jsx";
+import FloatingPanel from "../../shared/ui/FloatingPanel.jsx";
+import { clampToBounds, initialFloatPos, reconcileForNarrow, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../../shared/ui/floatingPanel.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
@@ -1142,7 +1145,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
-  const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: parcel|yield|analysis|references|standards|null (B656: props is a companion, not a tab)
+  const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is DOCKED: parcel|yield|analysis|references|standards|null (B656: props is a companion, not a tab)
+  // NEW-1 (poppable panels): panels detached over the map. { [panelId]: {x,y} } in viewport px.
+  // A panel is EXACTLY one of docked (leftPanel===id), floating (id in `floating`), or closed.
+  const [floating, setFloating] = useState({});
+  const isFloating = useCallback((id) => Object.prototype.hasOwnProperty.call(floating, id), [floating]);
   // B653 cross-links: which Standards section a "default ↗" jump should open + scroll to
   // (parcels|building|parking|trailers|dockzones|roads|colors). Cleared when the panel closes.
   const [standardsFocus, setStandardsFocus] = useState(null);
@@ -1152,13 +1159,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the canvas to a sliver, so they OVERLAY it instead of consuming row width, and the
   // right tool palette collapses behind a toggle. matchMedia keeps it in sync with
   // rotate/resize. The desktop layout is untouched (every mobile style is `narrow ?`-gated).
-  const [narrow, setNarrow] = useState(() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } });
+  const [narrow, setNarrow] = useState(() => { try { return window.matchMedia(`(max-width: ${FLOAT_MIN_WIDTH}px)`).matches; } catch (_) { return false; } });
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
   const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
   const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
   const [propsDismissed, setPropsDismissed] = useState(false); // B656 follow-up: ✕ hides the companion while the element stays selected; re-clicking the element reopens it
   useEffect(() => {
-    let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }
+    let mq; try { mq = window.matchMedia(`(max-width: ${FLOAT_MIN_WIDTH}px)`); } catch (_) { return undefined; }
     const on = () => setNarrow(mq.matches);
     mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
     return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
@@ -2516,6 +2523,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
+
+  // NEW-1 (poppable panels) — a left-rail panel can pop out of the docked column into a
+  // draggable card over the map. Its position is remembered for the SESSION (sessionStorage —
+  // deliberately session-scoped per the spec; the app otherwise uses localStorage). Guarded
+  // reads/writes like lsGet, so private-mode / quota never throws.
+  const ssGetPos = (id) => { try { const v = sessionStorage.getItem("planarfit:floatPos:" + id); return v ? JSON.parse(v) : null; } catch (_) { return null; } };
+  const ssSetPos = (id, pos) => { try { sessionStorage.setItem("planarfit:floatPos:" + id, JSON.stringify(pos)); } catch (_) {} };
+  const detachPanel = useCallback((id) => {
+    if (narrow) return; // below the floating breakpoint the app is docked-only
+    const b = wrapRef.current?.getBoundingClientRect();
+    const remembered = ssGetPos(id);
+    const pos = remembered ? clampToBounds(remembered, FLOAT_SIZE, b) : initialFloatPos(b, Object.keys(floating).length);
+    setFloating((f) => ({ ...f, [id]: pos }));
+    ssSetPos(id, pos);
+    setLeftPanel((p) => (p === id ? null : p)); // vacate the dock if this panel held it
+  }, [narrow, floating]);
+  const dockPanel = useCallback((id) => {
+    setFloating((f) => { const n = { ...f }; delete n[id]; return n; });
+    setLeftPanel(id); // ≤1 docked: whatever was docked simply closes
+  }, []);
+  const moveFloating = useCallback((id, pos) => {
+    setFloating((f) => (Object.prototype.hasOwnProperty.call(f, id) ? { ...f, [id]: pos } : f));
+    ssSetPos(id, pos);
+  }, []);
+  const closeFloating = useCallback((id) => {
+    setFloating((f) => { const n = { ...f }; delete n[id]; return n; });
+  }, []);
+  // Dropping below the floating breakpoint forces docked-only: dock one floater, close the rest.
+  useEffect(() => {
+    if (!narrow) return;
+    setFloating((f) => {
+      const ids = Object.keys(f);
+      if (!ids.length) return f;
+      const { leftPanel: next, floating: cleared } = reconcileForNarrow({ floatingIds: ids, leftPanel });
+      setLeftPanel(next);
+      return cleared;
+    });
+  }, [narrow]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reframe when this view becomes active — its real size is known only once shown.
   useEffect(() => {
@@ -8273,6 +8318,818 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return cloudActive ? "synced" : "local";
   })();
 
+  // NEW-1 (poppable panels) — the title shown in each panel's PanelChrome bar. The inner Section
+  // titles that duplicated these ("Site Analysis" / "References" / "Parcels · N") were dropped so
+  // the name shows exactly once.
+  const panelTitle = {
+    yield: "Yield",
+    parcel: `Parcels · ${parcels.length - supersededParcelIds.size}`,
+    analysis: "Site Analysis",
+    references: "References",
+    standards: "Standards",
+  };
+  // Render one left-rail panel's body for a given id, hosted in EITHER the docked column or a
+  // floating card. A called render FUNCTION (never a mounted <Component/>) so the same JSX inlines
+  // into either host with no remount on drag (MODULE-SCOPE-COMPONENTS).
+  const renderPanelBody = (_pid) => (<>
+          {/* References (B654) — the merged Aerial + Overlay panel: every backdrop the plan
+              sits over, in one list with one add flow and ONE shared calibration (the
+              ovCalib trace/align flow — the old separate "calibrate" tool is gone).
+              Row #1 is the aerial (image-only, always beneath everything); the rest are
+              sheet references (site plans / surveys, PDF or image). Persisted fields are
+              UNCHANGED (`underlay` + `sheetOverlays`) — this is a UI unification. */}
+          {_pid === "references" && (
+          <Section>
+            {/* The whole block is a drop target (NEW-1): drop a PDF/image here or on the map,
+                or click to browse. Mirrors the Doc-Review FileBrowser dropzone pattern —
+                dashed border + accent highlight on hover, anti-flicker via currentTarget. */}
+            <div
+              onClick={() => { if (!overlayBusy) overlayFileRef.current?.click(); }}
+              onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
+              onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
+              onDragLeave={(e) => { if (e.currentTarget === e.target) setOverlayDropOver(false); }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
+              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
+              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image)…"}</button>
+              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
+              <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
+                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this reference</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
+              </div>
+            </div>
+
+            {/* Aerial backdrop — pinned reference #1. Opacity + lock lived on the underlay
+                object all along (render honours both); the CONTROLS are new here. */}
+            <div style={{ marginTop: 12 }}>
+              {!underlay ? (
+                <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
+                    <span style={{ flex: 1 }} />
+                    <button style={chip} onClick={() => fileRef.current?.click()}>Load screenshot…</button>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
+                </div>
+              ) : (
+                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "var(--border-default)", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                    <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
+                    <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
+                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
+                  </div>
+                  {aerialSel && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
+                      <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
+                        <input type="range" min={0.1} max={1} step={0.05} value={underlay.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => setUnderlay((u) => (u ? { ...u, opacity: +e.target.value } : u))} />
+                        <span style={{ fontSize: 11, color: PAL.muted, width: 34, textAlign: "right" }}>{Math.round((underlay.opacity ?? 1) * 100)}%</span>
+                      </label>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button style={{ ...chip, flex: 1, ...(underlay.fromMap ? { opacity: 0.55, cursor: "not-allowed" } : null) }} disabled={!!underlay.fromMap}
+                          title={underlay.fromMap ? "This aerial came from the map — it's already to scale, so manual calibration is disabled" : "Click two ends of a known distance on the aerial, then enter its real length"}
+                          onClick={() => { setShowAerial(true); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); }}>Calibrate</button>
+                        <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
+                      </div>
+                      <div style={{ fontSize: 11, color: PAL.muted }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide{underlay.fromMap ? " · georeferenced from the map" : ""}</div>
+                      {origin && basemapOn && <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>}
+                    </div>
+                  )}
+                  {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
+                  {underlayLost && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>The saved aerial couldn't be recovered on this device (not in the offline cache or your account). Your boundary and tools are intact — <button style={{ ...chip, padding: "1px 7px", color: PAL.accent }} onClick={() => fileRef.current?.click()}>re-drop the screenshot</button> to restore the backdrop.</div>}
+                </div>
+              )}
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { onUnderlayFile(e.target.files?.[0]); e.target.value = ""; }} />
+            </div>
+            {!sheetOverlays.length ? null : (
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                {sheetOverlays.map((o) => {
+                  const on = selOverlay === o.id;
+                  return (
+                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                      {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
+                          sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
+                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
+                      {/* Hide / lock / remove — one shared square icon style (B574) so the three render identically. */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                        <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
+                        <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
+                        <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}><XIcon /></button>
+                      </div>
+                      {on && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
+                          <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
+                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); }} />
+                            {/* Numeric percent alongside the slider (B575), two-way bound. While typing we hold a
+                                raw draft (so a half-typed value isn't clobbered); the slider + overlay update live;
+                                on blur the draft clears so the field follows the overlay again. Stored 0.1–1.0 ↔ 10–100%. */}
+                            <input type="number" min={10} max={100} step={5} aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct"
+                              style={{ ...numInput, width: 54, textAlign: "right" }}
+                              value={(ovEdit && ovEdit.id === o.id && ovEdit.opacityText != null) ? ovEdit.opacityText : Math.round((o.opacity ?? 1) * 100)}
+                              onChange={(e) => { const txt = e.target.value; setOvEditFor(o.id, { opacityText: txt }); const n = Math.round(+txt); if (txt !== "" && Number.isFinite(n)) patchOverlay(o.id, { opacity: Math.min(1, Math.max(0.1, n / 100)) }, false); }}
+                              onBlur={() => setOvEditFor(o.id, { opacityText: null })} />
+                            <span style={{ fontSize: 11, color: PAL.muted }}>%</span>
+                          </label>
+                          <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
+                            <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it" data-testid="overlay-rotation"
+                              onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
+                              onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
+                          </label>
+                          {/* Numeric width — kept ONLY for image overlays (B577). A PDF carries a `sheet`
+                              (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
+                              a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
+                              and this stays its one direct numeric size + ±10% nudge control. */}
+                          {!o.sheet && (
+                            <label style={ovRow}><span style={{ width: 48 }}>Width</span>
+                              <input style={numInput} value={Math.round(o.imgW * o.ftPerPx)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
+                              <span>ft</span>
+                              <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
+                              <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
+                            </label>
+                          )}
+                          {o.pageCount > 1 && (
+                            <div style={ovRow}><span style={{ width: 48 }}>Page</span>
+                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
+                              <span style={{ color: PAL.ink }}>{o.page} / {o.pageCount}</span>
+                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
+                              {!overlayDocs.current.has(o.id) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
+                            <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
+                          </div>
+                          {/* B654: above/below moved into the panel (the right-click menu keeps them too) */}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1 }} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
+                            <button style={{ ...chip, flex: 1 }} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
+                          </div>
+                          {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
+                          {(overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf")) && (
+                            <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
+                              <input type="checkbox" checked={o.knockout !== false} onChange={(e) => setOverlayKnockout(o.id, e.target.checked)} />
+                              <span>Knock out white paper</span>
+                            </label>
+                          )}
+                          {o.sheet && (() => {
+                            // Bluebeam-style scale entry (B576): the page→real ratio is the single source of
+                            // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
+                            // [page][unit] = [real][unit] fields. The mode lives in explicit editor state (ovEdit),
+                            // NOT derived from the current size — so picking Custom always reveals the fields.
+                            const ed = ovEdit && ovEdit.id === o.id ? ovEdit : null;
+                            const curFpi = scaleForFtPerPoint(o.ftPerPx);
+                            const matched = overlayScalePreset(o);
+                            const selVal = ed?.scaleMode ?? (matched ? matched.id : "custom");
+                            const pageUnit = ed?.pageUnit ?? "in";
+                            const realUnit = ed?.realUnit ?? "ft";
+                            // DISPLAY values (rounded for readability) vs COMMIT defaults (full precision). A field
+                            // the user never edited must re-apply its EXACT current value, never the rounded display
+                            // string — otherwise an idle focus→blur on a non-round scale (e.g. metric 1″=1m → 3.2808)
+                            // would quantize it to 3.3. The per-field *Dirty flags below then skip the commit entirely
+                            // when a field wasn't touched, so an idle blur is a true no-op (no scale change, no history).
+                            const pageVal = ed?.page ?? (matched ? trimNum(matched.pageIn) : "1");
+                            const realVal = ed?.real ?? (matched ? trimNum(matched.realFt) : fmtScaleNum(curFpi));
+                            const pageCommit = ed?.page ?? (matched ? matched.pageIn : 1);
+                            const realCommit = ed?.real ?? (matched ? matched.realFt : curFpi);
+                            const commit = (next) => {
+                              const fpi = feetPerInchFromPair({ pageVal: next.page ?? pageCommit, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? realCommit, realUnit: next.realUnit ?? realUnit });
+                              if (fpi) applyOverlayScale(o.id, fpi);
+                            };
+                            return (
+                              <div style={{ borderTop: `1px dashed var(--planner-border)`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                                <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
+                                <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
+                                  <select data-testid="overlay-scale-preset" style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selVal}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      if (v === "custom") { setOvEditFor(o.id, { scaleMode: "custom", page: pageVal, pageUnit, real: realVal, realUnit }); return; }
+                                      const p = SCALE_PRESETS.find((x) => x.id === v);
+                                      if (p) { setOvEditFor(o.id, { scaleMode: p.id, page: trimNum(p.pageIn), pageUnit: "in", real: trimNum(p.realFt), realUnit: "ft" }); applyOverlayScale(o.id, feetPerInchForPreset(p)); }
+                                    }}>
+                                    <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+                                    <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+                                    <option value="custom">Custom…</option>
+                                  </select>
+                                </label>
+                                {selVal === "custom" && (
+                                  <label style={ovRow} data-testid="overlay-scale-custom">
+                                    <input style={{ ...numInput, width: 48 }} value={pageVal} placeholder="0.5 or 1/2" title="Distance measured on the page (decimals or fractions)"
+                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", page: e.target.value, pageDirty: true })}
+                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.pageDirty) commit({ page: e.currentTarget.value }); }}
+                                      onBlur={(e) => { if (ed?.pageDirty) commit({ page: e.currentTarget.value }); }} />
+                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={pageUnit} title="Page unit"
+                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", pageUnit: e.target.value }); commit({ pageUnit: e.target.value }); }}>
+                                      {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                    <span style={{ fontWeight: 700, color: PAL.ink }}>=</span>
+                                    <input style={{ ...numInput, width: 48 }} value={realVal} placeholder="real" title="Real-world distance"
+                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", real: e.target.value, realDirty: true })}
+                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.realDirty) commit({ real: e.currentTarget.value }); }}
+                                      onBlur={(e) => { if (ed?.realDirty) commit({ real: e.currentTarget.value }); }} />
+                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={realUnit} title="Real-world unit"
+                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", realUnit: e.target.value }); commit({ realUnit: e.target.value }); }}>
+                                      {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                  </label>
+                                )}
+                                {o.detectedScale && (
+                                  <div style={{ fontSize: 11, color: PAL.muted }}>Read from sheet: <b style={{ color: PAL.ink }}>1″={o.detectedScale}′</b>{Math.round(scaleForFtPerPoint(o.ftPerPx)) !== o.detectedScale && <button style={{ ...chip, marginLeft: 6, padding: "3px 8px" }} onClick={() => applyOverlayScale(o.id, o.detectedScale)}>Apply</button>}</div>
+                                )}
+                                <div style={{ fontSize: 10.5, color: PAL.muted }}>Now ≈ <b style={{ color: PAL.ink }}>1″={fmtScaleNum(scaleForFtPerPoint(o.ftPerPx))}′</b> · {Math.round(o.imgW * o.ftPerPx)}′ wide</div>
+                              </div>
+                            );
+                          })()}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            {/* Resize THIS drawing to ~60% of the current view and recentre it — the
+                                one-click rescue when a drawing came in far too big/small (then set the
+                                real scale above). Distinct from "Fit view", which zooms the canvas. */}
+                            <button style={{ ...chip, flex: 1 }} title="Resize this drawing to fit your current view (use when it came in far too big or small), then set the real scale above"
+                              onClick={() => { const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW)); const vc = p2fStatic(size.w / 2, size.h / 2); patchOverlay(o.id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2 }); }}>Size to view</button>
+                            <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
+          )}
+
+          {/* Parcel menu — empty hint when no parcel is selected */}
+          {/* every parcel in this plan — click to select */}
+          {/* Site Analysis (B147): screen the active-parcel footprint for floodplain,
+              wetlands, pipelines, oil/gas wells, contamination, jurisdiction & zoning. */}
+          {_pid === "analysis" && (
+            <Section>
+              {!origin ? (
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Site Analysis needs a georeferenced plan. Bring a parcel in from the map to anchor it, then screen it here.</div>
+              ) : (() => {
+                const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
+                const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
+                const acres = dissolvedParcelSqft(act) / SQFT_PER_ACRE; // B715: dissolve overlaps (count shared ground once)
+                return (
+                  <>
+                    <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
+                      isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus}
+                      onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
+                    {/* B712 — the floodplain mitigation & buildability card. A SIBLING card,
+                        deliberately NOT injected into the auto-refreshing flood finding above:
+                        this data is button-gated (the drainage check) with its own staleness
+                        clock — two freshness models in one card would lie about data age. */}
+                    <FloodMitigationCard drainage={drainage} PAL={PAL} onCheck={drainage?.onCheck} />
+                  </>
+                );
+              })()}
+            </Section>
+          )}
+          {_pid === "parcel" && (
+            // B651 — count the CURRENT lots only: a superseded (split) parent is history, not a
+            // counted parcel, so splitting one lot into two still reads "Parcels · 2".
+            <Section>
+              {/* ＋ Add parcel (B383) — the one front-door for adding land once you're in the
+                  planner, so you never have to back out to the map. Opens a menu of add methods
+                  (reuses the AnchoredMenu portal flyout the right-rail Boundary menu uses). */}
+              <div ref={addParcelAnchor} style={{ position: "relative", marginBottom: 9 }}>
+                <button
+                  aria-haspopup="menu" aria-expanded={addParcelMenu}
+                  style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
+                  onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — identify from county GIS or draw a boundary">
+                  ＋ Add parcel <span style={{ opacity: 0.8, fontSize: 11 }}>▾</span>
+                </button>
+                <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
+                  {/* Identify from county GIS — the headline path (needs a georeferenced frame). */}
+                  {origin ? (
+                    <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
+                      <div style={{ fontWeight: 650 }}>🔍 Identify from county GIS</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>County parcel lines light up on the aerial — click lots to add them (one or many).</div>
+                    </button>
+                  ) : (
+                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
+                      <div style={{ fontWeight: 650, color: PAL.ink }}>🔍 Identify from county GIS</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Identify needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
+                    </div>
+                  )}
+                  {/* Add by address (B384) — geocode a typed address, then identify-and-add the lot
+                      at that point through the SAME quickAddAt path. Needs a georeferenced frame. */}
+                  {origin ? (
+                    <div style={{ padding: "7px 10px" }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>Type a street address — we'll find that lot in the county GIS and add it.</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          value={addrQuery}
+                          onChange={(e) => setAddrQuery(e.target.value)}
+                          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") addByAddress(); }}
+                          placeholder="123 Main St, Katy TX"
+                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
+                        <button
+                          onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
+                          title="Find this address and add its parcel"
+                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "var(--surface-raised)", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                          {addrBusy ? "…" : "Find"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
+                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add-by-address needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
+                    </div>
+                  )}
+                  {/* Draw a new boundary — always available (no GIS frame needed). */}
+                  <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
+                    <div style={{ fontWeight: 650 }}>✏️ Draw a new boundary</div>
+                    <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Trace a lot by clicking points on the canvas; close on the first dot.</div>
+                  </button>
+                </AnchoredMenu>
+              </div>
+              {parcels.length === 0 ? (
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add parcel</b> above, or draw one with the Parcel tool (right rail).</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {/* B651 — lineage-aware list: children of a split nest under their parent (indented),
+                      and the split parent is greyed + labelled "· split" as a SUPERSEDED, non-counting
+                      row (it's inactive, so excluded from yield/coverage/detention) with the original
+                      real parcel still visible. Names follow lineage: Parcel 3 → 3A / 3B. */}
+                  {parcelOutline(parcels).map(({ pc, depth, name, superseded }) => {
+                    const on = selParcel?.id === pc.id;
+                    const picked = combineSel.includes(pc.id);
+                    const inactive = pc.active === false;
+                    const tag = superseded ? " · split" : inactive ? " · inactive" : "";
+                    return (
+                      // Per-row Active checkbox (B175): checked = participates in yield / coverage /
+                      // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
+                      // The `active` flag persists per-parcel via the Site Model (same path as B100).
+                      <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7, marginLeft: depth * 16 }}>
+                        <label
+                          title={superseded ? "Split into the parcels nested below — superseded, so excluded from yield / coverage / detention. Check to make it active again (its children go inactive)." : inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
+                        >
+                          <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
+                            style={{ width: 15, height: 15, cursor: "pointer" }} />
+                        </label>
+                        <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
+                        </button>
+                        {/* B598 — per-row remove (✕). Undo-able (removeParcelById pushes history); the
+                            tombstone keeps it deleted across reload/merge. The most discoverable place
+                            to remove a parcel, alongside the Parcel tool's Remove mode. */}
+                        <button title="Remove this parcel" aria-label={`Remove ${name}`}
+                          onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
+                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid var(--border-default)`, borderRadius: 8, background: "var(--surface-raised)", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {/* Split a parcel (B416) — the inverse of Merge below. Surfaced HERE in the
+                  panel (not only the right-rail Boundary ▾ menu) so a user reaching for
+                  parcel ops — after B383 moved ＋ Add parcel / parcel actions into this
+                  panel — finds it where they look. Same selectTool("split") as the rail. */}
+              {parcels.length >= 1 && (
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    title="Split a parcel — draw a cut line across one to divide it in two"
+                    style={{ ...chip, width: "100%", ...(tool === "split" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
+                    onClick={() => selectTool("split")}>✂ Split a parcel</button>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Click points to draw a cut across a parcel; double-click or Enter to finish. It divides in two — then delete the piece you don't want.</div>
+                </div>
+              )}
+              {parcels.length > 1 && (
+                <div style={{ marginTop: 8 }}>
+                  <button style={{ ...chip, width: "100%", ...(combineSel.length >= 2 ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : { opacity: 0.55 }) }}
+                    disabled={combineSel.length < 2} onClick={mergeParcels}>Merge parcels{combineSel.length >= 2 ? ` (${combineSel.length})` : ""}</button>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Shift-click parcels (here or on the map, or right-click) to multi-select, then Merge. Working merge for test-fit — not a recorded consolidation.</div>
+                </div>
+              )}
+              {/* identify result + armed status (B383) — the body of the ＋ Add parcel menu's
+                  "Identify from county GIS" path. The entry point lives in ＋ Add parcel above;
+                  no duplicate toggle down here. The status row is the off-switch (so is Esc). */}
+              {(identifyMode || identifyRes) && (
+                <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
+                {identifyMode && (
+                  <>
+                    <button style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent }}
+                      onClick={() => { setIdentifyMode(false); setIdentifyRes(null); setJurInfo(null); }} title="Stop adding parcels">
+                      {identAdded > 0 ? `Adding lots — ${identAdded} added · Done` : "Click lit-up lots to add · Done"}
+                    </button>
+                    {origin && ppfToZoom(view.ppf, origin.lat) < PARCEL_MINZOOM && (
+                      <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 5 }}>Zoom in to see the county parcel lines light up (a click still adds the lot).</div>
+                    )}
+                  </>
+                )}
+                {identifyRes && (
+                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
+                    {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
+                      : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
+                      : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
+                      : identifyRes.already ? <span style={{ color: PAL.muted }}>{identifyRes.addr || "That lot"} is already in this plan — selected it.</span>
+                      : <>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                            <span style={{ color: "#15803d", fontWeight: 800, fontSize: 13, lineHeight: 1 }}>✓</span>
+                            <span style={{ fontWeight: 700, color: PAL.ink }}>Added {identifyRes.addr || "parcel"}</span>
+                          </div>
+                          {apprRows(identifyRes.attrs).slice(0, 4).map((r) => (
+                            <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0" }}>
+                              <span style={{ color: PAL.muted }}>{r.label}</span><span style={{ color: PAL.ink, fontWeight: 600 }}>{apprVal(r.label, r.value)}</span>
+                            </div>
+                          ))}
+                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={checkJurisdiction} disabled={jurInfo?.busy}>
+                            {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
+                          </button>
+                          {jurInfo && !jurInfo.busy && (
+                            <div style={{ marginTop: 7, borderTop: "1px dashed var(--planner-border)", paddingTop: 6 }}>
+                              {jurInfo.error ? <span style={{ color: PAL.warn }}>{jurInfo.error}</span> : <>
+                                {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
+                                {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
+                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "no ETJ layer here (Houston/Austin/DFW covered)" : "not in a city ETJ"), jurInfo.j.ages.etj)}
+                                {jurRow("Road maint.", jurInfo.road.authorities.length ? jurInfo.road.authorities.join(" · ") + (jurInfo.road.nearest?.route ? ` (${jurInfo.road.nearest.route})` : "") : "unknown", jurInfo.road.ageMs)}
+                                {jurInfo.j.straddle && <div style={{ color: PAL.warn, marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
+                                <div style={{ color: PAL.muted, marginTop: 4, fontStyle: "italic" }}>Screening only — verify with the jurisdiction.</div>
+                              </>}
+                            </div>
+                          )}
+                        </>}
+                  </div>
+                )}
+              </div>
+              )}
+            </Section>
+          )}
+          {/* parcel-attached drawings (B67): attach a PDF/JPEG to THIS parcel and mark it
+              up on an immutable backdrop. */}
+          {_pid === "parcel" && selParcel && (() => {
+            const mine = parcelDrawings.filter((d) => d.parcelId === selParcel.id);
+            return (
+              <Section title="Attached drawings">
+                <button style={{ ...chip, width: "100%" }} onClick={() => { setDrawingTargetParcel(selParcel.id); drawingFileRef.current?.click(); }}>＋ Attach a drawing (PDF / JPG)</button>
+                <input ref={drawingFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }}
+                  onChange={(e) => { onAttachDrawing(drawingTargetParcel, e.target.files?.[0]); e.target.value = ""; }} />
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>An immutable backdrop you mark up on top of — saved with this parcel.</div>
+                {mine.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                    {mine.map((d) => (
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
+                        <button onClick={() => setOpenDrawingId(d.id)} title={d.src ? "Open & mark up" : "Re-attach the file to view (markups are saved)"}
+                          style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {d.src ? "🖹" : "⚠"} {d.name}{d.markups?.length ? ` · ${d.markups.length} mk` : ""}
+                        </button>
+                        <button onClick={() => { if (window.confirm(`Remove “${d.name}” and its markups?`)) deleteDrawing(d.id); }} title="Remove this drawing"
+                          style={{ border: "none", background: "transparent", cursor: "pointer", color: PAL.muted, fontSize: 13, lineHeight: 1 }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            );
+          })()}
+          {/* appraisal-district property data for the selected parcel */}
+          {_pid === "parcel" && selParcel && selParcel.attrs && (
+            <Section title="Appraisal data">
+              {(() => {
+                const ok = Object.keys(selParcel.attrs).find((k) => /^(owner|own_?name|owner_?name|owner1|name)$/i.test(k) && selParcel.attrs[k]);
+                return ok ? (
+                  <div style={{ marginBottom: 9, paddingBottom: 8, borderBottom: "1px solid var(--planner-border)" }}>
+                    <div style={{ fontSize: 9.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Owner</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: PAL.ink, lineHeight: 1.3, marginTop: 2 }}>{String(selParcel.attrs[ok])}</div>
+                  </div>
+                ) : null;
+              })()}
+              {apprRows(selParcel.attrs).length === 0 ? (
+                <div style={{ fontSize: 12, color: PAL.muted }}>No recognizable fields in the county record.</div>
+              ) : apprRows(selParcel.attrs).map((r) => (
+                <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "5px 0", borderBottom: "1px solid #f3efe5" }}>
+                  <span style={{ fontSize: 11.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
+                  <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600, textAlign: "right", wordBreak: "break-word" }}>{apprVal(r.label, r.value)}</span>
+                </div>
+              ))}
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ fontSize: 11, color: PAL.muted, cursor: "pointer" }}>All county fields</summary>
+                <div style={{ marginTop: 6 }}>
+                  {apprAll(selParcel.attrs).map((r) => (
+                    <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "3px 0" }}>
+                      <span style={{ fontSize: 10.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
+                      <span style={{ fontSize: 10.5, color: PAL.ink, fontFamily: "ui-monospace, monospace", textAlign: "right", wordBreak: "break-word" }}>{String(r.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </Section>
+          )}
+          {/* taxing jurisdictions + combined rate (graceful-degrade until wired) */}
+          {_pid === "parcel" && selParcel && selParcel.attrs && (
+            <Section title="Taxes" collapsed>
+              {!taxInfo ? (
+                <div style={{ fontSize: 11.5, color: PAL.muted }}>Looking up taxing units…</div>
+              ) : (
+                <>
+                  {taxInfo.units.length > 0 ? taxInfo.units.map((u, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid #f3efe5" }}>
+                      <span style={{ fontSize: 11.5, color: PAL.ink }}>{u.name}</span>
+                      <span style={{ fontSize: 11.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{u.value}</span>
+                    </div>
+                  )) : <div style={{ fontSize: 11.5, color: PAL.muted }}>No taxing-unit fields in the county record.</div>}
+                  {taxInfo.connected && taxInfo.total != null ? (
+                    <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: PAL.ink }}>Total tax rate: {taxInfo.total} per $100</div>
+                  ) : (
+                    <div style={{ marginTop: 8, fontSize: 11, color: PAL.warn, lineHeight: 1.5 }}>▲ {taxInfo.note} A total tax rate isn't shown until a rate source is wired for this county.</div>
+                  )}
+                </>
+              )}
+            </Section>
+          )}
+          {/* selected parcel — translucence + setback standards */}
+          {_pid === "parcel" && selParcel && (
+            <Section title="Boundary">
+              <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 8, lineHeight: 1.6 }}>
+                Area: <b style={{ color: PAL.ink }}>{f0(polyArea(selParcel.points))} sf</b> · {f2(polyArea(selParcel.points) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
+              </div>
+              {(() => {
+                const ca = countyAcres(selParcel.attrs);
+                if (!ca || !ca.acres) return null;
+                const mine = polyArea(selParcel.points) / SQFT_PER_ACRE;
+                // A projected Shape area read as ft² but actually in m² lands ~10.76× too small; if
+                // multiplying it back by that factor matches our geometry, treat it as m² and use the
+                // corrected county acreage (so a correct parcel reads ✓, not a false ~900% off).
+                const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
+                const county = m2 ? ca.acres * 10.7639 : ca.acres;
+                const diff = Math.abs(mine - county) / county;
+                const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
+                return (
+                  <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "6px 9px" }}>
+                    <b>{mark} Geometry check</b> · county {f2(county)} ac vs {f2(mine)} ac ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
+                    {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
+                    {!m2 && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
+                  </div>
+                );
+              })()}
+              <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
+                <button style={chip} onClick={() => toggleParcelActive(selParcel.id)} title={selParcel.active === false ? "Excluded from yield / coverage / detention — click to include" : "Counted in yield / coverage / detention — click to exclude (stays visible, dimmed)"}>{selParcel.active === false ? "◯ Inactive" : "✓ Active"}</button>
+                <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+              </div>
+              {/* B214 — setback editor mode. Only shown when a side is built from MORE than
+                  one segment (where "by side" actually saves clicks); otherwise every side is
+                  a single edge and the two modes are identical. */}
+              {settings.showSetback && selRuns && selRuns.some((r) => r.edges.length > 1) && (
+                <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 9, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <span>Edit setbacks:</span>
+                  <button style={{ ...chip, ...(sbEditMode === "side" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
+                    onClick={() => setSbEditMode("side")} title="One value per whole side — a side digitized as many segments edits in a single click (Alt-click a side to override just one segment)">By side</button>
+                  <button style={{ ...chip, ...(sbEditMode === "segment" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
+                    onClick={() => setSbEditMode("segment")} title="Each segment on its own — for a notch or jog that needs its own setback">Per segment</button>
+                </div>
+              )}
+              <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!selParcel.fill} onChange={(e) => { pushHistory(); setSelParcel(e.target.checked ? { fill: "#5b6650" } : { fill: null }); }} /> Fill the parcel (off by default)
+              </label>
+              {selParcel.fill && (
+                <>
+                  <Field label="Translucence">
+                    <input type="range" min={0} max={0.6} step={0.02} value={selParcel.fillOpacity ?? 0.12}
+                      onChange={(e) => setSelParcel({ fillOpacity: +e.target.value })} />
+                  </Field>
+                  <Field label="Fill color">
+                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input type="color" value={toHex6(selParcel.fill)} {...livePick((v) => setSelParcel({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                    </span>
+                  </Field>
+                </>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
+                <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setbacks per edge</span>
+                <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
+              </div>
+              {(() => {
+                const sb = parcelSetbacks(selParcel), fe = frontEdge(selParcel);
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {sb.map((v, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{i === fe ? "Front" : `Edge ${i + 1}`}</span>
+                        <NumInput style={{ ...numInput, width: 54 }} value={Math.round(v)} min={0} onCommit={(n) => setEdgeSetback(selParcel, i, n)} />
+                      </div>
+                    ))}
+                    <button style={{ ...chip, marginTop: 4 }} onClick={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}>Reset to default ({settings.setback}′)</button>
+                  </div>
+                );
+              })()}
+              <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+                <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete parcel</button>
+              </div>
+            </Section>
+          )}
+
+          {/* metrics */}
+          {_pid === "yield" && (<>
+          <YieldPanel
+            siteSqft={siteSqft} bldg={bldg} cov={cov} far={far} stalls={stalls} ratio={ratio}
+            trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
+            bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
+            inactiveCount={parcels.filter((p) => p.active === false).length}
+            easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
+            drainage={drainage} parcelOverlaps={parcelOverlaps}
+          />
+          {(() => {
+            // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
+            // (LF, both sides), split by curb type so each rides its own unit price.
+            // Unit prices are user-supplied (anchor to your own bids) — never defaulted.
+            const prices = settings.prices || {};
+            const cost = costRollup(els, roadTravel, roadLengthOf, prices);
+            if (!cost.segments) return null;
+            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
+            const setPrice = (k, v) => setSettings((s) => ({ ...s, prices: { ...(s.prices || {}), [k]: v } }));
+            const priceField = (label, k, unit) => (
+              <Field label={label}>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
+                  <NumInput style={{ ...numInput, width: 70 }} value={prices[k] ?? null} min={0} placeholder="—" onCommit={(n) => setPrice(k, n)} />
+                  <span style={{ fontSize: 11, color: PAL.muted }}>{unit}</span>
+                </span>
+              </Field>
+            );
+            return (
+              <Section title="Road cost (screening)" accent="#0e7490" collapsed>
+                {metricRow("Paving", `${f0(cost.pavingSy)} SY`, cost.pavingCost != null ? usd(cost.pavingCost) : "set $/SY")}
+                {cost.curbBarrierLf > 0 && metricRow("Curb · barrier", `${f0(cost.curbBarrierLf)} LF`, cost.curbBarrierCost != null ? usd(cost.curbBarrierCost) : "set $/LF")}
+                {cost.curbGutterLf > 0 && metricRow("Curb · curb & gutter", `${f0(cost.curbGutterLf)} LF`, cost.curbGutterCost != null ? usd(cost.curbGutterCost) : "set $/LF")}
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
+                {priceField("Paving", "pavingSy", "/SY")}
+                {cost.curbBarrierLf > 0 && priceField("Barrier curb", "curbBarrierLf", "/LF")}
+                {cost.curbGutterLf > 0 && priceField("Curb & gutter", "curbGutterLf", "/LF")}
+                {cost.total != null && metricRow("Subtotal", usd(cost.total), "priced lines")}
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
+                  Paving is face-of-curb to face-of-curb (curb excluded); curb-&amp;-gutter trims the gutter pan from paving. Screening — verify against bids.
+                </div>
+              </Section>
+            );
+          })()}
+          {(() => {
+            // B712 — earthwork cost lines: the floodplain-mitigation CUT + pond
+            // excavation, in CY, priced ONLY by the user (the road-cost pattern —
+            // never a hardcoded rate). An unchecked drainage screen renders an
+            // explicit not-checked state; an un-priceable mitigation volume renders
+            // UNKNOWN — NEVER a silent 0 CY in a priced takeoff.
+            const prices = settings.prices || {};
+            const pondCy = pondExcavationCf / 27;
+            const drainageChecked = !!drainCtxData;
+            const mitKnown = fmResult && fmResult.volumeCf != null;
+            const mitCy = mitKnown ? fmResult.cutCy : null;
+            const fmGeoFailed = drainageChecked && drainCtxData?.floodGeo?.state === "failed";
+            const mitRelevant = drainageChecked && ((fmResult && fmResult.intersectAcres > 0) || fmGeoFailed);
+            if (!(pondCy > 0) && !mitRelevant) return null;
+            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
+            const pEarthRaw = prices.earthworkCy;
+            const pEarth = pEarthRaw == null || pEarthRaw === "" ? null : Number.isFinite(+pEarthRaw) && +pEarthRaw >= 0 ? +pEarthRaw : null;
+            const setPrice = (k, v) => setSettings((sx) => ({ ...sx, prices: { ...(sx.prices || {}), [k]: v } }));
+            const pricedCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0);
+            return (
+              <Section title="Earthwork cost (screening)" accent="#0e7490" collapsed>
+                {pondCy > 0 && metricRow("Pond excavation", `${f0(pondCy)} CY`, pEarth != null ? usd(pondCy * pEarth) : "set $/CY")}
+                {mitRelevant && (mitKnown
+                  ? metricRow("Floodplain mitigation cut", `${f0(mitCy)} CY`, pEarth != null ? usd(mitCy * pEarth) : "set $/CY")
+                  : metricRow("Floodplain mitigation cut", "UNKNOWN", fmGeoFailed ? "flood source unavailable" : "enter elevations"))}
+                {!drainageChecked && (
+                  <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "4px 0 0", fontWeight: 700 }}>
+                    Floodplain mitigation not screened yet — run ⛆ Check drainage criteria; this takeoff is INCOMPLETE until then, not zero.
+                  </div>
+                )}
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
+                <Field label="Excavation / cut">
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
+                    <NumInput style={{ ...numInput, width: 70 }} value={prices.earthworkCy ?? null} min={0} placeholder="—" onCommit={(n) => setPrice("earthworkCy", n)} />
+                    <span style={{ fontSize: 11, color: PAL.muted }}>/CY</span>
+                  </span>
+                </Field>
+                {pEarth != null && pricedCy > 0 && metricRow("Subtotal", usd(pricedCy * pEarth), "priced lines")}
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
+                  Pond excavation is the full basin cut (top of bank → achievable floor). The mitigation cut usually serves as pad borrow — the same dirt raises the pad. Screening quantities; volumes stay separate ledgers.
+                </div>
+              </Section>
+            );
+          })()}
+          </>)}
+
+          {/* Standards (B653) — pure per-element-type STARTING VALUES. The what-you-see
+              toggles + grid/snap moved to the on-canvas View (eye) menu; each section
+              below is one element type, deep-linkable from that type's inspector via
+              standardsFocus (the remount key opens the focused section). */}
+          {_pid === "standards" && (<>
+          <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.55, margin: "2px 2px 10px" }}>
+            <b style={{ color: PAL.ink }}>Starting values for new elements</b> — editable per element after you place it.
+            Show/hide toggles and grid &amp; snap moved to the <b>View</b> (eye) menu on the canvas.
+          </div>
+
+          <div data-std-sec="parcels">
+          <Section key={`std-parcels:${standardsFocus === "parcels"}`} title="Parcels" collapsed={standardsFocus !== "parcels"}>
+            <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
+            {/* "Show setback line" lives in the Parcel panel (Boundary › Setbacks per edge › Show),
+                next to the object it acts on — see B164. Not duplicated here. */}
+          </Section>
+          </div>
+
+          {/* Structural column grid (B568): speed bay + flex-to-band typical bays + dock doors.
+              These are the plan-wide defaults; a single building can pin its own in its inspector. */}
+          <div data-std-sec="building">
+          <Section key={`std-building:${standardsFocus === "building"}`} title="Buildings — structural grid" collapsed={standardsFocus !== "building"}>
+            <Field label="Speed bay (ft)"><NumInput style={numInput} value={settings.speedBay} min={1} onCommit={(n) => setSettings((s) => ({ ...s, speedBay: n }))} /></Field>
+            <Field label="Typ. bay — length"><NumInput style={numInput} value={settings.bayLengthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayLengthTarget: n }))} /></Field>
+            <Field label="Typ. bay — depth"><NumInput style={numInput} value={settings.bayDepthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayDepthTarget: n }))} /></Field>
+            <Field label="Bay band (min / max)"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.bayMin} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMin: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.bayMax} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMax: n }))} /></span></Field>
+            <Field label="Dock door — W / o.c."><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.doorWidth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, doorWidth: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.doorOC} min={2} onCommit={(n) => setSettings((s) => ({ ...s, doorOC: n }))} /></span></Field>
+            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Interior bays are sized evenly within the band toward the typical size, so the columns are uniformly spaced; the speed bay is pinned. The band is the allowed bay range.</div>
+          </Section>
+          </div>
+
+          <div data-std-sec="parking">
+          <Section key={`std-parking:${standardsFocus === "parking"}`} title="Parking" collapsed={standardsFocus !== "parking"}>
+            <Field label="Stall W / D"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.stallW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.stallDepth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallDepth: n }))} /></span></Field>
+            <Field label="Drive aisle"><NumInput style={numInput} value={settings.aisle} min={1} onCommit={(n) => setSettings((s) => ({ ...s, aisle: n }))} /></Field>
+            <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
+          </Section>
+          </div>
+
+          <div data-std-sec="trailers">
+          <Section key={`std-trailers:${standardsFocus === "trailers"}`} title="Trailers" collapsed={standardsFocus !== "trailers"}>
+            <Field label="Trailer W / L"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.trailerW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.trailerL} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerL: n }))} /></span></Field>
+            <Field label="Trailer aisle"><NumInput style={numInput} value={settings.trailerAisle} min={0} onCommit={(n) => setSettings((s) => ({ ...s, trailerAisle: n }))} /></Field>
+          </Section>
+
+          </div>
+
+          {/* Default depths for the building-anchored dock-zone stack (B228), outward from
+              the dock face. Editable per plan — the building "+" reads these. */}
+          <div data-std-sec="dockzones">
+          <Section key={`std-dockzones:${standardsFocus === "dockzones"}`} title="Dock zones" collapsed={standardsFocus !== "dockzones"}>
+            <Field label="Truck court (ft)"><NumInput style={numInput} value={settings.truckCourtD ?? 135} min={1} onCommit={(n) => setSettings((s) => ({ ...s, truckCourtD: n }))} /></Field>
+            <Field label="Trailer parking (ft)"><NumInput style={numInput} value={settings.trailerParkD ?? 50} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerParkD: n }))} /></Field>
+            <Field label="Buffer (ft)"><NumInput style={numInput} value={settings.bufferD ?? 15} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bufferD: n }))} /></Field>
+            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Outward from the dock face: truck court → trailer parking → buffer. New zones use these depths; each is still editable per building.</div>
+          </Section>
+          </div>
+
+          <div data-std-sec="roads">
+          <Section key={`std-roads:${standardsFocus === "roads"}`} title="Roads" collapsed={standardsFocus !== "roads"}>
+            <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
+            <Field label="Road widths (ft)">
+              <input style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
+                onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
+            </Field>
+            {/* Road classes — civil defaults + min-radius warning thresholds (B599/NEW-4). */}
+            {(() => {
+              const setRCC = (key, patch) => setSettings((s) => {
+                const list = (Array.isArray(s.roadClasses) && s.roadClasses.length ? s.roadClasses : ROAD_CLASS_SEEDS).map((c) => ({ ...c }));
+                const i = list.findIndex((c) => c.key === key);
+                if (i >= 0) list[i] = { ...list[i], ...patch };
+                return { ...s, roadClasses: list };
+              });
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 4px" }}>Road classes — civil defaults</div>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 6 }}>Default curve radius for new vertices + a min-radius warning per class. Seeds are starting points — verify against current AASHTO / the adopted fire code; nothing here is authoritative.</div>
+                  {roadClassesOf(settings).map((c) => (
+                    <div key={c.key} style={{ marginBottom: 7 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink, marginBottom: 2 }}>{c.label}</div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Default R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.defaultRadius ?? 50)} min={1} onCommit={(n) => setRCC(c.key, { defaultRadius: n })} /></label>
+                        {c.designSpeed != null ? (
+                          <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Design mph <NumInput style={{ ...numInput, width: 48 }} value={Math.round(c.designSpeed)} min={0} onCommit={(n) => setRCC(c.key, { designSpeed: n })} /></label>
+                        ) : (
+                          <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Warn below R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.minRadius ?? 0)} min={0} onCommit={(n) => setRCC(c.key, { minRadius: n })} /></label>
+                        )}
+                        <span style={{ fontSize: 10.5, color: PAL.muted }}>= {f0(classMinRadius(c))}′ min</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </Section>
+
+          </div>
+
+          {/* element default colors — edit without selecting anything */}
+          <div data-std-sec="colors">
+          <Section key={`std-colors:${standardsFocus === "colors"}`} title="Colors" collapsed={standardsFocus !== "colors"}>
+            {Object.keys(TYPE).map((k) => {
+              const st = typeStyle(k, settings);
+              return (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                  <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{TYPE[k].label.split(" / ")[0]}</span>
+                  <input type="color" title="Fill" value={toHex6(st.fill)} {...livePick((v) => liveTypeStyle(k, { fill: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Line" value={toHex6(st.stroke)} {...livePick((v) => liveTypeStyle(k, { stroke: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                </div>
+              );
+            })}
+            <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: {} })); }}>Reset all to built-in</button>
+          </Section>
+          </div>
+          </>)}
+  </>);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--planner-panel)",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
@@ -8400,7 +9257,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <span style={{ background: "var(--surface-raised)", color: PAL.ink, fontWeight: 700, fontSize: 14, padding: "10px 20px", borderRadius: 999, border: `1px solid ${PAL.accent}`, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>Drop site plan to place it on the map</span>
             </div>
           )}
-          <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
+          <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             // Two-finger pinch runs on native touch events (B555) — see onTouchStartPinch. While a
@@ -9865,8 +10722,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* the rail */}
           <div style={{ width: 54, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4 }}>
             {leftTabs.map((tb) => (
-              <button key={tb.id} title={tb.label} className="dbtn" style={railBtn(leftPanel === tb.id)}
-                onClick={() => setLeftPanel((p) => (p === tb.id ? null : tb.id))}>
+              <button key={tb.id} title={tb.label} className="dbtn" style={railBtn(leftPanel === tb.id || isFloating(tb.id))}
+                aria-pressed={leftPanel === tb.id || isFloating(tb.id)}
+                onClick={() => {
+                  if (isFloating(tb.id)) { closeFloating(tb.id); return; } // re-clicking a floating panel's icon closes it
+                  setLeftPanel((p) => (p === tb.id ? null : tb.id));
+                }}>
                 <span style={{ fontSize: 16, lineHeight: 1 }}>{tb.glyph}</span>
                 {/* long labels ("Standards") overflow the 54px rail at 10.5px — shrink, never clip */}
                 <span style={tb.label.length > 8 ? { fontSize: 9, letterSpacing: 0 } : undefined}>{tb.label}</span>
@@ -10995,806 +11856,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </>)}
           </div>
           )}
-          {leftPanel && (
-          <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px" }}>
-          {/* References (B654) — the merged Aerial + Overlay panel: every backdrop the plan
-              sits over, in one list with one add flow and ONE shared calibration (the
-              ovCalib trace/align flow — the old separate "calibrate" tool is gone).
-              Row #1 is the aerial (image-only, always beneath everything); the rest are
-              sheet references (site plans / surveys, PDF or image). Persisted fields are
-              UNCHANGED (`underlay` + `sheetOverlays`) — this is a UI unification. */}
-          {leftPanel === "references" && (
-          <Section title="References">
-            {/* The whole block is a drop target (NEW-1): drop a PDF/image here or on the map,
-                or click to browse. Mirrors the Doc-Review FileBrowser dropzone pattern —
-                dashed border + accent highlight on hover, anti-flicker via currentTarget. */}
-            <div
-              onClick={() => { if (!overlayBusy) overlayFileRef.current?.click(); }}
-              onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
-              onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
-              onDragLeave={(e) => { if (e.currentTarget === e.target) setOverlayDropOver(false); }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
-              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
-              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image)…"}</button>
-              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
-              <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
-                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this reference</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
-              </div>
-            </div>
-
-            {/* Aerial backdrop — pinned reference #1. Opacity + lock lived on the underlay
-                object all along (render honours both); the CONTROLS are new here. */}
-            <div style={{ marginTop: 12 }}>
-              {!underlay ? (
-                <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
-                    <span style={{ flex: 1 }} />
-                    <button style={chip} onClick={() => fileRef.current?.click()}>Load screenshot…</button>
-                  </div>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
-                </div>
-              ) : (
-                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "var(--border-default)", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-                    <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
-                    <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
-                  </div>
-                  {aerialSel && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
-                      <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
-                        <input type="range" min={0.1} max={1} step={0.05} value={underlay.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => setUnderlay((u) => (u ? { ...u, opacity: +e.target.value } : u))} />
-                        <span style={{ fontSize: 11, color: PAL.muted, width: 34, textAlign: "right" }}>{Math.round((underlay.opacity ?? 1) * 100)}%</span>
-                      </label>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button style={{ ...chip, flex: 1, ...(underlay.fromMap ? { opacity: 0.55, cursor: "not-allowed" } : null) }} disabled={!!underlay.fromMap}
-                          title={underlay.fromMap ? "This aerial came from the map — it's already to scale, so manual calibration is disabled" : "Click two ends of a known distance on the aerial, then enter its real length"}
-                          onClick={() => { setShowAerial(true); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); }}>Calibrate</button>
-                        <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
-                      </div>
-                      <div style={{ fontSize: 11, color: PAL.muted }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide{underlay.fromMap ? " · georeferenced from the map" : ""}</div>
-                      {origin && basemapOn && <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>}
-                    </div>
-                  )}
-                  {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
-                  {underlayLost && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>The saved aerial couldn't be recovered on this device (not in the offline cache or your account). Your boundary and tools are intact — <button style={{ ...chip, padding: "1px 7px", color: PAL.accent }} onClick={() => fileRef.current?.click()}>re-drop the screenshot</button> to restore the backdrop.</div>}
-                </div>
-              )}
-              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { onUnderlayFile(e.target.files?.[0]); e.target.value = ""; }} />
-            </div>
-            {!sheetOverlays.length ? null : (
-              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                {sheetOverlays.map((o) => {
-                  const on = selOverlay === o.id;
-                  return (
-                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                      {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
-                          sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
-                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
-                      {/* Hide / lock / remove — one shared square icon style (B574) so the three render identically. */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-                        <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
-                        <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                        <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}><XIcon /></button>
-                      </div>
-                      {on && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
-                          <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
-                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); }} />
-                            {/* Numeric percent alongside the slider (B575), two-way bound. While typing we hold a
-                                raw draft (so a half-typed value isn't clobbered); the slider + overlay update live;
-                                on blur the draft clears so the field follows the overlay again. Stored 0.1–1.0 ↔ 10–100%. */}
-                            <input type="number" min={10} max={100} step={5} aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct"
-                              style={{ ...numInput, width: 54, textAlign: "right" }}
-                              value={(ovEdit && ovEdit.id === o.id && ovEdit.opacityText != null) ? ovEdit.opacityText : Math.round((o.opacity ?? 1) * 100)}
-                              onChange={(e) => { const txt = e.target.value; setOvEditFor(o.id, { opacityText: txt }); const n = Math.round(+txt); if (txt !== "" && Number.isFinite(n)) patchOverlay(o.id, { opacity: Math.min(1, Math.max(0.1, n / 100)) }, false); }}
-                              onBlur={() => setOvEditFor(o.id, { opacityText: null })} />
-                            <span style={{ fontSize: 11, color: PAL.muted }}>%</span>
-                          </label>
-                          <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
-                            <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it" data-testid="overlay-rotation"
-                              onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
-                              onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
-                          </label>
-                          {/* Numeric width — kept ONLY for image overlays (B577). A PDF carries a `sheet`
-                              (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
-                              a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
-                              and this stays its one direct numeric size + ±10% nudge control. */}
-                          {!o.sheet && (
-                            <label style={ovRow}><span style={{ width: 48 }}>Width</span>
-                              <input style={numInput} value={Math.round(o.imgW * o.ftPerPx)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
-                              <span>ft</span>
-                              <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
-                              <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
-                            </label>
-                          )}
-                          {o.pageCount > 1 && (
-                            <div style={ovRow}><span style={{ width: 48 }}>Page</span>
-                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
-                              <span style={{ color: PAL.ink }}>{o.page} / {o.pageCount}</span>
-                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
-                              {!overlayDocs.current.has(o.id) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
-                            </div>
-                          )}
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
-                            <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
-                          </div>
-                          {/* B654: above/below moved into the panel (the right-click menu keeps them too) */}
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1 }} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
-                            <button style={{ ...chip, flex: 1 }} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
-                          </div>
-                          {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
-                          {(overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf")) && (
-                            <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
-                              <input type="checkbox" checked={o.knockout !== false} onChange={(e) => setOverlayKnockout(o.id, e.target.checked)} />
-                              <span>Knock out white paper</span>
-                            </label>
-                          )}
-                          {o.sheet && (() => {
-                            // Bluebeam-style scale entry (B576): the page→real ratio is the single source of
-                            // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
-                            // [page][unit] = [real][unit] fields. The mode lives in explicit editor state (ovEdit),
-                            // NOT derived from the current size — so picking Custom always reveals the fields.
-                            const ed = ovEdit && ovEdit.id === o.id ? ovEdit : null;
-                            const curFpi = scaleForFtPerPoint(o.ftPerPx);
-                            const matched = overlayScalePreset(o);
-                            const selVal = ed?.scaleMode ?? (matched ? matched.id : "custom");
-                            const pageUnit = ed?.pageUnit ?? "in";
-                            const realUnit = ed?.realUnit ?? "ft";
-                            // DISPLAY values (rounded for readability) vs COMMIT defaults (full precision). A field
-                            // the user never edited must re-apply its EXACT current value, never the rounded display
-                            // string — otherwise an idle focus→blur on a non-round scale (e.g. metric 1″=1m → 3.2808)
-                            // would quantize it to 3.3. The per-field *Dirty flags below then skip the commit entirely
-                            // when a field wasn't touched, so an idle blur is a true no-op (no scale change, no history).
-                            const pageVal = ed?.page ?? (matched ? trimNum(matched.pageIn) : "1");
-                            const realVal = ed?.real ?? (matched ? trimNum(matched.realFt) : fmtScaleNum(curFpi));
-                            const pageCommit = ed?.page ?? (matched ? matched.pageIn : 1);
-                            const realCommit = ed?.real ?? (matched ? matched.realFt : curFpi);
-                            const commit = (next) => {
-                              const fpi = feetPerInchFromPair({ pageVal: next.page ?? pageCommit, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? realCommit, realUnit: next.realUnit ?? realUnit });
-                              if (fpi) applyOverlayScale(o.id, fpi);
-                            };
-                            return (
-                              <div style={{ borderTop: `1px dashed var(--planner-border)`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                                <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
-                                <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
-                                  <select data-testid="overlay-scale-preset" style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selVal}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      if (v === "custom") { setOvEditFor(o.id, { scaleMode: "custom", page: pageVal, pageUnit, real: realVal, realUnit }); return; }
-                                      const p = SCALE_PRESETS.find((x) => x.id === v);
-                                      if (p) { setOvEditFor(o.id, { scaleMode: p.id, page: trimNum(p.pageIn), pageUnit: "in", real: trimNum(p.realFt), realUnit: "ft" }); applyOverlayScale(o.id, feetPerInchForPreset(p)); }
-                                    }}>
-                                    <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-                                    <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-                                    <option value="custom">Custom…</option>
-                                  </select>
-                                </label>
-                                {selVal === "custom" && (
-                                  <label style={ovRow} data-testid="overlay-scale-custom">
-                                    <input style={{ ...numInput, width: 48 }} value={pageVal} placeholder="0.5 or 1/2" title="Distance measured on the page (decimals or fractions)"
-                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", page: e.target.value, pageDirty: true })}
-                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.pageDirty) commit({ page: e.currentTarget.value }); }}
-                                      onBlur={(e) => { if (ed?.pageDirty) commit({ page: e.currentTarget.value }); }} />
-                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={pageUnit} title="Page unit"
-                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", pageUnit: e.target.value }); commit({ pageUnit: e.target.value }); }}>
-                                      {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                                    </select>
-                                    <span style={{ fontWeight: 700, color: PAL.ink }}>=</span>
-                                    <input style={{ ...numInput, width: 48 }} value={realVal} placeholder="real" title="Real-world distance"
-                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", real: e.target.value, realDirty: true })}
-                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.realDirty) commit({ real: e.currentTarget.value }); }}
-                                      onBlur={(e) => { if (ed?.realDirty) commit({ real: e.currentTarget.value }); }} />
-                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={realUnit} title="Real-world unit"
-                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", realUnit: e.target.value }); commit({ realUnit: e.target.value }); }}>
-                                      {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                                    </select>
-                                  </label>
-                                )}
-                                {o.detectedScale && (
-                                  <div style={{ fontSize: 11, color: PAL.muted }}>Read from sheet: <b style={{ color: PAL.ink }}>1″={o.detectedScale}′</b>{Math.round(scaleForFtPerPoint(o.ftPerPx)) !== o.detectedScale && <button style={{ ...chip, marginLeft: 6, padding: "3px 8px" }} onClick={() => applyOverlayScale(o.id, o.detectedScale)}>Apply</button>}</div>
-                                )}
-                                <div style={{ fontSize: 10.5, color: PAL.muted }}>Now ≈ <b style={{ color: PAL.ink }}>1″={fmtScaleNum(scaleForFtPerPoint(o.ftPerPx))}′</b> · {Math.round(o.imgW * o.ftPerPx)}′ wide</div>
-                              </div>
-                            );
-                          })()}
-                          <div style={{ display: "flex", gap: 6 }}>
-                            {/* Resize THIS drawing to ~60% of the current view and recentre it — the
-                                one-click rescue when a drawing came in far too big/small (then set the
-                                real scale above). Distinct from "Fit view", which zooms the canvas. */}
-                            <button style={{ ...chip, flex: 1 }} title="Resize this drawing to fit your current view (use when it came in far too big or small), then set the real scale above"
-                              onClick={() => { const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW)); const vc = p2fStatic(size.w / 2, size.h / 2); patchOverlay(o.id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2 }); }}>Size to view</button>
-                            <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Section>
-          )}
-
-          {/* Parcel menu — empty hint when no parcel is selected */}
-          {/* every parcel in this plan — click to select */}
-          {/* Site Analysis (B147): screen the active-parcel footprint for floodplain,
-              wetlands, pipelines, oil/gas wells, contamination, jurisdiction & zoning. */}
-          {leftPanel === "analysis" && (
-            <Section title="Site Analysis">
-              {!origin ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Site Analysis needs a georeferenced plan. Bring a parcel in from the map to anchor it, then screen it here.</div>
-              ) : (() => {
-                const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
-                const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
-                const acres = dissolvedParcelSqft(act) / SQFT_PER_ACRE; // B715: dissolve overlaps (count shared ground once)
-                return (
-                  <>
-                    <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
-                      isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus}
-                      onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
-                    {/* B712 — the floodplain mitigation & buildability card. A SIBLING card,
-                        deliberately NOT injected into the auto-refreshing flood finding above:
-                        this data is button-gated (the drainage check) with its own staleness
-                        clock — two freshness models in one card would lie about data age. */}
-                    <FloodMitigationCard drainage={drainage} PAL={PAL} onCheck={drainage?.onCheck} />
-                  </>
-                );
-              })()}
-            </Section>
-          )}
-          {leftPanel === "parcel" && (
-            // B651 — count the CURRENT lots only: a superseded (split) parent is history, not a
-            // counted parcel, so splitting one lot into two still reads "Parcels · 2".
-            <Section title={`Parcels · ${parcels.length - supersededParcelIds.size}`}>
-              {/* ＋ Add parcel (B383) — the one front-door for adding land once you're in the
-                  planner, so you never have to back out to the map. Opens a menu of add methods
-                  (reuses the AnchoredMenu portal flyout the right-rail Boundary menu uses). */}
-              <div ref={addParcelAnchor} style={{ position: "relative", marginBottom: 9 }}>
-                <button
-                  aria-haspopup="menu" aria-expanded={addParcelMenu}
-                  style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
-                  onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — identify from county GIS or draw a boundary">
-                  ＋ Add parcel <span style={{ opacity: 0.8, fontSize: 11 }}>▾</span>
-                </button>
-                <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
-                  {/* Identify from county GIS — the headline path (needs a georeferenced frame). */}
-                  {origin ? (
-                    <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
-                      <div style={{ fontWeight: 650 }}>🔍 Identify from county GIS</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>County parcel lines light up on the aerial — click lots to add them (one or many).</div>
-                    </button>
-                  ) : (
-                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
-                      <div style={{ fontWeight: 650, color: PAL.ink }}>🔍 Identify from county GIS</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Identify needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
-                    </div>
-                  )}
-                  {/* Add by address (B384) — geocode a typed address, then identify-and-add the lot
-                      at that point through the SAME quickAddAt path. Needs a georeferenced frame. */}
-                  {origin ? (
-                    <div style={{ padding: "7px 10px" }} onClick={(e) => e.stopPropagation()}>
-                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>Type a street address — we'll find that lot in the county GIS and add it.</div>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <input
-                          value={addrQuery}
-                          onChange={(e) => setAddrQuery(e.target.value)}
-                          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") addByAddress(); }}
-                          placeholder="123 Main St, Katy TX"
-                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
-                        <button
-                          onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
-                          title="Find this address and add its parcel"
-                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "var(--surface-raised)", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
-                          {addrBusy ? "…" : "Find"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
-                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add-by-address needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
-                    </div>
-                  )}
-                  {/* Draw a new boundary — always available (no GIS frame needed). */}
-                  <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
-                    <div style={{ fontWeight: 650 }}>✏️ Draw a new boundary</div>
-                    <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Trace a lot by clicking points on the canvas; close on the first dot.</div>
-                  </button>
-                </AnchoredMenu>
-              </div>
-              {parcels.length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add parcel</b> above, or draw one with the Parcel tool (right rail).</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                  {/* B651 — lineage-aware list: children of a split nest under their parent (indented),
-                      and the split parent is greyed + labelled "· split" as a SUPERSEDED, non-counting
-                      row (it's inactive, so excluded from yield/coverage/detention) with the original
-                      real parcel still visible. Names follow lineage: Parcel 3 → 3A / 3B. */}
-                  {parcelOutline(parcels).map(({ pc, depth, name, superseded }) => {
-                    const on = selParcel?.id === pc.id;
-                    const picked = combineSel.includes(pc.id);
-                    const inactive = pc.active === false;
-                    const tag = superseded ? " · split" : inactive ? " · inactive" : "";
-                    return (
-                      // Per-row Active checkbox (B175): checked = participates in yield / coverage /
-                      // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
-                      // The `active` flag persists per-parcel via the Site Model (same path as B100).
-                      <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7, marginLeft: depth * 16 }}>
-                        <label
-                          title={superseded ? "Split into the parcels nested below — superseded, so excluded from yield / coverage / detention. Check to make it active again (its children go inactive)." : inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
-                        >
-                          <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
-                            style={{ width: 15, height: 15, cursor: "pointer" }} />
-                        </label>
-                        <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
-                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
-                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
-                        </button>
-                        {/* B598 — per-row remove (✕). Undo-able (removeParcelById pushes history); the
-                            tombstone keeps it deleted across reload/merge. The most discoverable place
-                            to remove a parcel, alongside the Parcel tool's Remove mode. */}
-                        <button title="Remove this parcel" aria-label={`Remove ${name}`}
-                          onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
-                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid var(--border-default)`, borderRadius: 8, background: "var(--surface-raised)", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Split a parcel (B416) — the inverse of Merge below. Surfaced HERE in the
-                  panel (not only the right-rail Boundary ▾ menu) so a user reaching for
-                  parcel ops — after B383 moved ＋ Add parcel / parcel actions into this
-                  panel — finds it where they look. Same selectTool("split") as the rail. */}
-              {parcels.length >= 1 && (
-                <div style={{ marginTop: 8 }}>
-                  <button
-                    title="Split a parcel — draw a cut line across one to divide it in two"
-                    style={{ ...chip, width: "100%", ...(tool === "split" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
-                    onClick={() => selectTool("split")}>✂ Split a parcel</button>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Click points to draw a cut across a parcel; double-click or Enter to finish. It divides in two — then delete the piece you don't want.</div>
-                </div>
-              )}
-              {parcels.length > 1 && (
-                <div style={{ marginTop: 8 }}>
-                  <button style={{ ...chip, width: "100%", ...(combineSel.length >= 2 ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : { opacity: 0.55 }) }}
-                    disabled={combineSel.length < 2} onClick={mergeParcels}>Merge parcels{combineSel.length >= 2 ? ` (${combineSel.length})` : ""}</button>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Shift-click parcels (here or on the map, or right-click) to multi-select, then Merge. Working merge for test-fit — not a recorded consolidation.</div>
-                </div>
-              )}
-              {/* identify result + armed status (B383) — the body of the ＋ Add parcel menu's
-                  "Identify from county GIS" path. The entry point lives in ＋ Add parcel above;
-                  no duplicate toggle down here. The status row is the off-switch (so is Esc). */}
-              {(identifyMode || identifyRes) && (
-                <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
-                {identifyMode && (
-                  <>
-                    <button style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent }}
-                      onClick={() => { setIdentifyMode(false); setIdentifyRes(null); setJurInfo(null); }} title="Stop adding parcels">
-                      {identAdded > 0 ? `Adding lots — ${identAdded} added · Done` : "Click lit-up lots to add · Done"}
-                    </button>
-                    {origin && ppfToZoom(view.ppf, origin.lat) < PARCEL_MINZOOM && (
-                      <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 5 }}>Zoom in to see the county parcel lines light up (a click still adds the lot).</div>
-                    )}
-                  </>
-                )}
-                {identifyRes && (
-                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
-                    {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
-                      : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
-                      : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
-                      : identifyRes.already ? <span style={{ color: PAL.muted }}>{identifyRes.addr || "That lot"} is already in this plan — selected it.</span>
-                      : <>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                            <span style={{ color: "#15803d", fontWeight: 800, fontSize: 13, lineHeight: 1 }}>✓</span>
-                            <span style={{ fontWeight: 700, color: PAL.ink }}>Added {identifyRes.addr || "parcel"}</span>
-                          </div>
-                          {apprRows(identifyRes.attrs).slice(0, 4).map((r) => (
-                            <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0" }}>
-                              <span style={{ color: PAL.muted }}>{r.label}</span><span style={{ color: PAL.ink, fontWeight: 600 }}>{apprVal(r.label, r.value)}</span>
-                            </div>
-                          ))}
-                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={checkJurisdiction} disabled={jurInfo?.busy}>
-                            {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
-                          </button>
-                          {jurInfo && !jurInfo.busy && (
-                            <div style={{ marginTop: 7, borderTop: "1px dashed var(--planner-border)", paddingTop: 6 }}>
-                              {jurInfo.error ? <span style={{ color: PAL.warn }}>{jurInfo.error}</span> : <>
-                                {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
-                                {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
-                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "no ETJ layer here (Houston/Austin/DFW covered)" : "not in a city ETJ"), jurInfo.j.ages.etj)}
-                                {jurRow("Road maint.", jurInfo.road.authorities.length ? jurInfo.road.authorities.join(" · ") + (jurInfo.road.nearest?.route ? ` (${jurInfo.road.nearest.route})` : "") : "unknown", jurInfo.road.ageMs)}
-                                {jurInfo.j.straddle && <div style={{ color: PAL.warn, marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
-                                <div style={{ color: PAL.muted, marginTop: 4, fontStyle: "italic" }}>Screening only — verify with the jurisdiction.</div>
-                              </>}
-                            </div>
-                          )}
-                        </>}
-                  </div>
-                )}
-              </div>
-              )}
-            </Section>
-          )}
-          {/* parcel-attached drawings (B67): attach a PDF/JPEG to THIS parcel and mark it
-              up on an immutable backdrop. */}
-          {leftPanel === "parcel" && selParcel && (() => {
-            const mine = parcelDrawings.filter((d) => d.parcelId === selParcel.id);
-            return (
-              <Section title="Attached drawings">
-                <button style={{ ...chip, width: "100%" }} onClick={() => { setDrawingTargetParcel(selParcel.id); drawingFileRef.current?.click(); }}>＋ Attach a drawing (PDF / JPG)</button>
-                <input ref={drawingFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }}
-                  onChange={(e) => { onAttachDrawing(drawingTargetParcel, e.target.files?.[0]); e.target.value = ""; }} />
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>An immutable backdrop you mark up on top of — saved with this parcel.</div>
-                {mine.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
-                    {mine.map((d) => (
-                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
-                        <button onClick={() => setOpenDrawingId(d.id)} title={d.src ? "Open & mark up" : "Re-attach the file to view (markups are saved)"}
-                          style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {d.src ? "🖹" : "⚠"} {d.name}{d.markups?.length ? ` · ${d.markups.length} mk` : ""}
-                        </button>
-                        <button onClick={() => { if (window.confirm(`Remove “${d.name}” and its markups?`)) deleteDrawing(d.id); }} title="Remove this drawing"
-                          style={{ border: "none", background: "transparent", cursor: "pointer", color: PAL.muted, fontSize: 13, lineHeight: 1 }}>✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Section>
-            );
-          })()}
-          {/* appraisal-district property data for the selected parcel */}
-          {leftPanel === "parcel" && selParcel && selParcel.attrs && (
-            <Section title="Appraisal data">
-              {(() => {
-                const ok = Object.keys(selParcel.attrs).find((k) => /^(owner|own_?name|owner_?name|owner1|name)$/i.test(k) && selParcel.attrs[k]);
-                return ok ? (
-                  <div style={{ marginBottom: 9, paddingBottom: 8, borderBottom: "1px solid var(--planner-border)" }}>
-                    <div style={{ fontSize: 9.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Owner</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: PAL.ink, lineHeight: 1.3, marginTop: 2 }}>{String(selParcel.attrs[ok])}</div>
-                  </div>
-                ) : null;
-              })()}
-              {apprRows(selParcel.attrs).length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted }}>No recognizable fields in the county record.</div>
-              ) : apprRows(selParcel.attrs).map((r) => (
-                <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "5px 0", borderBottom: "1px solid #f3efe5" }}>
-                  <span style={{ fontSize: 11.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
-                  <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600, textAlign: "right", wordBreak: "break-word" }}>{apprVal(r.label, r.value)}</span>
-                </div>
-              ))}
-              <details style={{ marginTop: 8 }}>
-                <summary style={{ fontSize: 11, color: PAL.muted, cursor: "pointer" }}>All county fields</summary>
-                <div style={{ marginTop: 6 }}>
-                  {apprAll(selParcel.attrs).map((r) => (
-                    <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "3px 0" }}>
-                      <span style={{ fontSize: 10.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
-                      <span style={{ fontSize: 10.5, color: PAL.ink, fontFamily: "ui-monospace, monospace", textAlign: "right", wordBreak: "break-word" }}>{String(r.value)}</span>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            </Section>
-          )}
-          {/* taxing jurisdictions + combined rate (graceful-degrade until wired) */}
-          {leftPanel === "parcel" && selParcel && selParcel.attrs && (
-            <Section title="Taxes" collapsed>
-              {!taxInfo ? (
-                <div style={{ fontSize: 11.5, color: PAL.muted }}>Looking up taxing units…</div>
-              ) : (
-                <>
-                  {taxInfo.units.length > 0 ? taxInfo.units.map((u, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid #f3efe5" }}>
-                      <span style={{ fontSize: 11.5, color: PAL.ink }}>{u.name}</span>
-                      <span style={{ fontSize: 11.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{u.value}</span>
-                    </div>
-                  )) : <div style={{ fontSize: 11.5, color: PAL.muted }}>No taxing-unit fields in the county record.</div>}
-                  {taxInfo.connected && taxInfo.total != null ? (
-                    <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: PAL.ink }}>Total tax rate: {taxInfo.total} per $100</div>
-                  ) : (
-                    <div style={{ marginTop: 8, fontSize: 11, color: PAL.warn, lineHeight: 1.5 }}>▲ {taxInfo.note} A total tax rate isn't shown until a rate source is wired for this county.</div>
-                  )}
-                </>
-              )}
-            </Section>
-          )}
-          {/* selected parcel — translucence + setback standards */}
-          {leftPanel === "parcel" && selParcel && (
-            <Section title="Boundary">
-              <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 8, lineHeight: 1.6 }}>
-                Area: <b style={{ color: PAL.ink }}>{f0(polyArea(selParcel.points))} sf</b> · {f2(polyArea(selParcel.points) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
-              </div>
-              {(() => {
-                const ca = countyAcres(selParcel.attrs);
-                if (!ca || !ca.acres) return null;
-                const mine = polyArea(selParcel.points) / SQFT_PER_ACRE;
-                // A projected Shape area read as ft² but actually in m² lands ~10.76× too small; if
-                // multiplying it back by that factor matches our geometry, treat it as m² and use the
-                // corrected county acreage (so a correct parcel reads ✓, not a false ~900% off).
-                const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
-                const county = m2 ? ca.acres * 10.7639 : ca.acres;
-                const diff = Math.abs(mine - county) / county;
-                const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
-                return (
-                  <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "6px 9px" }}>
-                    <b>{mark} Geometry check</b> · county {f2(county)} ac vs {f2(mine)} ac ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
-                    {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
-                    {!m2 && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
-                  </div>
-                );
-              })()}
-              <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
-                <button style={chip} onClick={() => toggleParcelActive(selParcel.id)} title={selParcel.active === false ? "Excluded from yield / coverage / detention — click to include" : "Counted in yield / coverage / detention — click to exclude (stays visible, dimmed)"}>{selParcel.active === false ? "◯ Inactive" : "✓ Active"}</button>
-                <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
-              </div>
-              {/* B214 — setback editor mode. Only shown when a side is built from MORE than
-                  one segment (where "by side" actually saves clicks); otherwise every side is
-                  a single edge and the two modes are identical. */}
-              {settings.showSetback && selRuns && selRuns.some((r) => r.edges.length > 1) && (
-                <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 9, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span>Edit setbacks:</span>
-                  <button style={{ ...chip, ...(sbEditMode === "side" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
-                    onClick={() => setSbEditMode("side")} title="One value per whole side — a side digitized as many segments edits in a single click (Alt-click a side to override just one segment)">By side</button>
-                  <button style={{ ...chip, ...(sbEditMode === "segment" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
-                    onClick={() => setSbEditMode("segment")} title="Each segment on its own — for a notch or jog that needs its own setback">Per segment</button>
-                </div>
-              )}
-              <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
-                <input type="checkbox" checked={!!selParcel.fill} onChange={(e) => { pushHistory(); setSelParcel(e.target.checked ? { fill: "#5b6650" } : { fill: null }); }} /> Fill the parcel (off by default)
-              </label>
-              {selParcel.fill && (
-                <>
-                  <Field label="Translucence">
-                    <input type="range" min={0} max={0.6} step={0.02} value={selParcel.fillOpacity ?? 0.12}
-                      onChange={(e) => setSelParcel({ fillOpacity: +e.target.value })} />
-                  </Field>
-                  <Field label="Fill color">
-                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <input type="color" value={toHex6(selParcel.fill)} {...livePick((v) => setSelParcel({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
-                    </span>
-                  </Field>
-                </>
-              )}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
-                <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setbacks per edge</span>
-                <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
-              </div>
-              {(() => {
-                const sb = parcelSetbacks(selParcel), fe = frontEdge(selParcel);
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {sb.map((v, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{i === fe ? "Front" : `Edge ${i + 1}`}</span>
-                        <NumInput style={{ ...numInput, width: 54 }} value={Math.round(v)} min={0} onCommit={(n) => setEdgeSetback(selParcel, i, n)} />
-                      </div>
-                    ))}
-                    <button style={{ ...chip, marginTop: 4 }} onClick={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}>Reset to default ({settings.setback}′)</button>
-                  </div>
-                );
-              })()}
-              <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-                <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete parcel</button>
-              </div>
-            </Section>
-          )}
-
-          {/* metrics */}
-          {leftPanel === "yield" && (<>
-          <YieldPanel
-            siteSqft={siteSqft} bldg={bldg} cov={cov} far={far} stalls={stalls} ratio={ratio}
-            trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
-            bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
-            inactiveCount={parcels.filter((p) => p.active === false).length}
-            easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
-            drainage={drainage} parcelOverlaps={parcelOverlaps}
-          />
-          {(() => {
-            // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
-            // (LF, both sides), split by curb type so each rides its own unit price.
-            // Unit prices are user-supplied (anchor to your own bids) — never defaulted.
-            const prices = settings.prices || {};
-            const cost = costRollup(els, roadTravel, roadLengthOf, prices);
-            if (!cost.segments) return null;
-            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
-            const setPrice = (k, v) => setSettings((s) => ({ ...s, prices: { ...(s.prices || {}), [k]: v } }));
-            const priceField = (label, k, unit) => (
-              <Field label={label}>
-                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
-                  <NumInput style={{ ...numInput, width: 70 }} value={prices[k] ?? null} min={0} placeholder="—" onCommit={(n) => setPrice(k, n)} />
-                  <span style={{ fontSize: 11, color: PAL.muted }}>{unit}</span>
-                </span>
-              </Field>
-            );
-            return (
-              <Section title="Road cost (screening)" accent="#0e7490" collapsed>
-                {metricRow("Paving", `${f0(cost.pavingSy)} SY`, cost.pavingCost != null ? usd(cost.pavingCost) : "set $/SY")}
-                {cost.curbBarrierLf > 0 && metricRow("Curb · barrier", `${f0(cost.curbBarrierLf)} LF`, cost.curbBarrierCost != null ? usd(cost.curbBarrierCost) : "set $/LF")}
-                {cost.curbGutterLf > 0 && metricRow("Curb · curb & gutter", `${f0(cost.curbGutterLf)} LF`, cost.curbGutterCost != null ? usd(cost.curbGutterCost) : "set $/LF")}
-                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
-                {priceField("Paving", "pavingSy", "/SY")}
-                {cost.curbBarrierLf > 0 && priceField("Barrier curb", "curbBarrierLf", "/LF")}
-                {cost.curbGutterLf > 0 && priceField("Curb & gutter", "curbGutterLf", "/LF")}
-                {cost.total != null && metricRow("Subtotal", usd(cost.total), "priced lines")}
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
-                  Paving is face-of-curb to face-of-curb (curb excluded); curb-&amp;-gutter trims the gutter pan from paving. Screening — verify against bids.
-                </div>
-              </Section>
-            );
-          })()}
-          {(() => {
-            // B712 — earthwork cost lines: the floodplain-mitigation CUT + pond
-            // excavation, in CY, priced ONLY by the user (the road-cost pattern —
-            // never a hardcoded rate). An unchecked drainage screen renders an
-            // explicit not-checked state; an un-priceable mitigation volume renders
-            // UNKNOWN — NEVER a silent 0 CY in a priced takeoff.
-            const prices = settings.prices || {};
-            const pondCy = pondExcavationCf / 27;
-            const drainageChecked = !!drainCtxData;
-            const mitKnown = fmResult && fmResult.volumeCf != null;
-            const mitCy = mitKnown ? fmResult.cutCy : null;
-            const fmGeoFailed = drainageChecked && drainCtxData?.floodGeo?.state === "failed";
-            const mitRelevant = drainageChecked && ((fmResult && fmResult.intersectAcres > 0) || fmGeoFailed);
-            if (!(pondCy > 0) && !mitRelevant) return null;
-            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
-            const pEarthRaw = prices.earthworkCy;
-            const pEarth = pEarthRaw == null || pEarthRaw === "" ? null : Number.isFinite(+pEarthRaw) && +pEarthRaw >= 0 ? +pEarthRaw : null;
-            const setPrice = (k, v) => setSettings((sx) => ({ ...sx, prices: { ...(sx.prices || {}), [k]: v } }));
-            const pricedCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0);
-            return (
-              <Section title="Earthwork cost (screening)" accent="#0e7490" collapsed>
-                {pondCy > 0 && metricRow("Pond excavation", `${f0(pondCy)} CY`, pEarth != null ? usd(pondCy * pEarth) : "set $/CY")}
-                {mitRelevant && (mitKnown
-                  ? metricRow("Floodplain mitigation cut", `${f0(mitCy)} CY`, pEarth != null ? usd(mitCy * pEarth) : "set $/CY")
-                  : metricRow("Floodplain mitigation cut", "UNKNOWN", fmGeoFailed ? "flood source unavailable" : "enter elevations"))}
-                {!drainageChecked && (
-                  <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "4px 0 0", fontWeight: 700 }}>
-                    Floodplain mitigation not screened yet — run ⛆ Check drainage criteria; this takeoff is INCOMPLETE until then, not zero.
-                  </div>
-                )}
-                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
-                <Field label="Excavation / cut">
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
-                    <NumInput style={{ ...numInput, width: 70 }} value={prices.earthworkCy ?? null} min={0} placeholder="—" onCommit={(n) => setPrice("earthworkCy", n)} />
-                    <span style={{ fontSize: 11, color: PAL.muted }}>/CY</span>
-                  </span>
-                </Field>
-                {pEarth != null && pricedCy > 0 && metricRow("Subtotal", usd(pricedCy * pEarth), "priced lines")}
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
-                  Pond excavation is the full basin cut (top of bank → achievable floor). The mitigation cut usually serves as pad borrow — the same dirt raises the pad. Screening quantities; volumes stay separate ledgers.
-                </div>
-              </Section>
-            );
-          })()}
-          </>)}
-
-          {/* Standards (B653) — pure per-element-type STARTING VALUES. The what-you-see
-              toggles + grid/snap moved to the on-canvas View (eye) menu; each section
-              below is one element type, deep-linkable from that type's inspector via
-              standardsFocus (the remount key opens the focused section). */}
-          {leftPanel === "standards" && (<>
-          <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.55, margin: "2px 2px 10px" }}>
-            <b style={{ color: PAL.ink }}>Starting values for new elements</b> — editable per element after you place it.
-            Show/hide toggles and grid &amp; snap moved to the <b>View</b> (eye) menu on the canvas.
-          </div>
-
-          <div data-std-sec="parcels">
-          <Section key={`std-parcels:${standardsFocus === "parcels"}`} title="Parcels" collapsed={standardsFocus !== "parcels"}>
-            <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
-            {/* "Show setback line" lives in the Parcel panel (Boundary › Setbacks per edge › Show),
-                next to the object it acts on — see B164. Not duplicated here. */}
-          </Section>
-          </div>
-
-          {/* Structural column grid (B568): speed bay + flex-to-band typical bays + dock doors.
-              These are the plan-wide defaults; a single building can pin its own in its inspector. */}
-          <div data-std-sec="building">
-          <Section key={`std-building:${standardsFocus === "building"}`} title="Buildings — structural grid" collapsed={standardsFocus !== "building"}>
-            <Field label="Speed bay (ft)"><NumInput style={numInput} value={settings.speedBay} min={1} onCommit={(n) => setSettings((s) => ({ ...s, speedBay: n }))} /></Field>
-            <Field label="Typ. bay — length"><NumInput style={numInput} value={settings.bayLengthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayLengthTarget: n }))} /></Field>
-            <Field label="Typ. bay — depth"><NumInput style={numInput} value={settings.bayDepthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayDepthTarget: n }))} /></Field>
-            <Field label="Bay band (min / max)"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.bayMin} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMin: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.bayMax} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMax: n }))} /></span></Field>
-            <Field label="Dock door — W / o.c."><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.doorWidth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, doorWidth: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.doorOC} min={2} onCommit={(n) => setSettings((s) => ({ ...s, doorOC: n }))} /></span></Field>
-            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Interior bays are sized evenly within the band toward the typical size, so the columns are uniformly spaced; the speed bay is pinned. The band is the allowed bay range.</div>
-          </Section>
-          </div>
-
-          <div data-std-sec="parking">
-          <Section key={`std-parking:${standardsFocus === "parking"}`} title="Parking" collapsed={standardsFocus !== "parking"}>
-            <Field label="Stall W / D"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.stallW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.stallDepth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallDepth: n }))} /></span></Field>
-            <Field label="Drive aisle"><NumInput style={numInput} value={settings.aisle} min={1} onCommit={(n) => setSettings((s) => ({ ...s, aisle: n }))} /></Field>
-            <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
-          </Section>
-          </div>
-
-          <div data-std-sec="trailers">
-          <Section key={`std-trailers:${standardsFocus === "trailers"}`} title="Trailers" collapsed={standardsFocus !== "trailers"}>
-            <Field label="Trailer W / L"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.trailerW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.trailerL} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerL: n }))} /></span></Field>
-            <Field label="Trailer aisle"><NumInput style={numInput} value={settings.trailerAisle} min={0} onCommit={(n) => setSettings((s) => ({ ...s, trailerAisle: n }))} /></Field>
-          </Section>
-
-          </div>
-
-          {/* Default depths for the building-anchored dock-zone stack (B228), outward from
-              the dock face. Editable per plan — the building "+" reads these. */}
-          <div data-std-sec="dockzones">
-          <Section key={`std-dockzones:${standardsFocus === "dockzones"}`} title="Dock zones" collapsed={standardsFocus !== "dockzones"}>
-            <Field label="Truck court (ft)"><NumInput style={numInput} value={settings.truckCourtD ?? 135} min={1} onCommit={(n) => setSettings((s) => ({ ...s, truckCourtD: n }))} /></Field>
-            <Field label="Trailer parking (ft)"><NumInput style={numInput} value={settings.trailerParkD ?? 50} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerParkD: n }))} /></Field>
-            <Field label="Buffer (ft)"><NumInput style={numInput} value={settings.bufferD ?? 15} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bufferD: n }))} /></Field>
-            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Outward from the dock face: truck court → trailer parking → buffer. New zones use these depths; each is still editable per building.</div>
-          </Section>
-          </div>
-
-          <div data-std-sec="roads">
-          <Section key={`std-roads:${standardsFocus === "roads"}`} title="Roads" collapsed={standardsFocus !== "roads"}>
-            <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
-            <Field label="Road widths (ft)">
-              <input style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
-                onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
-            </Field>
-            {/* Road classes — civil defaults + min-radius warning thresholds (B599/NEW-4). */}
-            {(() => {
-              const setRCC = (key, patch) => setSettings((s) => {
-                const list = (Array.isArray(s.roadClasses) && s.roadClasses.length ? s.roadClasses : ROAD_CLASS_SEEDS).map((c) => ({ ...c }));
-                const i = list.findIndex((c) => c.key === key);
-                if (i >= 0) list[i] = { ...list[i], ...patch };
-                return { ...s, roadClasses: list };
-              });
-              return (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 4px" }}>Road classes — civil defaults</div>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 6 }}>Default curve radius for new vertices + a min-radius warning per class. Seeds are starting points — verify against current AASHTO / the adopted fire code; nothing here is authoritative.</div>
-                  {roadClassesOf(settings).map((c) => (
-                    <div key={c.key} style={{ marginBottom: 7 }}>
-                      <div style={{ fontSize: 11.5, fontWeight: 600, color: PAL.ink, marginBottom: 2 }}>{c.label}</div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Default R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.defaultRadius ?? 50)} min={1} onCommit={(n) => setRCC(c.key, { defaultRadius: n })} /></label>
-                        {c.designSpeed != null ? (
-                          <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Design mph <NumInput style={{ ...numInput, width: 48 }} value={Math.round(c.designSpeed)} min={0} onCommit={(n) => setRCC(c.key, { designSpeed: n })} /></label>
-                        ) : (
-                          <label style={{ fontSize: 10.5, color: PAL.muted, display: "flex", alignItems: "center", gap: 4 }}>Warn below R <NumInput style={{ ...numInput, width: 54 }} value={Math.round(c.minRadius ?? 0)} min={0} onCommit={(n) => setRCC(c.key, { minRadius: n })} /></label>
-                        )}
-                        <span style={{ fontSize: 10.5, color: PAL.muted }}>= {f0(classMinRadius(c))}′ min</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-          </Section>
-
-          </div>
-
-          {/* element default colors — edit without selecting anything */}
-          <div data-std-sec="colors">
-          <Section key={`std-colors:${standardsFocus === "colors"}`} title="Colors" collapsed={standardsFocus !== "colors"}>
-            {Object.keys(TYPE).map((k) => {
-              const st = typeStyle(k, settings);
-              return (
-                <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-                  <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{TYPE[k].label.split(" / ")[0]}</span>
-                  <input type="color" title="Fill" value={toHex6(st.fill)} {...livePick((v) => liveTypeStyle(k, { fill: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
-                  <input type="color" title="Line" value={toHex6(st.stroke)} {...livePick((v) => liveTypeStyle(k, { stroke: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
-                </div>
-              );
-            })}
-            <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: {} })); }}>Reset all to built-in</button>
-          </Section>
+          {leftPanel && (<>
+          <PanelChrome
+            title={panelTitle[leftPanel]} floating={false} canFloat={!narrow}
+            onDetach={() => detachPanel(leftPanel)}
+            onClose={() => setLeftPanel(null)}
+            onToggle={() => { if (!narrow) detachPanel(leftPanel); }}
+            data-testid={`panel-chrome-${leftPanel}`} />
+          <div data-wheelscroll="1" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px" }}>
+          {renderPanelBody(leftPanel)}
           </div>
           </>)}
-          </div>
-          )}
           </div>
           {/* drag handle to resize the menu (desktop only — on phones the panel is a fixed-width overlay) */}
           {!narrow && <div onPointerDown={startLeftResize} title="Drag to resize"
@@ -11802,6 +11874,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </>)}
         </div>
       </div>
+
+      {/* NEW-1 — panels detached over the map. Portal-to-body draggable cards (FloatingPanel);
+          each renders the SAME body as its docked form via renderPanelBody, so there's no
+          duplicated JSX. Gated to !narrow — below the breakpoint the app is docked-only. */}
+      {!narrow && Object.keys(floating).map((id) => (
+        <FloatingPanel key={id} title={panelTitle[id]} pos={floating[id]}
+          onMove={(p) => moveFloating(id, p)} onDock={() => dockPanel(id)} onClose={() => closeFloating(id)}
+          boundsRef={wrapRef} width={leftWidth} data-testid={`floating-panel-${id}`}>
+          {renderPanelBody(id)}
+        </FloatingPanel>
+      ))}
 
       {showShortcuts && (
         <div onClick={() => setShowShortcuts(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
@@ -12747,6 +12830,16 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
 /* ----------------------------- small UI ----------------------------- */
 function Section({ title, children, collapsed, accent }) {
   const [open, setOpen] = useState(!collapsed);
+  // NEW-1: a whole-panel wrapper passes no title (the panel name now lives in the PanelChrome
+  // bar, so an inner "Site Analysis"/"References"/"Parcels · N" header would duplicate it) —
+  // render a bare, always-open card.
+  if (title == null || title === false) {
+    return (
+      <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+        <div style={{ padding: 12 }}>{children}</div>
+      </div>
+    );
+  }
   return (
     <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
       <div className="sec-head" onClick={() => setOpen((o) => !o)}

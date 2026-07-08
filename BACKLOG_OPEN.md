@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _48 open · 31 awaiting live verification._
+> _48 open · 32 awaiting live verification._
 
 ## 🔲 Open
 
@@ -63,6 +63,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B717 | Poppable / floating left panels + always-visible icon rail for the Site Planner | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
 | B715 | Site acreage double-counts overlapping active parcels: DISSOLVE the rings so shared ground counts once (Martini 176.6 → ~88.6 ac) | [Site Planner / Yield · Analysis] | #site-planner #yield | ⏳ live — awaiting |
 | B716 | Clean up phantom drawn parcels on the Martini site (`smqsfzqc72pw`): soft-deleted 2 attr-less outlines + 1 degenerate dup sliver → ~88.6 ac | [Site Planner / data] | #site-planner #persistence | ⏳ live — awaiting |
 | B707 | Floodplain mitigation engine: rules matrix + elevation-based compensating-storage volume | [Site Planner / Stormwater] | #site-planner #gis #pond | ⏳ live — awaiting |
@@ -114,8 +115,8 @@
 - **#pond** — B707
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413
 - **#testing** — B269, B63
-- **#ui** — B115, B712, B706, B695, B693, B669, B668, B658, B673, B674
+- **#ui** — B115, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
 - **#yield** — B553, B715, B712, B651
