@@ -36,7 +36,7 @@ const STATUS = {
   pending: { dot: "#4B5263", bg: "#F3F5F8", border: "#E1E5EB", label: "Not connected", glyph: "○" },
 };
 
-export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isLayerOn, onToggleLayer, layerStatus = {}, runAnalysis = runSiteAnalysis }) {
+export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isLayerOn, onToggleLayer, layerStatus = {}, runAnalysis = runSiteAnalysis, onFindings = null }) {
   const [state, setState] = useState({ loading: false, findings: null, error: null, empty: !rings || !rings.length, at: null });
   const [open, setOpen] = useState({});
   const reqRef = useRef(0);
@@ -48,7 +48,13 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
     const tok = ++reqRef.current;
     setState((s) => ({ ...s, loading: true, error: null, empty: false }));
     runAnalysis(rings)
-      .then((r) => { if (tok === reqRef.current) setState({ loading: false, findings: r.findings, error: null, empty: !!r.empty, at: r.generatedAt }); })
+      .then((r) => {
+        if (tok !== reqRef.current) return;
+        setState({ loading: false, findings: r.findings, error: null, empty: !!r.empty, at: r.generatedAt });
+        // B710: lift the finished findings to the parent (the floodplain buildability
+        // card reads the WETLANDS status from here — same screen, no second fetch).
+        if (onFindings) { try { onFindings(r.findings); } catch (_) { /* a listener error must not break the screen */ } }
+      })
       .catch((e) => { if (tok === reqRef.current) setState({ loading: false, findings: null, error: String(e?.message || e), empty: false, at: null }); });
   };
 

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-07 @ `f26ac29` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-08 @ `6baa4ad` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_211 source files mapped._
+_216 source files mapped._
 
 ## infra
 
@@ -189,6 +189,8 @@ _211 source files mapped._
 
 - **`src/workspaces/site-planner/components/AuthPanel.jsx`** — Account modal: signed-out sign-in/sign-up/reset + set-new-password, signed-in Profile/Team/Settings tabs, focus-trapped
   - _exports_: `default (AuthPanel)`
+- **`src/workspaces/site-planner/components/FloodMitigationCard.jsx`** — B712 card under Site Analysis: the floodplain-mitigation ledger by zone class + buildability/LOMR-F/§404 flags, button-gated by the drainage check with honest UNKNOWN/outage states
+  - _exports_: `default (FloodMitigationCard)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
   - _exports_: `default (LayerPanel)`
 - **`src/workspaces/site-planner/components/ParcelDrawing.jsx`** — Immutable PDF/JPEG backdrop markup canvas: pen/line/box/text/measure tools with scale calibration, 0..1 pixel-relative coords
@@ -215,6 +217,8 @@ _211 source files mapped._
   - _exports_: `initialBootResolved`, `mayReconcileUrl`, `pickResumeTarget`
 - **`src/workspaces/site-planner/lib/boundaryLabels.js`** — Pure label-placement math for boundary overlays: shoelace ring centroid, one anchor per name, greedy collision-drop by on-screen area, zoom gate (Leaflet-free, node-tested)
   - _exports_: `featureAnchor`, `labelAnchors`, `labelsVisible`, `placeLabels`, `ringAreaCentroid`, `titleCaseName`
+- **`src/workspaces/site-planner/lib/buildability.js`** — B710 buildability pathway: editable per-jurisdiction required-FFE rules (0.2% WSE + 2 ft seeds, verified-flagged), fill-to-elevate pathway flags, LOMR-F + wetlands-§404 copy flags
+  - _exports_: `assessBuildability`, `DEFAULT_BUILDABILITY_RULES`, `loadBuildabilityRules`, `LOMR_NOTE`, `requiredFfe`, `saveBuildabilityRules`, `WETLANDS_404_NOTE`
 - **`src/workspaces/site-planner/lib/buildingGrid.js`** — Pure structural column-grid + dock-door layout: uniform in-band bays, pinned speed bays, doors avoiding column lines
   - _exports_: `computeBuildingGrid`, `divideSpan`, `GRID_DEFAULTS`, `placeDockDoors`, `resolveGridSettings`
 - **`src/workspaces/site-planner/lib/buildingProps.js`** — Pure tiered building-property rules: sf-driven clear-height + slab-thickness defaults with per-building manual overrides
@@ -265,6 +269,10 @@ _211 source files mapped._
   - _exports_: `fetchOverpass`, `mapillaryLayer`, `mapillaryToken`, `overpassLayer`, `setMapillaryToken`, `subscribeMapillaryToken`
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export
   - _exports_: `PRINT_WEIGHTS`, `printStrokeWidth`, `PT_PER_CENTI_INCH`, `sheetFitScale`
+- **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
+  - _exports_: `BFE_SENTINEL_MIN`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `floodGeoBbox`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wse1pctForRing`, `zonesFromFeatureCollection`
+- **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
+  - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed
   - _exports_: `d8Direction`, `flowArrows`
 - **`src/workspaces/site-planner/lib/geocode.js`** — Shared address geocoder (Esri World primary, Nominatim fallback) with honest hit/not-found/service-down return contract, used by map and planner
@@ -321,14 +329,16 @@ _211 source files mapped._
   - _exports_: `overlappingParcelPairs`, `PARCEL_OVERLAP_TOL`, `polyIntersectArea`, `triangulate`
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
   - _exports_: `nearestPointOnSeg`, `polyArea`, `segLineIntersect`, `splitPolygonByLine`, `splitPolygonByPath`
+- **`src/workspaces/site-planner/lib/pondCriteriaRules.js`** — B709 editable per-jurisdiction pond design criteria (max side slope, min freeboard, maintenance-berm width; all verified:false) + drawn-input conformance checks
+  - _exports_: `checkPondCriteria`, `DEFAULT_POND_CRITERIA`, `loadPondCriteria`, `savePondCriteria`
 - **`src/workspaces/site-planner/lib/pondGeom.js`** — Pond expansion label placement (deepest added-ground point) and stage contour rings with elevation/depth labels
-  - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `contourLabelPoint`, `detentionStorage`, `pointInRing`, `pondContours`
+  - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `bandedStorage`, `bermAsFillHeight`, `contourLabelPoint`, `detentionStorage`, `drawdownWarning`, `excavationVolume`, `pointInRing`, `pondContours`, `usablePondVolume`, `volumeBetween`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
-  - _exports_: `maxInwardOffset`, `offsetInward`, `ringsArea`
+  - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
   - _exports_: `presenceSummary`
 - **`src/workspaces/site-planner/lib/printSheet.js`** — Pure single-SVG print sheet composer: page geometry, buildings table, metrics band, title block, export filename builder
-  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `formatDateStamp`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`
+  - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/registerGisSw.js`** — Boot-time unregister of the retired browser GIS imagery service worker (superseded by server-side Drive cache), fail-safe

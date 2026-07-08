@@ -50,6 +50,36 @@ export function offsetInward(ring, dist) {
   }
 }
 
+/* OUTWARD offset of `ring` (world feet) by `dist` feet — B709's maintenance-berm
+ * ring (the mirror of offsetInward: same clipper engine, positive delta). A single
+ * outer ring grows to exactly one ring with round joins; the largest-area result is
+ * kept defensively. Returns [] on degenerate input, [ring-copy] for dist <= 0. */
+export function offsetOutward(ring, dist) {
+  if (!Array.isArray(ring) || ring.length < 3) return [];
+  if (!(dist > 0)) return [ring.map((p) => ({ x: p.x, y: p.y }))];
+  try {
+    let path = toPath(ring);
+    path = ClipperLib.Clipper.CleanPolygon(path, SCALE * 0.01);
+    if (path.length < 3) return [];
+    if (ClipperLib.Clipper.Area(path) < 0) path.reverse();
+    const co = new ClipperLib.ClipperOffset(MITER, ARC_TOL);
+    co.AddPath(path, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
+    const sol = new ClipperLib.Paths();
+    co.Execute(sol, dist * SCALE);
+    let best = null, bestA = -1;
+    for (const p of sol) {
+      if (!p || p.length < 3) continue;
+      const a = Math.abs(ClipperLib.Clipper.Area(p));
+      if (a > bestA) { bestA = a; best = p; }
+    }
+    if (!best) return [];
+    const r = fromPath(ClipperLib.Clipper.Area(best) < 0 ? best.slice().reverse() : best);
+    return r.length >= 3 ? [r] : [];
+  } catch {
+    return [];
+  }
+}
+
 // Total filled area (sf) across a set of rings (from offsetInward).
 export function ringsArea(rings) {
   let a = 0;

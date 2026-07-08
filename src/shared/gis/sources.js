@@ -55,7 +55,7 @@ export const GIS_SOURCES = {
     serviceUrl: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
     layerId: 28, // Flood Hazard Zones (S_Fld_Haz_Ar) — the canonical queryable SFHA polygons
     geometryType: "polygon",
-    fields: { zone: "FLD_ZONE", subtype: "ZONE_SUBTY", elev: "STATIC_BFE", vdatum: "V_DATUM" },
+    fields: { zone: "FLD_ZONE", subtype: "ZONE_SUBTY", elev: "STATIC_BFE", vdatum: "V_DATUM", depth: "DEPTH" },
     coverage: "national",
     tier: "production",
     lastVerified: "2026-06-21",

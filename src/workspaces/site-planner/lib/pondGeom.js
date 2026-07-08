@@ -216,3 +216,193 @@ export function contourLabelPoint(contourRing, anchor = "top") {
   const n = Math.min(10, L * 0.4);
   return { x: best.x + (dx / L) * n, y: best.y + (dy / L) * n };
 }
+
+/* ---------------------------------------------------------------------------------
+ * B708 — elevation-anchored banded storage. Anchoring a pond to a real NAVD88
+ * top-of-bank elevation (det.tobElev — the same field the stage contours label
+ * with) lets the basin's volume split at REAL water surfaces:
+ *
+ *   ── top of bank (tobElev) ─────────────────────────────── freeboard
+ *   ── design water surface (tobElev − freeboard) ────────┐
+ *      DETENTION-USABLE — above max(flood WSE, pool)      │ exclusive bands:
+ *   ── flood WSE ─────────────────────────────────────────┤ no acre-foot lands
+ *      MITIGATION-CANDIDATE — the flood already occupies  │ in two ledgers
+ *      it at design stage → NO detention credit           │
+ *   ── permanent pool surface (det.poolElev) ─────────────┤
+ *      POOL DEAD — wet-bottom storage below the outlet    │
+ *   ── achievable floor (tobElev − min(depth, maxDepth)) ─┘
+ *
+ * All pure; volumes are CUBIC FEET (display converts). Same average-end-area
+ * slab integration as detentionStorage so a full-band request equals its `vol`
+ * exactly. Small LRU memos (the metrics pass calls these for every pond each
+ * render) — sigs EXTEND the detentionStorage signature with the elevation params
+ * so two elevation states of one pond can never collide in the cache.
+ * ------------------------------------------------------------------------------- */
+
+const EPS_ELEV = 1e-9;
+
+// Shared slab integrator over a depth-below-top range (dLo < dHi), ~1-ft slabs —
+// the same loop detentionStorage runs, factored so bands can't drift from it.
+function integrateAreaBetween(areaAt, dLo, dHi) {
+  let vol = 0;
+  const step = 1;
+  for (let d = dLo; d < dHi - EPS_ELEV; d += step) {
+    const h = Math.min(step, dHi - d);
+    vol += ((areaAt(d) + areaAt(d + h)) / 2) * h;
+  }
+  return vol;
+}
+
+const detOf = (det = {}) => ({
+  depth: det.depth != null ? det.depth : 8,
+  freeboard: det.freeboard != null ? det.freeboard : 1,
+  slope: det.slope != null ? det.slope : 3,
+});
+
+/* Volume of the basin between two ELEVATIONS (ft NAVD88), clamped to what exists:
+ * nothing above the top of bank, nothing below the achievable floor (pinch-off
+ * respected via maxInwardOffset). Returns cubic feet; null when the pond isn't
+ * anchored (no tobElev) — never a silent 0 for a missing anchor. Pure. */
+export function volumeBetween(ring, det, elevLo, elevHi) {
+  const tob = det && det.tobElev;
+  if (tob == null || !isFinite(tob)) return null;
+  const { depth, slope } = detOf(det);
+  const maxDepth = slope > 0 ? maxInwardOffset(ring) / slope : 0;
+  const floorElev = tob - Math.min(depth, maxDepth);
+  const lo = Math.max(elevLo, floorElev), hi = Math.min(elevHi, tob);
+  if (!(hi > lo)) return 0;
+  const areaAt = (down) => (down <= 0 ? polyArea(ring) : ringsArea(offsetInward(ring, slope * down)));
+  return integrateAreaBetween(areaAt, tob - hi, tob - lo);
+}
+
+const _bandMemo = new Map();
+const BAND_MEMO_MAX = 32;
+
+/* Split an ANCHORED pond's storage into the exclusive bands above. `wseFt` is the
+ * governing flood water surface at the pond (B707's wse1pctForRing / manual BFE) —
+ * null when the pond is outside the floodplain or the WSE is unknown, in which case
+ * only the pool band splits (a wet-bottom pond outside the floodplain still earns
+ * no credit below its outlet). Returns null when unanchored — the caller falls back
+ * to the Regime-B estimate, NEVER silently to gross. Pure + memoized. */
+export function bandedStorage(ring, det, { wseFt = null } = {}) {
+  const tob = det && det.tobElev;
+  if (tob == null || !isFinite(tob)) return null;
+  const { depth, freeboard, slope } = detOf(det);
+  const poolElev = det.poolElev != null && isFinite(det.poolElev) ? det.poolElev : null;
+  const sig = `${depth}|${freeboard}|${slope}|${tob}|${poolElev}|${wseFt}|${ring.length}|` +
+    `${ring[0] ? `${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}` : ""}|${polyArea(ring).toFixed(1)}`;
+  if (_bandMemo.has(sig)) {
+    const hit = _bandMemo.get(sig);
+    _bandMemo.delete(sig); _bandMemo.set(sig, hit);
+    return hit;
+  }
+  const maxDepth = slope > 0 ? maxInwardOffset(ring) / slope : 0;
+  const floorElev = tob - Math.min(depth, maxDepth);
+  const waterSurf = tob - freeboard;
+  const grossCf = detentionStorage(ring, depth, freeboard, slope).vol;
+  const poolTop = poolElev != null ? Math.min(poolElev, waterSurf) : null;
+  const poolDeadCf = poolTop != null ? volumeBetween(ring, det, floorElev, poolTop) : 0;
+  // Mitigation-candidate: pool surface (or floor) up to the flood WSE — the flood
+  // already occupies it during the design storm (tailwater), so it stores nothing
+  // for detention; it IS candidate compensating-storage cut ("hydraulic connection
+  // + stage distribution: engineer confirms").
+  const candLo = Math.max(floorElev, poolTop != null ? poolTop : floorElev);
+  const candHi = wseFt != null ? Math.min(wseFt, waterSurf) : candLo;
+  const mitigationCandidateCf = candHi > candLo ? volumeBetween(ring, det, candLo, candHi) : 0;
+  const usableLo = Math.max(wseFt != null ? wseFt : floorElev, poolTop != null ? poolTop : floorElev, floorElev);
+  const usableCf = volumeBetween(ring, det, usableLo, waterSurf);
+  const val = {
+    usableCf,
+    mitigationCandidateCf,
+    poolDeadCf,
+    grossCf,
+    fullyInundated: wseFt != null && wseFt >= tob - EPS_ELEV,
+    anchored: true,
+    elevations: { tobElev: tob, waterSurfElev: waterSurf, floorElev, poolElev, wseFt },
+  };
+  _bandMemo.set(sig, val);
+  if (_bandMemo.size > BAND_MEMO_MAX) _bandMemo.delete(_bandMemo.keys().next().value);
+  return val;
+}
+
+/* THE per-pond usable/dead split — the ONE helper every consumer calls (the site
+ * metrics loop, the pond auto-size solver's volumeAt + depth fallback, and the
+ * per-pond required-vs-provided card), so the readout and the solver can never
+ * disagree (the invariant the providedUsableCf comment in SitePlanner holds).
+ *
+ * Precedence:
+ *   anchored  — det.tobElev is set AND we have something real to split on (a flood
+ *               WSE and/or a permanent-pool elevation) → the banded split.
+ *   estimate  — otherwise, when the caller passes the Regime-B site-level pool
+ *               estimate (deadStoragePoolDepthFt output) → the existing
+ *               depth-below-pool subtraction. An anchored pond whose ctx elevations
+ *               are missing lands HERE — it must never silently zero its dead band.
+ *   gross     — no flood/pool information at all → everything counts.
+ * Pure. */
+export function usablePondVolume(ring, det = {}, { wseFt = null, estimatePoolDepthFt = null } = {}) {
+  const { depth, freeboard, slope } = detOf(det);
+  const grossCf = detentionStorage(ring, depth, freeboard, slope).vol;
+  const anchored = det.tobElev != null && isFinite(det.tobElev);
+  if (anchored && (wseFt != null || (det.poolElev != null && isFinite(det.poolElev)))) {
+    const bands = bandedStorage(ring, det, { wseFt });
+    return { mode: "anchored", usableCf: bands.usableCf, deadCf: Math.max(0, grossCf - bands.usableCf), grossCf, bands };
+  }
+  if (estimatePoolDepthFt != null && estimatePoolDepthFt > 0) {
+    const dead = detentionStorage(ring, depth, Math.max(0, depth - estimatePoolDepthFt), slope).vol;
+    return { mode: "estimate", usableCf: Math.max(0, grossCf - dead), deadCf: Math.min(grossCf, dead), grossCf, bands: null };
+  }
+  return { mode: "gross", usableCf: grossCf, deadCf: 0, grossCf, bands: null };
+}
+
+const _excMemo = new Map();
+
+/* Excavation (cut) volume for the cost line (B712): the WHOLE basin from the drawn
+ * top-of-bank down to the achievable floor — deliberately NOT detentionStorage.vol,
+ * which integrates only below the freeboard (the water column). Assumes the drawn
+ * top-of-bank sits at existing grade; a bermed basin (tobElev above grade) is fill,
+ * flagged separately by bermAsFillHeight. Cubic feet; /27 for cy. Pure + memoized. */
+export function excavationVolume(ring, det = {}) {
+  const { depth, slope } = detOf(det);
+  const sig = `exc|${depth}|${slope}|${ring.length}|${ring[0] ? `${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}` : ""}|${polyArea(ring).toFixed(1)}`;
+  if (_excMemo.has(sig)) {
+    const hit = _excMemo.get(sig);
+    _excMemo.delete(sig); _excMemo.set(sig, hit);
+    return hit;
+  }
+  const maxDepth = slope > 0 ? maxInwardOffset(ring) / slope : 0;
+  const floor = Math.min(depth, maxDepth);
+  const areaAt = (down) => (down <= 0 ? polyArea(ring) : ringsArea(offsetInward(ring, slope * down)));
+  const val = floor > 0 ? integrateAreaBetween(areaAt, 0, floor) : 0;
+  _excMemo.set(sig, val);
+  if (_excMemo.size > BAND_MEMO_MAX) _excMemo.delete(_excMemo.keys().next().value);
+  return val;
+}
+
+/* Gravity-drawdown screen (B708; the pond-side consumer of the B641 outfall
+ * umbrella — HCFCD flowline data plugs into receivingFlowlineElev later): a pond
+ * bottom BELOW the receiving channel's flowline can't drain by gravity. Returns
+ * null (no concern / not enough info) or the warning payload. Pure. */
+export function drawdownWarning(det = {}) {
+  const tob = det.tobElev, fl = det.receivingFlowlineElev;
+  if (tob == null || fl == null || !isFinite(tob) || !isFinite(fl)) return null;
+  const { depth } = detOf(det);
+  const bottomElev = tob - depth;
+  if (bottomElev >= fl - 0.05) return null;
+  return {
+    bottomElev,
+    flowlineElev: fl,
+    belowByFt: fl - bottomElev,
+    // The depth at which the bottom would sit AT the flowline — the gravity cap.
+    suggestedMaxDepthFt: Math.max(0, tob - fl),
+  };
+}
+
+/* Berm-as-fill screen (B708): a top of bank ABOVE existing grade means the basin is
+ * bermed — the berm itself is fill (requires mitigation in the floodplain and can
+ * block conveyance). 0.25 ft tolerance shrugs off survey noise. Pure. */
+export function bermAsFillHeight(det = {}, existGradeFt = null) {
+  const tob = det.tobElev;
+  if (tob == null || existGradeFt == null || !isFinite(tob) || !isFinite(existGradeFt)) return null;
+  const h = tob - existGradeFt;
+  return h > 0.25 ? h : null;
+}

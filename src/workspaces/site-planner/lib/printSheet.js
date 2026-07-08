@@ -36,12 +36,38 @@ export const pageSize = (paper, orient) => PAGE[`${paper}:${orient}`] || PAGE["l
 // Lay the sheet out for the given paper/orientation and whether a buildings table
 // is present. Returns boxes (in centi-inch units) for every region so the caller
 // can position the nested plan SVG and so composition is deterministic + testable.
-export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0 } = {}) {
+/* How many rows the metrics band needs for these pairs at this width — the SAME
+ * width/flow math buildMetricsSvg uses (fs 12.5 × 0.54 char estimate + 26 gap), so
+ * the band the layout reserves always fits what the renderer draws. Pure; exported
+ * for the layout + tests. `pairs` may be [label, value] tuples or plain counts fall
+ * back to a coarse ~150 c-in average. */
+export function metricsRowsFor(pairsOrCount, bandW) {
+  const padX = 4, fs = 12.5, colGap = 26;
+  const maxX = bandW - 2 * padX;
+  if (!Array.isArray(pairsOrCount)) {
+    const perRow = Math.max(1, Math.floor(maxX / 150));
+    return Math.max(2, Math.ceil((pairsOrCount || 0) / perRow));
+  }
+  let cx = 0, rows = pairsOrCount.length ? 1 : 0;
+  for (const [k, v] of pairsOrCount) {
+    const wEst = (String(k).length + 2 + String(v).length) * fs * 0.54;
+    if (cx + wEst > maxX && cx > 0) { cx = 0; rows++; }
+    cx += wEst + colGap;
+  }
+  return Math.max(2, rows);
+}
+
+export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null } = {}) {
   const page = pageSize(paper, orient);
   const M = 28; // ≈0.28 in border inset
   const inner = { x: M, y: M, w: page.w - 2 * M, h: page.h - 2 * M };
   const titleH = 56;
-  const metricsH = 64;
+  // The metrics band grows with its ACTUAL pairs (B712 added detention/mitigation
+  // pairs — some very wide) instead of clipping a wrapped row into the note line.
+  // Sized from the same flow estimate buildMetricsSvg draws with; a bare count
+  // falls back to a coarse average. Two rows minimum = the historical 64 c-in.
+  const metricRows = metricsRowsFor(metricsPairs || metricsCount, inner.w);
+  const metricsH = 18 + metricRows * 17 + 12;
   const gap = 14;
   const contentTop = inner.y + titleH + gap;
   const contentBot = inner.y + inner.h - metricsH - gap;
