@@ -68,6 +68,14 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V245 — B715: site acreage DISSOLVES overlapping active parcels (counts shared ground once) ⏳ **SIGNED-IN (planyr.io), any teammate or the owner** (real-project-data class)
+- **Verified here (sandbox, 2026-07-08):** `test/polyClip.test.js` +9 tests — disjoint/adjacent → exact additive sum (no clipper jitter), identical/partial/contained → union, the Martini shape (two 100×100 outlines over four 50×50 tiles) dissolves to 10,000 not the additive 30,000, inactive excluded, husk/degenerate rings skipped, precomputed-overlapPairs contract. Full suite 3,107 green · lint 0 · build green · MAP regenerated. Fix = `dissolvedParcelSqft` (clipper-lib `ctUnion`) wired into `siteSqft` (SitePlanner:5608), the Site-Analysis header (:11229), and `MapFinder.siteAcres` (:201); the fast path keeps non-overlapping sites byte-identical.
+- **Pending signed-in step (planyr.io):** open a project whose active parcels genuinely overlap and confirm the header/site acreage counts the shared ground ONCE (Yield panel, Site Analysis, and the map-list tooltip all agree), the B652 "active parcels overlap" banner still names the offenders, AND a normal non-overlapping site's acreage is unchanged from before. (Martini itself now reads ~88.6 from its 12 real parcels after the B716 cleanup — see V246.)
+
+### V246 — B716: the Martini phantom-parcel cleanup renders clean signed-in (~88.6 ac, no outline reappears) ⏳ **SIGNED-IN (planyr.io), the owner's account** (real-project-data class)
+- **Done + verified at the data layer (prod query, 2026-07-08):** the three phantom `site_elements` (`e1454579`, `e1454582`, `e1454578`) are tombstoned (`deleted_at` + `rev` bump) and pruned from the `sites.data.parcels` mirror; active parcels 15 → 12, additive acreage over the survivors = 88.58 ac, the 12 HCAD keepers intact. Root cause + operation in B716.
+- **Pending signed-in step (planyr.io, owner):** load the Martini project (site `smqsfzqc72pw`) and confirm the site acreage reads ~88.6 ac, the two hand-drawn boundary outlines are gone from the canvas + Parcel panel, and neither reappears after a reload / cross-tab sync (the tombstone holds).
+
 ### V244 — B714: sharing survives the owner's autosaves — the two-account share round-trip works end to end ⏳ **TWO SIGNED-IN ACCOUNTS (both exist: the owner + michael.butler@hillwood.com, already admins on team "HIP Houston"; Goose Creek group smqfy48tlk9j re-linked to the team by the data heal)**
 - **Verified here (sandbox, 2026-07-08):** `test/teamShareGuard.test.js` 8/8 (sites/doc_reviews update rows carry NO team_id key; inserts inherit; slim jsonb strips teamId/ownerId; headerSig share-neutral) · full suite green · build green. Root cause + fix in B714.
 - **Pending signed-in steps (planyr.io, owner + hillwood account — reload EVERY open Planyr tab first so no pre-fix tab is still running):**

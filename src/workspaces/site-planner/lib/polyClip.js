@@ -9,6 +9,7 @@
 // for convex AND concave lots, not just rectangles.
 
 import { polyArea } from "./polygonSplit.js";
+import ClipperLib from "clipper-lib";
 
 const EPS = 1e-9;
 
@@ -129,4 +130,51 @@ export function overlappingParcelPairs(parcels, tol = PARCEL_OVERLAP_TOL) {
     }
   }
   return out;
+}
+
+// Clipper works on an integer grid → scale feet to centi-feet (~1/8" precision), matching pondOffset.js.
+const UNION_SCALE = 100;
+const isValidRing = (r) =>
+  Array.isArray(r) && r.length >= 3 && r.every((pt) => pt && Number.isFinite(pt.x) && Number.isFinite(pt.y));
+
+// True DISSOLVED (union) area in feet² of a site's ACTIVE parcels — overlapping ground counted
+// ONCE (B715). The old `parcels.reduce((s,p) => s + polyArea(p.points))` was purely additive, so
+// any overlap double-counted the shared ground: a hand-drawn boundary sitting over the real
+// parcels (the Martini repro: 176.6 ac vs ~88.6 geometric), a superseded parent left active, a
+// duplicated county import. This is the corrective companion to the B652 overlap WARNING (which
+// only flags the condition, by design).
+//
+// FAST PATH — the common, non-overlapping site returns the EXACT additive sum (byte-identical to
+// the old number, no clipper rounding jitter): 0/1 valid ring, or no overlapping pair (adjacent
+// lots share only an edge = zero-area intersection, below PARCEL_OVERLAP_TOL). Clipper (ctUnion,
+// the same engine pondOffset.js uses) runs ONLY when parcels genuinely overlap. Callers on the
+// hot render path may pass a precomputed `overlapPairs` (from overlappingParcelPairs) to avoid
+// re-running the O(n²) overlap scan twice per render.
+export function dissolvedParcelSqft(parcels, overlapPairs) {
+  const rings = (Array.isArray(parcels) ? parcels : [])
+    .filter((p) => p && p.active !== false && isValidRing(p.points))
+    .map((p) => p.points);
+  if (rings.length === 0) return 0;
+  const sum = rings.reduce((s, r) => s + polyArea(r), 0);
+  if (rings.length === 1) return sum;
+  const pairs = overlapPairs !== undefined ? overlapPairs : overlappingParcelPairs(parcels);
+  if (!pairs || !pairs.length) return sum; // no genuine overlap → the sum already counts each once
+  try {
+    const clip = new ClipperLib.Clipper();
+    for (const r of rings) {
+      clip.AddPath(
+        r.map((pt) => ({ X: Math.round(pt.x * UNION_SCALE), Y: Math.round(pt.y * UNION_SCALE) })),
+        ClipperLib.PolyType.ptSubject, true);
+    }
+    const sol = new ClipperLib.Paths();
+    clip.Execute(ClipperLib.ClipType.ctUnion, sol, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+    // Sum SIGNED areas so any holes (opposite winding) net out; the union can never exceed the
+    // additive sum, so clamp — and never silently report 0 for rings that clearly have area.
+    let net = 0;
+    for (const p of sol) net += ClipperLib.Clipper.Area(p);
+    const area = Math.abs(net) / (UNION_SCALE * UNION_SCALE);
+    return area > 0 ? Math.min(area, sum) : sum;
+  } catch {
+    return sum; // degenerate/self-intersecting geometry → the honest additive sum, never a crash or false 0
+  }
 }

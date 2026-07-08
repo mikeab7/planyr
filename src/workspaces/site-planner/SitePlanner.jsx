@@ -98,7 +98,7 @@ import {
   computeRateBasedDetention, computePumpedCredit, DESIGN_STORM_PERIODS,
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
-import { overlappingParcelPairs } from "./lib/polyClip.js";
+import { overlappingParcelPairs, dissolvedParcelSqft } from "./lib/polyClip.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
@@ -5605,7 +5605,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (e.g. the 50′ × 12′ single-row trailer parking carries its own cfg).
   const cfgOf = (el) => (el.cfg ? { ...settings, ...el.cfg } : settings);
   // Only ACTIVE parcels drive the yield/area math (default active; inactive = excluded but visible) (B100).
-  const siteSqft = parcels.reduce((s, p) => s + (p.active !== false ? polyArea(p.points) : 0), 0);
+  // B715: DISSOLVE overlapping active parcels so shared ground counts ONCE (a hand-drawn boundary over
+  // the real parcels used to double-count → 176.6 vs ~88.6 ac). Overlap pairs are computed here ONCE and
+  // reused by the B652 warning below (they were the same O(n²) scan run twice). Non-overlapping sites get
+  // the exact additive sum, unchanged.
+  const parcelOverlapPairs = overlappingParcelPairs(parcels);
+  const siteSqft = dissolvedParcelSqft(parcels, parcelOverlapPairs);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
   let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // B630: provided detention across ALL ponds (cubic feet; pondGeom's Map memo keeps this cheap per render)
@@ -5656,7 +5661,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B652 — overlap safety net: any two ACTIVE parcels whose geometry overlaps by more than a
   // small tolerance are double-counting acreage. Surface a non-blocking Yield banner naming them.
   const parcelOverlaps = (() => {
-    const pairs = overlappingParcelPairs(parcels);
+    const pairs = parcelOverlapPairs; // computed once above (drives both the dissolved area + this warning)
     if (!pairs.length) return null;
     const nameOf = (pid) => (parcelInfo.get(pid) && parcelInfo.get(pid).name) || "a parcel";
     const names = [...new Set(pairs.flatMap((pr) => [nameOf(pr.aId), nameOf(pr.bId)]))];
@@ -11226,7 +11231,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ) : (() => {
                 const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
                 const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
-                const acres = act.reduce((s, p) => s + polyArea(p.points), 0) / SQFT_PER_ACRE;
+                const acres = dissolvedParcelSqft(act) / SQFT_PER_ACRE; // B715: dissolve overlaps (count shared ground once)
                 return (
                   <>
                     <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
@@ -12949,12 +12954,13 @@ function YieldPanel({
 
       {openPanel && (
         <div style={{ padding: "0 12px 13px" }}>
-          {/* B652 — non-blocking overlap warning: two or more ACTIVE parcels cover the same ground,
-              so this acreage is being double-counted. Names the offending parcels; never blocks. */}
+          {/* B652 warning + B715 fix: two or more ACTIVE parcels cover the same ground. Site area now
+              DISSOLVES the overlap (counts it once), so the acreage is correct — but an overlap usually
+              means a duplicate/stray outline worth reviewing. Non-blocking; names the offending parcels. */}
           {parcelOverlaps && (
             <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "rgba(234,179,8,0.13)", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
-              <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap — acreage may be double-counted</div>
-              <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac). Make one inactive in the Parcel panel so the site area isn't inflated.</div>
+              <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap</div>
+              <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac of overlap). Site area counts the shared ground once — but if one is a duplicate or stray outline, make it inactive in the Parcel panel.</div>
             </div>
           )}
           {/* KPI cards */}
