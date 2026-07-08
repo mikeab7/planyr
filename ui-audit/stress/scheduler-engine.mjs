@@ -214,6 +214,39 @@ export const computeRolledHealth = (all) => {
   return map;
 };
 
+// Live "today" — in index.html this is module-scope `let NOW = fdLocal(new Date())`, refreshed on
+// focus / midnight rollover. Settable here so tests can pin a deterministic today.
+export let NOW = fdLocal(new Date());
+export const setNOW = v => { NOW = v; };
+
+// Conditional-format display health (faithful copy from index.html ~L1976). Applies the cfRules
+// (completeGreen / overdueRed / dueSoonYellow) on top of the raw stored health — this is the value
+// the grid's Status column shows.
+export const computeDisplayHealth = (task, settings) => {
+  const cf = settings?.cfRules || {};
+  if (!task) return task?.health;
+  // Rule order matters: more specific overrides general
+  if (cf.completeGreen && (task.percentComplete||0) >= 100) return "green";
+  if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
+  if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
+    // Within 7 calendar days
+    const today = new Date(NOW + "T12:00:00");
+    const end = new Date(task.end + "T12:00:00");
+    const days = Math.ceil((end - today) / 86400000);
+    if (days <= 7) return "yellow";
+  }
+  return task.health;
+};
+
+// Focus-visibility classification for a LEAF task (faithful copy of the flatTasks rolledStatus leaf
+// branch, index.html ~L6213). B717: it classifies by computeDisplayHealth (the grid's status), NOT
+// raw health, so an overdue-but-Not-Started task that renders red is treated "active" and never
+// hidden by Focus.
+export const leafFocusStatus = h => h === "green" ? "done" : h === "gray" ? "upcoming" : h === "paused" ? "paused" : "active";
+export const rolledStatusLeaf = (task, settings) => leafFocusStatus(computeDisplayHealth(task, settings));
+// A leaf/sub-group is hideable by Focus unless it's "active" (index.html ~L6228).
+export const hideStatusOf = status => status === "active" ? null : status;
+
 export const cascadeDates = tasks => {
   const map = {};
   tasks.forEach(t => { map[t.id] = {...t, predecessors: normPreds(t.predecessors)}; });
