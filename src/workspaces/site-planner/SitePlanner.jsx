@@ -86,7 +86,7 @@ import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger,
-  floodGeoBbox, pickWorstCase, NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
+  floodGeoBbox, pickWorstCase, effectivePadElev, NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
 } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, triggerClasses } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
@@ -5863,10 +5863,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!fmZones.length) return [];
     if (fmSettings.wholeSiteAsPad) return drainActive.map((p) => ({ id: "site:" + p.id, ring: p.points, padElevFt: null }));
     const list = [];
+    // B713 — dock-high industrial: each footprint prices at its EFFECTIVE pad
+    // elevation (explicit override → slab FF − dock drop for dock-stack courts /
+    // trailer strips → slab FF), so a truck court 4 ft below the slab never bills
+    // 4 ft of phantom fill.
+    const fmDockDrop = Number.isFinite(fmSettings.dockDropFt) ? fmSettings.dockDropFt : 4;
     for (const e of els) {
       if (!FM_FILL_TYPES.has(e.type)) continue;
       const r = ringOf(e);
-      if (r && r.length >= 3) list.push({ id: e.id, ring: r, padElevFt: Number.isFinite(e.padElevFt) ? e.padElevFt : null });
+      if (r && r.length >= 3) list.push({ id: e.id, ring: r, padElevFt: effectivePadElev(e, { padFfeFt: fmElev.padElevFt, dockDropFt: fmDockDrop }) });
     }
     return list;
   })();
@@ -10465,6 +10470,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 );
               })()}
+              {/* B713 — per-element pad elevation for the floodplain-mitigation screen.
+                  Blank = auto (dock-stack court/trailer strips price at slab FF − the
+                  dock drop; everything else at slab FF). Inline editor + Auto chip. */}
+              {FM_FILL_TYPES.has(selEl.type) && (() => {
+                const fmS = settings.floodMitigation || {};
+                const drop = Number.isFinite(fmS.dockDropFt) ? fmS.dockDropFt : 4;
+                const auto = effectivePadElev({ ...selEl, padElevFt: null }, { padFfeFt: Number.isFinite(fmS.padFfeFt) ? fmS.padFfeFt : null, dockDropFt: drop });
+                const isDock = !!(selEl.truckCourt || selEl.forCourt);
+                return (
+                  <div style={{ marginTop: 8 }}>
+                    <Field label="Pad elev. (ft NAVD88)">
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput style={{ ...numInput, width: 64 }} value={selEl.padElevFt ?? ""} placeholder={auto != null ? `auto ${f1(auto)}` : "auto"} onCommit={(n) => { pushHistory(); setSelEl({ padElevFt: Number.isFinite(n) ? n : null }); }} />
+                        {selEl.padElevFt != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to automatic (slab FF, dock zones minus the dock drop)" onClick={() => { pushHistory(); setSelEl({ padElevFt: null }); }}>Auto</button>}
+                      </span>
+                    </Field>
+                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
+                      {isDock
+                        ? `Dock zone: auto prices this surface at the slab FF − ${f1(drop)}′ dock drop (floodplain-mitigation screen only).`
+                        : "Feeds the floodplain-mitigation fill screen; blank = the plan's pad FFE (dock-zone courts auto-drop)."}
+                    </div>
+                  </div>
+                );
+              })()}
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place — prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                 <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete element</button>
@@ -13185,6 +13214,7 @@ function YieldPanel({
                   {fmRow("Existing grade", "existGradeFt", "3DEP auto", "Blank = the 3DEP bare-earth median sampled by this drainage check")}
                   {fmRow("BFE (1% WSE)", "bfeFt", "often needed", "Many AE reaches publish NO static BFE — manual entry is the COMMON path (FIRM panel / effective model)")}
                   {fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIS / HCFCD", "Not an NFHL attribute — from the FEMA FIS profile or HCFCD model data; hook for MAAPnext grids later")}
+                  {fmRow("Dock-high drop: court below slab FF (ft)", "dockDropFt", "4", "Industrial dock-high: building-attached truck courts + their trailer strips auto-price at slab FF minus this drop (typ. 48\u2033 docks); blank = 4")}
                   {fmRow("Expert: average depth of fill below the flood elevation (ft)", "avgFillDepthFt", "bypass", "Expert bypass: volume = intersect area × this constant depth")}
                   <label style={{ display: "flex", gap: 7, alignItems: "center", fontSize: 11, color: Y.text, cursor: "pointer", padding: "3px 0" }}>
                     <input type="checkbox" checked={!!fm.settings.wholeSiteAsPad} onChange={(e) => fm.onChange({ wholeSiteAsPad: e.target.checked || null })} />

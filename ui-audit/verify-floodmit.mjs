@@ -79,6 +79,18 @@ async function run() {
     await page.screenshot({ path: OUT + "02-pond-inspector.png" });
   }
 
+  // ---- 1b. B713: a fill element's inspector carries the pad-elevation field ----
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  // the building sits above canvas center in the seeded layout
+  let bldgSelected = false;
+  for (const dy of [-320, -300, -340]) {
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2 + dy * 0.5);
+    await page.waitForTimeout(350);
+    if (await page.getByText("Pad elev.", { exact: false }).count()) { bldgSelected = true; break; }
+  }
+  check("fill element shows the Pad elev. field (B713)", bldgSelected);
+
   // ---- 2. Yield: drainage check + earthwork cost honest states ----
   // deselect, then open the Yield left-rail panel
   await page.keyboard.press("Escape");

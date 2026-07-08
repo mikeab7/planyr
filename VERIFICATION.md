@@ -85,6 +85,7 @@ was never clicked" quietly ships broken.
 7. The maintenance-berm land-take line and berm-overlap warning behave on a pond next to a building.
 8. Print/PDF export: the detention/mitigation pairs appear; the metrics band doesn't clip its note (PDF-PARITY).
 9. Block the NFHL host (devtools offline for that origin) → the geometry-outage warning renders; nothing reads clear.
+10. (B713) On a dock-high layout with pad FFE entered: the truck court's inspector shows "auto FF−4"; the mitigation volume visibly drops vs pricing the court at slab FF.
 
 ### V240 — B704: 1-ft contours over a known ditch/pond AGREE with the cross-section tool ⏳ **LIVE APP (planyr.io), any teammate** (GIS endpoint + zoom/data-density classes)
 - **Verified here (sandbox, 2026-07-07):** ramp CALIBRATION test pins the whole geometric chain (d3 cell-center convention ↔ mercator transform ↔ bilinear sampler); cone/void/fixture unit suites green; headless on the built app with REAL Katy bytes: one LERC fetch, worker decode, 30 halo labels, real canvas ink, honest zoom-gate message below z16.
