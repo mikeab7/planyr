@@ -4,12 +4,19 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _48 open · 33 awaiting live verification._
+> _55 open · 33 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B720 | Canonical thoroughfare-segment data model + jurisdiction registry | [Site Planner / GIS · data model] | #thoroughfare #gis #persistence #coordinates | live |
+| B721 | Ingestion adapter #1: City of Houston Major Thoroughfare & Freeway Plan (MTFP) | [Site Planner / GIS · ingestion] | #thoroughfare #gis | live |
+| B722 | Config-driven ingestion adapters: surrounding jurisdictions (Harris · Fort Bend · Pearland · Montgomery · H-GAC) | [Site Planner / GIS · ingestion] | #thoroughfare #gis | live |
+| B723 | Map layer: "Thoroughfare Plan" overlay | [Site Planner / GIS · map layer] | #thoroughfare #gis #site-planner #ui | live |
+| B724 | Parcel analysis: frontage detection + ROW-dedication estimate | [Site Planner / analysis] | #thoroughfare #site-planner #yield #gis | live |
+| B725 | Auto-generated entitlement issues from thoroughfare-plan exposure | [Site Planner / entitlements] | #thoroughfare #entitlements #site-planner | live |
+| B726 | Thoroughfare-plan versioning + data-freshness tracking | [Site Planner / GIS · data ops] | #thoroughfare #entitlements #gis #infra | live |
 | B691 | Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy | [Site Planner / GIS] | #site-planner #gis | live |
 | B663 | ONE-TIME migration: every existing project gets the standard tree + existing files move into their tree folders in Drive | [Library / storage] | #library #drive | — |
 | B662 | Unified Library: the folder tree IS the view, and files live inside it (+ the live-502 chunked Drive sync fix) | [Library / Doc Review / storage] | #library #drive #persistence | — |
@@ -101,24 +108,26 @@
 
 - **#auth** — B483, B676, B714
 - **#compare** — B471
-- **#coordinates** — B684
+- **#coordinates** — B720, B684
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B687, B685, B667, B659
 - **#drive** — B663, B662, B629, B409, B699, B701, B687
+- **#entitlements** — B725, B726
 - **#export** — B712, B684
 - **#files** — B180, B181, B182, B183, B699, B687, B685, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
-- **#gis** — B691, B629, B370, B309, B178, B171, B147, B13, B95, B707, B712, B703, B704, B705, B706, B695, B694, B693
-- **#infra** — B408, B406, B179, B63, B675, B669
+- **#gis** — B720, B721, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B707, B712, B703, B704, B705, B706, B695, B694, B693
+- **#infra** — B726, B408, B406, B179, B63, B675, B669
 - **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479, B704, B694, B669
-- **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B716, B701, B692, B682, B676, B667, B673, B674, B714
+- **#persistence** — B720, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B716, B701, B692, B682, B676, B667, B673, B674, B714
 - **#pond** — B707
 - **#road** — B719
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413
 - **#testing** — B269, B63
-- **#ui** — B115, B719, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
-- **#yield** — B553, B715, B712, B651
+- **#thoroughfare** — B720, B721, B722, B723, B724, B725, B726
+- **#ui** — B723, B115, B719, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
+- **#yield** — B724, B553, B715, B712, B651
