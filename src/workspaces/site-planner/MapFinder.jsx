@@ -25,6 +25,7 @@ import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, makeSnapshotLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { dissolvedParcelSqft } from "./lib/polyClip.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 import { shareProject, makeProjectPrivate } from "./lib/sharing.js";
@@ -195,10 +196,12 @@ function computeAssembly(selected, exportBase) {
   return { parcels, underlay, totalAc: totalSqft / 43560, origin: { lat: lat0, lon: lon0 } };
 }
 
-// Acreage of a stored site from its planner-feet parcels.
+// Acreage of a stored site from its planner-feet parcels. B715: dissolve the ACTIVE parcels so
+// overlapping ground counts once (matches the planner's siteSqft), instead of an additive sum over
+// EVERY parcel — the old version double-counted overlaps AND summed inactive/superseded parcels too.
 function siteAcres(site) {
   if (!site.parcels?.length) return 0;
-  return site.parcels.reduce((s, p) => s + shoelace(p.points), 0) / 43560;
+  return dissolvedParcelSqft(site.parcels) / 43560;
 }
 
 // Total acreage across every outer ring of a lon/lat parcel feature (multipart-safe).

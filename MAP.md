@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-08 @ `9cfa24c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-08 @ `a532b6a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -325,8 +325,8 @@ _216 source files mapped._
   - _exports_: `edgeAbutsPaving`, `explodeParkingBands`, `parkDepthForRows`, `parkRowsForDepth`, `PAVED_NEIGHBOR_TYPES`, `splitParkingPieces`
 - **`src/workspaces/site-planner/lib/planStyle.js`** — Shared element style tokens (fills/strokes/weight/pattern per surface type), style resolver, paint z-order, element feet ring outline
   - _exports_: `byZ`, `elRingFeet`, `elStyle`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
-- **`src/workspaces/site-planner/lib/polyClip.js`** — Pure polygon intersection-AREA via ear-clip triangulation + Sutherland–Hodgman; pairwise active-parcel overlap detection for the B652 double-count warning
-  - _exports_: `overlappingParcelPairs`, `PARCEL_OVERLAP_TOL`, `polyIntersectArea`, `triangulate`
+- **`src/workspaces/site-planner/lib/polyClip.js`** — Pure polygon intersection-AREA via ear-clip triangulation + Sutherland–Hodgman; pairwise active-parcel overlap detection for the B652 double-count warning; clipper-lib UNION/dissolve of overlapping active parcels for correct site acreage (B715)
+  - _exports_: `dissolvedParcelSqft`, `overlappingParcelPairs`, `PARCEL_OVERLAP_TOL`, `polyIntersectArea`, `triangulate`
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
   - _exports_: `nearestPointOnSeg`, `polyArea`, `segLineIntersect`, `splitPolygonByLine`, `splitPolygonByPath`
 - **`src/workspaces/site-planner/lib/pondCriteriaRules.js`** — B709 editable per-jurisdiction pond design criteria (max side slope, min freeboard, maintenance-berm width; all verified:false) + drawn-input conformance checks
