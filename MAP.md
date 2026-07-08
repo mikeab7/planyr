@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-08 @ `9d1992f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-08 @ `9cfa24c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -224,7 +224,7 @@ _216 source files mapped._
 - **`src/workspaces/site-planner/lib/buildingProps.js`** — Pure tiered building-property rules: sf-driven clear-height + slab-thickness defaults with per-building manual overrides
   - _exports_: `autoClearHeight`, `autoSlab`, `DEFAULT_BUILDING_RULES`, `effectiveBuildingProps`, `evalTier`, `fmtClearHeight`, `fmtSlab`, `normalizeRules`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
-  - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudList`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `slimForCloud`
+  - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudList`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
   - _exports_: `conceptLettersToNumber`, `nextConceptName`, `numberToConcept`, `parseConceptIndex`
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
@@ -436,7 +436,7 @@ _216 source files mapped._
 - **`src/workspaces/doc-review/lib/renderBudget.js`** — Pure canvas backing-store budget math: two-layer backdrop/detail density, visible-region tiling and device-pixel rect rounding under a 24MP cap
   - _exports_: `BACKDROP_PX_BUDGET`, `backdropDensity`, `backingPixels`, `backingScale`, `CANVAS_PX_BUDGET`, `DETAIL_DENSITY_CAP`, `DETAIL_DENSITY_TARGET`, `deviceRect`, `tileCovers`, `visibleRegion`
 - **`src/workspaces/doc-review/lib/reviewStore.js`** — Document Review cloud persistence I/O: Supabase doc_reviews + file-facts index, Drive-first byte storage, filing/re-filing, localStorage flush mirror
-  - _exports_: `BUCKET`, `clearDraft`, `clearReviewVersions`, `cloudConfigured`, `cloudReady`, `composeTitle`, `currentUid`, `deleteFromDrive`, `deleteReview`, `DISCIPLINES`, `downloadFromDrive`, `downloadSource`, `fileNewReview`, `fmtDocDate`, `getShareLink`, `guessContentType`, `isStoredSource`, `keepaliveFlushReview`, `listFileFacts`, `listProjects`, `listReviews`, `loadReview`, `markReviewPlaced`, `MAX_BYTES`, `newReviewId`, `newSourceId`, `pushFileToDrive`, `readDraft`, `reconcile`, `refileReview`, `REVIEW_SCHEMA`, `setProjectStatus`, `STATUS_META`, `STATUSES`, `statusOf`, `storeSource`, `stripFileExt`, `uploadLargeToDrive`, `uploadSource`, `upsertFileFacts`, `upsertReview`, `writeDraft`
+  - _exports_: `BUCKET`, `clearDraft`, `clearReviewVersions`, `cloudConfigured`, `cloudReady`, `composeTitle`, `currentUid`, `deleteFromDrive`, `deleteReview`, `DISCIPLINES`, `downloadFromDrive`, `downloadSource`, `fileNewReview`, `fmtDocDate`, `getShareLink`, `guessContentType`, `isStoredSource`, `keepaliveFlushReview`, `listFileFacts`, `listProjects`, `listReviews`, `loadReview`, `markReviewPlaced`, `MAX_BYTES`, `newReviewId`, `newSourceId`, `pushFileToDrive`, `readDraft`, `reconcile`, `refileReview`, `REVIEW_SCHEMA`, `reviewRowFor`, `setProjectStatus`, `STATUS_META`, `STATUSES`, `statusOf`, `storeSource`, `stripFileExt`, `uploadLargeToDrive`, `uploadSource`, `upsertFileFacts`, `upsertReview`, `writeDraft`
 - **`src/workspaces/doc-review/lib/sessionBytes.js`** — In-memory session-lifetime FIFO cache of dropped source Files by srcId so a backdrop reopens while its upload is still keyless
   - _exports_: `_clearSessionBytes`, `cacheSourceBytes`, `getSourceBytes`, `hasSourceBytes`, `SESSION_BYTES_CAP`
 - **`src/workspaces/doc-review/lib/sheetRead.js`** — Browser bridge from pdf.js to pure sheet engines: reads/groups pages, derives per-group stated/scale-bar calibration, flags not-to-scale sheets, with dormant OCR seam

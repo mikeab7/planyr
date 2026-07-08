@@ -120,13 +120,13 @@ _Last updated: 2026-07-07._
       changes the conclusion. **One optional call for you:** the Grand Port depth bays run as tight as 45–48′,
       below the current 50–58′ flex band floor. Want me to drop the band floor to ~45′ so a building's *depth*
       can flex tighter to match? Default = leave it at 50–58′ (your stated range). Say the word and it's a one-liner.
-- [ ] **A second test account** *(now also blocking the live-editing checks — bumped 2026-07-07)* — to verify
-      Team Workspaces end-to-end (invite → accept → shared edit → member can't delete → make-private revokes),
-      **and now the new live co-editing notices too**: when two people change the same thing, each side gets a
-      note naming the other person — with two windows of ONE account those notes can only ever say "you
-      (another window)", so the whole named-notice checklist (V230) is stuck until a second account exists on a
-      team-shared site. Creating it is ~2 minutes: any email you control → sign up at planyr.io → invite it to
-      a team project. The Claude cohort runs everything after that.
+- [x] ~~**A second test account**~~ — **DONE (confirmed 2026-07-08): `michael.butler@hillwood.com` exists and
+      is an admin on team "HIP Houston" alongside your main account.** Your share attempt on Goose Creek
+      surfaced a real bug — any autosave from your open tab silently reverted the share (B714, fixed +
+      shipped 2026-07-08; the site was re-linked to the team for you). Nothing left on your plate here —
+      the two-account click-throughs (V244 share round-trip + V230 named conflict notices) are the Claude
+      cohort's job. **One habit that matters: after a Planyr update ships, reload your open Planyr tabs**
+      (an old tab runs the old code until reloaded).
 - [ ] **One real, heavy PDF** (a big construction set) — to profile the **PDF/map stutter (B484)** and pin exactly
       where it hangs. Without a profile from a real file, the fix would be a guess.
 - [ ] **A >50 MB file** (optional) — to confirm the "50 MB per-file cloud limit" banner text. The automated

@@ -134,29 +134,41 @@ export function upsertReview(record) {
   return serializeReviewWrite(record.id, () => upsertReviewCore(record));
 }
 
-async function upsertReviewCore(record) {
-  if (!supabase) return { ok: false, error: "Cloud not configured." };
-  const uid = await currentUid();
-  if (!uid) return { ok: false, error: "Sign in to save." };
-  if (!record || !record.id) return { ok: false, error: "Review has no id." };
-  const data = { ...record, schemaVersion: REVIEW_SCHEMA };
-  // Core columns (exist since the first persistence migration) + the data jsonb, which
-  // always carries every field (incl. the library ones). The library index columns are
-  // added on top; if that migration hasn't run yet we fall back to the core row so
-  // saving never regresses — the new fields still round-trip through `data`.
-  // No user_id here: casUpsert stamps the creator only on INSERT, so a teammate editing a
-  // SHARED review never re-stamps the owner. team_id rides along (null = private; when set,
-  // RLS lets the project's team read/edit it).
-  const base = {
+// B714 — the core column payload a review save sends (pure; exported for tests). team_id rides
+// ONLY on a brand-new row (isNew): an ordinary update must never carry the sharing pointer, so a
+// stale in-memory record can't silently unshare a project (see cloudSync.siteRowFor for the full
+// story — same bug class, same rule).
+export function reviewRowFor(record, { isNew = false } = {}) {
+  const row = {
     id: record.id,
     title: record.title || null,
     kind: record.kind || null,
     project: record.project || null,
     discipline: record.discipline || null,
-    team_id: record.teamId || null,
     updated_at: new Date(record.updatedAt || Date.now()).toISOString(),
-    data,
+    data: { ...record, schemaVersion: REVIEW_SCHEMA },
   };
+  if (isNew) row.team_id = record.teamId || null;
+  return row;
+}
+
+async function upsertReviewCore(record) {
+  if (!supabase) return { ok: false, error: "Cloud not configured." };
+  const uid = await currentUid();
+  if (!uid) return { ok: false, error: "Sign in to save." };
+  if (!record || !record.id) return { ok: false, error: "Review has no id." };
+  // Core columns (exist since the first persistence migration) + the data jsonb, which
+  // always carries every field (incl. the library ones). The library index columns are
+  // added on top; if that migration hasn't run yet we fall back to the core row so
+  // saving never regresses — the new fields still round-trip through `data`.
+  // No user_id here: casUpsert stamps the creator only on INSERT, so a teammate editing a
+  // SHARED review never re-stamps the owner.
+  const expected = reviewVersions[record.id];
+  // B714 — team_id is INSERT-ONLY (mirrors cloudSync.siteRowFor): a content save from a tab whose
+  // in-memory record predates a share must never be able to revert the sharing column. Share and
+  // unshare go ONLY through lib/sharing.js's explicit column update; a brand-new row still stamps
+  // the record's teamId so a review created inside a shared project is born shared.
+  const base = reviewRowFor(record, { isNew: expected == null });
   const full = { ...base, project_id: record.projectId || null, item: record.item || null, revision: record.revision || null, doc_date: record.docDate || null };
   // Optimistic concurrency (B314), guarded by the version we last synced. THREE independent
   // graceful degrades layer here so saving never regresses against a partially-migrated DB:
@@ -165,7 +177,6 @@ async function upsertReviewCore(record) {
   // fall back to a plain upsert.
   const stripTeam = (row) => { const { team_id, ...rest } = row; return rest; };
   const libColMiss = (e) => !!e && /column|project_id|doc_date|revision|item|schema cache/i.test(e) && !/version/i.test(e) && !/team_id/i.test(e);
-  const expected = reviewVersions[record.id];
   // full → (lib cols missing) → base, for a given row-shaper (identity or team-stripped).
   const attempt = async (shape) => {
     let r = await casUpsert(supabase, "doc_reviews", { uid, id: record.id, row: shape(full), expected });
@@ -191,11 +202,11 @@ async function upsertReviewCore(record) {
     let error = await plainUpsert("id", false);
     if (isPkMismatch(error && error.message)) // pre-PK-change DB: target is (user_id,id)
       error = await plainUpsert("user_id,id", true);
-    if (!error) writeDraft(uid, data);
+    if (!error) writeDraft(uid, base.data);
     return { ok: !error, error: error ? error.message : null };
   }
   if (r.conflict) return { ok: false, conflict: true }; // another session advanced this review — caller prompts a reload
-  if (r.ok) { reviewVersions[record.id] = r.version; writeDraft(uid, data); return { ok: true }; }
+  if (r.ok) { reviewVersions[record.id] = r.version; writeDraft(uid, base.data); return { ok: true }; }
   return { ok: false, error: r.error || "save failed" };
 }
 
@@ -209,15 +220,9 @@ export function keepaliveFlushReview(record) {
   if (!supabase || !record || !record.id) return false;
   const { url, anon } = supabaseRest();
   const token = currentAccessToken();
-  const data = { ...record, schemaVersion: REVIEW_SCHEMA };
-  const row = {
-    id: record.id,
-    title: record.title || null, kind: record.kind || null,
-    project: record.project || null, discipline: record.discipline || null,
-    team_id: record.teamId || null,
-    updated_at: new Date(record.updatedAt || Date.now()).toISOString(),
-    data,
-  };
+  // Core-column row, NO team_id (B714) — the keepalive is always an update, and an update must
+  // never carry the sharing pointer (a stale in-memory teamId would silently unshare).
+  const row = reviewRowFor(record);
   return keepaliveCasPush({ url, anon, token, table: "doc_reviews", id: record.id, row, expected: reviewVersions[record.id] });
 }
 
@@ -375,12 +380,16 @@ export async function upsertFileFacts(row) {
   const uid = await currentUid();
   if (!uid) return { ok: false, error: "Sign in to file documents." };
   // No user_id in the payload: the column default (auth.uid()) stamps the creator on INSERT, so a
-  // teammate edit of a shared row won't re-stamp the owner. team_id carries the share (null =
-  // private); category/state are the Work Item B index columns. onConflict = the PK "id" (post the
-  // phase-2 migration). Degrade gracefully if any optional column (team_id / category / state) or
-  // the old composite PK isn't where we expect, so indexing never regresses on a partial migration.
+  // teammate edit of a shared row won't re-stamp the owner. category/state are the Work Item B
+  // index columns. onConflict = the PK "id" (post the phase-2 migration). Degrade gracefully if
+  // any optional column (team_id / category / state) or the old composite PK isn't where we
+  // expect, so indexing never regresses on a partial migration.
+  // B714 — team_id rides ONLY when a caller explicitly set it: this is a plain UPSERT, and the
+  // regular filing callers (toFactsRow) never carry teamId, so the old `teamId || t0 || null`
+  // rewrote a SHARED fact row back to private on every refile. Omitting the key leaves the
+  // column untouched on update; sharing stamps it project-wide via lib/sharing.js.
   const { teamId, team_id: t0, ...rest } = row;
-  const payload = { ...rest, team_id: teamId || t0 || null };
+  const payload = (teamId !== undefined || t0 !== undefined) ? { ...rest, team_id: teamId || t0 || null } : rest;
   const core = () => { const { team_id, category, state, ...c } = payload; return c; };
   let { error } = await supabase.from("file_facts").upsert(payload, { onConflict: "id" });
   if (error && /team_id|category|state|column|schema cache/i.test(error.message || ""))

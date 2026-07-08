@@ -68,6 +68,15 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V244 — B714: sharing survives the owner's autosaves — the two-account share round-trip works end to end ⏳ **TWO SIGNED-IN ACCOUNTS (both exist: the owner + michael.butler@hillwood.com, already admins on team "HIP Houston"; Goose Creek group smqfy48tlk9j re-linked to the team by the data heal)**
+- **Verified here (sandbox, 2026-07-08):** `test/teamShareGuard.test.js` 8/8 (sites/doc_reviews update rows carry NO team_id key; inserts inherit; slim jsonb strips teamId/ownerId; headerSig share-neutral) · full suite green · build green. Root cause + fix in B714.
+- **Pending signed-in steps (planyr.io, owner + hillwood account — reload EVERY open Planyr tab first so no pre-fix tab is still running):**
+  1. **The regression that bit:** owner opens Goose Creek and makes several edits (each triggers an autosave) → in the DB (or via the hillwood account's view) the site STAYS shared — `team_id` never reverts to null. The hillwood session keeps a green cloud and keeps seeing elements across reloads.
+  2. Hillwood account opens the shared site → sees the parcels/elements, makes an edit → it lands (green cloud) and propagates to the owner's session (<~2s).
+  3. Owner right-click → Share on a DIFFERENT (private) project → hillwood sees it appear; owner keeps editing → still shared minutes later. Unshare ("make private") → it disappears for hillwood.
+  4. NEW-2 sanity (no realtime leak): on a genuinely UNSHARED site, the hillwood account (own window) receives NO realtime updates while the owner edits it.
+  5. This unblocks **V230** (the named conflict toasts) — run its steps 7–11 same sitting with these two accounts.
+
 ### V239 — B703: view-relative ground relief on the LIVE map — ditch cooler/darker than pad; panning re-stretches ⏳ **LIVE APP (planyr.io), any teammate, logged-out OK** (GIS endpoint class; supersedes the old V189 elevation-paint check — that rendering rule no longer exists)
 - **Verified here (sandbox, 2026-07-07):** measure-before-patch ran against the REAL service through the production `/api/gis-cache` proxy (allowRasterFunction true; rendered PNGs at neighborhood + pad scale: named rule = flat green sheet, the shipped Colormap/Stretch-DRA chain = ponds/ditches blue, embankment red) · unit + full suite + build green · headless on the built app (real bytes via the proxy): the exportImage request carries the chain, the esri image paints, the relative-to-view note renders.
 - **Pending live steps (Site Planner or map finder, "Ground relief (low = blue, high = red)" on, z ≥ 16):** (1) over a site with a roadside ditch — the ditch line reads visibly cooler/darker than the pad; a detention pond reads deep blue; (2) pan a full screen — the colors re-stretch to the new view (a red knoll may turn cream as bigger relief enters; that's the DRA behavior the note explains) with no blank tiles/errors; (3) judge the 0.55 default opacity over green summer imagery — if it reads washed out, bump the default to 0.65 (one-line change in `TERRAIN.elevation`).
@@ -85,7 +94,7 @@ was never clicked" quietly ships broken.
 7. The maintenance-berm land-take line and berm-overlap warning behave on a pond next to a building.
 8. Print/PDF export: the detention/mitigation pairs appear; the metrics band doesn't clip its note (PDF-PARITY).
 9. Block the NFHL host (devtools offline for that origin) → the geometry-outage warning renders; nothing reads clear.
-10. (B713) On a dock-high layout with pad FFE entered: the truck court's inspector shows "auto FF−4"; the mitigation volume visibly drops vs pricing the court at slab FF.
+10. (B714) On a dock-high layout with pad FFE entered: the truck court's inspector shows "auto FF−4"; the mitigation volume visibly drops vs pricing the court at slab FF.
 
 ### V240 — B704: 1-ft contours over a known ditch/pond AGREE with the cross-section tool ⏳ **LIVE APP (planyr.io), any teammate** (GIS endpoint + zoom/data-density classes)
 - **Verified here (sandbox, 2026-07-07):** ramp CALIBRATION test pins the whole geometric chain (d3 cell-center convention ↔ mercator transform ↔ bilinear sampler); cone/void/fixture unit suites green; headless on the built app with REAL Katy bytes: one LERC fetch, worker decode, 30 halo labels, real canvas ink, honest zoom-gate message below z16.

@@ -77,7 +77,33 @@ export function slimForCloud(model) {
   // Element collections → site_elements rows (B672 read cutover). The header keeps empty arrays
   // (not missing fields) so createSiteModel-normalization of a loaded header stays shape-identical.
   m = { ...m, els: [], markups: [], measures: [], callouts: [], parcels: [], elementsInRows: true };
-  return m;
+  // B714 — the sharing pointer never rides the stored jsonb: the `team_id` COLUMN is the single
+  // source of truth (set only by the explicit share/unshare flow; overlaid back onto the model by
+  // cloudList on every read). A model held in a tab's memory since before a share carries a STALE
+  // teamId — embedding it here (and worse, in the row's team_id column, fixed in cloudUpsertCore)
+  // is how one ordinary autosave silently un-shared a just-shared project. ownerId is likewise a
+  // read-time overlay of the user_id column. Stripping both also keeps headerSig share-neutral.
+  const { teamId: _team, ownerId: _owner, ...noShare } = m;
+  return noShare;
+}
+
+// B714 — the column payload an ordinary content push sends (pure; exported for tests). The
+// sharing pointer `team_id` is DELIBERATELY absent from updates: a content save must never be
+// able to change who a project is shared with (an open tab's in-memory model predates any share
+// made after it loaded — pushing its stale teamId is exactly how a fresh share got silently
+// reverted to private, locking the collaborator out). team_id changes ONLY through the explicit
+// share/unshare flow (lib/sharing.js updates the column directly; the DB rehome-guard trigger
+// enforces owner-only). The single exception: a brand-new row (isNew) stamps the model's teamId
+// so a new plan created inside a shared project is born shared, not private.
+export function siteRowFor(m, { isNew = false, teamId = null } = {}) {
+  const row = {
+    id: m.id,
+    group_id: m.groupId || null, site: m.site || null, name: m.name || null, county: m.county || null,
+    updated_at: new Date(m.updatedAt || Date.now()).toISOString(),
+    data: m,
+  };
+  if (isNew) row.team_id = teamId || null;
+  return row;
 }
 
 // B529: serialize cloud writes per site id so a tab can't race ITSELF (debounced autosave + a
@@ -100,15 +126,8 @@ async function cloudUpsertCore(uid, model, isRetry) {
   const sig = headerSig(model);
   if (!isRetry && lastHeaderSig[m.id] === sig && siteVersions[m.id] != null) return { ok: true, skipped: true };
   // Row carries NO user_id — casUpsert stamps the creator only on INSERT, so a teammate editing
-  // a shared row never re-stamps the original owner (team feature). team_id rides along (null =
-  // private); when set, RLS lets the project's team read/edit it.
-  const row = {
-    id: m.id,
-    group_id: m.groupId || null, site: m.site || null, name: m.name || null, county: m.county || null,
-    team_id: m.teamId || null,
-    updated_at: new Date(m.updatedAt || Date.now()).toISOString(),
-    data: m,
-  };
+  // a shared row never re-stamps the original owner (team feature).
+  const row = siteRowFor(m, { isNew: siteVersions[m.id] == null, teamId: model.teamId });
   // Optimistic concurrency (B314): a conditional write guarded by the version we last synced.
   let r = await casUpsert(supabase, "sites", { uid, id: m.id, row, expected: siteVersions[m.id] });
   // Graceful degrade if the team_id column isn't migrated in yet (db/team_sharing.sql not run):
@@ -166,14 +185,9 @@ export function keepaliveCloudPush(uid, model) {
   const { url, anon } = supabaseRest();
   const token = currentAccessToken();
   const m = slimForCloud(model); // slim header (B672) — elements ride the element keepalive instead
-  // No user_id in the PATCH body — a guarded UPDATE must not re-stamp the row's creator.
-  const row = {
-    id: m.id,
-    group_id: m.groupId || null, site: m.site || null, name: m.name || null, county: m.county || null,
-    team_id: m.teamId || null,
-    updated_at: new Date(m.updatedAt || Date.now()).toISOString(),
-    data: m,
-  };
+  // No user_id in the PATCH body (a guarded UPDATE must not re-stamp the creator) and no team_id
+  // (B714 — the keepalive is always an update; a stale teamId here could silently unshare).
+  const row = siteRowFor(m);
   return keepaliveCasPush({ url, anon, token, table: "sites", id: m.id, row, expected: siteVersions[m.id] });
 }
 
