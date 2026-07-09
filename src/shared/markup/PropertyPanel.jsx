@@ -75,8 +75,13 @@ function EnumControl({ value, options, label, onChange }) {
   );
 }
 
-export default function PropertyPanel({ markup, onChange, style: outerStyle }) {
-  if (!markup) {
+/* `markup` drives the control list via schemaForMarkup (the matrix-derived path). A host whose
+ * markups don't map onto a matrix row (e.g. the Site Planner's ParcelDrawing overlay, whose marks
+ * use a `type` field) may instead pass an explicit `schema` — an ordered list of
+ * { key, value, type, label, ... } entries built from the shared columnMeta — for the same
+ * capability-driven controls without a per-surface panel fork (B735). */
+export default function PropertyPanel({ markup, schema: schemaOverride, onChange, style: outerStyle }) {
+  if (!markup && !schemaOverride) {
     return (
       <div style={{ padding: "12px", fontFamily: FONT, ...outerStyle }}>
         <div style={{ fontSize: 11.5, color: L, textAlign: "center", lineHeight: 1.6 }}>
@@ -86,7 +91,7 @@ export default function PropertyPanel({ markup, onChange, style: outerStyle }) {
     );
   }
 
-  const schema = schemaForMarkup(markup);
+  const schema = schemaOverride || schemaForMarkup(markup);
   if (!schema.length) {
     return (
       <div style={{ padding: "12px", fontFamily: FONT, ...outerStyle }}>
