@@ -503,6 +503,23 @@ export function aerialPlacement(bbox, lon0, lat0, opts = {}) {
   };
 }
 
+// Convert a planner-feet extent to a lon/lat bbox for an aerial `export` request (B735).
+// In the planner's feet frame +x is EAST and +y is SOUTH (feetToLatLng negates y), so the
+// extent's top-left (minX,minY) is the NORTH-WEST corner and bottom-right (maxX,maxY) the
+// SOUTH-EAST corner. We round-trip both corners through the SAME feetToLatLng the map render
+// and parcels use, then Math.min/max so the result is a well-formed bbox regardless of which
+// corner is which. Pure + injectable-free → unit-tested; `aerialPlacement` reverses it exactly.
+export function feetExtentToBbox(ext, lat0, lon0) {
+  const a = feetToLatLng({ x: ext.minX, y: ext.minY }, lat0, lon0); // NW corner → [lat, lon]
+  const b = feetToLatLng({ x: ext.maxX, y: ext.maxY }, lat0, lon0); // SE corner → [lat, lon]
+  return {
+    lonMin: Math.min(a[1], b[1]),
+    lonMax: Math.max(a[1], b[1]),
+    latMin: Math.min(a[0], b[0]),
+    latMax: Math.max(a[0], b[0]),
+  };
+}
+
 // Turn fetch/CORS failures into something actionable for a non-technical user.
 export function humanizeError(e) {
   // Typed parcel-fetch failures (B244/B245) carry a `kind` — give each its own plain

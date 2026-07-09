@@ -36,6 +36,28 @@ describe("commitElements", () => {
     expect(r.ok).toBe(false);
     expect(r.error).toContain("network");
   });
+
+  it("times out a HUNG commit as ok:false so the sync slot can't wedge forever (NEW-1, LOUD-FAILURE)", async () => {
+    let fire;
+    const client = fakeClient(() => new Promise(() => {})); // never settles — simulates a stalled request
+    const p = commitElements(client, "s", [{ op: "delete", id: "e1", kind: "el", expected: 1 }], {
+      timeoutMs: 8000, setTimer: (fn) => { fire = fn; return 1; }, clearTimer: () => {},
+    });
+    expect(typeof fire).toBe("function"); // the timer was armed synchronously, before the await
+    fire();                              // trip the timeout instead of waiting 8s
+    const r = await p;
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/timeout/);
+  });
+
+  it("wires an AbortSignal through to the builder when it supports .abortSignal()", async () => {
+    let gotSignal;
+    const builder = { abortSignal: (sig) => { gotSignal = sig; return Promise.resolve({ data: [{ id: "e1", status: "ok", rev: 2 }], error: null }); } };
+    const client = { rpc: () => builder };
+    const r = await commitElements(client, "s", [{ op: "create", id: "e1", kind: "el", data: {} }]);
+    expect(r).toEqual({ ok: true, results: [{ id: "e1", status: "ok", rev: 2 }] });
+    expect(gotSignal && typeof gotSignal.aborted === "boolean").toBe(true); // an AbortSignal was passed
+  });
 });
 
 describe("fetchElements", () => {
@@ -55,6 +77,17 @@ describe("fetchElements", () => {
     const client = { from: () => ({ select: () => ({ eq: async () => ({ data: null, error: { message: "down" } }) }) }) };
     const r = await fetchElements(client, "s");
     expect(r).toMatchObject({ ok: false, rows: [], error: "down" });
+  });
+
+  it("times out a HUNG fetch as ok:false so a stalled refetch can't hang the read path (NEW-1)", async () => {
+    let fire;
+    const client = { from: () => ({ select: () => ({ eq: () => new Promise(() => {}) }) }) }; // never settles
+    const p = fetchElements(client, "s", { timeoutMs: 8000, setTimer: (fn) => { fire = fn; return 1; }, clearTimer: () => {} });
+    expect(typeof fire).toBe("function");
+    fire();
+    const r = await p;
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/timeout/);
   });
 });
 

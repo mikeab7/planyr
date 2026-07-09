@@ -6,7 +6,8 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
 **Subfolders**
 - `markup/` — the ONE shared markup/measure/selection engine. `tools.matrix.js` is the
   machine-checkable spec (**never edit it to make a test green** — fix the code). Pure modules:
-  `geometry.js`, `markupModel.js`, `measure.js`, `hitTest.js`, `propertySchema.js`, `selection.js`;
+  `geometry.js`, `markupModel.js`, `measure.js`, `hitTest.js`, `propertySchema.js`, `selection.js`,
+  `markupStyle.js` (per-object style + kind-keyed fallback, shared by renderer + draft preview, B736);
   renderers `MarkupRenderer.jsx`, `PropertyPanel.jsx`, `SelectionChrome.jsx`.
 - `coordinates/` — the EPSG:2278 ↔ WGS84 projection (shared coordinate spine). Read-only
   screening use today; grow additively, not a planner rewrite.

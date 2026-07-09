@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-09 @ `00b0390` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-09 @ `440639d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_224 source files mapped._
+_227 source files mapped._
 
 ## infra
 
@@ -118,6 +118,8 @@ _224 source files mapped._
   - _exports_: `bboxOfMarkup`, `boxCorners`, `isClosed`, `minPtsOf`, `ptsOf`, `sanitizeMarkup`, `sanitizeMarkups`, `setPts`, `translate`
 - **`src/shared/markup/MarkupRenderer.jsx`** — Pure SVG renderer for one markup of any kind (measures, shapes, text, callout, cloud, dimension, arrows) given viewport scale + ftPerUnit
   - _exports_: `default (MarkupRenderer)`
+- **`src/shared/markup/markupStyle.js`** — Shared per-object style resolver: turns a markup's stored fields into display style with a kind-keyed fallback (measures teal, annotations orange); used by MarkupRenderer + the DocReview draft preview so preview + commit can't drift
+  - _exports_: `ANNOT_STROKE`, `kindDefaults`, `MEAS_STROKE`, `MEASURE_KINDS`, `resolveMarkupStyle`
 - **`src/shared/markup/measure.js`** — Measure engine: turns distance/polylength/perimeter/area/count markups into real feet/acres via the ftPerUnit unit-scale seam; labels + rollup totals
   - _exports_: `canCommitMeasure`, `measureLabel`, `measureValue`, `MIN_MEASURE_PTS`, `rollup`
 - **`src/shared/markup/PropertyPanel.jsx`** — Pure schema-driven property panel: renders color/number/range/bool/enum controls for the selected markup from schemaForMarkup, emits canonical-key onChange
@@ -209,6 +211,8 @@ _224 source files mapped._
   - _exports_: `default (LayerPanel)`
 - **`src/workspaces/site-planner/components/ParcelDrawing.jsx`** — Immutable PDF/JPEG backdrop markup canvas: pen/line/box/text/measure tools with scale calibration, 0..1 pixel-relative coords
   - _exports_: `default (ParcelDrawing)`
+- **`src/workspaces/site-planner/components/parcelDrawingStyle.js`** — Pure style helpers bringing ParcelDrawing onto the shared per-object model: legacy color→stroke/fontColor migration, capability-driven PD_PROPS (fill only for the closed Box), dash mapping, and the shared PropertyPanel schema
+  - _exports_: `dashFor`, `migrateMark`, `migrateMarks`, `PD_DEFAULT_COLOR`, `PD_DEFAULT_STYLE`, `PD_PROPS`, `pdSchema`, `stampStyle`
 - **`src/workspaces/site-planner/components/SiteAnalysis.jsx`** — Site Analysis panel: presence-first environmental/regulatory screening of active parcels with honest present/none/unknown/unavailable states
   - _exports_: `default (SiteAnalysis)`
 - **`src/workspaces/site-planner/components/SiteReviewModal.jsx`** — Legacy-site migration wizard: step through on-device sites to save-to-cloud, keep-on-device, or discard one by one
@@ -222,7 +226,7 @@ _224 source files mapped._
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
   - _exports_: `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `prettyKey`
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
-  - _exports_: `aerialPlacement`, `BACKUP_GRACE_MS`, `featureToParcel`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `outerRingsLngLat`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
+  - _exports_: `aerialPlacement`, `BACKUP_GRACE_MS`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `outerRingsLngLat`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
 - **`src/workspaces/site-planner/lib/auth.js`** — Thin Supabase Auth wrappers: signUp/signIn/signOut/reset/updatePassword, getUser, onAuthChange with pinned redirect origin
   - _exports_: `getUser`, `onAuthChange`, `resetPassword`, `signIn`, `signOut`, `signUp`, `updatePassword`
 - **`src/workspaces/site-planner/lib/basemaps.js`** — Shared aerial basemap SOURCE registry (Esri/USGS tiles + export + maxNative ceilings, B220 rule) + the planner's Off/Aerial/USGS choices; used by MapFinder and the planner Basemap control
@@ -272,7 +276,7 @@ _224 source files mapped._
 - **`src/workspaces/site-planner/lib/editorNames.js`** — conflict-toast naming (B673): cached editor display names via the team roster RPC (self → "you (another window)") + describeElement labels
   - _exports_: `createNameResolver`, `describeElement`
 - **`src/workspaces/site-planner/lib/elementApi.js`** — network seam for per-element sync (B671): the commit_elements RPC wrapper, element-row fetch, and the pure unload keepalive commit
-  - _exports_: `commitElements`, `ELEMENT_SELECT`, `fetchElements`, `keepaliveCommit`
+  - _exports_: `COMMIT_TIMEOUT_MS`, `commitElements`, `ELEMENT_SELECT`, `fetchElements`, `keepaliveCommit`
 - **`src/workspaces/site-planner/lib/elementRows.js`** — pure JS mirror of the site_elements explode/rebuild (B670): model⇄rows for the 5 vector collections, tombstone-aware, keyed by (kind,id)
   - _exports_: `byRowOrder`, `ELEMENT_FIELDS`, `explodeModel`, `FIELD_TO_KIND`, `KIND_TO_FIELD`, `rowsToModel`, `Z_GAP`
 - **`src/workspaces/site-planner/lib/elementSync.js`** — the per-element write engine (B671): diffs live collections vs a shadow map, batches rev-guarded commits, LWW conflict events, dirty-queue backoff
@@ -317,6 +321,8 @@ _224 source files mapped._
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure metes-and-bounds engine: parses Texas deed bearing/distance calls (curves, SAVE-AND-EXCEPT tracts) to planner-feet paths, closure/misclosure, polyline offset/buffer, ring overlap
   - _exports_: `arcChordPoints`, `bufferPolyline`, `callsToPath`, `misclosure`, `offsetPolyline`, `parseCalls`, `parseTracts`, `pathCloses`, `ringsOverlap`, `VARA_FT`
+- **`src/workspaces/site-planner/lib/multiStyle.js`** — B740 multi-selection shared styling (pure): `styleCapsOf` (per-item editable props), `commonStyleState` (common set + uniform-or-mixed per property), `selectionRingFeet` (rotation-aware per-member outline).
+  - _exports_: `commonStyleState`, `selectionRingFeet`, `styleCapsOf`
 - **`src/workspaces/site-planner/lib/multiwriter.js`** — the B674 multi-writer switch: default-ON code constant + the `planyr.multiwriter=off` localStorage escape hatch (no build-time env var)
   - _exports_: `MULTIWRITER_DEFAULT`, `MULTIWRITER_KEY`, `multiwriterEnabled`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
