@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _56 open · 34 awaiting live verification._
+> _56 open · 35 awaiting live verification._
 
 ## 🔲 Open
 
@@ -71,6 +71,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B736 | "Drop site plan" overlay hint sticks after a drag leaves the window; make it non-obscuring | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
 | B719 | Road curb/border drawn far too thick: size it to a true 6″ (0.5′) curb, to scale | [Site Planner] | #site-planner #road #ui | ⏳ live — awaiting |
 | B734 | Account dropdown opens pinned to the top-left corner instead of under the account pill | [App Shell / UI] | #ui #infra | ⏳ live — awaiting |
 | B717 | Poppable / floating left panels + always-visible icon rail for the Site Planner | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
@@ -127,9 +128,9 @@
 - **#road** — B719
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B736, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413
 - **#testing** — B269, B63
 - **#thoroughfare** — B720, B721, B722, B723, B724, B725, B726
-- **#ui** — B735, B723, B115, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
+- **#ui** — B735, B723, B115, B736, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
 - **#yield** — B724, B553, B715, B712, B651
