@@ -20,6 +20,7 @@ import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
+import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
@@ -60,6 +61,8 @@ import {
   outerRingsLngLat,
   lngLatRingToFeet,
   feetToLatLng,
+  aerialPlacement,
+  feetExtentToBbox,
   humanizeError,
 } from "./lib/arcgis.js";
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
@@ -1225,13 +1228,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const capturePidRef = useRef(null);              // last pointerId the canvas captured — lets a gesture interrupted without a pointer-up still release capture (NEW-1)
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [multi, setMulti] = useState([]);
-  // B734 — a multi-selection of ≥2 styleable items (elements / markups) drives the SHARED
+  // B740 — a multi-selection of ≥2 styleable items (elements / markups) drives the SHARED
   // property panel. A marquee box-select leaves `sel` null while `multi` is populated, so the
   // inspector must key off this too — not `sel` alone — or the shared panel never opens.
   const multiStyleable = multi.length > 1 && multi.some((m) => m.kind === "el" || m.kind === "markup");
   // B656: the Properties companion follows the selection — these three kinds have an
   // inspector. Derived from `sel` alone (not the resolved selectors) so early effects can use it.
-  // B734 widens it to a styleable multi-selection.
+  // B740 widens it to a styleable multi-selection.
   const companionSel = (!!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup")) || multiStyleable;
   // B261: while a persistent group is selected, double-clicking a member "drills in" to
   // edit just that one element in place (without ungrouping). drillId = that member's id,
@@ -2511,7 +2514,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B656 follow-up: any (re)selection clears a prior ✕-dismiss so the companion reopens.
   // Keyed on `sel` identity, not kind/id — every canvas click re-fires setSel({...}) with a
   // fresh object (startMoveEl), so re-clicking the already-selected element reopens the panel.
-  // B734: also key on `multi` so a fresh marquee/shift multi-selection (which can leave sel=null)
+  // B740: also key on `multi` so a fresh marquee/shift multi-selection (which can leave sel=null)
   // reopens the shared panel too.
   useEffect(() => { setPropsDismissed(false); }, [sel, multi]);
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
@@ -2989,14 +2992,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (hit) { toggleMerge(hit.id); setSel({ kind: "parcel", id: hit.id }); return; }
       }
       if (e.shiftKey) {
-        // Shift-click a parcel BODY → toggle it into the merge selection. B420 makes the
+        // Shift-click a parcel BODY → add it to the merge selection. B420 makes the
         // parcel interior click-through (only its boundary hit-stroke grabs), so a Shift-press
         // in the body lands here on the background — without this it started a marquee and the
         // merge pick was silently missed, which read as "Shift-click needs several tries" (NEW-2).
         // Topmost (last-drawn) parcel under the point wins, matching the boundary-stroke path.
+        // B735: shiftPickParcel SEEDS the set from the current single selection so a plain-click
+        // A then Shift-click B keeps A (a plain click only ever put A in `sel`, not combineSel).
         if (settings.parcelSelect) {
           const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
-          if (hit) { toggleMerge(hit.id); setSel({ kind: "parcel", id: hit.id }); return; }
+          if (hit) { shiftPickParcel(hit.id); return; } // shiftPickParcel owns `sel` (B735)
         }
         // Shift-drag empty canvas → marquee select
         drag.current = { mode: "marquee", a: fp };
@@ -3006,7 +3011,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       setSel(null); setMulti([]); setDrillId(null);
       setPanning(true);
-      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
+      // B735: tag a plain background press so a genuine TAP on empty canvas (tiny travel) clears the
+      // merge selection in onUp, while a real pan (larger travel) leaves it untouched. Not in merge-
+      // pick mode — there an empty click intentionally keeps the set (B720).
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapEmpty: !mergePick, downX: e.clientX, downY: e.clientY, downT: Date.now() };
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
@@ -3176,6 +3184,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (pc && pc.active === false) return s;
     return [...s, id];
   });
+  // B735 — Shift-click / additive merge pick. Unlike toggleMerge (used by the B720 pick MODE,
+  // where the whole set is built from scratch), this SEEDS the set from the current single
+  // selection first — so a plain-click A then Shift-click B accumulates [A,B] instead of
+  // silently dropping A (the parcel that was only ever in `sel`, never in the merge set). The
+  // seed + inactive guard + toggle math live in the pure lib (reuses shared nextSelection).
+  // It OWNS `sel` too (callers must NOT setSel after it): a click that adds a parcel makes it
+  // primary, but a click that REMOVES one must never leave `sel` on the just-removed parcel —
+  // otherwise the seed would resurrect it on the next Shift-click. So on removal `sel` falls back
+  // to the last remaining picked parcel (or clears).
+  const shiftPickParcel = (id) => {
+    const next = extendMergeSelection(combineSel, id, {
+      primaryId: sel?.kind === "parcel" ? sel.id : null,
+      isActive: (pid) => parcels.find((p) => p.id === pid)?.active,
+    });
+    setCombineSel(next);
+    const removed = combineSel.includes(id) && !next.includes(id);
+    setSel(removed ? (next.length ? { kind: "parcel", id: next[next.length - 1] } : null) : { kind: "parcel", id });
+  };
   // B720 — click-to-pick merge mode. After pressing "Merge" in the Parcel-panel ops row,
   // plain clicks (canvas body, boundary stroke, or list rows) toggle parcels into the merge
   // set — no Shift knowledge required. Reuses toggleMerge (keeps the B170 inactive-parcel
@@ -3184,6 +3210,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMergePick = () => {
     if (tool !== "select") selectTool("select"); // pick mode lives in Select — a draw tool switches first (edge case)
     setMergePick(true);
+    // B735 — carry the already-selected parcel into the merge set so pressing Merge keeps your
+    // pick (you then click more parcels to add them). Inactive parcels never merge (B170).
+    setCombineSel((s) => (sel?.kind === "parcel" && !s.includes(sel.id) && parcels.find((p) => p.id === sel.id)?.active !== false ? [...s, sel.id] : s));
   };
   const exitMergePick = () => { setMergePick(false); setCombineSel([]); };
   // Fuse the selected parcels (any that share a boundary) into one parcel on the
@@ -3202,7 +3231,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (merged) { result = merged; remaining.splice(i, 1); progress = true; break; }
       }
     }
-    if (remaining.length) { alert("Those parcels don't all share a boundary — pick parcels that touch edge-to-edge."); return; }
+    if (remaining.length) { flashWarn("Those parcels don't all share a boundary — pick parcels that touch edge-to-edge.", 6000); return; } // B735: non-blocking notice, not a jarring alert()
     pushHistory();
     const np = { id: uid(), points: result, locked: true };
     // The merged-away parcels are genuinely removed (replaced by `np`), so TOMBSTONE them — the same
@@ -3353,7 +3382,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (m && !m.locked && (m.kind === "line" || m.kind === "polyline" || m.kind === "easement") && isDoubleTap(e, id)) {
       setSel({ kind: "markup", id }); beginEditInline("markup", id); return;
     }
-    // B734 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
+    // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
     if (hasSelMod(e)) {
       const mods = { toggle: true, add: false };
       const ref = { kind: "markup", id };
@@ -4154,6 +4183,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
         && Date.now() - d.downT <= PARCEL_CLICK_MS) {
       setSel({ kind: "parcel", id: d.tapParcel });
+      setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
+    }
+    // B735: a plain TAP on empty canvas (tiny travel + brief, tagged tapEmpty in onBgDown) clears the
+    // merge selection; a real pan (larger travel) leaves it untouched, so dragging the map never wipes
+    // an in-progress pick. Not tagged in merge-pick mode — there an empty click keeps the set (B720).
+    if (d && d.mode === "pan" && d.tapEmpty
+        && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
+        && Date.now() - d.downT <= PARCEL_CLICK_MS) {
+      setCombineSel([]);
     }
     // B383: a press that began in identify→add mode and barely moved was a deliberate
     // click → add (or toggle) the lot under it; any real drag just panned to find more.
@@ -5395,7 +5433,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Explicit attach/align flows (click a host/target) take precedence.
     if (attachFor) { attachTo(attachFor, el.id); setAttachFor(null); return; }
     if (alignFor) { alignToElement(el); return; } // align: this click picks an element to match
-    // B734 — Shift (Windows-first additive modifier) OR Ctrl/⌘ TOGGLES the element in/out of the
+    // B740 — Shift (Windows-first additive modifier) OR Ctrl/⌘ TOGGLES the element in/out of the
     // multi-selection (B569 made Shift add-only; the owner wants add AND remove on the same click).
     if (hasSelMod(e)) {
       const mods = { toggle: true, add: false };
@@ -5406,7 +5444,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const next = nextSelection(seedMulti(multi), ref, mods, refEq);
       setMulti(next);
       // Keep `sel` on a member of the set: the just-clicked ref if it survived the toggle, else the
-      // last remaining member, else nothing (a marquee-style multi with sel=null is valid — B734).
+      // last remaining member, else nothing (a marquee-style multi with sel=null is valid — B740).
       setSel(next.some((r) => refEq(r, ref)) ? ref : next.length ? measureSelRef(next[next.length - 1]) : null);
       setDrillId(null);
       return;
@@ -5449,13 +5487,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // exactly as if the click had landed on empty canvas.
     if (!settings.parcelSelect) return;
     if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
-    if (e.shiftKey) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // Shift-click: multi-select to merge
+    if (e.shiftKey) { e.stopPropagation(); shiftPickParcel(id); return; } // Shift-click: additive multi-select to merge (B735 seeds from `sel`; shiftPickParcel owns `sel`)
     e.stopPropagation();
     if (!pc.locked) {
       // Unlocked = the user deliberately unlocked this parcel to reshape/move it, so a press
       // grabs it to drag (like an element). The pan-instead-of-select fix below is for the
       // LOCKED default that every county-pulled / drawn lot carries.
       setSel({ kind: "parcel", id });
+      setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
       pushHistory();
       drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current }; // canceler: B315 Esc/abort-mid-drag revert
       capturePidRef.current = e.pointerId;
@@ -6512,29 +6551,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
   };
-  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper) => {
-    if (!svgRef.current) return null;
-    let x, y, w, h;
-    if (frame) { // explicit print crop (feet) → exact paper-aspect viewBox
-      const a = f2p({ x: frame.cx - frame.wFt / 2, y: frame.cy - frame.hFt / 2 });
-      const b = f2p({ x: frame.cx + frame.wFt / 2, y: frame.cy + frame.hFt / 2 });
-      x = Math.min(a.x, b.x); y = Math.min(a.y, b.y); w = Math.abs(b.x - a.x); h = Math.abs(b.y - a.y);
-    } else {
-      let pts = [];
-      const dev = devExtent();
-      if (dev) pts = [{ x: dev.cx - dev.w / 2, y: dev.cy - dev.h / 2 }, { x: dev.cx + dev.w / 2, y: dev.cy + dev.h / 2 }];
-      else { parcels.forEach((p) => pts.push(...p.points)); els.forEach((e) => (e.points ? pts.push(...e.points) : pts.push(...elCorners(e)))); }
-      if (!pts.length && underlay) {
-        const sy = underlay.ftPerPxY || underlay.ftPerPx;
-        pts = [{ x: underlay.x, y: underlay.y }, { x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy }];
-      }
-      if (!pts.length) return null;
-      const PAD = 60; // ft of margin around the site
-      const minX = Math.min(...pts.map((p) => p.x)) - PAD, maxX = Math.max(...pts.map((p) => p.x)) + PAD;
-      const minY = Math.min(...pts.map((p) => p.y)) - PAD, maxY = Math.max(...pts.map((p) => p.y)) + PAD;
-      const a = f2p({ x: minX, y: minY }), b = f2p({ x: maxX, y: maxY });
-      x = Math.min(a.x, b.x); y = Math.min(a.y, b.y); w = Math.abs(b.x - a.x); h = Math.abs(b.y - a.y);
+  // The feet extent an export will crop to (B735) — ONE source of truth so the synthesized
+  // aerial (exportAerialForFrame) can never disagree with the viewBox buildExportSvg renders.
+  // With an explicit print crop → that frame; otherwise the development bounds, else the bare
+  // parcel/element bounds, else the underlay bounds (matching what the sheet actually shows),
+  // padded. Returns {minX,minY,maxX,maxY} in feet, or null when there's genuinely nothing to frame.
+  const exportFeetExtent = (frame) => {
+    if (frame) {
+      return { minX: frame.cx - frame.wFt / 2, minY: frame.cy - frame.hFt / 2, maxX: frame.cx + frame.wFt / 2, maxY: frame.cy + frame.hFt / 2 };
     }
+    let pts = [];
+    const dev = devExtent();
+    if (dev) pts = [{ x: dev.cx - dev.w / 2, y: dev.cy - dev.h / 2 }, { x: dev.cx + dev.w / 2, y: dev.cy + dev.h / 2 }];
+    else { parcels.forEach((p) => pts.push(...p.points)); els.forEach((e) => (e.points ? pts.push(...e.points) : pts.push(...elCorners(e)))); }
+    if (!pts.length && underlay) {
+      const sy = underlay.ftPerPxY || underlay.ftPerPx;
+      pts = [{ x: underlay.x, y: underlay.y }, { x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy }];
+    }
+    if (!pts.length) return null;
+    const PAD = 60; // ft of margin around the site
+    return {
+      minX: Math.min(...pts.map((p) => p.x)) - PAD, maxX: Math.max(...pts.map((p) => p.x)) + PAD,
+      minY: Math.min(...pts.map((p) => p.y)) - PAD, maxY: Math.max(...pts.map((p) => p.y)) + PAD,
+    };
+  };
+  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null) => {
+    if (!svgRef.current) return null;
+    const fe = exportFeetExtent(frame);
+    if (!fe) return null;
+    const a = f2p({ x: fe.minX, y: fe.minY }), b = f2p({ x: fe.maxX, y: fe.maxY });
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
     const clone = svgRef.current.cloneNode(true);
     clone.querySelectorAll('[data-export="skip"]').forEach((n) => n.remove());
     clone.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
@@ -6546,21 +6592,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
     bg.setAttribute("fill", paper); // PDF export passes white (screen cream wastes ink); PNG keeps the screen page colour
     clone.insertBefore(bg, clone.firstChild);
-    // Always include the aerial underlay (even if it's hidden on screen), placed
-    // beneath everything but the paper, so prints/exports keep the satellite.
-    if (underlay) {
+    // Always include the aerial (even if it's hidden on screen), placed beneath everything
+    // but the paper, so prints/exports keep the satellite. Two sources (B735): when the LIVE
+    // basemap is on, the on-screen aerial is a Leaflet tile <div> the SVG clone can't capture
+    // (it's a sibling of the exported <svg>, tagged data-export="skip"), so the caller passes
+    // `exportAerial` — a frame-exact snapshot synthesized from the SAME source's `export`
+    // endpoint. Otherwise fall back to the persisted `underlay` (a dropped screenshot or a
+    // from-map capture). Both place the image in the SAME feet frame as the parcels via f2p,
+    // so it aligns exactly; the live <image> is tagged data-export-aerial so inlineImages can
+    // raise a LOUD warning (never a silent white PDF) if the remote fetch is dropped.
+    //
+    // Fallback layering: when the live synth is used AND a RELIABLE local underlay exists (a
+    // dropped screenshot — its src is a self-contained data: URL that inlineImages never drops),
+    // draw that underlay UNDERNEATH the live aerial. If the live fetch is dropped, the underlay
+    // still shows real imagery instead of white; if it succeeds it fully covers the underlay.
+    const aerials = [];
+    if (exportAerial) {
+      if (underlay && typeof underlay.src === "string" && underlay.src.startsWith("data:")) aerials.push({ a: underlay, tag: false }); // reliable fallback, bottom
+      aerials.push({ a: exportAerial, tag: true }); // live view, on top (the LOUD-FAILURE marker)
+    } else if (underlay) {
+      aerials.push({ a: underlay, tag: true });
+    }
+    if (aerials.length) {
       clone.querySelectorAll('image:not([data-overlay-image])').forEach((n) => n.remove()); // drop any live aerial copy — keep the placed site-plan overlays (handled below)
-      const tl = f2p({ x: underlay.x, y: underlay.y });
-      const sy = underlay.ftPerPxY || underlay.ftPerPx;
-      const im = document.createElementNS("http://www.w3.org/2000/svg", "image");
-      im.setAttribute("href", underlay.src);
-      im.setAttributeNS("http://www.w3.org/1999/xlink", "href", underlay.src);
-      im.setAttribute("x", tl.x); im.setAttribute("y", tl.y);
-      im.setAttribute("width", underlay.imgW * underlay.ftPerPx * view.ppf);
-      im.setAttribute("height", underlay.imgH * sy * view.ppf);
-      im.setAttribute("preserveAspectRatio", "none");
-      im.setAttribute("opacity", underlay.opacity ?? 1);
-      clone.insertBefore(im, bg.nextSibling);
+      let anchor = bg; // insert each aerial right after the previous → preserves bottom→top paint order
+      for (const { a, tag } of aerials) {
+        const tl = f2p({ x: a.x, y: a.y });
+        const sy = a.ftPerPxY || a.ftPerPx;
+        const im = document.createElementNS("http://www.w3.org/2000/svg", "image");
+        im.setAttribute("href", a.src);
+        im.setAttributeNS("http://www.w3.org/1999/xlink", "href", a.src);
+        im.setAttribute("x", tl.x); im.setAttribute("y", tl.y);
+        im.setAttribute("width", a.imgW * a.ftPerPx * view.ppf);
+        im.setAttribute("height", a.imgH * sy * view.ppf);
+        im.setAttribute("preserveAspectRatio", "none");
+        im.setAttribute("opacity", a.opacity ?? 1);
+        if (tag) im.setAttribute("data-export-aerial", "1"); // LOUD-FAILURE marker: a dropped fetch here must warn, not silently blank the PDF
+        clone.insertBefore(im, anchor.nextSibling);
+        anchor = im;
+      }
     }
     // Site-plan overlays (B72) obey the print dialog's "Print overlay" toggle (B131):
     // off → drop every placed overlay raster (its editor chrome + any unsynced
@@ -6659,27 +6729,59 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ~INLINE_TIMEOUT_MS, not unbounded. On timeout/CORS/non-200 we drop the image (PNG)
   // or keep its remote href (print can still load it natively).
   const INLINE_TIMEOUT_MS = 8000;
+  // Returns { aerialDropped } (B735, LOUD-FAILURE): true when the aerial <image> (tagged
+  // data-export-aerial) couldn't be fetched/inlined and was dropped — so the caller can warn
+  // the user instead of silently handing them a background-less PDF.
   const inlineImages = async (root, dropOnFail = true) => {
     const XL = "http://www.w3.org/1999/xlink";
     const imgs = [...root.querySelectorAll("image")];
+    let aerialDropped = false;
     await Promise.all(imgs.map(async (img) => {
       const href = img.getAttribute("href") || img.getAttributeNS(XL, "href");
       if (!href || href.startsWith("data:")) return;
+      const isAerial = img.hasAttribute("data-export-aerial");
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), INLINE_TIMEOUT_MS);
       try {
         const blob = await fetch(href, { mode: "cors", signal: ctrl.signal }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
         const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
         img.setAttribute("href", dataUrl); img.removeAttributeNS(XL, "href");
-      } catch (_) { if (dropOnFail) img.remove(); }
+      } catch (_) { if (dropOnFail) { img.remove(); if (isAerial) aerialDropped = true; } }
       finally { clearTimeout(timer); }
     }));
+    return { aerialDropped };
+  };
+  // Synthesize a frame-exact aerial for the export (B735). The live basemap is a Leaflet tile
+  // <div> that the exported SVG can't capture, so when it's on we request ONE stitched image
+  // from the active source's `export` endpoint covering exactly the printed area, placed in the
+  // same feet frame as the parcels (aerialPlacement reverses feetExtentToBbox exactly) so it
+  // aligns pixel-for-pixel. Esri's endpoint is verified CORS `*` (a plain fetch inlines cleanly);
+  // USGS's is expected to be but is pending the live check (V251) — either way, a source that
+  // ISN'T CORS-open just drops the aerial and warns loudly (LOUD-FAILURE), never a silent white
+  // sheet. Returns null when there's no live basemap to capture (then buildExportSvg falls back
+  // to any dropped/from-map underlay).
+  const exportAerialForFrame = (frame) => {
+    if (!origin || !basemapOn) return null;
+    const bm = BASEMAPS[basemapSrc] || BASEMAPS.esri;
+    // Use the SAME extent buildExportSvg crops to (dev → parcels → underlay), so a parcels-only
+    // site (deed imported, no massing yet) over the live basemap still gets its aerial — the old
+    // dev-only guard returned null there and silently exported white (B735 review, all 4 lenses).
+    const ext = exportFeetExtent(frame);
+    if (!ext) return null;
+    // ⚠ ARG-ORDER LANDMINE: feetExtentToBbox takes (ext, LAT, LON) but aerialPlacement takes
+    // (bbox, LON, LAT) — latitude and longitude are swapped between the two. Keep them exactly
+    // as written; flipping either pair silently offsets the aerial by thousands of feet.
+    const bbox = feetExtentToBbox(ext, origin.lat, origin.lon);
+    // maxPx 2400 (> the underlay's 1800) keeps the print-DPI raster crisp; ArcGIS export
+    // caps at 4096, so this stays well inside the limit for any single sheet.
+    return { ...aerialPlacement(bbox, origin.lon, origin.lat, { exportBase: bm.export, maxPx: 2400 }), opacity: 1, fromMap: true };
   };
   const exportPNG = async () => {
-    const built = buildExportSvg(printFrame); // use the print crop if one's set, else dev extent
+    const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap for the export
+    const built = buildExportSvg(printFrame, true, PAL.paper, exportAerial); // use the print crop if one's set, else dev extent
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     const { clone, w, h } = built;
-    await inlineImages(clone); // embed the aerial so the raster includes it
+    const { aerialDropped } = await inlineImages(clone); // embed the aerial so the raster includes it (warned loudly on the success path below — B735)
     // Thin line work + restyle labels to the SAME physical weights the PDF uses, by
     // scaling against a notional letter-landscape plan box (PNG has no paper of its own),
     // so a downloaded PNG looks as crisp/professional as the PDF (NEW-2 / NEW-3).
@@ -6701,6 +6803,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         aEl.download = `${sheetFileName({ project: siteLabel, plan: planLabel })}.png`; // B201
         aEl.click();
         URL.revokeObjectURL(aEl.href);
+        // B735 LOUD-FAILURE: the PNG downloaded but without the aerial — say so (⚠ = red banner).
+        if (aerialDropped) flashWarn("⚠ Couldn't load the satellite imagery, so the PNG was exported without it. Check your connection and try again — your plan and measurements are all included.", 8000);
       }, "image/png");
     } catch (_) {
       // image.onerror, a CORS-tainted canvas (the aerial basemap), or drawImage failing
@@ -6763,13 +6867,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
-    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff"); // force WHITE paper for print/PDF
+    const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial); // force WHITE paper for print/PDF
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     setExportingPDF(true);
     try {
       // Embed the aerial (and any placed overlay) as data URLs; DROP any we can't fetch so
-      // a cross-origin image can't taint the canvas and abort the whole export (B202).
-      await inlineImages(built.clone, true);
+      // a cross-origin image can't taint the canvas and abort the whole export (B202). A
+      // dropped AERIAL is surfaced loudly on the success path below (B735) — never a silent
+      // white-background PDF. The warning waits until the file actually downloads, so a later
+      // render/encode failure (which throws to the outer catch) can't leave a contradictory toast.
+      const { aerialDropped } = await inlineImages(built.clone, true);
       mark("inline images");
       // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg> sized to
       // the layout's plan box (it keeps its own viewBox); the title block, buildings table
@@ -6822,6 +6930,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         aEl.click();
         mark("downloaded");
         URL.revokeObjectURL(aEl.href); // B544: revoke now (matches the PNG path L5112) — the 8s timer leaked a blob URL per export on rapid re-export / navigation
+        // B735 LOUD-FAILURE: the file DID download, but without the aerial — say so (⚠ = red banner, not the success green).
+        if (aerialDropped) flashWarn("⚠ Couldn't load the satellite imagery, so the PDF was exported without it. Check your connection and try again — your plan and measurements are all included.", 8000);
       } finally { URL.revokeObjectURL(url); }
     } catch (_) {
       // A CORS-tainted canvas (the aerial basemap) is the usual culprit; surfaced, not silent (B50).
@@ -7411,7 +7521,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
 
   const handleNodes = (() => {
-    if (sel?.kind !== "el" || multi.length > 1) return null; // B734: no single-element transform grips while multi-selecting
+    if (sel?.kind !== "el" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
     const cpx0 = f2p({ x: el.cx, y: el.cy });
@@ -7563,7 +7673,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond): drag a square
   // to move a corner. Add via Shift-click / right-click an edge; delete via right-click / Delete.
   const elPolyHandles = (() => {
-    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B734
+    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740
     const el = els.find((x) => x.id === sel.id);
     if (!el || !el.points || el.locked) return null;
     return <g>{el.points.map((a, i) => vtxRect(`epv${i}`, f2p(a), isSelVtx("el", el.id, i), "move", (e) => startElVertex(e, el.id, i)))}</g>;
@@ -7575,7 +7685,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (a bounding box around a line is wrong, per the owner rule) → grips only, no outline here. Never
   // exported (data-export="skip").
   const elSelOutline = (() => {
-    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B734: multi uses per-member outlines
+    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: multi uses per-member outlines
     const el = els.find((x) => x.id === sel.id);
     if (!el) return null;
     if (isCenterlineRoad(el) || el.type === "road") {
@@ -7602,7 +7712,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //    Shift-click a dot to delete one
   // Semantic markups (utilRoute/traced/encumbrance/…) get no grips (move-only, as before).
   const markupHandles = (() => {
-    if (sel?.kind !== "markup" || tool !== "select" || multi.length > 1) return null; // B734
+    if (sel?.kind !== "markup" || tool !== "select" || multi.length > 1) return null; // B740
     const m = markups.find((x) => x.id === sel.id);
     if (!m || m.locked) return null;
     if (MK_BOX_KINDS.includes(m.kind)) {
@@ -8253,7 +8363,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
   const curStyle = selEl ? elStyle(styleHostOf(selEl), settings) : null;
-  // B734 — the styleable members of a multi-selection (els resolved to their style host), and the
+  // B740 — the styleable members of a multi-selection (els resolved to their style host), and the
   // COMMON editable style across them (each property uniform-value-or-"mixed"). Non-styleable refs
   // (measures) are simply ignored so the user can still restyle the buildings/strips in the set.
   const multiMembers = multiStyleable
@@ -8293,7 +8403,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Drop the selected element's per-element overrides (back to the type default).
   const clearElStyle = () => { if (!selEl) return; pushHistory(); const tid = styleHostOf(selEl).id; setEls((a) => a.map((e) => { if (e.id !== tid) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
 
-  /* ---- B734: shared style editing across a multi-selection ----
+  /* ---- B740: shared style editing across a multi-selection ----
    * Fan a style patch across EVERY selected element / markup in one setEls/setMarkups (so the
    * autosave effect runs once → one batched cloud commit, one local mirror + read-back verify;
    * optimistic UI + LOUD-FAILURE come free from the existing pipeline). Elements retarget through
@@ -8864,7 +8974,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
-                        <button onClick={(e) => { if (mergePick || e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
+                        <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
                           style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
@@ -9845,7 +9955,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </g>;
               })()}
               {/* multi-select outlines — neutral hue-free chrome (B569): a light casing under a dark
-                  line, legible on aerial imagery, never colliding with a status/accent hue. B734: a
+                  line, legible on aerial imagery, never colliding with a status/accent hue. B740: a
                   per-member outline that HUGS each element's real footprint (rotation-aware — an
                   angled truck-court strip gets a tight OBB outline, not an upright box floating wider
                   than the strip). No corner grips: a multi-selection is for shared property editing,
@@ -10970,7 +11080,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
-          {/* B734 — SHARED properties for a multi-selection: only the style props common to every
+          {/* B740 — SHARED properties for a multi-selection: only the style props common to every
               selected element/markup, each showing a "Mixed" state where they disagree. Setting a
               control writes to the WHOLE selection at once (the driver: raise opacity on a building +
               its truck courts + trailer parking back to 100% together, instead of one at a time). */}

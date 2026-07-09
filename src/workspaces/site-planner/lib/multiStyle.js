@@ -1,4 +1,4 @@
-/* B734 — shared style editing across a multi-selection (Site Planner).
+/* B740 — shared style editing across a multi-selection (Site Planner).
  *
  * Pure helpers, kept out of the 13k-line SitePlanner.jsx so they're unit-testable:
  *   - which style properties a single selected item exposes,

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-09 @ `da0ee37` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-09 @ `ec340ba` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,10 +15,12 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_220 source files mapped._
+_225 source files mapped._
 
 ## infra
 
+- **`src/app/AccountControl.jsx`** — Header right-edge auth surface: signed-in account pill + dropdown (Profile/Team/Settings/Sign out), signed-out Sign-in pill, Cloud-off popover; self-contained ref+open state per instance so kept-alive duplicate headers don't share one anchor (B734)
+  - _exports_: `default (AccountControl)`
 - **`src/app/chunkReload.js`** — Stale-chunk-after-deploy recovery: vite:preloadError listener, cache-busting reloadFresh, cooldown/stuck loop guard, flushAll on unload
   - _exports_: `arrivedViaFreshReload`, `clearReloadGuard`, `hasReloadParam`, `installChunkReloadGuard`, `isChunkLoadError`, `recoveryStage`, `RELOAD_COOLDOWN_MS`, `RELOAD_GUARD_KEY`, `RELOAD_PARAM`, `reloadFresh`, `shouldReloadAfterPreloadError`, `stripReloadParam`
 - **`src/app/ErrorBoundary.jsx`** — Per-workspace React class error boundary: contains render crashes, detects chunk-load errors, offers cache-busting reload vs mid-deploy 'try again'
@@ -31,7 +33,7 @@ _220 source files mapped._
   - _exports_: `prefetchModule`, `prefetchOnIdle`
 - **`src/app/route.js`** — Hash-route model: parseRoute/buildHash for {module,projectId,cross}, slug maps, useHashRoute hook with merge-navigate, INITIAL_HASH_EMPTY resume flag
   - _exports_: `buildHash`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `MODULE_BY_SLUG`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `useHashRoute`
-- **`src/app/Shell.jsx`** — App shell: auth state, hash-driven module switching, lazy workspace registry with per-id ErrorBoundary+Suspense, account pill/dropdown, cross-workspace intents
+- **`src/app/Shell.jsx`** — App shell: auth state, hash-driven module switching, lazy workspace registry with per-id ErrorBoundary+Suspense, builds the AccountControl auth slot, cross-workspace intents
   - _exports_: `default (Shell)`
 - **`src/main.jsx`** — Entry point: installs client-error telemetry + chunk-reload guard, retires old GIS service worker, renders Shell inside ThemeProvider/StrictMode
   - _exports_: _(none)_
@@ -112,6 +114,8 @@ _220 source files mapped._
   - _exports_: `bboxOfMarkup`, `boxCorners`, `isClosed`, `minPtsOf`, `ptsOf`, `sanitizeMarkup`, `sanitizeMarkups`, `setPts`, `translate`
 - **`src/shared/markup/MarkupRenderer.jsx`** — Pure SVG renderer for one markup of any kind (measures, shapes, text, callout, cloud, dimension, arrows) given viewport scale + ftPerUnit
   - _exports_: `default (MarkupRenderer)`
+- **`src/shared/markup/markupStyle.js`** — Shared per-object style resolver: turns a markup's stored fields into display style with a kind-keyed fallback (measures teal, annotations orange); used by MarkupRenderer + the DocReview draft preview so preview + commit can't drift
+  - _exports_: `ANNOT_STROKE`, `kindDefaults`, `MEAS_STROKE`, `MEASURE_KINDS`, `resolveMarkupStyle`
 - **`src/shared/markup/measure.js`** — Measure engine: turns distance/polylength/perimeter/area/count markups into real feet/acres via the ftPerUnit unit-scale seam; labels + rollup totals
   - _exports_: `canCommitMeasure`, `measureLabel`, `measureValue`, `MIN_MEASURE_PTS`, `rollup`
 - **`src/shared/markup/PropertyPanel.jsx`** — Pure schema-driven property panel: renders color/number/range/bool/enum controls for the selected markup from schemaForMarkup, emits canonical-key onChange
@@ -158,6 +162,8 @@ _220 source files mapped._
   - _exports_: `ThemeProvider`, `usePalette`, `useTheme`
 - **`src/shared/ui/AnchoredMenu.jsx`** — Portal-to-body dropdown/flyout that escapes rail stacking-context + overflow clipping; rect-anchored fixed positioning, click-away + Esc
   - _exports_: `default (AnchoredMenu)`
+- **`src/shared/ui/anchoredMenuPlacement.js`** — Pure viewport-placement math for AnchoredMenu: left/below-left/below-right anchoring + edge clamp; returns null for a zero-sized (display:none) anchor so a mis-anchored menu hides instead of pinning top-left (B734)
+  - _exports_: `placeMenu`
 - **`src/shared/ui/AppHeader.jsx`** — Shared two-row chrome: Row1 brand/breadcrumb/cloud-badge/auth, Row2 module tabs+toolbar, fullscreen F-key, phone sideways-scroll, cross-tab conflict banner
   - _exports_: `default (AppHeader)`, `MODULE_ACCENT`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
@@ -201,6 +207,8 @@ _220 source files mapped._
   - _exports_: `default (LayerPanel)`
 - **`src/workspaces/site-planner/components/ParcelDrawing.jsx`** — Immutable PDF/JPEG backdrop markup canvas: pen/line/box/text/measure tools with scale calibration, 0..1 pixel-relative coords
   - _exports_: `default (ParcelDrawing)`
+- **`src/workspaces/site-planner/components/parcelDrawingStyle.js`** — Pure style helpers bringing ParcelDrawing onto the shared per-object model: legacy color→stroke/fontColor migration, capability-driven PD_PROPS (fill only for the closed Box), dash mapping, and the shared PropertyPanel schema
+  - _exports_: `dashFor`, `migrateMark`, `migrateMarks`, `PD_DEFAULT_COLOR`, `PD_DEFAULT_STYLE`, `PD_PROPS`, `pdSchema`, `stampStyle`
 - **`src/workspaces/site-planner/components/SiteAnalysis.jsx`** — Site Analysis panel: presence-first environmental/regulatory screening of active parcels with honest present/none/unknown/unavailable states
   - _exports_: `default (SiteAnalysis)`
 - **`src/workspaces/site-planner/components/SiteReviewModal.jsx`** — Legacy-site migration wizard: step through on-device sites to save-to-cloud, keep-on-device, or discard one by one
@@ -214,7 +222,7 @@ _220 source files mapped._
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
   - _exports_: `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `prettyKey`
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
-  - _exports_: `aerialPlacement`, `BACKUP_GRACE_MS`, `featureToParcel`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `outerRingsLngLat`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
+  - _exports_: `aerialPlacement`, `BACKUP_GRACE_MS`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `outerRingsLngLat`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
 - **`src/workspaces/site-planner/lib/auth.js`** — Thin Supabase Auth wrappers: signUp/signIn/signOut/reset/updatePassword, getUser, onAuthChange with pinned redirect origin
   - _exports_: `getUser`, `onAuthChange`, `resetPassword`, `signIn`, `signOut`, `signUp`, `updatePassword`
 - **`src/workspaces/site-planner/lib/basemaps.js`** — Shared aerial basemap SOURCE registry (Esri/USGS tiles + export + maxNative ceilings, B220 rule) + the planner's Off/Aerial/USGS choices; used by MapFinder and the planner Basemap control
@@ -309,7 +317,7 @@ _220 source files mapped._
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure metes-and-bounds engine: parses Texas deed bearing/distance calls (curves, SAVE-AND-EXCEPT tracts) to planner-feet paths, closure/misclosure, polyline offset/buffer, ring overlap
   - _exports_: `arcChordPoints`, `bufferPolyline`, `callsToPath`, `misclosure`, `offsetPolyline`, `parseCalls`, `parseTracts`, `pathCloses`, `ringsOverlap`, `VARA_FT`
-- **`src/workspaces/site-planner/lib/multiStyle.js`** — B734 multi-selection shared styling (pure): `styleCapsOf` (per-item editable props), `commonStyleState` (common set + uniform-or-mixed per property), `selectionRingFeet` (rotation-aware per-member outline).
+- **`src/workspaces/site-planner/lib/multiStyle.js`** — B740 multi-selection shared styling (pure): `styleCapsOf` (per-item editable props), `commonStyleState` (common set + uniform-or-mixed per property), `selectionRingFeet` (rotation-aware per-member outline).
   - _exports_: `commonStyleState`, `selectionRingFeet`, `styleCapsOf`
 - **`src/workspaces/site-planner/lib/multiwriter.js`** — the B674 multi-writer switch: default-ON code constant + the `planyr.multiwriter=off` localStorage escape hatch (no build-time env var)
   - _exports_: `MULTIWRITER_DEFAULT`, `MULTIWRITER_KEY`, `multiwriterEnabled`
@@ -327,6 +335,8 @@ _220 source files mapped._
   - _exports_: `ADD_CURSOR`, `makeParcelDisplayLayer`, `makeParcelImageLayer`, `makeParcelLayer`, `makeSnapshotLayer`, `PARCEL_MINZOOM`, `parcelDisplayIsImageOnly`, `REMOVE_CURSOR`
 - **`src/workspaces/site-planner/lib/parcelQuery.js`** — Shared parcel ID/address lookup: SQL-injection-safe where-clause builder with county scoping and primary-CAD to statewide-TxGIO outage fallback plus circuit-breaker health recording
   - _exports_: `buildParcelWhere`, `isDefaultLookupUrl`, `lookupParcels`, `okField`
+- **`src/workspaces/site-planner/lib/parcelSelect.js`** — Pure parcel merge-selection reducer: seeds the Combine set from the current single selection so plain-click-then-Shift-click accumulates, reusing shared nextSelection for toggle math plus the B170 inactive-parcel guard
+  - _exports_: `extendMergeSelection`
 - **`src/workspaces/site-planner/lib/parcelSnapshot.js`** — Client loader for nightly Drive county parcel-snapshot cache: IndexedDB-held SWR download, pure viewport-filter/point-in-lot hit-test so a flaky county server never blanks the map
   - _exports_: `_resetSnapshots`, `ensureSnapshot`, `featureAtPoint`, `featureBbox`, `featuresForView`, `getSnapshot`, `onSnapshotChange`, `snapshotEnabled`, `snapshotVintage`
 - **`src/workspaces/site-planner/lib/parking.js`** — Pure parking-layout math: rows-to-depth, split into double-loaded modules, explode into stall-row/aisle bands, curb-adjacency test

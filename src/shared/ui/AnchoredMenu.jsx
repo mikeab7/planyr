@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { placeMenu } from "./anchoredMenuPlacement.js";
 
 /**
  * AnchoredMenu — a dropdown / flyout that renders in a PORTAL at document.body
@@ -51,17 +52,20 @@ export default function AnchoredMenu({
       const a = anchorRef?.current?.getBoundingClientRect();
       const m = menuRef.current;
       if (!a || !m) return;
-      const vw = window.innerWidth, vh = window.innerHeight, M = 8;
-      const mw = m.offsetWidth || width;
-      const mh = m.offsetHeight || 0;
-      let left, top;
-      if (placement === "below-left") { left = a.left; top = a.bottom + gap; }
-      else if (placement === "below-right") { left = a.right - mw; top = a.bottom + gap; }
-      else { left = a.left - gap - mw; top = a.top; } // "left" — flyout to the left of the rail
-      // keep the whole menu on-screen
-      left = Math.max(M, Math.min(left, vw - mw - M));
-      top = Math.max(M, Math.min(top, vh - mh - M));
-      setPos({ left, top });
+      // Pure, tested placement math (B734). Returns null for a zero-sized (display:none)
+      // anchor — in that case leave `pos` as-is so the menu stays hidden rather than being
+      // clamped to the top-left corner.
+      const p = placeMenu({
+        anchorRect: a,
+        menuW: m.offsetWidth || width,
+        menuH: m.offsetHeight || 0,
+        viewportW: window.innerWidth,
+        viewportH: window.innerHeight,
+        placement,
+        gap,
+        margin: 8,
+      });
+      if (p) setPos(p);
     };
     place();
     window.addEventListener("resize", place);

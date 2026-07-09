@@ -1,4 +1,4 @@
-/* Self-verification: B734 — Shift-click multi-select + shared property editing (opacity/style).
+/* Self-verification: B740 — Shift-click multi-select + shared property editing (opacity/style).
  *
  * Drives the real LOGGED-OUT app on :4173. Seeds one building + two angled paving strips (a
  * building + truck-court-style strips, the exact driver) with DIFFERING fill-opacity so the shared
@@ -13,7 +13,7 @@
  *   - while multi>1: per-member OBB outlines render (stroke-width 3.5 casings) and the single-element
  *     transform grips (rotation knob) are suppressed.
  *
- * Run:  node ui-audit/verify-b734.mjs   (needs `npm run preview` on :4173)
+ * Run:  node ui-audit/verify-b740.mjs   (needs `npm run preview` on :4173)
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
@@ -29,7 +29,7 @@ const bldg = { id: "B0", type: "building", cx: 0, cy: -220, w: 150, h: 90, rot: 
 const strip1 = { id: "P1", type: "paving", cx: 0, cy: 60, w: 60, h: 190, rot: 30, fill: "#202022", fillOpacity: 0.6 };
 const strip2 = { id: "P2", type: "paving", cx: 0, cy: 330, w: 60, h: 190, rot: 30, fill: "#303033", fillOpacity: 0.8 };
 const demoSite = {
-  id: DEMO_ID, groupId: DEMO_ID, site: "Verify B734", name: "Plan 1",
+  id: DEMO_ID, groupId: DEMO_ID, site: "Verify B740", name: "Plan 1",
   origin: null, county: null, parcels: [], els: [bldg, strip1, strip2], measures: [], callouts: [],
   markups: [], settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now(),
 };
@@ -160,7 +160,7 @@ try {
   check("script ran without throwing", false, String(e));
 } finally {
   const passed = results.filter((r) => r.ok).length;
-  console.log(`\nB734 headless: ${passed}/${results.length} checks passed`);
+  console.log(`\nB740 headless: ${passed}/${results.length} checks passed`);
   await browser.close();
   process.exit(passed === results.length ? 0 : 1);
 }
