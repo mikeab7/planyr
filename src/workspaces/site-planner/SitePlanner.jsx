@@ -49,7 +49,7 @@ import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.j
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
-import { pickInMarquee, selMods, nextSelection } from "../../shared/markup/selection.js";
+import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./lib/kmzExport.js";
@@ -69,6 +69,7 @@ import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
+import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid as deedCentroid, describeRotation } from "./lib/deedAlign.js";
 import { readDeedFile } from "../../shared/files/docxText.js";
@@ -1227,9 +1228,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const capturePidRef = useRef(null);              // last pointerId the canvas captured — lets a gesture interrupted without a pointer-up still release capture (NEW-1)
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [multi, setMulti] = useState([]);
+  // B740 — a multi-selection of ≥2 styleable items (elements / markups) drives the SHARED
+  // property panel. A marquee box-select leaves `sel` null while `multi` is populated, so the
+  // inspector must key off this too — not `sel` alone — or the shared panel never opens.
+  const multiStyleable = multi.length > 1 && multi.some((m) => m.kind === "el" || m.kind === "markup");
   // B656: the Properties companion follows the selection — these three kinds have an
   // inspector. Derived from `sel` alone (not the resolved selectors) so early effects can use it.
-  const companionSel = !!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup");
+  // B740 widens it to a styleable multi-selection.
+  const companionSel = (!!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup")) || multiStyleable;
   // B261: while a persistent group is selected, double-clicking a member "drills in" to
   // edit just that one element in place (without ungrouping). drillId = that member's id,
   // or null when we're operating on the group as a whole.
@@ -2508,7 +2514,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B656 follow-up: any (re)selection clears a prior ✕-dismiss so the companion reopens.
   // Keyed on `sel` identity, not kind/id — every canvas click re-fires setSel({...}) with a
   // fresh object (startMoveEl), so re-clicking the already-selected element reopens the panel.
-  useEffect(() => { setPropsDismissed(false); }, [sel]);
+  // B740: also key on `multi` so a fresh marquee/shift multi-selection (which can leave sel=null)
+  // reopens the shared panel too.
+  useEffect(() => { setPropsDismissed(false); }, [sel, multi]);
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
   // so a later manual visit opens with the normal all-collapsed overview.
@@ -3379,10 +3387,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (m && !m.locked && (m.kind === "line" || m.kind === "polyline" || m.kind === "easement") && isDoubleTap(e, id)) {
       setSel({ kind: "markup", id }); beginEditInline("markup", id); return;
     }
-    const mkMods = selMods(e); // Ctrl/⌘-click = toggle in/out, Shift-click = additive add (B569)
-    if (mkMods.toggle || mkMods.add) {
-      setMulti((s) => nextSelection(seedMulti(s), { kind: "markup", id }, mkMods, refEq));
-      setSel({ kind: "markup", id });
+    // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
+    if (hasSelMod(e)) {
+      const mods = { toggle: true, add: false };
+      const ref = { kind: "markup", id };
+      const next = nextSelection(seedMulti(multi), ref, mods, refEq);
+      setMulti(next);
+      setSel(next.some((r) => refEq(r, ref)) ? ref : next.length ? measureSelRef(next[next.length - 1]) : null);
       setDrillId(null);
       return;
     }
@@ -5445,10 +5456,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Explicit attach/align flows (click a host/target) take precedence.
     if (attachFor) { attachTo(attachFor, el.id); setAttachFor(null); return; }
     if (alignFor) { alignToElement(el); return; } // align: this click picks an element to match
-    const elMods = selMods(e); // Ctrl/⌘-click = toggle in/out, Shift-click = additive add (B569)
-    if (elMods.toggle || elMods.add) {
-      setMulti((s) => nextSelection(seedMulti(s), { kind: "el", id }, elMods, refEq));
-      setSel({ kind: "el", id });
+    // B740 — Shift (Windows-first additive modifier) OR Ctrl/⌘ TOGGLES the element in/out of the
+    // multi-selection (B569 made Shift add-only; the owner wants add AND remove on the same click).
+    if (hasSelMod(e)) {
+      const mods = { toggle: true, add: false };
+      // A bump-out (dog-ear) is visually part of its building and its styling resolves to the host,
+      // so it enters the set as the host — never as a stray duplicate ref. Attached children that are
+      // their OWN styleable element (truck court, trailer parking, sidewalk) keep their own id.
+      const ref = { kind: "el", id: el.dogEar ? styleHostOf(el).id : id };
+      const next = nextSelection(seedMulti(multi), ref, mods, refEq);
+      setMulti(next);
+      // Keep `sel` on a member of the set: the just-clicked ref if it survived the toggle, else the
+      // last remaining member, else nothing (a marquee-style multi with sel=null is valid — B740).
+      setSel(next.some((r) => refEq(r, ref)) ? ref : next.length ? measureSelRef(next[next.length - 1]) : null);
       setDrillId(null);
       return;
     }
@@ -7524,7 +7544,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
 
   const handleNodes = (() => {
-    if (sel?.kind !== "el") return null;
+    if (sel?.kind !== "el" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
     const cpx0 = f2p({ x: el.cx, y: el.cy });
@@ -7677,7 +7697,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond): drag a square
   // to move a corner. Add via Shift-click / right-click an edge; delete via right-click / Delete.
   const elPolyHandles = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
+    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740
     const el = els.find((x) => x.id === sel.id);
     if (!el || !el.points || el.locked) return null;
     return <g>{el.points.map((a, i) => vtxRect(`epv${i}`, f2p(a), isSelVtx("el", el.id, i), "move", (e) => startElVertex(e, el.id, i)))}</g>;
@@ -7689,7 +7709,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (a bounding box around a line is wrong, per the owner rule) → grips only, no outline here. Never
   // exported (data-export="skip").
   const elSelOutline = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
+    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: multi uses per-member outlines
     const el = els.find((x) => x.id === sel.id);
     if (!el) return null;
     if (isCenterlineRoad(el) || el.type === "road") {
@@ -7716,7 +7736,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //    Shift-click a dot to delete one
   // Semantic markups (utilRoute/traced/encumbrance/…) get no grips (move-only, as before).
   const markupHandles = (() => {
-    if (sel?.kind !== "markup" || tool !== "select") return null;
+    if (sel?.kind !== "markup" || tool !== "select" || multi.length > 1) return null; // B740
     const m = markups.find((x) => x.id === sel.id);
     if (!m || m.locked) return null;
     if (MK_BOX_KINDS.includes(m.kind)) {
@@ -8367,6 +8387,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
   const curStyle = selEl ? elStyle(styleHostOf(selEl), settings) : null;
+  // B740 — the styleable members of a multi-selection (els resolved to their style host), and the
+  // COMMON editable style across them (each property uniform-value-or-"mixed"). Non-styleable refs
+  // (measures) are simply ignored so the user can still restyle the buildings/strips in the set.
+  const multiMembers = multiStyleable
+    ? multi.map((r) => {
+        if (r.kind === "el") { const el = els.find((x) => x.id === r.id); return el ? { item: styleHostOf(el), kind: "el" } : null; }
+        if (r.kind === "markup") { const m = markups.find((x) => x.id === r.id); return m ? { item: m, kind: "markup" } : null; }
+        return null;
+      }).filter(Boolean)
+    : [];
+  const multiStyle = multiStyleable ? commonStyleState(multiMembers, settings) : null;
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); };
 
@@ -8395,6 +8426,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Drop the selected element's per-element overrides (back to the type default).
   const clearElStyle = () => { if (!selEl) return; pushHistory(); const tid = styleHostOf(selEl).id; setEls((a) => a.map((e) => { if (e.id !== tid) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
+
+  /* ---- B740: shared style editing across a multi-selection ----
+   * Fan a style patch across EVERY selected element / markup in one setEls/setMarkups (so the
+   * autosave effect runs once → one batched cloud commit, one local mirror + read-back verify;
+   * optimistic UI + LOUD-FAILURE come free from the existing pipeline). Elements retarget through
+   * styleHostOf (a bump-out → its host building) and dedup into a Set, so a host selected both
+   * directly and via a bump-out is patched exactly once. */
+  const multiElHostIds = () => {
+    const ids = new Set();
+    multi.forEach((r) => { if (r.kind === "el") { const el = els.find((x) => x.id === r.id); if (el) ids.add(styleHostOf(el).id); } });
+    return ids;
+  };
+  const applyMultiElPatch = (patch) => { const ids = multiElHostIds(); if (!ids.size) return; setEls((a) => a.map((e) => (ids.has(e.id) ? { ...e, ...patch } : e))); };
+  const applyMultiMarkupPatch = (patch) => { const ids = new Set(multi.filter((r) => r.kind === "markup").map((r) => r.id)); if (!ids.size) return; setMarkups((a) => a.map((m) => (ids.has(m.id) ? { ...m, ...patch } : m))); };
+  // No-history mutator for a live drag (color picker / opacity slider), applied to both kinds.
+  const liveMultiStyle = (patch) => { applyMultiElPatch(patch); applyMultiMarkupPatch(patch); };
+  // A discrete commit (dash select, weight commit, Reset): exactly one undo frame.
+  const applyMultiStyle = (patch) => { pushHistory(); liveMultiStyle(patch); };
+  // Drop per-element overrides across every selected element (multi "Reset" → back to type defaults).
+  const clearMultiElStyle = () => { const ids = multiElHostIds(); if (!ids.size) return; pushHistory(); setEls((a) => a.map((e) => { if (!ids.has(e.id)) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
+  // Opacity slider drag = ONE undo frame (a <input type=range> has no focus/input split like a
+  // color picker): snapshot lazily on the first change of a drag, reset on pointer-down.
+  const opSnapRef = useRef(false);
+  const multiOpacityHandlers = {
+    onPointerDown: () => { opSnapRef.current = false; },
+    onChange: (e) => { if (!opSnapRef.current) { pushHistory(); opSnapRef.current = true; } liveMultiStyle({ fillOpacity: +e.target.value }); },
+  };
 
   /* ------------ Plans dropdown grouping (this site's plans vs. other sites) ------------ */
   const planGroup = (s) => s.groupId || s.id;
@@ -9920,16 +9978,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {pp.map((q, i) => <rect key={i} x={q.x - 2.5} y={q.y - 2.5} width={5} height={5} fill="#b45309" stroke="#fff" strokeWidth={1} />)}
                 </g>;
               })()}
-              {/* multi-select outlines + marquee — neutral hue-free chrome (B569): a light casing
-                  under a dark line + solid corner grips, legible on aerial imagery, never colliding
-                  with a status/accent hue. One shared <SelectionChrome> for both workspaces. */}
-              {multi.length > 1 && multi.map((m) => {
-                const o = m.kind === "el" ? els.find((x) => x.id === m.id) : m.kind === "measure" ? measures.find((x) => x.id === m.id) : markups.find((x) => x.id === m.id);
-                const bb = o && featBBox(o); if (!bb) return null;
-                const p0 = f2p({ x: bb.x0, y: bb.y0 }), p1 = f2p({ x: bb.x1, y: bb.y1 });
-                const x = Math.min(p0.x, p1.x) - 2, y = Math.min(p0.y, p1.y) - 2;
-                return <SelectionChrome key={`ms${m.kind}${m.id}`} x={x} y={y} w={Math.abs(p1.x - p0.x) + 4} h={Math.abs(p1.y - p0.y) + 4} casing={PAL.selCasing} line={PAL.selLine} grips />;
-              })}
+              {/* multi-select outlines — neutral hue-free chrome (B569): a light casing under a dark
+                  line, legible on aerial imagery, never colliding with a status/accent hue. B740: a
+                  per-member outline that HUGS each element's real footprint (rotation-aware — an
+                  angled truck-court strip gets a tight OBB outline, not an upright box floating wider
+                  than the strip). No corner grips: a multi-selection is for shared property editing,
+                  not group transform. Wrapped in data-export="skip" so selection chrome never leaks
+                  into a PDF/print export taken while multi-selected. */}
+              {multi.length > 1 && (
+                <g data-export="skip" pointerEvents="none">
+                  {multi.map((m) => {
+                    if (m.kind === "measure") {
+                      // measures are index/line features with no styleable footprint — keep the AABB box.
+                      const o = measures.find((x) => x.id === m.id);
+                      const bb = o && featBBox(o); if (!bb) return null;
+                      const p0 = f2p({ x: bb.x0, y: bb.y0 }), p1 = f2p({ x: bb.x1, y: bb.y1 });
+                      return <SelectionChrome key={`ms${m.kind}${m.id}`} x={Math.min(p0.x, p1.x) - 2} y={Math.min(p0.y, p1.y) - 2} w={Math.abs(p1.x - p0.x) + 4} h={Math.abs(p1.y - p0.y) + 4} casing={PAL.selCasing} line={PAL.selLine} grips />;
+                    }
+                    const o = m.kind === "el" ? els.find((x) => x.id === m.id) : markups.find((x) => x.id === m.id);
+                    const ring = o && selectionRingFeet(o, m.kind); if (!ring || !ring.pts.length) return null;
+                    const pts = ring.pts.map((p) => { const s = f2p(p); return `${s.x},${s.y}`; }).join(" ");
+                    const Tag = ring.closed ? "polygon" : "polyline";
+                    return (
+                      <g key={`ms${m.kind}${m.id}`}>
+                        <Tag points={pts} fill="none" stroke={PAL.selCasing} strokeWidth={3.5} strokeLinejoin="round" strokeLinecap="round" />
+                        <Tag points={pts} fill="none" stroke={PAL.selLine} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
               {marquee && (() => { const a = f2p(marquee.a), b = f2p(marquee.b); return <SelectionChrome x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} w={Math.abs(b.x - a.x)} h={Math.abs(b.y - a.y)} casing={PAL.selCasing} line={PAL.selLine} fill />; })()}
               {/* persistent GROUP outline (B261): a dashed enclosing box that reads "these
                   stay together" — a pure indicator, NO resize handles (a group never scales
@@ -11015,7 +11093,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
-              Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` — ${l}` : ""; })()}
+              {multiStyleable ? `${multi.length} selected` : <>Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` — ${l}` : ""; })()}</>}
             </span>
             {/* B656 follow-up: explicit close. On the phone-pill overlay it just closes the overlay (element stays
                 selected, pill returns); everywhere else it dismisses the companion but KEEPS the element selected —
@@ -11026,8 +11104,75 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
+          {/* B740 — SHARED properties for a multi-selection: only the style props common to every
+              selected element/markup, each showing a "Mixed" state where they disagree. Setting a
+              control writes to the WHOLE selection at once (the driver: raise opacity on a building +
+              its truck courts + trailer parking back to 100% together, instead of one at a time). */}
+          {multiStyleable && multiStyle && (() => {
+            const { caps, props } = multiStyle;
+            const hasEl = multiMembers.some((m) => m.kind === "el");
+            const mixNote = { fontSize: 11, color: PAL.muted };
+            // A color control that shows a hatched "Mixed" swatch when the selection disagrees. The
+            // native <input type=color> (which has no indeterminate state) is overlaid but visually
+            // hidden, so a pick still opens the OS palette and the first choice applies to ALL — no
+            // dialog box (honours the inline-editors-only rule).
+            const colorField = (label, prop) => {
+              const st = props[prop]; if (!st) return null;
+              return (
+                <Field label={label} key={prop}>
+                  <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ position: "relative", width: 34, height: 26, borderRadius: 6, overflow: "hidden", border: `1px solid var(--border-default)`,
+                      background: st.mixed ? "repeating-linear-gradient(45deg, var(--surface-raised) 0 5px, var(--border-default) 5px 10px)" : toHex6(st.value) }}>
+                      <input type="color" aria-label={label} value={st.mixed ? "#808080" : toHex6(st.value)}
+                        {...livePick((v) => liveMultiStyle({ [prop]: v }))}
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", padding: 0, border: "none" }} />
+                    </span>
+                    {st.mixed && <span style={mixNote}>Mixed</span>}
+                  </span>
+                </Field>
+              );
+            };
+            return (
+              <div data-testid="property-panel">
+              <Section title={`${multi.length} selected`}>
+                {caps.includes("fillOpacity") && (
+                  <Field label="Opacity">
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {/* Mixed → the thumb sits at a neutral midpoint (a range can't be truly
+                          indeterminate) so dragging it anywhere — including to 100% to restore the
+                          whole selection — is a real change that writes to every member. */}
+                      <input type="range" min={0} max={1} step={0.05} value={props.fillOpacity.mixed ? 0.5 : props.fillOpacity.value} {...multiOpacityHandlers} />
+                      {props.fillOpacity.mixed && <span style={mixNote}>Mixed</span>}
+                    </span>
+                  </Field>
+                )}
+                {caps.includes("fill") && colorField("Fill", "fill")}
+                {caps.includes("stroke") && colorField("Outline", "stroke")}
+                {caps.includes("weight") && (
+                  <Field label="Line weight">
+                    <NumInput style={numInput} value={props.weight.mixed ? null : props.weight.value} placeholder="—" min={0.5} step={0.5} coarse={2} onCommit={(n) => applyMultiStyle({ weight: n })} />
+                  </Field>
+                )}
+                {caps.includes("dash") && (
+                  <Field label="Dash">
+                    <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={props.dash.mixed ? "" : (props.dash.value || "solid")} onChange={(e) => { if (e.target.value) applyMultiStyle({ dash: e.target.value }); }}>
+                      {props.dash.mixed && <option value="" disabled>Mixed</option>}
+                      <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
+                    </select>
+                  </Field>
+                )}
+                {hasEl && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    <button style={{ ...chip, flex: 1 }} onClick={clearMultiElStyle} title="Revert every selected element to its type default colors">Reset</button>
+                  </div>
+                )}
+                <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>Editing {multiMembers.length} item{multiMembers.length === 1 ? "" : "s"}. Only the properties they share are shown.</div>
+              </Section>
+              </div>
+            );
+          })()}
           {/* selected easement — first-class attributes (NEW-1) */}
-          {selMarkup && selMarkup.kind === "easement" && (() => {
+          {!multiStyleable && selMarkup && selMarkup.kind === "easement" && (() => {
             const e = selMarkup;
             const t = easementType(e.easeType);
             const area = easementArea(e);
@@ -11089,7 +11234,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
           {/* selected markup shape — geometry + style */}
-          {selMarkup && selMarkup.kind !== "easement" && (() => {
+          {!multiStyleable && selMarkup && selMarkup.kind !== "easement" && (() => {
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
@@ -11164,7 +11309,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
           {/* selected callout — text styling */}
-          {selCallout && (() => {
+          {!multiStyleable && selCallout && (() => {
             const cs = calloutStyle(selCallout);
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
             // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
@@ -11205,7 +11350,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
           {/* selected element */}
-          {selEl && (
+          {!multiStyleable && selEl && (
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
               {!selEl.points ? (
                 <>
@@ -12097,7 +12242,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
 
           {/* Bluebeam-style Properties — colors for the selected element + set defaults */}
-          {selEl && curStyle && (
+          {!multiStyleable && selEl && curStyle && (
             <Section title="Properties">
               <Field label="Fill">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
