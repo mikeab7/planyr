@@ -221,10 +221,14 @@ const RAIL_ICONS = {
   analysis: <><line x1="6" y1="3" x2="6" y2="21" /><path d="M6 4 H18 L15 8 L18 12 H6 Z" /></>,
   // Yield — an ascending bar chart (the headline metrics)
   yield: <><line x1="3.5" y1="20.5" x2="20.5" y2="20.5" /><rect x="5" y="12" width="3.2" height="8" rx="0.5" /><rect x="10.4" y="8" width="3.2" height="12" rx="0.5" /><rect x="15.8" y="4" width="3.2" height="16" rx="0.5" /></>,
+  // Properties — an inspector panel with attribute rows (home for the selected element's fields)
+  properties: <><rect x="4" y="4" width="16" height="16" rx="2" /><line x1="8" y1="9" x2="16" y2="9" /><line x1="8" y1="12.5" x2="16" y2="12.5" /><line x1="8" y1="16" x2="13" y2="16" /></>,
   // References — two stacked backdrop sheets (aerial + plan overlays)
   references: <><rect x="3" y="8" width="12.5" height="12.5" rx="1.5" /><path d="M8 8 V5 A2 2 0 0 1 10 3 H19 A2 2 0 0 1 21 5 V16 A2 2 0 0 1 19 18 H15.5" /></>,
-  // Standards — a gear (default settings for new elements)
-  standards: <><circle cx="12" cy="12" r="3.4" /><path d="M12 2.5 V5.2 M12 18.8 V21.5 M21.5 12 H18.8 M5.2 12 H2.5 M18.7 5.3 L16.8 7.2 M7.2 16.8 L5.3 18.7 M18.7 18.7 L16.8 16.8 M7.2 7.2 L5.3 5.3" /></>,
+  // Standards — adjustment sliders (default settings for new elements). B721 first used a
+  // gear here, but at 17px the circle-plus-radial-spokes read as a SUN (owner report) — sliders
+  // are unambiguous "settings" and can't be mistaken for anything else.
+  standards: <><line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="20" y2="17" /><circle cx="9" cy="7" r="2.4" fill="currentColor" stroke="none" /><circle cx="15" cy="12" r="2.4" fill="currentColor" stroke="none" /><circle cx="8" cy="17" r="2.4" fill="currentColor" stroke="none" /></>,
 };
 const RailIcon = ({ id, size = 17 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -7633,14 +7637,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
   // B721 — workflow order (was build order Yield/Parcel/Analysis…): you pick the land
-  // first (Parcel), screen it (Analysis), read the result (Yield), bring in backdrops
-  // (References), then defaults (Standards). Icons are real inline SVGs (RailIcon), keyed
-  // by id. There's no "Element" tab — element editing is the Properties companion (B656)
-  // that auto-appears when you select something on the canvas.
+  // first (Parcel), screen it (Analysis), read the result (Yield), edit a selected element
+  // (Properties), bring in backdrops (References), then defaults (Standards). Icons are real
+  // inline SVGs (RailIcon), keyed by id.
+  // Properties (B733) is the docked HOME for the element inspector — the B656 companion still
+  // auto-rides above another open panel when you select something, but this tab gives it a
+  // permanent, discoverable seat (with an empty state when nothing is selected).
   const leftTabs = [
     { id: "parcel", label: "Parcel" },
     { id: "analysis", label: "Analysis" },
     { id: "yield", label: "Yield" },
+    { id: "properties", label: "Properties" }, // B733: docked home for the selected-element inspector
     { id: "references", label: "References" }, // B654: Aerial + Overlay merged into one panel
     { id: "standards", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
   ];
@@ -7648,6 +7655,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // qualifying selection exists. On a phone it stays closed unless a panel is already
   // open (B556: tap = select only) or the ✎ Properties pill explicitly opened it.
   const companionOpen = companionSel && !propsDismissed && (!narrow || !!leftPanel || narrowProps);
+  // B733 — the Properties tab is active. When it is, the inspector docks as the MAIN panel
+  // (full height + its own empty state), rather than riding above another panel as the B656
+  // companion does. Properties is dock-only (it reuses the companion, which is outside the
+  // B717 float system), so it's excluded from the PanelChrome detach path below.
+  const propsTab = leftPanel === "properties";
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
     padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
@@ -8426,6 +8438,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     yield: "Yield",
     parcel: `Parcels · ${parcels.length - supersededParcelIds.size}`,
     analysis: "Site Analysis",
+    properties: "Properties", // B733 (dock-only; the companion supplies its body)
     references: "References",
     standards: "Standards",
   };
@@ -10456,40 +10469,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
-          {/* B718 — persistent Yield KPI strip. The left rail shows one panel at a time, so the
-              headline yield numbers vanish whenever another panel (Parcel, Element…) is open —
-              exactly when you're dragging a building and want to watch coverage. This bottom-center
-              pill keeps them on the canvas. It reads the SAME engine outputs the Yield panel does
-              (siteSqft / bldg / cov / stalls / ratio — never re-derives geometry, one source of
-              truth). Click opens the Yield panel. Hidden on a clean empty canvas; in the narrow
-              overlay layout (left panel covers the canvas) it truncates to Site · Coverage. */}
-          {siteSqft > 0 && (() => {
-            const items = narrow
-              ? [["Site", `${f2(siteSqft / SQFT_PER_ACRE)} ac`], ["Cover", `${f0(cov)}%`]]
-              : [
-                  ["Site", `${f2(siteSqft / SQFT_PER_ACRE)} ac`],
-                  ["Bldg", `${f0(bldg / 1000)}k sf`],
-                  ["Cover", `${f0(cov)}%`],
-                  ["Stalls", `${f0(stalls)}${ratio ? ` · ${f2(ratio)}/1k` : ""}`],
-                ];
-            const nodes = [];
-            items.forEach(([label, value], i) => {
-              if (i > 0) nodes.push(<span key={`d${i}`} style={{ width: 1, height: 22, background: "rgba(255,255,255,0.18)", flex: "none" }} />);
-              nodes.push(
-                <span key={label} style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.15 }}>
-                  <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.78)" }}>{label}</span>
-                  <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, fontWeight: 700, color: "#fff", fontVariantNumeric: "tabular-nums" }}>{value}</span>
-                </span>
-              );
-            });
-            return (
-              <button data-export="skip" data-testid="yield-kpi-strip" onClick={() => setLeftPanel("yield")} title="Open the Yield panel"
-                style={{ position: "absolute", left: "50%", bottom: 40, transform: "translateX(-50%)", zIndex: 6, display: "flex", alignItems: "center", gap: 11, background: "rgba(25,22,19,0.92)", border: "none", borderRadius: 99, padding: "6px 15px", boxShadow: "0 6px 22px rgba(0,0,0,0.28)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                {nodes}
-              </button>
-            );
-          })()}
-
           {/* B656: on a phone, selection alone never opens the overlay (B556) — this pill is
               the explicit affordance: tap it to open the Properties companion as an overlay. */}
           {narrow && companionSel && !leftPanel && !narrowProps && (
@@ -10875,6 +10854,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 aria-pressed={leftPanel === tb.id || isFloating(tb.id)}
                 onClick={() => {
                   if (isFloating(tb.id)) { closeFloating(tb.id); return; } // re-clicking a floating panel's icon closes it
+                  // B733: opening Properties un-dismisses + expands the inspector (a prior ✕/collapse
+                  // shouldn't leave the freshly-opened tab looking empty or headers-only).
+                  if (tb.id === "properties") { setPropsDismissed(false); setPropsCollapsed(false); }
                   setLeftPanel((p) => (p === tb.id ? null : tb.id));
                 }}>
                 <span style={{ display: "grid", placeItems: "center", height: 18, lineHeight: 1 }}><RailIcon id={tb.id} /></span>
@@ -10890,8 +10872,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
               so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).
               With no panel open it takes the full column. */}
-          {companionOpen && (
-          <div data-testid="property-panel" style={{ flex: leftPanel ? "0 1 auto" : "1 1 auto", maxHeight: leftPanel ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: leftPanel ? "1px solid var(--border-default)" : "none" }}>
+          {/* B733: also render when the Properties tab is active (even if a prior ✕ dismissed the
+              companion) — the tab is an explicit request to see the inspector. When it's the active
+              tab the inspector is the MAIN panel (full height, no 45% cap, no bottom divider). */}
+          {(companionOpen || (propsTab && companionSel)) && (
+          <div data-testid="property-panel" style={{ flex: (leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (leftPanel && !propsTab) ? "1px solid var(--border-default)" : "none" }}>
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
@@ -10901,7 +10886,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* B656 follow-up: explicit close. On the phone-pill overlay it just closes the overlay (element stays
                 selected, pill returns); everywhere else it dismisses the companion but KEEPS the element selected —
                 re-clicking the element (or picking another) reopens it via the [sel] effect above. */}
-            <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — click it again to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsDismissed(true); }}>✕</button>
+            {/* B733: the ✕ dismisses the auto-companion — but in the Properties TAB it would do
+                nothing visible (the tab re-shows it), so hide it there; you close the tab from the rail. */}
+            {!propsTab && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — click it again to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsDismissed(true); }}>✕</button>}
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
@@ -12005,7 +11992,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </>)}
           </div>
           )}
-          {leftPanel && (<>
+          {/* B733 — Properties tab with nothing selected: an explicit empty state so the tab is
+              never a blank column. (Parcels are edited in their own Parcel panel, not here.) */}
+          {propsTab && !companionSel && (
+          <div data-testid="property-panel" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "15px 14px" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, marginBottom: 9 }}>Properties</div>
+            <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.65 }}>
+              Nothing selected. Click a building, pond, parking, trailer, road, easement, or markup on the canvas to edit its properties here. Parcels have their own <button style={linkBtn} onClick={() => setLeftPanel("parcel")}>Parcel</button> panel.
+            </div>
+          </div>
+          )}
+          {/* B733: Properties reuses the companion (above) as its docked body, so it must NOT go
+              through the standard PanelChrome + renderPanelBody path (there's no "properties" case
+              there, and Properties is intentionally dock-only / non-floating). */}
+          {leftPanel && !propsTab && (<>
           <PanelChrome
             title={panelTitle[leftPanel]} floating={false} canFloat={!narrow}
             onDetach={() => detachPanel(leftPanel)}
