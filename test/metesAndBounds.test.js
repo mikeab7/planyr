@@ -68,3 +68,26 @@ describe("metes-and-bounds parser + plotter", () => {
     expect(ringsOverlap(a, [])).toBe(false);
   });
 });
+
+
+describe("spelled-out DEG./MIN./SEC. bearings (survey verbose form)", () => {
+  it("parses 'NORTH nn DEG. nn MIN. nn SEC. WEST' keeping West (no DEG-letter leak)", () => {
+    const c = parseCalls("THENCE NORTH 02 DEG. 29 MIN. 38 SEC. WEST, A DISTANCE OF 531.21 FEET");
+    expect(c).toHaveLength(1);
+    expect(c[0].az).toBeCloseTo(357.506, 2); // N 2 deg 29' 38" W
+    expect(c[0].distFt).toBeCloseTo(531.21, 2);
+  });
+  it("keeps minutes + seconds (not just whole degrees) in the verbose form", () => {
+    const c = parseCalls("THENCE SOUTH 23 DEG. 57 MIN. 24 SEC. WEST, A DISTANCE OF 29.45 FEET");
+    expect(c[0].az).toBeCloseTo(203.957, 2); // S 23 deg 57' 24" W
+  });
+  it("parses fully spelled-out degrees / minutes / seconds", () => {
+    const c = parseCalls("THENCE North 87 degrees 04 minutes 16 seconds East, 1773.49 feet");
+    expect(c[0].az).toBeCloseTo(87.071, 2);
+    expect(c[0].distFt).toBeCloseTo(1773.49, 2);
+  });
+  it("still parses the compact symbol DMS form", () => {
+    const c = parseCalls('THENCE S 16°13\'23" E, 403.47 feet');
+    expect(c[0].az).toBeCloseTo(163.777, 2);
+  });
+});

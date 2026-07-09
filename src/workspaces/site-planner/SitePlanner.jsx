@@ -1510,7 +1510,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [deedName, setDeedName] = useState("");      // last-read deed file name
   const [deedDrag, setDeedDrag] = useState(false);   // drop-zone hover state
   const deedFileRef = useRef(null);
-  const deedReqRef = useRef(0);                       // in-flight read token (ignore a stale read)
+  const deedReqRef = useRef(0);
+  const [deedQueue, setDeedQueue] = useState([]); // dropped deeds waiting to be placed (multi-file)
+  const [deedActiveId, setDeedActiveId] = useState(null); // the queue row currently loaded in the textarea                       // in-flight read token (ignore a stale read)
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
   // Single-owner warning toast (B56b): every non-empty warning goes through flashWarn,
   // which cancels any pending auto-clear first — so a stale timer from an earlier message
@@ -7947,25 +7949,88 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // --- Title reader + metes-and-bounds plotting ---
   const elRingOf = (el) => (el.points ? el.points : elCorners(el));
 
-  // Read a dropped/selected deed file (.docx / .txt) into the plotter textarea so
-  // the user can "just drop in the files" instead of pasting. Parses on the way in
-  // to give an immediate honest read-out (calls found, or why not).
-  const readDeed = async (file) => {
-    if (!file) return;
-    const myReq = ++deedReqRef.current; // a newer drop supersedes a slow in-flight read
-    setDeedErr(""); setDeedBusy(true); setDeedName(file.name || "");
+  // Read one or several dropped/selected deed files (.doc/.docx/.pdf/.txt) into a queue so the user
+  // can "just drop in the files" instead of pasting. Each file is read + parsed on the way in for an
+  // immediate honest read-out (calls found, or why not); the first readable one loads into the
+  // plotter textarea. A single-file drop behaves exactly as before.
+  const readDeeds = async (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    const myReq = ++deedReqRef.current; // a newer drop supersedes a slow in-flight batch
+    setDeedErr(""); setDeedBusy(true);
     try {
-      const text = await readDeedFile(file);
+      const rows = [];
+      for (const file of list) {
+        const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "" };
+        try {
+          const text = await readDeedFile(file);
+          row.text = text;
+          const tracts = parseTracts(text);
+          const b = tracts[0];
+          row.boundaryCalls = b ? b.calls.length : 0;
+          row.exCount = Math.max(0, tracts.length - 1);
+          if (row.boundaryCalls) {
+            const p = callsToPath(b.calls, { x: 0, y: 0 });
+            row.closes = pathCloses(p);
+            row.gap = misclosure(p);
+          } else {
+            row.error = "No bearing/distance calls found — a survey drawing rather than a written description?";
+          }
+        } catch (e) {
+          row.error = (e && e.message) || "Couldn't read that file.";
+        }
+        rows.push(row);
+      }
       if (deedReqRef.current !== myReq) return;
-      setMbText(text);
-      const found = parseTracts(text).reduce((s, t) => s + t.calls.length, 0);
-      if (!found) setDeedErr("Read the file, but found no bearing/distance calls — is this a metes-and-bounds legal description?");
-    } catch (e) {
-      if (deedReqRef.current !== myReq) return;
-      setDeedErr((e && e.message) || "Couldn't read that file.");
+      setDeedQueue(rows);
+      // Auto-load the first readable deed into the textarea (single-file parity).
+      const firstOk = rows.find((r) => !r.error && r.boundaryCalls > 0) || rows.find((r) => !r.error) || rows[0];
+      if (firstOk) {
+        setDeedActiveId(firstOk.id); setDeedName(firstOk.name);
+        if (firstOk.text) setMbText(firstOk.text);
+        if (firstOk.error) setDeedErr(firstOk.error);
+        else if (!firstOk.boundaryCalls) setDeedErr("Read the file, but found no bearing/distance calls — is this a metes-and-bounds legal description?");
+      }
     } finally {
       if (deedReqRef.current === myReq) setDeedBusy(false);
     }
+  };
+
+  // Advance a multi-deed "Plot all" run: re-arm the POB prompt for the next queued deed, or finish
+  // with a summary when the queue is empty. Reads the live pobMode (a fresh closure each render).
+  const advanceDeed = (note) => {
+    const pm = pobMode;
+    const notes = note ? [...((pm && pm.notes) || []), note] : ((pm && pm.notes) || []);
+    const q = (pm && pm.queue) || [];
+    if (q.length) {
+      const next = q[0], placed = ((pm && pm.placed) || 0) + 1;
+      setPobMode({ tracts: next.tracts, asEasement: false, name: next.name, queue: q.slice(1), queueTotal: pm.queueTotal, placed, notes });
+      setSel(null); setTool("select");
+      flashWarn(`Deed ${placed + 1} of ${pm.queueTotal} — ${next.name}: click its point of beginning.`, 0);
+    } else {
+      setPobMode(null);
+      if (pm && pm.queueTotal) {
+        const bad = notes.filter((n) => n && n.bad).map((n) => n.name);
+        flashWarn(`All ${pm.queueTotal} deed${pm.queueTotal > 1 ? "s" : ""} placed.${bad.length ? ` ⚠ Verify: ${bad.join(", ")}.` : ""}`, 9000);
+      }
+    }
+  };
+
+  // Plot every readable deed in the queue, one after another — each armed for its own POB click.
+  const startPlotDeeds = (deeds) => {
+    if (!deeds.length) return;
+    setDeedAlignHint(null);
+    const first = deeds[0];
+    setPobMode({ tracts: first.tracts, asEasement: false, name: first.name, queue: deeds.slice(1), queueTotal: deeds.length, placed: 0, notes: [] });
+    setTitleOpen(false); setSel(null); setTool("select");
+    flashWarn(`Deed 1 of ${deeds.length} — ${first.name}: click its point of beginning.`, 0);
+  };
+  const plotAllDeeds = () => {
+    const deeds = deedQueue
+      .map((r) => ({ name: r.name, tracts: parseTracts(r.text || "") }))
+      .filter((d) => d.tracts[0] && d.tracts[0].calls.length);
+    if (!deeds.length) { flashWarn("No readable deeds to plot yet.", 5000); return; }
+    startPlotDeeds(deeds);
   };
 
   // Parse the legal description and arm POB placement (the user then clicks the
@@ -8015,7 +8080,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const anchorEncumbrance = (pob) => {
     const { tracts, asEasement } = pobMode;
     const main = tracts && tracts[0];
-    if (!main || !main.calls.length) { flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
+    if (!main || !main.calls.length) { if (pobMode && pobMode.queueTotal) { advanceDeed({ name: pobMode.name || "deed", bad: true }); return; } flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
     // NEW-2 — Easement path spawns a first-class Easement from the MAIN tract.
     if (asEasement) {
       const path = callsToPath(main.calls, pob);
@@ -8030,7 +8095,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const groupId = uid(); // links the boundary + its holes so Align moves them as one
     const built = buildEncumbranceMarkup(main.calls, pob, { label: (main.label && main.label !== "Boundary") ? main.label : "Tract boundary", group: groupId });
-    if (!built) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
+    if (!built) { if (pobMode && pobMode.queueTotal) { advanceDeed({ name: pobMode.name || "deed", bad: true }); return; } flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
     // SAVE-AND-EXCEPT holes: position each from its commencing tie off the same POB.
     const exMarks = [];
     for (const t of tracts.slice(1)) {
@@ -8045,7 +8110,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setMarkups((a) => [...a, built.mk, ...exMarks]);
     setSel({ kind: "markup", id: built.mk.id });
-    setPobMode(null);
     // overlap check against buildings + paving (main ring only)
     const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(built.ring, elRingOf(e)));
     const gap = built.gap;
@@ -8059,6 +8123,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const parts = [b && `${b} building${b > 1 ? "s" : ""}`, p && `${p} paving area${p > 1 ? "s" : ""}`].filter(Boolean).join(" and ");
       overlapNote = ` ⚠ Boundary overlaps ${parts}.`;
     }
+    // A multi-deed "Plot all" run: skip the per-deed basis-of-bearings hint (it would churn the
+    // banner across many deeds and re-run an O(parcels) solve each time) — accumulate a note and
+    // advance to the next deed's POB. The user aligns each afterward via the right-click menu.
+    if (pobMode && pobMode.queueTotal) {
+      advanceDeed({ name: pobMode.name || built.mk.label, bad: !built.closed || hits.length > 0 });
+      return;
+    }
+    setPobMode(null);
     // Basis-of-bearings check (deedAlign.js): a deed is drawn on the survey's grid/record
     // north but the county parcel + aerial are true north, so a raw plot lands rotated
     // ~1–2° (≈90 ft over a long line near Houston). If a parcel is loaded and the deed sits
@@ -12453,7 +12525,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <button className="gbtn" onClick={() => setTitleOpen(false)} style={{ ...chip }}>Close ✕</button>
             </div>
             <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 14 }}>
-              Upload a title commitment to pull its Schedule B exceptions into a checklist, or <b>drop a deed / legal description (.docx)</b> below to read and plot its metes-and-bounds boundary.
+              Upload a title commitment to pull its Schedule B exceptions into a checklist, or <b>drop one or several deeds / legal descriptions (.doc, .docx, PDF, or .txt)</b> below to read and plot their metes-and-bounds boundaries.
             </div>
 
             {/* API key */}
@@ -12508,20 +12580,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>2 · Plot a metes-and-bounds description</div>
               {/* Drop a deed file (.docx / .txt) → read its text into the box below. */}
-              <input ref={deedFileRef} data-testid="deed-file-input" type="file" accept=".docx,.txt,.text,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" style={{ display: "none" }}
-                onChange={(e) => { readDeed(e.target.files?.[0]); e.target.value = ""; }} />
+              <input ref={deedFileRef} data-testid="deed-file-input" type="file" multiple accept=".docx,.doc,.txt,.text,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/pdf,text/plain" style={{ display: "none" }}
+                onChange={(e) => { readDeeds(e.target.files); e.target.value = ""; }} />
               <div
                 onClick={() => !deedBusy && deedFileRef.current?.click()}
                 onDragOver={(e) => { e.preventDefault(); setDeedDrag(true); }}
                 onDragLeave={() => setDeedDrag(false)}
-                onDrop={(e) => { e.preventDefault(); setDeedDrag(false); readDeed(e.dataTransfer.files?.[0]); }}
+                onDrop={(e) => { e.preventDefault(); setDeedDrag(false); readDeeds(e.dataTransfer.files); }}
                 style={{ border: `1.5px dashed ${deedDrag ? PAL.accent : PAL.panelLine}`, background: deedDrag ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "default" : "pointer", marginBottom: 10 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>{deedBusy ? "Reading…" : "Drop a deed file here, or click to choose"}</div>
-                <div style={{ fontSize: 11, color: PAL.muted, marginTop: 3, lineHeight: 1.4 }}>Word (.docx) or text (.txt) — bearings, distances, curves, and save-and-except are read automatically.</div>
+                <div style={{ fontSize: 11, color: PAL.muted, marginTop: 3, lineHeight: 1.4 }}>Word (.doc / .docx), PDF, or text (.txt) — drop one or several; bearings, distances, curves, and save-and-except are read automatically.</div>
                 {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: "ui-monospace, monospace", wordBreak: "break-all" }}>📄 {deedName}</div>}
               </div>
               {deedErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{deedErr}</div>}
-              <textarea value={mbText} onChange={(e) => setMbText(e.target.value)} rows={5}
+              {deedQueue.length > 1 && (
+                <div style={{ marginBottom: 10, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, overflow: "hidden" }}>
+                  {deedQueue.map((r, i) => {
+                    const active = r.id === deedActiveId, ok = !r.error && r.boundaryCalls > 0;
+                    return (
+                      <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); if (r.text) setMbText(r.text); setDeedErr(""); }}
+                        style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: r.error ? "default" : "pointer", borderTop: i ? `1px solid ${PAL.panelLine}` : "none", background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
+                        <span style={{ fontSize: 11, color: r.error ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`}`}</span>
+                        {active && ok && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700, whiteSpace: "nowrap" }}>LOADED</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <textarea value={mbText} onChange={(e) => { const v = e.target.value; setMbText(v); setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: v } : r))); }} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
                 style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
@@ -12552,6 +12639,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </label>
                 )}
                 <div style={{ flex: 1 }} />
+                {deedQueue.filter((r) => !r.error && r.boundaryCalls > 0).length > 1 && (
+                  <button style={{ ...btn(true), padding: "8px 15px" }} onClick={plotAllDeeds} title="Place each dropped deed one after another — click the map for each one's point of beginning">Plot all {deedQueue.filter((r) => !r.error && r.boundaryCalls > 0).length} →</button>
+                )}
                 <button style={{ ...chip, padding: "8px 13px", opacity: calls.length ? 1 : 0.5 }} disabled={!calls.length} onClick={() => startPlotMetes(true)} title="Spawn a first-class Easement object (type/holder/etc. editable afterward in the Element panel)">Plot as easement →</button>
                 <button style={{ ...btn(true), padding: "8px 15px", opacity: calls.length ? 1 : 0.5 }} disabled={!calls.length} onClick={() => startPlotMetes(false)}>Plot on canvas →</button>
               </div>
@@ -12608,7 +12698,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
           background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
           color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
-          <span>{pobMode ? "Click the point of beginning on the plan to anchor the description (Esc to cancel)." : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
+          <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
           {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
           {deedAlignHint && !pobMode && !routeMode && <>
             <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>

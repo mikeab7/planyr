@@ -11,6 +11,8 @@
  * emit. We read the central directory (always carries correct sizes/offsets), so a
  * streamed entry with a trailing data descriptor is handled fine. */
 
+import { docToText } from "./docText.js";
+
 const u16 = (dv, o) => dv.getUint16(o, true);
 const u32 = (dv, o) => dv.getUint32(o, true);
 
@@ -127,16 +129,24 @@ export async function docxToText(arrayBuffer) {
 const isDocx = (file) =>
   /\.docx$/i.test(file.name || "") ||
   file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const isDoc = (file) =>
+  /\.doc$/i.test(file.name || "") || file.type === "application/msword";
+const isPdf = (file) =>
+  /\.pdf$/i.test(file.name || "") || file.type === "application/pdf";
 const isPlainText = (file) =>
   /\.(txt|text|md)$/i.test(file.name || "") || (file.type || "").startsWith("text/");
 
-/* Read a dropped/selected file into a legal-description text string. Handles .docx
- * (Word) and plain text; throws a friendly error for anything else (the caller shows
- * it). PDFs are read by the Schedule-B uploader, not here. */
+/* Read a dropped/selected file into a legal-description text string. Handles Word (.docx and the
+ * legacy binary .doc), PDF (embedded text layer), and plain text; throws a friendly error for
+ * anything else (the caller shows it). PDF extraction rides pdf.js, so pdfText.js is imported
+ * LAZILY — only a dropped PDF pulls it in, keeping pdf.js out of the common .docx/.txt/.doc path
+ * (and out of the vitest unit tests, which never exercise the PDF branch). */
 export async function readDeedFile(file) {
   if (!file) throw new Error("No file.");
   if (isDocx(file)) return docxToText(await file.arrayBuffer());
+  if (isDoc(file)) return docToText(await file.arrayBuffer());
+  if (isPdf(file)) return (await import("./pdfText.js")).pdfToDeedText(file);
   if (isPlainText(file)) return (await file.text()).trim();
   const ext = (file.name || "").split(".").pop();
-  throw new Error(`Can't read a .${ext || "?"} here — drop a Word (.docx) or text (.txt) legal description.`);
+  throw new Error(`Can't read a .${ext || "?"} here — drop a Word (.doc/.docx), PDF, or text (.txt) legal description.`);
 }

@@ -1,0 +1,5 @@
+BEGINNING at a found iron rod;
+THENCE N 45°00'00" E, 100.00 feet to a point;
+THENCE S 45°00'00" E, 100.00 feet to a point;
+THENCE S 45°00'00" W, 100.00 feet to a point;
+THENCE N 45°00'00" W, 100.00 feet to the POINT OF BEGINNING.
