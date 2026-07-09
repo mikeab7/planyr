@@ -2694,7 +2694,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
-      if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
+      if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
       if ((e.key === "Delete" || e.key === "Backspace") && (selRef.current || multiRef.current.length)) { e.preventDefault(); deleteSel(); } // read live selection (refs) — not the listener's possibly-stale closure
     };
     const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
@@ -2714,8 +2714,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { window.removeEventListener("keydown", sync); window.removeEventListener("keyup", sync); window.removeEventListener("blur", clear); };
   }, []);
 
-  const deleteSel = () => {
-    const sel = selRef.current, multi = multiRef.current; // live selection — robust to a stale keydown closure (NEW-1)
+  const deleteSel = (target) => {
+    // Optional explicit `target` ({kind,id}) lets a menu handler delete a just-clicked item WITHOUT waiting
+    // for a setSel() state update to land (the stale-selection class the refs were meant to kill, NEW-1).
+    // Guard on `.kind` so the five bare onClick={deleteSel} panel buttons — which pass a React event as
+    // arg 1 — still fall back to the live selection ref (a MouseEvent has no `.kind`).
+    const explicit = !!(target && target.kind);
+    const sel = explicit ? target : selRef.current, multi = explicit ? [] : multiRef.current; // live selection — robust to a stale keydown closure (NEW-1)
     if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
       pushHistory();
       const elIds = new Set();
@@ -3635,10 +3640,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSelVtx({ layer, id, index: edgeIndex + 1 });
   };
   // Delete control point `index` from its path, but never below the geometry's minimum.
+  // Returns TRUE only when it actually removed a control point; FALSE on every no-op / guard path (and
+  // clears the armed point first). The keyboard handler uses that boolean to FALL THROUGH to a whole-
+  // element delete instead of silently swallowing the keypress — a stale/at-min armed vertex must never
+  // wedge the Delete key (NEW-1/NEW-2).
   const deleteVtx = (layer, id, index) => {
     if (layer === "road") { // B718: interior-only + never below 2 points (removeRoadVertex guards both); keep vtx in sync.
       const el = els.find((x) => x.id === id);
-      if (!el || !isCenterlineRoad(el) || !canRemoveRoadVertex(el.pts, index)) return; // endpoint / min-2 → no-op
+      if (!el || !isCenterlineRoad(el) || !canRemoveRoadVertex(el.pts, index)) { setSelVtx(null); setRoadVtxSel(null); return false; } // endpoint / min-2 / stale index → clear the armed point so Delete can't wedge, then fall through to whole-road delete
       pushHistory();
       setEls((a) => a.map((x) => {
         if (x.id !== id || !isCenterlineRoad(x)) return x;
@@ -3647,16 +3656,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }));
       setSelVtx(null);
       setRoadVtxSel(null); // avoid a stale/off-by-one treatment target after the splice
-      return;
+      return true;
     }
+    // Non-road layers keep a per-type minimum vertex count. Decide up front whether `index` is actually
+    // removable, so a no-op clears the armed point + returns false (→ keyboard falls through to a whole-
+    // element delete) instead of silently doing nothing and leaving a bogus history entry.
+    let removable = false;
+    if (layer === "parcel") { const pc = parcels.find((p) => p.id === id); removable = !!pc && pc.points.length > 3; }
+    else if (layer === "el") { const x = els.find((e) => e.id === id); removable = !!(x && x.points && x.points.length > 3); }
+    else if (layer === "measure") { const mm = measures[id]; if (mm) { const pts = measPts(mm), min = measMode(mm) === "area" ? 3 : measMode(mm) === "count" ? 1 : 2; removable = pts.length > min; } }
+    else if (layer === "ease") { const x = markups.find((m) => m.id === id); if (x) { const p = easeEditPath(x), min = x.mode === "boundary" ? 3 : 2; removable = p.length > min; } }
+    else if (layer === "markup") { const x = markups.find((m) => m.id === id); if (x) { const pts = mkPts(x); removable = pts.length > mkMinPts(x); } }
+    if (!removable) { setSelVtx(null); setRoadVtxSel(null); return false; }
     const rm = (arr) => arr.filter((_, j) => j !== index);
     pushHistory();
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id && pc.points.length > 3 ? { ...pc, points: rm(pc.points) } : pc));
-    else if (layer === "el") setEls((a) => a.map((x) => x.id === id && x.points && x.points.length > 3 ? { ...x, points: rm(x.points) } : x));
-    else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => { if (k !== id) return mm; const pts = measPts(mm), min = measMode(mm) === "area" ? 3 : measMode(mm) === "count" ? 1 : 2; return pts.length > min ? { ...mm, mode: measMode(mm), pts: rm(pts) } : mm; }));
-    else if (layer === "ease") setMarkups((a) => a.map((x) => { if (x.id !== id) return x; const p = easeEditPath(x), min = x.mode === "boundary" ? 3 : 2; return p.length > min ? setEasePath(x, rm(p)) : x; }));
-    else if (layer === "markup") setMarkups((a) => a.map((x) => { if (x.id !== id) return x; const pts = mkPts(x); return pts.length > mkMinPts(x) ? setMkPts(x, rm(pts)) : x; }));
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: rm(pc.points) } : pc));
+    else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: rm(x.points) } : x));
+    else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: rm(measPts(mm)) } : mm));
+    else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, rm(easeEditPath(x))) : x));
+    else if (layer === "markup") setMarkups((a) => a.map((x) => x.id === id ? setMkPts(x, rm(mkPts(x))) : x));
     setSelVtx(null);
+    setRoadVtxSel(null);
+    return true;
   };
   // Capture-phase pointer / contextmenu / move on the canvas, so the SAME interaction reaches
   // every editable layer BEFORE its own handlers — without overlaying hit targets that would
@@ -3879,6 +3900,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "roadVtx") { // drag one vertex of a centerline road (B596/B597)
       const el = els.find((x) => x.id === d.id);
       if (!el || !isCenterlineRoad(el)) return;
+      d.moved = true; // NEW-1: a genuine reshape (vs a plain click) — cleared on release so Delete then targets the whole road, not this dot
       const ref = d.idx > 0 ? el.pts[d.idx - 1] : el.pts[d.idx + 1]; // 45°-lock against the neighbour
       const P = e.shiftKey && ref ? snapPt(snap45(ref, fp)) : snapPt(fp);
       setEls((arr) => arr.map((x) => {
@@ -4204,6 +4226,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const r = els.find((x) => x.id === d.id);
       const stt = r && roadRadiusStatus(r, settings);
       if (stt) flashWarn(`⚠ ${f0(stt.minR)}′ radius — below ${f0(stt.threshold)}′ min for ${stt.label}`, 6000);
+      if (d.moved) setSelVtx(null); // NEW-1: after actually reshaping a dot, Delete deletes the whole road; a plain click (no move) still arms the dot for a targeted vertex-delete
     }
     drag.current = null;
     setPanning(false);
@@ -7444,6 +7467,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const selected = roadVtxSel && roadVtxSel.id === el.id && roadVtxSel.idx === i;
             return (
               <circle key={`rv${i}`} cx={m.x} cy={m.y} r={isEnd ? 6 : 5.5} data-export="skip"
+                data-testid={`road-vtx-${i}`} data-road-endpoint={isEnd ? "1" : "0"}
                 fill={selected ? SEL_BLUE : SEL_HANDLE_FILL} stroke={selected ? SEL_HANDLE_FILL : SEL_BLUE} strokeWidth={1.75}
                 style={{ cursor: "grab" }} onPointerDown={(e) => startRoadVtx(e, el.id, i)}>
                 <title>{isEnd ? "Drag to move this end" : "Drag to move · select it in the panel to set sharp / arc / smooth"}</title>
@@ -12491,7 +12515,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {t.attachedTo
                     ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach</button>
                     : <button style={menuItem(false)} onClick={() => { setAttachFor(typeMenu.id); setTypeMenu(null); }}>Attach to…</button>}
-                  <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); deleteSel(); setTypeMenu(null); }}>Delete</button>
+                  <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { deleteSel({ kind: "el", id: typeMenu.id }); setTypeMenu(null); }}>Delete</button>
                 </>
               );
             })()}
