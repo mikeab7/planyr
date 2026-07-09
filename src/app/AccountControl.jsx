@@ -17,7 +17,7 @@
  * gate, sign-out, the menu primitive) is imported directly — this file is app-shell chrome, at
  * the same import depth Shell uses, so src/shared/ui stays free of workspace-lib imports.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { signOut } from "../workspaces/site-planner/lib/auth.js";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
@@ -79,6 +79,22 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
   const acctAnchor = useRef(null);
   const who = profileApi?.displayName;
+
+  // Close the dropdown on ANY workspace navigation. Every module switch — a tab click, a
+  // programmatic navigate, AND browser Back/Forward — goes through window.location.hash and
+  // fires `hashchange` (see app/route.js). The dropdown is a portal-to-body flyout (AnchoredMenu),
+  // and every kept-alive header renders its own AccountControl instance, so a menu left open while
+  // the user navigates via Back/Forward — the one nav path the click-away backdrop can't intercept —
+  // would leave THIS (now display:none) instance's portal hanging over the newly-active workspace.
+  // Closing on hashchange collapses it cleanly. In-page actions (Profile/Team/Settings open a modal,
+  // Sign out) don't change the hash, so they don't trip this. (B734 follow-up; broader AnchoredMenu
+  // class tracked in B735.) The listener is attached only while open.
+  useEffect(() => {
+    if (!acctOpen) return;
+    const close = () => setAcctOpen(false);
+    window.addEventListener("hashchange", close);
+    return () => window.removeEventListener("hashchange", close);
+  }, [acctOpen]);
 
   if (!supabaseConfigured()) {
     // Cloud not configured — show a "Cloud off" pill with an explanatory popover.
