@@ -37,7 +37,8 @@ import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import MarkupRenderer from "../../shared/markup/MarkupRenderer.jsx";
 import PropertyPanel from "../../shared/markup/PropertyPanel.jsx";
 import { propsForTool, columnMeta, toolById } from "../../shared/markup/tools.matrix.js";
-import { writeProp } from "../../shared/markup/propertySchema.js";
+import { writeProp, readProp } from "../../shared/markup/propertySchema.js";
+import { kindDefaults } from "../../shared/markup/markupStyle.js";
 import { bboxOfMarkup } from "../../shared/markup/markupModel.js";
 import { pickInMarquee, selMods, nextSelection, hasSelMod } from "../../shared/markup/selection.js";
 import { pickMarkup } from "../../shared/markup/hitTest.js";
@@ -1007,25 +1008,33 @@ export default function DocReview({
     pinchRef.current = pts.length >= 2 ? { mid: midpoint(pts[0], pts[1]), dist: Math.max(1, distance(pts[0], pts[1])) } : null;
   };
 
-  // Per-tool style defaults that override PROPERTY_COLUMNS defaults but yield to the user's
+  // Per-tool style defaults that override the kind + column defaults but yield to the user's
   // last-set sticky style (propStyle). Highlight is yellow + wide + translucent by default.
   const TOOL_DEFAULTS = { highlight: { stroke: "#fbbf24", strokeWidth: 12, opacity: 0.35 } };
 
-  const commit = (mk) => {
-    // Stamp the new markup with the current sticky style for its tool kind. The user's overrides
-    // (propStyle) take precedence over tool defaults, which take precedence over column defaults;
-    // explicit fields inside mk win over all.
+  // The style a new markup of `kind` will be stamped with. Precedence: the user's sticky style
+  // (propStyle) > per-tool default > the KIND's historical default (measures teal, annotations
+  // orange — kindDefaults) > the column default. The SINGLE source used by both commit() and the
+  // live draft preview, so a shape can never preview one color and commit another (B734).
+  const seedStyle = (kind) => {
     const style = {};
-    const toolDefs = TOOL_DEFAULTS[mk.kind] || {};
-    propsForTool(mk.kind).forEach((key) => {
+    const toolDefs = TOOL_DEFAULTS[kind] || {};
+    const kd = kindDefaults(kind);
+    propsForTool(kind).forEach((key) => {
       const v = propStyle[key] !== undefined ? propStyle[key]
         : toolDefs[key] !== undefined ? toolDefs[key]
+        : kd[key] !== undefined ? kd[key]
         : columnMeta(key)?.default;
       if (v !== undefined) style[key] = v;
     });
+    return style;
+  };
+
+  const commit = (mk) => {
+    // Stamp the new markup with the seeded style for its tool kind (explicit fields in mk win).
     const id = uid();
     pushHistory();
-    setMarkups((a) => [...a, { id, page, ...style, ...mk }]);
+    setMarkups((a) => [...a, { id, page, ...seedStyle(mk.kind), ...mk }]);
     setDraft(null);
     // Bluebeam: a single-use tool reverts to Select after one markup and selects the new one
     // (so its properties show + you can tweak it); a locked tool stays armed.
@@ -1080,16 +1089,13 @@ export default function DocReview({
       setMarkups((a) => a.map((m) => (m.id === ed.id ? { ...m, text } : m)));
     } else if (ed.calloutTip) {
       // New callout: pts[0] = leader tip (pointer target), pts[1] = text box anchor
-      const style = {};
-      propsForTool("callout").forEach((k) => { const v = propStyle[k] ?? columnMeta(k)?.default; if (v !== undefined) style[k] = v; });
       const id = uid();
-      setMarkups((a) => [...a, { id, page: ed.page, kind: "callout", pts: [ed.calloutTip, ed.pt], ...style, text }]);
+      setMarkups((a) => [...a, { id, page: ed.page, kind: "callout", pts: [ed.calloutTip, ed.pt], ...seedStyle("callout"), text }]);
       if (!toolLock) { setTool("select"); selectOne(id); }
     } else {
-      const style = {}; // honor the sticky text style (size/color/bold/…) set before drawing
-      propsForTool("text").forEach((k) => { const v = propStyle[k] ?? columnMeta(k)?.default; if (v !== undefined) style[k] = v; });
+      // honor the sticky text style (size/color/bold/…) set before drawing
       const id = uid();
-      setMarkups((a) => [...a, { id, page: ed.page, kind: "text", pts: [ed.pt], ...style, text }]);
+      setMarkups((a) => [...a, { id, page: ed.page, kind: "text", pts: [ed.pt], ...seedStyle("text"), text }]);
       if (!toolLock) { setTool("select"); selectOne(id); } // revert + select like the other tools
     }
   };
@@ -1647,7 +1653,11 @@ export default function DocReview({
     const S = (q) => ({ x: q.x * view.scale, y: q.y * view.scale });
     const pts = draft.pts.map(S);
     const cur = cursor ? S(cursor) : null;
-    const col = draft.kind === "calibrate" ? PAL.accent : MEASURE.has(draft.kind) ? "#0e7490" : "#b91c1c";
+    // WYSIWYG preview (B734): the draft shows the SAME stroke/fill the commit will stamp
+    // (seedStyle), so a pre-set custom color previews before release. Calibrate keeps the accent.
+    const st = seedStyle(draft.kind);
+    const col = draft.kind === "calibrate" ? PAL.accent : (st.stroke || (MEASURE.has(draft.kind) ? "#0e7490" : "#c2410c"));
+    const wash = ((st.fill && st.fill !== "none") ? st.fill : col) + "18";
 
     // Callout draft: first click pins the leader tip; show a rubber-band leader to the cursor
     if (draft.kind === "callout") {
@@ -1702,7 +1712,7 @@ export default function DocReview({
       const sw = isHL ? 10 : 2;
       const op = isHL ? 0.4 : 1;
       const d = "M " + pts.map((q) => `${q.x},${q.y}`).join(" L ");
-      return <path d={d} fill="none" stroke={isHL ? "#fbbf24" : col} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" opacity={op} />;
+      return <path d={d} fill="none" stroke={col} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" opacity={op} />;
     }
 
     // Region draft (eraser / snapshot): rubber-band rectangle
@@ -1710,7 +1720,7 @@ export default function DocReview({
       const a = pts[0];
       const x = Math.min(a.x, cur.x), y = Math.min(a.y, cur.y);
       const w = Math.abs(cur.x - a.x), h = Math.abs(cur.y - a.y);
-      return <rect x={x} y={y} width={w} height={h} fill={col + "18"} stroke={col} strokeWidth={1.5} strokeDasharray="5 4" />;
+      return <rect x={x} y={y} width={w} height={h} fill={wash} stroke={col} strokeWidth={1.5} strokeDasharray="5 4" />;
     }
 
     // Multi-point drafts (polygon, polyline, area, perimeter, count)
@@ -1723,7 +1733,7 @@ export default function DocReview({
       <g>
         {seq.length > 1 && (
           <polyline points={seq.map((q) => `${q.x},${q.y}`).join(" ")}
-            fill={draft.kind === "polygon" || draft.kind === "area" ? col + "18" : "none"}
+            fill={draft.kind === "polygon" || draft.kind === "area" ? wash : "none"}
             stroke={col} strokeWidth={2} strokeDasharray="5 4" />
         )}
         {closeSegment}
@@ -1957,7 +1967,10 @@ export default function DocReview({
               const selM = sel ? pageMarks.find((mm) => mm.id === sel) : null;
               const armed = (!selM && toolById(tool) && propsForTool(tool).length) ? tool : null;
               if (!selM && !armed) return null;
-              const subject = selM || { kind: armed, ...propStyle };
+              // Show the ACTUAL seeded style for an armed tool (seedStyle: propStyle > tool default >
+              // kind default > column default) so the panel swatch matches what will be drawn — a
+              // bare propStyle would show the generic orange column default for a teal measure (B734).
+              const subject = selM || { kind: armed, ...seedStyle(armed) };
               return (
                 <div style={{ flex: "none", borderTop: `1px solid ${PAL.line}` }}>
                   <div style={{ padding: "6px 12px 4px", fontSize: 10, color: PAL.muted, fontWeight: 700,
@@ -2080,7 +2093,9 @@ export default function DocReview({
                   onPointerDown={(ev) => ev.stopPropagation()}
                   onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); closeEditor(true); } else if (ev.key === "Escape") { ev.preventDefault(); closeEditor(false); } }}
                   onBlur={() => closeEditor(true)} placeholder="Text note…"
-                  style={{ position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", color: "#b91c1c", minWidth: 90, zIndex: 5 }} />
+                  style={{ position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff",
+                    // Match the committed text color (B734): an existing note's fontColor, else the pending sticky default.
+                    color: editing.id ? (readProp(markups.find((m) => m.id === editing.id) || {}, "fontColor") || "#1a1a1a") : (propStyle.fontColor ?? columnMeta("fontColor")?.default ?? "#1a1a1a"), minWidth: 90, zIndex: 5 }} />
               )}
               {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
               {calInput && (
