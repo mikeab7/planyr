@@ -20,7 +20,9 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `var()`). `ui/statusTokens.js` — the single project-status palette source. `ui/controls.jsx` —
   shared control primitives (Button/ToggleChip/IconButton/Field/Section/MenuItem) + the one
   radius/padding/type scale; token-driven, an `accent` prop keeps each module's hue (B657-5B).
-  `ui/AnchoredMenu.jsx` — the portal-to-body clamped flyout. `ui/FloatingPanel.jsx` +
+  `ui/AnchoredMenu.jsx` — the portal-to-body clamped flyout (placement math is pure, unit-tested
+  `ui/anchoredMenuPlacement.js` — `placeMenu`, which hides rather than corner-pins a
+  zero-sized/`display:none` anchor, B734). `ui/FloatingPanel.jsx` +
   `ui/PanelChrome.jsx` + pure `ui/floatingPanel.js` — the NEW-1 poppable-panel primitive (a
   left-rail panel detached into a draggable card over the map; clamp/persist/pan-isolation math
   is pure + unit-tested, host wiring lives in the Site Planner workspace).
