@@ -195,7 +195,8 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   });
 
   it("B557: account email renders are null-guarded (no 'undefined' in the pill/profile)", () => {
-    expect(read("../src/app/Shell.jsx")).toMatch(/Signed in as \$\{user\?\.email \|\| "\(no email\)"\}/);
+    // The account pill moved out of Shell into AccountControl (B734); the null-guard rode with it.
+    expect(read("../src/app/AccountControl.jsx")).toMatch(/Signed in as \$\{user\?\.email \|\| "\(no email\)"\}/);
     expect(read("../src/workspaces/site-planner/components/AuthPanel.jsx")).toMatch(/\{user\?\.email \|\| "\(no email\)"\}/);
   });
 
