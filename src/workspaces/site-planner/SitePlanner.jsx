@@ -61,6 +61,8 @@ import {
   outerRingsLngLat,
   lngLatRingToFeet,
   feetToLatLng,
+  aerialPlacement,
+  feetExtentToBbox,
   humanizeError,
 } from "./lib/arcgis.js";
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
@@ -6529,29 +6531,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
   };
-  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper) => {
-    if (!svgRef.current) return null;
-    let x, y, w, h;
-    if (frame) { // explicit print crop (feet) → exact paper-aspect viewBox
-      const a = f2p({ x: frame.cx - frame.wFt / 2, y: frame.cy - frame.hFt / 2 });
-      const b = f2p({ x: frame.cx + frame.wFt / 2, y: frame.cy + frame.hFt / 2 });
-      x = Math.min(a.x, b.x); y = Math.min(a.y, b.y); w = Math.abs(b.x - a.x); h = Math.abs(b.y - a.y);
-    } else {
-      let pts = [];
-      const dev = devExtent();
-      if (dev) pts = [{ x: dev.cx - dev.w / 2, y: dev.cy - dev.h / 2 }, { x: dev.cx + dev.w / 2, y: dev.cy + dev.h / 2 }];
-      else { parcels.forEach((p) => pts.push(...p.points)); els.forEach((e) => (e.points ? pts.push(...e.points) : pts.push(...elCorners(e)))); }
-      if (!pts.length && underlay) {
-        const sy = underlay.ftPerPxY || underlay.ftPerPx;
-        pts = [{ x: underlay.x, y: underlay.y }, { x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy }];
-      }
-      if (!pts.length) return null;
-      const PAD = 60; // ft of margin around the site
-      const minX = Math.min(...pts.map((p) => p.x)) - PAD, maxX = Math.max(...pts.map((p) => p.x)) + PAD;
-      const minY = Math.min(...pts.map((p) => p.y)) - PAD, maxY = Math.max(...pts.map((p) => p.y)) + PAD;
-      const a = f2p({ x: minX, y: minY }), b = f2p({ x: maxX, y: maxY });
-      x = Math.min(a.x, b.x); y = Math.min(a.y, b.y); w = Math.abs(b.x - a.x); h = Math.abs(b.y - a.y);
+  // The feet extent an export will crop to (B735) — ONE source of truth so the synthesized
+  // aerial (exportAerialForFrame) can never disagree with the viewBox buildExportSvg renders.
+  // With an explicit print crop → that frame; otherwise the development bounds, else the bare
+  // parcel/element bounds, else the underlay bounds (matching what the sheet actually shows),
+  // padded. Returns {minX,minY,maxX,maxY} in feet, or null when there's genuinely nothing to frame.
+  const exportFeetExtent = (frame) => {
+    if (frame) {
+      return { minX: frame.cx - frame.wFt / 2, minY: frame.cy - frame.hFt / 2, maxX: frame.cx + frame.wFt / 2, maxY: frame.cy + frame.hFt / 2 };
     }
+    let pts = [];
+    const dev = devExtent();
+    if (dev) pts = [{ x: dev.cx - dev.w / 2, y: dev.cy - dev.h / 2 }, { x: dev.cx + dev.w / 2, y: dev.cy + dev.h / 2 }];
+    else { parcels.forEach((p) => pts.push(...p.points)); els.forEach((e) => (e.points ? pts.push(...e.points) : pts.push(...elCorners(e)))); }
+    if (!pts.length && underlay) {
+      const sy = underlay.ftPerPxY || underlay.ftPerPx;
+      pts = [{ x: underlay.x, y: underlay.y }, { x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy }];
+    }
+    if (!pts.length) return null;
+    const PAD = 60; // ft of margin around the site
+    return {
+      minX: Math.min(...pts.map((p) => p.x)) - PAD, maxX: Math.max(...pts.map((p) => p.x)) + PAD,
+      minY: Math.min(...pts.map((p) => p.y)) - PAD, maxY: Math.max(...pts.map((p) => p.y)) + PAD,
+    };
+  };
+  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null) => {
+    if (!svgRef.current) return null;
+    const fe = exportFeetExtent(frame);
+    if (!fe) return null;
+    const a = f2p({ x: fe.minX, y: fe.minY }), b = f2p({ x: fe.maxX, y: fe.maxY });
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
     const clone = svgRef.current.cloneNode(true);
     clone.querySelectorAll('[data-export="skip"]').forEach((n) => n.remove());
     clone.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
@@ -6563,21 +6572,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
     bg.setAttribute("fill", paper); // PDF export passes white (screen cream wastes ink); PNG keeps the screen page colour
     clone.insertBefore(bg, clone.firstChild);
-    // Always include the aerial underlay (even if it's hidden on screen), placed
-    // beneath everything but the paper, so prints/exports keep the satellite.
-    if (underlay) {
+    // Always include the aerial (even if it's hidden on screen), placed beneath everything
+    // but the paper, so prints/exports keep the satellite. Two sources (B735): when the LIVE
+    // basemap is on, the on-screen aerial is a Leaflet tile <div> the SVG clone can't capture
+    // (it's a sibling of the exported <svg>, tagged data-export="skip"), so the caller passes
+    // `exportAerial` — a frame-exact snapshot synthesized from the SAME source's `export`
+    // endpoint. Otherwise fall back to the persisted `underlay` (a dropped screenshot or a
+    // from-map capture). Both place the image in the SAME feet frame as the parcels via f2p,
+    // so it aligns exactly; the live <image> is tagged data-export-aerial so inlineImages can
+    // raise a LOUD warning (never a silent white PDF) if the remote fetch is dropped.
+    //
+    // Fallback layering: when the live synth is used AND a RELIABLE local underlay exists (a
+    // dropped screenshot — its src is a self-contained data: URL that inlineImages never drops),
+    // draw that underlay UNDERNEATH the live aerial. If the live fetch is dropped, the underlay
+    // still shows real imagery instead of white; if it succeeds it fully covers the underlay.
+    const aerials = [];
+    if (exportAerial) {
+      if (underlay && typeof underlay.src === "string" && underlay.src.startsWith("data:")) aerials.push({ a: underlay, tag: false }); // reliable fallback, bottom
+      aerials.push({ a: exportAerial, tag: true }); // live view, on top (the LOUD-FAILURE marker)
+    } else if (underlay) {
+      aerials.push({ a: underlay, tag: true });
+    }
+    if (aerials.length) {
       clone.querySelectorAll('image:not([data-overlay-image])').forEach((n) => n.remove()); // drop any live aerial copy — keep the placed site-plan overlays (handled below)
-      const tl = f2p({ x: underlay.x, y: underlay.y });
-      const sy = underlay.ftPerPxY || underlay.ftPerPx;
-      const im = document.createElementNS("http://www.w3.org/2000/svg", "image");
-      im.setAttribute("href", underlay.src);
-      im.setAttributeNS("http://www.w3.org/1999/xlink", "href", underlay.src);
-      im.setAttribute("x", tl.x); im.setAttribute("y", tl.y);
-      im.setAttribute("width", underlay.imgW * underlay.ftPerPx * view.ppf);
-      im.setAttribute("height", underlay.imgH * sy * view.ppf);
-      im.setAttribute("preserveAspectRatio", "none");
-      im.setAttribute("opacity", underlay.opacity ?? 1);
-      clone.insertBefore(im, bg.nextSibling);
+      let anchor = bg; // insert each aerial right after the previous → preserves bottom→top paint order
+      for (const { a, tag } of aerials) {
+        const tl = f2p({ x: a.x, y: a.y });
+        const sy = a.ftPerPxY || a.ftPerPx;
+        const im = document.createElementNS("http://www.w3.org/2000/svg", "image");
+        im.setAttribute("href", a.src);
+        im.setAttributeNS("http://www.w3.org/1999/xlink", "href", a.src);
+        im.setAttribute("x", tl.x); im.setAttribute("y", tl.y);
+        im.setAttribute("width", a.imgW * a.ftPerPx * view.ppf);
+        im.setAttribute("height", a.imgH * sy * view.ppf);
+        im.setAttribute("preserveAspectRatio", "none");
+        im.setAttribute("opacity", a.opacity ?? 1);
+        if (tag) im.setAttribute("data-export-aerial", "1"); // LOUD-FAILURE marker: a dropped fetch here must warn, not silently blank the PDF
+        clone.insertBefore(im, anchor.nextSibling);
+        anchor = im;
+      }
     }
     // Site-plan overlays (B72) obey the print dialog's "Print overlay" toggle (B131):
     // off → drop every placed overlay raster (its editor chrome + any unsynced
@@ -6676,27 +6709,59 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ~INLINE_TIMEOUT_MS, not unbounded. On timeout/CORS/non-200 we drop the image (PNG)
   // or keep its remote href (print can still load it natively).
   const INLINE_TIMEOUT_MS = 8000;
+  // Returns { aerialDropped } (B735, LOUD-FAILURE): true when the aerial <image> (tagged
+  // data-export-aerial) couldn't be fetched/inlined and was dropped — so the caller can warn
+  // the user instead of silently handing them a background-less PDF.
   const inlineImages = async (root, dropOnFail = true) => {
     const XL = "http://www.w3.org/1999/xlink";
     const imgs = [...root.querySelectorAll("image")];
+    let aerialDropped = false;
     await Promise.all(imgs.map(async (img) => {
       const href = img.getAttribute("href") || img.getAttributeNS(XL, "href");
       if (!href || href.startsWith("data:")) return;
+      const isAerial = img.hasAttribute("data-export-aerial");
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), INLINE_TIMEOUT_MS);
       try {
         const blob = await fetch(href, { mode: "cors", signal: ctrl.signal }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
         const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
         img.setAttribute("href", dataUrl); img.removeAttributeNS(XL, "href");
-      } catch (_) { if (dropOnFail) img.remove(); }
+      } catch (_) { if (dropOnFail) { img.remove(); if (isAerial) aerialDropped = true; } }
       finally { clearTimeout(timer); }
     }));
+    return { aerialDropped };
+  };
+  // Synthesize a frame-exact aerial for the export (B735). The live basemap is a Leaflet tile
+  // <div> that the exported SVG can't capture, so when it's on we request ONE stitched image
+  // from the active source's `export` endpoint covering exactly the printed area, placed in the
+  // same feet frame as the parcels (aerialPlacement reverses feetExtentToBbox exactly) so it
+  // aligns pixel-for-pixel. Esri's endpoint is verified CORS `*` (a plain fetch inlines cleanly);
+  // USGS's is expected to be but is pending the live check (V251) — either way, a source that
+  // ISN'T CORS-open just drops the aerial and warns loudly (LOUD-FAILURE), never a silent white
+  // sheet. Returns null when there's no live basemap to capture (then buildExportSvg falls back
+  // to any dropped/from-map underlay).
+  const exportAerialForFrame = (frame) => {
+    if (!origin || !basemapOn) return null;
+    const bm = BASEMAPS[basemapSrc] || BASEMAPS.esri;
+    // Use the SAME extent buildExportSvg crops to (dev → parcels → underlay), so a parcels-only
+    // site (deed imported, no massing yet) over the live basemap still gets its aerial — the old
+    // dev-only guard returned null there and silently exported white (B735 review, all 4 lenses).
+    const ext = exportFeetExtent(frame);
+    if (!ext) return null;
+    // ⚠ ARG-ORDER LANDMINE: feetExtentToBbox takes (ext, LAT, LON) but aerialPlacement takes
+    // (bbox, LON, LAT) — latitude and longitude are swapped between the two. Keep them exactly
+    // as written; flipping either pair silently offsets the aerial by thousands of feet.
+    const bbox = feetExtentToBbox(ext, origin.lat, origin.lon);
+    // maxPx 2400 (> the underlay's 1800) keeps the print-DPI raster crisp; ArcGIS export
+    // caps at 4096, so this stays well inside the limit for any single sheet.
+    return { ...aerialPlacement(bbox, origin.lon, origin.lat, { exportBase: bm.export, maxPx: 2400 }), opacity: 1, fromMap: true };
   };
   const exportPNG = async () => {
-    const built = buildExportSvg(printFrame); // use the print crop if one's set, else dev extent
+    const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap for the export
+    const built = buildExportSvg(printFrame, true, PAL.paper, exportAerial); // use the print crop if one's set, else dev extent
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     const { clone, w, h } = built;
-    await inlineImages(clone); // embed the aerial so the raster includes it
+    const { aerialDropped } = await inlineImages(clone); // embed the aerial so the raster includes it (warned loudly on the success path below — B735)
     // Thin line work + restyle labels to the SAME physical weights the PDF uses, by
     // scaling against a notional letter-landscape plan box (PNG has no paper of its own),
     // so a downloaded PNG looks as crisp/professional as the PDF (NEW-2 / NEW-3).
@@ -6718,6 +6783,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         aEl.download = `${sheetFileName({ project: siteLabel, plan: planLabel })}.png`; // B201
         aEl.click();
         URL.revokeObjectURL(aEl.href);
+        // B735 LOUD-FAILURE: the PNG downloaded but without the aerial — say so (⚠ = red banner).
+        if (aerialDropped) flashWarn("⚠ Couldn't load the satellite imagery, so the PNG was exported without it. Check your connection and try again — your plan and measurements are all included.", 8000);
       }, "image/png");
     } catch (_) {
       // image.onerror, a CORS-tainted canvas (the aerial basemap), or drawImage failing
@@ -6780,13 +6847,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
-    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff"); // force WHITE paper for print/PDF
+    const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial); // force WHITE paper for print/PDF
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     setExportingPDF(true);
     try {
       // Embed the aerial (and any placed overlay) as data URLs; DROP any we can't fetch so
-      // a cross-origin image can't taint the canvas and abort the whole export (B202).
-      await inlineImages(built.clone, true);
+      // a cross-origin image can't taint the canvas and abort the whole export (B202). A
+      // dropped AERIAL is surfaced loudly on the success path below (B735) — never a silent
+      // white-background PDF. The warning waits until the file actually downloads, so a later
+      // render/encode failure (which throws to the outer catch) can't leave a contradictory toast.
+      const { aerialDropped } = await inlineImages(built.clone, true);
       mark("inline images");
       // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg> sized to
       // the layout's plan box (it keeps its own viewBox); the title block, buildings table
@@ -6839,6 +6910,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         aEl.click();
         mark("downloaded");
         URL.revokeObjectURL(aEl.href); // B544: revoke now (matches the PNG path L5112) — the 8s timer leaked a blob URL per export on rapid re-export / navigation
+        // B735 LOUD-FAILURE: the file DID download, but without the aerial — say so (⚠ = red banner, not the success green).
+        if (aerialDropped) flashWarn("⚠ Couldn't load the satellite imagery, so the PDF was exported without it. Check your connection and try again — your plan and measurements are all included.", 8000);
       } finally { URL.revokeObjectURL(url); }
     } catch (_) {
       // A CORS-tainted canvas (the aerial basemap) is the usual culprit; surfaced, not silent (B50).
