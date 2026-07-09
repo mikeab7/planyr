@@ -4,12 +4,13 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _55 open · 34 awaiting live verification._
+> _56 open · 35 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B736 | GIS overlay layers (floodplain / wetlands / etc.) are absent from the PDF/PNG export | [Site Planner / GIS · export] | #site-planner #export #gis | live |
 | B720 | Canonical thoroughfare-segment data model + jurisdiction registry | [Site Planner / GIS · data model] | #thoroughfare #gis #persistence #coordinates | live |
 | B721 | Ingestion adapter #1: City of Houston Major Thoroughfare & Freeway Plan (MTFP) | [Site Planner / GIS · ingestion] | #thoroughfare #gis | live |
 | B722 | Config-driven ingestion adapters: surrounding jurisdictions (Harris · Fort Bend · Pearland · Montgomery · H-GAC) | [Site Planner / GIS · ingestion] | #thoroughfare #gis | live |
@@ -70,6 +71,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B735 | Satellite/aerial basemap missing from PDF/PNG export (plan prints on a blank white background) | [Site Planner] | #site-planner #export #gis | ⏳ live — awaiting |
 | B719 | Road curb/border drawn far too thick: size it to a true 6″ (0.5′) curb, to scale | [Site Planner] | #site-planner #road #ui | ⏳ live — awaiting |
 | B734 | Account dropdown opens pinned to the top-left corner instead of under the account pill | [App Shell / UI] | #ui #infra | ⏳ live — awaiting |
 | B717 | Poppable / floating left panels + always-visible icon rail for the Site Planner | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
@@ -113,10 +115,10 @@
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B687, B685, B667, B659
 - **#drive** — B663, B662, B629, B409, B699, B701, B687
 - **#entitlements** — B725, B726
-- **#export** — B712, B684
+- **#export** — B736, B735, B712, B684
 - **#files** — B180, B181, B182, B183, B699, B687, B685, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
-- **#gis** — B720, B721, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B707, B712, B703, B704, B705, B706, B695, B694, B693
+- **#gis** — B736, B720, B721, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B735, B707, B712, B703, B704, B705, B706, B695, B694, B693
 - **#infra** — B726, B408, B406, B179, B63, B734, B675, B669
 - **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268
@@ -126,7 +128,7 @@
 - **#road** — B719
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B682, B651
-- **#site-planner** — B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B736, B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B735, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413
 - **#testing** — B269, B63
 - **#thoroughfare** — B720, B721, B722, B723, B724, B725, B726
