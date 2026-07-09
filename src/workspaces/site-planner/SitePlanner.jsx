@@ -20,6 +20,7 @@ import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
+import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
@@ -2981,14 +2982,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (hit) { toggleMerge(hit.id); setSel({ kind: "parcel", id: hit.id }); return; }
       }
       if (e.shiftKey) {
-        // Shift-click a parcel BODY → toggle it into the merge selection. B420 makes the
+        // Shift-click a parcel BODY → add it to the merge selection. B420 makes the
         // parcel interior click-through (only its boundary hit-stroke grabs), so a Shift-press
         // in the body lands here on the background — without this it started a marquee and the
         // merge pick was silently missed, which read as "Shift-click needs several tries" (NEW-2).
         // Topmost (last-drawn) parcel under the point wins, matching the boundary-stroke path.
+        // B735: shiftPickParcel SEEDS the set from the current single selection so a plain-click
+        // A then Shift-click B keeps A (a plain click only ever put A in `sel`, not combineSel).
         if (settings.parcelSelect) {
           const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
-          if (hit) { toggleMerge(hit.id); setSel({ kind: "parcel", id: hit.id }); return; }
+          if (hit) { shiftPickParcel(hit.id); return; } // shiftPickParcel owns `sel` (B735)
         }
         // Shift-drag empty canvas → marquee select
         drag.current = { mode: "marquee", a: fp };
@@ -2998,7 +3001,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       setSel(null); setMulti([]); setDrillId(null);
       setPanning(true);
-      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
+      // B735: tag a plain background press so a genuine TAP on empty canvas (tiny travel) clears the
+      // merge selection in onUp, while a real pan (larger travel) leaves it untouched. Not in merge-
+      // pick mode — there an empty click intentionally keeps the set (B720).
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapEmpty: !mergePick, downX: e.clientX, downY: e.clientY, downT: Date.now() };
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
@@ -3168,6 +3174,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (pc && pc.active === false) return s;
     return [...s, id];
   });
+  // B735 — Shift-click / additive merge pick. Unlike toggleMerge (used by the B720 pick MODE,
+  // where the whole set is built from scratch), this SEEDS the set from the current single
+  // selection first — so a plain-click A then Shift-click B accumulates [A,B] instead of
+  // silently dropping A (the parcel that was only ever in `sel`, never in the merge set). The
+  // seed + inactive guard + toggle math live in the pure lib (reuses shared nextSelection).
+  // It OWNS `sel` too (callers must NOT setSel after it): a click that adds a parcel makes it
+  // primary, but a click that REMOVES one must never leave `sel` on the just-removed parcel —
+  // otherwise the seed would resurrect it on the next Shift-click. So on removal `sel` falls back
+  // to the last remaining picked parcel (or clears).
+  const shiftPickParcel = (id) => {
+    const next = extendMergeSelection(combineSel, id, {
+      primaryId: sel?.kind === "parcel" ? sel.id : null,
+      isActive: (pid) => parcels.find((p) => p.id === pid)?.active,
+    });
+    setCombineSel(next);
+    const removed = combineSel.includes(id) && !next.includes(id);
+    setSel(removed ? (next.length ? { kind: "parcel", id: next[next.length - 1] } : null) : { kind: "parcel", id });
+  };
   // B720 — click-to-pick merge mode. After pressing "Merge" in the Parcel-panel ops row,
   // plain clicks (canvas body, boundary stroke, or list rows) toggle parcels into the merge
   // set — no Shift knowledge required. Reuses toggleMerge (keeps the B170 inactive-parcel
@@ -3176,6 +3200,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMergePick = () => {
     if (tool !== "select") selectTool("select"); // pick mode lives in Select — a draw tool switches first (edge case)
     setMergePick(true);
+    // B735 — carry the already-selected parcel into the merge set so pressing Merge keeps your
+    // pick (you then click more parcels to add them). Inactive parcels never merge (B170).
+    setCombineSel((s) => (sel?.kind === "parcel" && !s.includes(sel.id) && parcels.find((p) => p.id === sel.id)?.active !== false ? [...s, sel.id] : s));
   };
   const exitMergePick = () => { setMergePick(false); setCombineSel([]); };
   // Fuse the selected parcels (any that share a boundary) into one parcel on the
@@ -3194,7 +3221,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (merged) { result = merged; remaining.splice(i, 1); progress = true; break; }
       }
     }
-    if (remaining.length) { alert("Those parcels don't all share a boundary — pick parcels that touch edge-to-edge."); return; }
+    if (remaining.length) { flashWarn("Those parcels don't all share a boundary — pick parcels that touch edge-to-edge.", 6000); return; } // B735: non-blocking notice, not a jarring alert()
     pushHistory();
     const np = { id: uid(), points: result, locked: true };
     // The merged-away parcels are genuinely removed (replaced by `np`), so TOMBSTONE them — the same
@@ -4143,6 +4170,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
         && Date.now() - d.downT <= PARCEL_CLICK_MS) {
       setSel({ kind: "parcel", id: d.tapParcel });
+      setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
+    }
+    // B735: a plain TAP on empty canvas (tiny travel + brief, tagged tapEmpty in onBgDown) clears the
+    // merge selection; a real pan (larger travel) leaves it untouched, so dragging the map never wipes
+    // an in-progress pick. Not tagged in merge-pick mode — there an empty click keeps the set (B720).
+    if (d && d.mode === "pan" && d.tapEmpty
+        && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
+        && Date.now() - d.downT <= PARCEL_CLICK_MS) {
+      setCombineSel([]);
     }
     // B383: a press that began in identify→add mode and barely moved was a deliberate
     // click → add (or toggle) the lot under it; any real drag just panned to find more.
@@ -5429,13 +5465,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // exactly as if the click had landed on empty canvas.
     if (!settings.parcelSelect) return;
     if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
-    if (e.shiftKey) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // Shift-click: multi-select to merge
+    if (e.shiftKey) { e.stopPropagation(); shiftPickParcel(id); return; } // Shift-click: additive multi-select to merge (B735 seeds from `sel`; shiftPickParcel owns `sel`)
     e.stopPropagation();
     if (!pc.locked) {
       // Unlocked = the user deliberately unlocked this parcel to reshape/move it, so a press
       // grabs it to drag (like an element). The pan-instead-of-select fix below is for the
       // LOCKED default that every county-pulled / drawn lot carries.
       setSel({ kind: "parcel", id });
+      setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
       pushHistory();
       drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current }; // canceler: B315 Esc/abort-mid-drag revert
       capturePidRef.current = e.pointerId;
@@ -8806,7 +8843,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
-                        <button onClick={(e) => { if (mergePick || e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
+                        <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
                           style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
