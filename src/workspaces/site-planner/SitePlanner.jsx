@@ -1315,10 +1315,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => { setOvEdit(null); }, [selOverlay]); // a different row expands → drop the previous row's draft
   const overlayClip = useRef(null);                     // copied site-plan overlay (B461 Copy/Paste — shares the source ref, not a re-import)
   const [overlayBusy, setOverlayBusy] = useState(false);
-  // Drag-and-drop affordance for the site-plan overlay (NEW-1). Two independent hover flags:
+  // Drag-and-drop affordance for the site-plan overlay (B445). Two independent hover flags:
   // the left References panel dropzone, and a full-canvas "drop to place" hint.
   const [overlayDropOver, setOverlayDropOver] = useState(false);
   const [canvasDropOver, setCanvasDropOver] = useState(false);
+  // B736 — dragenter/dragleave DEPTH COUNTERS (one per dropzone). dragenter/dragleave bubble,
+  // so the child <svg>'s own drag events must not flip the highlight off mid-hover; the highlight
+  // shows iff depth > 0, and a leave can never get "stuck" when the pointer was over a child at
+  // exit (the old currentTarget===target guard missed that case). Refs, not state — read via
+  // .current inside the window listeners with no stale-closure risk; forced to 0 on drop/reset.
+  const canvasDragDepth = useRef(0);
+  const overlayDragDepth = useRef(0);
   // Parcel-attached drawings (B67): immutable backdrop + pixel-relative markup, per parcel.
   const [parcelDrawings, setParcelDrawings] = useState(() => restored?.parcelDrawings || []);
   const [openDrawingId, setOpenDrawingId] = useState(null);   // the drawing shown in the markup modal
@@ -1519,16 +1526,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Auto-dismiss the transient "couldn't explode that field" notice (B472).
   useEffect(() => { if (!splitNote) return; const t = setTimeout(() => setSplitNote(null), 4500); return () => clearTimeout(t); }, [splitNote]);
   // Block the browser's default file-drop (navigate to / open the dropped PDF) anywhere in
-  // the window (NEW-1). Without this, releasing a file a few pixels off the real dropzone
+  // the window (B445). Without this, releasing a file a few pixels off the real dropzone
   // makes the browser open the PDF in a new tab — which reads as the file vanishing. Our own
   // dropzones stopPropagation + run first, so this only catches the "missed everything" case.
+  // B736: also the safety net that clears every drag-hover highlight when a drag leaves the
+  // window entirely or is aborted — an OS-file drag fires NO in-page dragend, and its final
+  // window-exit dragleave can target document/body (outside our dropzone subtrees), so without
+  // this the highlight (and depth counter) could stick on with nothing under the cursor.
   useEffect(() => {
     const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+    // Hard reset of every drag-hover affordance + its depth counter. Setters + refs are
+    // component-scope and stable, so deps stay [] with no stale-closure risk.
+    const resetAll = () => {
+      canvasDragDepth.current = 0;
+      overlayDragDepth.current = 0;
+      setCanvasDropOver(false);
+      setOverlayDropOver(false);
+      setDeedDrag(false);
+    };
+    // True ONLY when the drag actually left the window — not an in-page element move. In-page
+    // dragleaves bubble to window too; the depth counter (not this net) owns those. A genuine
+    // window exit has no relatedTarget AND pointer coords pinned to / past a viewport edge
+    // (commonly 0,0). Requiring BOTH avoids the flicker a bare relatedTarget==null check causes,
+    // since Chromium routinely reports a null relatedTarget on in-page drag transitions as well.
+    const leftWindow = (e) => {
+      if (e.relatedTarget != null) return false;
+      const x = e.clientX, y = e.clientY;
+      return x <= 0 || y <= 0 || x >= window.innerWidth || y >= window.innerHeight;
+    };
     const onOver = (e) => { if (hasFiles(e)) e.preventDefault(); };
-    const onDrop = (e) => { if (hasFiles(e)) e.preventDefault(); };
+    const onLeave = (e) => { if (leftWindow(e)) resetAll(); };
+    const onDrop = (e) => { if (hasFiles(e)) e.preventDefault(); resetAll(); };
     window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
     window.addEventListener("drop", onDrop);
-    return () => { window.removeEventListener("dragover", onOver); window.removeEventListener("drop", onDrop); };
+    return () => {
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
+    };
   }, []);
   const xsecBusyRef = useRef(false); // in-flight guard for the async ditch cross-section (B56b)
   const titlePdfRef = useRef(null);
@@ -8651,10 +8687,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 dashed border + accent highlight on hover, anti-flicker via currentTarget. */}
             <div
               onClick={() => { if (!overlayBusy) overlayFileRef.current?.click(); }}
-              onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
-              onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
-              onDragLeave={(e) => { if (e.currentTarget === e.target) setOverlayDropOver(false); }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
+              onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); overlayDragDepth.current += 1; setOverlayDropOver(true); }}
+              onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
+              onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; overlayDragDepth.current = Math.max(0, overlayDragDepth.current - 1); if (overlayDragDepth.current === 0) setOverlayDropOver(false); }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
               style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
               <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image)…"}</button>
               <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
@@ -9545,10 +9581,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}
-          onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setCanvasDropOver(true); } }}
-          onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setCanvasDropOver(true); } }}
-          onDragLeave={(e) => { if (e.currentTarget === e.target) setCanvasDropOver(false); }}
-          onDrop={(e) => { setCanvasDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}>
+          onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); canvasDragDepth.current += 1; setCanvasDropOver(true); }}
+          onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
+          onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; canvasDragDepth.current = Math.max(0, canvasDragDepth.current - 1); if (canvasDragDepth.current === 0) setCanvasDropOver(false); }}
+          onDrop={(e) => { canvasDragDepth.current = 0; setCanvasDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {/* When the aerial is ON, the backdrop is a neutral mid-dark gray so the
@@ -9567,10 +9603,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
           {/* "Drop to place" hint — mounts only during an active file drag over the canvas
-              (NEW-1). pointerEvents:none so it never blocks map interaction; sits above the
-              SVG (zIndex 1) so the cue reads clearly over the drawing. */}
+              (B445; depth-counter + non-obscuring fill B736). pointerEvents:none so it never
+              blocks map interaction; a translucent accent wash (both themes) keeps existing
+              geometry visible under it; sits above the SVG (zIndex 1) so the cue reads clearly. */}
           {canvasDropOver && (
-            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 50, pointerEvents: "none", border: `2.5px dashed ${PAL.accent}`, background: PAL.accentSoft, display: "grid", placeItems: "center" }}>
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 50, pointerEvents: "none", border: `2.5px dashed ${PAL.accent}`, background: `color-mix(in srgb, ${PAL.accent} 18%, transparent)`, display: "grid", placeItems: "center" }}>
               <span style={{ background: "var(--surface-raised)", color: PAL.ink, fontWeight: 700, fontSize: 14, padding: "10px 20px", borderRadius: 999, border: `1px solid ${PAL.accent}`, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>Drop site plan to place it on the map</span>
             </div>
           )}
