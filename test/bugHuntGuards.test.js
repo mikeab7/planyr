@@ -273,8 +273,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     expect(src).toMatch(/const livePick = \(apply\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(!pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // all 12 native color controls now spread livePick instead of a bare onChange
-    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(12);
+    // all 13 native color controls now spread livePick instead of a bare onChange
+    // (B734 added the shared multi-selection Fill/Outline pickers — one colorField reused twice)
+    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(13);
     // the per-pixel undo floods are gone: the OLD color-input handlers (inline pushHistory) no
     // longer exist (discrete controls like the "Fill the parcel" checkbox keep their pushHistory)
     expect(src).not.toMatch(/onChange=\{\(e\) => \{ pushHistory\(\); setSelEl\(\{ fill: e\.target\.value/);
@@ -287,6 +288,25 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const nsw = sw \+ \(isSel \? 1 : 0\);/);
     // B617: the on-screen width is the zoom-scaled vsw (held constant relative to the drawing).
     expect(src).toMatch(/const common = \{ stroke: nStroke, strokeWidth: vsw,/);
+  });
+
+  it("B734: multi-selection shares style editing, toggles on Shift, and draws per-member OBB outlines", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // Shift (or Ctrl/⌘) TOGGLES a member in/out — via hasSelMod, not the old add-only selMods branch.
+    expect(src).toMatch(/import \{[^}]*hasSelMod[^}]*\} from "\.\.\/\.\.\/shared\/markup\/selection\.js";/);
+    expect(src).toMatch(/if \(hasSelMod\(e\)\) \{\s*\n\s*const mods = \{ toggle: true, add: false \};/);
+    // the shared panel opens for a styleable multi-selection even when sel is null (a marquee)
+    expect(src).toMatch(/const multiStyleable = multi\.length > 1 && multi\.some/);
+    expect(src).toMatch(/const companionSel = \(!!sel &&[^;]*\) \|\| multiStyleable;/);
+    // the write helpers fan a patch across the whole selection (els dedup via a host-id Set)
+    expect(src).toMatch(/const applyMultiElPatch = /);
+    expect(src).toMatch(/const applyMultiMarkupPatch = /);
+    expect(src).toMatch(/const applyMultiStyle = \(patch\) => \{ pushHistory\(\); liveMultiStyle\(patch\); \};/);
+    // single-element transform grips are suppressed while multi-selecting (no group transform, B734 req 4)
+    expect((src.match(/\|\| multi\.length > 1\) return null;/g) || []).length).toBeGreaterThanOrEqual(4);
+    // multi outlines are per-member (rotation-aware) and never leak into an export
+    expect(src).toMatch(/selectionRingFeet\(o, m\.kind\)/);
+    expect(src).toMatch(/<g data-export="skip" pointerEvents="none">/);
   });
 
   it("B617: linear markup stroke weights scale with zoom (strokeZoom), NOT fixed screen px", () => {
