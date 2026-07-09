@@ -71,21 +71,14 @@ ok(railLabels.slice(0, 5).join(",") === "Parcel,Analysis,Yield,References,Standa
   `B721 rail order = Parcel,Analysis,Yield,References,Standards (got: ${railLabels.join(",")})`);
 ok(railLabels.length >= 5, "B721 all five rail buttons render an inline SVG icon");
 
-// ---------- B718 — KPI strip visible, contents, click opens Yield ----------
+// ---------- B732 — the B718 KPI strip was REVERTED (owner didn't want numbers on the canvas) ----------
 const strip = page.locator('[data-testid="yield-kpi-strip"]');
-await strip.waitFor({ state: "visible", timeout: 4000 }).catch(() => {});
-const stripVisible = await strip.isVisible().catch(() => false);
-ok(stripVisible, "B718 KPI strip is visible on the canvas with a seeded site");
-if (stripVisible) {
-  const txt = (await strip.innerText()).replace(/\s+/g, " ");
-  ok(/SITE/i.test(txt) && /ac/i.test(txt), `B718 strip shows Site acres (“${txt}”)`);
-  ok(/BLDG/i.test(txt) && /COVER/i.test(txt) && /STALLS/i.test(txt), "B718 strip shows Bldg / Cover / Stalls");
-}
+await page.waitForTimeout(600);
+ok(!(await strip.count()), "B732 the on-canvas Yield KPI strip is gone (reverted)");
 
-// Open the Parcel panel and confirm the strip STAYS (the whole point of B718).
+// Open the Parcel panel (needed for the B720 ops-row checks below).
 await page.locator('button[title="Parcel"]').first().click();
 await page.waitForTimeout(600);
-ok(await strip.isVisible().catch(() => false), "B718 strip stays visible while the Parcel panel is open");
 
 // ---------- B720 — ops row + click-to-pick merge ----------
 const menuPanel = page.locator('[data-testid="left-menu-panel"]');
@@ -134,14 +127,6 @@ await page.waitForTimeout(400);
 const stdTxt2 = (await menuPanel.innerText()).replace(/\s+/g, " ");
 ok(/Per-edge setbacks live on the parcel/.test(stdTxt2), "B721 per-edge setback cross-link caption present (Parcels section)");
 
-// strip → Yield wiring
-if (stripVisible) {
-  await strip.click();
-  await page.waitForTimeout(500);
-  const afterTxt = (await menuPanel.innerText());
-  ok(/Site Yield/i.test(afterTxt) || /Detention storage/.test(afterTxt), "B718 clicking the strip opens the Yield panel");
-}
-
-console.log(`\nB718–B722: ${pass} passed, ${fail} failed`);
+console.log(`\nB719–B722 (+B732 revert): ${pass} passed, ${fail} failed`);
 await browser.close();
 process.exit(fail ? 1 : 0);
