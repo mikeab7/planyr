@@ -195,8 +195,18 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   });
 
   it("B557: account email renders are null-guarded (no 'undefined' in the pill/profile)", () => {
-    expect(read("../src/app/Shell.jsx")).toMatch(/Signed in as \$\{user\?\.email \|\| "\(no email\)"\}/);
+    // The account pill moved out of Shell into AccountControl (B734); the null-guard rode with it.
+    expect(read("../src/app/AccountControl.jsx")).toMatch(/Signed in as \$\{user\?\.email \|\| "\(no email\)"\}/);
     expect(read("../src/workspaces/site-planner/components/AuthPanel.jsx")).toMatch(/\{user\?\.email \|\| "\(no email\)"\}/);
+  });
+
+  it("B734: the account dropdown closes on workspace navigation (hashchange) so it can't linger over another workspace", () => {
+    // Every module switch (incl. browser Back/Forward — the one nav a click-away backdrop can't
+    // catch) goes through window.location.hash -> fires hashchange. AccountControl closes its portal
+    // menu on that event so a kept-alive-but-hidden instance's flyout can't hang over the new tab.
+    const src = read("../src/app/AccountControl.jsx");
+    expect(src).toMatch(/addEventListener\("hashchange", close\)/);
+    expect(src).toMatch(/const close = \(\) => setAcctOpen\(false\)/);
   });
 
   it("B557: layers.js clears the feature-retry timer on removal + guards the cache-age fetch", () => {
