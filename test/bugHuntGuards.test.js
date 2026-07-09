@@ -456,4 +456,17 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(resumable).toMatch(/if \(setRes && setRes\.ok === false\)/);
     expect(resumable).toMatch(/client\.del\(fileId\)/);
   });
+
+  it("B735: the export aerial + viewBox share ONE extent (no dev-only guard that blanks a parcels-only site)", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // buildExportSvg AND exportAerialForFrame both crop to exportFeetExtent(frame) — the single
+    // source of truth. If a future edit re-adds a dev-only `if (!dev) return null` in the aerial
+    // path, a parcels-only site over the live basemap silently exports white again (the confirmed
+    // review defect). Guard the shared-helper wiring + the LOUD-FAILURE marker + warn.
+    expect(src).toMatch(/const exportFeetExtent = \(frame\) =>/);
+    expect(src).toMatch(/const ext = exportFeetExtent\(frame\);/); // exportAerialForFrame reuses it
+    expect(src).toMatch(/const fe = exportFeetExtent\(frame\);/);  // buildExportSvg reuses it (no inline dev-only extent)
+    expect(src).toMatch(/data-export-aerial/);                     // the dropped-aerial marker survives
+    expect(src).toMatch(/aerialDropped/);                          // LOUD-FAILURE signal survives
+  });
 });

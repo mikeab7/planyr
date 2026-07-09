@@ -12,9 +12,10 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import PropertyPanel from "../../../shared/markup/PropertyPanel.jsx";
+import { PD_PROPS, PD_DEFAULT_STYLE, PD_DEFAULT_COLOR, dashFor, migrateMarks, stampStyle, pdSchema } from "./parcelDrawingStyle.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", paper: "var(--surface-page)", accent: "var(--accent)" };
-const COLORS = ["#dc2626", "#ea580c", "#2563eb", "#16a34a", "#7c3aed", "#111827"];
 const uid = () => "k" + Math.random().toString(36).slice(2, 9);
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const fmtFt = (f) => (f >= 1000 ? `${(f / 1000).toFixed(2)}k ft` : `${f.toFixed(f < 10 ? 1 : 0)} ft`);
@@ -23,8 +24,10 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const [tool, setTool] = useState("select");      // select | pen | line | rect | text | measure | calib
-  const [color, setColor] = useState(COLORS[0]);
-  const [marks, setMarks] = useState(() => drawing.markups || []);
+  // Per-object style, shared model (B735): the sticky default for the next mark; a panel edit
+  // updates this AND the selected mark. Legacy single-`color` marks are migrated on load.
+  const [style, setStyle] = useState(PD_DEFAULT_STYLE);
+  const [marks, setMarks] = useState(() => migrateMarks(drawing.markups || []));
   const [sel, setSel] = useState(null);            // selected markup id
   const [draft, setDraft] = useState(null);        // in-progress markup
   const [moving, setMoving] = useState(null);      // { id, pts } live drag of an existing markup
@@ -70,7 +73,7 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
     if (!calBox) return;
     const feet = parseFloat(calBox.val);
     if (!feet || feet <= 0) { setCalBox((c) => c ? { ...c, err: "Enter a positive length in feet." } : c); return; }
-    setMarks((cur) => [...cur.filter((m) => m.type !== "calib"), { id: uid(), type: "calib", pts: calBox.pts, feet, ftPerPx: feet / calBox.px, color }]);
+    setMarks((cur) => [...cur.filter((m) => m.type !== "calib"), { id: uid(), type: "calib", pts: calBox.pts, feet, ftPerPx: feet / calBox.px, ...stampStyle(style, "calib") }]);
     setCalBox(null);
   };
 
@@ -96,9 +99,9 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
     const n = toNorm(e.clientX, e.clientY);
     wrapRef.current?.setPointerCapture?.(e.pointerId);
     if (tool === "select") { drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy }; setSel(null); return; }
-    if (tool === "text") { const m = { id: uid(), type: "text", pts: [n], color, text: "" }; addMark(m); setTextEdit({ id: m.id }); setTool("select"); return; }
+    if (tool === "text") { const m = { id: uid(), type: "text", pts: [n], text: "", ...stampStyle(style, "text") }; addMark(m); setTextEdit({ id: m.id }); setTool("select"); return; }
     drag.current = { mode: "draw", type: tool };
-    setDraft({ id: uid(), type: tool, color, pts: [n] });
+    setDraft({ id: uid(), type: tool, pts: [n], ...stampStyle(style, tool) });
   };
   const onMove = (e) => {
     const d = drag.current; if (!d) return;
@@ -133,19 +136,24 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
   }, []);
 
   // Render one markup as SVG (coords 0..1; viewBox 0 0 1 1). `moving` overrides its points live.
+  // Honors the shared per-object style fields (B735): stroke/weight/dash/opacity for every mark,
+  // plus fill for the closed Box. A faint width bump is the only selected cue (never a recolour).
   const renderMark = (m, isSel) => {
     const pts = moving && moving.id === m.id ? moving.pts : m.pts;
-    const common = { stroke: m.color, strokeWidth: isSel ? 3.25 : 2, fill: "none", vectorEffect: "non-scaling-stroke", strokeLinecap: "round", strokeLinejoin: "round", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMove(e, m) };
+    const sw = (m.strokeWidth ?? 2) + (isSel ? 1.25 : 0);
+    const common = { stroke: m.stroke || PD_DEFAULT_COLOR, strokeWidth: sw, fill: "none", opacity: m.opacity ?? 1, strokeDasharray: dashFor(m), vectorEffect: "non-scaling-stroke", strokeLinecap: "round", strokeLinejoin: "round", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMove(e, m) };
     if (m.type === "pen" || m.type === "line" || m.type === "measure" || m.type === "calib") {
       const d = pts.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
-      return <path key={m.id} d={d} {...common} strokeDasharray={m.type === "calib" ? "0.012 0.008" : undefined} />;
+      return <path key={m.id} d={d} {...common} />;
     }
     if (m.type === "rect") {
       const [a, b] = pts; if (!b) return null;
+      const fillOn = (m.fillOpacity ?? 0) > 0;
       // pointerEvents:"all" → the Box selects + drags across its whole interior, not just its 2px
       // border. An unfilled rect's fill area is otherwise not a pointer target, so you'd have to
-      // grab exactly on the line (B155). `common` is shared with the open paths, so set it here only.
-      return <rect key={m.id} x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} {...common} pointerEvents="all" />;
+      // grab exactly on the line (B155). `common` sets fill:"none"; a filled Box overrides it after.
+      return <rect key={m.id} x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} {...common}
+        fill={fillOn ? (m.fill || m.stroke || PD_DEFAULT_COLOR) : "none"} fillOpacity={fillOn ? m.fillOpacity : undefined} pointerEvents="all" />;
     }
     return null; // text + measure/calib labels are positioned divs below
   };
@@ -154,6 +162,17 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
   const texts = allMarks.filter((m) => m.type === "text");
   const dimensioned = allMarks.filter((m) => m.type === "measure" || m.type === "calib");
   const ptsOf = (m) => (moving && moving.id === m.id ? moving.pts : m.pts);
+
+  // Property panel (B735): a panel edit patches the selected mark AND updates the sticky style
+  // so the next mark inherits it. The subject is the selected mark, or — with a drawable tool
+  // armed and nothing selected — the tool's sticky style, so you can pre-set it before drawing.
+  const onPropChange = (key, value) => {
+    if (sel) setMarks((cur) => cur.map((m) => (m.id === sel ? { ...m, [key]: value } : m)));
+    setStyle((s) => ({ ...s, [key]: value }));
+  };
+  const selMark = sel ? marks.find((m) => m.id === sel) : null;
+  const armedType = (!selMark && tool !== "select" && PD_PROPS[tool]) ? tool : null;
+  const styleSubject = selMark || (armedType ? { type: armedType, ...style } : null);
 
   const tBtn = (id, label, hint) => (
     <button onClick={() => setTool(id)} title={hint || label}
@@ -169,10 +188,7 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
         <span style={{ width: 1, height: 20, background: PAL.line, margin: "0 2px" }} />
         {tBtn("measure", "Measure", calib ? `Measure lengths (scale set: ${fmtFt(calib.feet)} ref)` : "Measure lengths — set the scale first")}
         {tBtn("calib", calib ? "Scale ✓" : "Scale", "Set the drawing scale: draw a line of known length, then enter its feet")}
-        <span style={{ display: "flex", gap: 3, marginLeft: 4 }}>
-          {COLORS.map((c) => <button key={c} onClick={() => { setColor(c); if (sel) setMarks((cur) => cur.map((m) => (m.id === sel ? { ...m, color: c } : m))); }} title={c}
-            style={{ width: 18, height: 18, borderRadius: 99, cursor: "pointer", background: c, border: color === c ? `2px solid ${PAL.ink}` : "2px solid #fff", boxShadow: "0 0 0 1px " + PAL.line }} />)}
-        </span>
+        <span style={{ width: 1, height: 20, background: PAL.line, margin: "0 2px" }} />
         <button onClick={delSel} disabled={!sel} title="Delete selected markup"
           style={{ padding: "6px 10px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: sel ? "pointer" : "not-allowed", fontFamily: "inherit", border: `1px solid ${PAL.line}`, background: "#fff", color: sel ? "#b91c1c" : PAL.muted, opacity: sel ? 1 : 0.6 }}>Delete</button>
         <span style={{ flex: 1 }} />
@@ -190,6 +206,18 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
               style={{ position: "absolute", left: view.ox, top: view.oy, width: Wd, height: Hd }}>
               {allMarks.map((m) => renderMark(m, m.id === sel))}
             </svg>
+            {/* Shared property panel (B735) — capability-driven controls for the selected mark, or
+                the armed tool's sticky style. stopPropagation keeps its clicks/scroll off the canvas. */}
+            {styleSubject && (
+              <div onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}
+                style={{ position: "absolute", top: 10, right: 10, width: 184, maxHeight: "calc(100% - 20px)", overflowY: "auto", background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.28)", zIndex: 7 }}>
+                <div style={{ padding: "7px 12px 5px", fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>{selMark ? "Properties" : "Tool style"}</span>
+                  <span style={{ fontWeight: 500, color: PAL.ink, textTransform: "none", letterSpacing: 0, fontSize: 11 }}>{styleSubject.type}</span>
+                </div>
+                <PropertyPanel schema={pdSchema(styleSubject)} onChange={onPropChange} />
+              </div>
+            )}
             {/* measure / scale length labels at each segment midpoint */}
             {dimensioned.map((m) => {
               const pts = ptsOf(m); if (!pts || pts.length < 2) return null;
@@ -203,14 +231,15 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
             {texts.map((m) => {
               const pts = ptsOf(m); const left = view.ox + pts[0].x * Wd, top = view.oy + pts[0].y * Hd;
               const editing = textEdit?.id === m.id;
+              const tc = m.fontColor || PD_DEFAULT_COLOR;
               return editing ? (
                 <input key={m.id} autoFocus defaultValue={m.text}
                   onBlur={(e) => { const v = e.target.value; setMarks((cur) => cur.map((x) => (x.id === m.id ? { ...x, text: v } : x)).filter((x) => x.type !== "text" || x.text.trim() || x.id !== m.id)); setTextEdit(null); }}
                   onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                  style={{ position: "absolute", left, top, fontSize: Math.max(11, 0.022 * Hd), color: m.color, fontWeight: 700, border: `1px dashed ${m.color}`, background: "rgba(255,255,255,0.85)", padding: "1px 3px", fontFamily: "system-ui" }} />
+                  style={{ position: "absolute", left, top, fontSize: Math.max(11, 0.022 * Hd), color: tc, fontWeight: 700, border: `1px dashed ${tc}`, background: "rgba(255,255,255,0.85)", padding: "1px 3px", fontFamily: "system-ui" }} />
               ) : (
                 <div key={m.id} onPointerDown={(e) => startMove(e, m)} onDoubleClick={() => setTextEdit({ id: m.id })}
-                  style={{ position: "absolute", left, top, fontSize: Math.max(11, 0.022 * Hd), color: m.color, fontWeight: 700, cursor: tool === "select" ? "move" : "crosshair", whiteSpace: "nowrap", textShadow: "0 1px 2px rgba(255,255,255,0.8)", outline: m.id === sel ? `1px dashed ${m.color}` : "none", padding: "1px 2px" }}>{m.text || "…"}</div>
+                  style={{ position: "absolute", left, top, fontSize: Math.max(11, 0.022 * Hd), color: tc, fontWeight: 700, cursor: tool === "select" ? "move" : "crosshair", whiteSpace: "nowrap", textShadow: "0 1px 2px rgba(255,255,255,0.8)", outline: m.id === sel ? `1px dashed ${tc}` : "none", padding: "1px 2px" }}>{m.text || "…"}</div>
               );
             })}
             {/* Inline scale-entry box — replaces window.prompt for the Scale / Calib tool */}
