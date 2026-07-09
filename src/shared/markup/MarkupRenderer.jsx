@@ -16,13 +16,7 @@
 import { measureLabel } from "./measure.js";
 import { midOfPath, centroidOf } from "./geometry.js";
 import { readProp } from "./propertySchema.js";
-
-/* ---- defaults ---- */
-const DEF_STROKE   = "#c2410c";   // annotation default (matches matrix PROPERTY_COLUMNS)
-const MEAS_STROKE  = "#0e7490";   // measure overlay stroke (teal)
-
-// dimension has measureOutput="length" and shows an inline length label (like distance but with ticks)
-const MEASURE_KINDS = new Set(["distance", "polylength", "perimeter", "area", "count", "dimension"]);
+import { resolveMarkupStyle, MEASURE_KINDS, MEAS_STROKE } from "./markupStyle.js";
 
 /* Scalloped "cloud" path — shared with DocReview's cloudPath (same algorithm, module-local). */
 function cloudPath(x, y, w, h, r = 9) {
@@ -57,9 +51,12 @@ function Arrowhead({ from, to, color, size = 9 }) {
   );
 }
 
-function MeasLabel({ x, y, text }) {
+/* Measure value label. The measured value is computed (measureLabel); only its COLOR is
+ * user-controllable — it follows the object's stroke so restyling a measure restyles its
+ * label too. The paintOrder:"stroke" white halo keeps it legible over any fill (B734). */
+function MeasLabel({ x, y, text, color = MEAS_STROKE }) {
   return (
-    <text x={x} y={y} fontSize="11" fontWeight="700" fill={MEAS_STROKE}
+    <text x={x} y={y} fontSize="11" fontWeight="700" fill={color}
       style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }} pointerEvents="none">
       {text}
     </text>
@@ -69,17 +66,17 @@ function MeasLabel({ x, y, text }) {
 /* Reads the display properties for a markup. A selected markup is shown in its REAL color
  * (WYSIWYG — so a color change in the panel takes effect instantly); selection is indicated by
  * the host's vertex grips + delete affordance, not by recoloring the stroke. A faint width bump
- * is the only selected cue (also covers freehand, which has no grips). Falls back to
- * PROPERTY_COLUMNS defaults via readProp. */
+ * is the only selected cue (also covers freehand, which has no grips). Style + kind-keyed
+ * fallback come from the shared resolveMarkupStyle (measures default teal, annotations orange). */
 function props(m, selected) {
-  const isMeas = MEASURE_KINDS.has(m.kind);
+  const b = resolveMarkupStyle(m);
   return {
-    stroke:      readProp(m, "stroke") || (isMeas ? MEAS_STROKE : DEF_STROKE),
-    strokeWidth: (readProp(m, "strokeWidth") || 2) + (selected ? 1 : 0),
-    dashArray:   ({ dashed: "8 5", dotted: "2 4" })[readProp(m, "strokeStyle")] || undefined,
-    opacity:     readProp(m, "opacity") ?? 1,
-    fill:        readProp(m, "fill")    || "none",
-    fillOpacity: readProp(m, "fillOpacity") ?? 0,
+    stroke:      b.stroke,
+    strokeWidth: b.strokeWidth + (selected ? 1 : 0),
+    dashArray:   ({ dashed: "8 5", dotted: "2 4" })[b.strokeStyle] || undefined,
+    opacity:     b.opacity,
+    fill:        b.fill,
+    fillOpacity: b.fillOpacity,
   };
 }
 
@@ -101,7 +98,7 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
       <g opacity={p.opacity}>
         <polyline points={dd} fill="none" stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
         {pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill={p.stroke} />)}
-        {lbl && <MeasLabel x={mid.x + 4} y={mid.y - 4} text={lbl} />}
+        {lbl && <MeasLabel x={mid.x + 4} y={mid.y - 4} text={lbl} color={p.stroke} />}
       </g>
     );
   }
@@ -110,11 +107,17 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
     if (pts.length < 2) return null;
     const dd = [...pts, pts[0]].map((q) => `${q.x},${q.y}`).join(" ");
     const mid = midOfPath(pts, true);
+    // Perimeter is a closed ring measuring loop length; fill is OFF by default (fillOpacity 0)
+    // but user-settable (B734), painted behind the outline when turned up.
     return (
       <g opacity={p.opacity}>
+        {p.fillOpacity > 0 && pts.length >= 3 && (
+          <polygon points={pts.map((q) => `${q.x},${q.y}`).join(" ")}
+            fill={p.fill !== "none" ? p.fill : p.stroke} fillOpacity={p.fillOpacity} stroke="none" />
+        )}
         <polyline points={dd} fill="none" stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
         {pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill={p.stroke} />)}
-        {lbl && <MeasLabel x={mid.x + 4} y={mid.y - 4} text={lbl} />}
+        {lbl && <MeasLabel x={mid.x + 4} y={mid.y - 4} text={lbl} color={p.stroke} />}
       </g>
     );
   }
@@ -128,7 +131,7 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
         <polygon points={pts.map((q) => `${q.x},${q.y}`).join(" ")}
           fill={areaFill} fillOpacity={p.fillOpacity || 0.13}
           stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
-        {lbl && <MeasLabel x={c.x} y={c.y} text={lbl} />}
+        {lbl && <MeasLabel x={c.x} y={c.y} text={lbl} color={p.stroke} />}
       </g>
     );
   }
@@ -138,8 +141,8 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
       <g opacity={p.opacity}>
         {pts.map((q, i) => (
           <g key={i}>
-            <circle cx={q.x} cy={q.y} r={7} fill={MEAS_STROKE + "33"} stroke={p.stroke} strokeWidth={1.5} />
-            <text x={q.x} y={q.y + 3} fontSize="8" textAnchor="middle" fill={MEAS_STROKE} fontWeight="700" pointerEvents="none">{i + 1}</text>
+            <circle cx={q.x} cy={q.y} r={7} fill={p.stroke + "33"} stroke={p.stroke} strokeWidth={1.5} />
+            <text x={q.x} y={q.y + 3} fontSize="8" textAnchor="middle" fill={p.stroke} fontWeight="700" pointerEvents="none">{i + 1}</text>
           </g>
         ))}
       </g>

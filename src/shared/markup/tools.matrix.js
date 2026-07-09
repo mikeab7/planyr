@@ -152,7 +152,7 @@ export const TOOL_MATRIX = [
     properties: [...STROKE, "measureCaption"], workspaces: ["site", "doc"] },
   { id: "perimeter", label: "Perimeter", hint: "Click points around a shape; close it. Measures the loop length.",
     category: "measure", drawMode: "multiPoint", closed: true, measureOutput: "length",
-    properties: [...STROKE, "measureCaption"], workspaces: ["site", "doc", "stitch"] },
+    properties: [...STROKE_FILL, "measureCaption"], workspaces: ["site", "doc", "stitch"] },
   { id: "area", label: "Area", hint: "Outline a region; close it. Measures square feet / acres.",
     category: "measure", drawMode: "multiPoint", closed: true, measureOutput: "area",
     properties: [...STROKE_FILL, "measureCaption"], workspaces: ["site", "doc", "stitch"] },
