@@ -4,12 +4,13 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _55 open · 34 awaiting live verification._
+> _56 open · 34 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B735 | AnchoredMenu portal + click-away backdrop can linger over the newly-active workspace when a menu is left open and the user navigates via browser Back/Forward | [App Shell / UI] | #ui #infra | live |
 | B720 | Canonical thoroughfare-segment data model + jurisdiction registry | [Site Planner / GIS · data model] | #thoroughfare #gis #persistence #coordinates | live |
 | B721 | Ingestion adapter #1: City of Houston Major Thoroughfare & Freeway Plan (MTFP) | [Site Planner / GIS · ingestion] | #thoroughfare #gis | live |
 | B722 | Config-driven ingestion adapters: surrounding jurisdictions (Harris · Fort Bend · Pearland · Montgomery · H-GAC) | [Site Planner / GIS · ingestion] | #thoroughfare #gis | live |
@@ -117,7 +118,7 @@
 - **#files** — B180, B181, B182, B183, B699, B687, B685, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
 - **#gis** — B720, B721, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B707, B712, B703, B704, B705, B706, B695, B694, B693
-- **#infra** — B726, B408, B406, B179, B63, B734, B675, B669
+- **#infra** — B735, B726, B408, B406, B179, B63, B734, B675, B669
 - **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268
 - **#perf** — B495, B484, B479, B704, B694, B669
@@ -130,5 +131,5 @@
 - **#stitching** — B413
 - **#testing** — B269, B63
 - **#thoroughfare** — B720, B721, B722, B723, B724, B725, B726
-- **#ui** — B723, B115, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
+- **#ui** — B735, B723, B115, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
 - **#yield** — B724, B553, B715, B712, B651
