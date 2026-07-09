@@ -33,11 +33,17 @@ const fmtDist = (ft) => `${ft.toFixed(2).replace(/\.00$/, "")}′`;
  * Misclosure-tolerant by design: it returns whatever it can read; the caller
  * decides closure and shows the gap honestly. */
 
-// A quadrant bearing: N/North … E/East, with optional DMS (dash-DMS "12-15" too).
+// A quadrant bearing: N/North … E/East, with optional DMS. Handles the compact form
+// (N 45°30'00" E, dash-DMS 12-15, letters 45d30m00s) AND the spelled-out survey form
+// (NORTH 02 DEG. 29 MIN. 38 SEC. WEST, North 87 degrees 04 minutes 16 seconds East).
+// Each unit separator matches its spelled-out word (optional trailing period) BEFORE the
+// single-char fallbacks — else the bare `d` ate the "D" of "DEG" and the "E" was misread as
+// the East quadrant, so a "…SEC. WEST" call silently plotted East, dropping minutes/seconds.
 const BEARING_SRC =
-  "(N(?:orth)?|S(?:outh)?)\\s*([0-9]{1,3})\\s*(?:[°ºo*:d-]|deg(?:rees)?|\\s)?\\s*" + // quadrant + degrees
-  "([0-9]{1,2})?\\s*(?:['’′:m-]|min(?:utes)?)?\\s*" +                                // minutes
-  "([0-9]{1,2}(?:\\.[0-9]+)?)?\\s*(?:[\"”″s]|sec(?:onds)?)?\\s*" +                    // seconds
+  "(N(?:orth)?|S(?:outh)?)\\s*([0-9]{1,3})" +
+  "\\s*(?:deg(?:rees)?\\.?|[°ºo*:d-])?\\s*" +                          // degrees + separator
+  "([0-9]{1,2})?\\s*(?:min(?:utes)?\\.?|['’′:m-])?\\s*" +              // minutes + separator
+  "([0-9]{1,2}(?:\\.[0-9]+)?)?\\s*(?:sec(?:onds)?\\.?|[\"”″s])?\\s*" + // seconds + separator
   "(E(?:ast)?|W(?:est)?)";                                                           // quadrant2
 const BEARING_RE = new RegExp(BEARING_SRC, "gi");
 // A distance value + unit. The trailing (?![0-9]) stops a bearing's minute tick

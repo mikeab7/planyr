@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-09 @ `97a2055` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-09 @ `00b0390` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_222 source files mapped._
+_224 source files mapped._
 
 ## infra
 
@@ -54,6 +54,8 @@ _222 source files mapped._
   - _exports_: `normSheet`, `parseDetailAnchors`, `parseDetailRefs`
 - **`src/shared/files/disciplineSplit.js`** — Splits a multi-discipline combined PDF into contiguous discipline segments and filing sets (prefix-first, sticky-smoothed) and builds a page-partition filing plan
   - _exports_: `buildFilingPlan`, `resolvePageDiscipline`, `smoothDisciplines`, `splitByDiscipline`
+- **`src/shared/files/docText.js`** — Dependency-free browser legacy-.doc (Word 97-2003 OLE/CFB) to plain-text reader: FAT/mini-FAT + FIB + piece-table walk decoding windows-1252/UTF-16, feeding the legal-description parser
+  - _exports_: `cleanWordText`, `docToText`
 - **`src/shared/files/docxText.js`** — Dependency-free browser .docx-to-plain-text reader (native ZIP central-directory walk + deflate-raw inflate + WordprocessingML flatten) feeding the legal-description parser
   - _exports_: `documentXmlToText`, `docxToText`, `readDeedFile`
 - **`src/shared/files/edgeGeomMatch.js`** — Vector match-line seam fitter: PCA line-fit of drawn linework across two adjacent sheets returning ordered endpoint pairs for the similarity solve, fail-open
@@ -68,6 +70,8 @@ _222 source files mapped._
   - _exports_: `decide`, `matchProjectInText`, `scoreProjectInText`
 - **`src/shared/files/ocrMatchLines.js`** — Recovers "MATCH LINE ... SHEET N" labels from raster scans by OCRing the page at 0/90/270 orientations and mapping found labels back to page space for autoStitch
   - _exports_: `framePointToPage`, `OCR_ORIENTATIONS`, `recoverMatchLines`
+- **`src/shared/files/pdfText.js`** — Lazy pdf.js PDF-to-deed-text reader: pulls the embedded text layer and reflows word-wrapped survey courses onto one logical line each so the metes-and-bounds parser can segment them
+  - _exports_: `pdfToDeedText`, `reflowLines`
 - **`src/shared/files/rasterCompare.js`** — Pure revision-compare pipeline core: registers rev B onto rev A, nearest-neighbor resamples B into A's grid, then diffs two binaries into change codes and regions
   - _exports_: `compareBinaries`, `resampleBinary`
 - **`src/shared/files/rasterDiff.js`** — Pure raster diff engine: classifies each pixel unchanged/removed/added with tolerance dilation and clusters changed pixels into navigable change regions for compare-versions
