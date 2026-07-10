@@ -41,10 +41,11 @@ function cleanMText(s) {
   if (!s) return "";
   return String(s)
     .replace(/\\P/g, " ")                       // paragraph break → space
-    .replace(/\\[A-Za-z][^;\\]*;/g, "")          // \fArial|...; \H2.5x; \C1; …
+    .replace(/\\[A-Za-z][^;\\]*;/g, "")          // arg codes ending in ';': \fArial|...; \H2.5x; \C1; \A1; \pxq…;
+    .replace(/\\[LlOoKkNX]/g, "")                // no-arg toggles: underline \L\l, overline \O\o, strike \K\k, wrap \N\X
+    .replace(/\\[~]/g, " ")                      // non-breaking space
     .replace(/[{}]/g, "")                        // grouping braces
-    .replace(/\\[~]/g, " ")
-    .replace(/\\\\/g, "\\")
+    .replace(/\\\\/g, "\\")                      // escaped backslash → literal
     .trim();
 }
 
@@ -97,8 +98,20 @@ function collect(entities, blocks, M, acc, depth) {
         const blk = e.name && blocks ? blocks[e.name] : null;
         if (blk && Array.isArray(blk.entities) && depth < MAX_INSERT_DEPTH) {
           const base = blk.position || { x: 0, y: 0 };
-          const M2 = matMul(matMul(M, insertMatrix(e)), translate(-(base.x || 0), -(base.y || 0)));
-          collect(blk.entities, blocks, M2, acc, depth + 1);
+          // MINSERT: a rectangular array (columnCount×rowCount at column/row spacing). The array is
+          // laid out along the INSERT's ROTATED axes, so each cell offset is rotated by `rotation`.
+          const cols = Math.max(1, e.columnCount || 1), rows = Math.max(1, e.rowCount || 1);
+          const cSp = e.columnSpacing || 0, rSp = e.rowSpacing || 0;
+          const rot = (e.rotation || 0) * Math.PI / 180, cos = Math.cos(rot), sin = Math.sin(rot);
+          const pos = e.position || { x: 0, y: 0 };
+          let cells = 0;
+          for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+            if (++cells > 4096) break; // pathological-array backstop
+            const ox = c * cSp, oy = r * rSp;
+            const cellPos = { x: pos.x + (ox * cos - oy * sin), y: pos.y + (ox * sin + oy * cos) };
+            const M2 = matMul(matMul(M, insertMatrix({ ...e, position: cellPos })), translate(-(base.x || 0), -(base.y || 0)));
+            collect(blk.entities, blocks, M2, acc, depth + 1);
+          }
         } else {
           acc.unsupported[e.type] = (acc.unsupported[e.type] || 0) + 1; // missing block / too deep
         }
@@ -141,6 +154,14 @@ export function renderDxfToSvg(parsed, { rasterMax = RASTER_MAX } = {}) {
   if (!entityCount || !Number.isFinite(b.minX)) {
     return { ok: false, reason: "no-geometry", unsupported: { count: unsupportedCount, types: unsupportedTypes, byType: acc.unsupported } };
   }
+
+  // A purely 1-D drawing (all geometry collinear) would give a 0-width/height viewBox — pad the
+  // degenerate axis symmetrically so the raster + viewBox stay valid. Real 2-D sheets are unaffected
+  // (the pad is 0.5% of the long edge, far below any real span).
+  const longSpan = Math.max(b.maxX - b.minX, b.maxY - b.minY, 1);
+  const minSpan = longSpan * 0.005;
+  if (b.maxX - b.minX < minSpan) { const c = (b.minX + b.maxX) / 2; b.minX = c - minSpan / 2; b.maxX = c + minSpan / 2; }
+  if (b.maxY - b.minY < minSpan) { const c = (b.minY + b.maxY) / 2; b.minY = c - minSpan / 2; b.maxY = c + minSpan / 2; }
 
   // Model bounds → raster dims (longest edge = rasterMax, aspect preserved, ≥1px).
   const modelW = Math.max(b.maxX - b.minX, 1e-6);

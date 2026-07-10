@@ -78,6 +78,34 @@ describe("renderDxfToSvg — true-units, INSERT expansion, unsupported tally (B7
     expect(r.unsupported.count).toBe(1); // the SPLINE is still tallied
   });
 
+  it("strips MTEXT no-arg toggle codes (underline/overline/strike) — words stay legible", () => {
+    const withText = (t) => ({ header: { $INSUNITS: 2 }, blocks: {},
+      entities: [{ type: "LINE", vertices: [{ x: 0, y: 0 }, { x: 100, y: 50 }] }, { type: "MTEXT", position: { x: 10, y: 10 }, height: 10, text: t }] });
+    const textOf = (t) => (renderDxfToSvg(withText(t)).svg.match(/<text[^>]*>([^<]*)<\/text>/) || [])[1];
+    expect(textOf("\\LFIRE LANE\\l")).toBe("FIRE LANE");
+    expect(textOf("\\ONORTH\\o")).toBe("NORTH");
+    expect(textOf("\\KVOID\\k")).toBe("VOID");
+    expect(textOf("\\fArial|b1;\\C1;GOOD")).toBe("GOOD"); // arg codes with ';' still stripped
+  });
+
+  it("expands a MINSERT rectangular array (columnCount×rowCount), not just one copy", () => {
+    const r = renderDxfToSvg({ header: { $INSUNITS: 2 },
+      blocks: { B: { position: { x: 0, y: 0 }, entities: [{ type: "CIRCLE", center: { x: 0, y: 0 }, radius: 5 }] } },
+      entities: [{ type: "INSERT", name: "B", position: { x: 0, y: 0 }, columnCount: 3, rowCount: 1, columnSpacing: 50, rowSpacing: 0 }] });
+    expect(r.ok).toBe(true);
+    // 3 circles at x=0,50,100 (radius 5) → bounds -5..105 = 110 wide (a single copy would be 10)
+    expect(r.modelW).toBeCloseTo(110, 3);
+  });
+
+  it("a purely 1-D drawing still yields a valid non-zero viewBox (no degenerate raster)", () => {
+    const horiz = renderDxfToSvg({ header: { $INSUNITS: 2 }, blocks: {},
+      entities: [{ type: "LINE", vertices: [{ x: 0, y: 0 }, { x: 100, y: 0 }] }] });
+    expect(horiz.ok).toBe(true);
+    expect(horiz.imgH).toBeGreaterThan(1);
+    expect(horiz.svg).not.toMatch(/viewBox="0 0 \d+(\.\d+)? 0"/); // height must not be 0
+    expect(horiz.imgW * horiz.ftPerPx).toBeCloseTo(100, 1); // real width still 100 ft
+  });
+
   it("emits a valid, self-contained SVG (no external refs)", () => {
     const r = renderDxfToSvg(parse(fixture(2)));
     expect(r.svg.startsWith("<svg")).toBe(true);
