@@ -19,6 +19,7 @@
  */
 import { useEffect, useState } from "react";
 import { STATEWIDE, JURISDICTIONS, EVIDENCE, TERRAIN, jurisdictionFor, layerVintage } from "../lib/layers.js";
+import { DEFAULT_CORRIDOR_WIDTH_FT, MIN_CORRIDOR_WIDTH_FT, MAX_CORRIDOR_WIDTH_FT } from "../lib/pipelineCorridor.js";
 import { PLANNER_BASEMAP_CHOICES } from "../lib/basemaps.js";
 import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
 import { formatAge } from "../lib/gisCache.js";
@@ -102,6 +103,22 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             title="Layer opacity" aria-label={`${cfg.label} opacity`}
             onChange={(e) => set(k, { opacity: +e.target.value })}
             style={{ width: "100%", marginTop: 2 }} />
+        )}
+        {/* B752: inline width control for the assumed easement corridor — no dialog (inline-editor
+            rule); commits on change, clamped to the editable bounds. */}
+        {st.on && cfg.corridorWidth && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: INK, margin: "3px 0 0 22px" }}>
+            Corridor width (total):
+            <input type="number" min={MIN_CORRIDOR_WIDTH_FT} max={MAX_CORRIDOR_WIDTH_FT} step={5}
+              value={st.widthFt ?? DEFAULT_CORRIDOR_WIDTH_FT}
+              aria-label="Assumed corridor total width in feet"
+              onChange={(e) => {
+                const v = Math.max(MIN_CORRIDOR_WIDTH_FT, Math.min(MAX_CORRIDOR_WIDTH_FT, Math.round(+e.target.value || DEFAULT_CORRIDOR_WIDTH_FT)));
+                set(k, { widthFt: v });
+              }}
+              style={{ width: 56, fontSize: 11, padding: "1px 4px" }} />
+            ft
+          </label>
         )}
         {/* B236 vintage + B75 refreshed-age, folded into ONE line (the B96 note):
             "as of" = the DATA's own currency; "refreshed" = when WE last pulled the
