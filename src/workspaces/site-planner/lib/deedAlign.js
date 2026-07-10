@@ -33,6 +33,19 @@ import { projectToGrid, gridToProject } from "../../../shared/coordinates/index.
 // residual / characteristic-size ratio at or below which a fit is called "confident".
 export const CONFIDENT_FRAC = 0.02; // 2%
 
+// Widest rotation the empirical fit will consider, in degrees. A basis-of-bearings
+// correction is ALWAYS physically small: grid convergence is ~1.5° near Houston (up to
+// ~2–3° at the Texas zone edges), and an old magnetic/record basis adds at most a handful
+// of degrees. So the real answer lives well under ~15°, while the nearest spurious
+// rotational alias of a near-square / roughly-symmetric outline is at 45/90/180°. Searching
+// the full ±180° let that alias win — a shape whose deed polygon differs a little from the
+// generalized county outline could score a LOWER nearest-vertex RMS tens of degrees away
+// than at the true ~1.5°, so the deed swung grossly off-angle (the B625 recurrence). Bounding
+// the sweep to ±20° sits cleanly in the gap: it still finds any legitimate correction, but a
+// deed that only "fits" past 20° is either the wrong tract or a mis-plot and is reported
+// not-confident rather than force-rotated. Caller may override via opts.maxRotDeg.
+export const MAX_ALIGN_ROT_DEG = 20;
+
 /* Drop a duplicated closing vertex (first ≈ last) and any non-finite points so vertex
  * counts and centroids compare cleanly. Returns an open ring of {x,y}. */
 export function openRing(ring) {
@@ -98,11 +111,15 @@ function symmetricRms(A, B) {
 }
 
 /* Solve the rigid rotation + translation (scale LOCKED to 1) that best overlays the
- * plotted deed ring onto a held county parcel ring. Both rings are {x,y} in the
- * planner's feet frame (north = up). Strategy: translate the deed centroid onto the
- * parcel centroid, then sweep the rotation about that point for the lowest symmetric
- * nearest-vertex RMS (a full ±180° coarse sweep — so it copes with any basis of
- * bearings AND a reversed winding — then a fine refine around the best).
+ * plotted deed ring onto a held county parcel ring. Both rings are {x,y} in the planner's
+ * y-DOWN feet frame (+x east, +y SOUTH — north renders up but is −y; see the file header
+ * and metesAndBounds). Strategy: translate the deed centroid onto the parcel centroid, then
+ * sweep the rotation about that point for the lowest symmetric nearest-vertex RMS — a coarse
+ * sweep BOUNDED to ±maxRotDeg (default MAX_ALIGN_ROT_DEG), then a fine refine clamped to that
+ * same window. The window is deliberately narrow because a basis-of-bearings correction is
+ * always small; searching wider let a near-symmetric outline snap to a 45/90/180° alias.
+ * A reversed winding needs NO wide sweep — symmetricRms compares point SETS, so a ring
+ * digitized the opposite way round is the same set and its optimum is still the small angle.
  *
  * Returns { ok, rotDeg, pivot, residualFt, charLenFt, residualFrac, confident, apply,
  * reason }. `apply(pt)` maps ANY deed point (boundary ring OR centerline) to its
@@ -121,9 +138,11 @@ export function solveDeedAlignment(deedRing, parcelRing, opts = {}) {
   const centered = ds.map((p) => ({ x: p.x - Cd.x + Cp.x, y: p.y - Cd.y + Cp.y }));
   const evalAt = (deg) => symmetricRms(rotatePointsAbout(centered, deg, Cp), ps);
 
+  const maxRot = Number.isFinite(opts.maxRotDeg) ? Math.abs(opts.maxRotDeg) : MAX_ALIGN_ROT_DEG;
   let best = { deg: 0, rms: Infinity };
-  for (let d = -180; d < 180; d += 1) { const r = evalAt(d); if (r < best.rms) best = { deg: d, rms: r }; }
-  for (let d = best.deg - 1; d <= best.deg + 1; d += 0.02) { const r = evalAt(d); if (r < best.rms) best = { deg: d, rms: r }; }
+  for (let d = -maxRot; d <= maxRot; d += 1) { const r = evalAt(d); if (r < best.rms) best = { deg: d, rms: r }; }
+  const lo = Math.max(-maxRot, best.deg - 1), hi = Math.min(maxRot, best.deg + 1);
+  for (let d = lo; d <= hi; d += 0.02) { const r = evalAt(d); if (r < best.rms) best = { deg: d, rms: r }; }
 
   const rotDeg = best.deg;
   const t = (rotDeg * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
