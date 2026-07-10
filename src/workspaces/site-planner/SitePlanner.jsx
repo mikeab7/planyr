@@ -117,6 +117,7 @@ import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } 
 import { printStrokeWidth, sheetFitScale } from "./lib/exportStyle.js";
 import { jpegToPdf } from "./lib/imagePdf.js";
 import { createHistoryStack } from "./lib/history.js";
+import { resolveDraftStepBack } from "./lib/drafts.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -2414,7 +2415,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no");
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no"); // RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
   // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
   // compares against the live state we pass in (stateRef.current), so undo/redo
   // can't act on a stale baseline (B315). One stack instance, kept across renders.
@@ -2428,6 +2429,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard itself — an
     // undo/redo shrink now just diffs into per-element deletes through the rev-checked path.)
     setSel(null); setSplitPath([]); setTypeMenu(null);
+    // Drop EVERY in-progress draft: a snapshot restored under a half-drawn shape (on a redo, or an
+    // undo while an uncovered draft — callout/rect/ellipse — is pending) would otherwise leave stale
+    // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
+    setDraftPoly(null); setDraftElPoly(null); setDraftRoadPts(null); setMkPoly(null); setMeasDraft([]);
+    setEaseDraft(null); setEaseEdges(null); setTracePts([]); setXsecPts([]); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
   };
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
   const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { applySnapshot(next); touchHist(); } };
@@ -2715,7 +2721,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!active) return; // keep-alive: a hidden planner must never eat keys (or Delete markups) while another module is on screen
       const t = document.activeElement;
       if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // don't hijack keys while typing in a field
-      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // Bluebeam: mid-draw Ctrl-Z peels the last placed vertex; only a no-draft Ctrl-Z does a global undo (matches Doc Review / Stitcher)
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } else if (selOverlay) { e.preventDefault(); copyOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
@@ -2755,7 +2761,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
+  }, [active, sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, easeMode, easeWidth, xsecMode, xsecPts, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
 
   // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
@@ -4353,18 +4359,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "easement" && easeDraft?.pts?.length >= (easeMode === "boundary" ? 3 : 2)) { finishEaseDraft(); return true; }
     return false;
   };
-  // Remove the last placed vertex of whatever multi-point shape is in progress (Backspace/Delete);
-  // empties a polygon draft to null so it's fully cancelled once the last point is gone.
+  // Remove the last placed vertex of whatever multi-point shape is in progress (Backspace/Delete
+  // AND Ctrl/⌘-Z, Bluebeam-style); empties a draft to null so it's fully cancelled once the last
+  // point is gone. Pure decision lives in lib/drafts.js (resolveDraftStepBack) so every draft
+  // type's trim + the "no draft → false" fall-through contract is unit-tested; returns true iff
+  // it consumed a vertex, so Ctrl-Z falls through to a global undo only when no draft is active.
+  const draftSetters = { tracePts: setTracePts, splitPath: setSplitPath, measDraft: setMeasDraft, mkPoly: setMkPoly, draftPoly: setDraftPoly, draftElPoly: setDraftElPoly, draftRoadPts: setDraftRoadPts, easeDraft: setEaseDraft, easeEdges: setEaseEdges, xsecPts: setXsecPts };
   const removeLastVertex = () => {
-    if (traceMode && tracePts.length) { setTracePts((a) => a.slice(0, -1)); return true; }
-    if (tool === "split" && splitPath.length) { setSplitPath((a) => a.slice(0, -1)); return true; }
-    if (tool === "measure" && measDraft.length) { setMeasDraft((a) => a.slice(0, -1)); return true; }
-    if (mkPoly?.pts?.length) { setMkPoly((m) => { const pts = m.pts.slice(0, -1); return pts.length ? { ...m, pts } : null; }); return true; }
-    if (draftPoly?.length) { setDraftPoly((a) => { const n = a.slice(0, -1); return n.length ? n : null; }); return true; }
-    if (draftElPoly?.pts?.length) { setDraftElPoly((d) => { const pts = d.pts.slice(0, -1); return pts.length ? { ...d, pts } : null; }); return true; }
-    if (draftRoadPts?.length) { setDraftRoadPts((a) => { const n = a.slice(0, -1); return n.length ? n : null; }); return true; } // centerline road (B596)
-    if (easeDraft?.pts?.length) { setEaseDraft((d) => { const pts = d.pts.slice(0, -1); return pts.length ? { pts } : null; }); return true; }
-    return false;
+    const r = resolveDraftStepBack({ traceMode, tracePts, tool, splitPath, measDraft, mkPoly, draftPoly, draftElPoly, draftRoadPts, easeDraft, easeEdges, xsecMode, xsecPts });
+    if (!r) return false;
+    draftSetters[r.target](r.next);
+    return true;
   };
   // Double-click finishes exactly the way Enter does (the shared path above).
   const onBgDouble = () => { finishActiveDrawing(); };
@@ -8744,7 +8749,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     : [];
   const multiStyle = multiStyleable ? commonStyleState(multiMembers, settings) : null;
   // Merge a default-color patch for one type into settings.typeStyles.
-  const setTypeStyle = (type, patch) => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); };
+  const setTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); // RC-6: settings-only → not undoable (no pushHistory dead frame)
 
   /* ---- live color picking (B567) ----
    * A native <input type="color"> fires `change` only when the OS palette CLOSES, but fires
@@ -8755,10 +8760,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * with a frame per swatch). `livePick(apply)` spreads onto the <input>; `apply` is a no-history
    * mutator. pickSnapRef survives re-renders (only one color input can be active at a time). */
   const pickSnapRef = useRef(false);
-  const livePick = (apply) => ({
+  // `hist` (default on) pushes one undo frame per picking session; pass hist=false for pickers that
+  // only touch `settings` (Standards defaults), which isn't in the undo snapshot — pushing there
+  // just leaves a dead frame that misdirects the next Ctrl-Z (RC-6).
+  const livePick = (apply, hist = true) => ({
     onFocus: () => { pickSnapRef.current = false; },
-    onInput:  (e) => { if (!pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
-    onChange: (e) => { if (!pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
+    onInput:  (e) => { if (hist && !pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
+    onChange: (e) => { if (hist && !pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
   const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
@@ -8792,12 +8800,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Drop per-element overrides across every selected element (multi "Reset" → back to type defaults).
   const clearMultiElStyle = () => { const ids = multiElHostIds(); if (!ids.size) return; pushHistory(); setEls((a) => a.map((e) => { if (!ids.has(e.id)) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
   // Opacity slider drag = ONE undo frame (a <input type=range> has no focus/input split like a
-  // color picker): snapshot lazily on the first change of a drag, reset on pointer-down.
+  // color picker): snapshot lazily on the first change of a drag, reset on pointer-down. Shared
+  // ref is safe because only one slider can be dragged at a time. `apply(e)` is a NO-history
+  // writer; EVERY opacity slider must spread {...sliderHistory(apply)} so a single edit is undoable
+  // in ONE Ctrl-Z and a drag never floods (or silently skips) the stack (RC-5/RC-7).
   const opSnapRef = useRef(false);
-  const multiOpacityHandlers = {
+  const sliderHistory = (apply) => ({
     onPointerDown: () => { opSnapRef.current = false; },
-    onChange: (e) => { if (!opSnapRef.current) { pushHistory(); opSnapRef.current = true; } liveMultiStyle({ fillOpacity: +e.target.value }); },
-  };
+    onChange: (e) => { if (!opSnapRef.current) { pushHistory(); opSnapRef.current = true; } apply(e); },
+  });
+  const multiOpacityHandlers = sliderHistory((e) => liveMultiStyle({ fillOpacity: +e.target.value }));
 
   /* ------------ Plans dropdown grouping (this site's plans vs. other sites) ------------ */
   const planGroup = (s) => s.groupId || s.id;
@@ -9026,12 +9038,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
                     <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
+                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { pushHistory(); if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
                   </div>
                   {aerialSel && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
                       <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
-                        <input type="range" min={0.1} max={1} step={0.05} value={underlay.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => setUnderlay((u) => (u ? { ...u, opacity: +e.target.value } : u))} />
+                        <input type="range" min={0.1} max={1} step={0.05} value={underlay.opacity ?? 1} style={{ flex: 1 }} {...sliderHistory((e) => setUnderlay((u) => (u ? { ...u, opacity: +e.target.value } : u)))} />
                         <span style={{ fontSize: 11, color: PAL.muted, width: 34, textAlign: "right" }}>{Math.round((underlay.opacity ?? 1) * 100)}%</span>
                       </label>
                       <div style={{ display: "flex", gap: 6 }}>
@@ -9068,13 +9080,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {on && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
                           <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
-                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); }} />
+                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} {...sliderHistory((e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); })} />
                             {/* Numeric percent alongside the slider (B575), two-way bound. While typing we hold a
                                 raw draft (so a half-typed value isn't clobbered); the slider + overlay update live;
                                 on blur the draft clears so the field follows the overlay again. Stored 0.1–1.0 ↔ 10–100%. */}
                             <input type="number" min={10} max={100} step={5} aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct"
                               style={{ ...numInput, width: 54, textAlign: "right" }}
                               value={(ovEdit && ovEdit.id === o.id && ovEdit.opacityText != null) ? ovEdit.opacityText : Math.round((o.opacity ?? 1) * 100)}
+                              onFocus={() => pushHistory()}
                               onChange={(e) => { const txt = e.target.value; setOvEditFor(o.id, { opacityText: txt }); const n = Math.round(+txt); if (txt !== "" && Number.isFinite(n)) patchOverlay(o.id, { opacity: Math.min(1, Math.max(0.1, n / 100)) }, false); }}
                               onBlur={() => setOvEditFor(o.id, { opacityText: null })} />
                             <span style={{ fontSize: 11, color: PAL.muted }}>%</span>
@@ -9781,12 +9794,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
                   <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{TYPE[k].label.split(" / ")[0]}</span>
-                  <input type="color" title="Fill" value={toHex6(st.fill)} {...livePick((v) => liveTypeStyle(k, { fill: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
-                  <input type="color" title="Line" value={toHex6(st.stroke)} {...livePick((v) => liveTypeStyle(k, { stroke: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Fill" value={toHex6(st.fill)} {...livePick((v) => liveTypeStyle(k, { fill: v }), false)} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Line" value={toHex6(st.stroke)} {...livePick((v) => liveTypeStyle(k, { stroke: v }), false)} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </div>
               );
             })}
-            <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: {} })); }}>Reset all to built-in</button>
+            <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => setSettings((s) => ({ ...s, typeStyles: {} }))}>Reset all to built-in</button>
           </Section>
           </div>
           </>)}
@@ -11613,7 +11626,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </>)}
                 {closed && <>
                   <Field label="Fill"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
-                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} onChange={(e) => setSelMarkup({ fillOpacity: +e.target.value })} /></Field>
+                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveMarkup({ fillOpacity: +e.target.value }))} /></Field>
                 </>}
                 {MK_BOX_KINDS.includes(selMarkup.kind) && <>
                   <Field label="Width / Height"><span style={{ display: "flex", gap: 5 }}>
@@ -11955,7 +11968,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               {gg.summary && <div style={note}>{gg.summary.lengthCount} × {gg.summary.depthCount} bays · {gg.summary.lengthTyp}′ × {gg.summary.depthTyp}′ typ{gg.summary.speedBay ? ` · speed bay ${gg.summary.speedBay}′` : ""}.</div>}
                               {/* B653 write-back: this building's resolved grid becomes the plan standard, and says so. */}
                               <button style={{ ...chip, width: "100%", marginTop: 6 }} title="Make this building's column grid the plan standard for new buildings"
-                                onClick={() => { pushHistory(); setSettings((s) => ({ ...s, speedBay: grd.speedBay, bayLengthTarget: grd.bayLengthTarget, bayDepthTarget: grd.bayDepthTarget, doorOC: grd.doorOC })); flashWarn("Saved to Standards — new buildings start with this column grid.", 4000); }}>
+                                onClick={() => { setSettings((s) => ({ ...s, speedBay: grd.speedBay, bayLengthTarget: grd.bayLengthTarget, bayDepthTarget: grd.bayDepthTarget, doorOC: grd.doorOC })); flashWarn("Saved to Standards — new buildings start with this column grid.", 4000); }}>
                                 Set as standard
                               </button>
                             </>
@@ -12009,7 +12022,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <Field label="Drive aisle (ft)"><NumInput style={numInput} value={pc.aisle} min={0} onCommit={(n) => setParkCfg(selEl, { aisle: n })} /></Field>
                         {/* B653 write-back: this field's stall depth + aisle become the plan standard, and say so. */}
                         <button style={{ ...chip, width: "100%", marginTop: 6 }} title="Make this field's stall depth & drive aisle the plan standard for new parking"
-                          onClick={() => { pushHistory(); setSettings((s) => ({ ...s, stallDepth: pc.stallDepth, aisle: pc.aisle })); flashWarn("Saved to Standards — new parking starts with this stall depth & aisle.", 4000); }}>
+                          onClick={() => { setSettings((s) => ({ ...s, stallDepth: pc.stallDepth, aisle: pc.aisle })); flashWarn("Saved to Standards — new parking starts with this stall depth & aisle.", 4000); }}>
                           Set as standard
                         </button>
                         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
@@ -12609,7 +12622,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </Field>
               <Field label="Fill opacity">
                 <input type="range" min={0.1} max={1} step={0.05} value={curStyle.fillOpacity}
-                  onChange={(e) => setSelEl({ fillOpacity: +e.target.value })} />
+                  {...sliderHistory((e) => setSelEl({ fillOpacity: +e.target.value }))} />
               </Field>
               <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                 <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${TYPE[selEl.type].label}`}>Set as default</button>

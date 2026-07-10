@@ -1521,7 +1521,7 @@ export default function DocReview({
   // onPointerMove re-renders dozens of times/sec while drawing (B41).
   const onKeyRef = useRef(null);
   onKeyRef.current = (e) => {
-    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return; // RC-9: also skip SELECT/contentEditable so a focused field's Ctrl-Z isn't hijacked (matches Site Planner)
     const mod = e.ctrlKey || e.metaKey;
     if (mod && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // ⌘/Ctrl-Z (B303)
     if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }                                                        // Ctrl-Y redo

@@ -281,11 +281,16 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
 
   it("B567: every Site Planner color input picks live via livePick (onInput), with one-frame undo", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    expect(src).toMatch(/const livePick = \(apply\) =>/);
-    expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(!pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // all 13 native color controls now spread livePick instead of a bare onChange
+    // livePick now takes an optional hist flag (default on); Standards-default swatches pass false
+    // so a settings-only pick doesn't leave a dead undo frame (RC-6). Element/markup pickers are
+    // unchanged — they still push one frame per picking session.
+    expect(src).toMatch(/const livePick = \(apply, hist = true\) =>/);
+    expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
+    // all 13 native color controls still spread livePick instead of a bare onChange
     // (B740 added the shared multi-selection Fill/Outline pickers — one colorField reused twice)
     expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(13);
+    // the two Standards color swatches opt out of history (settings-only, RC-6)
+    expect((src.match(/\{\.\.\.livePick\(\(v\) => liveTypeStyle\([^)]*\), false\)\}/g) || []).length).toBe(2);
     // the per-pixel undo floods are gone: the OLD color-input handlers (inline pushHistory) no
     // longer exist (discrete controls like the "Fill the parcel" checkbox keep their pushHistory)
     expect(src).not.toMatch(/onChange=\{\(e\) => \{ pushHistory\(\); setSelEl\(\{ fill: e\.target\.value/);
