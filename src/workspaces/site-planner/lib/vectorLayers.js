@@ -66,6 +66,52 @@ export const VECTOR_SOURCES = {
     imageFallback: { url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer", layers: [27, 28] },
     note: "FEMA NFHL flood zone — screening only; verify with the official FEMA Flood Map Service Center.",
   },
+  // Base Flood Elevation LINES (S_BFE, B752) — the whole-foot water-surface contours
+  // FEMA draws ACROSS the floodplain. On most AE reaches the zone polygon's STATIC_BFE
+  // is the -9999 "none" sentinel, so the BFE actually lives here; the floodplain-
+  // mitigation engine interpolates these lines at the fill to DERIVE a screening BFE.
+  // Compute-only (no map render, no imageFallback). NOTE: sublayer index 16 = "Base
+  // Flood Elevations" on the public NFHL MapServer — FEMA occasionally renumbers the
+  // NFHL sublayers; live-verify against /NFHL/MapServer/layers, a one-line edit if moved.
+  bfeLines: {
+    id: "bfeLines",
+    label: "FEMA Base Flood Elevation lines",
+    style: "bfe",
+    query: {
+      url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/16/query",
+      keyRev: 1,
+      outFields: ["ELEV", "LEN_UNIT", "V_DATUM", "SOURCE_CIT"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000, // 30 days — flood layers move slowly
+      minVectorZoom: 15,
+      maxAreaDeg: 0.5,
+    },
+    note: "FEMA NFHL Base Flood Elevation lines — screening only; verify with the official FEMA Flood Map Service Center.",
+  },
+  // Regulatory Cross-Sections (S_XS, B752) — carry WSEL_REG (1% water surface at a
+  // station). REGISTERED for v2 but NOT consumed in v1: correct use needs stream
+  // matching (WTR_NM) + along-station interpolation, not nearest-line distance, or an
+  // unrelated creek's WSE would be misattributed (the multi-foot silent-error class).
+  // NOTE: sublayer index 14 = "Cross-Sections" — same renumber caveat as bfeLines.
+  crossSections: {
+    id: "crossSections",
+    label: "FEMA Cross-Sections",
+    style: "xs",
+    query: {
+      url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/14/query",
+      keyRev: 1,
+      outFields: ["WSEL_REG", "WTR_NM", "STREAM_STN", "XS_LTR", "V_DATUM", "STRMBED_EL"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 15,
+      maxAreaDeg: 0.5,
+    },
+    note: "FEMA NFHL regulatory cross-sections — screening only.",
+  },
   wetlands: {
     id: "wetlands",
     label: "Wetlands (NWI)",
@@ -300,22 +346,43 @@ export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFet
 // Esri JSON → GeoJSON
 // ---------------------------------------------------------------------------
 
-/* Convert Esri JSON features ({attributes, geometry:{rings}}) into a GeoJSON
- * FeatureCollection of Polygons. Esri rings are already [[ [lng,lat], ... ], ...],
- * so they pass straight through as Polygon `coordinates`. Features with no rings are
- * skipped. NOTE: this does not split outer rings from holes into separate
+/* Convert Esri JSON features into a GeoJSON FeatureCollection. Polygons
+ * ({geometry:{rings}}) pass straight through as Polygon `coordinates`; polylines
+ * ({geometry:{paths}} — e.g. FEMA Base Flood Elevation lines (S_BFE) or cross-sections)
+ * become LineString / MultiLineString. Esri rings/paths are already
+ * [[ [lng,lat], ... ], ...], so they need no reprojection here. Features with neither
+ * are skipped. NOTE: this does not split outer rings from holes into separate
  * Polygons/MultiPolygons — for screening, an even-odd fill renders these rings fine;
  * precise outer/hole classification is a later refinement. Pure. */
 export function featuresToGeoJson(esriFeatures, { source } = {}) {
   const out = [];
   for (const f of esriFeatures || []) {
-    const rings = f && f.geometry && f.geometry.rings;
-    if (!rings || !rings.length) continue; // skip null/empty geometry
-    out.push({
-      type: "Feature",
-      properties: f.attributes || {},
-      geometry: { type: "Polygon", coordinates: rings },
-    });
+    const geom = (f && f.geometry) || null;
+    const rings = geom && geom.rings;
+    if (rings && rings.length) {
+      out.push({
+        type: "Feature",
+        properties: f.attributes || {},
+        geometry: { type: "Polygon", coordinates: rings },
+      });
+      continue;
+    }
+    // Polyline sources (Esri `geometry.paths`) — one path → LineString, several →
+    // MultiLineString. Without this branch a line-layer pull would SILENTLY drop every
+    // feature (no error), exactly the fabricated-empty-result class the mitigation
+    // engine forbids (LOUD-FAILURE).
+    const paths = geom && geom.paths;
+    if (paths && paths.length) {
+      out.push({
+        type: "Feature",
+        properties: f.attributes || {},
+        geometry: paths.length > 1
+          ? { type: "MultiLineString", coordinates: paths }
+          : { type: "LineString", coordinates: paths[0] },
+      });
+      continue;
+    }
+    // neither rings nor paths — skip null/empty geometry
   }
   return { type: "FeatureCollection", features: out, style: source ? source.style : undefined };
 }
@@ -362,6 +429,11 @@ export function douglasPeucker(pts, tol) {
 export function simplifyGeoJson(fc, tolDeg = 0.00003) {
   const features = [];
   for (const feat of (fc && fc.features) || []) {
+    // Only Polygons are ring-simplified. Non-polygon geometry (LineString /
+    // MultiLineString — BFE lines, cross-sections) passes through UNTOUCHED: thinning a
+    // line's vertices would move it relative to the query point and perturb the BFE
+    // value interpolated off it. Pure.
+    if (!feat.geometry || feat.geometry.type !== "Polygon") { features.push(feat); continue; }
     const rings = (feat.geometry && feat.geometry.coordinates) || [];
     const outRings = [];
     for (const ring of rings) {
