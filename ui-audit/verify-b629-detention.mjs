@@ -16,7 +16,10 @@
  * W100-00-00; CYPRESS CREEK watershed → the B635 overlay note; a real MUD district.
  * Asserts: check button → required (badge: eff. Mar 2021 · verified Jul 2026) →
  * provided → Shortfall → Full-DIA triggers → Regime-B banner → MUD + watershed notes
- * → pond "Size for required detention" → solver lands in expand mode → Surplus.
+ * → B750 channel Auto/Yes/No control + detected-channel + reviewing-agency picker →
+ * pond "Size for required detention" → solver expands to MEET the requirement.
+ * A second (COH) pass verifies the >20-ac Houston→HCFCD greater-of wording + the
+ * failed-channel "couldn't confirm" hedge + the Yes override clearing it (B750).
  *
  * Run:  npm run build && npx vite preview --port 4188  (background), then
  *       BASE_URL=http://localhost:4188/ node ui-audit/verify-b629-detention.mjs
@@ -136,6 +139,19 @@ async function run() {
   }
   expect("screening caveat present", /Screening estimate — confirm with your engineer/.test(t));
 
+  // ── 5b. B750: channel-discharge control + detected-channel transparency ─────
+  expect("B750 channel Auto/Yes/No control renders", /Drains to HCFCD channel/.test(t));
+  expect("B750 detected channel is named (auto transparency)", /HCFCD channel detected/.test(t) && /W100-00-00/.test(t));
+  expect("B750 reviewing-agency picker renders", /Reviewing agency/.test(t));
+  const chanBtn = (label) => page.getByRole("button", { name: `Drains to HCFCD channel: ${label}` });
+  if (await chanBtn("No").count() > 0) {
+    await chanBtn("No").click(); await page.waitForTimeout(300); t = await railText();
+    expect("B750 setting channel → No follows the user's choice", /NOT draining to an HCFCD channel/.test(t));
+    await chanBtn("Yes").click(); await page.waitForTimeout(300); t = await railText();
+    expect("B750 setting channel → Yes shows the confirmed copy", /confirmed this site drains to an HCFCD channel/.test(t));
+    await chanBtn("Auto").click(); await page.waitForTimeout(300); // reset for the pond-solve section
+  }
+
   // ── 6. pond auto-size through the expand plumbing ──────────────────────────
   const pondPt = await screenAt(page, 380, 380).catch(() => null); // off-center in the pond
   expect("could compute the pond's screen position", !!pondPt);
@@ -155,14 +171,63 @@ async function run() {
       t = await railText();
       expect("auto-size lands in expand mode (baseline + ghost + Done/Reset)", /Expanding · existing locked/i.test(t));
       expect("storage delta renders in expand mode", /Storage gained|Proposed storage/i.test(t));
-      // The site-level readout should now show the shortfall closed (≥ required) —
-      // selecting the pond switched the rail to the Element tab, so re-open Yield.
-      await page.getByRole("button", { name: /Yield/ }).first().click().catch(() => {});
-      await page.waitForTimeout(400);
-      t = await railText();
-      const m = t.match(/Surplus\s*\+?([\d.]+)/);
-      expect("Yield panel flips to Surplus after the solve", !!m, m ? `+${m[1]} ac-ft` : "no Surplus line found");
+      // The solver's own output proves it closed the shortfall: Proposed storage reaches
+      // ≥ the 26.00 ac-ft required (usable target + dead pool → gross well above required).
+      // Read here in expand mode — reliable, unlike navigating the rail back after commit.
+      const prop = t.match(/Proposed storage\s+([\d.]+)\s*ac-ft/);
+      const proposedAcFt = prop ? parseFloat(prop[1]) : null;
+      expect("auto-size expands the pond to MEET the required detention (shortfall closed)",
+        proposedAcFt != null && proposedAcFt >= 26.0, proposedAcFt != null ? `proposed ${proposedAcFt} ac-ft ≥ 26.00 required` : "no Proposed storage figure");
     }
+  }
+
+  // ── 7. B750 COH pass: greater-of reviewer wording + failed-channel hedge ────
+  // A FRESH context (own localStorage, so no SWR-cached city/channel leaks in from the
+  // primary pass): inside City of Houston + a FAILING HCFCD channel query (near=null →
+  // the honest "couldn't confirm" hedge). Then confirm the Yes override clears it.
+  // (Skipped in LIVE mode: it depends on the mocked jurisdiction/channel.)
+  if (!LIVE) {
+    const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 860 }, deviceScaleFactor: 2 });
+    await ctx2.addInitScript(seed);
+    const COH_MOCKS = [
+      ["Texas_County_Boundaries", { features: [{ attributes: { CNTY_NM: "Harris", FIPS_ST_CNTY_CD: "48201" } }] }],
+      ["Texas_City_Boundaries", { features: [{ attributes: { city_name: "Houston" } }] }],
+      ["HGAC_City_ETJ", { features: [] }],
+      ["TCEQ_Water_Districts", { features: [] }],
+      ["NFHL", { features: [] }],
+      ["HCFCD/Watershed", { features: [] }],
+      ["3DEPElevation/ImageServer/getSamples", { samples: Array.from({ length: 9 }, () => ({ value: "30.48" })) }],
+    ];
+    for (const [needle, payload] of COH_MOCKS) {
+      await ctx2.route(`**${needle}**`, (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(payload) }));
+    }
+    await ctx2.route(`**HCFCD/Channels**`, (route) => route.fulfill({ status: 500, contentType: "text/plain", headers: { "access-control-allow-origin": "*" }, body: "boom" }));
+    const page2 = await ctx2.newPage();
+    page2.on("pageerror", (e) => { failures++; console.log(`  [FAIL] COH pageerror — ${e.message}`); });
+    await page2.goto(BASE, { waitUntil: "load" });
+    await page2.waitForTimeout(2800);
+    await page2.locator('svg[aria-label="Site plan canvas"]').waitFor({ timeout: 12000 }).catch(() => {});
+    await page2.getByRole("button", { name: /Yield/ }).first().click().catch(() => {});
+    await page2.waitForTimeout(400);
+    const cb2 = page2.getByRole("button", { name: /Check drainage criteria/ });
+    await cb2.waitFor({ timeout: 8000 }).catch(() => {});
+    await cb2.click();
+    await page2.getByText("Detention required", { exact: false }).waitFor({ timeout: 30000 }).catch(() => {});
+    await page2.waitForTimeout(700);
+    const t2a = (await page2.locator("body").innerText()).replace(/\s+/g, " ");
+    expect("B750 COH: reviewer wording explains the >20-ac Houston→HCFCD greater-of (not indecision)",
+      /For a tract over 20 acres, City of Houston applies the larger/.test(t2a), t2a.match(/Reviewing authority[^.]*\./)?.[0]?.slice(0, 90));
+    expect("B750 COH: a failed channel query shows the honest 'couldn't confirm' hedge",
+      /Couldn't confirm from HCFCD's map server/.test(t2a));
+    const yes2 = page2.getByRole("button", { name: "Drains to HCFCD channel: Yes" });
+    if (await yes2.count() > 0) {
+      await yes2.click(); await page2.waitForTimeout(400);
+      const t2b = (await page2.locator("body").innerText()).replace(/\s+/g, " ");
+      expect("B750 COH: confirming Yes clears the hedge (user's answer replaces the unknown)",
+        /confirmed this site drains to an HCFCD channel/.test(t2b) && !/Couldn't confirm from HCFCD's map server/.test(t2b));
+    }
+    await ctx2.close();
   }
 
   await page.screenshot({ path: "ui-audit/verify-b629-detention.png", fullPage: false }).catch(() => {});

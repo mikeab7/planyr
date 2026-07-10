@@ -16,6 +16,11 @@ import {
   stormIntensity,
   computeRateBasedDetention,
   computePumpedCredit,
+  effectiveChannelDischarge,
+  effectiveReviewer,
+  DETENTION_AUTHORITY_CHOICES,
+  slimDrainageContext,
+  hydrateDrainageContext,
 } from "../src/workspaces/site-planner/lib/detentionRules.js";
 
 describe("rule records — integrity sweep", () => {
@@ -434,5 +439,99 @@ describe("computePumpedCredit", () => {
     const c = computePumpedCredit({ acres: 10, impPct: 75, returnPeriodYr: 100 });
     expect(c.creditedAcFt).toBe(null);
     expect(c.flags).toContain("pump-rate-missing");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B750 — user overrides + a remembered result for the Stormwater readout.
+// ---------------------------------------------------------------------------
+describe("B750 — effectiveChannelDischarge", () => {
+  it("an explicit override (true/false) wins over detection", () => {
+    expect(effectiveChannelDischarge(true, false)).toEqual({ value: true, source: "override" });
+    expect(effectiveChannelDischarge(false, true)).toEqual({ value: false, source: "override" });
+  });
+  it("no override falls back to detection; null stays unknown", () => {
+    expect(effectiveChannelDischarge(null, true)).toEqual({ value: true, source: "auto" });
+    expect(effectiveChannelDischarge(undefined, false)).toEqual({ value: false, source: "auto" });
+    expect(effectiveChannelDischarge(null, null)).toEqual({ value: null, source: "auto" });
+    expect(effectiveChannelDischarge(undefined, undefined)).toEqual({ value: null, source: "auto" });
+  });
+});
+
+describe("B750 — effectiveReviewer", () => {
+  it("a non-empty override id wins over the detected reviewer", () => {
+    expect(effectiveReviewer("coh", "hcfcd")).toEqual({ authorityId: "coh", source: "override" });
+  });
+  it("an empty override falls back to the detected reviewer (both may be null)", () => {
+    expect(effectiveReviewer(null, "hcfcd")).toEqual({ authorityId: "hcfcd", source: "auto" });
+    expect(effectiveReviewer("", "coh")).toEqual({ authorityId: "coh", source: "auto" });
+    expect(effectiveReviewer(null, null)).toEqual({ authorityId: null, source: "auto" });
+  });
+});
+
+describe("B750 — DETENTION_AUTHORITY_CHOICES", () => {
+  it("carries HCFCD + City of Houston with plain labels, plus the municipal overlays", () => {
+    const byId = Object.fromEntries(DETENTION_AUTHORITY_CHOICES.map((c) => [c.id, c.label]));
+    expect(byId.hcfcd).toBe("Harris County Flood Control District");
+    expect(byId.coh).toBe("City of Houston");
+    expect(byId.fortbend).toBeTruthy();
+    expect(byId.missouricity).toBeTruthy(); // a municipal overlay is present
+    for (const c of DETENTION_AUTHORITY_CHOICES) expect(c.label).toBeTruthy();
+  });
+});
+
+describe("B750 — slim / hydrate drainage context", () => {
+  const ctx = {
+    authority: {
+      primaryReviewer: { authorityId: "coh", rule: ruleFor("coh") },
+      channelAuthority: "hcfcd",
+      overlays: [{ kind: "mud", name: "Harris County MUD 1", type: "MUD" }],
+      ambiguous: [],
+      flags: ["secondary-source"],
+      mud: { state: "loaded", districts: [{ name: "Harris County MUD 1" }] },
+      jurisdiction: { city: ["Houston"], county: ["Harris"], etj: [] },
+      sources: [{ id: "county", state: "loaded" }],
+      note: "x",
+    },
+    flood: { zones: [{ zone: "AE", subtype: null, staticBfeFt: 52.1, vdatum: "NAVD88" }], state: "loaded", ageMs: 1000 },
+    channel: { near: true, unitNo: "W100-00-00", name: "Buffalo Bayou", type: "Natural", distFt: 45, geometry: { paths: [[[0, 0], [1, 1]]] }, state: "loaded" },
+    watershed: { names: ["CYPRESS CREEK"], state: "loaded", ageMs: 2000 },
+    watershedOverlays: WATERSHED_OVERLAYS.filter((o) => o.match.test("CYPRESS CREEK")),
+    groundElevFt: 60.2,
+    groundDatum: "NAVD88",
+    floodGeo: { zones: [], state: "loaded" },
+  };
+  it("slim drops the bulky geometry + floodGeo but keeps the re-render facts and is JSON-safe", () => {
+    const slim = slimDrainageContext(ctx);
+    expect(slim.channel.geometry).toBeUndefined();
+    expect(slim.channel.unitNo).toBe("W100-00-00");
+    expect(slim.floodGeo).toBeUndefined();
+    expect(slim.authority.primaryReviewerId).toBe("coh");
+    expect(slim.authority.jurisdiction.city).toEqual(["Houston"]);
+    expect(slim.flood.zones).toHaveLength(1);
+    expect(slim.watershed.names).toEqual(["CYPRESS CREEK"]);
+    expect(() => JSON.parse(JSON.stringify(slim))).not.toThrow(); // no regex / functions survive
+  });
+  it("hydrate rebuilds the read-context shape: rule + watershed overlays re-derived, geometry null, restored flag", () => {
+    const slim = JSON.parse(JSON.stringify(slimDrainageContext(ctx)));
+    const h = hydrateDrainageContext(slim);
+    expect(h.restored).toBe(true);
+    expect(h.authority.primaryReviewer.authorityId).toBe("coh");
+    expect(h.authority.primaryReviewer.rule.id).toBe(ruleFor("coh").id); // rule re-derived, not stored
+    expect(h.channel.near).toBe(true);
+    expect(h.channel.geometry).toBeNull();
+    expect(h.floodGeo).toBeNull();
+    expect(h.watershedOverlays.length).toBeGreaterThan(0); // re-matched from watershed.names
+    expect(h.watershedOverlays[0].match).toBeInstanceOf(RegExp); // full overlay object restored
+    expect(h.flood.zones).toHaveLength(1);
+    expect(h.authority.jurisdiction.city).toEqual(["Houston"]);
+  });
+  it("null / empty inputs are safe", () => {
+    expect(slimDrainageContext(null)).toBeNull();
+    expect(hydrateDrainageContext(null)).toBeNull();
+    const hEmpty = hydrateDrainageContext({});
+    expect(hEmpty.authority.primaryReviewer).toBeNull();
+    expect(hEmpty.channel.near).toBeNull();
+    expect(hEmpty.flood.zones).toEqual([]);
   });
 });

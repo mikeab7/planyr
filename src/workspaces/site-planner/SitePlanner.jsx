@@ -109,6 +109,8 @@ import {
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt,
   resolveDrainageContext, ruleBadge,
   computeRateBasedDetention, computePumpedCredit, DESIGN_STORM_PERIODS,
+  effectiveChannelDischarge, effectiveReviewer, DETENTION_AUTHORITY_CHOICES,
+  slimDrainageContext, hydrateDrainageContext,
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft } from "./lib/polyClip.js";
@@ -1078,6 +1080,12 @@ const DEFAULT_SETTINGS = {
   speedBay: 60, bayLengthTarget: 56, bayDepthTarget: 50, bayMin: 50, bayMax: 58,
   doorWidth: 9, doorOC: 12,
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
+  // B750 — drainage overrides + remembered last check. drainsToHcfcdChannel / authorityId:
+  // null = auto (use GIS detection); true/false or an authority id = the user's own answer,
+  // used when the county maps can't confirm it. lastCheck = a slim summary of the last
+  // "Check drainage criteria" result so the readout survives a reload. Reads null-guard, so
+  // a project saved before this key still works.
+  drainage: {}, // { drainsToHcfcdChannel, authorityId, lastCheck }
 };
 
 // Eye / eye-off icons for the per-overlay visibility toggle (B277) — inline SVG so
@@ -6157,7 +6165,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         floodGeoP,
       ]);
       if (tok !== drainTok.current) return;
-      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1 });
+      const checkedAt = Date.now();
+      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt });
+      // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
+      // survives a reload without re-hitting the (flaky) county GIS. Rides the existing
+      // settings autosave — no schema change.
+      setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctx), sig, checkedAt } } }));
     } catch (e) {
       if (tok === drainTok.current) setDrainCtx((prev) => ({ error: String((e && e.message) || e), prev: prev?.prev }));
     }
@@ -6165,12 +6178,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The context to READ from: the live result, or the prior good one preserved under a
   // busy/error state (so a re-check that fails doesn't erase what we already knew).
   const drainReadCtx = drainCtx?.ctx ? drainCtx : drainCtx?.prev || null;
-  const drainCtxData = drainReadCtx?.ctx || null;
-  const drainAuthorityId = drainCtxData?.authority?.primaryReviewer?.authorityId ?? null;
+  // B750 "remember it": with no live check this session, fall back to the slim summary
+  // saved last time (settings.drainage.lastCheck) so the readout still shows last-known
+  // facts (a "re-check to refresh" hint carries its age). A live result always wins.
+  const drainRestoredCtx = !drainReadCtx && settings.drainage?.lastCheck
+    ? { ctx: hydrateDrainageContext(settings.drainage.lastCheck), sig: settings.drainage.lastCheck.sig, multiParcel: false, checkedAt: settings.drainage.lastCheck.checkedAt, restored: true }
+    : null;
+  const drainViewCtx = drainReadCtx || drainRestoredCtx;
+  const drainCtxData = drainViewCtx?.ctx || null;
+  const detectedAuthorityId = drainCtxData?.authority?.primaryReviewer?.authorityId ?? null;
+  // B750 overrides: the user's own answer (settings.drainage.*) wins over GIS detection
+  // when set — so a channel they can see, or a jurisdiction the county maps can't resolve,
+  // is never stuck at "unknown".
+  const chanOverride = settings.drainage?.drainsToHcfcdChannel;
+  const authOverride = settings.drainage?.authorityId || null;
+  const { authorityId: drainAuthorityId, source: reviewerSource } = effectiveReviewer(authOverride, detectedAuthorityId);
+  const { value: drainsToChanEff, source: channelSource } = effectiveChannelDischarge(chanOverride, drainCtxData?.channel?.near ?? null);
   const drainFloodOk = !!drainCtxData?.flood && drainCtxData.flood.state !== "failed";
   const acresActive = siteSqft / SQFT_PER_ACRE;
   const drainCityCount = drainCtxData?.authority?.jurisdiction?.city?.length ?? 0;
-  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainCityCount > 0, drainsToHcfcdChannel: drainCtxData?.channel?.near ?? null };
+  // Overriding the reviewer to City of Houston asserts city-limits jurisdiction (so the
+  // >20 ac greater-of branch fires); otherwise use the detected city membership.
+  const drainInCity = authOverride === "coh" ? true : drainCityCount > 0;
+  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff };
   const detReq = drainCtxData && siteSqft > 0 && drainAuthorityId
     ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
     : null;
@@ -6302,9 +6332,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         wetlandsPresent: analysisWetlands === "present",
       })
     : null;
+  // B750 — plain-English authority label from the shared choice list (never a raw id).
+  const authLabelFor = (id) => (DETENTION_AUTHORITY_CHOICES.find((c) => c.id === id) || {}).label || id || null;
+  // The channel Yes/No/Auto control is only consequential where HCFCD channels are the
+  // question — Harris-County authorities (City of Houston or HCFCD itself).
+  const drainChannelRelevant = drainAuthorityId === "coh" || drainAuthorityId === "hcfcd" || drainCtxData?.authority?.channelAuthority === "hcfcd";
   const drainage = siteSqft > 0 && origin ? {
-    status: !drainCtx ? "idle" : drainCtx.busy ? "busy" : drainCtx.error ? "error" : "ready",
+    status: drainCtx?.busy ? "busy" : drainCtx?.error ? "error" : drainViewCtx ? "ready" : "idle",
     error: drainCtx?.error || null,
+    restored: !!drainViewCtx?.restored,
+    lastCheckedAt: drainViewCtx?.checkedAt ?? null,
+    acres: acresActive,
     providedCf: providedDetCf, providedUsableCf, deadCf: siteDeadCf, pondCount,
     req: detReq, reqCandidates: detReqCandidates,
     tier: detTier, regime: detRegime, outfall: outfallNote,
@@ -6333,9 +6371,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     channelFailed: drainCtxData?.channel?.state === "failed",
     mudFailed: drainCtxData?.authority?.mud?.state === "failed",
     watershedFailed: drainCtxData?.watershed?.state === "failed",
-    stale: !!(drainReadCtx?.sig && drainReadCtx.sig !== drainSigNow),
-    multiParcel: !!drainReadCtx?.multiParcel,
-    showingPrior: !!(drainCtx && !drainCtx.ctx && drainReadCtx), // a busy/error state over a preserved prior answer
+    stale: !!(drainViewCtx?.sig && drainViewCtx.sig !== drainSigNow),
+    multiParcel: !!drainViewCtx?.multiParcel,
+    showingPrior: !!(drainCtx && !drainCtx.ctx && drainViewCtx), // a busy/error state over a preserved prior answer (live or restored)
+    // B750 — the reviewing authority the number is priced against (detected or overridden),
+    // kept distinct from the governing-RATE authority the badge shows (they differ on a
+    // >20 ac Houston tract, which is exactly what read as indecision before).
+    reviewer: drainAuthorityId ? { authorityId: drainAuthorityId, label: authLabelFor(drainAuthorityId), source: reviewerSource } : null,
+    // B750 — the reviewing-agency override picker (Auto + every modeled authority).
+    authorityChoice: {
+      override: authOverride,
+      detectedId: detectedAuthorityId,
+      detectedLabel: detectedAuthorityId ? authLabelFor(detectedAuthorityId) : null,
+      choices: DETENTION_AUTHORITY_CHOICES,
+      source: reviewerSource,
+      onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), authorityId: v || null } })),
+    },
+    // B750 — the "drains to an HCFCD channel" Auto/Yes/No control + what detection found.
+    channelDischarge: {
+      relevant: drainChannelRelevant,
+      override: chanOverride === true || chanOverride === false ? chanOverride : null,
+      effective: drainsToChanEff,
+      source: channelSource,
+      detected: drainCtxData?.channel || null, // { near, unitNo, name, distFt, state }
+      onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), drainsToHcfcdChannel: v } })),
+    },
     onCheck: checkDrainage,
   } : null;
 
@@ -14085,6 +14145,63 @@ function YieldPanel({
             const d = drainage;
             const warnNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.warnText, lineHeight: 1.45, margin: "3px 0 0", fontStyle: "italic" }}>{text}</div>;
             const keyedNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
+            // B750 — one segmented button for the Auto/Yes/No channel control (mirrors the
+            // per-pond Outfall toggle). Selected rides the global accent + --on-accent text.
+            const seg = (label, selected, onClick, key) => (
+              <button key={key} onClick={onClick} aria-label={`Drains to HCFCD channel: ${label}`} aria-pressed={selected} style={{ flex: 1, padding: "4px 6px", borderRadius: 6, border: `1px solid ${selected ? "var(--accent)" : Y.border}`, background: selected ? "var(--accent)" : Y.cardBg, color: selected ? "var(--on-accent)" : Y.text, fontWeight: 700, fontSize: 10.5, fontFamily: "inherit", cursor: "pointer" }}>{label}</button>
+            );
+            // B750 — the two overridable assumptions, grouped so the user can correct either:
+            // which agency reviews drainage, and whether the site drains to an HCFCD channel.
+            const assumptionsBlock = () => {
+              const cd = d.channelDischarge, ac = d.authorityChoice;
+              const showAuth = ac && (ac.detectedId || ac.override);
+              const showChan = cd && cd.relevant;
+              if (!showAuth && !showChan) return null;
+              const rows = [];
+              if (showAuth) rows.push(
+                <div key="auth" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                  <span style={{ fontSize: 11, color: Y.rowLabel }}>Reviewing agency</span>
+                  <select value={ac.override || ""} onChange={(e) => ac.onSet(e.target.value || null)}
+                    style={{ fontSize: 11, padding: "2px 6px", borderRadius: 6, border: `1px solid ${Y.border}`, background: Y.cardBg, color: Y.text, fontFamily: "inherit", maxWidth: 180 }}>
+                    <option value="">Auto{ac.detectedLabel ? ` — detected: ${ac.detectedLabel}` : ""}</option>
+                    {ac.choices.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                </div>
+              );
+              if (showChan) {
+                const det = cd.detected;
+                const unit = det && det.unitNo ? `Unit ${det.unitNo}` : "an HCFCD channel";
+                const nm = det && det.name ? ` (${det.name})` : "";
+                const dist = det && det.distFt != null ? ` within ~${Math.round(det.distFt)} ft` : "";
+                const defers = d.reviewer?.authorityId === "coh" && (d.acres || 0) > 20
+                  ? " At over 20 acres, City of Houston still defers to HCFCD's rate, so it's included regardless — only a smaller tract would use Houston's rate alone." : "";
+                let msg, warn = false;
+                if (cd.source === "override" && cd.override === true) msg = "You confirmed this site drains to an HCFCD channel — HCFCD's rate applies (no assumption).";
+                else if (cd.source === "override" && cd.override === false) msg = "You marked this site as NOT draining to an HCFCD channel." + defers;
+                else if (det && det.near === true) msg = `HCFCD channel detected — ${unit}${nm}${dist}. Assuming your detention discharges to it, so HCFCD's rate is included. Not right? Set this to No.`;
+                else if (det && det.near === false) { msg = "No HCFCD channel found near your site. If one runs through it — you can see it on the aerial — set this to Yes."; warn = true; }
+                else { msg = "Couldn't confirm from HCFCD's map server whether a channel is adjacent — the stricter reading is shown. Set Yes or No to tell the tool directly."; warn = true; }
+                rows.push(
+                  <div key="chan" style={{ marginTop: showAuth ? 6 : 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                      <span style={{ fontSize: 11, color: Y.rowLabel }}>Drains to HCFCD channel</span>
+                      <span style={{ display: "flex", gap: 4, width: 156 }}>
+                        {seg("Auto", cd.override == null, () => cd.onSet(null), "a")}
+                        {seg("Yes", cd.override === true, () => cd.onSet(true), "y")}
+                        {seg("No", cd.override === false, () => cd.onSet(false), "n")}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: warn ? Y.warnText : Y.muted, lineHeight: 1.45, margin: "3px 0 0", fontStyle: warn ? "italic" : "normal" }}>{msg}</div>
+                  </div>
+                );
+              }
+              return (
+                <div key="assumptions" style={{ marginTop: 7, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4 }}>Assumptions — correct if needed</div>
+                  {rows}
+                </div>
+              );
+            };
             // First-time idle (no prior answer) → the check button + intro.
             if (d.status !== "ready" && !d.showingPrior) {
               return (
@@ -14118,9 +14235,17 @@ function YieldPanel({
                 if (req.overlayRule.params?.runoffReductionPct) out.push(warnNote(`${req.overlayRule.authorityLabel} also requires a ${req.overlayRule.params.runoffReductionPct}% runoff reduction on top of detention.`, "runoff"));
               }
               if (req.governing?.candidates?.length > 1) {
-                out.push(keyedNote(`Greater-of: ${req.governing.candidates.map((c) => `${c.rule?.authorityLabel || c.authorityId} ${f2(c.acFt)} ac-ft`).join(" vs ")} — more restrictive governs.`, "gov"));
+                // B750 — name the reviewing authority (detected/overridden) DISTINCTLY from the
+                // governing-rate authority (the badge). On a >20 ac Houston tract they differ, and
+                // that difference read as indecision; spell out that it's Houston's own rule.
+                const cands = req.governing.candidates.map((c) => `${c.rule?.authorityLabel || c.authorityId} ${f2(c.acFt)} ac-ft`);
+                const govLabel = req.rule?.authorityLabel || req.governing.picked;
+                if (d.reviewer?.authorityId === "coh" && req.governing.picked === "hcfcd") {
+                  out.push(keyedNote(`Reviewing authority: ${d.reviewer.label} ${d.reviewer.source === "override" ? "(you set this)" : "(detected from city-limits GIS)"}. For a tract over 20 acres, City of Houston applies the larger of its own rate and HCFCD's — ${cands.join(" vs ")} — so ${govLabel}'s ${f2(req.requiredAcFt ?? 0)} ac-ft governs.`, "gov"));
+                } else {
+                  out.push(keyedNote(`Greater-of: ${cands.join(" vs ")} — more restrictive governs${d.reviewer?.label ? ` (${d.reviewer.label} review)` : ""}.`, "gov"));
+                }
               }
-              if (req.flags.includes("channel-adjacency-unknown")) out.push(warnNote("Whether the site drains directly to an HCFCD channel is unknown — the stricter reading is shown.", "chan-unk"));
               if (req.flags.includes("curve-approximate")) out.push(warnNote("Rate read from an approximate Fig. 9.2 curve — exact breakpoints pending transcription.", "curve"));
               if (req.flags.includes("secondary-source")) out.push(warnNote("June-2026 Houston rate verified against secondary coverage — manual PDF confirmation pending.", "sec-src"));
               if (req.flags.includes("added-impervious-unknown")) out.push(warnNote("This rate applies to ADDED impervious on redevelopment — full site impervious was used here; enter the added-impervious area to refine.", "added-imp"));
@@ -14164,6 +14289,8 @@ function YieldPanel({
             // with a truthy req, so it lives outside the req-shaped chain above).
             if (d.authorityFlags.includes("city-criteria-unverified")) out.push(warnNote("This city's own detention criteria aren't modeled — the county requirement is shown as a screening floor. Verify with the city.", "city-unv"));
             if (d.authorityFlags.includes("jurisdiction-partial")) out.push(warnNote("The city/ETJ lookup was incomplete (an outage) — if this parcel is inside Houston or its ETJ, the reviewing authority would be the City. Re-check.", "jur-partial"));
+            // B750 — the two overridable assumptions (reviewing agency + channel discharge).
+            { const ab = assumptionsBlock(); if (ab) out.push(ab); }
             out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
             if (d.deadCf > 0) out.push(keyedNote(`Usable ${f2(usableAcFt)} ac-ft after ${f2(d.deadCf / 43560)} ac-ft below the flood WSE / permanent pool (anchored ponds split at their real water surfaces; the rest use the Regime-B estimate — dead storage earns no credit).`, "usable"));
             {
@@ -14232,6 +14359,8 @@ function YieldPanel({
             if (d.mudFailed) out.push(warnNote("MUD / water-district data is unavailable — can't tell whether a district's own drainage criteria apply.", "mudfail"));
             if (d.channelFailed) out.push(warnNote("HCFCD channel data is unavailable — channel adjacency unknown.", "chanfail"));
             if (d.multiParcel) out.push(keyedNote("Checked against the largest active parcel.", "multi"));
+            // B750 — restored from a saved check (no live lookup this session): show its age.
+            if (d.restored && d.lastCheckedAt && !d.stale) out.push(keyedNote(`Remembered from your last check on ${new Date(d.lastCheckedAt).toLocaleDateString()} — re-check to refresh.`, "restored"));
             if (d.stale) out.push(warnNote("Site boundary changed since this check — re-check drainage criteria.", "stale"));
             // B712 — the mitigation inputs: jurisdiction defaulted from the resolved
             // drainage authority (stored only on override — the B74 pattern) + the
