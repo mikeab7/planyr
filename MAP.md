@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-09 @ `440639d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-10 @ `6d714e3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_227 source files mapped._
+_228 source files mapped._
 
 ## infra
 
@@ -267,6 +267,8 @@ _227 source files mapped._
   - _exports_: `catalogDepthDefault`, `DOCK_ZONES`, `dockSidesFor`, `footprintAxes`, `footprintDepth`, `footprintLength`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `pruneStrandedZones`, `strandedZoneIds`, `usableCourtSpan`, `ZONE_CATALOG`, `zoneDepthDefault`, `zoneDepthDefaults`
 - **`src/workspaces/site-planner/lib/dogEar.js`** — Corner bump-out geometry: box placement flush at a dock-wall corner, resize round-trip, and sidewalk span extension it causes
   - _exports_: `bumpSidewalkSide`, `DOGEAR_D`, `DOGEAR_W`, `dogEarGeom`, `dogEarSize`, `isDogEarSide`, `sidewalkSpanForBumps`
+- **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
+  - _exports_: `resolveDraftStepBack`
 - **`src/workspaces/site-planner/lib/easementRules.js`** — Editable per-jurisdiction utility-easement width rules (placeholder, verify-flagged) persisted in localStorage with county default mapping
   - _exports_: `DEFAULT_EASEMENT_RULES`, `defaultJurForCounty`, `loadEasementRules`, `saveEasementRules`
 - **`src/workspaces/site-planner/lib/easements.js`** — Easement domain logic: type catalog, label, and derive drawn ring from centerline/boundary/parcel-edge input modes with area

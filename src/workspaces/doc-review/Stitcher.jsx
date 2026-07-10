@@ -499,7 +499,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // render — onPointerMove re-renders constantly while drawing (B41).
   const onKeyRef = useRef(null);
   onKeyRef.current = (e) => {
-    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return; // RC-9: also skip SELECT/contentEditable (matches Site Planner)
     const mod = e.ctrlKey || e.metaKey;
     if (mod && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; }
     if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
