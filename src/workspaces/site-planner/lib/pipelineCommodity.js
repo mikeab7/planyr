@@ -47,12 +47,18 @@ export const commodityBucketRecord = (key) => BUCKET_BY_KEY[key] || BUCKET_BY_KE
 //    natural-gas `\bGAS\b` test keeps a bare "GAS" from stealing them.
 //  - hvl BEFORE gas: "NATURAL GAS LIQUIDS" must land in HVL, not natural gas.
 //  - crude requires the word CRUDE (a bare "OIL" is ambiguous — "fuel oil" is refined).
-const RE_REFINED = /GASOLINE|GASOHOL|DIESEL|\bJET\b|JET\s*(?:FUEL|-?A)|KEROSENE|REFINED|TRANSMIX|NAPHTHA|AVIATION|MOTOR\s*FUEL|GAS\s*OIL|DISTILLATE|FUEL\s*OIL/i;
-// Alkane names carry \b so "METHANE" (natural gas) doesn't match the "ETHANE" substring.
-const RE_HVL = /\bNGL?S?\b|NATURAL\s*GAS\s*LIQUID|Y[-\s]?GRADE|\bPROPANE\b|\bETHANE\b|\bBUTANE\b|\bISOBUTANE\b|\bPENTANE\b|\bPROPYLENE\b|\bETHYLENE\b|\bLPG\b|LIQU[EI]FIED\s*PETROLEUM|HIGHLY\s*VOLATILE|\bHVL\b/i;
+// "PRODUCTS" / "PETROLEUM PRODUCTS" is the RRC's common bare label for the refined-products group.
+const RE_REFINED = /GASOLINE|GASOHOL|DIESEL|\bJET\b|JET\s*(?:FUEL|-?A)|KEROSENE|REFINED|TRANSMIX|NAPHTHA|AVIATION|MOTOR\s*FUEL|GAS\s*OIL|DISTILLATE|FUEL\s*OIL|\bPRODUCTS?\b/i;
+// Alkane/olefin names carry \b (so "METHANE" doesn't match the "ETHANE" substring) + an optional
+// plural (the RRC uses "PENTANES PLUS", "BUTANES"). Olefins/diolefins (butadiene, butylene,
+// isobutylene, isoprene) are high-hazard HVLs common on the Gulf-Coast petrochemical corridor.
+const RE_HVL = /\bNGL?S?\b|NATURAL\s*GAS\s*LIQUID|Y[-\s]?GRADE|\bPROPANES?\b|\bETHANE\b|\bBUTANES?\b|\bISOBUTANES?\b|\bPENTANES?\b|\bPROPYLENE\b|\bETHYLENE\b|\bBUTADIENE\b|\bBUTYLENES?\b|\bISOBUTYLENE\b|\bOLEFINS?\b|\bISOPRENE\b|\bLPG\b|LIQU[EI]FIED\s*PETROLEUM|HIGHLY\s*VOLATILE|\bHVL\b/i;
 // High-hazard outliers → red HVL style, but the identify keeps the true commodity name.
 const RE_HVL_HAZARD = /HYDROGEN|ANHYDROUS\s*AMMONIA|\bAMMONIA\b/i;
-const RE_CRUDE = /CRUDE/i;
+// Condensate (lease / gas condensate) is a light, crude-like hydrocarbon liquid — grouped with crude
+// (a non-HVL hazardous liquid, matching the brief's HVL list, which is NGL/LPG only). Deliberate
+// screening call, NOT gray: crude-vs-HVL is confirmed against the live distinct values (V264).
+const RE_CRUDE = /CRUDE|CONDENSATE/i;
 const RE_CO2 = /CARBON\s*DIOXIDE|\bCO2\b|\bCO²\b/i;
 const RE_GAS = /NATURAL\s*GAS|\bGAS\b|METHANE|CASINGHEAD|SOUR\s*GAS|SWEET\s*GAS|FUEL\s*GAS/i;
 
@@ -62,6 +68,9 @@ const RE_GAS = /NATURAL\s*GAS|\bGAS\b|METHANE|CASINGHEAD|SOUR\s*GAS|SWEET\s*GAS|
 export function commodityBucket(desc) {
   const s = String(desc == null ? "" : desc).trim();
   if (!s) return "unknown";
+  // Natural gasoline is a pentanes-plus NGL (an HVL), NOT a refined motor fuel — it must win before
+  // RE_REFINED's bare GASOLINE keyword steals it into the lower-hazard refined bucket.
+  if (/NATURAL\s*GASOLINE/i.test(s)) return "hvl";
   if (RE_REFINED.test(s)) return "refined";
   if (RE_HVL.test(s) || RE_HVL_HAZARD.test(s)) return "hvl";
   if (RE_CRUDE.test(s)) return "crude";

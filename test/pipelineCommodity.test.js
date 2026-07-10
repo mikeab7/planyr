@@ -60,6 +60,31 @@ describe("commodityBucket — keyword crosswalk from COMMODITY_DESCRIPTION", () 
     expect(commodityBucket("crude oil")).toBe("crude");
     expect(commodityBucket("Natural Gas")).toBe("gas");
   });
+
+  // Review-hardening (B751 adversarial pass) — real Texas commodities that must NOT fall to gray.
+  it("condensate (light crude-like liquid) → crude, never gray or natural-gas", () => {
+    for (const s of ["CONDENSATE", "LEASE CONDENSATE", "GAS CONDENSATE", "NATURAL GAS CONDENSATE", "CRUDE OIL AND CONDENSATE"])
+      expect(commodityBucket(s)).toBe("crude");
+  });
+  it("olefins / diolefins (butadiene, butylene, isobutylene, isoprene, olefins) → HVL, never gray", () => {
+    for (const s of ["BUTADIENE", "1,3-BUTADIENE", "BUTYLENE", "BUTYLENES", "ISOBUTYLENE", "ISOPRENE", "OLEFINS"])
+      expect(commodityBucket(s)).toBe("hvl");
+  });
+  it("plural / 'plus' NGL alkane forms → HVL (the RRC uses PENTANES PLUS, BUTANES)", () => {
+    for (const s of ["PENTANES", "PENTANES PLUS", "BUTANES", "NORMAL BUTANE", "PROPANES"])
+      expect(commodityBucket(s)).toBe("hvl");
+  });
+  it("natural gasoline (a pentanes-plus NGL) → HVL, not refined", () => {
+    expect(commodityBucket("NATURAL GASOLINE")).toBe("hvl");
+    expect(commodityBucket("GASOLINE")).toBe("refined"); // plain motor gasoline stays refined
+  });
+  it("bare 'PRODUCTS' / 'PETROLEUM PRODUCTS' refined-group labels → refined, not gray", () => {
+    for (const s of ["PRODUCTS", "PETROLEUM PRODUCTS", "REFINED PRODUCTS"]) expect(commodityBucket(s)).toBe("refined");
+    expect(commodityBucket("CRUDE PETROLEUM")).toBe("crude"); // 'PETROLEUM' alone must not become refined
+  });
+  it("METHANE stays natural gas (the \\b guard survives the olefin additions)", () => {
+    expect(commodityBucket("METHANE")).toBe("gas");
+  });
 });
 
 describe("pipelineStyleFor — Leaflet path style per commodity", () => {
