@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _57 open · 46 awaiting live verification._
+> _57 open · 47 awaiting live verification._
 
 ## 🔲 Open
 
@@ -72,6 +72,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B625 | Metes-and-bounds deed rotates grossly off-angle on "Align to county parcel" (×2) | [Site Planner] | #site-planner #coordinates #gis | ⏳ live — awaiting |
 | B747 | Overlay tool accepts CAD files: client-side DXF import with true-units auto-scale | [Site Planner] | #site-planner #files | ⏳ live — awaiting |
 | B748 | Wire DWG into the overlay via the B238 conversion service (gated live, never a dead end) | [Site Planner / server] | #site-planner #files #infra | ⏳ live — awaiting |
 | B749 | Overlay PDF rasterization quality: raise base resolution + zoom-aware re-raster | [Site Planner] | #site-planner #perf | ⏳ live — awaiting |
@@ -123,14 +124,14 @@
 
 - **#auth** — B483, B676, B714
 - **#compare** — B471
-- **#coordinates** — B720, B684
+- **#coordinates** — B720, B625, B684
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B746, B687, B685, B667, B659
 - **#drive** — B663, B662, B629, B409, B699, B701, B687
 - **#entitlements** — B725, B726
 - **#export** — B745, B739, B738, B712, B684
 - **#files** — B180, B181, B182, B183, B747, B748, B699, B687, B685, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
-- **#gis** — B720, B721, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
+- **#gis** — B720, B721, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B625, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
 - **#infra** — B735, B726, B408, B406, B179, B63, B748, B734, B675, B669
 - **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B746, B740, B737
@@ -140,7 +141,7 @@
 - **#road** — B742, B719
 - **#scheduler** — B495, B408, B255, B644
 - **#selection** — B741, B746, B742, B743, B740, B737, B682, B651
-- **#site-planner** — B741, B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B747, B748, B749, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B741, B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B625, B747, B748, B749, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413
 - **#testing** — B269, B63, B743
 - **#thoroughfare** — B720, B721, B722, B723, B724, B725, B726
