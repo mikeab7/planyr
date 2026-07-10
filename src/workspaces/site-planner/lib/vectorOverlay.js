@@ -271,7 +271,7 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
   if (!source) return null;
   const { cache = gisCache, interactive = false, identifyOk = () => true, buildRaster = null } = opts;
 
-  let map = null, opacity = initialOpacity, lastVectorError = null;
+  let map = null, opacity = initialOpacity;
   let seq = 0, lastKey = null, mode = null; // 'vector' | 'image'
   let rasterLayer = null, openPopup = null;
   const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
@@ -345,7 +345,7 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     try { rasterLayer = buildRaster(); if (rasterLayer && rasterLayer.setOpacity) rasterLayer.setOpacity(opacity); } catch (_) { rasterLayer = null; }
     return rasterLayer;
   };
-  const showRaster = () => { const r = ensureRaster(); if (r && !group.hasLayer(r)) group.addLayer(r); };
+  const showRaster = () => { const r = ensureRaster(); if (r && !group.hasLayer(r)) group.addLayer(r); return !!r; };
   const hideRaster = () => { if (rasterLayer && group.hasLayer(rasterLayer)) { try { group.removeLayer(rasterLayer); } catch (_) {} } };
 
   const paintVector = (fc, ts, stale) => {
@@ -355,10 +355,12 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     report(n ? "loaded" : "empty", n ? null : "No pipelines in this view.", { ts: ts ?? null, stale: !!stale });
   };
 
-  const enterImage = (msg) => {
+  // Show the far-out raster. Report HONESTLY: "loaded" only if the raster actually mounted; if the
+  // injected raster couldn't be built (absent/threw) surface a failure rather than a false "loaded".
+  const enterImage = (msg, failMsg) => {
     if (mode !== "image") { seq++; mode = "image"; geo.clearLayers(); closeIdentify(); lastKey = null; }
-    showRaster();
-    report("loaded", msg || null);
+    if (showRaster()) report("loaded", msg || null);
+    else report("failed", failMsg || `${cfg.label}: the pipeline layer couldn't load here (screening only).`);
   };
 
   const refresh = async () => {
@@ -367,7 +369,12 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     const b = map.getBounds();
     const bbox = { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() };
     const areaDeg = Math.abs((bbox.e - bbox.w) * (bbox.n - bbox.s));
-    if (decideVectorOrImage(source, { zoom, bboxAreaDeg: areaDeg, lastVectorError }) === "image") { enterImage(); return; }
+    // Zoom / area alone decide vector-vs-raster — this is a live, RETRYABLE switch, NOT a permanent
+    // latch. A transient vector-fetch failure (below) falls to the raster for the current view but is
+    // retried on the next moveend, so a one-off RRC blip can't pin the layer to the grainy raster (and
+    // kill click-identify) for the session. (Deliberately unlike the boundary layer's `lastVectorError`
+    // latch, which is paired with its permanent live-fallback.)
+    if (decideVectorOrImage(source, { zoom, bboxAreaDeg: areaDeg }) === "image") { enterImage(); return; }
     if (mode !== "vector") { mode = "vector"; hideRaster(); lastKey = null; }
     const tier = pickTier(source, zoom);
     const eff = tier && tier.scope !== "all" && tier.cellDeg ? snapBbox(bbox, tier.cellDeg) : bbox;
@@ -385,13 +392,13 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
       });
       if (mySeq !== seq || !map || mode !== "vector") return;
       lastKey = key;
-      lastVectorError = null; // a good pull heals any earlier blip
       paintVector(r.data, r.ts, r.stale);
     } catch (e) {
       if (mySeq !== seq || !map || mode !== "vector") return;
-      lastVectorError = e; // a vector failure drops to the raster for this view (LOUD via status) — never a blank layer
+      // A vector failure drops to the raster for THIS view (LOUD via status) — never a blank layer.
+      // The next moveend re-tries vector (the gate above no longer latches on the error).
       mode = null; // force enterImage to switch panes/report
-      enterImage(`${cfg.label}: showing the raster pipeline layer (vector pull failed).`);
+      enterImage(null, `${cfg.label}: couldn't load the pipeline vector here (screening only).`);
     }
   };
 
