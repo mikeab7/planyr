@@ -415,16 +415,30 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/inlineLabelControls\(selEl, "road", coalesceLabelWrite\(selEl\.id/);
   });
 
-  it("B679: double-tap (time + DISTANCE gated) opens the in-place editor; pointer capture eats the DOM dblclick", () => {
+  it("B754: single-click selects only; a double-tap opens Properties, an ALREADY-selected text feature edits its text", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    // reconstruct the browser's own double-click test — a second press on the same feature within the
-    // time window AND within the distance threshold (the distance gate kills the select-then-drag misfire)
-    expect(src).toMatch(/const isDoubleTap = \(e, id\) => \{/);
+    // isDoubleTap now also carries whether the feature was ALREADY selected at the FIRST press (wasSel);
+    // it reconstructs the browser's own double-click test (pointer capture eats the DOM dblclick) and
+    // exposes the first-press selection via dblWasSelRef when the second tap matches.
+    expect(src).toMatch(/const isDoubleTap = \(e, id, wasSel\) => \{/);
     expect(src).toMatch(/const near = Math\.abs\(e\.clientX - p\.x\) <= DBLTAP_PX/);
-    // callout / text box (box part), and — only when UNLOCKED — markup line/polyline/easement and centerline road
-    expect(src).toMatch(/if \(part === "box" && isDoubleTap\(e, id\)\) \{[\s\S]{0,60}beginEditCallout\(id\); return;/);
-    expect(src).toMatch(/!m\.locked && \(m\.kind === "line" \|\| m\.kind === "polyline" \|\| m\.kind === "easement"\) && isDoubleTap\(e, id\)/);
-    expect(src).toMatch(/!el\.groupId && !el\.locked && isCenterlineRoad\(el\) && isDoubleTap\(e, id\)/);
+    expect(src).toMatch(/dblWasSelRef\.current = !!p\.wasSel;/);
+    // callout: already-selected → edit text in place; otherwise open Properties
+    expect(src).toMatch(/if \(part === "box" && isDoubleTap\(e, id, [\s\S]{0,90}if \(dblWasSelRef\.current\) beginEditCallout\(id\);[\s\S]{0,90}setPropsFor\(\{ kind: "callout", id \}\)/);
+    // markup line/polyline/easement: already-selected text-bearing → edit label; otherwise open Properties
+    expect(src).toMatch(/const textBearing = m\.kind === "line" \|\| m\.kind === "polyline" \|\| m\.kind === "easement";/);
+    expect(src).toMatch(/if \(dblWasSelRef\.current && textBearing\) beginEditInline\("markup", id\);[\s\S]{0,90}setPropsFor\(\{ kind: "markup", id \}\)/);
+    // element (centerline road is the only text-bearing el): already-selected road → edit label; else Properties
+    expect(src).toMatch(/if \(!el\.groupId && !el\.locked && isDoubleTap\(e, id, /);
+    expect(src).toMatch(/if \(dblWasSelRef\.current && isCenterlineRoad\(el\)\) beginEditInline\("el", id\);[\s\S]{0,90}setPropsFor\(\{ kind: "el", id \}\)/);
+    // the Properties companion is now gated on an EXPLICIT open (propsMatches), not raw selection —
+    // on desktop a plain click selects without popping it; phone still uses the ✎ pill (narrowProps).
+    expect(src).toMatch(/const propsMatches = propsFor === "multi"/);
+    expect(src).toMatch(/const companionOpen = companionSel && \(narrow \?/);
+    // onElDouble (the native/raw-dblclick fallback) now OPENS PROPERTIES; the type/actions menu moved
+    // off double-click and stays on right-click via onElContext.
+    expect(src).toMatch(/const onElDouble = \(e, id\) => \{[\s\S]*?setPropsFor\(\{ kind: "el", id \}\);\s*\n\s*\};/);
+    expect(src).toMatch(/const onElContext = \(e, id\) => \{[\s\S]*?setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY \}\);/);
   });
 
   it("B680: callout editor hides the committed box + chrome while editing (no doubling), keeps a typeable min", () => {

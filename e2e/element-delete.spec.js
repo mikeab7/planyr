@@ -61,6 +61,10 @@ test.describe("element delete — never a silent no-op (logged out)", () => {
     await startBlank(page);
     await drawRoad(page);
 
+    // B754: a single click / fresh draw now SELECTS only — the Properties companion no longer auto-pops.
+    // The road is still selected after drawRoad, so open the docked Properties inspector from the rail
+    // (renders via `propsTab && companionSel`) to reach its "Delete element" button.
+    await page.locator('button[title="Properties"]').click();
     await page.getByRole("button", { name: /Delete element/i }).click();
     await expect.poll(() => readEls(page).then((r) => r.clRoads)).toBe(0);
 

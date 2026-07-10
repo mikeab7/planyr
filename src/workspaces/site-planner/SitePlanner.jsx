@@ -1207,7 +1207,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
   const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
   const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
-  const [propsDismissed, setPropsDismissed] = useState(false); // B656 follow-up: ✕ hides the companion while the element stays selected; re-clicking the element reopens it
+  // B754: the Properties companion no longer follows raw selection — a single click SELECTS only.
+  // `propsFor` marks the selection whose companion is explicitly open (a double-click, the phone ✎ pill,
+  // or the docked Properties tab set it); `null` = closed. The panel re-checks each render whether this
+  // still matches the current selection (propsMatches), so any OTHER selection path — single click,
+  // marquee, shift-multi, programmatic, undo/redo — leaves the companion closed without touching the
+  // ~70 setSel sites. Holds {kind,id} or the sentinel 'multi' (a styleable multi-selection).
+  const [propsFor, setPropsFor] = useState(null);
   useEffect(() => {
     let mq; try { mq = window.matchMedia(`(max-width: ${FLOAT_MIN_WIDTH}px)`); } catch (_) { return undefined; }
     const on = () => setNarrow(mq.matches);
@@ -1243,6 +1249,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // inspector. Derived from `sel` alone (not the resolved selectors) so early effects can use it.
   // B740 widens it to a styleable multi-selection.
   const companionSel = (!!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup")) || multiStyleable;
+  // B754: does the explicitly-opened Properties marker still point at the CURRENT selection? Declared
+  // here (right after companionSel) so both the canvas-shift effect and companionOpen can read it.
+  const propsMatches = propsFor === "multi"
+    ? multiStyleable
+    : (!!propsFor && !!sel && propsFor.kind === sel.kind && propsFor.id === sel.id);
   // B261: while a persistent group is selected, double-clicking a member "drills in" to
   // edit just that one element in place (without ungrouping). drillId = that member's id,
   // or null when we're operating on the group as a whole.
@@ -1872,14 +1883,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // a second press on the SAME feature within DBLTAP_MS *and* within DBLTAP_PX of the first (the time +
   // distance thresholds a native double-click uses). The distance gate is what stops a "click here to
   // select, then press over THERE to drag" gesture from misfiring as an edit.
-  const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0 });
+  const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0, wasSel: false });
   const labelSessionRef = useRef(null);  // B682 — coalesces a live label-spacing slider drag into one undo frame
+  // B754 — carries whether the feature was ALREADY selected at the FIRST press of a double-tap. That
+  // decides a double-click's job: an already-selected text-bearing feature edits its text ("click to
+  // select, then double-click to edit text"); anything else opens Properties. Read right after
+  // isDoubleTap(...) returns true.
+  const dblWasSelRef = useRef(false);
   const DBLTAP_MS = 350, DBLTAP_PX = 14;
-  const isDoubleTap = (e, id) => {
+  const isDoubleTap = (e, id, wasSel) => {
     const now = Date.now(), p = lastTapRef.current;
     const near = Math.abs(e.clientX - p.x) <= DBLTAP_PX && Math.abs(e.clientY - p.y) <= DBLTAP_PX;
-    if (p.id === id && now - p.t < DBLTAP_MS && near) { lastTapRef.current = { id: null, t: 0, x: 0, y: 0 }; return true; }
-    lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY };
+    if (p.id === id && now - p.t < DBLTAP_MS && near) { dblWasSelRef.current = !!p.wasSel; lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; return true; }
+    lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY, wasSel: !!wasSel };
     return false;
   };
   const pinch2Ref = useRef(null);        // active baseline { mid, dist } (svg-relative) | null
@@ -2561,12 +2577,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [sel?.kind, sel?.id]);
   // B656: the phone companion overlay follows the selection's lifetime — deselect closes it.
   useEffect(() => { if (!companionSel) setNarrowProps(false); }, [companionSel]);
-  // B656 follow-up: any (re)selection clears a prior ✕-dismiss so the companion reopens.
-  // Keyed on `sel` identity, not kind/id — every canvas click re-fires setSel({...}) with a
-  // fresh object (startMoveEl), so re-clicking the already-selected element reopens the panel.
-  // B740: also key on `multi` so a fresh marquee/shift multi-selection (which can leave sel=null)
-  // reopens the shared panel too.
-  useEffect(() => { setPropsDismissed(false); }, [sel, multi]);
+  // B754: when the selection moves OFF the element whose Properties are open, drop the marker so the
+  // companion closes and can't re-pop on a plain re-click. (Replaces the old B656 effect that RE-opened
+  // the companion on every selection change — the exact auto-open behavior we're removing.)
+  useEffect(() => {
+    const keep = propsFor === "multi"
+      ? multiStyleable
+      : (!!propsFor && !!sel && propsFor.kind === sel.kind && propsFor.id === sel.id);
+    if (propsFor && !keep) { setPropsFor(null); setNarrowProps(false); }
+  }, [sel, multi, propsFor, multiStyleable]);
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
   // so a later manual visit opens with the normal all-collapsed overview.
@@ -2597,14 +2616,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // EXACT delta we applied, so a mid-open rotation can never leave a residual sideways offset.
   const panelShiftRef = useRef(0);
   useEffect(() => {
-    const want = ((!!leftPanel || (companionSel && !propsDismissed)) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts; a ✕-dismissed companion must NOT hold the shift or it leaves a blank rail gap)
+    const want = ((!!leftPanel || (companionSel && propsMatches)) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts; B754: only an EXPLICITLY-open companion holds the shift, else it leaves a blank rail gap)
     if (want !== panelShiftRef.current) {
       const delta = want - panelShiftRef.current;
       panelShiftRef.current = want;
       setView((v) => ({ ...v, offX: v.offX - delta }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftPanel, narrow, companionSel, propsDismissed]);
+  }, [leftPanel, narrow, companionSel, propsMatches]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
@@ -3432,10 +3451,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
-    // B679 — double-click an UNLOCKED line / polyline / easement → edit its inline label in place
-    // (pointer capture eats the DOM dblclick, so read e.detail here). Locked features stay select-only.
-    if (m && !m.locked && (m.kind === "line" || m.kind === "polyline" || m.kind === "easement") && isDoubleTap(e, id)) {
-      setSel({ kind: "markup", id }); beginEditInline("markup", id); return;
+    // B754 — double-click an UNLOCKED markup opens its Properties. Exception: an ALREADY-selected
+    // text-bearing markup (line / polyline / easement — the ones with an inline label) edits its label
+    // instead ("click to select, then double-click to edit text"). Pointer capture eats the DOM dblclick,
+    // so we reconstruct the double-tap here. Locked features stay select-only.
+    if (m && !m.locked && isDoubleTap(e, id, sel?.kind === "markup" && sel.id === id)) {
+      setSel({ kind: "markup", id });
+      const textBearing = m.kind === "line" || m.kind === "polyline" || m.kind === "easement";
+      if (dblWasSelRef.current && textBearing) beginEditInline("markup", id);
+      else { setPropsFor({ kind: "markup", id }); if (narrow) setNarrowProps(true); }
+      return;
     }
     // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
     if (hasSelMod(e)) {
@@ -3571,9 +3596,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
-    // B679 — double-click a callout / text box (box part only) → edit its text in place. Pointer
-    // capture eats the DOM dblclick, so we read e.detail on the pointerdown instead.
-    if (part === "box" && isDoubleTap(e, id)) { setSel({ kind: "callout", id }); beginEditCallout(id); return; }
+    // B754 — double-click a callout (box part only): an ALREADY-selected callout edits its text in place
+    // ("click to select, then double-click to edit text"); otherwise it opens Properties. Pointer capture
+    // eats the DOM dblclick, so we reconstruct the double-tap here.
+    if (part === "box" && isDoubleTap(e, id, sel?.kind === "callout" && sel.id === id)) {
+      setSel({ kind: "callout", id });
+      if (dblWasSelRef.current) beginEditCallout(id);
+      else { setPropsFor({ kind: "callout", id }); if (narrow) setNarrowProps(true); }
+      return;
+    }
     const c = callouts.find((x) => x.id === id);
     setSel({ kind: "callout", id });
     pushHistory();
@@ -5498,9 +5529,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
-    // B679 — double-click a non-grouped, UNLOCKED centerline road → edit its inline label in place,
-    // matching onElDouble. Pointer capture eats the DOM dblclick, so read e.detail here too.
-    if (!el.groupId && !el.locked && isCenterlineRoad(el) && isDoubleTap(e, id)) { setSel({ kind: "el", id }); beginEditInline("el", id); return; }
+    // B754 — double-click a non-grouped, UNLOCKED element opens its Properties. Exception: an ALREADY-
+    // selected centerline road (the only text-bearing element) edits its inline label instead ("click to
+    // select, then double-click to edit text"). Pointer capture eats the DOM dblclick, so we reconstruct
+    // the double-tap here. Groups keep single-click = select-whole-group (drill-in stays in onElDouble).
+    if (!el.groupId && !el.locked && isDoubleTap(e, id, sel?.kind === "el" && sel.id === id)) {
+      setSel({ kind: "el", id });
+      if (dblWasSelRef.current && isCenterlineRoad(el)) beginEditInline("el", id);
+      else { setPropsFor({ kind: "el", id }); if (narrow) setNarrowProps(true); }
+      return;
+    }
     const fp = p2f(e.clientX, e.clientY);
     // Explicit attach/align flows (click a host/target) take precedence.
     if (attachFor) { attachTo(attachFor, el.id); setAttachFor(null); return; }
@@ -5831,9 +5869,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (el.groupId) { setMulti([]); setDrillId(id); setSel({ kind: "el", id }); return; }
     // B620: double-click a (centerline) road → edit its inline label in place (right-click still opens
     // the type/actions menu via onElContext). Legacy bonded rect roads keep the type menu.
-    if (isCenterlineRoad(el)) { beginEditInline("el", id); return; }
+    if (isCenterlineRoad(el)) { setSel({ kind: "el", id }); beginEditInline("el", id); return; }
+    // B754: double-click now opens Properties (was the type/actions menu — that stays on right-click via
+    // onElContext). This native path is the raw-dblclick / test-harness fallback; real users hit the
+    // reconstructed double-tap in startMoveEl (pointer capture eats this native dblclick).
     setSel({ kind: "el", id });
-    setTypeMenu({ id, x: e.clientX, y: e.clientY });
+    setPropsFor({ kind: "el", id });
   };
   // Right-click an element always opens its actions menu (so a grouped element can still
   // reach Ungroup / Duplicate group / etc). Keeps an active group selection intact so the
@@ -8088,7 +8129,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B656: the Properties companion coexists with the open panel — it renders whenever a
   // qualifying selection exists. On a phone it stays closed unless a panel is already
   // open (B556: tap = select only) or the ✎ Properties pill explicitly opened it.
-  const companionOpen = companionSel && !propsDismissed && (!narrow || !!leftPanel || narrowProps);
+  // B754: on desktop the companion opens ONLY when Properties was explicitly opened for this selection
+  // (propsMatches) — a plain click selects without popping it. Phone is unchanged: the ✎ pill (narrowProps)
+  // or an already-open panel gates it there (B556: tap = select only).
+  const companionOpen = companionSel && (narrow ? (!!leftPanel || narrowProps) : propsMatches);
   // B733 — the Properties tab is active. When it is, the inspector docks as the MAIN panel
   // (full height + its own empty state), rather than riding above another panel as the B656
   // companion does. Properties is dock-only (it reuses the companion, which is outside the
@@ -11043,7 +11087,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* B656: on a phone, selection alone never opens the overlay (B556) — this pill is
               the explicit affordance: tap it to open the Properties companion as an overlay. */}
           {narrow && companionSel && !leftPanel && !narrowProps && (
-            <button data-export="skip" onClick={() => { setNarrowProps(true); setPropsDismissed(false); }}
+            <button data-export="skip" onClick={() => { setNarrowProps(true); }}
               style={{ position: "absolute", left: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: 99, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
               ✎ Properties
             </button>
@@ -11432,9 +11476,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 aria-pressed={leftPanel === tb.id || isFloating(tb.id)}
                 onClick={() => {
                   if (isFloating(tb.id)) { closeFloating(tb.id); return; } // re-clicking a floating panel's icon closes it
-                  // B733: opening Properties un-dismisses + expands the inspector (a prior ✕/collapse
-                  // shouldn't leave the freshly-opened tab looking empty or headers-only).
-                  if (tb.id === "properties") { setPropsDismissed(false); setPropsCollapsed(false); }
+                  // B733/B754: opening the Properties tab expands the inspector (a prior collapse shouldn't
+                  // leave the freshly-opened tab headers-only). The tab renders via `propsTab && companionSel`,
+                  // independent of the double-click `propsFor` marker, so it always shows the current selection.
+                  if (tb.id === "properties") { setPropsCollapsed(false); }
                   setLeftPanel((p) => (p === tb.id ? null : tb.id));
                 }}>
                 <span style={{ display: "grid", placeItems: "center", height: 18, lineHeight: 1 }}><RailIcon id={tb.id} /></span>
@@ -11466,7 +11511,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 re-clicking the element (or picking another) reopens it via the [sel] effect above. */}
             {/* B733: the ✕ dismisses the auto-companion — but in the Properties TAB it would do
                 nothing visible (the tab re-shows it), so hide it there; you close the tab from the rail. */}
-            {!propsTab && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — click it again to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsDismissed(true); }}>✕</button>}
+            {!propsTab && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); }}>✕</button>}
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
