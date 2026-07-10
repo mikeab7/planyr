@@ -25,8 +25,9 @@
  */
 import L from "leaflet";
 import { gisCache } from "./gisCache.js";
-import { VECTOR_SOURCES, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey } from "./vectorLayers.js";
+import { VECTOR_SOURCES, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor } from "./vectorLayers.js";
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
+import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 
 const LABEL_PANE = "boundarylabels";
 
@@ -246,5 +247,283 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     if (fallbackLayer && fallbackLayer.setOpacity) { try { fallbackLayer.setOpacity(o); } catch (_) {} }
   };
 
+  return group;
+}
+
+const CORRIDOR_PANE = "pipecorridorpane";
+
+/* Cached-vector PIPELINE overlay (B751) — a view-driven LINE layer that draws the RRC T-4
+ * pipeline centerlines as crisp polylines COLORED BY COMMODITY when zoomed in, and swaps to the
+ * agency's `/export` raster (imageFallback) when zoomed far out (statewide density is too heavy
+ * to draw as vector). Unlike the boundary `cachedVectorLayer`, the vector↔raster choice is
+ * RE-EVALUATED on every moveend (`decideVectorOrImage`) — a zoom-reactive switch, not a
+ * permanent fallback latch. Rides the same `gisCache` SWR cache + geometry-simplify tiers as
+ * FEMA/NWI, and carries a click-identify (operator · commodity · diameter · status).
+ *
+ * Options:
+ *   cache        — injected SWR cache (default: the gisCache singleton)
+ *   interactive  — enable click-identify (map finder yes; planner backdrop no)
+ *   identifyOk   — live gate read per event: false while a tool owns clicks (B98)
+ *   buildRaster  — () => a live esri dynamicMapLayer for the imageFallback (injected by layers.js
+ *                  so this module stays esri-free); mounted only in the far-out raster mode. */
+export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
+  const source = VECTOR_SOURCES[k];
+  if (!source) return null;
+  const { cache = gisCache, interactive = false, identifyOk = () => true, buildRaster = null } = opts;
+
+  let map = null, opacity = initialOpacity, lastVectorError = null;
+  let seq = 0, lastKey = null, mode = null; // 'vector' | 'image'
+  let rasterLayer = null, openPopup = null;
+  const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
+
+  const group = L.layerGroup([], { pane });
+
+  // Per-feature commodity style (fixed map symbology, hazard-encoded weight/dash) folded with the
+  // live layer opacity. styleFor(pipeline) returns Leaflet path keys ({color,weight,dashArray}).
+  const styleFeature = (feature) => {
+    const s = styleFor(source, feature && feature.properties) || {};
+    return { color: s.color, weight: s.weight, dashArray: s.dashArray || null, opacity, fill: false, fillOpacity: 0 };
+  };
+
+  const closeIdentify = () => {
+    if (openPopup && map) { try { map.closePopup(openPopup); } catch (_) {} }
+    openPopup = null;
+  };
+
+  // Identify popover DOM (external attribute values → textContent, never innerHTML).
+  const identifyEl = (props) => {
+    const p = props || {};
+    const commodity = p[source.commodityField];
+    const color = (styleFor(source, p) || {}).color || "#333";
+    const el = document.createElement("div");
+    el.style.cssText = "font-size:12px;line-height:1.5;max-width:260px;";
+    const head = document.createElement("div");
+    head.style.cssText = "font-weight:700;font-size:12.5px;margin-bottom:3px;display:flex;align-items:center;gap:6px;";
+    const sw = document.createElement("span");
+    sw.style.cssText = `width:14px;height:0;border-top:3px solid ${color};flex:none;`;
+    const ct = document.createElement("span");
+    ct.textContent = commodity == null || commodity === "" ? "Pipeline (commodity not stated)" : String(commodity);
+    head.append(sw, ct);
+    el.append(head);
+    for (const f of source.identifyFields || []) {
+      const raw = p[f.field];
+      if (raw == null || raw === "") continue;
+      const row = document.createElement("div");
+      const lab = document.createElement("span");
+      lab.style.cssText = "opacity:0.7;";
+      lab.textContent = `${f.label}: `;
+      const val = document.createElement("span");
+      val.textContent = f.unit && /^[\d.]+$/.test(String(raw)) ? `${raw}″` : String(raw);
+      row.append(lab, val);
+      el.append(row);
+    }
+    const note = document.createElement("div");
+    note.style.cssText = "opacity:0.85;margin-top:4px;";
+    note.textContent = source.identifyNote || "";
+    const src = document.createElement("div");
+    src.style.cssText = "opacity:0.7;font-size:10.5px;margin-top:3px;";
+    src.textContent = source.sourceName ? `Source: ${source.sourceName}` : "";
+    el.append(note, src);
+    return el;
+  };
+
+  const wireFeature = (feature, lyr) => {
+    if (!interactive) return;
+    lyr.on("mouseover", () => { try { lyr.setStyle({ weight: (styleFeature(feature).weight || 2) + 1.5 }); } catch (_) {} });
+    lyr.on("mouseout", () => { try { lyr.setStyle(styleFeature(feature)); } catch (_) {} });
+    lyr.on("click", (e) => {
+      if (!identifyOk() || !map) return;
+      openPopup = L.popup({ maxWidth: 290, autoPan: false }).setLatLng(e.latlng).setContent(identifyEl(feature.properties)).openOn(map);
+    });
+  };
+
+  const geo = L.geoJSON(null, { pane, interactive, style: styleFeature, onEachFeature: wireFeature });
+  group.addLayer(geo);
+
+  const ensureRaster = () => {
+    if (rasterLayer || !buildRaster) return rasterLayer;
+    try { rasterLayer = buildRaster(); if (rasterLayer && rasterLayer.setOpacity) rasterLayer.setOpacity(opacity); } catch (_) { rasterLayer = null; }
+    return rasterLayer;
+  };
+  const showRaster = () => { const r = ensureRaster(); if (r && !group.hasLayer(r)) group.addLayer(r); };
+  const hideRaster = () => { if (rasterLayer && group.hasLayer(rasterLayer)) { try { group.removeLayer(rasterLayer); } catch (_) {} } };
+
+  const paintVector = (fc, ts, stale) => {
+    geo.clearLayers();
+    const n = (fc && fc.features && fc.features.length) || 0;
+    if (n) geo.addData(fc);
+    report(n ? "loaded" : "empty", n ? null : "No pipelines in this view.", { ts: ts ?? null, stale: !!stale });
+  };
+
+  const enterImage = (msg) => {
+    if (mode !== "image") { seq++; mode = "image"; geo.clearLayers(); closeIdentify(); lastKey = null; }
+    showRaster();
+    report("loaded", msg || null);
+  };
+
+  const refresh = async () => {
+    if (!map) return;
+    const zoom = map.getZoom();
+    const b = map.getBounds();
+    const bbox = { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() };
+    const areaDeg = Math.abs((bbox.e - bbox.w) * (bbox.n - bbox.s));
+    if (decideVectorOrImage(source, { zoom, bboxAreaDeg: areaDeg, lastVectorError }) === "image") { enterImage(); return; }
+    if (mode !== "vector") { mode = "vector"; hideRaster(); lastKey = null; }
+    const tier = pickTier(source, zoom);
+    const eff = tier && tier.scope !== "all" && tier.cellDeg ? snapBbox(bbox, tier.cellDeg) : bbox;
+    const key = vectorKey(source, eff, tier);
+    if (key === lastKey) return; // same cache cell → data can't have changed
+    const mySeq = ++seq;
+    try {
+      const r = await fetchCached(source, bbox, {
+        cache, zoom,
+        onFresh: (fr) => {
+          if (mySeq !== seq || !map || mode !== "vector" || !fr) return;
+          if (fr.updated && lastKey === key) paintVector(fr.data, fr.ts, false);
+          else if (fr.error && lastKey === key) lastKey = null;
+        },
+      });
+      if (mySeq !== seq || !map || mode !== "vector") return;
+      lastKey = key;
+      lastVectorError = null; // a good pull heals any earlier blip
+      paintVector(r.data, r.ts, r.stale);
+    } catch (e) {
+      if (mySeq !== seq || !map || mode !== "vector") return;
+      lastVectorError = e; // a vector failure drops to the raster for this view (LOUD via status) — never a blank layer
+      mode = null; // force enterImage to switch panes/report
+      enterImage(`${cfg.label}: showing the raster pipeline layer (vector pull failed).`);
+    }
+  };
+
+  group.onAdd = function (m) {
+    map = m;
+    L.LayerGroup.prototype.onAdd.call(this, m);
+    m.on("moveend", refresh);
+    report("loading");
+    refresh();
+    return this;
+  };
+  group.onRemove = function (m) {
+    seq++;
+    closeIdentify();
+    m.off("moveend", refresh);
+    L.LayerGroup.prototype.onRemove.call(this, m);
+    map = null; lastKey = null; mode = null;
+  };
+  group.setOpacity = (o) => {
+    opacity = o;
+    try { geo.setStyle(styleFeature); } catch (_) {}
+    if (rasterLayer && rasterLayer.setOpacity) { try { rasterLayer.setOpacity(o); } catch (_) {} }
+  };
+  // The export gatherer reads this to know which class to composite (vector SVG vs raster image).
+  group.getExportMode = () => mode;
+  return group;
+}
+
+/* Cached-vector PIPELINE EASEMENT CORRIDOR overlay (B752) — an ASSUMED translucent band a set
+ * distance each side of the pipeline centerline, a screening proxy for easement extent (NOT a
+ * surveyed width — the caveat lives on the layer note). Shares the B751 pipeline source + cache
+ * key so enabling it alongside Pipelines costs no extra network. Bands are tinted to the
+ * commodity color and drawn in a lower pane so they sit BENEATH the centerlines. Vector-only:
+ * when zoomed out past the pipeline layer's vector gate there's no centerline geometry to buffer,
+ * so it reports "zoom in" rather than a meaningless statewide raster. It reads the pipeline geometry
+ * through the SAME gisCache key as the B751 layer, so every pan/zoom reuses the cached pull rather
+ * than a second network round-trip (only a cold first paint with BOTH layers freshly enabled can
+ * race a duplicate fetch, which then converges on the one shared entry).
+ *
+ * Options: cache (injected SWR cache), widthFt (total corridor width, feet). */
+export function cachedCorridorLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
+  const source = VECTOR_SOURCES[cfg.pipelineSource || "txrrc_pipe"];
+  if (!source) return null;
+  const { cache = gisCache } = opts;
+
+  let map = null, opacity = initialOpacity, widthFt = opts.widthFt || DEFAULT_CORRIDOR_WIDTH_FT;
+  let seq = 0, lastData = null;
+  const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
+  const group = L.layerGroup([], { pane });
+  const bands = L.layerGroup([]); // the polygon bands live here (their own lower pane)
+  group.addLayer(bands);
+
+  // Extract each feature's [lon,lat] centerline parts from a LineString / MultiLineString.
+  const featureParts = (feature) => {
+    const g = feature && feature.geometry;
+    if (!g) return [];
+    if (g.type === "MultiLineString") return g.coordinates || [];
+    if (g.type === "LineString") return [g.coordinates];
+    return [];
+  };
+
+  const paint = (fc) => {
+    bands.clearLayers();
+    let drawn = 0;
+    for (const feature of (fc && fc.features) || []) {
+      const color = (styleFor(source, feature.properties) || {}).color || "#9a9992";
+      for (const part of featureParts(feature)) {
+        const ring = corridorRingLngLat(part, widthFt);
+        if (!ring || ring.length < 3) continue;
+        const latlngs = ring.map(([lon, lat]) => [lat, lon]);
+        const poly = L.polygon(latlngs, {
+          pane: CORRIDOR_PANE,
+          stroke: true, color, weight: 0.5, opacity: Math.min(1, opacity + 0.15),
+          fill: true, fillColor: color, fillOpacity: 0.18 * opacity,
+          interactive: false,
+        });
+        bands.addLayer(poly);
+        drawn++;
+      }
+    }
+    report(drawn ? "loaded" : "empty", drawn ? null : "No pipelines in this view to buffer.");
+  };
+
+  const refresh = async () => {
+    if (!map) return;
+    const zoom = map.getZoom();
+    const b = map.getBounds();
+    const bbox = { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() };
+    const areaDeg = Math.abs((bbox.e - bbox.w) * (bbox.n - bbox.s));
+    // Vector-only: no centerline vectors zoomed out → nothing to buffer.
+    if (decideVectorOrImage(source, { zoom, bboxAreaDeg: areaDeg }) === "image") {
+      seq++; bands.clearLayers(); lastData = null;
+      report("empty", `Zoom in to about street level to see the assumed corridor.`);
+      return;
+    }
+    const mySeq = ++seq;
+    try {
+      const r = await fetchCached(source, bbox, {
+        cache, zoom,
+        onFresh: (fr) => { if (mySeq === seq && map && fr && fr.updated) { lastData = fr.data; paint(fr.data); } },
+      });
+      if (mySeq !== seq || !map) return;
+      lastData = r.data;
+      paint(r.data);
+    } catch (e) {
+      if (mySeq !== seq || !map) return;
+      bands.clearLayers();
+      report("failed", `${cfg.label}: ${(e && e.message) || "couldn't load the pipeline geometry"} (screening only).`);
+    }
+  };
+
+  group.onAdd = function (m) {
+    map = m;
+    if (!m.getPane(CORRIDOR_PANE)) {
+      const p = m.createPane(CORRIDOR_PANE);
+      p.style.zIndex = 349; // just below the GIS overlay pane (350) → bands sit under the centerlines
+    }
+    L.LayerGroup.prototype.onAdd.call(this, m);
+    m.on("moveend", refresh);
+    report("loading");
+    refresh();
+    return this;
+  };
+  group.onRemove = function (m) {
+    seq++;
+    m.off("moveend", refresh);
+    L.LayerGroup.prototype.onRemove.call(this, m);
+    map = null; lastData = null;
+  };
+  group.setOpacity = (o) => { opacity = o; if (lastData) paint(lastData); };
+  // Inline width control (B752): re-buffer the SAME cached geometry at the new width (no re-fetch).
+  group.setWidth = (ft) => { const n = Number(ft); if (Number.isFinite(n) && n > 0 && n !== widthFt) { widthFt = n; if (lastData) paint(lastData); } };
+  group.getExportMode = () => "vector";
   return group;
 }
