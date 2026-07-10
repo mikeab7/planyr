@@ -29,7 +29,8 @@ import { uploadOverlayFile, uploadParcelDrawingFile, uploadUnderlayDataUrl, down
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, gisProxyEnabled } from "./lib/layers.js";
+import { overlayExportRequest } from "./lib/layerRequest.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
@@ -62,6 +63,7 @@ import {
   lngLatRingToFeet,
   feetToLatLng,
   aerialPlacement,
+  overlayExportPlacement,
   feetExtentToBbox,
   humanizeError,
 } from "./lib/arcgis.js";
@@ -1170,6 +1172,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printPaper, setPrintPaper] = useState("letter");   // "letter" | "tabloid"
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
   const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B131); re-defaulted to on-screen visibility on entering print mode
+  const [printMapLayers, setPrintMapLayers] = useState(true); // include the live GIS map layers (floodplain, pipelines, …) in print/export (B739) — default on ("what I see prints")
   const [exportingPDF, setExportingPDF] = useState(false);  // NEW-1: PDF is being composed/rasterized (drives the "Preparing PDF…" indicator)
   const [printOptsOpen, setPrintOptsOpen] = useState(false); // print options flyout (B199): global rules + per-building overrides
   const printOptAnchor = useRef(null);
@@ -6636,7 +6639,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       minY: Math.min(...pts.map((p) => p.y)) - PAD, maxY: Math.max(...pts.map((p) => p.y)) + PAD,
     };
   };
-  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null) => {
+  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true) => {
     if (!svgRef.current) return null;
     const fe = exportFeetExtent(frame);
     if (!fe) return null;
@@ -6674,9 +6677,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } else if (underlay) {
       aerials.push({ a: underlay, tag: true });
     }
+    let anchor = bg; // running insertion point; each new backdrop image goes right after the previous → bottom→top paint order
     if (aerials.length) {
-      clone.querySelectorAll('image:not([data-overlay-image])').forEach((n) => n.remove()); // drop any live aerial copy — keep the placed site-plan overlays (handled below)
-      let anchor = bg; // insert each aerial right after the previous → preserves bottom→top paint order
+      clone.querySelectorAll('image:not([data-overlay-image]):not([data-export-overlay])').forEach((n) => n.remove()); // drop any live aerial copy — keep placed site-plan overlays + our GIS overlay images
       for (const { a, tag } of aerials) {
         const tl = f2p({ x: a.x, y: a.y });
         const sy = a.ftPerPxY || a.ftPerPx;
@@ -6689,6 +6692,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         im.setAttribute("preserveAspectRatio", "none");
         im.setAttribute("opacity", a.opacity ?? 1);
         if (tag) im.setAttribute("data-export-aerial", "1"); // LOUD-FAILURE marker: a dropped fetch here must warn, not silently blank the PDF
+        clone.insertBefore(im, anchor.nextSibling);
+        anchor = im;
+      }
+    }
+    // GIS overlay LAYERS (FEMA floodplain, pipelines, wetlands, utilities, ground relief) — B739.
+    // Composited ABOVE the aerial and BELOW the drawn geometry + site-plan overlays, matching the
+    // on-screen stacking (aerial tiles < GIS-overlay pane < SVG). Same feet frame + pixel grid as
+    // the aerial (overlayExportPlacement shares aerialGeom), each at its layer opacity, in the
+    // array's bottom→top order. Tagged data-export-overlay so inlineImages warns loudly (never
+    // silently) if a layer's fetch is dropped; data-fallback-href = the direct-agency URL to retry
+    // before dropping (when the same-origin proxy isn't serving).
+    if (includeMapLayers && exportOverlays && exportOverlays.length) {
+      for (const o of exportOverlays) {
+        const tl = f2p({ x: o.x, y: o.y });
+        const sy = o.ftPerPxY || o.ftPerPx;
+        const im = document.createElementNS("http://www.w3.org/2000/svg", "image");
+        im.setAttribute("href", o.src);
+        im.setAttributeNS("http://www.w3.org/1999/xlink", "href", o.src);
+        im.setAttribute("x", tl.x); im.setAttribute("y", tl.y);
+        im.setAttribute("width", o.imgW * o.ftPerPx * view.ppf);
+        im.setAttribute("height", o.imgH * sy * view.ppf);
+        im.setAttribute("preserveAspectRatio", "none");
+        im.setAttribute("opacity", o.opacity ?? 1);
+        im.setAttribute("data-export-overlay", "1"); // LOUD-FAILURE marker
+        im.setAttribute("data-layer-id", o.id);
+        if (o.label) im.setAttribute("data-layer-label", o.label);
+        if (o.fallbackSrc) im.setAttribute("data-fallback-href", o.fallbackSrc);
         clone.insertBefore(im, anchor.nextSibling);
         anchor = im;
       }
@@ -6790,27 +6820,47 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ~INLINE_TIMEOUT_MS, not unbounded. On timeout/CORS/non-200 we drop the image (PNG)
   // or keep its remote href (print can still load it natively).
   const INLINE_TIMEOUT_MS = 8000;
-  // Returns { aerialDropped } (B735, LOUD-FAILURE): true when the aerial <image> (tagged
-  // data-export-aerial) couldn't be fetched/inlined and was dropped — so the caller can warn
-  // the user instead of silently handing them a background-less PDF.
+  // Fetch one URL and return it as a data: URL, time-boxed by its own AbortController so a hung
+  // request can't stall the whole (parallel) inline pass. Throws on timeout/CORS/non-200.
+  const fetchAsDataUrl = async (url) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), INLINE_TIMEOUT_MS);
+    try {
+      const blob = await fetch(url, { mode: "cors", signal: ctrl.signal }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
+      return await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+    } finally { clearTimeout(timer); }
+  };
+  // Returns { aerialDropped, overlaysDropped } (B735/B739, LOUD-FAILURE): the aerial <image>
+  // (data-export-aerial) or any GIS overlay <image> (data-export-overlay) that couldn't be
+  // fetched/inlined is dropped and reported, so the caller warns the user instead of silently
+  // handing them a sheet missing the satellite or a floodplain/pipeline layer they turned on.
+  // A GIS overlay first tries its (same-origin proxy) href, then retries the direct-agency URL
+  // (data-fallback-href) before dropping — mirroring the live layer's proxy→direct fail-open.
   const inlineImages = async (root, dropOnFail = true) => {
     const XL = "http://www.w3.org/1999/xlink";
     const imgs = [...root.querySelectorAll("image")];
     let aerialDropped = false;
+    const overlaysDropped = [];
     await Promise.all(imgs.map(async (img) => {
       const href = img.getAttribute("href") || img.getAttributeNS(XL, "href");
       if (!href || href.startsWith("data:")) return;
       const isAerial = img.hasAttribute("data-export-aerial");
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), INLINE_TIMEOUT_MS);
+      const isOverlay = img.hasAttribute("data-export-overlay");
+      const fallback = img.getAttribute("data-fallback-href");
       try {
-        const blob = await fetch(href, { mode: "cors", signal: ctrl.signal }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
-        const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+        let dataUrl;
+        try { dataUrl = await fetchAsDataUrl(href); }
+        catch (e) { if (isOverlay && fallback) dataUrl = await fetchAsDataUrl(fallback); else throw e; }
         img.setAttribute("href", dataUrl); img.removeAttributeNS(XL, "href");
-      } catch (_) { if (dropOnFail) { img.remove(); if (isAerial) aerialDropped = true; } }
-      finally { clearTimeout(timer); }
+      } catch (_) {
+        if (dropOnFail) {
+          img.remove();
+          if (isAerial) aerialDropped = true;
+          else if (isOverlay) overlaysDropped.push(img.getAttribute("data-layer-label") || img.getAttribute("data-layer-id") || "a map layer");
+        }
+      }
     }));
-    return { aerialDropped };
+    return { aerialDropped, overlaysDropped };
   };
   // Synthesize a frame-exact aerial for the export (B735). The live basemap is a Leaflet tile
   // <div> that the exported SVG can't capture, so when it's on we request ONE stitched image
@@ -6837,12 +6887,57 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // caps at 4096, so this stays well inside the limit for any single sheet.
     return { ...aerialPlacement(bbox, origin.lon, origin.lat, { exportBase: bm.export, maxPx: 2400 }), opacity: 1, fromMap: true };
   };
+  // Synthesize frame-exact images for the LIVE GIS overlay layers (FEMA floodplain, TxRRC
+  // pipelines, wetlands, utilities, ground relief …) so they print, same as the aerial (B739).
+  // They render only on the Leaflet backdrop <div> (data-export="skip"), so the SVG clone can't
+  // capture them; instead, for each ENABLED raster layer we request one transparent /export PNG
+  // covering exactly the print frame and composite it above the aerial in buildExportSvg. Returns
+  // an array ORDERED bottom→top to match the on-screen paint order (all overlays share one Leaflet
+  // pane, painted in ALL_LAYERS registry order — the LayerPanel's group order is display-only).
+  // Vector/line layers (esriFeature/vector/contours/flowdir/overpass/mapillary) aren't server
+  // images and are handled separately (Phase 2 — Class B). Uses the SAME feetExtentToBbox arg-order
+  // landmine as the aerial: (ext, LAT, LON).
+  const exportOverlaysForFrame = (frame) => {
+    if (!origin) return [];
+    const ext = exportFeetExtent(frame);
+    if (!ext) return [];
+    const bbox = feetExtentToBbox(ext, origin.lat, origin.lon);
+    const proxy = gisProxyEnabled();
+    const out = [];
+    for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
+      const st = overlays?.[id];
+      if (!st || !st.on) continue; // respect the toggle
+      const isRaster = !cfg.kind || cfg.kind === "dynamic" || cfg.kind === "esriImage";
+      if (!isRaster) continue; // vector/client layers → Class B
+      if (layerStatus?.[id]?.state === "failed") continue; // confirmed-dead host — requesting it would only drop+warn
+      const req = overlayExportRequest(cfg, { proxy });
+      const geomOpts = { layersParam: req.layersParam, renderingRule: req.renderingRule, maxPx: 2400 };
+      const p = overlayExportPlacement(bbox, origin.lon, origin.lat, { exportBase: `${req.url}/${req.endpoint}`, ...geomOpts });
+      // Proxy→direct CORS fallback for the export inliner (mirrors the live layer's fail-open):
+      // the same-origin proxy image is always canvas-clean, but if it isn't serving (e.g. a
+      // preview deploy) the inliner retries the direct-agency URL before dropping the layer.
+      const pDirect = proxy && req.direct !== req.url
+        ? overlayExportPlacement(bbox, origin.lon, origin.lat, { exportBase: `${req.direct}/${req.endpoint}`, ...geomOpts })
+        : null;
+      out.push({ ...p, id, label: cfg.label, opacity: st.opacity ?? cfg.opacity ?? 0.8, fallbackSrc: pDirect ? pDirect.src : null });
+    }
+    return out; // ordered bottom→top
+  };
+  // B739 LOUD-FAILURE — one batched banner naming the GIS layers whose imagery couldn't be
+  // fetched (so the export dropped them), kept separate from the aerial warning so the user can
+  // tell which failed. No-op when nothing dropped.
+  const warnDroppedOverlays = (dropped, fmt) => {
+    if (!dropped || !dropped.length) return;
+    const many = dropped.length > 1;
+    flashWarn(`⚠ Couldn't load ${dropped.length} map layer${many ? "s" : ""} (${dropped.join(", ")}), so the ${fmt} was exported without ${many ? "them" : "it"}. Your plan and measurements are all included.`, 8000);
+  };
   const exportPNG = async () => {
     const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap for the export
-    const built = buildExportSvg(printFrame, true, PAL.paper, exportAerial); // use the print crop if one's set, else dev extent
+    const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS layers (floodplain, pipelines, …)
+    const built = buildExportSvg(printFrame, true, PAL.paper, exportAerial, exportOverlays); // use the print crop if one's set, else dev extent
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     const { clone, w, h } = built;
-    const { aerialDropped } = await inlineImages(clone); // embed the aerial so the raster includes it (warned loudly on the success path below — B735)
+    const { aerialDropped, overlaysDropped } = await inlineImages(clone); // embed the aerial + GIS layers so the raster includes them (warned loudly on the success path below — B735/B739)
     // Thin line work + restyle labels to the SAME physical weights the PDF uses, by
     // scaling against a notional letter-landscape plan box (PNG has no paper of its own),
     // so a downloaded PNG looks as crisp/professional as the PDF (NEW-2 / NEW-3).
@@ -6866,6 +6961,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         URL.revokeObjectURL(aEl.href);
         // B735 LOUD-FAILURE: the PNG downloaded but without the aerial — say so (⚠ = red banner).
         if (aerialDropped) flashWarn("⚠ Couldn't load the satellite imagery, so the PNG was exported without it. Check your connection and try again — your plan and measurements are all included.", 8000);
+        warnDroppedOverlays(overlaysDropped, "PNG"); // B739 — same for any GIS layer that couldn't be fetched
       }, "image/png");
     } catch (_) {
       // image.onerror, a CORS-tainted canvas (the aerial basemap), or drawImage failing
@@ -6924,21 +7020,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return pairs;
   };
-  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true) => {
+  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
     const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image
-    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial); // force WHITE paper for print/PDF
+    const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS layers (floodplain, pipelines, …) for the print frame
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers); // force WHITE paper for print/PDF
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     setExportingPDF(true);
     try {
-      // Embed the aerial (and any placed overlay) as data URLs; DROP any we can't fetch so
-      // a cross-origin image can't taint the canvas and abort the whole export (B202). A
-      // dropped AERIAL is surfaced loudly on the success path below (B735) — never a silent
-      // white-background PDF. The warning waits until the file actually downloads, so a later
+      // Embed the aerial + GIS overlays (and any placed overlay) as data URLs; DROP any we can't
+      // fetch so a cross-origin image can't taint the canvas and abort the whole export (B202). A
+      // dropped AERIAL or GIS layer is surfaced loudly on the success path below (B735/B739) — never
+      // a silent omission. The warning waits until the file actually downloads, so a later
       // render/encode failure (which throws to the outer catch) can't leave a contradictory toast.
-      const { aerialDropped } = await inlineImages(built.clone, true);
+      const { aerialDropped, overlaysDropped } = await inlineImages(built.clone, true);
       mark("inline images");
       // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg> sized to
       // the layout's plan box (it keeps its own viewBox); the title block, buildings table
@@ -6993,6 +7090,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         URL.revokeObjectURL(aEl.href); // B544: revoke now (matches the PNG path L5112) — the 8s timer leaked a blob URL per export on rapid re-export / navigation
         // B735 LOUD-FAILURE: the file DID download, but without the aerial — say so (⚠ = red banner, not the success green).
         if (aerialDropped) flashWarn("⚠ Couldn't load the satellite imagery, so the PDF was exported without it. Check your connection and try again — your plan and measurements are all included.", 8000);
+        warnDroppedOverlays(overlaysDropped, "PDF"); // B739 — same for any GIS layer that couldn't be fetched
       } finally { URL.revokeObjectURL(url); }
     } catch (_) {
       // A CORS-tainted canvas (the aerial basemap) is the usual culprit; surfaced, not silent (B50).
@@ -7029,7 +7127,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printAspectKey]);
   const overlayPrintable = hasPrintableOverlay(sheetOverlays); // gates the "Print overlay" checkbox — no dead control when nothing's loaded
-  const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay; setPrintMode(false); setTimeout(() => exportPDF(p, o, ov), 60); };
+  // B739 — is any RASTER GIS layer (floodplain, pipelines, wetlands, utilities, relief) turned on?
+  // Gates the "Print map layers" checkbox so there's no dead control when no such layer is live.
+  const mapLayersPrintable = Object.entries(ALL_LAYERS).some(([id, cfg]) => overlays?.[id]?.on && (!cfg.kind || cfg.kind === "dynamic" || cfg.kind === "esriImage"));
+  const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay, ml = printMapLayers; setPrintMode(false); setTimeout(() => exportPDF(p, o, ov, ml), 60); };
   const startPrintMove = (e) => {
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
@@ -10839,6 +10940,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <label title="Include the placed site-plan overlay in the printout — exactly as shown (scale, position, rotation, opacity)" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: PAL.ink, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
                     <input type="checkbox" checked={printOverlay} onChange={(e) => setPrintOverlay(e.target.checked)} style={{ cursor: "pointer", margin: 0 }} />
                     Print overlay
+                  </label>
+                )}
+                {/* B739 — include the live GIS map layers (floodplain, pipelines, utilities…) in the printout; only shown when one's on (no dead control) */}
+                {mapLayersPrintable && (
+                  <label title="Include the live map layers (floodplain, pipelines, utilities…) in the printout, exactly as shown on the map" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: PAL.ink, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+                    <input type="checkbox" checked={printMapLayers} onChange={(e) => setPrintMapLayers(e.target.checked)} style={{ cursor: "pointer", margin: 0 }} />
+                    Print map layers
                   </label>
                 )}
                 <span style={{ width: 1, height: 18, background: PAL.panelLine }} />

@@ -31,7 +31,7 @@ export { JURISDICTION_LAYERS };
  * on everywhere: the proxy fails open (302 → agency) and the client also one-shot falls back to
  * the direct agency URL if the proxy isn't serving (e.g. not deployed), so a layer always renders
  * — caching is a pure enhancement on top. */
-function gisProxyEnabled() {
+export function gisProxyEnabled() {
   try {
     const v = import.meta.env && import.meta.env.VITE_GIS_PROXY;
     return v !== "0" && v !== "false" && v !== "off";

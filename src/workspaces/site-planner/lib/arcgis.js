@@ -476,11 +476,11 @@ export function feetToLatLng(pt, lat0, lon0) {
 // same FT_PER_DEG constants the parcels use, so image and boundary align exactly.
 // ftPerPx is the horizontal scale, ftPerPxY the vertical (they differ at this
 // latitude — that vertical stretch is what was missing before).
-export function aerialPlacement(bbox, lon0, lat0, opts = {}) {
-  const maxPx = opts.maxPx || 1800;
-  const exportBase =
-    opts.exportBase ||
-    "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export";
+// Shared sizing/placement geometry for an ArcGIS `export` image covering a lon/lat bbox, in
+// the planner's feet frame (origin lon0/lat0). Pulled out of aerialPlacement (B739) so the
+// aerial AND every overlay export use IDENTICAL math — same bbox + same maxPx ⇒ identical
+// imgW/imgH/ftPerPx/x/y ⇒ an overlay registers pixel-for-pixel on the aerial and the parcels.
+function aerialGeom(bbox, lon0, lat0, maxPx) {
   const FT_LON = ftPerDegLon(lat0);
   const lonSpan = bbox.lonMax - bbox.lonMin;
   const latSpan = bbox.latMax - bbox.latMin;
@@ -489,11 +489,7 @@ export function aerialPlacement(bbox, lon0, lat0, opts = {}) {
   else { imgH = maxPx; imgW = Math.max(16, Math.round(maxPx * (lonSpan / latSpan))); }
   const widthFt = lonSpan * FT_LON;
   const heightFt = latSpan * FT_PER_DEG_LAT;
-  const src =
-    `${exportBase}?bbox=${bbox.lonMin},${bbox.latMin},${bbox.lonMax},${bbox.latMax}` +
-    `&bboxSR=4326&imageSR=4326&size=${imgW},${imgH}&format=jpg&transparent=false&f=image`;
   return {
-    src,
     imgW,
     imgH,
     ftPerPx: widthFt / imgW,
@@ -501,6 +497,36 @@ export function aerialPlacement(bbox, lon0, lat0, opts = {}) {
     x: (bbox.lonMin - lon0) * FT_LON,
     y: -(bbox.latMax - lat0) * FT_PER_DEG_LAT,
   };
+}
+
+export function aerialPlacement(bbox, lon0, lat0, opts = {}) {
+  const maxPx = opts.maxPx || 1800;
+  const exportBase =
+    opts.exportBase ||
+    "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export";
+  const geom = aerialGeom(bbox, lon0, lat0, maxPx);
+  const src =
+    `${exportBase}?bbox=${bbox.lonMin},${bbox.latMin},${bbox.lonMax},${bbox.latMax}` +
+    `&bboxSR=4326&imageSR=4326&size=${geom.imgW},${geom.imgH}&format=jpg&transparent=false&f=image`;
+  return { src, ...geom };
+}
+
+// Frame-exact TRANSPARENT export image for a raster GIS overlay (FEMA floodplain, TxRRC
+// pipelines, wetlands, utilities, ground relief …) — B739. Placed in the SAME feet frame as
+// the aerial + parcels (shares aerialGeom), so it lands exactly over them. `exportBase` is the
+// layer's service root WITH its endpoint (`…/MapServer/export` or `…/ImageServer/exportImage`).
+// png32 (RGBA) + transparent so it composites over the aerial; `layersParam` (`show:27,28`) pins
+// the sublayer set and `renderingRule` carries an ImageServer raster-function chain — both come
+// from overlayExportRequest (the same shapers the live layer uses) so print can't drift (PDF-PARITY).
+export function overlayExportPlacement(bbox, lon0, lat0, opts = {}) {
+  const { exportBase, layersParam = null, renderingRule = null, maxPx = 2400, dpi = 96 } = opts;
+  const geom = aerialGeom(bbox, lon0, lat0, maxPx);
+  let src =
+    `${exportBase}?bbox=${bbox.lonMin},${bbox.latMin},${bbox.lonMax},${bbox.latMax}` +
+    `&bboxSR=4326&imageSR=4326&size=${geom.imgW},${geom.imgH}&format=png32&transparent=true&dpi=${dpi}&f=image`;
+  if (layersParam) src += `&layers=${encodeURIComponent(layersParam)}`;
+  if (renderingRule) src += `&renderingRule=${encodeURIComponent(JSON.stringify(renderingRule))}`;
+  return { src, ...geom };
 }
 
 // Convert a planner-feet extent to a lon/lat bbox for an aerial `export` request (B735).
