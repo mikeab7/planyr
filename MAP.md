@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-10 @ `abf5b0e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-10 @ `fd60ae5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -286,7 +286,7 @@ _234 source files mapped._
 - **`src/workspaces/site-planner/lib/elementApi.js`** — network seam for per-element sync (B671): the commit_elements RPC wrapper, element-row fetch, and the pure unload keepalive commit
   - _exports_: `COMMIT_TIMEOUT_MS`, `commitElements`, `ELEMENT_SELECT`, `fetchElements`, `keepaliveCommit`
 - **`src/workspaces/site-planner/lib/elementRows.js`** — pure JS mirror of the site_elements explode/rebuild (B670): model⇄rows for the 5 vector collections, tombstone-aware, keyed by (kind,id)
-  - _exports_: `byRowOrder`, `ELEMENT_FIELDS`, `explodeModel`, `FIELD_TO_KIND`, `KIND_TO_FIELD`, `rowsToModel`, `Z_GAP`
+  - _exports_: `byRowOrder`, `ELEMENT_FIELDS`, `explodeModel`, `FIELD_TO_KIND`, `foldNeverSyncedLocal`, `KIND_TO_FIELD`, `rowsToModel`, `Z_GAP`
 - **`src/workspaces/site-planner/lib/elementSync.js`** — the per-element write engine (B671): diffs live collections vs a shadow map, batches rev-guarded commits, LWW conflict events, dirty-queue backoff
   - _exports_: `createElementSync`, `stableStringify`
 - **`src/workspaces/site-planner/lib/elevation.js`** — USGS 3DEP bare-earth DEM sampling: profile elevations along a polyline (metres to survey-ft) plus ditch-depth screening stats

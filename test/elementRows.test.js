@@ -6,6 +6,7 @@ import {
   explodeModel,
   rowsToModel,
   byRowOrder,
+  foldNeverSyncedLocal,
 } from "../src/workspaces/site-planner/lib/elementRows.js";
 
 // B670 — the JS mirror of the SQL explode (backfill) / rebuild (down-migration) must
@@ -161,5 +162,74 @@ describe("mapping tables", () => {
   it("byRowOrder sorts by z_index then id without locale surprises", () => {
     const rows = [{ id: "e10", z_index: 0 }, { id: "e2", z_index: 0 }, { id: "e1", z_index: -1 }];
     expect([...rows].sort(byRowOrder).map((r) => r.id)).toEqual(["e1", "e10", "e2"]); // plain lexicographic, like SQL
+  });
+});
+
+// B756 — the never-synced local-only fold that stops refetch-replace from wiping a brand-new signed-in
+// site's parcels (parcels that only ever reached localStorage + the slim cloud header, never site_elements).
+describe("foldNeverSyncedLocal (B756 data-loss guard)", () => {
+  const parcel = (id) => ({ id, points: [[0, 0], [10, 0], [10, 10]], locked: true });
+  const husk = (kind) => ({ kind }); // firstArg matches isHuskParcel(kind, el)
+  const isHuskParcel = (kind, el) => kind === "parcel" && !(el && Array.isArray(el.points) && el.points.length);
+  const emptyNext = () => ({ els: [], markups: [], measures: [], callouts: [], parcels: [] });
+
+  it("folds a never-synced local parcel (no row at all) into next so it survives the wipe", () => {
+    const local = { ...emptyNext(), parcels: [parcel("psX_0"), parcel("psX_1")] };
+    const out = foldNeverSyncedLocal(emptyNext(), local, new Set(), isHuskParcel);
+    expect(out.parcels.map((p) => p.id)).toEqual(["psX_0", "psX_1"]); // both kept — refetch fetched 0 rows
+  });
+
+  it("does NOT fold a parcel that already has a LIVE row (rows stay canonical — no V229 re-commit)", () => {
+    const local = { ...emptyNext(), parcels: [parcel("psX_0")] };
+    const out = foldNeverSyncedLocal(emptyNext(), local, new Set(["parcel:psX_0"]), isHuskParcel);
+    expect(out.parcels).toEqual([]); // the row is authoritative; the stale local copy is dropped
+  });
+
+  it("does NOT resurrect a parcel that has a TOMBSTONE row (delete stays a delete)", () => {
+    // rowKeys is built from LIVE + TOMBSTONE rows, so a remotely-deleted parcel's (kind,id) is present.
+    const local = { ...emptyNext(), parcels: [parcel("psX_0")] };
+    const out = foldNeverSyncedLocal(emptyNext(), local, new Set(["parcel:psX_0"]), isHuskParcel);
+    expect(out.parcels).toEqual([]);
+  });
+
+  it("never folds a husk parcel (no points)", () => {
+    const local = { ...emptyNext(), parcels: [husk("parcel")] };
+    const out = foldNeverSyncedLocal(emptyNext(), local, new Set(), isHuskParcel);
+    expect(out.parcels).toEqual([]);
+  });
+
+  it("does not duplicate an id already present in next (e.g. re-substituted via a dirty create)", () => {
+    const next = { ...emptyNext(), parcels: [parcel("psX_0")] };
+    const local = { ...emptyNext(), parcels: [parcel("psX_0")] };
+    const out = foldNeverSyncedLocal(next, local, new Set(), isHuskParcel);
+    expect(out.parcels.map((p) => p.id)).toEqual(["psX_0"]);
+  });
+
+  it("folds never-synced local-only elements across ALL five collections, not just parcels", () => {
+    const local = {
+      els: [{ id: "e1s" }], markups: [{ id: "m1s" }], measures: [{ id: "z1s" }],
+      callouts: [{ id: "c1s" }], parcels: [parcel("p1s")],
+    };
+    const out = foldNeverSyncedLocal(emptyNext(), local, new Set(), isHuskParcel);
+    expect(out.els.map((x) => x.id)).toEqual(["e1s"]);
+    expect(out.markups.map((x) => x.id)).toEqual(["m1s"]);
+    expect(out.measures.map((x) => x.id)).toEqual(["z1s"]);
+    expect(out.callouts.map((x) => x.id)).toEqual(["c1s"]);
+    expect(out.parcels.map((x) => x.id)).toEqual(["p1s"]);
+  });
+
+  it("keys by (kind,id): a live row under a DIFFERENT kind does not block a local element", () => {
+    // legacy e6327 class — an id live as a markup must not exclude a genuinely-new parcel sharing the id.
+    const local = { ...emptyNext(), parcels: [parcel("e6327")] };
+    const out = foldNeverSyncedLocal(emptyNext(), local, new Set(["markup:e6327"]), isHuskParcel);
+    expect(out.parcels.map((p) => p.id)).toEqual(["e6327"]); // parcel:e6327 has no row → folded
+  });
+
+  it("returns a fresh object without mutating next or local", () => {
+    const next = emptyNext();
+    const local = { ...emptyNext(), parcels: [parcel("psX_0")] };
+    const out = foldNeverSyncedLocal(next, local, new Set(), isHuskParcel);
+    expect(next.parcels).toEqual([]); // input untouched
+    expect(out).not.toBe(next);
   });
 });

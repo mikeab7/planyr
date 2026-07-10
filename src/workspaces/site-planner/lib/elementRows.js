@@ -101,3 +101,34 @@ export function rowsToModel(header, rows) {
   out.deletedIds = [...dead].filter((id) => !liveIds.has(id)).sort();
   return out;
 }
+
+// B756 — DATA-LOSS FIX (recurrence of the B473 "new signed-in site's parcels vanish" class, regressed
+// by the B672 read-cutover). Fold NEVER-SYNCED local-only elements back into the rows-canonical `next`
+// so the refetch-replace can't wipe geometry the server has simply never seen. `rowKeys` is the set of
+// `${kind}:${id}` for EVERY fetched row — LIVE and TOMBSTONE alike (fetchElements returns both). A local
+// canvas element whose (kind,id) has NO row at all was born on this device and never reached
+// site_elements — exactly the site just planned from the map, whose parcels live only in the slim
+// header + local state — so keep it; the caller's reconcile then enqueues it as a create.
+//
+// Bounding the fold to zero-row (kind,id)s is what makes it SAFE:
+//   • V229 #5 stale-tab clobber: a reconnecting stale tab holds OLD geometry only for elements that
+//     ALREADY have rows → those ids are in rowKeys → excluded → the row is adopted, never re-committed.
+//   • TOMBSTONE-DELETES: a remotely-deleted element has a TOMBSTONE row (its (kind,id) is in rowKeys) →
+//     excluded → it stays deleted, never resurrected.
+//   • per-tab salted ids (B591) make a folded create's id globally unique → no cross-writer collision.
+// Husk parcels (no points) are never folded. Returns a NEW next object; inputs are untouched.
+export function foldNeverSyncedLocal(next, local, rowKeys, isHusk = () => false) {
+  const keys = rowKeys instanceof Set ? rowKeys : new Set(arr(rowKeys));
+  const out = { ...(next || {}) };
+  for (const [kind, field] of Object.entries(KIND_TO_FIELD)) {
+    const base = arr(out[field]);
+    const present = new Set(base.map((el) => el && el.id).filter(Boolean));
+    const extra = arr(local && local[field]).filter((el) =>
+      el && typeof el.id === "string"
+      && !keys.has(kind + ":" + el.id)   // the server has never seen this exact element
+      && !present.has(el.id)             // not already placed via rows / a pending (dirty) edit
+      && !isHusk(kind, el));             // never fold a points-less husk parcel (B690)
+    if (extra.length) out[field] = [...base, ...extra];
+  }
+  return out;
+}

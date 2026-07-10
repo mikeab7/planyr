@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createElementSync, stableStringify } from "../src/workspaces/site-planner/lib/elementSync.js";
+import { foldNeverSyncedLocal } from "../src/workspaces/site-planner/lib/elementRows.js";
 
 // B671 — the per-element write engine. Injected commit + timers + clock, so the diff classes,
 // debounce-vs-immediate boundaries, batch coalescing, conflict matrix, and backoff are all
@@ -399,6 +400,46 @@ describe("refetch-replace safety (V229 #5 lost-update class)", () => {
     expect(s.pendingCount()).toBe(0);                      // not re-enqueued
     release(); await tick(); await tick();
     expect(commits).toHaveLength(1);                       // exactly one write total
+  });
+});
+
+// B756 — the refetch-replace integration the data-loss fix restores: a brand-new signed-in site's
+// parcels live only in local state (rows are empty on the first fetch). foldNeverSyncedLocal folds them
+// back into `next`, and the post-substitution reconcile must COMMIT them as creates (they used to be
+// silently wiped, leaving 0 site_elements rows).
+describe("B756 — never-synced local parcels commit through refetch-replace", () => {
+  it("seed([]) + fold-in a local-only parcel + reconcile → one create commit (parcels reach site_elements)", async () => {
+    const commits = [];
+    const s = createElementSync({
+      siteId: "s", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      commit: async (ops) => { commits.push(ops); return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: 1 })) }; },
+    });
+    s.seed([]); // refetchReplace fetched 0 rows for the brand-new site
+    const next = { els: [], markups: [], measures: [], callouts: [], parcels: [] }; // rows-canonical = empty
+    const local = { ...next, parcels: [{ id: "psX_0", points: [[0, 0], [10, 0], [10, 10]] }] };
+    const merged = foldNeverSyncedLocal(next, local, new Set() /* no rows */);
+    expect(merged.parcels.map((p) => p.id)).toEqual(["psX_0"]); // survived the wipe
+    s.reconcile(merged, { busy: false });
+    await tick();
+    expect(commits).toHaveLength(1);
+    expect(commits[0][0]).toMatchObject({ op: "create", id: "psX_0", kind: "parcel" }); // committed as a row
+  });
+
+  it("a parcel that already has a row is NOT re-committed (rows canonical, no V229 re-commit)", async () => {
+    const commits = [];
+    const s = createElementSync({
+      siteId: "s", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      commit: async (ops) => { commits.push(ops); return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: 1 })) }; },
+    });
+    const row = { kind: "parcel", id: "psX_0", data: { id: "psX_0", points: [[0, 0], [10, 0], [10, 10]] }, rev: 5, z_index: 0 };
+    s.seed([row]);
+    const next = { els: [], markups: [], measures: [], callouts: [], parcels: [row.data] };
+    const local = { ...next, parcels: [{ id: "psX_0", points: [[9, 9], [1, 1], [2, 2]] }] }; // STALE local geometry
+    const merged = foldNeverSyncedLocal(next, local, new Set(["parcel:psX_0"]));
+    expect(merged.parcels).toEqual([row.data]); // adopts the row, not the stale local copy
+    s.reconcile(merged, { busy: false });
+    await tick();
+    expect(commits).toHaveLength(0); // nothing re-committed — the stale tab can't clobber
   });
 });
 
