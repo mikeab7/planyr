@@ -23,9 +23,10 @@ import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
-import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
+import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale } from "./lib/overlayPdf.js";
+import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
-import { uploadOverlayFile, uploadParcelDrawingFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, uploadParcelDrawingFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
@@ -4417,33 +4418,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
-  /* ------------ site-plan overlays (B72) ------------ */
-  // Add a dropped PDF/image as a backdrop overlay, placed ~60% of the view wide and
-  // centered on what the user is currently looking at (true scale comes in B73).
-  const addOverlayFile = async (file) => {
-    if (!file) return;
+  /* ------------ site-plan overlays (B72 · CAD in B747/B748) ------------ */
+  // Add a dropped PDF/image/DXF/DWG as a backdrop overlay, placed centered on the current view.
+  // PDF/image size via the B73 scale heuristic; a DXF (or a DWG converted through the B238
+  // service) auto-places at TRUE real-world size from its declared units.
+  const addOverlayFile = async (rawFile) => {
+    if (!rawFile) return;
     setOverlayBusy(true);
     try {
-      const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf,detectedScale,sheet}
+      // B748 — a .dwg round-trips through the convert service into a .dxf, then flows through the
+      // exact DXF path below. Every failure is surfaced (unset URL / 422 / 413 / unreachable) —
+      // never a spinner into nothing (LOUD-FAILURE). The original DWG is backed up as provenance.
+      let file = rawFile;
+      let originalDwg = null;
+      if (isDwgFile(rawFile)) {
+        const conv = await convertDwgToDxf(rawFile);
+        if (!conv.ok) { flashWarn(conv.error, 10000); return; }
+        originalDwg = rawFile;
+        file = new File([conv.bytes], (rawFile.name || "drawing").replace(/\.dwg$/i, ".dxf"), { type: "application/dxf" });
+      }
+
+      const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf,detectedScale,sheet} or the DXF shape (kind:"dxf",ftPerPx,unitsAssumed,unsupported)
       const id = uid();
       if (r.pdf) overlayDocs.current.set(id, r.pdf); // keep the doc for the in-session page picker
       const c = p2fStatic(size.w / 2, size.h / 2);   // view centre, in feet
-      // Pick the initial size: trust a read scale note (B73) ONLY when it lands the sheet
-      // at a sane on-screen size, else "size to fit" (~60% of the view). A misread scale
-      // (e.g. a vicinity-map scale on the same sheet) otherwise placed the drawing 10–30×
-      // too large, blanketing the map with its title block — the reported "file name all
-      // over the map" bug. The read scale is still kept on the overlay so the panel can
-      // offer it as one-click "Apply". (chooseOverlayScale is pure + unit-tested.)
-      const pick = chooseOverlayScale({ detectedScale: r.detectedScale, sheetStd: !!(r.sheet && r.sheet.std), imgW: r.imgW, ppf: view.ppf, screenW: size.w });
-      const ftPerPx = pick.ftPerPx;
+
+      let ftPerPx, pick = null;
+      if (r.kind === "dxf") {
+        ftPerPx = r.ftPerPx; // TRUE units — no B73 scale heuristic needed
+      } else {
+        // Pick the initial size: trust a read scale note (B73) ONLY when it lands the sheet at a
+        // sane on-screen size, else "size to fit". (chooseOverlayScale is pure + unit-tested.)
+        pick = chooseOverlayScale({ detectedScale: r.detectedScale, sheetStd: !!(r.sheet && r.sheet.std), imgW: r.imgW, ppf: view.ppf, screenW: size.w });
+        ftPerPx = pick.ftPerPx;
+      }
       // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
       const ovIdbKey = siteId ? `raster:${siteId}:overlay:${id}` : undefined;
       const ov = {
-        id, name: file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
+        id, name: rawFile.name || file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
         page: r.page || 1, pageCount: r.pageCount || 1,
         x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
         ftPerPx, rotation: 0, opacity: 0.85, locked: false,
         detectedScale: r.detectedScale || null, sheet: r.sheet || null,
+        kind: r.kind || null, unitsAssumed: !!r.unitsAssumed, unitsLabel: r.unitsLabel || null,
       };
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
@@ -4451,12 +4468,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B474 review (#2): attach idbKey only AFTER the stash confirms — until then src stays inline so
       // dropIdbBackedSrc can't strip it before it's durable (overlays also have the cloud-Storage fallback below).
       if (ovIdbKey && idbAvailable() && r.src) idbPut(ovIdbKey, r.src).then((ok) => { if (ok) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, idbKey: ovIdbKey } : x))); });
-      if (pick.reason === "too-big" || pick.reason === "too-small") // honest, actionable note — never a silent mis-place
-        flashWarn(`Added “${file.name || "drawing"}”, but its printed scale (1″=${r.detectedScale}′) would place it ${pick.reason === "too-big" ? "far too large" : "far too small"} — sized it to fit your view instead. Set the exact scale (or “Trace a length”) in the Site-plan overlay panel.`, 9000);
-      if (isCloudActive()) { // back the source (PDF or image) up to Storage for cross-device reload (B72)
-        uploadOverlayFile(siteId, id, file).then((res) => {
-          if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
-        }).catch(() => {});
+      // B747 — surface skipped entity types + assumed units, never a silent drop / silent guess.
+      if (r.unsupported && r.unsupported.count)
+        flashWarn(`Imported “${ov.name}” — ${r.unsupportedSummary || `${r.unsupported.count} entities of unsupported types skipped`}.`, 9000);
+      if (r.kind === "dxf" && r.unitsAssumed)
+        flashWarn(`Imported “${ov.name}” at assumed feet (the DXF declares no units) — verify the size, or set the exact scale / “Trace a length” in the Site-plan overlay panel.`, 10000);
+      if (pick && (pick.reason === "too-big" || pick.reason === "too-small")) // honest, actionable note — never a silent mis-place
+        flashWarn(`Added “${ov.name}”, but its printed scale (1″=${r.detectedScale}′) would place it ${pick.reason === "too-big" ? "far too large" : "far too small"} — sized it to fit your view instead. Set the exact scale (or “Trace a length”) in the Site-plan overlay panel.`, 9000);
+      if (isCloudActive()) { // back the source up to Storage for cross-device reload (B72/B747)
+        // B747 — oversize must fail VISIBLY, never a silent skip of the cloud backup (LOUD-FAILURE).
+        if (file.size > OVERLAY_MAX_BYTES)
+          flashWarn(`“${ov.name}” is ${(file.size / 1048576) | 0} MB — too large to back up to the cloud (50 MB limit). It's on this device but won't reload on another until you re-add it.`, 10000);
+        else
+          uploadOverlayFile(siteId, id, file).then((res) => {
+            if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
+          }).catch(() => {});
+        // B748 — best-effort provenance copy of the original DWG (the true source of truth).
+        if (originalDwg && originalDwg.size <= OVERLAY_MAX_BYTES)
+          uploadOverlayFile(siteId, id + "-dwg", originalDwg).then((res) => {
+            if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, sourceDwgKey: res.key } : x)));
+          }).catch(() => {});
       }
     } catch (err) {
       alert(humanizeError(err));
@@ -4744,6 +4775,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const bytes = await downloadOverlayBytes(o.storageKey);
             const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1, { knockout: o.knockout !== false }) : null; // honour the per-reference knockout (B654)
             if (r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+          } else if ((o.storageKey || "").toLowerCase().endsWith(".dxf")) { // B747 — DXF: re-render at the SAME dims so the on-map size is exact
+            const bytes = await downloadOverlayBytes(o.storageKey);
+            const r = bytes ? await rasterizeStoredDxf(bytes, { width: o.imgW, height: o.imgH }) : null;
+            if (r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src } : x)));
           } else if (o.storageKey) { // image: its raster IS the source — restore the src directly (dims already known)
             const src = await downloadOverlayDataUrl(o.storageKey);
             if (src) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src } : x)));
@@ -4752,6 +4787,66 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     })();
   }, [sheetOverlays]); // eslint-disable-line
+
+  /* ---- B749 Tier 2 — zoom-aware re-raster of PDF overlays ----------------------------------
+   * When a placed PDF overlay is zoomed past sheet-fit its base raster (≤4500px) softens. Once
+   * on-screen magnification exceeds ~1.5× its raster pixels, re-render that page at a higher
+   * device scale (cap 8192px) to a TRANSIENT revocable object URL (the B45 precedent) and swap
+   * it in place — the base data URL stays the record's `src`, so persistence / undo / cloud are
+   * untouched and the hi-res never bloats state. Drop back to the base raster (and revoke) when
+   * zoomed out, so multiple hi-res overlays can't accumulate in memory. */
+  const [hiresById, setHiresById] = useState({});     // id → hi-res object URL (render override only; never persisted)
+  const hiresRef = useRef({});                         // id → { url, scale, revoke } (revoke bookkeeping)
+  const hiresBusy = useRef(new Set());
+  const commitHires = () => setHiresById(Object.fromEntries(Object.entries(hiresRef.current).map(([id, v]) => [id, v.url])));
+  useEffect(() => () => { Object.values(hiresRef.current).forEach((v) => { try { v.revoke && v.revoke(); } catch (_) {} }); hiresRef.current = {}; }, []); // revoke all on unmount
+  // Get a PDF proxy for an overlay: the in-session doc, or load once from stored bytes (cached in overlayDocs).
+  const ensureOverlayPdf = async (o) => {
+    if (overlayDocs.current.has(o.id)) return overlayDocs.current.get(o.id);
+    if (!(o.storageKey || "").toLowerCase().endsWith(".pdf")) return null;
+    const bytes = await downloadOverlayBytes(o.storageKey);
+    if (!bytes) return null;
+    const { loadPdf } = await import("../doc-review/lib/pdf.js");
+    const pdf = await loadPdf(bytes);
+    overlayDocs.current.set(o.id, pdf);
+    return pdf;
+  };
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const cur = hiresRef.current;
+      const liveIds = new Set(sheetOverlays.filter((o) => o.visible !== false).map((o) => o.id));
+      let changed = false;
+      for (const id of Object.keys(cur)) if (!liveIds.has(id)) { try { cur[id].revoke && cur[id].revoke(); } catch (_) {} delete cur[id]; changed = true; } // prune gone/hidden
+      for (const o of sheetOverlays) {
+        if (o.visible === false || !o.src) continue;
+        const isPdf = overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf");
+        if (!isPdf) continue; // a DXF base is already vector-crisp at 4500px; an image can't re-raster
+        const pageMaxPts = Math.max(o.imgW, o.imgH);
+        const dec = chooseOverlayRasterScale({ ftPerPx: o.ftPerPx, ppf: view.ppf, pageMaxPts, baseScale: baseRasterScale(pageMaxPts) });
+        const existing = cur[o.id];
+        if (!dec.isHires) { if (existing) { try { existing.revoke && existing.revoke(); } catch (_) {} delete cur[o.id]; changed = true; } continue; } // zoomed out → base
+        if (existing && Math.abs(existing.scale - dec.scale) <= existing.scale * 0.1) continue; // already close enough
+        if (hiresBusy.current.has(o.id)) continue;
+        hiresBusy.current.add(o.id);
+        (async () => {
+          try {
+            const pdf = await ensureOverlayPdf(o);
+            if (!pdf) return;
+            const rr = await rasterizePageHiRes(pdf, o.page || 1, dec.scale, { knockout: o.knockout !== false });
+            // The overlay may have been removed / hidden while we rasterized — don't resurrect or leak it.
+            const stillLive = stateRef.current.sheetOverlays.some((x) => x.id === o.id && x.visible !== false);
+            if (!stillLive) { try { rr.revoke && rr.revoke(); } catch (_) {} return; }
+            const prev = cur[o.id];
+            cur[o.id] = { url: rr.src, scale: dec.scale, revoke: rr.revoke };
+            if (prev) { try { prev.revoke && prev.revoke(); } catch (_) {} }
+            commitHires();
+          } catch (_) { /* keep the base raster */ } finally { hiresBusy.current.delete(o.id); }
+        })();
+      }
+      if (changed) commitHires();
+    }, 260); // debounce behind zoom settle
+    return () => clearTimeout(timer);
+  }, [view.ppf, sheetOverlays, size.w, size.h]); // eslint-disable-line
 
   /* ------------ county parcel lookup ------------ */
   const onCountyChange = (key) => {
@@ -9011,10 +9106,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); overlayDragDepth.current += 1; setOverlayDropOver(true); }}
               onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
               onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; overlayDragDepth.current = Math.max(0, overlayDragDepth.current - 1); if (overlayDragDepth.current === 0) setOverlayDropOver(false); }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
               style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
-              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image)…"}</button>
-              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
+              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image / CAD)…"}</button>
+              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
               <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
                 {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this reference</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
               </div>
@@ -9108,6 +9203,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
                               <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
                             </label>
+                          )}
+                          {/* B747 — a DXF with no declared units ($INSUNITS = 0) was placed at assumed feet; flag it
+                              (never a silent guess). Verify with the Width control above or "Trace a length" below. */}
+                          {o.kind === "dxf" && o.unitsAssumed && (
+                            <div style={{ fontSize: 11, color: PAL.warnText, fontWeight: 600, lineHeight: 1.35 }}>
+                              ⚠ Units assumed: feet — verify. This DXF declares no units; confirm the Width above, or use “Trace a length”.
+                            </div>
                           )}
                           {o.pageCount > 1 && (
                             <div style={ovRow}><span style={{ width: 48 }}>Page</span>
@@ -9906,7 +10008,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); canvasDragDepth.current += 1; setCanvasDropOver(true); }}
           onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
           onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; canvasDragDepth.current = Math.max(0, canvasDragDepth.current - 1); if (canvasDragDepth.current === 0) setCanvasDropOver(false); }}
-          onDrop={(e) => { canvasDragDepth.current = 0; setCanvasDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}>
+          onDrop={(e) => { canvasDragDepth.current = 0; setCanvasDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {/* When the aerial is ON, the backdrop is a neutral mid-dark gray so the
@@ -10024,8 +10126,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
                     onContextMenu={(e) => onOverlayContext(e, o.id)}>
                     {o.src ? (
-                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131)
-                      <image data-overlay-image="1" href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
+                      // B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
+                      <image data-overlay-image="1" href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
                     ) : (<g data-export="skip">
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
                       <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{(o.idbKey || o.storageKey) ? "Loading drawing…" : `Re-add “${o.name}” — image not on this device`}</text>
