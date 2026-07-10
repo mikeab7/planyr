@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-10 @ `81eb685` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-10 @ `2b5d93b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_229 source files mapped._
+_234 source files mapped._
 
 ## infra
 
@@ -249,6 +249,8 @@ _229 source files mapped._
   - _exports_: `toastForSyncEvent`
 - **`src/workspaces/site-planner/lib/contours.js`** — Pure contour-line math (B704): 1-ft interval auto-pick, sentinel-embedded voids, d3-contour marching squares, grid-border + dilated-void strip passes, pixel-space simplify, index flags + sparse labels
   - _exports_: `buildContours`, `dilateVoids`, `pickInterval`, `stripRing`
+- **`src/workspaces/site-planner/lib/convertClient.js`** — B748 client for the B238 DWG→DXF convert service (VITE_CONVERT_URL); round-trips DWG bytes → DXF with a visible, distinct state for every failure (unset URL / 422 / 413 / unreachable).
+  - _exports_: `CONVERT_URL`, `convertConfigured`, `convertDwgToDxf`, `isDwgFile`
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver
@@ -269,6 +271,14 @@ _229 source files mapped._
   - _exports_: `bumpSidewalkSide`, `DOGEAR_D`, `DOGEAR_W`, `dogEarGeom`, `dogEarSize`, `isDogEarSide`, `sidewalkSpanForBumps`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
   - _exports_: `resolveDraftStepBack`
+- **`src/workspaces/site-planner/lib/dxf/dxfGeom.js`** — B747 pure DXF geometry primitives (bulge/arc/ellipse flattening, INSERT affine composition, $INSUNITS→feet); no imports, worker-safe, unit-tested.
+  - _exports_: `arcPoints`, `bulgeArcPoints`, `dxfArcPoints`, `ellipsePoints`, `IDENTITY`, `insertMatrix`, `insunitsToFeet`, `matApply`, `matMul`, `r3`
+- **`src/workspaces/site-planner/lib/dxf/dxfOverlay.js`** — B747 main-thread DXF glue: runs the parse/render in the DXF worker, rasterizes the returned SVG to a transparent PNG, and exposes openDxfFile/rasterizeStoredDxf for the overlay + reload paths.
+  - _exports_: `openDxfFile`, `parseDxfText`, `rasterizeStoredDxf`, `rasterizeSvg`
+- **`src/workspaces/site-planner/lib/dxf/dxfRender.js`** — B747 pure DXF→SVG renderer for the civil subset (LINE/LWPOLYLINE/POLYLINE+bulge/ARC/CIRCLE/ELLIPSE/TEXT/MTEXT/INSERT) with true-units ftPerPx + unsupported-entity tally.
+  - _exports_: `renderDxfToSvg`, `unsupportedSummary`
+- **`src/workspaces/site-planner/lib/dxf/dxfWorker.js`** — B747 Web Worker running dxf-parser + dxfRender off the main thread (import-list test-guarded); posts back the SVG + metadata or a loud ok:false error.
+  - _exports_: _(none)_
 - **`src/workspaces/site-planner/lib/easementRules.js`** — Editable per-jurisdiction utility-easement width rules (placeholder, verify-flagged) persisted in localStorage with county default mapping
   - _exports_: `DEFAULT_EASEMENT_RULES`, `defaultJurForCounty`, `loadEasementRules`, `saveEasementRules`
 - **`src/workspaces/site-planner/lib/easements.js`** — Easement domain logic: type catalog, label, and derive drawn ring from centerline/boundary/parcel-edge input modes with area
@@ -330,13 +340,13 @@ _229 source files mapped._
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
   - _exports_: `alignOverlaySimilarity`, `applySimilarityToOverlay`, `calibrateUnderlayScale`, `imagePointToWorld`, `scaleOverlayAbout`, `similarityTransform`, `solveSimilarityLSQ`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
-  - _exports_: `isPdfFile`, `knockoutNearWhite`, `openOverlayFile`, `rasterizePage`, `rasterizeStoredPdf`
+  - _exports_: `baseRasterScale`, `chooseOverlayRasterScale`, `isDxfFile`, `isPdfFile`, `knockoutNearWhite`, `MAX_RERASTER_DIM`, `openOverlayFile`, `rasterizePage`, `rasterizePageHiRes`, `rasterizeStoredDxf`, `rasterizeStoredPdf`
 - **`src/workspaces/site-planner/lib/overlayPrint.js`** — Pure DOM-free print/export selection for placed site-plan overlays: filters src-bearing visible overlays, drives the 'Print overlay' checkbox visibility and the export compositing pass
   - _exports_: `hasPrintableOverlay`, `isOverlayPrintable`, `printableOverlays`
 - **`src/workspaces/site-planner/lib/overlayScale.js`** — Pure drawing-scale helpers: engineer scale-note parsing, standard sheet detection, feet-per-point conversions, viewport-sanity auto-scale guard, and Bluebeam-style page=real distance/preset scale entry
   - _exports_: `chooseOverlayScale`, `COMMON_SCALES`, `detectSheet`, `feetPerInchForPreset`, `feetPerInchFromPair`, `ftPerPointForScale`, `matchScalePreset`, `PAGE_UNIT_TO_IN`, `PAGE_UNITS`, `parseDistanceInput`, `parseScaleNote`, `parseSheetScale`, `POINTS_PER_INCH`, `REAL_UNIT_TO_FT`, `REAL_UNITS`, `SCALE_PRESETS`, `scaleForFtPerPoint`
 - **`src/workspaces/site-planner/lib/overlayStorage.js`** — Supabase Storage I/O for overlay/parcel-drawing/aerial-underlay source files (uid-first RLS keys, upload/download/delete), fallback-safe to inline raster when logged-out/oversize/error
-  - _exports_: `BUCKET`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fileKind`, `overlayKey`, `parcelDrawingKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadParcelDrawingFile`, `uploadUnderlayDataUrl`
+  - _exports_: `BUCKET`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `parcelDrawingKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadParcelDrawingFile`, `uploadUnderlayDataUrl`
 - **`src/workspaces/site-planner/lib/overlayVectorSvg.js`** — Pure vector-overlay SVG emitter for the print export (B745): reprojects normalized [lon,lat] line/polygon/point features via an injected projection into styled `<path>`/`<circle>` (LOUD-skip on non-finite), plus esri/terrain normalizers (contour lines, drainage-arrow glyphs)
   - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors

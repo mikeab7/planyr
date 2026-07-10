@@ -257,7 +257,7 @@ export default function DocReview({
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // PRIMARY selected markup id (property panel / vertex edit)
   const [selSet, setSelSet] = useState([]);         // B569: the full multi-selection (markup ids, current page)
-  // B754: a single click SELECTS only — the Properties section shows a markup's props only after an
+  // B750: a single click SELECTS only — the Properties section shows a markup's props only after an
   // explicit open (double-click, or a freshly-drawn markup). `propsForId` = the selected markup id whose
   // Properties are open (must equal `sel`), else null. `dblRef` carries, for a double-click, whether the
   // markup was ALREADY selected at the FIRST press — so an already-selected TEXT note edits its text while
@@ -357,7 +357,7 @@ export default function DocReview({
     setSelSet((s) => { const f = s.filter(onPage); return f.length === s.length ? s : f; });
     setSel((id) => (id && onPage(id) ? id : null));
   }, [markups, page]);
-  // B754: drop the Properties-open marker whenever the selection moves off it (single click to another
+  // B750: drop the Properties-open marker whenever the selection moves off it (single click to another
   // markup, deselect, page change) so a plain click can't leave a stale panel open. One effect covers
   // every selection path — no need to touch selectOne/clearSelection/applySelMods.
   useEffect(() => { setPropsForId((cur) => (cur && cur === sel ? cur : null)); }, [sel]);
@@ -1049,7 +1049,7 @@ export default function DocReview({
     setDraft(null);
     // Bluebeam: a single-use tool reverts to Select after one markup and selects the new one
     // (so its properties show + you can tweak it); a locked tool stays armed.
-    if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B754: a freshly drawn markup shows its Properties (its rail section would be blank otherwise)
+    if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B750: a freshly drawn markup shows its Properties (its rail section would be blank otherwise)
   };
 
   // Erase pen/highlight markups whose points overlap the given box (two corner pts).
@@ -1102,12 +1102,12 @@ export default function DocReview({
       // New callout: pts[0] = leader tip (pointer target), pts[1] = text box anchor
       const id = uid();
       setMarkups((a) => [...a, { id, page: ed.page, kind: "callout", pts: [ed.calloutTip, ed.pt], ...seedStyle("callout"), text }]);
-      if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B754: show the new callout's Properties
+      if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B750: show the new callout's Properties
     } else {
       // honor the sticky text style (size/color/bold/…) set before drawing
       const id = uid();
       setMarkups((a) => [...a, { id, page: ed.page, kind: "text", pts: [ed.pt], ...seedStyle("text"), text }]);
-      if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B754: revert + select + show the new text's Properties
+      if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B750: revert + select + show the new text's Properties
     }
   };
 
@@ -1175,7 +1175,7 @@ export default function DocReview({
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
         return;
       }
-      if (hitId) { // B754: record whether this markup was ALREADY selected at the FIRST press of a
+      if (hitId) { // B750: record whether this markup was ALREADY selected at the FIRST press of a
         // potential double-click (a 2nd press within 350ms preserves the 1st-press value), BEFORE
         // selectOne makes it current — onDbl reads this to pick edit-text vs open-properties.
         const nowT = Date.now(), pr = dblRef.current;
@@ -1426,7 +1426,7 @@ export default function DocReview({
   };
   const onDbl = (e) => {
     if (tool === "select") {
-      // B754 — double-click opens the markup's Properties. Exception: an ALREADY-selected TEXT note or
+      // B750 — double-click opens the markup's Properties. Exception: an ALREADY-selected TEXT note or
       // callout edits its text in place ("click to select, then double-click to edit text"). `dblRef`
       // (set in onDown) says whether it was selected at the FIRST press of this double-click.
       const m = pageMarks.find((mm) => mm.id === hitTest(toPage(e)));
@@ -1985,14 +1985,14 @@ export default function DocReview({
                 );
               })}
             </div>
-            {/* Properties (B426 + B437; B754) — shows for a markup whose Properties were EXPLICITLY opened
+            {/* Properties (B426 + B437; B750) — shows for a markup whose Properties were EXPLICITLY opened
                 (double-click, or a freshly-drawn markup: propsForId===sel), OR for the ARMED drawable tool
                 so you can set color/weight/fill/font BEFORE drawing (new markups inherit the sticky style
                 via commit()). A plain single-click selects only and leaves this closed. Driven by
                 schemaForMarkup → PropertyPanel. */}
             {(() => {
               const selM = sel ? pageMarks.find((mm) => mm.id === sel) : null;
-              const showSelProps = !!selM && propsForId === sel; // B754: explicit open gate
+              const showSelProps = !!selM && propsForId === sel; // B750: explicit open gate
               const armed = (!showSelProps && toolById(tool) && propsForTool(tool).length) ? tool : null;
               if (!showSelProps && !armed) return null;
               // Show the ACTUAL seeded style for an armed tool (seedStyle: propStyle > tool default >

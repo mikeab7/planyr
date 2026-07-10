@@ -23,9 +23,10 @@ import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
-import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
+import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale } from "./lib/overlayPdf.js";
+import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
-import { uploadOverlayFile, uploadParcelDrawingFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, uploadParcelDrawingFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
@@ -1207,7 +1208,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
   const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
   const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
-  // B754: the Properties companion no longer follows raw selection — a single click SELECTS only.
+  // B750: the Properties companion no longer follows raw selection — a single click SELECTS only.
   // `propsFor` marks the selection whose companion is explicitly open (a double-click, the phone ✎ pill,
   // or the docked Properties tab set it); `null` = closed. The panel re-checks each render whether this
   // still matches the current selection (propsMatches), so any OTHER selection path — single click,
@@ -1249,7 +1250,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // inspector. Derived from `sel` alone (not the resolved selectors) so early effects can use it.
   // B740 widens it to a styleable multi-selection.
   const companionSel = (!!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup")) || multiStyleable;
-  // B754: does the explicitly-opened Properties marker still point at the CURRENT selection? Declared
+  // B750: does the explicitly-opened Properties marker still point at the CURRENT selection? Declared
   // here (right after companionSel) so both the canvas-shift effect and companionOpen can read it.
   const propsMatches = propsFor === "multi"
     ? multiStyleable
@@ -1885,7 +1886,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // select, then press over THERE to drag" gesture from misfiring as an edit.
   const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0, wasSel: false });
   const labelSessionRef = useRef(null);  // B682 — coalesces a live label-spacing slider drag into one undo frame
-  // B754 — carries whether the feature was ALREADY selected at the FIRST press of a double-tap. That
+  // B750 — carries whether the feature was ALREADY selected at the FIRST press of a double-tap. That
   // decides a double-click's job: an already-selected text-bearing feature edits its text ("click to
   // select, then double-click to edit text"); anything else opens Properties. Read right after
   // isDoubleTap(...) returns true.
@@ -2577,7 +2578,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [sel?.kind, sel?.id]);
   // B656: the phone companion overlay follows the selection's lifetime — deselect closes it.
   useEffect(() => { if (!companionSel) setNarrowProps(false); }, [companionSel]);
-  // B754: when the selection moves OFF the element whose Properties are open, drop the marker so the
+  // B750: when the selection moves OFF the element whose Properties are open, drop the marker so the
   // companion closes and can't re-pop on a plain re-click. (Replaces the old B656 effect that RE-opened
   // the companion on every selection change — the exact auto-open behavior we're removing.)
   useEffect(() => {
@@ -2616,7 +2617,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // EXACT delta we applied, so a mid-open rotation can never leave a residual sideways offset.
   const panelShiftRef = useRef(0);
   useEffect(() => {
-    const want = ((!!leftPanel || (companionSel && propsMatches)) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts; B754: only an EXPLICITLY-open companion holds the shift, else it leaves a blank rail gap)
+    const want = ((!!leftPanel || (companionSel && propsMatches)) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts; B750: only an EXPLICITLY-open companion holds the shift, else it leaves a blank rail gap)
     if (want !== panelShiftRef.current) {
       const delta = want - panelShiftRef.current;
       panelShiftRef.current = want;
@@ -3451,7 +3452,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
-    // B754 — double-click an UNLOCKED markup opens its Properties. Exception: an ALREADY-selected
+    // B750 — double-click an UNLOCKED markup opens its Properties. Exception: an ALREADY-selected
     // text-bearing markup (line / polyline / easement — the ones with an inline label) edits its label
     // instead ("click to select, then double-click to edit text"). Pointer capture eats the DOM dblclick,
     // so we reconstruct the double-tap here. Locked features stay select-only.
@@ -3596,7 +3597,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
-    // B754 — double-click a callout (box part only): an ALREADY-selected callout edits its text in place
+    // B750 — double-click a callout (box part only): an ALREADY-selected callout edits its text in place
     // ("click to select, then double-click to edit text"); otherwise it opens Properties. Pointer capture
     // eats the DOM dblclick, so we reconstruct the double-tap here.
     if (part === "box" && isDoubleTap(e, id, sel?.kind === "callout" && sel.id === id)) {
@@ -4448,33 +4449,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
-  /* ------------ site-plan overlays (B72) ------------ */
-  // Add a dropped PDF/image as a backdrop overlay, placed ~60% of the view wide and
-  // centered on what the user is currently looking at (true scale comes in B73).
-  const addOverlayFile = async (file) => {
-    if (!file) return;
+  /* ------------ site-plan overlays (B72 · CAD in B747/B748) ------------ */
+  // Add a dropped PDF/image/DXF/DWG as a backdrop overlay, placed centered on the current view.
+  // PDF/image size via the B73 scale heuristic; a DXF (or a DWG converted through the B238
+  // service) auto-places at TRUE real-world size from its declared units.
+  const addOverlayFile = async (rawFile) => {
+    if (!rawFile) return;
     setOverlayBusy(true);
     try {
-      const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf,detectedScale,sheet}
+      // B748 — a .dwg round-trips through the convert service into a .dxf, then flows through the
+      // exact DXF path below. Every failure is surfaced (unset URL / 422 / 413 / unreachable) —
+      // never a spinner into nothing (LOUD-FAILURE). The original DWG is backed up as provenance.
+      let file = rawFile;
+      let originalDwg = null;
+      if (isDwgFile(rawFile)) {
+        const conv = await convertDwgToDxf(rawFile);
+        if (!conv.ok) { flashWarn(conv.error, 10000); return; }
+        originalDwg = rawFile;
+        file = new File([conv.bytes], (rawFile.name || "drawing").replace(/\.dwg$/i, ".dxf"), { type: "application/dxf" });
+      }
+
+      const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf,detectedScale,sheet} or the DXF shape (kind:"dxf",ftPerPx,unitsAssumed,unsupported)
       const id = uid();
       if (r.pdf) overlayDocs.current.set(id, r.pdf); // keep the doc for the in-session page picker
       const c = p2fStatic(size.w / 2, size.h / 2);   // view centre, in feet
-      // Pick the initial size: trust a read scale note (B73) ONLY when it lands the sheet
-      // at a sane on-screen size, else "size to fit" (~60% of the view). A misread scale
-      // (e.g. a vicinity-map scale on the same sheet) otherwise placed the drawing 10–30×
-      // too large, blanketing the map with its title block — the reported "file name all
-      // over the map" bug. The read scale is still kept on the overlay so the panel can
-      // offer it as one-click "Apply". (chooseOverlayScale is pure + unit-tested.)
-      const pick = chooseOverlayScale({ detectedScale: r.detectedScale, sheetStd: !!(r.sheet && r.sheet.std), imgW: r.imgW, ppf: view.ppf, screenW: size.w });
-      const ftPerPx = pick.ftPerPx;
+
+      let ftPerPx, pick = null;
+      if (r.kind === "dxf") {
+        ftPerPx = r.ftPerPx; // TRUE units — no B73 scale heuristic needed
+      } else {
+        // Pick the initial size: trust a read scale note (B73) ONLY when it lands the sheet at a
+        // sane on-screen size, else "size to fit". (chooseOverlayScale is pure + unit-tested.)
+        pick = chooseOverlayScale({ detectedScale: r.detectedScale, sheetStd: !!(r.sheet && r.sheet.std), imgW: r.imgW, ppf: view.ppf, screenW: size.w });
+        ftPerPx = pick.ftPerPx;
+      }
       // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
       const ovIdbKey = siteId ? `raster:${siteId}:overlay:${id}` : undefined;
       const ov = {
-        id, name: file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
+        id, name: rawFile.name || file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
         page: r.page || 1, pageCount: r.pageCount || 1,
         x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
         ftPerPx, rotation: 0, opacity: 0.85, locked: false,
         detectedScale: r.detectedScale || null, sheet: r.sheet || null,
+        kind: r.kind || null, unitsAssumed: !!r.unitsAssumed, unitsLabel: r.unitsLabel || null,
       };
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
@@ -4482,12 +4499,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B474 review (#2): attach idbKey only AFTER the stash confirms — until then src stays inline so
       // dropIdbBackedSrc can't strip it before it's durable (overlays also have the cloud-Storage fallback below).
       if (ovIdbKey && idbAvailable() && r.src) idbPut(ovIdbKey, r.src).then((ok) => { if (ok) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, idbKey: ovIdbKey } : x))); });
-      if (pick.reason === "too-big" || pick.reason === "too-small") // honest, actionable note — never a silent mis-place
-        flashWarn(`Added “${file.name || "drawing"}”, but its printed scale (1″=${r.detectedScale}′) would place it ${pick.reason === "too-big" ? "far too large" : "far too small"} — sized it to fit your view instead. Set the exact scale (or “Trace a length”) in the Site-plan overlay panel.`, 9000);
-      if (isCloudActive()) { // back the source (PDF or image) up to Storage for cross-device reload (B72)
-        uploadOverlayFile(siteId, id, file).then((res) => {
-          if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
-        }).catch(() => {});
+      // B747 — surface skipped entity types + assumed units, never a silent drop / silent guess.
+      if (r.unsupported && r.unsupported.count)
+        flashWarn(`Imported “${ov.name}” — ${r.unsupportedSummary || `${r.unsupported.count} entities of unsupported types skipped`}.`, 9000);
+      if (r.kind === "dxf" && r.unitsAssumed)
+        flashWarn(`Imported “${ov.name}” at assumed feet (the DXF declares no units) — verify the size, or set the exact scale / “Trace a length” in the Site-plan overlay panel.`, 10000);
+      if (pick && (pick.reason === "too-big" || pick.reason === "too-small")) // honest, actionable note — never a silent mis-place
+        flashWarn(`Added “${ov.name}”, but its printed scale (1″=${r.detectedScale}′) would place it ${pick.reason === "too-big" ? "far too large" : "far too small"} — sized it to fit your view instead. Set the exact scale (or “Trace a length”) in the Site-plan overlay panel.`, 9000);
+      if (isCloudActive()) { // back the source up to Storage for cross-device reload (B72/B747)
+        // B747 — oversize must fail VISIBLY, never a silent skip of the cloud backup (LOUD-FAILURE).
+        if (file.size > OVERLAY_MAX_BYTES)
+          flashWarn(`“${ov.name}” is ${(file.size / 1048576) | 0} MB — too large to back up to the cloud (50 MB limit). It's on this device but won't reload on another until you re-add it.`, 10000);
+        else
+          // Inside isCloudActive() + past the oversize pre-check, a null result means a GENUINE upload
+          // failure (Storage/RLS/network) — surface it, never a silent skip of the cross-device backup.
+          uploadOverlayFile(siteId, id, file).then((res) => {
+            if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
+            else flashWarn(`Couldn't back up “${ov.name}” to the cloud — it's saved on this device but won't reload on another until you re-add it (check your connection).`, 9000);
+          }).catch(() => flashWarn(`Couldn't back up “${ov.name}” to the cloud — it's saved on this device but won't reload on another until you re-add it.`, 9000));
+        // B748 — best-effort provenance copy of the original DWG (the true source of truth).
+        if (originalDwg && originalDwg.size <= OVERLAY_MAX_BYTES)
+          uploadOverlayFile(siteId, id + "-dwg", originalDwg).then((res) => {
+            if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, sourceDwgKey: res.key } : x)));
+          }).catch(() => {});
       }
     } catch (err) {
       alert(humanizeError(err));
@@ -4549,6 +4583,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // cloud object when no OTHER overlay still points at it (else we'd orphan the sibling's image).
     const shared = o.storageKey && sheetOverlays.some((x) => x.id !== id && x.storageKey === o.storageKey);
     if (o.storageKey && !shared) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
+    // B748 — the DWG provenance object rides its own key; drop it too (ref-counted) so a delete doesn't orphan it in Storage.
+    const sharedDwg = o.sourceDwgKey && sheetOverlays.some((x) => x.id !== id && x.sourceDwgKey === o.sourceDwgKey);
+    if (o.sourceDwgKey && !sharedDwg) deleteOverlayObject(o.sourceDwgKey);
     // B474 review (#23) — evict the cached IndexedDB raster too, ref-counted like storageKey (a Duplicate/Paste
     // copies the key, so only drop the entry when no other overlay still points at it).
     const sharedIdb = o.idbKey && sheetOverlays.some((x) => x.id !== id && x.idbKey === o.idbKey);
@@ -4775,6 +4812,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const bytes = await downloadOverlayBytes(o.storageKey);
             const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1, { knockout: o.knockout !== false }) : null; // honour the per-reference knockout (B654)
             if (r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+          } else if ((o.storageKey || "").toLowerCase().endsWith(".dxf")) { // B747 — DXF: re-render at the SAME dims so the on-map size is exact
+            const bytes = await downloadOverlayBytes(o.storageKey);
+            const r = bytes ? await rasterizeStoredDxf(bytes, { width: o.imgW, height: o.imgH }) : null;
+            if (r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src } : x)));
           } else if (o.storageKey) { // image: its raster IS the source — restore the src directly (dims already known)
             const src = await downloadOverlayDataUrl(o.storageKey);
             if (src) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src } : x)));
@@ -4783,6 +4824,75 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     })();
   }, [sheetOverlays]); // eslint-disable-line
+
+  /* ---- B749 Tier 2 — zoom-aware re-raster of PDF overlays ----------------------------------
+   * When a placed PDF overlay is zoomed past sheet-fit its base raster (≤4500px) softens. Once
+   * on-screen magnification exceeds ~1.5× its raster pixels, re-render that page at a higher
+   * device scale (cap 8192px) to a TRANSIENT revocable object URL (the B45 precedent) and swap
+   * it in place — the base data URL stays the record's `src`, so persistence / undo / cloud are
+   * untouched and the hi-res never bloats state. Drop back to the base raster (and revoke) when
+   * zoomed out, so multiple hi-res overlays can't accumulate in memory. */
+  const [hiresById, setHiresById] = useState({});     // id → hi-res object URL (render override only; never persisted)
+  const hiresRef = useRef({});                         // id → { url, scale, page, knockout, revoke } (revoke bookkeeping)
+  const hiresBusy = useRef(new Set());
+  const hiresMounted = useRef(true);                   // false after unmount — an in-flight raster must not resurrect state / leak a URL
+  const viewPpfRef = useRef(view.ppf);
+  viewPpfRef.current = view.ppf;                       // freshest zoom, so an async completion re-checks against the CURRENT view
+  const commitHires = () => { if (hiresMounted.current) setHiresById(Object.fromEntries(Object.entries(hiresRef.current).map(([id, v]) => [id, v.url]))); };
+  useEffect(() => () => { hiresMounted.current = false; Object.values(hiresRef.current).forEach((v) => { try { v.revoke && v.revoke(); } catch (_) {} }); hiresRef.current = {}; }, []); // revoke all on unmount
+  const wantsHires = (o) => { const pm = Math.max(o.imgW, o.imgH); return chooseOverlayRasterScale({ ftPerPx: o.ftPerPx, ppf: viewPpfRef.current, pageMaxPts: pm, baseScale: baseRasterScale(pm) }); };
+  // Get a PDF proxy for an overlay: the in-session doc, or load once from stored bytes (cached in overlayDocs).
+  const ensureOverlayPdf = async (o) => {
+    if (overlayDocs.current.has(o.id)) return overlayDocs.current.get(o.id);
+    if (!(o.storageKey || "").toLowerCase().endsWith(".pdf")) return null;
+    const bytes = await downloadOverlayBytes(o.storageKey);
+    if (!bytes) return null;
+    const { loadPdf } = await import("../doc-review/lib/pdf.js");
+    const pdf = await loadPdf(bytes);
+    // Unmounted (or the overlay was removed) while loading → don't leak an undestroyed proxy in overlayDocs.
+    if (!hiresMounted.current || !stateRef.current.sheetOverlays.some((x) => x.id === o.id)) { try { pdf.destroy(); } catch (_) {} return null; }
+    overlayDocs.current.set(o.id, pdf);
+    return pdf;
+  };
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const cur = hiresRef.current;
+      const liveIds = new Set(sheetOverlays.filter((o) => o.visible !== false).map((o) => o.id));
+      let changed = false;
+      for (const id of Object.keys(cur)) if (!liveIds.has(id)) { try { cur[id].revoke && cur[id].revoke(); } catch (_) {} delete cur[id]; changed = true; } // prune gone/hidden
+      for (const o of sheetOverlays) {
+        if (o.visible === false || !o.src) continue;
+        const isPdf = overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf");
+        if (!isPdf) continue; // a DXF base is already vector-crisp at 4500px; an image can't re-raster
+        const dec = wantsHires(o);
+        const existing = cur[o.id];
+        if (!dec.isHires) { if (existing) { try { existing.revoke && existing.revoke(); } catch (_) {} delete cur[o.id]; changed = true; } continue; } // zoomed out → base
+        const page = o.page || 1, knockout = o.knockout !== false;
+        // Re-raster unless we already hold a hi-res for the SAME page + knockout at a close-enough scale — so a
+        // page change / knockout toggle invalidates a stale hi-res instead of leaving the old page displayed.
+        if (existing && existing.page === page && existing.knockout === knockout && Math.abs(existing.scale - dec.scale) <= existing.scale * 0.1) continue;
+        if (hiresBusy.current.has(o.id)) continue;
+        hiresBusy.current.add(o.id);
+        (async () => {
+          try {
+            const pdf = await ensureOverlayPdf(o);
+            if (!pdf) return;
+            const rr = await rasterizePageHiRes(pdf, page, dec.scale, { knockout });
+            // Bail if we unmounted, the overlay was removed/hidden, or the user zoomed back out while we
+            // rasterized — don't resurrect state or leave a hi-res mounted when it's no longer wanted (revoke).
+            const o2 = stateRef.current.sheetOverlays.find((x) => x.id === o.id && x.visible !== false);
+            if (!hiresMounted.current || !o2 || !wantsHires(o2).isHires) { try { rr.revoke && rr.revoke(); } catch (_) {} return; }
+            const prev = cur[o.id];
+            cur[o.id] = { url: rr.src, scale: dec.scale, page, knockout, revoke: rr.revoke };
+            if (prev) { try { prev.revoke && prev.revoke(); } catch (_) {} }
+            commitHires();
+          } catch (_) { /* keep the base raster */ } finally { hiresBusy.current.delete(o.id); }
+        })();
+      }
+      if (changed) commitHires();
+    }, 260); // debounce behind zoom settle
+    return () => clearTimeout(timer);
+  }, [view.ppf, sheetOverlays, size.w, size.h]); // eslint-disable-line
 
   /* ------------ county parcel lookup ------------ */
   const onCountyChange = (key) => {
@@ -5529,7 +5639,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
-    // B754 — double-click a non-grouped, UNLOCKED element opens its Properties. Exception: an ALREADY-
+    // B750 — double-click a non-grouped, UNLOCKED element opens its Properties. Exception: an ALREADY-
     // selected centerline road (the only text-bearing element) edits its inline label instead ("click to
     // select, then double-click to edit text"). Pointer capture eats the DOM dblclick, so we reconstruct
     // the double-tap here. Groups keep single-click = select-whole-group (drill-in stays in onElDouble).
@@ -5870,7 +5980,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B620: double-click a (centerline) road → edit its inline label in place (right-click still opens
     // the type/actions menu via onElContext). Legacy bonded rect roads keep the type menu.
     if (isCenterlineRoad(el)) { setSel({ kind: "el", id }); beginEditInline("el", id); return; }
-    // B754: double-click now opens Properties (was the type/actions menu — that stays on right-click via
+    // B750: double-click now opens Properties (was the type/actions menu — that stays on right-click via
     // onElContext). This native path is the raw-dblclick / test-harness fallback; real users hit the
     // reconstructed double-tap in startMoveEl (pointer capture eats this native dblclick).
     setSel({ kind: "el", id });
@@ -6912,7 +7022,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let aerialDropped = false;
     const overlaysDropped = [];
     await Promise.all(imgs.map(async (img) => {
-      const href = img.getAttribute("href") || img.getAttributeNS(XL, "href");
+      let href = img.getAttribute("href") || img.getAttributeNS(XL, "href");
+      // B749 — a placed overlay may be showing a TRANSIENT hi-res object URL (blob:) while zoomed in;
+      // that URL is session-local and could be revoked mid-export → a silently dropped overlay. Swap it
+      // for the overlay's PERSISTED base raster (a data: URL) so the export always has valid, inline-able
+      // bytes (LOUD-FAILURE / PDF-PARITY — the export uses the same picture, never nothing).
+      if (href && href.startsWith("blob:") && img.hasAttribute("data-overlay-id")) {
+        const ov = stateRef.current.sheetOverlays.find((o) => o.id === img.getAttribute("data-overlay-id"));
+        if (ov && ov.src) { img.setAttribute("href", ov.src); img.removeAttributeNS(XL, "href"); href = ov.src; }
+      }
       if (!href || href.startsWith("data:")) return;
       const isAerial = img.hasAttribute("data-export-aerial");
       const isOverlay = img.hasAttribute("data-export-overlay");
@@ -8129,7 +8247,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B656: the Properties companion coexists with the open panel — it renders whenever a
   // qualifying selection exists. On a phone it stays closed unless a panel is already
   // open (B556: tap = select only) or the ✎ Properties pill explicitly opened it.
-  // B754: on desktop the companion opens ONLY when Properties was explicitly opened for this selection
+  // B750: on desktop the companion opens ONLY when Properties was explicitly opened for this selection
   // (propsMatches) — a plain click selects without popping it. Phone is unchanged: the ✎ pill (narrowProps)
   // or an already-open panel gates it there (B556: tap = select only).
   const companionOpen = companionSel && (narrow ? (!!leftPanel || narrowProps) : propsMatches);
@@ -9055,10 +9173,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); overlayDragDepth.current += 1; setOverlayDropOver(true); }}
               onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
               onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; overlayDragDepth.current = Math.max(0, overlayDragDepth.current - 1); if (overlayDragDepth.current === 0) setOverlayDropOver(false); }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
               style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
-              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image)…"}</button>
-              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
+              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image / CAD)…"}</button>
+              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
               <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
                 {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this reference</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
               </div>
@@ -9152,6 +9270,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
                               <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
                             </label>
+                          )}
+                          {/* B747 — a DXF with no declared units ($INSUNITS = 0) was placed at assumed feet; flag it
+                              (never a silent guess). Verify with the Width control above or "Trace a length" below. */}
+                          {o.kind === "dxf" && o.unitsAssumed && (
+                            <div style={{ fontSize: 11, color: PAL.warnText, fontWeight: 600, lineHeight: 1.35 }}>
+                              ⚠ Units assumed: feet — verify. This DXF declares no units; confirm the Width above, or use “Trace a length”.
+                            </div>
                           )}
                           {o.pageCount > 1 && (
                             <div style={ovRow}><span style={{ width: 48 }}>Page</span>
@@ -9950,7 +10075,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); canvasDragDepth.current += 1; setCanvasDropOver(true); }}
           onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
           onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; canvasDragDepth.current = Math.max(0, canvasDragDepth.current - 1); if (canvasDragDepth.current === 0) setCanvasDropOver(false); }}
-          onDrop={(e) => { canvasDragDepth.current = 0; setCanvasDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}>
+          onDrop={(e) => { canvasDragDepth.current = 0; setCanvasDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {/* When the aerial is ON, the backdrop is a neutral mid-dark gray so the
@@ -10068,8 +10193,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
                     onContextMenu={(e) => onOverlayContext(e, o.id)}>
                     {o.src ? (
-                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131)
-                      <image data-overlay-image="1" href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
+                      // B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
+                      // data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
+                      <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
                     ) : (<g data-export="skip">
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
                       <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{(o.idbKey || o.storageKey) ? "Loading drawing…" : `Re-add “${o.name}” — image not on this device`}</text>
@@ -11476,7 +11603,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 aria-pressed={leftPanel === tb.id || isFloating(tb.id)}
                 onClick={() => {
                   if (isFloating(tb.id)) { closeFloating(tb.id); return; } // re-clicking a floating panel's icon closes it
-                  // B733/B754: opening the Properties tab expands the inspector (a prior collapse shouldn't
+                  // B733/B750: opening the Properties tab expands the inspector (a prior collapse shouldn't
                   // leave the freshly-opened tab headers-only). The tab renders via `propsTab && companionSel`,
                   // independent of the double-click `propsFor` marker, so it always shows the current selection.
                   if (tb.id === "properties") { setPropsCollapsed(false); }

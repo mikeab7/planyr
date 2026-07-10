@@ -415,7 +415,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/inlineLabelControls\(selEl, "road", coalesceLabelWrite\(selEl\.id/);
   });
 
-  it("B754: single-click selects only; a double-tap opens Properties, an ALREADY-selected text feature edits its text", () => {
+  it("B750: single-click selects only; a double-tap opens Properties, an ALREADY-selected text feature edits its text", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // isDoubleTap now also carries whether the feature was ALREADY selected at the FIRST press (wasSel);
     // it reconstructs the browser's own double-click test (pointer capture eats the DOM dblclick) and

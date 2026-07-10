@@ -16,6 +16,10 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `vectorLayers.js` (pure vector engine + boundary registry) + `vectorOverlay.js` (cached boundary
   render / identify / labels glue) + `boundaryLabels.js` (pure label math) — the B694/B695 tier;
   `basemaps.js` — the shared Esri/USGS aerial-source registry (B693).
+- Site-plan overlay import (B72/B73/B747/B748/B749): `overlayPdf.js` (PDF+DXF raster, banded
+  white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
+  (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
+  + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `labelLayout.js` — LOD label tiering. `roadGeometry.js` — centerline road curves (pure).
 - Terrain pipeline (B703–B706): `demGrid.js` / `contours.js` / `flowField.js` (pure math,

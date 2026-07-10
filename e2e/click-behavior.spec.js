@@ -1,7 +1,7 @@
-/* Click behavior — single-click SELECTS, double-click opens PROPERTIES (B754).
+/* Click behavior — single-click SELECTS, double-click opens PROPERTIES (B750).
  *
  * The owner's rule: "clicking any element must not auto-open its properties menu. Single left-click
- * selects; double-click opens Properties." Before B754 the Site Planner's Properties companion was
+ * selects; double-click opens Properties." Before B750 the Site Planner's Properties companion was
  * DERIVED from the selection, so a plain click popped it open. This spec is the live guard for the
  * decoupled behavior — it runs LOGGED OUT against a seeded-blank site (no account), driving the real
  * SVG canvas:
@@ -51,7 +51,7 @@ test.describe("click behavior — single-click selects, double-click opens Prope
     await startBlank(page);
     const { cx, cy } = await drawBuilding(page);
 
-    // Freshly drawn → the companion stays CLOSED (B754: no auto-open on draw in the Site Planner).
+    // Freshly drawn → the companion stays CLOSED (B750: no auto-open on draw in the Site Planner).
     await expect(panel(page)).toHaveCount(0);
 
     // Double-click → Properties opens (with its "Delete element" control). The app reconstructs the
