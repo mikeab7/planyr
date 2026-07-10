@@ -21,6 +21,7 @@
  */
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
+import { pipelineStyleFor } from "./pipelineCommodity.js";
 
 // ---------------------------------------------------------------------------
 // Source registry — one row per layer. `query` drives the vector pull (endpoint,
@@ -66,7 +67,7 @@ export const VECTOR_SOURCES = {
     imageFallback: { url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer", layers: [27, 28] },
     note: "FEMA NFHL flood zone — screening only; verify with the official FEMA Flood Map Service Center.",
   },
-  // Base Flood Elevation LINES (S_BFE, B752) — the whole-foot water-surface contours
+  // Base Flood Elevation LINES (S_BFE, B755) — the whole-foot water-surface contours
   // FEMA draws ACROSS the floodplain. On most AE reaches the zone polygon's STATIC_BFE
   // is the -9999 "none" sentinel, so the BFE actually lives here; the floodplain-
   // mitigation engine interpolates these lines at the fill to DERIVE a screening BFE.
@@ -90,7 +91,7 @@ export const VECTOR_SOURCES = {
     },
     note: "FEMA NFHL Base Flood Elevation lines — screening only; verify with the official FEMA Flood Map Service Center.",
   },
-  // Regulatory Cross-Sections (S_XS, B752) — carry WSEL_REG (1% water surface at a
+  // Regulatory Cross-Sections (S_XS, B755) — carry WSEL_REG (1% water surface at a
   // station). REGISTERED for v2 but NOT consumed in v1: correct use needs stream
   // matching (WTR_NM) + along-station interpolation, not nearest-line distance, or an
   // unrelated creek's WSE would be misattributed (the multi-foot silent-error class).
@@ -128,6 +129,47 @@ export const VECTOR_SOURCES = {
     },
     imageFallback: { url: "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer", layers: [0] },
     note: "NWI is for screening only — not a jurisdictional determination.",
+  },
+
+  /* Pipelines (RRC T-4) — vector LINE layer (B751). Reuses the SAME authoritative statewide RRC
+   * service the Site Analysis pipeline count reads (sources.js `pipelines`, layer 13) so the map
+   * and the analysis agree (the B517 invariant — one source of truth, no fork). Rendered as crisp
+   * polylines colored by commodity (style "pipeline", fixed map-symbology hex, weight = hazard)
+   * when zoomed in; falls back to the RRC `/export` raster (imageFallback) when zoomed far out —
+   * statewide pipeline density is too heavy to draw as vector. The `outFields` are the registry's
+   * exact columns (operator/commodity/diameter/status/system/county), so the click-identify reads
+   * the same fields the analysis maps. */
+  txrrc_pipe: {
+    id: "txrrc_pipe",
+    label: "Pipelines (TxRRC)",
+    style: "pipeline",
+    geometryType: "line",
+    commodityField: GIS_SOURCES.pipelines.fields.commodity, // "COMMODITY_DESCRIPTION"
+    sourceName: GIS_SOURCES.pipelines.provider, // "Railroad Commission of Texas (RRC) — statewide"
+    // Click-identify rows (B751) — the same registry columns the analysis reads (one source of
+    // truth). Commodity is the headline; diameter surfaces HERE since weight encodes hazard.
+    identifyFields: [
+      { label: "Operator", field: GIS_SOURCES.pipelines.fields.operator },
+      { label: "Diameter", field: GIS_SOURCES.pipelines.fields.diameter, unit: "in" },
+      { label: "Status", field: GIS_SOURCES.pipelines.fields.status },
+      { label: "System", field: GIS_SOURCES.pipelines.fields.system },
+    ],
+    identifyNote: "RRC T-4 permit route — schematic, not a surveyed location.",
+    query: {
+      url: GIS_SOURCES.pipelines.serviceUrl + "/" + GIS_SOURCES.pipelines.layerId + "/query", // …/MapServer/13/query
+      outFields: Object.values(GIS_SOURCES.pipelines.fields), // OPERATOR, COMMODITY_DESCRIPTION, DIAMETER, STATUS, SYSTEM_NAME, COUNTY_NAME
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 6000,
+      ttl: 7 * 24 * 3600 * 1000, // RRC permit data updates continuously; a week keeps the cached copy fresh-ish
+      minVectorZoom: 13,          // crisp vector at site / neighborhood zoom; raster below (statewide density)
+      maxAreaDeg: 0.2,            // a county-plus view is too dense to pull/draw as vector → raster fallback
+    },
+    imageFallback: {
+      url: GIS_SOURCES.pipelines.serviceUrl,
+      layers: [GIS_SOURCES.pipelines.layerId], // [13] — the same sublayer the vector pull queries
+    },
+    note: "RRC T-4 permit routes — schematic, not surveyed locations.",
   },
 
   /* Jurisdiction BOUNDARY layers (B694) — county / city / ETJ move off live per-pan
@@ -346,43 +388,31 @@ export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFet
 // Esri JSON → GeoJSON
 // ---------------------------------------------------------------------------
 
-/* Convert Esri JSON features into a GeoJSON FeatureCollection. Polygons
- * ({geometry:{rings}}) pass straight through as Polygon `coordinates`; polylines
- * ({geometry:{paths}} — e.g. FEMA Base Flood Elevation lines (S_BFE) or cross-sections)
- * become LineString / MultiLineString. Esri rings/paths are already
- * [[ [lng,lat], ... ], ...], so they need no reprojection here. Features with neither
- * are skipped. NOTE: this does not split outer rings from holes into separate
- * Polygons/MultiPolygons — for screening, an even-odd fill renders these rings fine;
+/* Convert Esri JSON features into a GeoJSON FeatureCollection. Handles BOTH geometry
+ * shapes the app pulls:
+ *   • polygons  ({geometry:{rings}})  → Polygon (rings pass straight through as [lng,lat])
+ *   • polylines ({geometry:{paths}})  → LineString (1 path) / MultiLineString (n paths)
+ * (B751 added the polyline path for the RRC pipelines layer; B755 reuses it for the FEMA
+ * Base Flood Elevation lines / cross-sections.) Esri coords are already [lng,lat], so they
+ * pass through unchanged. Features with no usable geometry are skipped. NOTE: polygons don't
+ * split outer rings from holes — for screening, an even-odd fill renders these rings fine;
  * precise outer/hole classification is a later refinement. Pure. */
 export function featuresToGeoJson(esriFeatures, { source } = {}) {
   const out = [];
   for (const f of esriFeatures || []) {
-    const geom = (f && f.geometry) || null;
-    const rings = geom && geom.rings;
-    if (rings && rings.length) {
-      out.push({
-        type: "Feature",
-        properties: f.attributes || {},
-        geometry: { type: "Polygon", coordinates: rings },
-      });
-      continue;
+    const g = f && f.geometry;
+    if (!g) continue;
+    if (g.rings && g.rings.length) {
+      out.push({ type: "Feature", properties: f.attributes || {}, geometry: { type: "Polygon", coordinates: g.rings } });
+    } else if (g.paths && g.paths.length) {
+      const parts = g.paths.filter((p) => p && p.length >= 2);
+      if (!parts.length) continue; // no drawable part
+      const geometry = parts.length === 1
+        ? { type: "LineString", coordinates: parts[0] }
+        : { type: "MultiLineString", coordinates: parts };
+      out.push({ type: "Feature", properties: f.attributes || {}, geometry });
     }
-    // Polyline sources (Esri `geometry.paths`) — one path → LineString, several →
-    // MultiLineString. Without this branch a line-layer pull would SILENTLY drop every
-    // feature (no error), exactly the fabricated-empty-result class the mitigation
-    // engine forbids (LOUD-FAILURE).
-    const paths = geom && geom.paths;
-    if (paths && paths.length) {
-      out.push({
-        type: "Feature",
-        properties: f.attributes || {},
-        geometry: paths.length > 1
-          ? { type: "MultiLineString", coordinates: paths }
-          : { type: "LineString", coordinates: paths[0] },
-      });
-      continue;
-    }
-    // neither rings nor paths — skip null/empty geometry
+    // else: null/empty geometry — skip
   }
   return { type: "FeatureCollection", features: out, style: source ? source.style : undefined };
 }
@@ -421,20 +451,40 @@ export function douglasPeucker(pts, tol) {
   return [a, b];
 }
 
-/* Simplify every ring of every feature into a NEW FeatureCollection (originals
- * untouched). Each ring is reduced with Douglas–Peucker but ALWAYS re-closed (first
- * coord === last coord) and never has its endpoints dropped; a ring that collapses
- * below 4 points (a degenerate sliver) is dropped, and a feature left with no rings
- * is dropped. Pure. */
+/* Simplify every feature's geometry into a NEW FeatureCollection (originals untouched),
+ * dispatching on geometry type:
+ *   • Polygon           — each ring reduced with Douglas–Peucker, ALWAYS re-closed (first ===
+ *                         last), a ring collapsing below 4 points dropped, an empty feature dropped.
+ *   • LineString /      — each open path reduced with Douglas–Peucker (endpoints always kept), a
+ *     MultiLineString     part collapsing below 2 points dropped, an empty feature dropped. (B751.)
+ * Pure. */
 export function simplifyGeoJson(fc, tolDeg = 0.00003) {
   const features = [];
   for (const feat of (fc && fc.features) || []) {
-    // Only Polygons are ring-simplified. Non-polygon geometry (LineString /
-    // MultiLineString — BFE lines, cross-sections) passes through UNTOUCHED: thinning a
-    // line's vertices would move it relative to the query point and perturb the BFE
-    // value interpolated off it. Pure.
-    if (!feat.geometry || feat.geometry.type !== "Polygon") { features.push(feat); continue; }
-    const rings = (feat.geometry && feat.geometry.coordinates) || [];
+    const geom = feat.geometry;
+    const type = geom && geom.type;
+    if (type === "LineString" || type === "MultiLineString") {
+      // Lines (RRC pipelines B751, FEMA BFE lines / cross-sections B755) are Douglas–
+      // Peucker'd at the same ~11 ft tolerance; BFE lines are short, near-straight
+      // cross-lines so the endpoints (which fix a line's position) are always kept and
+      // the derived-BFE interpolation off them is unaffected within screening tolerance.
+      const parts = type === "MultiLineString" ? geom.coordinates : [geom.coordinates];
+      const outParts = [];
+      for (const part of parts || []) {
+        if (!part || part.length < 2) continue;
+        const simp = douglasPeucker(part, tolDeg);
+        if (simp.length < 2) continue; // collapsed below a segment — drop
+        outParts.push(simp);
+      }
+      if (!outParts.length) continue;
+      const outGeom = outParts.length === 1
+        ? { type: "LineString", coordinates: outParts[0] }
+        : { type: "MultiLineString", coordinates: outParts };
+      features.push({ type: "Feature", properties: feat.properties, geometry: outGeom });
+      continue;
+    }
+    // Polygon (default)
+    const rings = (geom && geom.coordinates) || [];
     const outRings = [];
     for (const ring of rings) {
       if (!ring || ring.length < 4) continue; // already degenerate — drop
@@ -489,6 +539,12 @@ export function styleFor(source, props) {
   if (style === "nwi") {
     const c = NWI_COLORS[p.WETLAND_TYPE] || NWI_COLORS.Other;
     return { color: c, weight: 1, fillColor: c, fillOpacity: 0.4 };
+  }
+  if (style === "pipeline") {
+    // B751: color/weight/dash by commodity (fixed map symbology, hazard-encoded). The
+    // crosswalk field name comes off the source's registry field map (COMMODITY_DESCRIPTION).
+    const field = (source && source.commodityField) || "COMMODITY_DESCRIPTION";
+    return pipelineStyleFor(p, 1, field);
   }
   // Unknown style — a safe neutral so a new source never renders invisibly.
   return { color: "#6b7280", weight: 1, fillColor: "#6b7280", fillOpacity: 0.3 };

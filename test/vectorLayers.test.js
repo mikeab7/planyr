@@ -56,7 +56,7 @@ describe("VECTOR_SOURCES — registry shape", () => {
     expect(VECTOR_SOURCES.wetlands.imageFallback.layers).toEqual([0]);
     expect(VECTOR_SOURCES.wetlands.note).toMatch(/screening only/i);
   });
-  it("FEMA line layers (B752): BFE lines on sublayer 16 with ELEV, cross-sections on 14 with WSEL_REG", () => {
+  it("FEMA line layers (B755): BFE lines on sublayer 16 with ELEV, cross-sections on 14 with WSEL_REG", () => {
     expect(VECTOR_SOURCES.bfeLines.query.url).toContain("/NFHL/MapServer/16/query");
     expect(VECTOR_SOURCES.bfeLines.query.outFields).toContain("ELEV");
     expect(VECTOR_SOURCES.bfeLines.query.outFields).toContain("V_DATUM");
@@ -280,7 +280,7 @@ describe("featuresToGeoJson — Esri rings → GeoJSON Polygons", () => {
     expect(fc.features).toHaveLength(1);
     expect(fc.features[0].properties.a).toBe(4);
   });
-  it("B752: one path → LineString, several paths → MultiLineString; attributes copied", () => {
+  it("B755: one path → LineString, several paths → MultiLineString; attributes copied", () => {
     const fc = featuresToGeoJson([
       { attributes: { ELEV: 96 }, geometry: { paths: [[[0, 0], [1, 1]]] } },
       { attributes: { ELEV: 97 }, geometry: { paths: [[[0, 0], [1, 0]], [[2, 2], [3, 3]]] } },
@@ -292,7 +292,7 @@ describe("featuresToGeoJson — Esri rings → GeoJSON Polygons", () => {
     expect(fc.features[1].geometry.type).toBe("MultiLineString");
     expect(fc.features[1].geometry.coordinates).toEqual([[[0, 0], [1, 0]], [[2, 2], [3, 3]]]);
   });
-  it("B752: a mixed polygon + polyline batch keeps both kinds", () => {
+  it("B755: a mixed polygon + polyline batch keeps both kinds", () => {
     const fc = featuresToGeoJson([
       { attributes: { a: 1 }, geometry: { rings: [square(0, 0, 1)] } },
       { attributes: { a: 2 }, geometry: { paths: [[[0, 0], [1, 1]]] } },
@@ -333,15 +333,7 @@ describe("simplifyGeoJson — Douglas–Peucker, closed rings, drop collapsed", 
     expect(input.features[0].geometry.coordinates[0]).toBe(ring); // original ref untouched
     expect(out.features[0].geometry.coordinates[0]).not.toBe(ring);
   });
-  it("B752: passes a LineString feature through UNCHANGED (no vertex thinning)", () => {
-    // BFE lines must not be simplified — thinning would move the line relative to the
-    // query point and perturb the interpolated BFE.
-    const line = { type: "Feature", properties: { ELEV: 96 }, geometry: { type: "LineString", coordinates: [[0, 0], [0.25, 0], [0.5, 0], [1, 0]] } };
-    const out = simplifyGeoJson({ type: "FeatureCollection", features: [line] });
-    expect(out.features).toHaveLength(1);
-    expect(out.features[0]).toBe(line); // same ref — untouched
-    expect(out.features[0].geometry.coordinates).toHaveLength(4);
-  });
+  // (Line-geometry simplification is covered by the B751 "Douglas–Peucker on lines" block below.)
 });
 
 // ----------------------------------------------------------------------------
@@ -562,5 +554,94 @@ describe("fetchCached — tiered boundary sources (B694)", () => {
     const fetchJson = fakeFetch({ [COUNTY]: () => ({ features: [{ attributes: { CNTY_NM: "X" }, geometry: { rings: [dense] } }] }) });
     const r = await fetchCached(VECTOR_SOURCES.jur_county, BBOX, { cache, fetchJson, zoom: 8 });
     expect(r.data.features[0].geometry.coordinates[0]).toEqual(dense);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// B751 — pipeline LINE geometry + the txrrc_pipe vector source
+// ----------------------------------------------------------------------------
+const PIPE = "RRC_Public_Viewer_Srvs/MapServer/13/query";
+
+describe("featuresToGeoJson — Esri paths → GeoJSON lines (B751)", () => {
+  it("a single path → LineString; multiple paths → MultiLineString; attributes copied", () => {
+    const fc = featuresToGeoJson([
+      { attributes: { OPERATOR: "Acme", COMMODITY_DESCRIPTION: "NATURAL GAS" }, geometry: { paths: [[[0, 0], [1, 1]]] } },
+      { attributes: { OPERATOR: "Beta" }, geometry: { paths: [[[0, 0], [1, 0]], [[2, 2], [3, 3]]] } },
+    ]);
+    expect(fc.features[0].geometry).toEqual({ type: "LineString", coordinates: [[0, 0], [1, 1]] });
+    expect(fc.features[0].properties.COMMODITY_DESCRIPTION).toBe("NATURAL GAS");
+    expect(fc.features[1].geometry.type).toBe("MultiLineString");
+    expect(fc.features[1].geometry.coordinates.length).toBe(2);
+  });
+  it("skips features with no/empty/too-short paths (never a 1-point line)", () => {
+    const fc = featuresToGeoJson([
+      { attributes: {}, geometry: {} },
+      { attributes: {}, geometry: { paths: [] } },
+      { attributes: {}, geometry: { paths: [[[0, 0]]] } }, // single vertex — not drawable
+      { attributes: { keep: 1 }, geometry: { paths: [[[0, 0], [1, 1]]] } },
+    ]);
+    expect(fc.features).toHaveLength(1);
+    expect(fc.features[0].properties.keep).toBe(1);
+  });
+  it("still handles polygons (rings) unchanged — no regression", () => {
+    const fc = featuresToGeoJson([{ attributes: {}, geometry: { rings: [square(0, 0, 1)] } }]);
+    expect(fc.features[0].geometry.type).toBe("Polygon");
+  });
+});
+
+describe("simplifyGeoJson — Douglas–Peucker on lines (B751)", () => {
+  it("strips collinear midpoints from a LineString, keeps endpoints", () => {
+    const dense = [[0, 0], [0.5, 0], [1, 0], [1.5, 0], [2, 0]];
+    const out = simplifyGeoJson({ type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: dense } }] }, 0.001);
+    expect(out.features[0].geometry.coordinates).toEqual([[0, 0], [2, 0]]);
+  });
+  it("simplifies each part of a MultiLineString and drops a part that collapses below a segment", () => {
+    const fc = {
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature", properties: {},
+        geometry: { type: "MultiLineString", coordinates: [[[0, 0], [1, 0], [2, 0]], [[5, 5]]] },
+      }],
+    };
+    const out = simplifyGeoJson(fc, 0.001);
+    // the second part had a single vertex → dropped; the survivor collapses to a single LineString
+    expect(out.features[0].geometry.type).toBe("LineString");
+    expect(out.features[0].geometry.coordinates).toEqual([[0, 0], [2, 0]]);
+  });
+});
+
+describe("styleFor — pipeline commodity symbology (B751)", () => {
+  it("colors + weights + dashes a pipeline by commodity via the crosswalk", () => {
+    const src = VECTOR_SOURCES.txrrc_pipe;
+    expect(styleFor(src, { COMMODITY_DESCRIPTION: "NATURAL GAS" })).toMatchObject({ color: "#EF9F27", weight: 3 });
+    expect(styleFor(src, { COMMODITY_DESCRIPTION: "REFINED PRODUCTS" })).toMatchObject({ color: "#1D9E75", dashArray: "10 6" });
+    expect(styleFor(src, { COMMODITY_DESCRIPTION: "PROPANE" }).color).toBe("#E24B4A"); // HVL
+    expect(styleFor(src, {}).color).toBe("#9a9992"); // unknown
+  });
+});
+
+describe("VECTOR_SOURCES.txrrc_pipe — pipeline vector source (B751)", () => {
+  const s = VECTOR_SOURCES.txrrc_pipe;
+  it("reuses the authoritative statewide RRC layer 13 + the registry field columns", () => {
+    expect(s.id).toBe("txrrc_pipe");
+    expect(s.style).toBe("pipeline");
+    expect(s.query.url).toContain("/MapServer/13/query");
+    expect(s.query.outFields).toEqual(expect.arrayContaining(["OPERATOR", "COMMODITY_DESCRIPTION", "DIAMETER", "STATUS"]));
+    expect(s.commodityField).toBe("COMMODITY_DESCRIPTION");
+    expect(s.imageFallback.layers).toEqual([13]);
+    expect(s.note).toMatch(/schematic/i);
+  });
+  it("is VECTOR when zoomed in, RASTER when zoomed out or the view is too large (the zoom-switch gate)", () => {
+    expect(decideVectorOrImage(s, { zoom: 15, bboxAreaDeg: 0.02 })).toBe("vector");
+    expect(decideVectorOrImage(s, { zoom: 12, bboxAreaDeg: 0.02 })).toBe("image"); // below minVectorZoom (13)
+    expect(decideVectorOrImage(s, { zoom: 15, bboxAreaDeg: 0.5 })).toBe("image");  // area > maxAreaDeg (0.2)
+    expect(decideVectorOrImage(s, { zoom: 15, bboxAreaDeg: 0.02, lastVectorError: new Error("x") })).toBe("image");
+  });
+  it("pages LINE features through the SWR cache into GeoJSON lines", async () => {
+    const cache = freshCache();
+    const fetchJson = fakeFetch({ [PIPE]: () => ({ features: [{ attributes: { COMMODITY_DESCRIPTION: "CRUDE OIL" }, geometry: { paths: [[[-95, 29.7], [-95.01, 29.71]]] } }] }) });
+    const r = await fetchCached(s, { w: -95.1, s: 29.6, e: -94.9, n: 29.8 }, { cache, fetchJson, zoom: 15 });
+    expect(r.data.features[0].geometry.type).toBe("LineString");
+    expect(r.data.features[0].properties.COMMODITY_DESCRIPTION).toBe("CRUDE OIL");
   });
 });

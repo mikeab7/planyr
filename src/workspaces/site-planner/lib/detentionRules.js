@@ -103,7 +103,10 @@ export const DETENTION_RULES = {
         singleFamilyLot: { maxSf: 15000, imperviousPctExempt: 65, rateAbove: 0.75, appliesTo: "excessImpervious", note: "Tables 9.3/9.4: SFR tract ≤15,000 SF exempt at ≤65% impervious, else 0.75 ac-ft/ac × impervious IN EXCESS of 65% of tract" },
         largeTract: { minAcres: 20, defersTo: "hcfcd", conflictRateAcFtPerAc: 0.75, note: "Table 9.5: >20 ac follows the current HCFCD PCPM (0.65 min + impact analysis); COH minimum rate 0.75 ac-ft/ac" },
         grandfather: "projects in review before 2026-06-01 may qualify for the prior (2019) rules if approved before the deadline",
-        appliesInEtj: true,
+        // NB: Houston's detention criteria govern inside the CITY LIMITS only. In the City's
+        // ETJ the parcel is unincorporated and the COUNTY drainage district's criteria govern
+        // detention (Houston reviews platting only) — see authorityForJurisdiction (owner rule
+        // 2026-07-10). §9.1.02.G ("receiving jurisdiction governs") is consistent with that.
       },
     },
     {
@@ -146,7 +149,6 @@ export const DETENTION_RULES = {
           transcribed: true,
         },
         largeTract: { minAcres: 20, defersTo: "hcfcd", conflictRateAcFtPerAc: 0.75 },
-        appliesInEtj: true,
       },
     },
   ],
@@ -1155,6 +1157,22 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
 
   if (counties.includes("harris")) out.channelAuthority = "hcfcd";
 
+  // City of Houston ETJ ≠ City of Houston detention criteria (owner rule, 2026-07-10).
+  // Being in Houston's EXTRATERRITORIAL JURISDICTION means the City reviews PLATTING, but the
+  // COUNTY drainage district's criteria GOVERN detention on that unincorporated land — it does
+  // NOT make Houston the detention authority. So an ETJ hit WITHOUT actual city-limits
+  // membership surfaces as an informational overlay + flag and NEVER sets the primary reviewer
+  // to COH. Placed before every return so the note always rides along with the resolved county.
+  if (etjs.includes("houston") && !cities.includes("houston")) {
+    out.overlays.push({
+      kind: "etj",
+      city: "Houston",
+      note:
+        "This parcel is in the City of Houston ETJ (extraterritorial jurisdiction), not its city limits. Houston reviews the plat, but the COUNTY drainage-district criteria govern detention here — Houston's own detention rate does not apply. Verify with both the City and the county.",
+    });
+    out.flags.push("houston-etj");
+  }
+
   if (counties.length > 1) {
     out.ambiguous.push({
       kind: "straddle",
@@ -1179,8 +1197,9 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
 
   if (counties.length && !countyAuth) out.flags.push("no-criteria-modeled");
 
-  if (cities.includes("houston") || etjs.includes("houston")) {
-    // COH IDM applies inside the city AND in its ETJ.
+  // City of Houston CITY LIMITS → the COH IDM detention criteria govern. (Its ETJ does NOT —
+  // that's handled above as an informational overlay only; owner rule 2026-07-10.)
+  if (cities.includes("houston")) {
     out.primary = "coh";
     return out;
   }
@@ -1246,10 +1265,12 @@ export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, o
   if (!out.primaryReviewer && !out.ambiguous.length && roleFailed("county")) {
     out.flags.push("jurisdiction-unavailable");
   }
-  // A city/ETJ layer outage while the county resolved is subtler: the authority may
-  // read as the county default only BECAUSE the city/ETJ query failed (a Houston
-  // parcel could silently downgrade to HCFCD). Flag it so the UI caveats the result.
-  if (out.primaryReviewer && !out.primaryReviewer.rule?.params?.appliesInEtj && (roleFailed("city") || roleFailed("etj"))) {
+  // A CITY-LIMITS layer outage while a county authority resolved is subtle: the parcel could
+  // actually sit inside Houston (or another) city limits and only read as the county default
+  // BECAUSE the city query failed. Flag it so the UI caveats the result. An ETJ outage no
+  // longer matters here — ETJ membership never changes the detention authority (owner rule
+  // 2026-07-10), so a failed ETJ query can't have hidden a different answer.
+  if (out.primaryReviewer && out.primaryReviewer.authorityId !== "coh" && roleFailed("city")) {
     out.flags.push("jurisdiction-partial");
   }
   return out;

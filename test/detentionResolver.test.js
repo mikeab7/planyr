@@ -50,10 +50,21 @@ const optsFor = (routes) => ({ cache: freshCache(), fetchJson: fakeFetch(routes)
 
 describe("authorityForJurisdiction — the pure mapping", () => {
   const j = (o) => authorityForJurisdiction(o);
-  it("Houston city → coh; Houston ETJ → coh (IDM applies in the ETJ); Harris channel authority", () => {
+  it("Houston CITY LIMITS → coh; Harris channel authority", () => {
     expect(j({ city: ["Houston"], county: ["Harris"] }).primary).toBe("coh");
     expect(j({ city: ["Houston"], county: ["Harris"] }).channelAuthority).toBe("hcfcd");
-    expect(j({ city: [], etj: ["Houston"], county: ["Harris"] }).primary).toBe("coh");
+  });
+  it("Houston ETJ (not city limits) → the COUNTY authority governs detention, NOT coh (owner rule 2026-07-10)", () => {
+    // Being in Houston's ETJ means the City reviews platting, but the county drainage
+    // district's criteria govern detention — it must NEVER auto-set the reviewer to COH.
+    const harrisEtj = j({ city: [], etj: ["Houston"], county: ["Harris"] });
+    expect(harrisEtj.primary).toBe("hcfcd");
+    expect(harrisEtj.flags).toContain("houston-etj");
+    expect(harrisEtj.overlays.find((o) => o.kind === "etj")).toMatchObject({ kind: "etj", city: "Houston" });
+    // Fort Bend ETJ of Houston (this session's real repro: 27211 Hoyt Ln, Katy) → FBCDD, not COH.
+    const fbEtj = j({ city: [], etj: ["Houston"], county: ["Fort Bend"] });
+    expect(fbEtj.primary).toBe("fortbend");
+    expect(fbEtj.flags).toContain("houston-etj");
   });
   it("Harris unincorporated, outside the COH ETJ → hcfcd", () => {
     const a = j({ city: [], etj: [], county: ["Harris"], unincorporated: true });
@@ -175,16 +186,21 @@ describe("resolveDrainageAuthority — jurisdiction + the QUERIED MUD layer", ()
     expect(out.ambiguous[0].candidates.sort()).toEqual(["fortbend", "hcfcd"]);
   });
 
-  it("a city/ETJ outage that leaves a county authority is flagged jurisdiction-partial (could've been COH)", async () => {
+  it("a CITY-LIMITS outage that leaves a county authority is flagged jurisdiction-partial (could've been in-city)", async () => {
     const routes = baseRoutes({});
     routes[CITY] = () => { throw new Error("city down"); };
-    routes[ETJ] = () => { throw new Error("etj down"); };
     const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(routes));
     expect(out.primaryReviewer.authorityId).toBe("hcfcd"); // county default…
     expect(out.flags).toContain("jurisdiction-partial"); // …but honestly flagged as possibly-incomplete
-    // A Houston hit is NOT flagged (COH applies in-ETJ, so a failed ETJ can't have hidden anything worse):
+    // A Houston CITY hit is NOT flagged (coh is the resolved reviewer, nothing hidden):
     const out2 = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(baseRoutes({ city: "Houston" })));
     expect(out2.flags).not.toContain("jurisdiction-partial");
+    // An ETJ-only outage (city query OK) is NOT flagged — ETJ never changes the detention
+    // authority, so a failed ETJ query can't have hidden a different answer (owner rule 2026-07-10):
+    const etjDown = baseRoutes({});
+    etjDown[ETJ] = () => { throw new Error("etj down"); };
+    const out3 = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(etjDown));
+    expect(out3.flags).not.toContain("jurisdiction-partial");
   });
 });
 

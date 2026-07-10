@@ -143,7 +143,7 @@ export function gridIntersect(ring, zone, depthAt = null, opts = {}) {
 }
 
 /* ---------------------------------------------------------------------------------
- * Derived BFE from FEMA Base Flood Elevation lines (S_BFE, B752).
+ * Derived BFE from FEMA Base Flood Elevation lines (S_BFE, B755).
  *
  * On most AE reaches FEMA leaves the zone polygon's STATIC_BFE at the -9999 "none"
  * sentinel — the BFE instead lives on the separate S_BFE line layer as whole-foot
@@ -338,7 +338,7 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   const grade = realElev(elev.existGradeFt);
   const wse02 = realElev(elev.wse02Ft);
   const manualBfe = realElev(elev.bfeFt);
-  const derivedBfe = realElev(elev.derivedBfeFt); // DERIVED from FEMA BFE lines (B752)
+  const derivedBfe = realElev(elev.derivedBfeFt); // DERIVED from FEMA BFE lines (B755)
   const wseProviders = new Set();
 
   for (const z of zones) {
@@ -358,7 +358,7 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
       else if (z.aoDepthFt != null && grade != null) { wse = grade + z.aoDepthFt; wseSrc = "ao-depth"; }
       else if (manualBfe != null) { wse = manualBfe; wseSrc = "manual"; }
       // Last resort before UNKNOWN: a BFE DERIVED by interpolating FEMA's S_BFE lines
-      // (B752). Manual entry above still wins; a zone's own published data (static BFE,
+      // (B755). Manual entry above still wins; a zone's own published data (static BFE,
       // AO depth) always wins — the derived value only fills a genuine gap.
       else if (derivedBfe != null) { wse = derivedBfe; wseSrc = "bfe-line-interp"; }
     } else if (z.cls === "02pct") {

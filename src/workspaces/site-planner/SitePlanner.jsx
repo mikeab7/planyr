@@ -93,7 +93,7 @@ import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNu
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight } from "./lib/pondGeom.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { gisCache } from "./lib/gisCache.js";
-import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
+import { VECTOR_SOURCES, fetchCached, styleFor } from "./lib/vectorLayers.js";
 import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./lib/overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./lib/boundaryLabels.js";
 import { gridRequest } from "./lib/demGrid.js";
@@ -6202,7 +6202,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             }))
             .catch(() => ({ zones: [], ts: null, truncated: false, state: "failed" }))
         : Promise.resolve({ zones: [], ts: null, truncated: false, state: "empty" });
-      // B752: FEMA Base Flood Elevation LINES (S_BFE) — the same explicit click, same
+      // B755: FEMA Base Flood Elevation LINES (S_BFE) — the same explicit click, same
       // SWR cache, same envelope. On most AE reaches the zone polygon carries no BFE,
       // so these whole-foot contour lines are the only published source; we interpolate
       // one at the fill to DERIVE a screening BFE. A failure reads honestly (no lines →
@@ -6305,7 +6305,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const floodJurKey = fmSettings.jurKey
     || (drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(restored?.county));
   const fmRule = floodRules[floodJurKey] || floodRules.generic;
-  // Derived BFE (B752): the FEMA-BFE-line estimate computed at check time. It NEVER
+  // Derived BFE (B755): the FEMA-BFE-line estimate computed at check time. It NEVER
   // overwrites the manual bfeFt (which would masquerade as user entry) — it rides its
   // own field, used only when no static/manual BFE exists (precedence in computeMitigation).
   const fmDerivedBfe = floodGeo?.derivedBfe || null;
@@ -6384,7 +6384,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // WSE inputs. Wetlands presence comes from the Site Analysis screen's own finding
   // (lifted via onFindings — no new fetch).
   // Governing 1% WSE for buildability/FFE: highest published static BFE → manual → the
-  // derived BFE-line estimate (B752). Same precedence the mitigation engine uses.
+  // derived BFE-line estimate (B755). Same precedence the mitigation engine uses.
   const fmGoverningBfe = fmZones.reduce((best, z) => (z.staticBfeFt != null && (best == null || z.staticBfeFt > best) ? z.staticBfeFt : best), null) ?? fmElev.bfeFt ?? fmElev.derivedBfeFt;
   const fmBuildingIn1pct = fmZones.length
     ? els.some((e) => {
@@ -6433,12 +6433,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       settings: fmSettings,
       jurKey: floodJurKey,
       rules: floodRules,
-      derivedBfe: fmDerivedBfe, // B752 — the FEMA-BFE-line estimate, for the input placeholder
+      derivedBfe: fmDerivedBfe, // B755 — the FEMA-BFE-line estimate, for the input placeholder
       onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
       onRuleChange: (jk, patch) => setFloodRules((r) => { const next = { ...r, [jk]: { ...r[jk], ...patch } }; saveFloodplainRules(next); return next; }),
     },
     watersheds: drainCtxData?.watershedOverlays || [],
     mudDistricts: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "mud"),
+    // ETJ notes (e.g. "in Houston's ETJ, county criteria govern detention" — owner rule 2026-07-10).
+    etjNotes: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "etj"),
     ambiguous: drainCtxData?.authority?.ambiguous || [],
     authorityFlags: drainCtxData?.authority?.flags || [],
     floodFailed: !!drainCtxData && !drainFloodOk,
@@ -7188,10 +7190,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
       const st = overlays?.[id];
       if (!st || !st.on) continue; // respect the toggle
+      let rasterCfg = cfg;
       const isRaster = !cfg.kind || cfg.kind === "dynamic" || cfg.kind === "esriImage";
-      if (!isRaster) continue; // vector/client layers → Class B
+      if (!isRaster) {
+        // B751: a pipeline vectorLine layer CURRENTLY showing its far-out raster → composite that
+        // raster here (the vector branch/Class B skips it in image mode). In vector mode it's a
+        // Class B layer, so skip it here. All other vector/client layers → Class B.
+        if (cfg.kind === "vectorLine" && cfg.imageFallback) {
+          const ref = overlayRefs.current?.[id];
+          const mode = ref && typeof ref.getExportMode === "function" ? ref.getExportMode() : null;
+          if (mode !== "image") continue;
+          rasterCfg = { kind: "dynamic", url: cfg.imageFallback.url, layers: cfg.imageFallback.layers };
+        } else continue;
+      }
       if (layerStatus?.[id]?.state === "failed") continue; // confirmed-dead host — requesting it would only drop+warn
-      const req = overlayExportRequest(cfg, { proxy });
+      const req = overlayExportRequest(rasterCfg, { proxy });
       const geomOpts = { layersParam: req.layersParam, renderingRule: req.renderingRule, maxPx: 2400 };
       const p = overlayExportPlacement(bbox, origin.lon, origin.lat, { exportBase: `${req.url}/${req.endpoint}`, ...geomOpts });
       // Proxy→direct CORS fallback for the export inliner (mirrors the live layer's fail-open):
@@ -7223,6 +7236,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const style = leafStyle(cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1 });
         features.push(...esriLineFeatures(gj.geometry, style));
       });
+      return { features };
+    }
+    if (kind === "vectorLine") { // B751 pipelines: commodity-colored line features (vector mode only)
+      if (typeof ref.getExportMode === "function" && ref.getExportMode() !== "vector") return { features: [] }; // image mode → Class A raster handles it
+      const layers = typeof ref.getLayers === "function" ? ref.getLayers() : [];
+      const geo = layers.find((l) => typeof l.toGeoJSON === "function" && typeof l.eachFeature !== "function");
+      const fc = geo ? geo.toGeoJSON() : null;
+      if (!fc || !fc.features || !fc.features.length) return { features: [] };
+      const src = VECTOR_SOURCES[id];
+      const features = [];
+      for (const f of fc.features) {
+        const style = leafStyle(styleFor(src, f.properties)); // SAME commodity symbology as the live layer (PDF-PARITY)
+        features.push(...esriLineFeatures(f.geometry, style));
+      }
+      return { features };
+    }
+    if (kind === "pipelineCorridor") { // B752 easement bands: commodity-tinted translucent polygons
+      const features = [];
+      const pushPoly = (l) => {
+        if (typeof l.getLatLngs !== "function") return;
+        const raw = l.getLatLngs();
+        const ring = Array.isArray(raw[0]) ? raw[0] : raw; // L.polygon nests one level
+        const coords = ring.map((p) => [p.lng, p.lat]);
+        if (coords.length < 3) return;
+        const color = (l.options && l.options.fillColor) || "#9a9992";
+        // Hand the emitter the DESIGN base opacity (0.18); it multiplies by st.opacity, matching
+        // the on-screen 0.18×opacity fill (the OSM-layer un-bake pattern).
+        features.push({ kind: "polygon", coords: [coords], style: { stroke: color, strokeWidth: 0.5, strokeOpacity: 1, fill: color, fillOpacity: 0.18 } });
+      };
+      const walk = (grp) => { if (typeof grp.eachLayer === "function") grp.eachLayer((l) => { if (typeof l.getLatLngs === "function") pushPoly(l); else walk(l); }); };
+      walk(ref);
       return { features };
     }
     if (kind === "vector") { // county/city/ETJ boundaries: outline polygons + collision-placed names
@@ -14382,7 +14426,11 @@ function YieldPanel({
             // An unmodeled city keeps the county number but MUST carry the caveat (coexists
             // with a truthy req, so it lives outside the req-shaped chain above).
             if (d.authorityFlags.includes("city-criteria-unverified")) out.push(warnNote("This city's own detention criteria aren't modeled — the county requirement is shown as a screening floor. Verify with the city.", "city-unv"));
-            if (d.authorityFlags.includes("jurisdiction-partial")) out.push(warnNote("The city/ETJ lookup was incomplete (an outage) — if this parcel is inside Houston or its ETJ, the reviewing authority would be the City. Re-check.", "jur-partial"));
+            if (d.authorityFlags.includes("jurisdiction-partial")) out.push(warnNote("The city-limits lookup was incomplete (an outage) — if this parcel is inside Houston's city limits, the reviewing authority would be the City. Re-check.", "jur-partial"));
+            // ETJ context: being in a city's ETJ does NOT make that city the detention authority —
+            // the county's criteria govern (owner rule 2026-07-10). Surfaced so it's never mistaken
+            // for a city-limits detection.
+            for (const e of d.etjNotes) out.push(warnNote(e.note, "etj-" + String(e.city || "").toLowerCase()));
             // B750 — the two overridable assumptions (reviewing agency + channel discharge).
             { const ab = assumptionsBlock(); if (ab) out.push(ab); }
             out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
@@ -14401,7 +14449,7 @@ function YieldPanel({
                     : mit.providers?.wse1pct === "bfe-line-interp" ? "BFE derived"
                     : "";
                   out.push(row("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`, mitTag));
-                  // B752 — when the volume is priced off a DERIVED BFE, say so loudly (an
+                  // B755 — when the volume is priced off a DERIVED BFE, say so loudly (an
                   // estimate to verify, never a published number) and show the conservative bound.
                   if (mit.providers?.wse1pct === "bfe-line-interp" && d.floodGeo?.derivedBfe) {
                     const db = d.floodGeo.derivedBfe;

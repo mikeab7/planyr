@@ -88,7 +88,7 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
           {mit.volumeCf != null
             ? row("Required compensating storage", `${f2(mit.volumeAcFt)} ac-ft · ${f2(mit.cutCy)} cy`, "total")
             : <div style={warnStyle}>⚠ Mitigation volume UNKNOWN — {mit.unknownReason}. The intersect geometry above still stands.</div>}
-          {/* B752 — the number was priced off a DERIVED BFE (FEMA BFE lines interpolated
+          {/* B755 — the number was priced off a DERIVED BFE (FEMA BFE lines interpolated
               at the fill): say so, show the bracket + conservative bound, never let it
               read as a published value. */}
           {geo && geo.derivedBfe && mit.providers.wse1pct === "bfe-line-interp" && (

@@ -352,7 +352,7 @@ describe("straddle + pond-side helpers", () => {
 });
 
 // ---------------------------------------------------------------------------
-// B752 — derived BFE from FEMA Base Flood Elevation lines (S_BFE)
+// B755 — derived BFE from FEMA Base Flood Elevation lines (S_BFE)
 // ---------------------------------------------------------------------------
 describe("distToPolyline — perpendicular point→polyline distance (feet)", () => {
   it("clamps to the nearest segment; a 1-point line → point-to-point (no NaN); empty → Infinity", () => {
@@ -362,7 +362,7 @@ describe("distToPolyline — perpendicular point→polyline distance (feet)", ()
   });
 });
 
-describe("deriveBfeFromLines — interpolate a BFE between S_BFE contours (B752)", () => {
+describe("deriveBfeFromLines — interpolate a BFE between S_BFE contours (B755)", () => {
   const vline = (x, elevFt) => ({ elevFt, pts: [{ x, y: -1000 }, { x, y: 1000 }] });
 
   it("midway between two contours → the mean; method two-line-interp; bracket recorded", () => {
@@ -424,7 +424,7 @@ describe("deriveBfeFromLines — interpolate a BFE between S_BFE contours (B752)
   });
 });
 
-describe("bfeLinesFromFeatureCollection — parse S_BFE lines with datum/unit guards (B752)", () => {
+describe("bfeLinesFromFeatureCollection — parse S_BFE lines with datum/unit guards (B755)", () => {
   const origin = { lat: 29.77, lon: -95.85 };
   const lineFeat = (props, coords = [[-95.85, 29.77], [-95.849, 29.771]]) => ({
     type: "Feature", properties: props, geometry: { type: "LineString", coordinates: coords },
@@ -472,7 +472,7 @@ describe("bfeLinesFromFeatureCollection — parse S_BFE lines with datum/unit gu
   });
 });
 
-describe("computeMitigation / wse1pctForRing — derived-BFE provider precedence (B752)", () => {
+describe("computeMitigation / wse1pctForRing — derived-BFE provider precedence (B755)", () => {
   const fp = { id: "b1", ring: rect(0, 0, 100, 100) };
   it("a derived BFE prices the volume and tags provider bfe-line-interp when nothing else exists", () => {
     const zone = mkZone("1pct", [rect(0, 0, 100, 100)]); // AE, no static BFE
