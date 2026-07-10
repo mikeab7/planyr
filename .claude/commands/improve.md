@@ -20,7 +20,8 @@ Read `CLAUDE.md` first if anything below is unclear — its standing rules win o
 - **Move shipped items, don't mark-done-in-place.** The moment an item ships, move its WHOLE block
   from `BACKLOG.md` → `BACKLOG-DONE.md` (and a fully-passed `VERIFICATION.md` item → `VERIFICATION-DONE.md`).
 - **Never read `BACKLOG-DONE.md` / `VERIFICATION-DONE.md`** except to look up one specific past item.
-- Next `B#`/`V#` = highest across BOTH the live and the done file, +1.
+- Next `B#`/`V#` = highest across BOTH the live and the done file, +1 — **get it with `npm run next-id`**
+  (prints `Next free → B### · V###` from disk, zero model tokens; never grep the archives for the max).
 - **Plain-English to the owner in chat;** technical in commits/PRs/code/backlog. Never put the model
   identifier in commits/PRs/code.
 
