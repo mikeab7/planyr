@@ -113,7 +113,7 @@ import {
   slimDrainageContext, hydrateDrainageContext,
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
-import { overlappingParcelPairs, dissolvedParcelSqft } from "./lib/polyClip.js";
+import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
@@ -8618,11 +8618,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * aerial are TRUE north. They differ by the meridian convergence (~1.5° near Houston),
    * so a raw plot lands rotated: up to ~90 ft off over a long boundary. These snap it on. */
   const activeParcelRings = () => parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
-  // Best rigid (rotation+translation, never scaled) fit of a deed ring over every drawn
+  // Only a parcel the plotted deed ACTUALLY sits on can be its alignment target. A deed must
+  // overlap the candidate by at least half the smaller footprint (else it's floating over the
+  // wrong ground — the 42-ac tract with no parcel under it), AND their areas must be within
+  // ~4:3 (a rigid, scale-locked fit can't honestly bridge materially different-sized tracts —
+  // a small deed sitting inside a big parent parcel). Without these gates bestDeedFit force-fit
+  // a deed to the nearest lowest-residual parcel regardless, producing a bogus rotation (B625×2).
+  const DEED_FIT_MIN_OVERLAP = 0.5;
+  const DEED_FIT_MIN_AREARATIO = 0.75;
+  // Best rigid (rotation+translation, never scaled) fit of a deed ring over every QUALIFYING
   // parcel — the lowest landing residual wins, so a stray neighbour parcel can't hijack it.
   const bestDeedFit = (deedRing) => {
+    const deedA = Math.abs(polyArea(deedRing));
+    if (!(deedA > 0)) return null;
     let best = null;
     for (const pc of activeParcelRings()) {
+      const parcelA = Math.abs(polyArea(pc.points));
+      if (!(parcelA > 0)) continue;
+      const inter = polyIntersectArea(deedRing, pc.points);
+      if (inter / Math.min(deedA, parcelA) < DEED_FIT_MIN_OVERLAP) continue; // deed isn't on this parcel
+      if (Math.min(deedA, parcelA) / Math.max(deedA, parcelA) < DEED_FIT_MIN_AREARATIO) continue; // different-size tract
       const fit = solveDeedAlignment(deedRing, pc.points);
       if (fit.ok && (!best || fit.residualFt < best.fit.residualFt)) best = { fit, parcel: pc };
     }
