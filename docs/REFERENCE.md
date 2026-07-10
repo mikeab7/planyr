@@ -103,9 +103,20 @@ One source of truth used across the planner. Layer `kind`s: `dynamic` (esri
   in `test/contours.test.js` — contours, readout, and cross-section can't drift by half a cell.
 - **Mapillary token is a secret** — `import.meta.env.VITE_MAPILLARY_TOKEN` (CI secret)
   or a user-entered localStorage value. Never commit it.
-- **Print/PNG caveat:** the SVG clone can't capture live Leaflet basemap/overlay
-  tiles (cross-origin canvas). With the basemap off, the captured screenshot underlay
-  still prints.
+- **Print/PNG (B738/B739):** the SVG clone can't capture the live Leaflet basemap/overlay
+  tiles (cross-origin canvas), so the export SYNTHESIZES them per print frame instead of
+  screenshotting: the aerial from the basemap source's `export` endpoint (B738), and each
+  enabled RASTER overlay (`kind` absent/`dynamic`/`esriImage` — FEMA/pipelines/wetlands/
+  utilities/MUD/relief) from its own transparent ArcGIS `/export` PNG (B739,
+  `overlayExportPlacement`/`overlayExportRequest`), composited above the aerial in on-screen
+  z-order (`ALL_LAYERS` registry order) at each layer's opacity. Fetched proxy-first
+  (same-origin → canvas-clean) with a direct-agency CORS fallback; a dropped layer warns
+  loudly (`overlaysDropped` → batched banner), never a silent omission. Gated by the "Print
+  map layers" toggle (default on). **Still pending (B745):** the VECTOR/thin-line layers
+  (contours, drainage arrows, HIFLD transmission, county/city/ETJ boundaries, OSM/Mapillary)
+  — no server image, so they need reproject-to-feet + SVG redraw. Note: DRA ground-relief
+  re-stretches per sheet extent, so its tint is self-consistent per sheet but not
+  pixel-matched to the screen ramp.
 
 ## Supabase (`src/workspaces/site-planner/lib/supabase.js`, `auth.js`, `cloudSync.js`)
 Config from build-time env only (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`;

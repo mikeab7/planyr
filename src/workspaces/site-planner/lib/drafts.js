@@ -1,6 +1,6 @@
 /* Pure "step back the last placed vertex" resolver for the Site Planner's in-progress
  * multi-point drafts — the Bluebeam-style mid-draw undo bound to BOTH Backspace/Delete and
- * Ctrl/⌘-Z (B7xx). Given a snapshot of the live draft states, it returns which draft to trim
+ * Ctrl/⌘-Z (B746). Given a snapshot of the live draft states, it returns which draft to trim
  * and that draft's NEXT value (null = fully cancelled once the last point is gone), or `null`
  * when there is nothing to trim — the caller then falls through to a global undo() (Ctrl-Z) or
  * a whole-element delete (Backspace). Extracted from SitePlanner.jsx's inline removeLastVertex

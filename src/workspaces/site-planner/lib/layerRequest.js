@@ -50,6 +50,25 @@ export function imageLayerOptions(cfg, opacity, pane, { proxy = false } = {}) {
   return o;
 }
 
+/* Export-time request for a RASTER overlay (B739) — a dynamic MapServer `/export` or an
+ * ImageServer `/exportImage`. Derived from the SAME option shapers the live layer uses
+ * (dynamicLayerOptions / imageLayerOptions) so the printed image can never drift from the
+ * on-screen render (PDF-PARITY). Returns the proxied-or-direct service ROOT, the direct-agency
+ * root (a CORS fallback for the export inliner), the endpoint, the `layers=show:` param
+ * (null ⇒ the server renders all sublayers, matching the `if (cfg.layers)` guard above), and
+ * the renderingRule (esriImage only). Pure — no leaflet/esri import. */
+export function overlayExportRequest(cfg, { proxy = false } = {}) {
+  const isImage = cfg.kind === "esriImage";
+  const url = layerUrl(cfg, proxy);
+  const endpoint = isImage ? "exportImage" : "export";
+  if (isImage) {
+    const { renderingRule } = imageLayerOptions(cfg, 1, null, { proxy });
+    return { url, direct: cfg.url, endpoint, layersParam: null, renderingRule: renderingRule ?? null };
+  }
+  const { layers } = dynamicLayerOptions(cfg, 1, null, { proxy });
+  return { url, direct: cfg.url, endpoint, layersParam: layers ? `show:${layers.join(",")}` : null, renderingRule: null };
+}
+
 /* esri featureLayer (vector FeatureServer) options. The style closure carries the
  * current opacity; nothing here filters features. A layer may supply a PER-FEATURE
  * `styleFn(props, opacity)` (e.g. road authority colored by maintainer) — then the
