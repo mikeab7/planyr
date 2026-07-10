@@ -56,6 +56,15 @@ describe("VECTOR_SOURCES — registry shape", () => {
     expect(VECTOR_SOURCES.wetlands.imageFallback.layers).toEqual([0]);
     expect(VECTOR_SOURCES.wetlands.note).toMatch(/screening only/i);
   });
+  it("FEMA line layers (B755): BFE lines on sublayer 16 with ELEV, cross-sections on 14 with WSEL_REG", () => {
+    expect(VECTOR_SOURCES.bfeLines.query.url).toContain("/NFHL/MapServer/16/query");
+    expect(VECTOR_SOURCES.bfeLines.query.outFields).toContain("ELEV");
+    expect(VECTOR_SOURCES.bfeLines.query.outFields).toContain("V_DATUM");
+    expect(VECTOR_SOURCES.bfeLines.imageFallback).toBeUndefined(); // compute-only, no map render
+    expect(VECTOR_SOURCES.bfeLines.note).toMatch(/screening only/i);
+    expect(VECTOR_SOURCES.crossSections.query.url).toContain("/NFHL/MapServer/14/query");
+    expect(VECTOR_SOURCES.crossSections.query.outFields).toContain("WSEL_REG");
+  });
 });
 
 describe("VECTOR_SOURCES — boundary rows (B694)", () => {
@@ -271,6 +280,25 @@ describe("featuresToGeoJson — Esri rings → GeoJSON Polygons", () => {
     expect(fc.features).toHaveLength(1);
     expect(fc.features[0].properties.a).toBe(4);
   });
+  it("B755: one path → LineString, several paths → MultiLineString; attributes copied", () => {
+    const fc = featuresToGeoJson([
+      { attributes: { ELEV: 96 }, geometry: { paths: [[[0, 0], [1, 1]]] } },
+      { attributes: { ELEV: 97 }, geometry: { paths: [[[0, 0], [1, 0]], [[2, 2], [3, 3]]] } },
+    ], { source: VECTOR_SOURCES.bfeLines });
+    expect(fc.style).toBe("bfe");
+    expect(fc.features[0].geometry.type).toBe("LineString");
+    expect(fc.features[0].geometry.coordinates).toEqual([[0, 0], [1, 1]]);
+    expect(fc.features[0].properties).toEqual({ ELEV: 96 });
+    expect(fc.features[1].geometry.type).toBe("MultiLineString");
+    expect(fc.features[1].geometry.coordinates).toEqual([[[0, 0], [1, 0]], [[2, 2], [3, 3]]]);
+  });
+  it("B755: a mixed polygon + polyline batch keeps both kinds", () => {
+    const fc = featuresToGeoJson([
+      { attributes: { a: 1 }, geometry: { rings: [square(0, 0, 1)] } },
+      { attributes: { a: 2 }, geometry: { paths: [[[0, 0], [1, 1]]] } },
+    ]);
+    expect(fc.features.map((f) => f.geometry.type)).toEqual(["Polygon", "LineString"]);
+  });
 });
 
 // ----------------------------------------------------------------------------
@@ -305,6 +333,7 @@ describe("simplifyGeoJson — Douglas–Peucker, closed rings, drop collapsed", 
     expect(input.features[0].geometry.coordinates[0]).toBe(ring); // original ref untouched
     expect(out.features[0].geometry.coordinates[0]).not.toBe(ring);
   });
+  // (Line-geometry simplification is covered by the B751 "Douglas–Peucker on lines" block below.)
 });
 
 // ----------------------------------------------------------------------------

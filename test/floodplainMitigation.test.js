@@ -15,6 +15,9 @@ import {
   pickWorstCase,
   floodGeoBbox,
   EXPERT_BYPASS_LABEL,
+  distToPolyline,
+  deriveBfeFromLines,
+  bfeLinesFromFeatureCollection,
 } from "../src/workspaces/site-planner/lib/floodplainMitigation.js";
 import { DEFAULT_FLOODPLAIN_RULES, triggerClasses } from "../src/workspaces/site-planner/lib/floodplainRules.js";
 import { feetToLatLng } from "../src/workspaces/site-planner/lib/arcgis.js";
@@ -345,5 +348,166 @@ describe("straddle + pond-side helpers", () => {
     expect(bb.w).toBeCloseTo(-95.601, 6);
     expect(bb.n).toBeCloseTo(29.811, 6);
     expect(floodGeoBbox([])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B755 — derived BFE from FEMA Base Flood Elevation lines (S_BFE)
+// ---------------------------------------------------------------------------
+describe("distToPolyline — perpendicular point→polyline distance (feet)", () => {
+  it("clamps to the nearest segment; a 1-point line → point-to-point (no NaN); empty → Infinity", () => {
+    expect(distToPolyline({ x: 0, y: 0 }, [{ x: 3, y: -1 }, { x: 3, y: 1 }])).toBeCloseTo(3, 6);
+    expect(distToPolyline({ x: 3, y: 4 }, [{ x: 0, y: 0 }])).toBeCloseTo(5, 6);
+    expect(distToPolyline({ x: 0, y: 0 }, [])).toBe(Infinity);
+  });
+});
+
+describe("deriveBfeFromLines — interpolate a BFE between S_BFE contours (B755)", () => {
+  const vline = (x, elevFt) => ({ elevFt, pts: [{ x, y: -1000 }, { x, y: 1000 }] });
+
+  it("midway between two contours → the mean; method two-line-interp; bracket recorded", () => {
+    const r = deriveBfeFromLines({ point: { x: 50, y: 0 }, lines: [vline(0, 96), vline(100, 97)] });
+    expect(r.bfeFt).toBeCloseTo(96.5, 6);
+    expect(r.method).toBe("two-line-interp");
+    expect(r.provider).toBe("bfe-line-interp");
+    expect(r.detail.loElev).toBe(96);
+    expect(r.detail.hiElev).toBe(97);
+  });
+  it("biases toward the nearer contour", () => {
+    const r = deriveBfeFromLines({ point: { x: 30, y: 0 }, lines: [vline(0, 96), vline(100, 97)] });
+    expect(r.bfeFt).toBeCloseTo(96.3, 6);
+  });
+  it("exactly on a contour returns that elevation (distance ≈ 0)", () => {
+    const r = deriveBfeFromLines({ point: { x: 0, y: 0 }, lines: [vline(0, 96), vline(100, 97)] });
+    expect(r.bfeFt).toBeCloseTo(96, 6);
+    expect(r.detail.dNearFt).toBeCloseTo(0, 6);
+  });
+  it("a single nearby contour snaps to it (method nearest-line)", () => {
+    const r = deriveBfeFromLines({ point: { x: 20, y: 0 }, lines: [vline(0, 96)] });
+    expect(r.bfeFt).toBe(96);
+    expect(r.method).toBe("nearest-line");
+  });
+  it("skips a duplicate-elevation line on the far bank, interpolating to the next elevation (not stuck)", () => {
+    const r = deriveBfeFromLines({ point: { x: 50, y: 0 }, lines: [vline(0, 96), vline(200, 96), vline(100, 97)] });
+    expect(r.method).toBe("two-line-interp");
+    expect(r.bfeFt).toBeGreaterThan(96);
+    expect(r.bfeFt).toBeCloseTo(96.5, 6);
+  });
+  it("returns null when the nearest line is beyond maxLineDistFt (honest UNKNOWN)", () => {
+    expect(deriveBfeFromLines({ point: { x: 0, y: 0 }, lines: [vline(3000, 96)], maxLineDistFt: 2500 })).toBeNull();
+  });
+  it("falls back to nearest-line when the bracketing pair spans more than maxGapFt", () => {
+    const r = deriveBfeFromLines({ point: { x: 0, y: 0 }, lines: [vline(0, 96), vline(7000, 97)], maxGapFt: 6000 });
+    expect(r.method).toBe("nearest-line");
+    expect(r.bfeFt).toBe(96);
+  });
+  it("empty / null lines → null", () => {
+    expect(deriveBfeFromLines({ point: { x: 0, y: 0 }, lines: [] })).toBeNull();
+    expect(deriveBfeFromLines({ point: { x: 0, y: 0 }, lines: null })).toBeNull();
+  });
+  it("interpolates across a 2-ft gap when the intermediate contour is missing", () => {
+    const r = deriveBfeFromLines({ point: { x: 50, y: 0 }, lines: [vline(0, 96), vline(100, 98)] });
+    expect(r.bfeFt).toBeCloseTo(97, 6);
+  });
+  it("is orientation-independent (descending line order gives the same value)", () => {
+    const asc = deriveBfeFromLines({ point: { x: 50, y: 0 }, lines: [vline(0, 97), vline(100, 98)] });
+    const desc = deriveBfeFromLines({ point: { x: 50, y: 0 }, lines: [vline(100, 98), vline(0, 97)] });
+    expect(asc.bfeFt).toBeCloseTo(desc.bfeFt, 6);
+    expect(asc.bfeFt).toBeCloseTo(97.5, 6);
+  });
+  it("the result always lands within the bracket [loElev, hiElev] (invariant)", () => {
+    for (const x of [5, 17, 42, 63, 88, 95]) {
+      const r = deriveBfeFromLines({ point: { x, y: 0 }, lines: [vline(0, 96), vline(100, 99)] });
+      expect(r.bfeFt).toBeGreaterThanOrEqual(96);
+      expect(r.bfeFt).toBeLessThanOrEqual(99);
+    }
+  });
+});
+
+describe("bfeLinesFromFeatureCollection — parse S_BFE lines with datum/unit guards (B755)", () => {
+  const origin = { lat: 29.77, lon: -95.85 };
+  const lineFeat = (props, coords = [[-95.85, 29.77], [-95.849, 29.771]]) => ({
+    type: "Feature", properties: props, geometry: { type: "LineString", coordinates: coords },
+  });
+  const fc = (features) => ({ type: "FeatureCollection", features });
+
+  it("keeps a NAVD88 / feet line and converts it to finite site-feet points", () => {
+    const out = bfeLinesFromFeatureCollection(fc([lineFeat({ ELEV: 96, V_DATUM: "NAVD88", LEN_UNIT: "Feet" })]), origin);
+    expect(out.lines).toHaveLength(1);
+    expect(out.lines[0].elevFt).toBe(96);
+    expect(out.lines[0].pts.length).toBeGreaterThanOrEqual(2);
+    expect(Number.isFinite(out.lines[0].pts[0].x)).toBe(true);
+    expect(out.total).toBe(1);
+  });
+  it("excludes the -9999 sentinel entirely (not even a candidate)", () => {
+    const out = bfeLinesFromFeatureCollection(fc([lineFeat({ ELEV: -9999, V_DATUM: "NAVD88", LEN_UNIT: "Feet" })]), origin);
+    expect(out.lines).toHaveLength(0);
+    expect(out.total).toBe(0);
+  });
+  it("excludes a non-NAVD88 datum and counts it", () => {
+    const out = bfeLinesFromFeatureCollection(fc([lineFeat({ ELEV: 96, V_DATUM: "NGVD29", LEN_UNIT: "Feet" })]), origin);
+    expect(out.lines).toHaveLength(0);
+    expect(out.excludedDatum).toBe(1);
+    expect(out.total).toBe(1);
+  });
+  it("excludes a meters unit and counts it", () => {
+    const out = bfeLinesFromFeatureCollection(fc([lineFeat({ ELEV: 30, V_DATUM: "NAVD88", LEN_UNIT: "Meters" })]), origin);
+    expect(out.lines).toHaveLength(0);
+    expect(out.excludedUnit).toBe(1);
+  });
+  it("uses only the NAVD88 subset when datums are mixed", () => {
+    const out = bfeLinesFromFeatureCollection(fc([
+      lineFeat({ ELEV: 96, V_DATUM: "NAVD88", LEN_UNIT: "Feet" }),
+      lineFeat({ ELEV: 96, V_DATUM: "NGVD29", LEN_UNIT: "Feet" }),
+    ]), origin);
+    expect(out.lines).toHaveLength(1);
+    expect(out.excludedDatum).toBe(1);
+    expect(out.total).toBe(2);
+  });
+  it("a MultiLineString yields one usable line entry per path", () => {
+    const feat = { type: "Feature", properties: { ELEV: 97, V_DATUM: "NAVD88", LEN_UNIT: "Feet" }, geometry: { type: "MultiLineString", coordinates: [[[-95.85, 29.77], [-95.849, 29.771]], [[-95.848, 29.772], [-95.847, 29.773]]] } };
+    const out = bfeLinesFromFeatureCollection(fc([feat]), origin);
+    expect(out.lines).toHaveLength(2);
+    expect(out.lines.every((l) => l.elevFt === 97)).toBe(true);
+  });
+});
+
+describe("computeMitigation / wse1pctForRing — derived-BFE provider precedence (B755)", () => {
+  const fp = { id: "b1", ring: rect(0, 0, 100, 100) };
+  it("a derived BFE prices the volume and tags provider bfe-line-interp when nothing else exists", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)]); // AE, no static BFE
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, derivedBfeFt: 96 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 6, -2); // min(96,100) - 90 = 6
+    expect(r.providers.wse1pct).toBe("bfe-line-interp");
+  });
+  it("a manual BFE outranks the derived BFE", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)]);
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, bfeFt: 95, derivedBfeFt: 96 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 5, -2); // 95 governs
+    expect(r.providers.wse1pct).toBe("manual");
+  });
+  it("a published static BFE outranks the derived BFE", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)], { staticBfeFt: 94 });
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, derivedBfeFt: 96 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 4, -2); // 94 governs
+    expect(r.providers.wse1pct).toBe("static-bfe");
+  });
+  it("an AO zone's own grade+DEPTH outranks the derived BFE (never mis-priced off a nearby AE reach)", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)], { zone: "AO", aoDepthFt: 2 });
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, derivedBfeFt: 96 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 2, -2); // WSE = 90 + 2, not 96
+    expect(r.providers.wse1pct).toBe("ao-depth");
+  });
+  it("with NO derived and NO other BFE the honest UNKNOWN message is unchanged", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)]);
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } });
+    expect(r.volumeCf).toBeNull();
+    expect(r.unknownReason).toMatch(/no published BFE/);
+  });
+  it("wse1pctForRing falls back to the derived BFE (manual still wins) on a touching ring", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)]);
+    const ring = rect(10, 10, 30, 30);
+    expect(wse1pctForRing(ring, [zone], { derivedBfeFt: 96 })).toEqual({ wseFt: 96, provider: "bfe-line-interp" });
+    expect(wse1pctForRing(ring, [zone], { bfeFt: 95, derivedBfeFt: 96 })).toEqual({ wseFt: 95, provider: "manual" });
   });
 });

@@ -142,10 +142,125 @@ export function gridIntersect(ring, zone, depthAt = null, opts = {}) {
   return { areaSf, sumDepthArea };
 }
 
+/* ---------------------------------------------------------------------------------
+ * Derived BFE from FEMA Base Flood Elevation lines (S_BFE, B755).
+ *
+ * On most AE reaches FEMA leaves the zone polygon's STATIC_BFE at the -9999 "none"
+ * sentinel — the BFE instead lives on the separate S_BFE line layer as whole-foot
+ * water-surface CONTOURS drawn across the floodplain. deriveBfeFromLines reads a BFE
+ * at a point the same way you'd read a spot elevation between two topo contours:
+ * distance-weighted linear interpolation between the nearest line and the nearest line
+ * of a DIFFERENT elevation. The result is an explicitly-labeled DERIVED screening
+ * estimate (provider "bfe-line-interp"), never a published or surveyed BFE, and it
+ * returns null (→ honest UNKNOWN) whenever the lines can't support a defensible value.
+ * -------------------------------------------------------------------------------- */
+
+// Perpendicular distance (feet) from an {x,y} point to a polyline: the min over its
+// segments, clamped to each segment's endpoints. A degenerate 1-point line falls back
+// to point-to-point (never NaN). Pure.
+export function distToPolyline(point, pts) {
+  if (!point || !Array.isArray(pts) || !pts.length) return Infinity;
+  if (pts.length === 1) return Math.hypot(point.x - pts[0].x, point.y - pts[0].y);
+  let best = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 === 0 ? 0 : ((point.x - a.x) * dx + (point.y - a.y) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+const isNavd88Datum = (v) => /navd\s*-?\s*88/i.test(String(v || ""));
+const isMetersUnit = (v) => /met(er|re)/i.test(String(v || ""));
+
+/* FEMA S_BFE FeatureCollection (featuresToGeoJson output — LineString /
+ * MultiLineString per feature) → BFE lines in the planner's site-feet frame, filtered
+ * to real feet-NAVD88 elevations. Each output line is { elevFt, pts:[{x,y}] }; a
+ * MultiLineString contributes one entry per path (same ELEV). Lines whose ELEV is the
+ * -9999 sentinel, whose datum isn't NAVD88, or whose unit is meters are EXCLUDED and
+ * counted — never silently mixed (a mixed datum is a multi-foot silent error). `total`
+ * counts real-elevation candidate lines so the UI can say "lines exist but non-NAVD88"
+ * rather than a bare UNKNOWN. Pure. */
+export function bfeLinesFromFeatureCollection(fc, origin) {
+  const out = { lines: [], excludedDatum: 0, excludedUnit: 0, total: 0 };
+  if (!fc || !Array.isArray(fc.features) || !origin) return out;
+  for (const f of fc.features) {
+    const p = (f && f.properties) || {};
+    const elevFt = realElev(p.ELEV);
+    if (elevFt == null) continue; // -9999 / missing — not a real elevation
+    out.total += 1;
+    if (!isNavd88Datum(p.V_DATUM)) { out.excludedDatum += 1; continue; }
+    if (isMetersUnit(p.LEN_UNIT)) { out.excludedUnit += 1; continue; }
+    const geom = (f && f.geometry) || {};
+    const paths = geom.type === "MultiLineString" ? geom.coordinates
+      : geom.type === "LineString" ? [geom.coordinates]
+      : [];
+    for (const path of paths) {
+      if (!Array.isArray(path) || !path.length) continue;
+      const pts = lngLatRingToFeet(path, origin.lon, origin.lat);
+      if (pts && pts.length) out.lines.push({ elevFt, pts });
+    }
+  }
+  return out;
+}
+
+/* Interpolate a screening BFE (feet NAVD88) at a site-feet point from S_BFE lines.
+ * Returns { bfeFt, provider:"bfe-line-interp", method, detail } or null.
+ *   method "two-line-interp" — distance-weighted between the nearest line and the
+ *          nearest line of a DIFFERENT elevation (the read-between-contours operation).
+ *   method "nearest-line"    — only one contour is near, or the pair spans an
+ *          implausible gap: snap to it (±~0.5 ft), flagged lower-confidence.
+ * Returns null when no usable line sits within maxLineDistFt (honest UNKNOWN, never a
+ * guess). detail carries loElev/hiElev (so the UI can show the conservative upper
+ * bracket) and the distances used. Pure. */
+export function deriveBfeFromLines({ point, lines, maxLineDistFt = 2500, maxGapFt = 6000 } = {}) {
+  if (!point || !Array.isArray(lines) || !lines.length) return null;
+  // Distance to each line, keeping the NEAREST occurrence per DISTINCT elevation (a
+  // meander can put the same contour on both banks — that's not a bracketing pair).
+  const byElev = new Map();
+  for (const ln of lines) {
+    if (ln == null || !isFinite(ln.elevFt)) continue;
+    const d = distToPolyline(point, ln.pts);
+    if (!isFinite(d)) continue;
+    const prev = byElev.get(ln.elevFt);
+    if (prev == null || d < prev) byElev.set(ln.elevFt, d);
+  }
+  if (!byElev.size) return null;
+  const ranked = [...byElev.entries()].map(([elevFt, d]) => ({ elevFt, d })).sort((a, b) => a.d - b.d);
+  const near = ranked[0];
+  if (near.d > maxLineDistFt) return null; // nothing close enough to defend
+  const other = ranked.find((r) => r.elevFt !== near.elevFt) || null;
+  const loElev = other ? Math.min(near.elevFt, other.elevFt) : near.elevFt;
+  const hiElev = other ? Math.max(near.elevFt, other.elevFt) : near.elevFt;
+  if (other && (near.d + other.d) <= maxGapFt) {
+    // frac = 0 at the near line → E_near; → 1 at the other line → E_other. Always
+    // inside [loElev, hiElev]; biased toward the nearer contour.
+    const frac = near.d / (near.d + other.d);
+    return {
+      bfeFt: near.elevFt + (other.elevFt - near.elevFt) * frac,
+      provider: "bfe-line-interp",
+      method: "two-line-interp",
+      detail: { loElev, hiElev, dNearFt: near.d, dOtherFt: other.d, nearestFt: near.d, usedLines: ranked.length },
+    };
+  }
+  // A single usable contour (or an implausibly wide pair) — snap to the nearest line.
+  return {
+    bfeFt: near.elevFt,
+    provider: "bfe-line-interp",
+    method: "nearest-line",
+    detail: { loElev, hiElev, dNearFt: near.d, dOtherFt: other ? other.d : null, nearestFt: near.d, usedLines: ranked.length },
+  };
+}
+
 /* The governing (highest) 1% water surface across the zones that touch a ring —
- * static BFE where published, else the manual BFE. B708's pond split consumes this.
- * Returns { wseFt, provider } — provider "static-bfe" | "manual" | null. Pure. */
-export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null } = {}) {
+ * static BFE where published, else the manual BFE, else the derived BFE-line estimate.
+ * B708's pond split consumes this. Returns { wseFt, provider } — provider
+ * "static-bfe" | "ao-depth" | "manual" | "bfe-line-interp" | null. Pure. */
+export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null, derivedBfeFt = null } = {}) {
   const fb = ringBBox(ring);
   let best = null, provider = null;
   for (const z of zones) {
@@ -161,10 +276,16 @@ export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null 
       best = existGradeFt + z.aoDepthFt; provider = "ao-depth";
     }
   }
-  if (best == null && bfeFt != null && isFinite(bfeFt)) {
-    // Only meaningful when the ring actually touches a 1% zone at all.
-    const touches = zones.some((z) => (z.cls === "1pct" || z.cls === "floodway") && bboxOverlap(fb, z.bbox) && gridIntersect(ring, z, null, { maxCells: 400 }).areaSf > 0);
-    if (touches) { best = bfeFt; provider = "manual"; }
+  if (best == null) {
+    // Fallbacks, manual before derived: a value the user typed wins over the auto
+    // BFE-line estimate. Only meaningful when the ring actually touches a 1% zone.
+    const fallback = (bfeFt != null && isFinite(bfeFt)) ? { v: bfeFt, p: "manual" }
+      : (derivedBfeFt != null && isFinite(derivedBfeFt)) ? { v: derivedBfeFt, p: "bfe-line-interp" }
+      : null;
+    if (fallback) {
+      const touches = zones.some((z) => (z.cls === "1pct" || z.cls === "floodway") && bboxOverlap(fb, z.bbox) && gridIntersect(ring, z, null, { maxCells: 400 }).areaSf > 0);
+      if (touches) { best = fallback.v; provider = fallback.p; }
+    }
   }
   return { wseFt: best, provider };
 }
@@ -217,6 +338,7 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   const grade = realElev(elev.existGradeFt);
   const wse02 = realElev(elev.wse02Ft);
   const manualBfe = realElev(elev.bfeFt);
+  const derivedBfe = realElev(elev.derivedBfeFt); // DERIVED from FEMA BFE lines (B755)
   const wseProviders = new Set();
 
   for (const z of zones) {
@@ -235,6 +357,10 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
       if (z.staticBfeFt != null) { wse = z.staticBfeFt; wseSrc = "static-bfe"; }
       else if (z.aoDepthFt != null && grade != null) { wse = grade + z.aoDepthFt; wseSrc = "ao-depth"; }
       else if (manualBfe != null) { wse = manualBfe; wseSrc = "manual"; }
+      // Last resort before UNKNOWN: a BFE DERIVED by interpolating FEMA's S_BFE lines
+      // (B755). Manual entry above still wins; a zone's own published data (static BFE,
+      // AO depth) always wins — the derived value only fills a genuine gap.
+      else if (derivedBfe != null) { wse = derivedBfe; wseSrc = "bfe-line-interp"; }
     } else if (z.cls === "02pct") {
       if (wse02 != null) { wse = wse02; wseSrc = "manual"; }
     }
@@ -323,7 +449,8 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
       wse1pct: wseProviders.has("static-bfe") && wseProviders.size > 1 ? "mixed"
         : wseProviders.has("static-bfe") ? "static-bfe"
         : wseProviders.has("ao-depth") ? "ao-depth"
-        : wseProviders.has("manual") ? "manual" : null,
+        : wseProviders.has("manual") ? "manual"
+        : wseProviders.has("bfe-line-interp") ? "bfe-line-interp" : null,
       wse02pct: wse02 != null ? "manual" : null,
       expert: expert ? "avg-fill-depth" : null,
     },
@@ -417,3 +544,5 @@ export const EXCLUSIONS_NOTE =
 export const OFFSITE_NOTE =
   "Floodplain sites often pass OFFSITE flow — upstream contributing area and conveyance through the site are your engineer's check, not modeled here.";
 export const EXPERT_BYPASS_LABEL = "average depth of fill below the flood elevation (ft)";
+export const DERIVED_BFE_NOTE =
+  "This BFE was DERIVED by interpolating FEMA's published Base Flood Elevation lines at your fill — a screening estimate, not a published or surveyed value. Confirm before design; type a BFE to override.";
