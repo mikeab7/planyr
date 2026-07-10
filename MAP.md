@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-10 @ `64dde4c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-10 @ `fd60ae5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_236 source files mapped._
+_234 source files mapped._
 
 ## infra
 
@@ -209,10 +209,6 @@ _236 source files mapped._
   - _exports_: `default (FloodMitigationCard)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
   - _exports_: `default (LayerPanel)`
-- **`src/workspaces/site-planner/components/ParcelDrawing.jsx`** — Immutable PDF/JPEG backdrop markup canvas: pen/line/box/text/measure tools with scale calibration, 0..1 pixel-relative coords
-  - _exports_: `default (ParcelDrawing)`
-- **`src/workspaces/site-planner/components/parcelDrawingStyle.js`** — Pure style helpers bringing ParcelDrawing onto the shared per-object model: legacy color→stroke/fontColor migration, capability-driven PD_PROPS (fill only for the closed Box), dash mapping, and the shared PropertyPanel schema
-  - _exports_: `dashFor`, `migrateMark`, `migrateMarks`, `PD_DEFAULT_COLOR`, `PD_DEFAULT_STYLE`, `PD_PROPS`, `pdSchema`, `stampStyle`
 - **`src/workspaces/site-planner/components/SiteAnalysis.jsx`** — Site Analysis panel: presence-first environmental/regulatory screening of active parcels with honest present/none/unknown/unavailable states
   - _exports_: `default (SiteAnalysis)`
 - **`src/workspaces/site-planner/components/SiteReviewModal.jsx`** — Legacy-site migration wizard: step through on-device sites to save-to-cloud, keep-on-device, or discard one by one
@@ -346,7 +342,7 @@ _236 source files mapped._
 - **`src/workspaces/site-planner/lib/overlayScale.js`** — Pure drawing-scale helpers: engineer scale-note parsing, standard sheet detection, feet-per-point conversions, viewport-sanity auto-scale guard, and Bluebeam-style page=real distance/preset scale entry
   - _exports_: `chooseOverlayScale`, `COMMON_SCALES`, `detectSheet`, `feetPerInchForPreset`, `feetPerInchFromPair`, `ftPerPointForScale`, `matchScalePreset`, `PAGE_UNIT_TO_IN`, `PAGE_UNITS`, `parseDistanceInput`, `parseScaleNote`, `parseSheetScale`, `POINTS_PER_INCH`, `REAL_UNIT_TO_FT`, `REAL_UNITS`, `SCALE_PRESETS`, `scaleForFtPerPoint`
 - **`src/workspaces/site-planner/lib/overlayStorage.js`** — Supabase Storage I/O for overlay/parcel-drawing/aerial-underlay source files (uid-first RLS keys, upload/download/delete), fallback-safe to inline raster when logged-out/oversize/error
-  - _exports_: `BUCKET`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `parcelDrawingKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadParcelDrawingFile`, `uploadUnderlayDataUrl`
+  - _exports_: `BUCKET`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadUnderlayDataUrl`
 - **`src/workspaces/site-planner/lib/overlayVectorSvg.js`** — Pure vector-overlay SVG emitter for the print export (B745): reprojects normalized [lon,lat] line/polygon/point features via an injected projection into styled `<path>`/`<circle>` (LOUD-skip on non-finite), plus esri/terrain normalizers (contour lines, drainage-arrow glyphs)
   - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors
