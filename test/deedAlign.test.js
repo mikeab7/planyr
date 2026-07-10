@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout,
-  ringCentroid, describeRotation, CONFIDENT_FRAC,
+  ringCentroid, describeRotation, CONFIDENT_FRAC, MAX_ALIGN_ROT_DEG,
 } from "../src/workspaces/site-planner/lib/deedAlign.js";
 import { projectToGrid } from "../src/shared/coordinates/index.js";
 
@@ -53,6 +53,39 @@ describe("deedAlign — empirical fit to the county parcel (basis-of-bearings fi
   it("returns ok:false when a ring is too small to form a shape", () => {
     expect(solveDeedAlignment([{ x: 0, y: 0 }, { x: 1, y: 1 }], PARCEL).ok).toBe(false);
     expect(solveDeedAlignment(PARCEL, [{ x: 0, y: 0 }]).ok).toBe(false);
+  });
+});
+
+// The B625 recurrence (×2): the empirical fit used a full ±180° sweep, so a near-symmetric
+// outline could snap to a 45/90/180° rotational alias — the deed swung tens of degrees off
+// the parcel. The bounded ±MAX_ALIGN_ROT_DEG window keeps only the physically-real, small
+// basis-of-bearings correction and refuses a gross rotation.
+describe("deedAlign — rotation is bounded to a plausible basis-of-bearings window (B625×2)", () => {
+  // A PERFECT square is maximally aliased: it overlays itself at 0/90/180/270°, so a full
+  // sweep had no reason to prefer the true small angle over an ~88.5° alias (identical residual).
+  const SQUARE = [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 1000 }, { x: 0, y: 1000 }];
+
+  it("recovers a small rotation on a near-symmetric outline instead of a 90° alias", () => {
+    const deed = rotatePointsAbout(SQUARE, -1.5, ringCentroid(SQUARE));
+    const fit = solveDeedAlignment(deed, SQUARE);
+    expect(fit.ok).toBe(true);
+    expect(Math.abs(fit.rotDeg)).toBeLessThanOrEqual(MAX_ALIGN_ROT_DEG); // never a 45/90/180 alias
+    expect(Math.abs(fit.rotDeg - 1.5)).toBeLessThan(0.2);                // the real +1.5°, not ~88.5/91.5
+    expect(fit.residualFt).toBeLessThan(0.5);
+  });
+
+  it("refuses a gross (45°) rotation — clamps to the window and reports not-confident", () => {
+    const deed = rotatePointsAbout(PARCEL, 45, ringCentroid(PARCEL));
+    const fit = solveDeedAlignment(deed, PARCEL);
+    expect(fit.ok).toBe(true);
+    expect(Math.abs(fit.rotDeg)).toBeLessThanOrEqual(MAX_ALIGN_ROT_DEG); // won't chase the 45° overlay
+    expect(fit.confident).toBe(false);                                   // a >window mismatch is flagged, not forced
+  });
+
+  it("honours an explicit opts.maxRotDeg override", () => {
+    const deed = rotatePointsAbout(PARCEL, -8, ringCentroid(PARCEL));
+    expect(Math.abs(solveDeedAlignment(deed, PARCEL, { maxRotDeg: 5 }).rotDeg)).toBeLessThanOrEqual(5);
+    expect(Math.abs(solveDeedAlignment(deed, PARCEL, { maxRotDeg: 15 }).rotDeg - 8)).toBeLessThan(0.2);
   });
 });
 

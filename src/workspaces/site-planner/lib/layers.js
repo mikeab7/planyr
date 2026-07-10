@@ -21,7 +21,9 @@ import { contourLayer, flowLayer, TERRAIN_MIN_ZOOM } from "./terrainLayers.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
 } from "./layerRequest.js";
-import { cachedVectorLayer } from "./vectorOverlay.js";
+import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer } from "./vectorOverlay.js";
+import { PIPELINE_LEGEND } from "./pipelineCommodity.js";
+import { DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 
 export { JURISDICTION_LAYERS };
@@ -95,16 +97,31 @@ export const STATEWIDE = {
     opacity: 0.55,
   },
   txrrc_pipe: {
-    label: "Pipelines (TxRRC)",
-    // B517: repointed to the AUTHORITATIVE statewide RRC service — matches the GIS source
-    // registry (sources.js `pipelines`) and the Site Analysis count path. The old Harris-County
-    // republication (www.gis.hctx.net/.../TXRRC/Pipelines) is ~99.8% incomplete outside Harris,
-    // so the MAP overlay silently under-painted (a false all-clear on Chambers/Gulf-coast sites)
-    // while the analysis panel queried the right host — they now agree.
-    url: "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer",
-    layers: [13], // Pipelines (polyline) — the registry's brief-verified sublayer
+    // B751: now a VECTOR LINE layer — crisp polylines colored by commodity at working zoom,
+    // falling back to the agency raster (imageFallback below) only when zoomed far out. The
+    // VECTOR_SOURCES.txrrc_pipe row (vectorLayers.js) owns the /query pull + commodity styling;
+    // this config is the panel/legend/fallback glue. Registry drives it — one source of truth.
+    kind: "vectorLine", label: "Pipelines (TxRRC)",
+    legend: PIPELINE_LEGEND, // six commodity classes, named under the row while on
+    // B517: the AUTHORITATIVE statewide RRC service — matches the GIS source registry
+    // (sources.js `pipelines`) and the Site Analysis count path. The old Harris-County
+    // republication (www.gis.hctx.net/.../TXRRC/Pipelines) is ~99.8% incomplete outside Harris.
+    // Repointed (NOT deleted, per B751): this /export raster is now the FAR-OUT imageFallback.
+    imageFallback: {
+      url: "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer",
+      layers: [13], // Pipelines (polyline) — the registry's brief-verified sublayer
+    },
     note: "RRC T-4 permit routes — schematic, not surveyed locations.",
     opacity: 0.9,
+  },
+  txrrc_pipe_easement: {
+    // B752: ASSUMED easement screening corridor — a translucent band off the B751 pipeline
+    // centerlines (shares that pull/cache; draws only the bands, tinted by commodity, beneath the
+    // lines). NOT a surveyed easement — the caveat below is as prominent as the band.
+    kind: "pipelineCorridor", label: "Pipeline easement corridor (assumed)",
+    pipelineSource: "txrrc_pipe", corridorWidth: true, // corridorWidth → LayerPanel shows the inline width control
+    opacity: 0.9,
+    note: "ASSUMED screening corridor drawn off a SCHEMATIC centerline — NOT a surveyed easement. Doubly approximate (schematic line × assumed width). Confirm via title commitment / recorded easement instrument + an 811 one-call before relying on it.",
   },
   txrrc_wells: {
     label: "Oil & gas wells (TxRRC)",
@@ -318,6 +335,7 @@ export const LAYER_VINTAGE = {
   fema: "Effective date varies by FIRM panel",
   wetlands: "Survey date varies by NWI project area",
   txrrc_pipe: "RRC permit data — continuously updated",
+  txrrc_pipe_easement: "Assumed buffer off RRC T-4 routes — not a recorded width",
   txrrc_wells: "RRC permit data — continuously updated",
   // Utility evidence
   osm_power: "OpenStreetMap — community-edited, live",
@@ -345,10 +363,14 @@ export const LAYER_VINTAGE = {
 // else null → the UI shows the honest "vintage unknown".
 export const layerVintage = (id, cfg) => (cfg && cfg.vintage) || LAYER_VINTAGE[id] || null;
 
-// Fresh per-layer UI state (all off, each at its default opacity).
+// Fresh per-layer UI state (all off, each at its default opacity). A corridor layer (B752)
+// also carries an editable `widthFt` (total assumed corridor width, feet).
 export const defaultOverlayState = () => {
   const o = {};
-  Object.entries(ALL_LAYERS).forEach(([k, cfg]) => { o[k] = { on: false, opacity: cfg.opacity ?? 0.8 }; });
+  Object.entries(ALL_LAYERS).forEach(([k, cfg]) => {
+    o[k] = { on: false, opacity: cfg.opacity ?? 0.8 };
+    if (cfg.corridorWidth) o[k].widthFt = DEFAULT_CORRIDOR_WIDTH_FT;
+  });
   return o;
 };
 
@@ -534,6 +556,30 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
         else fail(k, cfg, `${cfg.label}: no vector source registered`); // registry drift — loud, never a silent no-op
+      } else if (cfg.kind === "vectorLine") {
+        // Cached pipeline vector layer (B751): crisp commodity-colored polylines when zoomed in,
+        // the agency /export raster (imageFallback) when zoomed far out — switch re-evaluated per
+        // moveend. No health probe (the pull self-reports); the raster fallback is built here so
+        // vectorOverlay.js stays esri-free.
+        const lyr = cachedPipelineLayer(k, cfg, st.opacity, pane, onStatus, {
+          interactive: !!opts.identifyOk,
+          identifyOk: opts.identifyOk,
+          // The far-out raster: a direct-to-agency dynamicMapLayer from imageFallback. Direct
+          // (not proxied) keeps this rare fallback simple + always-rendering via a CORS-exempt
+          // <img> — the proxy caching win isn't worth a swap dance inside a child layerGroup.
+          buildRaster: () => {
+            const fb = cfg.imageFallback || {};
+            return EL.dynamicMapLayer(dynamicLayerOptions({ url: fb.url, layers: fb.layers }, st.opacity, pane, { proxy: false }));
+          },
+        });
+        if (lyr) { lyr.addTo(map); refs[k] = lyr; }
+        else fail(k, cfg, `${cfg.label}: no vector source registered`);
+      } else if (cfg.kind === "pipelineCorridor") {
+        // Cached easement-corridor bands (B752): buffer the SAME pipeline geometry (shared cache),
+        // drawn beneath the centerlines. Vector-only; carries an editable corridor width.
+        const lyr = cachedCorridorLayer(k, cfg, st.opacity, pane, onStatus, { widthFt: st.widthFt });
+        if (lyr) { lyr.addTo(map); refs[k] = lyr; }
+        else fail(k, cfg, `${cfg.label}: no pipeline source registered`);
       } else {
         // image / feature service — probe health first
         probeService(cfg.url).then(({ ok, error, unreachable }) => {
@@ -601,8 +647,11 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
     } else if (!st.on && cur) {
       if (cur !== "pending") { try { map.removeLayer(cur); } catch (_) {} }
       refs[k] = null; onStatus && onStatus(k, null);
-    } else if (cur && cur !== "pending" && cur.setOpacity) {
-      cur.setOpacity(st.opacity);
+    } else if (cur && cur !== "pending") {
+      if (cur.setOpacity) cur.setOpacity(st.opacity);
+      // B752: push a live corridor-width change (inline stepper) to the layer — re-buffers the
+      // cached geometry, no re-fetch. Only the corridor layer implements setWidth.
+      if (cur.setWidth && st.widthFt != null) cur.setWidth(st.widthFt);
     }
   });
 }

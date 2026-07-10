@@ -13,9 +13,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `storage.js` — thin model layer (migrate on read, merge+renormalize on save).
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `coverage.js` (coverage engine);
   `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; `gisCache.js` — screening cache;
-  `vectorLayers.js` (pure vector engine + boundary registry) + `vectorOverlay.js` (cached boundary
-  render / identify / labels glue) + `boundaryLabels.js` (pure label math) — the B694/B695 tier;
-  `basemaps.js` — the shared Esri/USGS aerial-source registry (B693).
+  `vectorLayers.js` (pure vector engine — polygons AND lines — + boundary/pipeline registry) +
+  `vectorOverlay.js` (cached boundary/pipeline/corridor render + identify + labels glue) +
+  `boundaryLabels.js` (pure label math) — the B694/B695 tier; `basemaps.js` — the shared Esri/USGS
+  aerial-source registry (B693). Pipelines (B751/B752): `pipelineCommodity.js` (commodity crosswalk +
+  fixed hazard symbology + legend) + `pipelineCorridor.js` (pure assumed-easement buffer geometry).
 - Site-plan overlay import (B72/B73/B747/B748/B749): `overlayPdf.js` (PDF+DXF raster, banded
   white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)

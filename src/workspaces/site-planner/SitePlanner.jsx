@@ -93,7 +93,7 @@ import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNu
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight } from "./lib/pondGeom.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { gisCache } from "./lib/gisCache.js";
-import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
+import { VECTOR_SOURCES, fetchCached, styleFor } from "./lib/vectorLayers.js";
 import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./lib/overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./lib/boundaryLabels.js";
 import { gridRequest } from "./lib/demGrid.js";
@@ -113,7 +113,7 @@ import {
   slimDrainageContext, hydrateDrainageContext,
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
-import { overlappingParcelPairs, dissolvedParcelSqft } from "./lib/polyClip.js";
+import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
@@ -7157,10 +7157,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
       const st = overlays?.[id];
       if (!st || !st.on) continue; // respect the toggle
+      let rasterCfg = cfg;
       const isRaster = !cfg.kind || cfg.kind === "dynamic" || cfg.kind === "esriImage";
-      if (!isRaster) continue; // vector/client layers → Class B
+      if (!isRaster) {
+        // B751: a pipeline vectorLine layer CURRENTLY showing its far-out raster → composite that
+        // raster here (the vector branch/Class B skips it in image mode). In vector mode it's a
+        // Class B layer, so skip it here. All other vector/client layers → Class B.
+        if (cfg.kind === "vectorLine" && cfg.imageFallback) {
+          const ref = overlayRefs.current?.[id];
+          const mode = ref && typeof ref.getExportMode === "function" ? ref.getExportMode() : null;
+          if (mode !== "image") continue;
+          rasterCfg = { kind: "dynamic", url: cfg.imageFallback.url, layers: cfg.imageFallback.layers };
+        } else continue;
+      }
       if (layerStatus?.[id]?.state === "failed") continue; // confirmed-dead host — requesting it would only drop+warn
-      const req = overlayExportRequest(cfg, { proxy });
+      const req = overlayExportRequest(rasterCfg, { proxy });
       const geomOpts = { layersParam: req.layersParam, renderingRule: req.renderingRule, maxPx: 2400 };
       const p = overlayExportPlacement(bbox, origin.lon, origin.lat, { exportBase: `${req.url}/${req.endpoint}`, ...geomOpts });
       // Proxy→direct CORS fallback for the export inliner (mirrors the live layer's fail-open):
@@ -7192,6 +7203,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const style = leafStyle(cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1 });
         features.push(...esriLineFeatures(gj.geometry, style));
       });
+      return { features };
+    }
+    if (kind === "vectorLine") { // B751 pipelines: commodity-colored line features (vector mode only)
+      if (typeof ref.getExportMode === "function" && ref.getExportMode() !== "vector") return { features: [] }; // image mode → Class A raster handles it
+      const layers = typeof ref.getLayers === "function" ? ref.getLayers() : [];
+      const geo = layers.find((l) => typeof l.toGeoJSON === "function" && typeof l.eachFeature !== "function");
+      const fc = geo ? geo.toGeoJSON() : null;
+      if (!fc || !fc.features || !fc.features.length) return { features: [] };
+      const src = VECTOR_SOURCES[id];
+      const features = [];
+      for (const f of fc.features) {
+        const style = leafStyle(styleFor(src, f.properties)); // SAME commodity symbology as the live layer (PDF-PARITY)
+        features.push(...esriLineFeatures(f.geometry, style));
+      }
+      return { features };
+    }
+    if (kind === "pipelineCorridor") { // B752 easement bands: commodity-tinted translucent polygons
+      const features = [];
+      const pushPoly = (l) => {
+        if (typeof l.getLatLngs !== "function") return;
+        const raw = l.getLatLngs();
+        const ring = Array.isArray(raw[0]) ? raw[0] : raw; // L.polygon nests one level
+        const coords = ring.map((p) => [p.lng, p.lat]);
+        if (coords.length < 3) return;
+        const color = (l.options && l.options.fillColor) || "#9a9992";
+        // Hand the emitter the DESIGN base opacity (0.18); it multiplies by st.opacity, matching
+        // the on-screen 0.18×opacity fill (the OSM-layer un-bake pattern).
+        features.push({ kind: "polygon", coords: [coords], style: { stroke: color, strokeWidth: 0.5, strokeOpacity: 1, fill: color, fillOpacity: 0.18 } });
+      };
+      const walk = (grp) => { if (typeof grp.eachLayer === "function") grp.eachLayer((l) => { if (typeof l.getLatLngs === "function") pushPoly(l); else walk(l); }); };
+      walk(ref);
       return { features };
     }
     if (kind === "vector") { // county/city/ETJ boundaries: outline polygons + collision-placed names
@@ -8620,11 +8662,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * aerial are TRUE north. They differ by the meridian convergence (~1.5° near Houston),
    * so a raw plot lands rotated: up to ~90 ft off over a long boundary. These snap it on. */
   const activeParcelRings = () => parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
-  // Best rigid (rotation+translation, never scaled) fit of a deed ring over every drawn
+  // Only a parcel the plotted deed ACTUALLY sits on can be its alignment target. A deed must
+  // overlap the candidate by at least half the smaller footprint (else it's floating over the
+  // wrong ground — the 42-ac tract with no parcel under it), AND their areas must be within
+  // ~4:3 (a rigid, scale-locked fit can't honestly bridge materially different-sized tracts —
+  // a small deed sitting inside a big parent parcel). Without these gates bestDeedFit force-fit
+  // a deed to the nearest lowest-residual parcel regardless, producing a bogus rotation (B625×2).
+  const DEED_FIT_MIN_OVERLAP = 0.5;
+  const DEED_FIT_MIN_AREARATIO = 0.75;
+  // Best rigid (rotation+translation, never scaled) fit of a deed ring over every QUALIFYING
   // parcel — the lowest landing residual wins, so a stray neighbour parcel can't hijack it.
   const bestDeedFit = (deedRing) => {
+    const deedA = Math.abs(polyArea(deedRing));
+    if (!(deedA > 0)) return null;
     let best = null;
     for (const pc of activeParcelRings()) {
+      const parcelA = Math.abs(polyArea(pc.points));
+      if (!(parcelA > 0)) continue;
+      const inter = polyIntersectArea(deedRing, pc.points);
+      if (inter / Math.min(deedA, parcelA) < DEED_FIT_MIN_OVERLAP) continue; // deed isn't on this parcel
+      if (Math.min(deedA, parcelA) / Math.max(deedA, parcelA) < DEED_FIT_MIN_AREARATIO) continue; // different-size tract
       const fit = solveDeedAlignment(deedRing, pc.points);
       if (fit.ok && (!best || fit.residualFt < best.fit.residualFt)) best = { fit, parcel: pc };
     }
