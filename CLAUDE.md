@@ -21,6 +21,15 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > token burn here. The `*-DONE.md` archives are **write-only — never Read them** except to
 > look up one specific past ID.
 >
+> **🔢 To MINT a new B# or V#, run `npm run next-id` — never grep the archives for the max (B755).**
+> It prints `Next free → B### · V###` in one line, scanning `BACKLOG.md` + `BACKLOG-DONE.md` (and the
+> two `VERIFICATION*.md`) **on disk, at zero model-token cost**. This is the fix for the recurring
+> "which number do we ship/merge with?" tax: the highest id routinely lives on a *Done* item in the
+> 1.4 MB archive, so reading files into context to eyeball the max was pure waste. `--json` for a
+> machine-readable object, `--b`/`--v` for just the paste-ready label. Multi-mint runs consecutively
+> from `nextB` (e.g. B755, B756). (This finds the *number*; **DEDUPE-FIRST** below still governs
+> *whether* to mint at all — a recurrence re-opens the original B#, it doesn't take a new one.)
+>
 > **🔄 Keep the per-folder pointers fresh.** Some module folders carry a short `CLAUDE.md`
 > pointer (what's here + key files) that auto-loads only when you work in that folder. **When
 > you rename, move, or delete a key file, update that folder's pointer in the SAME commit.**
@@ -63,8 +72,8 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
 > work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `BACKLOG-DONE.md` that same
 > session — never mark it done in place** (marking-done-in-place is exactly what bloated this file). The next
-> B# = highest `B#` across **both** files + 1. (Product backlog; distinct from the "Deferred / maintenance
-> backlog" near the end of this file.)
+> B# = highest `B#` across **both** files + 1 — **get it with `npm run next-id`** (don't grep for it).
+> (Product backlog; distinct from the "Deferred / maintenance backlog" near the end of this file.)
 >
 > **⏳ THREE-STATE LIFECYCLE (B645): items move 🔲 Open → ⏳ Verify → ✅ Done, not straight to Done.** A
 > `Verify: sandbox` item (green build + the right unit/headless self-test proves it) goes straight to Done. A
@@ -288,7 +297,8 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   remounts it → focus loss, lost input state, thrashing. (The remount / focus-loss regression class.)
 - **DEDUPE-FIRST** — Search **Open, ⏳ Verify, AND Done** (`^### B` headings + `#tags` + symbols; grep
   `BACKLOG_OPEN.md` for the live set) before minting a `B#`. A matching prior item gets the recurrence
-  treatment (back to Open, `Recurrence:` line, `(×N)` title) — never a fresh number.
+  treatment (back to Open, `Recurrence:` line, `(×N)` title) — never a fresh number. When you DO mint,
+  get the number from **`npm run next-id`** (B755) — never grep the archives for the max.
 - **TOMBSTONE-DELETES** — Every removal path records tombstones for its **FULL cascade set** before the
   next flush, so a merge / sync can't resurrect the deleted item (or raise a false "changed in another
   session" conflict). Applies to every delete handler, not just the obvious one. (B276 / B556 / B596 / B612.)
