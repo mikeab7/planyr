@@ -42,8 +42,13 @@ describe("overlay storage — fileKind (B72 polish: PDF + images, else stay inli
     expect(fileKind({ type: "", name: "Survey.PDF" })).toEqual({ ext: "pdf", contentType: "application/pdf" });
     expect(fileKind({ type: "", name: "sheet.jpeg" })).toEqual({ ext: "jpg", contentType: "image/jpeg" });
   });
+  it("classifies CAD files by extension — DXF/DWG back up like PDFs (B747/B748)", () => {
+    expect(fileKind({ type: "", name: "plan.dxf" })).toEqual({ ext: "dxf", contentType: "application/dxf" });
+    expect(fileKind({ type: "", name: "plan.dwg" })).toEqual({ ext: "dwg", contentType: "image/vnd.dwg" });
+    expect(fileKind({ type: "image/vnd.dxf", name: "x" }).ext).toBe("dxf");
+  });
   it("returns null for unsupported types (caller keeps it inline)", () => {
     expect(fileKind({ type: "image/tiff", name: "x.tif" })).toBe(null);
-    expect(fileKind({ type: "", name: "x.dwg" })).toBe(null);
+    expect(fileKind({ type: "", name: "x.zip" })).toBe(null);
   });
 });

@@ -195,6 +195,16 @@ server/                   # placeholder README only — NOT built or deployed; b
 - `vite.config` has `base: "./"` (for the GitHub Pages subpath); works unchanged at a
   domain root too.
 
+### Dependency notes (client bundle)
+Runtime deps are kept few and deliberate. New client dependency added 2026-07-10:
+- **`dxf-parser` (B747, ~380 KB, one transitive dep `loglevel`)** — parse-only DXF tokeniser used by
+  the site-plan overlay's CAD import. Justified over hand-rolling: DXF group-code parsing has to
+  survive many real-world exporter/version quirks, and a robust hand-rolled full parser fails the
+  cost/benefit test. We hand-roll ONLY the entity→SVG rendering (the civil subset), never the parse.
+  It's **parse-only** (no DOM), so it runs inside the DXF Web Worker, and it's imported lazily behind
+  a `?worker` specifier + a dynamic `import()` in `openOverlayFile` — so the CAD parser never rides
+  the initial planner bundle (loads only on the first `.dxf`/`.dwg` drop).
+
 ## Workflow & deploy
 - **Branch per workstream; `main` is the protected, always-working, deployed line.
   No direct commits to `main` from here on.**

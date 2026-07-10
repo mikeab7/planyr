@@ -8,14 +8,21 @@ import { supabase } from "./supabase.js";
 import { getUser } from "./auth.js";
 
 export const BUCKET = "doc-review-files";
-const MAX_BYTES = 50 * 1024 * 1024; // free-tier per-file cap
+export const MAX_BYTES = 50 * 1024 * 1024; // free-tier per-file cap
 
 // uid-first key (RLS-safe). `ext` distinguishes PDF vs image on reload.
 export const overlayKey = (uid, siteId, overlayId, ext = "pdf") =>
   `${uid}/site-overlays/${siteId || "unfiled"}/${overlayId}.${ext}`;
 
 // Map a dropped file to {ext, contentType}, or null for unsupported types (stay inline).
-const BY_TYPE = { "application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpg" };
+// B747/B748 — DXF (parsed client-side) + DWG (converted via B238) join PDF/PNG/JPG so a CAD
+// overlay's original bytes back up to Storage for cross-device reload. MIME is unreliable for
+// CAD, so the extension fallback is what actually classifies a dragged .dxf/.dwg.
+const BY_TYPE = {
+  "application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpg",
+  "image/vnd.dxf": "dxf", "application/dxf": "dxf",
+  "image/vnd.dwg": "dwg", "application/acad": "dwg", "image/x-dwg": "dwg",
+};
 export function fileKind(file) {
   let ct = file && file.type;
   if (!BY_TYPE[ct]) {
@@ -23,6 +30,8 @@ export function fileKind(file) {
     if (n.endsWith(".pdf")) ct = "application/pdf";
     else if (n.endsWith(".png")) ct = "image/png";
     else if (n.endsWith(".jpg") || n.endsWith(".jpeg")) ct = "image/jpeg";
+    else if (n.endsWith(".dxf")) ct = "application/dxf";
+    else if (n.endsWith(".dwg")) ct = "image/vnd.dwg";
   }
   return BY_TYPE[ct] ? { ext: BY_TYPE[ct], contentType: ct } : null;
 }
