@@ -93,6 +93,9 @@ import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterv
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
+import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./lib/overlayVectorSvg.js";
+import { labelAnchors, placeLabels } from "./lib/boundaryLabels.js";
+import { gridRequest } from "./lib/demGrid.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger,
   floodGeoBbox, pickWorstCase, effectivePadElev, NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
@@ -6639,7 +6642,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       minY: Math.min(...pts.map((p) => p.y)) - PAD, maxY: Math.max(...pts.map((p) => p.y)) + PAD,
     };
   };
-  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true) => {
+  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null) => {
     if (!svgRef.current) return null;
     const fe = exportFeetExtent(frame);
     if (!fe) return null;
@@ -6721,6 +6724,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (o.fallbackSrc) im.setAttribute("data-fallback-href", o.fallbackSrc);
         clone.insertBefore(im, anchor.nextSibling);
         anchor = im;
+      }
+    }
+    // GIS VECTOR/client layers (B745): transmission, road-authority, county/city/ETJ boundaries,
+    // contours, drainage arrows, OSM/Mapillary points. No server image — each layer's lat/lon
+    // geometry (gathered live in exportVectorOverlaysForFrame) is reprojected into the SAME feet
+    // frame via lngLatRingToFeet → f2p and redrawn as styled SVG, composited at the SAME z-anchor
+    // as the raster overlays (above them, below the drawn geometry). Colors/weights ride from the
+    // live layer (PDF-PARITY); stroke weights ride the export thinning pass like every plan line.
+    if (includeMapLayers && exportVectorOverlays && exportVectorOverlays.length) {
+      const projectLngLat = (ll) => f2p(lngLatRingToFeet([ll], origin.lon, origin.lat)[0]); // the ONE projection seam
+      for (const v of exportVectorOverlays) {
+        const { svg, skipped } = buildOverlayVectorFragment(v.features, projectLngLat, { opacity: v.opacity, labels: v.labels });
+        if (skipped) console.warn(`[export] ${v.label || v.id}: ${skipped} vector feature(s) skipped (non-finite projection)`);
+        if (!svg) continue;
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("data-export-vector", "1");
+        g.setAttribute("data-layer-id", v.id);
+        if (v.label) g.setAttribute("data-layer-label", v.label);
+        g.innerHTML = svg; // inline SVG fragment — same innerHTML idiom as the sheet furniture below
+        clone.insertBefore(g, anchor.nextSibling);
+        anchor = g;
       }
     }
     // Site-plan overlays (B72) obey the print dialog's "Print overlay" toggle (B131):
@@ -6923,6 +6947,116 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return out; // ordered bottom→top
   };
+  // B745 — a Leaflet path style ({color,weight,opacity,dashArray}) → our normalized style. Base
+  // opacity stays 1 here (per-layer opacity is applied once, via the pure emitter's opts.opacity).
+  const leafStyle = (s) => ({ stroke: s && s.color, strokeWidth: s && s.weight, strokeOpacity: s && s.opacity != null ? s.opacity : 1, dash: s && s.dashArray });
+  const projLLtoPx = ([lng, lat]) => f2p(lngLatRingToFeet([[lng, lat]], origin.lon, origin.lat)[0]);
+  // Read one live VECTOR/client layer off overlayRefs and normalize it to { features, labels }
+  // (coords [lon,lat]) for the export. Sync-only — captures exactly what's painted; anything not
+  // loaded / out of frame / not cached yields empty (the caller logs + skips). PDF-PARITY: colors,
+  // weights, dashes, radii and the terrain palette come verbatim from the live layer / registry.
+  const normalizeVectorLayer = (id, cfg, ref) => {
+    const kind = cfg.kind;
+    if (kind === "esriFeature") { // transmission (hifld_tx), road-authority: line features
+      if (typeof ref.eachFeature !== "function") return { features: [] };
+      const features = [];
+      ref.eachFeature((l) => {
+        const gj = l && l.feature;
+        if (!gj || !gj.geometry) return;
+        const style = leafStyle(cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1 });
+        features.push(...esriLineFeatures(gj.geometry, style));
+      });
+      return { features };
+    }
+    if (kind === "vector") { // county/city/ETJ boundaries: outline polygons + collision-placed names
+      const layers = typeof ref.getLayers === "function" ? ref.getLayers() : [];
+      const geo = layers.find((l) => typeof l.toGeoJSON === "function" && typeof l.eachFeature !== "function");
+      let fc = geo ? geo.toGeoJSON() : null;
+      if ((!fc || !fc.features) && typeof ref.eachFeature === "function") { const fs = []; ref.eachFeature((l) => l.feature && fs.push(l.feature)); fc = { type: "FeatureCollection", features: fs }; }
+      if (!fc || !fc.features || !fc.features.length) return { features: [] };
+      const style = { stroke: cfg.color || "#374151", strokeWidth: cfg.weight || 2, strokeOpacity: 1, fill: "none" };
+      const features = [];
+      for (const f of fc.features) features.push(...esriPolygonFeatures(f.geometry, style));
+      let labels = [];
+      const src = VECTOR_SOURCES[id];
+      if (src && src.labelField) {
+        const anchors = labelAnchors(fc, { labelField: src.labelField, titleCase: !!src.titleCaseLabel });
+        const placed = placeLabels(anchors, { project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
+        const tmpl = src.nameTemplate || "{name}";
+        labels = placed.map((p) => ({ x: p.box.x, y: p.box.y, text: tmpl.replace("{name}", p.name), uppercase: id === "jur_county" }));
+      }
+      return { features, labels };
+    }
+    if (kind === "overpass") { // OSM power/hydrants: lines/polygons/points, styled off l.options
+      const features = [];
+      ref.eachLayer((l) => {
+        const o = l.options || {}, base = o.opacity || 1;
+        if (typeof l.getLatLngs === "function") {
+          const raw = l.getLatLngs();
+          const ring = Array.isArray(raw[0]) ? raw[0] : raw; // polygon nests one level deeper
+          const coords = ring.map((p) => [p.lng, p.lat]);
+          if (l instanceof L.Polygon) features.push({ kind: "polygon", coords: [coords], style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: (o.fillOpacity ?? 0) / base } });
+          else features.push({ kind: "line", coords, style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, dash: o.dashArray } });
+        } else if (typeof l.getLatLng === "function") {
+          const c = l.getLatLng();
+          features.push({ kind: "point", coords: [c.lng, c.lat], style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: (o.fillOpacity ?? 1) / base, radius: o.radius } });
+        }
+      });
+      return { features };
+    }
+    if (kind === "mapillary") { // detection points
+      const features = [];
+      ref.eachLayer((l) => {
+        if (typeof l.getLatLng !== "function") return;
+        const o = l.options || {}, c = l.getLatLng(), base = o.opacity || 1;
+        features.push({ kind: "point", coords: [c.lng, c.lat], style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: (o.fillOpacity ?? 1) / base, radius: o.radius } });
+      });
+      return { features };
+    }
+    if (kind === "contours" || kind === "flowdir") { // terrain — read the cached artifact for the current view (what's painted)
+      const map = geoMapRef.current;
+      if (!map) return { features: [] };
+      const b = map.getBounds();
+      const req = gridRequest({ west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }, map.getZoom());
+      const hit = gisCache.read(`terrain:${req.key}`);
+      if (!hit || !hit.data) { console.warn(`[export] terrain "${cfg.label || id}" not cached for this view — skipped`); return { features: [] }; }
+      if (kind === "contours") {
+        const { features, labels } = contourFeatures(hit.data.contours);
+        const placedLabels = labels.map((lb) => { const q = projLLtoPx([lb.lng, lb.lat]); return { x: q.x, y: q.y, text: lb.text }; });
+        return { features, labels: placedLabels };
+      }
+      const features = [];
+      for (const a of hit.data.arrows || []) features.push(...arrowGlyphFeatures(a, projLLtoPx(swapLatLng(a.ll))));
+      return { features };
+    }
+    return { features: [] };
+  };
+  // B745 — capture the VECTOR/client-drawn overlay layers (transmission, boundaries, contours,
+  // drainage arrows, OSM/Mapillary) for the export. buildExportSvg reprojects lat/lon → feet → SVG;
+  // this only enumerates active non-raster layers + normalizes their live geometry. Sync-only; a
+  // layer that's on but has nothing to draw (not loaded / out of frame / not cached) is skipped +
+  // logged — never a silent partial, never a blocking re-query.
+  const exportVectorOverlaysForFrame = () => {
+    if (!origin) return [];
+    const out = [];
+    for (const [id, cfg] of Object.entries(ALL_LAYERS)) {
+      const st = overlays?.[id];
+      if (!st || !st.on) continue;
+      const isRaster = !cfg.kind || cfg.kind === "dynamic" || cfg.kind === "esriImage";
+      if (isRaster) continue; // Class A handled by exportOverlaysForFrame
+      if (layerStatus?.[id]?.state === "failed") continue;
+      const ref = overlayRefs.current?.[id];
+      if (!ref || ref === "pending" || typeof ref !== "object") continue; // not loaded yet
+      let norm;
+      try { norm = normalizeVectorLayer(id, cfg, ref); }
+      catch (e) { console.warn(`[export] vector layer "${cfg.label || id}" extraction failed`, e); continue; }
+      const features = (norm && norm.features) || [];
+      const labels = (norm && norm.labels) || [];
+      if (!features.length && !labels.length) continue; // on but nothing in view → honest omission
+      out.push({ id, label: cfg.label, features, labels, opacity: st.opacity ?? cfg.opacity ?? 0.9 });
+    }
+    return out; // ALL_LAYERS registry order == on-screen paint order
+  };
   // B739 LOUD-FAILURE — one batched banner naming the GIS layers whose imagery couldn't be
   // fetched (so the export dropped them), kept separate from the aerial warning so the user can
   // tell which failed. No-op when nothing dropped.
@@ -6933,8 +7067,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const exportPNG = async () => {
     const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap for the export
-    const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS layers (floodplain, pipelines, …)
-    const built = buildExportSvg(printFrame, true, PAL.paper, exportAerial, exportOverlays); // use the print crop if one's set, else dev extent
+    const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …)
+    const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
+    const built = buildExportSvg(printFrame, true, PAL.paper, exportAerial, exportOverlays, true, exportVectorOverlays); // use the print crop if one's set, else dev extent
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     const { clone, w, h } = built;
     const { aerialDropped, overlaysDropped } = await inlineImages(clone); // embed the aerial + GIS layers so the raster includes them (warned loudly on the success path below — B735/B739)
@@ -7025,8 +7160,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
     const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image
-    const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS layers (floodplain, pipelines, …) for the print frame
-    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers); // force WHITE paper for print/PDF
+    const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
+    const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays); // force WHITE paper for print/PDF
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     setExportingPDF(true);
     try {
@@ -7129,7 +7265,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const overlayPrintable = hasPrintableOverlay(sheetOverlays); // gates the "Print overlay" checkbox — no dead control when nothing's loaded
   // B739 — is any RASTER GIS layer (floodplain, pipelines, wetlands, utilities, relief) turned on?
   // Gates the "Print map layers" checkbox so there's no dead control when no such layer is live.
-  const mapLayersPrintable = Object.entries(ALL_LAYERS).some(([id, cfg]) => overlays?.[id]?.on && (!cfg.kind || cfg.kind === "dynamic" || cfg.kind === "esriImage"));
+  const mapLayersPrintable = Object.keys(ALL_LAYERS).some((id) => overlays?.[id]?.on); // B739 raster + B745 vector — any live layer prints
   const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay, ml = printMapLayers; setPrintMode(false); setTimeout(() => exportPDF(p, o, ov, ml), 60); };
   const startPrintMove = (e) => {
     e.stopPropagation();

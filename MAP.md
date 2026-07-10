@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-10 @ `6d714e3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-10 @ `cab0106` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_227 source files mapped._
+_228 source files mapped._
 
 ## infra
 
@@ -335,6 +335,8 @@ _227 source files mapped._
   - _exports_: `chooseOverlayScale`, `COMMON_SCALES`, `detectSheet`, `feetPerInchForPreset`, `feetPerInchFromPair`, `ftPerPointForScale`, `matchScalePreset`, `PAGE_UNIT_TO_IN`, `PAGE_UNITS`, `parseDistanceInput`, `parseScaleNote`, `parseSheetScale`, `POINTS_PER_INCH`, `REAL_UNIT_TO_FT`, `REAL_UNITS`, `SCALE_PRESETS`, `scaleForFtPerPoint`
 - **`src/workspaces/site-planner/lib/overlayStorage.js`** — Supabase Storage I/O for overlay/parcel-drawing/aerial-underlay source files (uid-first RLS keys, upload/download/delete), fallback-safe to inline raster when logged-out/oversize/error
   - _exports_: `BUCKET`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fileKind`, `overlayKey`, `parcelDrawingKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadParcelDrawingFile`, `uploadUnderlayDataUrl`
+- **`src/workspaces/site-planner/lib/overlayVectorSvg.js`** — Pure vector-overlay SVG emitter for the print export (B745): reprojects normalized [lon,lat] line/polygon/point features via an injected projection into styled `<path>`/`<circle>` (LOUD-skip on non-finite), plus esri/terrain normalizers (contour lines, drainage-arrow glyphs)
+  - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors
   - _exports_: `ADD_CURSOR`, `makeParcelDisplayLayer`, `makeParcelImageLayer`, `makeParcelLayer`, `makeSnapshotLayer`, `PARCEL_MINZOOM`, `parcelDisplayIsImageOnly`, `REMOVE_CURSOR`
 - **`src/workspaces/site-planner/lib/parcelQuery.js`** — Shared parcel ID/address lookup: SQL-injection-safe where-clause builder with county scoping and primary-CAD to statewide-TxGIO outage fallback plus circuit-breaker health recording
