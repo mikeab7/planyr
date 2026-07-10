@@ -1325,3 +1325,104 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
     note: SCREENING_CAVEAT,
   };
 }
+
+// ---------------------------------------------------------------------------
+// B750 — user overrides + a remembered result for the Stormwater readout.
+//
+// The GIS detection (resolveDrainageContext) stays the source of truth. These pure
+// helpers let the UI (a) fall back to the user's own answer when the county maps can't
+// confirm a fact — "an HCFCD channel runs through my site, I can see it" — and (b)
+// persist a compact summary of the last check so the readout survives a reload without
+// re-hitting the (often flaky) county GIS. Pure + Node-testable; no DOM/network.
+// ---------------------------------------------------------------------------
+
+/* Effective "drains to an HCFCD channel" value. A user override (true|false) is
+ * explicit and wins; otherwise the auto-detected adjacency stands (null = still
+ * unknown). `source` tells the UI which one it used so it can say so. Pure. */
+export function effectiveChannelDischarge(overrideValue, detectedNear) {
+  const isOverride = overrideValue === true || overrideValue === false;
+  return { value: isOverride ? overrideValue : (detectedNear ?? null), source: isOverride ? "override" : "auto" };
+}
+
+/* Effective reviewing-authority id. A non-empty user override wins over the detected
+ * primaryReviewer id; both may be null (nothing resolved yet). Pure. */
+export function effectiveReviewer(overrideAuthorityId, detectedAuthorityId) {
+  const ov = overrideAuthorityId || null;
+  return { authorityId: ov || detectedAuthorityId || null, source: ov ? "override" : "auto" };
+}
+
+/* Picker choices for the reviewing-authority override — {id,label} derived from the
+ * modeled rule records + municipal overlays, so a newly-modeled authority appears in
+ * the picker automatically (never a hand-maintained label list). HCFCD + City of
+ * Houston lead because DETENTION_RULES is keyed hcfcd, coh, … in that order. Pure. */
+export const DETENTION_AUTHORITY_CHOICES = [
+  ...Object.keys(DETENTION_RULES).map((id) => ({ id, label: (DETENTION_RULES[id][0] && DETENTION_RULES[id][0].authorityLabel) || id })),
+  ...Object.keys(MUNICIPAL_OVERLAYS).map((id) => ({ id, label: MUNICIPAL_OVERLAYS[id].authorityLabel || id })),
+];
+
+/* A compact, JSON-storable summary of a resolveDrainageContext result — everything the
+ * readout re-renders from, MINUS the bulky per-feature geometry (channel polyline,
+ * flood polygons) and non-serializable bits (regex-bearing watershed overlays, the
+ * rule object). Stored in settings.drainage.lastCheck. Watershed OVERLAYS are dropped
+ * here and re-derived from watershed.names on hydrate. Pure. */
+export function slimDrainageContext(ctx) {
+  if (!ctx) return null;
+  const a = ctx.authority || {};
+  const ch = ctx.channel || null;
+  return {
+    authority: {
+      primaryReviewerId: a.primaryReviewer?.authorityId ?? null,
+      channelAuthority: a.channelAuthority ?? null,
+      overlays: a.overlays || [],
+      ambiguous: a.ambiguous || [],
+      flags: a.flags || [],
+      mudState: a.mud?.state ?? null,
+      jurisdiction: {
+        city: a.jurisdiction?.city || [],
+        county: a.jurisdiction?.county || [],
+        etj: a.jurisdiction?.etj || [],
+      },
+    },
+    flood: ctx.flood ? { zones: ctx.flood.zones || [], state: ctx.flood.state, ageMs: ctx.flood.ageMs ?? null } : null,
+    channel: ch ? { near: ch.near ?? null, unitNo: ch.unitNo ?? null, name: ch.name ?? null, type: ch.type ?? null, distFt: ch.distFt ?? null, state: ch.state ?? null } : null,
+    watershed: ctx.watershed ? { names: ctx.watershed.names || [], state: ctx.watershed.state, ageMs: ctx.watershed.ageMs ?? null } : null,
+    groundElevFt: ctx.groundElevFt ?? null,
+    groundDatum: ctx.groundDatum ?? "NAVD88",
+  };
+}
+
+/* Rebuild a read-context-shaped object from a slim summary: re-derive the rule record
+ * (ruleFor) and the watershed overlays (from the module constant) so a reloaded readout
+ * matches a fresh check for everything that doesn't need geometry. Geometry-dependent
+ * extras (floodplain-mitigation footprints, the cross-section-crosses-channel test) stay
+ * absent (channel.geometry/floodGeo null) — the render path null-guards both. Marks
+ * `restored:true`. Pure. */
+export function hydrateDrainageContext(slim) {
+  if (!slim) return null;
+  const a = slim.authority || {};
+  const primaryReviewer = a.primaryReviewerId ? { authorityId: a.primaryReviewerId, rule: ruleFor(a.primaryReviewerId) } : null;
+  const watershedNames = slim.watershed?.names || [];
+  const watershedOverlays = WATERSHED_OVERLAYS.filter((ov) => watershedNames.some((n) => ov.match.test(n)));
+  return {
+    restored: true,
+    authority: {
+      primaryReviewer,
+      channelAuthority: a.channelAuthority ?? null,
+      overlays: a.overlays || [],
+      ambiguous: a.ambiguous || [],
+      flags: a.flags || [],
+      mud: { state: a.mudState ?? null, districts: [] },
+      jurisdiction: { city: a.jurisdiction?.city || [], county: a.jurisdiction?.county || [], etj: a.jurisdiction?.etj || [] },
+      sources: [],
+      note: SCREENING_CAVEAT,
+    },
+    flood: slim.flood ? { zones: slim.flood.zones || [], state: slim.flood.state, ageMs: slim.flood.ageMs ?? null } : { zones: [], state: "empty", ageMs: null },
+    channel: slim.channel ? { ...slim.channel, geometry: null } : { near: null, state: "not-applicable" },
+    watershed: slim.watershed ? { names: watershedNames, state: slim.watershed.state, ageMs: slim.watershed.ageMs ?? null } : null,
+    watershedOverlays,
+    groundElevFt: slim.groundElevFt ?? null,
+    groundDatum: slim.groundDatum ?? "NAVD88",
+    floodGeo: null,
+    note: SCREENING_CAVEAT,
+  };
+}

@@ -257,6 +257,13 @@ export default function DocReview({
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // PRIMARY selected markup id (property panel / vertex edit)
   const [selSet, setSelSet] = useState([]);         // B569: the full multi-selection (markup ids, current page)
+  // B750: a single click SELECTS only — the Properties section shows a markup's props only after an
+  // explicit open (double-click, or a freshly-drawn markup). `propsForId` = the selected markup id whose
+  // Properties are open (must equal `sel`), else null. `dblRef` carries, for a double-click, whether the
+  // markup was ALREADY selected at the FIRST press — so an already-selected TEXT note edits its text while
+  // anything else opens Properties ("click to select, then double-click to edit text").
+  const [propsForId, setPropsForId] = useState(null);
+  const dblRef = useRef({ id: null, t: 0, wasSel: false });
   const [hoverId, setHoverId] = useState(null);     // B156: markup under the cursor in Select mode (pre-click hover preview)
   const [marquee, setMarquee] = useState(null);     // B570: live box-select rubber-band { a, b } in page units
   const marqueeRef = useRef(null);                  // drag bookkeeping for the marquee gesture (no re-render churn)
@@ -350,6 +357,10 @@ export default function DocReview({
     setSelSet((s) => { const f = s.filter(onPage); return f.length === s.length ? s : f; });
     setSel((id) => (id && onPage(id) ? id : null));
   }, [markups, page]);
+  // B750: drop the Properties-open marker whenever the selection moves off it (single click to another
+  // markup, deselect, page change) so a plain click can't leave a stale panel open. One effect covers
+  // every selection path — no need to touch selectOne/clearSelection/applySelMods.
+  useEffect(() => { setPropsForId((cur) => (cur && cur === sel ? cur : null)); }, [sel]);
 
   /* ---- undo / redo (B303) ----
    * Snapshots of the editable doc state (markups + per-sheet calibration), by reference,
@@ -1038,7 +1049,7 @@ export default function DocReview({
     setDraft(null);
     // Bluebeam: a single-use tool reverts to Select after one markup and selects the new one
     // (so its properties show + you can tweak it); a locked tool stays armed.
-    if (!toolLock) { setTool("select"); selectOne(id); }
+    if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B750: a freshly drawn markup shows its Properties (its rail section would be blank otherwise)
   };
 
   // Erase pen/highlight markups whose points overlap the given box (two corner pts).
@@ -1091,12 +1102,12 @@ export default function DocReview({
       // New callout: pts[0] = leader tip (pointer target), pts[1] = text box anchor
       const id = uid();
       setMarkups((a) => [...a, { id, page: ed.page, kind: "callout", pts: [ed.calloutTip, ed.pt], ...seedStyle("callout"), text }]);
-      if (!toolLock) { setTool("select"); selectOne(id); }
+      if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B750: show the new callout's Properties
     } else {
       // honor the sticky text style (size/color/bold/…) set before drawing
       const id = uid();
       setMarkups((a) => [...a, { id, page: ed.page, kind: "text", pts: [ed.pt], ...seedStyle("text"), text }]);
-      if (!toolLock) { setTool("select"); selectOne(id); } // revert + select like the other tools
+      if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B750: revert + select + show the new text's Properties
     }
   };
 
@@ -1163,6 +1174,14 @@ export default function DocReview({
         groupDragRef.current = { ids: [...selSet], start: p, orig, moved: false };
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
         return;
+      }
+      if (hitId) { // B750: record whether this markup was ALREADY selected at the FIRST press of a
+        // potential double-click (a 2nd press within 350ms preserves the 1st-press value), BEFORE
+        // selectOne makes it current — onDbl reads this to pick edit-text vs open-properties.
+        const nowT = Date.now(), pr = dblRef.current;
+        dblRef.current = (pr.id === hitId && nowT - pr.t < 350)
+          ? { id: hitId, t: nowT, wasSel: pr.wasSel }
+          : { id: hitId, t: nowT, wasSel: sel === hitId };
       }
       selectOne(hitId);
       if (hitId) { // arm a single move-drag; a sub-threshold drag stays a plain click-select (B293)
@@ -1406,10 +1425,16 @@ export default function DocReview({
     }
   };
   const onDbl = (e) => {
-    if (tool === "select") { // double-click a text note → edit it inline (B293)
+    if (tool === "select") {
+      // B750 — double-click opens the markup's Properties. Exception: an ALREADY-selected TEXT note or
+      // callout edits its text in place ("click to select, then double-click to edit text"). `dblRef`
+      // (set in onDown) says whether it was selected at the FIRST press of this double-click.
       const m = pageMarks.find((mm) => mm.id === hitTest(toPage(e)));
-      if (m && m.kind === "text") openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
-      if (m && m.kind === "callout") openEditor({ id: m.id, page, pt: (m.pts && m.pts[1]) || (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
+      if (!m) return;
+      const wasSel = dblRef.current.id === m.id ? dblRef.current.wasSel : false;
+      if (wasSel && m.kind === "text") openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
+      else if (wasSel && m.kind === "callout") openEditor({ id: m.id, page, pt: (m.pts && m.pts[1]) || (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
+      else setPropsForId(m.id); // not-already-selected (→ props) or a non-text markup (→ props)
       return;
     }
     if (!draft) return;
@@ -1960,23 +1985,26 @@ export default function DocReview({
                 );
               })}
             </div>
-            {/* Properties (B426 + B437) — shows for a SELECTED markup, OR for the ARMED drawable tool
-                so you can set color/weight/fill/font BEFORE drawing (new markups inherit the sticky
-                style via commit()). Driven by schemaForMarkup → PropertyPanel. */}
+            {/* Properties (B426 + B437; B750) — shows for a markup whose Properties were EXPLICITLY opened
+                (double-click, or a freshly-drawn markup: propsForId===sel), OR for the ARMED drawable tool
+                so you can set color/weight/fill/font BEFORE drawing (new markups inherit the sticky style
+                via commit()). A plain single-click selects only and leaves this closed. Driven by
+                schemaForMarkup → PropertyPanel. */}
             {(() => {
               const selM = sel ? pageMarks.find((mm) => mm.id === sel) : null;
-              const armed = (!selM && toolById(tool) && propsForTool(tool).length) ? tool : null;
-              if (!selM && !armed) return null;
+              const showSelProps = !!selM && propsForId === sel; // B750: explicit open gate
+              const armed = (!showSelProps && toolById(tool) && propsForTool(tool).length) ? tool : null;
+              if (!showSelProps && !armed) return null;
               // Show the ACTUAL seeded style for an armed tool (seedStyle: propStyle > tool default >
               // kind default > column default) so the panel swatch matches what will be drawn — a
               // bare propStyle would show the generic orange column default for a teal measure (B734).
-              const subject = selM || { kind: armed, ...seedStyle(armed) };
+              const subject = showSelProps ? selM : { kind: armed, ...seedStyle(armed) };
               return (
                 <div style={{ flex: "none", borderTop: `1px solid ${PAL.line}` }}>
                   <div style={{ padding: "6px 12px 4px", fontSize: 10, color: PAL.muted, fontWeight: 700,
                     textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>{selM ? "Properties" : "Tool style"}</span>
-                    <span style={{ fontWeight: 500, color: PAL.ink, textTransform: "none", letterSpacing: 0, fontSize: 11 }}>{selM ? selM.kind : `${armed} · default`}</span>
+                    <span>{showSelProps ? "Properties" : "Tool style"}</span>
+                    <span style={{ fontWeight: 500, color: PAL.ink, textTransform: "none", letterSpacing: 0, fontSize: 11 }}>{showSelProps ? selM.kind : `${armed} · default`}</span>
                   </div>
                   <div data-testid="property-panel" style={{ maxHeight: 220, overflowY: "auto" }}>
                     <PropertyPanel markup={subject} onChange={onPropChange} />

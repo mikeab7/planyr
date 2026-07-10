@@ -109,6 +109,8 @@ import {
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt,
   resolveDrainageContext, ruleBadge,
   computeRateBasedDetention, computePumpedCredit, DESIGN_STORM_PERIODS,
+  effectiveChannelDischarge, effectiveReviewer, DETENTION_AUTHORITY_CHOICES,
+  slimDrainageContext, hydrateDrainageContext,
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
@@ -1078,6 +1080,12 @@ const DEFAULT_SETTINGS = {
   speedBay: 60, bayLengthTarget: 56, bayDepthTarget: 50, bayMin: 50, bayMax: 58,
   doorWidth: 9, doorOC: 12,
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
+  // B750 — drainage overrides + remembered last check. drainsToHcfcdChannel / authorityId:
+  // null = auto (use GIS detection); true/false or an authority id = the user's own answer,
+  // used when the county maps can't confirm it. lastCheck = a slim summary of the last
+  // "Check drainage criteria" result so the readout survives a reload. Reads null-guard, so
+  // a project saved before this key still works.
+  drainage: {}, // { drainsToHcfcdChannel, authorityId, lastCheck }
 };
 
 // Eye / eye-off icons for the per-overlay visibility toggle (B277) — inline SVG so
@@ -1208,7 +1216,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
   const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
   const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
-  const [propsDismissed, setPropsDismissed] = useState(false); // B656 follow-up: ✕ hides the companion while the element stays selected; re-clicking the element reopens it
+  // B750: the Properties companion no longer follows raw selection — a single click SELECTS only.
+  // `propsFor` marks the selection whose companion is explicitly open (a double-click, the phone ✎ pill,
+  // or the docked Properties tab set it); `null` = closed. The panel re-checks each render whether this
+  // still matches the current selection (propsMatches), so any OTHER selection path — single click,
+  // marquee, shift-multi, programmatic, undo/redo — leaves the companion closed without touching the
+  // ~70 setSel sites. Holds {kind,id} or the sentinel 'multi' (a styleable multi-selection).
+  const [propsFor, setPropsFor] = useState(null);
   useEffect(() => {
     let mq; try { mq = window.matchMedia(`(max-width: ${FLOAT_MIN_WIDTH}px)`); } catch (_) { return undefined; }
     const on = () => setNarrow(mq.matches);
@@ -1244,6 +1258,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // inspector. Derived from `sel` alone (not the resolved selectors) so early effects can use it.
   // B740 widens it to a styleable multi-selection.
   const companionSel = (!!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup")) || multiStyleable;
+  // B750: does the explicitly-opened Properties marker still point at the CURRENT selection? Declared
+  // here (right after companionSel) so both the canvas-shift effect and companionOpen can read it.
+  const propsMatches = propsFor === "multi"
+    ? multiStyleable
+    : (!!propsFor && !!sel && propsFor.kind === sel.kind && propsFor.id === sel.id);
   // B261: while a persistent group is selected, double-clicking a member "drills in" to
   // edit just that one element in place (without ungrouping). drillId = that member's id,
   // or null when we're operating on the group as a whole.
@@ -1873,14 +1892,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // a second press on the SAME feature within DBLTAP_MS *and* within DBLTAP_PX of the first (the time +
   // distance thresholds a native double-click uses). The distance gate is what stops a "click here to
   // select, then press over THERE to drag" gesture from misfiring as an edit.
-  const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0 });
+  const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0, wasSel: false });
   const labelSessionRef = useRef(null);  // B682 — coalesces a live label-spacing slider drag into one undo frame
+  // B750 — carries whether the feature was ALREADY selected at the FIRST press of a double-tap. That
+  // decides a double-click's job: an already-selected text-bearing feature edits its text ("click to
+  // select, then double-click to edit text"); anything else opens Properties. Read right after
+  // isDoubleTap(...) returns true.
+  const dblWasSelRef = useRef(false);
   const DBLTAP_MS = 350, DBLTAP_PX = 14;
-  const isDoubleTap = (e, id) => {
+  const isDoubleTap = (e, id, wasSel) => {
     const now = Date.now(), p = lastTapRef.current;
     const near = Math.abs(e.clientX - p.x) <= DBLTAP_PX && Math.abs(e.clientY - p.y) <= DBLTAP_PX;
-    if (p.id === id && now - p.t < DBLTAP_MS && near) { lastTapRef.current = { id: null, t: 0, x: 0, y: 0 }; return true; }
-    lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY };
+    if (p.id === id && now - p.t < DBLTAP_MS && near) { dblWasSelRef.current = !!p.wasSel; lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; return true; }
+    lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY, wasSel: !!wasSel };
     return false;
   };
   const pinch2Ref = useRef(null);        // active baseline { mid, dist } (svg-relative) | null
@@ -2562,12 +2586,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [sel?.kind, sel?.id]);
   // B656: the phone companion overlay follows the selection's lifetime — deselect closes it.
   useEffect(() => { if (!companionSel) setNarrowProps(false); }, [companionSel]);
-  // B656 follow-up: any (re)selection clears a prior ✕-dismiss so the companion reopens.
-  // Keyed on `sel` identity, not kind/id — every canvas click re-fires setSel({...}) with a
-  // fresh object (startMoveEl), so re-clicking the already-selected element reopens the panel.
-  // B740: also key on `multi` so a fresh marquee/shift multi-selection (which can leave sel=null)
-  // reopens the shared panel too.
-  useEffect(() => { setPropsDismissed(false); }, [sel, multi]);
+  // B750: when the selection moves OFF the element whose Properties are open, drop the marker so the
+  // companion closes and can't re-pop on a plain re-click. (Replaces the old B656 effect that RE-opened
+  // the companion on every selection change — the exact auto-open behavior we're removing.)
+  useEffect(() => {
+    const keep = propsFor === "multi"
+      ? multiStyleable
+      : (!!propsFor && !!sel && propsFor.kind === sel.kind && propsFor.id === sel.id);
+    if (propsFor && !keep) { setPropsFor(null); setNarrowProps(false); }
+  }, [sel, multi, propsFor, multiStyleable]);
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
   // so a later manual visit opens with the normal all-collapsed overview.
@@ -2598,14 +2625,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // EXACT delta we applied, so a mid-open rotation can never leave a residual sideways offset.
   const panelShiftRef = useRef(0);
   useEffect(() => {
-    const want = ((!!leftPanel || (companionSel && !propsDismissed)) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts; a ✕-dismissed companion must NOT hold the shift or it leaves a blank rail gap)
+    const want = ((!!leftPanel || (companionSel && propsMatches)) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts; B750: only an EXPLICITLY-open companion holds the shift, else it leaves a blank rail gap)
     if (want !== panelShiftRef.current) {
       const delta = want - panelShiftRef.current;
       panelShiftRef.current = want;
       setView((v) => ({ ...v, offX: v.offX - delta }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftPanel, narrow, companionSel, propsDismissed]);
+  }, [leftPanel, narrow, companionSel, propsMatches]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
@@ -3433,10 +3460,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
-    // B679 — double-click an UNLOCKED line / polyline / easement → edit its inline label in place
-    // (pointer capture eats the DOM dblclick, so read e.detail here). Locked features stay select-only.
-    if (m && !m.locked && (m.kind === "line" || m.kind === "polyline" || m.kind === "easement") && isDoubleTap(e, id)) {
-      setSel({ kind: "markup", id }); beginEditInline("markup", id); return;
+    // B750 — double-click an UNLOCKED markup opens its Properties. Exception: an ALREADY-selected
+    // text-bearing markup (line / polyline / easement — the ones with an inline label) edits its label
+    // instead ("click to select, then double-click to edit text"). Pointer capture eats the DOM dblclick,
+    // so we reconstruct the double-tap here. Locked features stay select-only.
+    if (m && !m.locked && isDoubleTap(e, id, sel?.kind === "markup" && sel.id === id)) {
+      setSel({ kind: "markup", id });
+      const textBearing = m.kind === "line" || m.kind === "polyline" || m.kind === "easement";
+      if (dblWasSelRef.current && textBearing) beginEditInline("markup", id);
+      else { setPropsFor({ kind: "markup", id }); if (narrow) setNarrowProps(true); }
+      return;
     }
     // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
     if (hasSelMod(e)) {
@@ -3572,9 +3605,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
-    // B679 — double-click a callout / text box (box part only) → edit its text in place. Pointer
-    // capture eats the DOM dblclick, so we read e.detail on the pointerdown instead.
-    if (part === "box" && isDoubleTap(e, id)) { setSel({ kind: "callout", id }); beginEditCallout(id); return; }
+    // B750 — double-click a callout (box part only): an ALREADY-selected callout edits its text in place
+    // ("click to select, then double-click to edit text"); otherwise it opens Properties. Pointer capture
+    // eats the DOM dblclick, so we reconstruct the double-tap here.
+    if (part === "box" && isDoubleTap(e, id, sel?.kind === "callout" && sel.id === id)) {
+      setSel({ kind: "callout", id });
+      if (dblWasSelRef.current) beginEditCallout(id);
+      else { setPropsFor({ kind: "callout", id }); if (narrow) setNarrowProps(true); }
+      return;
+    }
     const c = callouts.find((x) => x.id === id);
     setSel({ kind: "callout", id });
     pushHistory();
@@ -5608,9 +5647,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
-    // B679 — double-click a non-grouped, UNLOCKED centerline road → edit its inline label in place,
-    // matching onElDouble. Pointer capture eats the DOM dblclick, so read e.detail here too.
-    if (!el.groupId && !el.locked && isCenterlineRoad(el) && isDoubleTap(e, id)) { setSel({ kind: "el", id }); beginEditInline("el", id); return; }
+    // B750 — double-click a non-grouped, UNLOCKED element opens its Properties. Exception: an ALREADY-
+    // selected centerline road (the only text-bearing element) edits its inline label instead ("click to
+    // select, then double-click to edit text"). Pointer capture eats the DOM dblclick, so we reconstruct
+    // the double-tap here. Groups keep single-click = select-whole-group (drill-in stays in onElDouble).
+    if (!el.groupId && !el.locked && isDoubleTap(e, id, sel?.kind === "el" && sel.id === id)) {
+      setSel({ kind: "el", id });
+      if (dblWasSelRef.current && isCenterlineRoad(el)) beginEditInline("el", id);
+      else { setPropsFor({ kind: "el", id }); if (narrow) setNarrowProps(true); }
+      return;
+    }
     const fp = p2f(e.clientX, e.clientY);
     // Explicit attach/align flows (click a host/target) take precedence.
     if (attachFor) { attachTo(attachFor, el.id); setAttachFor(null); return; }
@@ -5941,9 +5987,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (el.groupId) { setMulti([]); setDrillId(id); setSel({ kind: "el", id }); return; }
     // B620: double-click a (centerline) road → edit its inline label in place (right-click still opens
     // the type/actions menu via onElContext). Legacy bonded rect roads keep the type menu.
-    if (isCenterlineRoad(el)) { beginEditInline("el", id); return; }
+    if (isCenterlineRoad(el)) { setSel({ kind: "el", id }); beginEditInline("el", id); return; }
+    // B750: double-click now opens Properties (was the type/actions menu — that stays on right-click via
+    // onElContext). This native path is the raw-dblclick / test-harness fallback; real users hit the
+    // reconstructed double-tap in startMoveEl (pointer capture eats this native dblclick).
     setSel({ kind: "el", id });
-    setTypeMenu({ id, x: e.clientX, y: e.clientY });
+    setPropsFor({ kind: "el", id });
   };
   // Right-click an element always opens its actions menu (so a grouped element can still
   // reach Ungroup / Duplicate group / etc). Keeps an active group selection intact so the
@@ -6157,7 +6206,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         floodGeoP,
       ]);
       if (tok !== drainTok.current) return;
-      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1 });
+      const checkedAt = Date.now();
+      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt });
+      // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
+      // survives a reload without re-hitting the (flaky) county GIS. Rides the existing
+      // settings autosave — no schema change.
+      setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctx), sig, checkedAt } } }));
     } catch (e) {
       if (tok === drainTok.current) setDrainCtx((prev) => ({ error: String((e && e.message) || e), prev: prev?.prev }));
     }
@@ -6165,12 +6219,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The context to READ from: the live result, or the prior good one preserved under a
   // busy/error state (so a re-check that fails doesn't erase what we already knew).
   const drainReadCtx = drainCtx?.ctx ? drainCtx : drainCtx?.prev || null;
-  const drainCtxData = drainReadCtx?.ctx || null;
-  const drainAuthorityId = drainCtxData?.authority?.primaryReviewer?.authorityId ?? null;
+  // B750 "remember it": with no live check this session, fall back to the slim summary
+  // saved last time (settings.drainage.lastCheck) so the readout still shows last-known
+  // facts (a "re-check to refresh" hint carries its age). A live result always wins.
+  const drainRestoredCtx = !drainReadCtx && settings.drainage?.lastCheck
+    ? { ctx: hydrateDrainageContext(settings.drainage.lastCheck), sig: settings.drainage.lastCheck.sig, multiParcel: false, checkedAt: settings.drainage.lastCheck.checkedAt, restored: true }
+    : null;
+  const drainViewCtx = drainReadCtx || drainRestoredCtx;
+  const drainCtxData = drainViewCtx?.ctx || null;
+  const detectedAuthorityId = drainCtxData?.authority?.primaryReviewer?.authorityId ?? null;
+  // B750 overrides: the user's own answer (settings.drainage.*) wins over GIS detection
+  // when set — so a channel they can see, or a jurisdiction the county maps can't resolve,
+  // is never stuck at "unknown".
+  const chanOverride = settings.drainage?.drainsToHcfcdChannel;
+  const authOverride = settings.drainage?.authorityId || null;
+  const { authorityId: drainAuthorityId, source: reviewerSource } = effectiveReviewer(authOverride, detectedAuthorityId);
+  const { value: drainsToChanEff, source: channelSource } = effectiveChannelDischarge(chanOverride, drainCtxData?.channel?.near ?? null);
   const drainFloodOk = !!drainCtxData?.flood && drainCtxData.flood.state !== "failed";
   const acresActive = siteSqft / SQFT_PER_ACRE;
   const drainCityCount = drainCtxData?.authority?.jurisdiction?.city?.length ?? 0;
-  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainCityCount > 0, drainsToHcfcdChannel: drainCtxData?.channel?.near ?? null };
+  // Overriding the reviewer to City of Houston asserts city-limits jurisdiction (so the
+  // >20 ac greater-of branch fires); otherwise use the detected city membership.
+  const drainInCity = authOverride === "coh" ? true : drainCityCount > 0;
+  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff };
   const detReq = drainCtxData && siteSqft > 0 && drainAuthorityId
     ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
     : null;
@@ -6302,9 +6373,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         wetlandsPresent: analysisWetlands === "present",
       })
     : null;
+  // B750 — plain-English authority label from the shared choice list (never a raw id).
+  const authLabelFor = (id) => (DETENTION_AUTHORITY_CHOICES.find((c) => c.id === id) || {}).label || id || null;
+  // The channel Yes/No/Auto control is only consequential where HCFCD channels are the
+  // question — Harris-County authorities (City of Houston or HCFCD itself).
+  const drainChannelRelevant = drainAuthorityId === "coh" || drainAuthorityId === "hcfcd" || drainCtxData?.authority?.channelAuthority === "hcfcd";
   const drainage = siteSqft > 0 && origin ? {
-    status: !drainCtx ? "idle" : drainCtx.busy ? "busy" : drainCtx.error ? "error" : "ready",
+    status: drainCtx?.busy ? "busy" : drainCtx?.error ? "error" : drainViewCtx ? "ready" : "idle",
     error: drainCtx?.error || null,
+    restored: !!drainViewCtx?.restored,
+    lastCheckedAt: drainViewCtx?.checkedAt ?? null,
+    acres: acresActive,
     providedCf: providedDetCf, providedUsableCf, deadCf: siteDeadCf, pondCount,
     req: detReq, reqCandidates: detReqCandidates,
     tier: detTier, regime: detRegime, outfall: outfallNote,
@@ -6333,9 +6412,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     channelFailed: drainCtxData?.channel?.state === "failed",
     mudFailed: drainCtxData?.authority?.mud?.state === "failed",
     watershedFailed: drainCtxData?.watershed?.state === "failed",
-    stale: !!(drainReadCtx?.sig && drainReadCtx.sig !== drainSigNow),
-    multiParcel: !!drainReadCtx?.multiParcel,
-    showingPrior: !!(drainCtx && !drainCtx.ctx && drainReadCtx), // a busy/error state over a preserved prior answer
+    stale: !!(drainViewCtx?.sig && drainViewCtx.sig !== drainSigNow),
+    multiParcel: !!drainViewCtx?.multiParcel,
+    showingPrior: !!(drainCtx && !drainCtx.ctx && drainViewCtx), // a busy/error state over a preserved prior answer (live or restored)
+    // B750 — the reviewing authority the number is priced against (detected or overridden),
+    // kept distinct from the governing-RATE authority the badge shows (they differ on a
+    // >20 ac Houston tract, which is exactly what read as indecision before).
+    reviewer: drainAuthorityId ? { authorityId: drainAuthorityId, label: authLabelFor(drainAuthorityId), source: reviewerSource } : null,
+    // B750 — the reviewing-agency override picker (Auto + every modeled authority).
+    authorityChoice: {
+      override: authOverride,
+      detectedId: detectedAuthorityId,
+      detectedLabel: detectedAuthorityId ? authLabelFor(detectedAuthorityId) : null,
+      choices: DETENTION_AUTHORITY_CHOICES,
+      source: reviewerSource,
+      onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), authorityId: v || null } })),
+    },
+    // B750 — the "drains to an HCFCD channel" Auto/Yes/No control + what detection found.
+    channelDischarge: {
+      relevant: drainChannelRelevant,
+      override: chanOverride === true || chanOverride === false ? chanOverride : null,
+      effective: drainsToChanEff,
+      source: channelSource,
+      detected: drainCtxData?.channel || null, // { near, unitNo, name, distFt, state }
+      onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), drainsToHcfcdChannel: v } })),
+    },
     onCheck: checkDrainage,
   } : null;
 
@@ -8206,7 +8307,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B656: the Properties companion coexists with the open panel — it renders whenever a
   // qualifying selection exists. On a phone it stays closed unless a panel is already
   // open (B556: tap = select only) or the ✎ Properties pill explicitly opened it.
-  const companionOpen = companionSel && !propsDismissed && (!narrow || !!leftPanel || narrowProps);
+  // B750: on desktop the companion opens ONLY when Properties was explicitly opened for this selection
+  // (propsMatches) — a plain click selects without popping it. Phone is unchanged: the ✎ pill (narrowProps)
+  // or an already-open panel gates it there (B556: tap = select only).
+  const companionOpen = companionSel && (narrow ? (!!leftPanel || narrowProps) : propsMatches);
   // B733 — the Properties tab is active. When it is, the inspector docks as the MAIN panel
   // (full height + its own empty state), rather than riding above another panel as the B656
   // companion does. Properties is dock-only (it reuses the companion, which is outside the
@@ -11185,7 +11289,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* B656: on a phone, selection alone never opens the overlay (B556) — this pill is
               the explicit affordance: tap it to open the Properties companion as an overlay. */}
           {narrow && companionSel && !leftPanel && !narrowProps && (
-            <button data-export="skip" onClick={() => { setNarrowProps(true); setPropsDismissed(false); }}
+            <button data-export="skip" onClick={() => { setNarrowProps(true); }}
               style={{ position: "absolute", left: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: 99, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
               ✎ Properties
             </button>
@@ -11574,9 +11678,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 aria-pressed={leftPanel === tb.id || isFloating(tb.id)}
                 onClick={() => {
                   if (isFloating(tb.id)) { closeFloating(tb.id); return; } // re-clicking a floating panel's icon closes it
-                  // B733: opening Properties un-dismisses + expands the inspector (a prior ✕/collapse
-                  // shouldn't leave the freshly-opened tab looking empty or headers-only).
-                  if (tb.id === "properties") { setPropsDismissed(false); setPropsCollapsed(false); }
+                  // B733/B750: opening the Properties tab expands the inspector (a prior collapse shouldn't
+                  // leave the freshly-opened tab headers-only). The tab renders via `propsTab && companionSel`,
+                  // independent of the double-click `propsFor` marker, so it always shows the current selection.
+                  if (tb.id === "properties") { setPropsCollapsed(false); }
                   setLeftPanel((p) => (p === tb.id ? null : tb.id));
                 }}>
                 <span style={{ display: "grid", placeItems: "center", height: 18, lineHeight: 1 }}><RailIcon id={tb.id} /></span>
@@ -11608,7 +11713,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 re-clicking the element (or picking another) reopens it via the [sel] effect above. */}
             {/* B733: the ✕ dismisses the auto-companion — but in the Properties TAB it would do
                 nothing visible (the tab re-shows it), so hide it there; you close the tab from the rail. */}
-            {!propsTab && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — click it again to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsDismissed(true); }}>✕</button>}
+            {!propsTab && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); }}>✕</button>}
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
@@ -14100,6 +14205,63 @@ function YieldPanel({
             const d = drainage;
             const warnNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.warnText, lineHeight: 1.45, margin: "3px 0 0", fontStyle: "italic" }}>{text}</div>;
             const keyedNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
+            // B750 — one segmented button for the Auto/Yes/No channel control (mirrors the
+            // per-pond Outfall toggle). Selected rides the global accent + --on-accent text.
+            const seg = (label, selected, onClick, key) => (
+              <button key={key} onClick={onClick} aria-label={`Drains to HCFCD channel: ${label}`} aria-pressed={selected} style={{ flex: 1, padding: "4px 6px", borderRadius: 6, border: `1px solid ${selected ? "var(--accent)" : Y.border}`, background: selected ? "var(--accent)" : Y.cardBg, color: selected ? "var(--on-accent)" : Y.text, fontWeight: 700, fontSize: 10.5, fontFamily: "inherit", cursor: "pointer" }}>{label}</button>
+            );
+            // B750 — the two overridable assumptions, grouped so the user can correct either:
+            // which agency reviews drainage, and whether the site drains to an HCFCD channel.
+            const assumptionsBlock = () => {
+              const cd = d.channelDischarge, ac = d.authorityChoice;
+              const showAuth = ac && (ac.detectedId || ac.override);
+              const showChan = cd && cd.relevant;
+              if (!showAuth && !showChan) return null;
+              const rows = [];
+              if (showAuth) rows.push(
+                <div key="auth" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                  <span style={{ fontSize: 11, color: Y.rowLabel }}>Reviewing agency</span>
+                  <select value={ac.override || ""} onChange={(e) => ac.onSet(e.target.value || null)}
+                    style={{ fontSize: 11, padding: "2px 6px", borderRadius: 6, border: `1px solid ${Y.border}`, background: Y.cardBg, color: Y.text, fontFamily: "inherit", maxWidth: 180 }}>
+                    <option value="">Auto{ac.detectedLabel ? ` — detected: ${ac.detectedLabel}` : ""}</option>
+                    {ac.choices.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                </div>
+              );
+              if (showChan) {
+                const det = cd.detected;
+                const unit = det && det.unitNo ? `Unit ${det.unitNo}` : "an HCFCD channel";
+                const nm = det && det.name ? ` (${det.name})` : "";
+                const dist = det && det.distFt != null ? ` within ~${Math.round(det.distFt)} ft` : "";
+                const defers = d.reviewer?.authorityId === "coh" && (d.acres || 0) > 20
+                  ? " At over 20 acres, City of Houston still defers to HCFCD's rate, so it's included regardless — only a smaller tract would use Houston's rate alone." : "";
+                let msg, warn = false;
+                if (cd.source === "override" && cd.override === true) msg = "You confirmed this site drains to an HCFCD channel — HCFCD's rate applies (no assumption).";
+                else if (cd.source === "override" && cd.override === false) msg = "You marked this site as NOT draining to an HCFCD channel." + defers;
+                else if (det && det.near === true) msg = `HCFCD channel detected — ${unit}${nm}${dist}. Assuming your detention discharges to it, so HCFCD's rate is included. Not right? Set this to No.`;
+                else if (det && det.near === false) { msg = "No HCFCD channel found near your site. If one runs through it — you can see it on the aerial — set this to Yes."; warn = true; }
+                else { msg = "Couldn't confirm from HCFCD's map server whether a channel is adjacent — the stricter reading is shown. Set Yes or No to tell the tool directly."; warn = true; }
+                rows.push(
+                  <div key="chan" style={{ marginTop: showAuth ? 6 : 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                      <span style={{ fontSize: 11, color: Y.rowLabel }}>Drains to HCFCD channel</span>
+                      <span style={{ display: "flex", gap: 4, width: 156 }}>
+                        {seg("Auto", cd.override == null, () => cd.onSet(null), "a")}
+                        {seg("Yes", cd.override === true, () => cd.onSet(true), "y")}
+                        {seg("No", cd.override === false, () => cd.onSet(false), "n")}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: warn ? Y.warnText : Y.muted, lineHeight: 1.45, margin: "3px 0 0", fontStyle: warn ? "italic" : "normal" }}>{msg}</div>
+                  </div>
+                );
+              }
+              return (
+                <div key="assumptions" style={{ marginTop: 7, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4 }}>Assumptions — correct if needed</div>
+                  {rows}
+                </div>
+              );
+            };
             // First-time idle (no prior answer) → the check button + intro.
             if (d.status !== "ready" && !d.showingPrior) {
               return (
@@ -14133,9 +14295,17 @@ function YieldPanel({
                 if (req.overlayRule.params?.runoffReductionPct) out.push(warnNote(`${req.overlayRule.authorityLabel} also requires a ${req.overlayRule.params.runoffReductionPct}% runoff reduction on top of detention.`, "runoff"));
               }
               if (req.governing?.candidates?.length > 1) {
-                out.push(keyedNote(`Greater-of: ${req.governing.candidates.map((c) => `${c.rule?.authorityLabel || c.authorityId} ${f2(c.acFt)} ac-ft`).join(" vs ")} — more restrictive governs.`, "gov"));
+                // B750 — name the reviewing authority (detected/overridden) DISTINCTLY from the
+                // governing-rate authority (the badge). On a >20 ac Houston tract they differ, and
+                // that difference read as indecision; spell out that it's Houston's own rule.
+                const cands = req.governing.candidates.map((c) => `${c.rule?.authorityLabel || c.authorityId} ${f2(c.acFt)} ac-ft`);
+                const govLabel = req.rule?.authorityLabel || req.governing.picked;
+                if (d.reviewer?.authorityId === "coh" && req.governing.picked === "hcfcd") {
+                  out.push(keyedNote(`Reviewing authority: ${d.reviewer.label} ${d.reviewer.source === "override" ? "(you set this)" : "(detected from city-limits GIS)"}. For a tract over 20 acres, City of Houston applies the larger of its own rate and HCFCD's — ${cands.join(" vs ")} — so ${govLabel}'s ${f2(req.requiredAcFt ?? 0)} ac-ft governs.`, "gov"));
+                } else {
+                  out.push(keyedNote(`Greater-of: ${cands.join(" vs ")} — more restrictive governs${d.reviewer?.label ? ` (${d.reviewer.label} review)` : ""}.`, "gov"));
+                }
               }
-              if (req.flags.includes("channel-adjacency-unknown")) out.push(warnNote("Whether the site drains directly to an HCFCD channel is unknown — the stricter reading is shown.", "chan-unk"));
               if (req.flags.includes("curve-approximate")) out.push(warnNote("Rate read from an approximate Fig. 9.2 curve — exact breakpoints pending transcription.", "curve"));
               if (req.flags.includes("secondary-source")) out.push(warnNote("June-2026 Houston rate verified against secondary coverage — manual PDF confirmation pending.", "sec-src"));
               if (req.flags.includes("added-impervious-unknown")) out.push(warnNote("This rate applies to ADDED impervious on redevelopment — full site impervious was used here; enter the added-impervious area to refine.", "added-imp"));
@@ -14179,6 +14349,8 @@ function YieldPanel({
             // with a truthy req, so it lives outside the req-shaped chain above).
             if (d.authorityFlags.includes("city-criteria-unverified")) out.push(warnNote("This city's own detention criteria aren't modeled — the county requirement is shown as a screening floor. Verify with the city.", "city-unv"));
             if (d.authorityFlags.includes("jurisdiction-partial")) out.push(warnNote("The city/ETJ lookup was incomplete (an outage) — if this parcel is inside Houston or its ETJ, the reviewing authority would be the City. Re-check.", "jur-partial"));
+            // B750 — the two overridable assumptions (reviewing agency + channel discharge).
+            { const ab = assumptionsBlock(); if (ab) out.push(ab); }
             out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
             if (d.deadCf > 0) out.push(keyedNote(`Usable ${f2(usableAcFt)} ac-ft after ${f2(d.deadCf / 43560)} ac-ft below the flood WSE / permanent pool (anchored ponds split at their real water surfaces; the rest use the Regime-B estimate — dead storage earns no credit).`, "usable"));
             {
@@ -14247,6 +14419,8 @@ function YieldPanel({
             if (d.mudFailed) out.push(warnNote("MUD / water-district data is unavailable — can't tell whether a district's own drainage criteria apply.", "mudfail"));
             if (d.channelFailed) out.push(warnNote("HCFCD channel data is unavailable — channel adjacency unknown.", "chanfail"));
             if (d.multiParcel) out.push(keyedNote("Checked against the largest active parcel.", "multi"));
+            // B750 — restored from a saved check (no live lookup this session): show its age.
+            if (d.restored && d.lastCheckedAt && !d.stale) out.push(keyedNote(`Remembered from your last check on ${new Date(d.lastCheckedAt).toLocaleDateString()} — re-check to refresh.`, "restored"));
             if (d.stale) out.push(warnNote("Site boundary changed since this check — re-check drainage criteria.", "stale"));
             // B712 — the mitigation inputs: jurisdiction defaulted from the resolved
             // drainage authority (stored only on override — the B74 pattern) + the
