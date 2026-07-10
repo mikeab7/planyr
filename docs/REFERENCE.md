@@ -112,11 +112,16 @@ One source of truth used across the planner. Layer `kind`s: `dynamic` (esri
   z-order (`ALL_LAYERS` registry order) at each layer's opacity. Fetched proxy-first
   (same-origin → canvas-clean) with a direct-agency CORS fallback; a dropped layer warns
   loudly (`overlaysDropped` → batched banner), never a silent omission. Gated by the "Print
-  map layers" toggle (default on). **Still pending (B745):** the VECTOR/thin-line layers
-  (contours, drainage arrows, HIFLD transmission, county/city/ETJ boundaries, OSM/Mapillary)
-  — no server image, so they need reproject-to-feet + SVG redraw. Note: DRA ground-relief
-  re-stretches per sheet extent, so its tint is self-consistent per sheet but not
-  pixel-matched to the screen ramp.
+  map layers" toggle (default on). The VECTOR/thin-line layers (HIFLD transmission,
+  road-authority, county/city/ETJ boundaries, contours, drainage arrows, OSM/Mapillary) are NOT
+  server images, so they're captured differently (B745, `lib/overlayVectorSvg.js` +
+  `exportVectorOverlaysForFrame`): each live layer's lat/lon geometry is read off `overlayRefs`,
+  reprojected into the site feet frame (`lngLatRingToFeet` → `f2p`) and redrawn as styled SVG in a
+  `<g data-export-vector>` at the same z-anchor (colors/weights verbatim — PDF-PARITY; boundary
+  names re-run `boundaryLabels`; terrain from the cached `terrain:*` artifact). Sync-only — a layer
+  that's on but not loaded / out of frame / below its load-zoom is honestly omitted (console note),
+  never half-drawn. Note: DRA ground-relief re-stretches per sheet extent, so its tint is
+  self-consistent per sheet but not pixel-matched to the screen ramp.
 
 ## Supabase (`src/workspaces/site-planner/lib/supabase.js`, `auth.js`, `cloudSync.js`)
 Config from build-time env only (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`;
