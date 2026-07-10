@@ -1520,6 +1520,13 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
   2. **Loud on a stalled save:** simulate/observe a slow or failing commit (e.g. throttle the network) → after the ~8s timeout + retries the sync badge flips to **"error / Retry"** (NOT stuck indefinitely on "saving"), and "Retry now" recovers. This is the LOUD-FAILURE guarantee for the silent-wedge class.
   3. **Any element type:** spot-check that a parcel / building / markup delete behaves the same (removes in one action, persists) — the pipeline is shared, so B742's road proof should generalize.
 
+### V265 — B752: a City-of-Houston **ETJ** parcel resolves detention to the COUNTY authority, not City of Houston ⏳ **LIVE APP (planyr.io) against LIVE GIS** (GIS-endpoint-behavior + real-project-data class) *(the sandbox can query the GIS via curl but Chromium's tunneled TLS is reset by this session's egress proxy, so live-GIS-in-browser can't run here — hence the owed live click-through)*
+- **Added** 2026-07-10 · **Cadence** once (bug-fix acceptance) · **Self-verified 2026-07-10** (headless Chromium + live-GIS curl probe, logged-out preview build)
+- **✅ PASS (sandbox — the logic + wiring):** the LIVE GIS was probed by curl at the repro coordinates (29.7722, -95.8548): city-limits (TxGIO) **empty**, H-GAC ETJ **HOUSTON**, county **Fort Bend** — confirming the mock matches reality. `test/detentionResolver.test.js` proves Houston-ETJ→county authority (`hcfcd`/`fortbend`) + the `houston-etj` flag + ETJ overlay, and that an ETJ-only outage no longer raises `jurisdiction-partial`. New `ui-audit/verify-etj-detention.mjs` (Fort Bend + Houston-ETJ, no city limits) → the readout reviewer reads **Fort Bend County Drainage District** (never City of Houston), the ETJ note renders, and no "detected from city-limits GIS" claim appears — 5/5 green. Existing `verify-b629-detention.mjs` COH pass (a real city-limits Houston site) still shows City of Houston + the >20-ac greater-of. Full suite 3308 + build green.
+- **⏳ Owed (LIVE APP, against the real county GIS — cannot run in-sandbox):**
+  1. **Open the real 27211 Hoyt Ln (Katy) site** (or any Houston-ETJ/Fort-Bend parcel) → ∑ Yield → Stormwater → ⛆ Check drainage criteria → the **Reviewing authority is the county drainage district (Fort Bend County Drainage District), NOT City of Houston**, and the amber ETJ note explains Houston reviews platting but the county's criteria govern detention (Houston's rate does not apply).
+  2. **A genuine in-Houston-city-limits site** still resolves to **City of Houston** with the >20-ac greater-of wording (no regression).
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.

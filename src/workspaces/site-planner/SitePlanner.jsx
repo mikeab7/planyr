@@ -6406,6 +6406,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     },
     watersheds: drainCtxData?.watershedOverlays || [],
     mudDistricts: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "mud"),
+    // ETJ notes (e.g. "in Houston's ETJ, county criteria govern detention" — owner rule 2026-07-10).
+    etjNotes: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "etj"),
     ambiguous: drainCtxData?.authority?.ambiguous || [],
     authorityFlags: drainCtxData?.authority?.flags || [],
     floodFailed: !!drainCtxData && !drainFloodOk,
@@ -14333,7 +14335,11 @@ function YieldPanel({
             // An unmodeled city keeps the county number but MUST carry the caveat (coexists
             // with a truthy req, so it lives outside the req-shaped chain above).
             if (d.authorityFlags.includes("city-criteria-unverified")) out.push(warnNote("This city's own detention criteria aren't modeled — the county requirement is shown as a screening floor. Verify with the city.", "city-unv"));
-            if (d.authorityFlags.includes("jurisdiction-partial")) out.push(warnNote("The city/ETJ lookup was incomplete (an outage) — if this parcel is inside Houston or its ETJ, the reviewing authority would be the City. Re-check.", "jur-partial"));
+            if (d.authorityFlags.includes("jurisdiction-partial")) out.push(warnNote("The city-limits lookup was incomplete (an outage) — if this parcel is inside Houston's city limits, the reviewing authority would be the City. Re-check.", "jur-partial"));
+            // ETJ context: being in a city's ETJ does NOT make that city the detention authority —
+            // the county's criteria govern (owner rule 2026-07-10). Surfaced so it's never mistaken
+            // for a city-limits detection.
+            for (const e of d.etjNotes) out.push(warnNote(e.note, "etj-" + String(e.city || "").toLowerCase()));
             // B750 — the two overridable assumptions (reviewing agency + channel discharge).
             { const ab = assumptionsBlock(); if (ab) out.push(ab); }
             out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
