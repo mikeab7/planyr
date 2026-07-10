@@ -245,9 +245,10 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
 
   it("B563: version restore re-applies parcelDrawings (its own persistence path) so it isn't a mixed-version restore", () => {
     const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    // the restore sequence must durably restore the version's parcelDrawings (via persistDrawings,
-    // which both sets state AND saves — a bare setParcelDrawings would not persist)
-    expect(sp).toMatch(/persistDrawings\(v\.parcelDrawings \|\| \[\]\)/);
+    // the per-parcel Attached-Drawings UI was removed, but parcelDrawings still rides its own
+    // persistence path and MUST survive a version restore — durably re-applied via a saveSite merge
+    // ({...existing, ...partial} preserves the rest), so restore isn't a mixed-version state.
+    expect(sp).toMatch(/saveSite\(\{ id: siteId, parcelDrawings: v\.parcelDrawings \|\| \[\] \}\)/);
   });
 
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
@@ -286,9 +287,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // unchanged — they still push one frame per picking session.
     expect(src).toMatch(/const livePick = \(apply, hist = true\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // all 13 native color controls still spread livePick instead of a bare onChange
-    // (B740 added the shared multi-selection Fill/Outline pickers — one colorField reused twice)
-    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(13);
+    // all 14 native color controls still spread livePick instead of a bare onChange
+    // (B740 added the shared multi-selection Fill/Outline pickers — one colorField reused twice;
+    //  the parcel Boundary panel added a per-parcel Outline-color picker → 14th)
+    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(14);
     // the two Standards color swatches opt out of history (settings-only, RC-6)
     expect((src.match(/\{\.\.\.livePick\(\(v\) => liveTypeStyle\([^)]*\), false\)\}/g) || []).length).toBe(2);
     // the per-pixel undo floods are gone: the OLD color-input handlers (inline pushHistory) no

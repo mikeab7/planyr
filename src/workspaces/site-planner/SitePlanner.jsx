@@ -25,8 +25,7 @@ import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPavin
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
-import ParcelDrawing from "./components/ParcelDrawing.jsx";
-import { uploadOverlayFile, uploadParcelDrawingFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
@@ -1354,95 +1353,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // .current inside the window listeners with no stale-closure risk; forced to 0 on drop/reset.
   const canvasDragDepth = useRef(0);
   const overlayDragDepth = useRef(0);
-  // Parcel-attached drawings (B67): immutable backdrop + pixel-relative markup, per parcel.
-  const [parcelDrawings, setParcelDrawings] = useState(() => restored?.parcelDrawings || []);
-  const [openDrawingId, setOpenDrawingId] = useState(null);   // the drawing shown in the markup modal
-  const [drawingTargetParcel, setDrawingTargetParcel] = useState(null); // parcel the file-picker is filing onto
-  const [pagePick, setPagePick] = useState(null); // multi-page PDF awaiting a sheet choice (B67 increment 2)
-  const [rehydratingId, setRehydratingId] = useState(null); // drawing whose backdrop is being re-fetched from Storage
-  const drawingFileRef = useRef(null);
-  const drawingPushTimer = useRef(null);
-  const parcelDrawingsRef = useRef(parcelDrawings);
-  useEffect(() => { parcelDrawingsRef.current = parcelDrawings; }, [parcelDrawings]);
-  // Persist parcelDrawings via a saveSite MERGE (preserves the live parcels/els the
-  // autosave owns), then debounce the cloud push. Keeps this collection off the main
-  // autosave path so it needs no new wiring through every flush/snapshot site.
-  const persistDrawings = (next) => {
-    setParcelDrawings(next);
-    if (siteId) saveSite({ id: siteId, parcelDrawings: next });
-    clearTimeout(drawingPushTimer.current);
-    drawingPushTimer.current = setTimeout(() => { if (isCloudActive() && siteId) pushSiteToCloud(siteId).catch(() => {}); }, 800);
-  };
-  // Back a freshly-attached drawing with its source file in Storage (B67 increment 2b), so
-  // its backdrop rebuilds on another device. Background + fallback-safe: logged-out / oversize
-  // / error just keeps the local raster (storageKey stays unset → "re-attach on load").
-  const uploadDrawingSource = async (recId, file) => {
-    if (!file) return;
-    const res = await uploadParcelDrawingFile(siteId, recId, file).catch(() => null);
-    if (!res) return;
-    persistDrawings(parcelDrawingsRef.current.map((d) => (d.id === recId ? { ...d, storageKey: res.key, ext: res.ext } : d)));
-  };
-  // Build + persist + open a drawing record from a rasterized page/image; back it with the source.
-  const addDrawingFromRaster = (parcelId, name, kind, raster, pageCount, file) => {
-    const id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
-    // B474 review (#2): the record carries `idbKey` only AFTER idbPut CONFIRMS — until then src stays inline
-    // (dropIdbBackedSrc keys off idbKey), so a failed/slow stash can never strip the only on-device copy.
-    const idbKey = siteId ? `raster:${siteId}:drawing:${id}` : undefined;
-    const rec = { id, parcelId,
-      name, kind, page: raster.page || 1, pageCount: pageCount || 1,
-      intrinsic: { w: raster.imgW, h: raster.imgH }, src: raster.src,
-      markups: [], createdAt: Date.now(), updatedAt: Date.now() };
-    persistDrawings([...parcelDrawings, rec]);
-    setOpenDrawingId(rec.id);
-    if (idbKey && idbAvailable() && raster.src) idbPut(idbKey, raster.src).then((ok) => { if (ok) persistDrawings(parcelDrawingsRef.current.map((d) => (d.id === id ? { ...d, idbKey } : d))); });
-    if (file) uploadDrawingSource(rec.id, file);
-    return rec;
-  };
-  const onAttachDrawing = async (parcelId, file) => {
-    if (!file || !parcelId) return;
-    if (!(isPdfFile(file) || /^image\//.test(file.type))) { flashWarn("Attach a PDF or an image (PNG/JPG).", 0); return; }
-    const baseName = (file.name || "Drawing").replace(/\.[^.]+$/, "");
-    try {
-      const r = await openOverlayFile(file); // { src, imgW, imgH, page, pageCount, pdf } — reuses the B72 rasterizer
-      // Multi-page PDF → let the user pick the sheet (keep the PDF + File alive to re-rasterize + upload).
-      if (r.pdf && r.pageCount > 1) { setPagePick({ parcelId, pdf: r.pdf, pageCount: r.pageCount, name: baseName, first: r, file }); return; }
-      if (r.pdf) { try { r.pdf.destroy(); } catch (_) {} } // single page — first raster is all we need
-      addDrawingFromRaster(parcelId, baseName, isPdfFile(file) ? "pdf" : "image", r, r.pageCount || 1, file);
-    } catch (_) { flashWarn("Couldn't read that file — try another PDF or image.", 0); }
-  };
-  // Page-picker: rasterize the chosen sheet of a multi-page PDF, then attach it (B67 increment 2a).
-  const pickPage = async (n) => {
-    const pp = pagePick; if (!pp) return;
-    setPagePick(null);
-    try {
-      const raster = pp.first && pp.first.page === n ? pp.first : await rasterizePage(pp.pdf, n);
-      addDrawingFromRaster(pp.parcelId, `${pp.name} — p.${n}`, "pdf", raster, pp.pageCount, pp.file);
-    } catch (_) { flashWarn("Couldn't render that page — try another.", 0); }
-    finally { try { pp.pdf.destroy(); } catch (_) {} }
-  };
-  const cancelPagePick = () => { if (pagePick) { try { pagePick.pdf.destroy(); } catch (_) {} setPagePick(null); } };
-  // Rehydrate a drawing's backdrop from Storage when it was opened without a local raster
-  // (cross-device: the cloud row's src was stripped, but storageKey + the source survive).
-  useEffect(() => {
-    if (!openDrawingId) return;
-    const d = parcelDrawingsRef.current.find((x) => x.id === openDrawingId);
-    if (!d || d.src || (!d.storageKey && !d.idbKey)) return;
-    let live = true;
-    setRehydratingId(d.id);
-    (async () => {
-      let src = null;
-      try {
-        if (d.idbKey && idbAvailable()) src = await idbGet(d.idbKey); // B474 — local IndexedDB cache first (fast, offline)
-        if (!src && d.storageKey) {                                   // fall back to cloud Storage (cross-device)
-          if (d.kind === "pdf") { const bytes = await downloadOverlayBytes(d.storageKey); if (bytes) { const rr = await rasterizeStoredPdf(bytes, d.page || 1); src = rr && rr.src; } }
-          else { src = await downloadOverlayDataUrl(d.storageKey); }
-        }
-      } catch (_) { /* keep the placeholder */ }
-      if (live) { if (src) setParcelDrawings((cur) => cur.map((x) => (x.id === d.id ? { ...x, src } : x))); setRehydratingId(null); }
-    })();
-    return () => { live = false; };
-  }, [openDrawingId]); // eslint-disable-line react-hooks/exhaustive-deps
   // B474 — re-hydrate the underlay raster from IndexedDB when the saved record carried only the ref (src
   // was dropped to keep the record off the ~5MB localStorage cap). Mirrors the drawing/overlay rehydrate
   // above; the underlay is the one raster that previously had NO recovery path (it needed a re-drop).
@@ -1461,8 +1371,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     })();
     return () => { live = false; };
   }, [underlay]);
-  const updateDrawingMarks = (id, markups) =>
-    persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
   // B556 — a DELIBERATE delete must leave a tombstone (`deletedIds`), the same invariant
   // removeOverlay/B276 already follow. WITHOUT it two things break: (1) the B459 thin-clobber guard
   // sees ≥2 items vanish with no tombstone to explain them and FALSELY rejects the save as an
@@ -1476,14 +1384,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const add = (Array.isArray(ids) ? ids : [ids]).filter((x) => typeof x === "string");
     if (!add.length) return;
     setDeletedIds((d) => { const s = new Set(d); for (const x of add) s.add(x); return s.size === d.length ? d : [...s]; });
-  };
-  const deleteDrawing = (id) => {
-    const gone = parcelDrawings.find((d) => d.id === id);
-    if (gone && gone.storageKey) deleteOverlayObject(gone.storageKey); // best-effort cloud cleanup (B67 2b)
-    if (gone && gone.idbKey) idbDelete(gone.idbKey); // B474 review (#13) — evict the cached raster from IndexedDB too, no orphan
-    persistDrawings(parcelDrawings.filter((d) => d.id !== id));
-    tombstone(id); // B556 — a deleted parcel-drawing stays deleted across reload/merge and never trips the thin-clobber guard
-    if (openDrawingId === id) setOpenDrawingId(null);
   };
   const overlayFileRef = useRef(null);
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
@@ -6804,13 +6704,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
     // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
-    // restore above silently skipped it: the canvas kept the CURRENT drawings while every other
-    // collection reverted (a mixed-version state). The stored version DOES capture parcelDrawings
-    // (sigOf + snapshotVersion store the full model), so restore + durably persist them via
-    // persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    // restore above silently skips it. The per-parcel Attached-Drawings UI was removed, but the data
+    // still round-trips and must survive a version restore (else a restored version would keep the
+    // CURRENT drawings — a mixed-version state). The stored version captures parcelDrawings, so
+    // durably re-apply them via a saveSite MERGE ({...existing, ...partial} preserves the rest).
     // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard — a restore to a
     // thinner version now diffs into per-element deletes through the rev-checked path.)
-    persistDrawings(v.parcelDrawings || []);
+    if (siteId) saveSite({ id: siteId, parcelDrawings: v.parcelDrawings || [] });
     setSel(null); setMulti([]); setVersionsOpen(false);
   };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
@@ -9753,33 +9653,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
             </Section>
           )}
-          {/* parcel-attached drawings (B67): attach a PDF/JPEG to THIS parcel and mark it
-              up on an immutable backdrop. */}
-          {_pid === "parcel" && selParcel && (() => {
-            const mine = parcelDrawings.filter((d) => d.parcelId === selParcel.id);
-            return (
-              <Section title="Attached drawings">
-                <button style={{ ...chip, width: "100%" }} onClick={() => { setDrawingTargetParcel(selParcel.id); drawingFileRef.current?.click(); }}>＋ Attach a drawing (PDF / JPG)</button>
-                <input ref={drawingFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }}
-                  onChange={(e) => { onAttachDrawing(drawingTargetParcel, e.target.files?.[0]); e.target.value = ""; }} />
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>An immutable backdrop you mark up on top of — saved with this parcel.</div>
-                {mine.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
-                    {mine.map((d) => (
-                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
-                        <button onClick={() => setOpenDrawingId(d.id)} title={d.src ? "Open & mark up" : "Re-attach the file to view (markups are saved)"}
-                          style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {d.src ? "🖹" : "⚠"} {d.name}{d.markups?.length ? ` · ${d.markups.length} mk` : ""}
-                        </button>
-                        <button onClick={() => { if (window.confirm(`Remove “${d.name}” and its markups?`)) deleteDrawing(d.id); }} title="Remove this drawing"
-                          style={{ border: "none", background: "transparent", cursor: "pointer", color: PAL.muted, fontSize: 13, lineHeight: 1 }}>✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Section>
-            );
-          })()}
           {/* appraisal-district property data for the selected parcel */}
           {_pid === "parcel" && selParcel && selParcel.attrs && (
             <Section title="Appraisal data">
@@ -9892,6 +9765,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </Field>
                 </>
               )}
+              {/* Outline (boundary line) style — always available. `livePick` gives the color its own
+                  one-frame undo; the discrete weight/style/reset commits push their own frame (setSelParcel
+                  does not). Renders live via pc.stroke/pc.weight/pc.dash at the parcel <polygon>. */}
+              <Field label="Outline color">
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input type="color" value={toHex6(selParcel.stroke ?? PAL.parcel)} {...livePick((v) => setSelParcel({ stroke: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                </span>
+              </Field>
+              <Field label="Line weight">
+                <NumInput style={numInput} value={selParcel.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => { pushHistory(); setSelParcel({ weight: n }); }} />
+              </Field>
+              <Field label="Line style">
+                <select value={selParcel.dash || "solid"} onChange={(e) => { pushHistory(); setSelParcel({ dash: e.target.value }); }}
+                  style={{ ...numInput, width: "auto", cursor: "pointer" }}>
+                  <option value="solid">Solid</option>
+                  <option value="dashed">Dashed</option>
+                  <option value="dotted">Dotted</option>
+                </select>
+              </Field>
+              <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ stroke: null, weight: null, dash: null }); }} title="Reset the outline back to the default color, weight and solid line">Reset outline</button>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
                 <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setbacks per edge</span>
                 <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
@@ -10470,14 +10363,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
                 const ring = pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 const zk = view.ppf / 0.35;
+                const baseW = pc.weight ?? 2; // per-parcel outline weight (authored); default 2
                 // B619: no accent recolor on select — the property line keeps its own color; the square
                 // vertex handles carry the selection. B617: the boundary weight holds constant relative
                 // to the drawing across zoom (dominant property outline → scaled, not fixed pixels).
                 return <g key={pc.id}>
                   <polygon data-testid="parcel-outline" points={ring}
                     fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
-                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.stroke || PAL.parcel)} strokeWidth={strokeZoom(removeHover || picked || isSel ? 3 : 2, zk)}
-                    strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
+                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.stroke || PAL.parcel)} strokeWidth={strokeZoom((removeHover || picked || isSel) ? Math.max(3, baseW) : baseW, zk)}
+                    strokeDasharray={inactive ? "8 6" : dashArray(pc.dash, baseW)} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : (tool === "parcel" && parcelMode === "remove") ? "pointer" : "crosshair" }}
@@ -13064,30 +12958,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 })}
               </div>
             )}
-          </div>
-        </div>
-      )}
-      {/* Parcel-attached drawing markup modal (B67) */}
-      {openDrawingId && (() => {
-        const d = parcelDrawings.find((x) => x.id === openDrawingId);
-        if (!d) return null;
-        return <ParcelDrawing drawing={d} loading={rehydratingId === d.id} onSave={(marks) => updateDrawingMarks(d.id, marks)} onClose={() => setOpenDrawingId(null)} />;
-      })()}
-      {/* Multi-page PDF sheet picker (B67 increment 2) */}
-      {pagePick && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 3500, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }} onClick={cancelPagePick}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, padding: 18, width: 420, maxWidth: "90vw", boxShadow: "0 18px 50px rgba(0,0,0,0.35)", fontFamily: "system-ui, sans-serif" }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: PAL.ink }}>Pick a sheet</div>
-            <div style={{ fontSize: 12, color: PAL.chromeMuted, margin: "5px 0 12px" }}>“{pagePick.name}” has {pagePick.pageCount} pages — choose which one to attach as the backdrop.</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 220, overflowY: "auto" }}>
-              {Array.from({ length: pagePick.pageCount }, (_, i) => i + 1).map((n) => (
-                <button key={n} onClick={() => pickPage(n)} title={`Attach page ${n}`}
-                  style={{ minWidth: 40, padding: "7px 10px", fontSize: 12.5, fontWeight: 700, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink }}>{n}</button>
-              ))}
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
-              <button onClick={cancelPagePick} style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink }}>Cancel</button>
-            </div>
           </div>
         </div>
       )}
