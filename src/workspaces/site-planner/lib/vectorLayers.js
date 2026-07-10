@@ -67,6 +67,52 @@ export const VECTOR_SOURCES = {
     imageFallback: { url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer", layers: [27, 28] },
     note: "FEMA NFHL flood zone — screening only; verify with the official FEMA Flood Map Service Center.",
   },
+  // Base Flood Elevation LINES (S_BFE, B755) — the whole-foot water-surface contours
+  // FEMA draws ACROSS the floodplain. On most AE reaches the zone polygon's STATIC_BFE
+  // is the -9999 "none" sentinel, so the BFE actually lives here; the floodplain-
+  // mitigation engine interpolates these lines at the fill to DERIVE a screening BFE.
+  // Compute-only (no map render, no imageFallback). NOTE: sublayer index 16 = "Base
+  // Flood Elevations" on the public NFHL MapServer — FEMA occasionally renumbers the
+  // NFHL sublayers; live-verify against /NFHL/MapServer/layers, a one-line edit if moved.
+  bfeLines: {
+    id: "bfeLines",
+    label: "FEMA Base Flood Elevation lines",
+    style: "bfe",
+    query: {
+      url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/16/query",
+      keyRev: 1,
+      outFields: ["ELEV", "LEN_UNIT", "V_DATUM", "SOURCE_CIT"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000, // 30 days — flood layers move slowly
+      minVectorZoom: 15,
+      maxAreaDeg: 0.5,
+    },
+    note: "FEMA NFHL Base Flood Elevation lines — screening only; verify with the official FEMA Flood Map Service Center.",
+  },
+  // Regulatory Cross-Sections (S_XS, B755) — carry WSEL_REG (1% water surface at a
+  // station). REGISTERED for v2 but NOT consumed in v1: correct use needs stream
+  // matching (WTR_NM) + along-station interpolation, not nearest-line distance, or an
+  // unrelated creek's WSE would be misattributed (the multi-foot silent-error class).
+  // NOTE: sublayer index 14 = "Cross-Sections" — same renumber caveat as bfeLines.
+  crossSections: {
+    id: "crossSections",
+    label: "FEMA Cross-Sections",
+    style: "xs",
+    query: {
+      url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/14/query",
+      keyRev: 1,
+      outFields: ["WSEL_REG", "WTR_NM", "STREAM_STN", "XS_LTR", "V_DATUM", "STRMBED_EL"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 15,
+      maxAreaDeg: 0.5,
+    },
+    note: "FEMA NFHL regulatory cross-sections — screening only.",
+  },
   wetlands: {
     id: "wetlands",
     label: "Wetlands (NWI)",
@@ -346,10 +392,11 @@ export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFet
  * shapes the app pulls:
  *   • polygons  ({geometry:{rings}})  → Polygon (rings pass straight through as [lng,lat])
  *   • polylines ({geometry:{paths}})  → LineString (1 path) / MultiLineString (n paths)
- * (B751 added the polyline path for the RRC pipelines layer.) Esri coords are already
- * [lng,lat], so they pass through unchanged. Features with no usable geometry are skipped.
- * NOTE: polygons don't split outer rings from holes — for screening, an even-odd fill renders
- * these rings fine; precise outer/hole classification is a later refinement. Pure. */
+ * (B751 added the polyline path for the RRC pipelines layer; B755 reuses it for the FEMA
+ * Base Flood Elevation lines / cross-sections.) Esri coords are already [lng,lat], so they
+ * pass through unchanged. Features with no usable geometry are skipped. NOTE: polygons don't
+ * split outer rings from holes — for screening, an even-odd fill renders these rings fine;
+ * precise outer/hole classification is a later refinement. Pure. */
 export function featuresToGeoJson(esriFeatures, { source } = {}) {
   const out = [];
   for (const f of esriFeatures || []) {
@@ -417,6 +464,10 @@ export function simplifyGeoJson(fc, tolDeg = 0.00003) {
     const geom = feat.geometry;
     const type = geom && geom.type;
     if (type === "LineString" || type === "MultiLineString") {
+      // Lines (RRC pipelines B751, FEMA BFE lines / cross-sections B755) are Douglas–
+      // Peucker'd at the same ~11 ft tolerance; BFE lines are short, near-straight
+      // cross-lines so the endpoints (which fix a line's position) are always kept and
+      // the derived-BFE interpolation off them is unaffected within screening tolerance.
       const parts = type === "MultiLineString" ? geom.coordinates : [geom.coordinates];
       const outParts = [];
       for (const part of parts || []) {

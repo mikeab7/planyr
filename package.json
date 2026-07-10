@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview --host",
     "lint": "eslint .",
+    "next-id": "node scripts/next-id.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test"

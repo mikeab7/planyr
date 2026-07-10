@@ -98,7 +98,8 @@ import { labelAnchors, placeLabels } from "./lib/boundaryLabels.js";
 import { gridRequest } from "./lib/demGrid.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger,
-  floodGeoBbox, pickWorstCase, effectivePadElev, NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
+  floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines,
+  NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
 } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, triggerClasses } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
@@ -668,7 +669,7 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
   const sig = [
     fp.id, fp.ring.length, ringHash(fp.ring), polyArea(fp.ring).toFixed(0),
     fp.padElevFt ?? "", zonesSig, rule ? `${rule.trigger}|${rule.ratio}|${rule.verified}` : "",
-    elev.padElevFt ?? "", elev.existGradeFt ?? "", elev.bfeFt ?? "", elev.wse02Ft ?? "", elev.avgFillDepthFt ?? "",
+    elev.padElevFt ?? "", elev.existGradeFt ?? "", elev.bfeFt ?? "", elev.derivedBfeFt ?? "", elev.wse02Ft ?? "", elev.avgFillDepthFt ?? "",
   ].join("~");
   if (_mitMemo.has(sig)) {
     const hit = _mitMemo.get(sig);
@@ -686,15 +687,15 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
  * grid tests would otherwise jank drags on exactly the in-floodplain sites this
  * feature targets. */
 const _pondFactsMemo = new Map();
-function pondFloodFacts(ring, zones, rule, { bfeFt, existGradeFt }, zonesSig) {
-  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", existGradeFt ?? ""].join("~");
+function pondFloodFacts(ring, zones, rule, { bfeFt, existGradeFt, derivedBfeFt }, zonesSig) {
+  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", existGradeFt ?? "", derivedBfeFt ?? ""].join("~");
   if (_pondFactsMemo.has(sig)) {
     const hit = _pondFactsMemo.get(sig);
     _pondFactsMemo.delete(sig); _pondFactsMemo.set(sig, hit);
     return hit;
   }
   const val = {
-    wseFt: wse1pctForRing(ring, zones, { bfeFt, existGradeFt }).wseFt,
+    wseFt: wse1pctForRing(ring, zones, { bfeFt, existGradeFt, derivedBfeFt }).wseFt,
     inTrigger: ringInTrigger(ring, zones, rule),
   };
   _pondFactsMemo.set(sig, val);
@@ -6101,11 +6102,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             }))
             .catch(() => ({ zones: [], ts: null, truncated: false, state: "failed" }))
         : Promise.resolve({ zones: [], ts: null, truncated: false, state: "empty" });
-      const [ctx, floodGeo] = await Promise.all([
+      // B755: FEMA Base Flood Elevation LINES (S_BFE) — the same explicit click, same
+      // SWR cache, same envelope. On most AE reaches the zone polygon carries no BFE,
+      // so these whole-foot contour lines are the only published source; we interpolate
+      // one at the fill to DERIVE a screening BFE. A failure reads honestly (no lines →
+      // no derived value → the existing "no published BFE" UNKNOWN), never a fake clear.
+      const bfeLinesP = fmBbox
+        ? fetchCached(VECTOR_SOURCES.bfeLines, fmBbox, { cache: gisCache })
+            .then((r) => ({ ...bfeLinesFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }), ts: r.ts ?? null, state: "loaded" }))
+            .catch(() => ({ lines: [], excludedDatum: 0, excludedUnit: 0, total: 0, ts: null, state: "failed" }))
+        : Promise.resolve({ lines: [], excludedDatum: 0, excludedUnit: 0, total: 0, ts: null, state: "empty" });
+      const [ctx, floodGeo, bfeLines] = await Promise.all([
         resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
         floodGeoP,
+        bfeLinesP,
       ]);
       if (tok !== drainTok.current) return;
+      // Representative point for the derived BFE: the centroid of the fill footprints
+      // (where mitigation is priced), else the largest parcel's centroid — same site-
+      // feet frame the BFE lines converted into.
+      const bfeFillPts = [];
+      for (const e of els) {
+        if (!FM_FILL_TYPES.has(e.type)) continue;
+        try { const r = ringOf(e); if (r && r.length >= 3) for (const pt of r) bfeFillPts.push(pt); } catch (_) { /* mid-edit */ }
+      }
+      const bfePtSrc = bfeFillPts.length ? bfeFillPts : largest.points;
+      const bfePt = bfePtSrc.reduce((s, p) => ({ x: s.x + p.x / bfePtSrc.length, y: s.y + p.y / bfePtSrc.length }), { x: 0, y: 0 });
+      floodGeo.derivedBfe = bfeLines.lines.length ? deriveBfeFromLines({ point: bfePt, lines: bfeLines.lines }) : null;
+      floodGeo.bfeLineFlags = { datumExcluded: bfeLines.excludedDatum, unitExcluded: bfeLines.excludedUnit, total: bfeLines.total, usable: bfeLines.lines.length, state: bfeLines.state };
       const checkedAt = Date.now();
       setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt });
       // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
@@ -6181,15 +6205,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const floodJurKey = fmSettings.jurKey
     || (drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(restored?.county));
   const fmRule = floodRules[floodJurKey] || floodRules.generic;
+  // Derived BFE (B755): the FEMA-BFE-line estimate computed at check time. It NEVER
+  // overwrites the manual bfeFt (which would masquerade as user entry) — it rides its
+  // own field, used only when no static/manual BFE exists (precedence in computeMitigation).
+  const fmDerivedBfe = floodGeo?.derivedBfe || null;
   const fmElev = {
     padElevFt: Number.isFinite(fmSettings.padFfeFt) ? fmSettings.padFfeFt : null,
     existGradeFt: Number.isFinite(fmSettings.existGradeFt) ? fmSettings.existGradeFt : (drainCtxData?.groundElevFt ?? null),
     bfeFt: Number.isFinite(fmSettings.bfeFt) ? fmSettings.bfeFt : null,
+    derivedBfeFt: fmDerivedBfe && Number.isFinite(fmDerivedBfe.bfeFt) ? fmDerivedBfe.bfeFt : null,
     wse02Ft: Number.isFinite(fmSettings.wse02Ft) ? fmSettings.wse02Ft : null,
     avgFillDepthFt: Number.isFinite(fmSettings.avgFillDepthFt) ? fmSettings.avgFillDepthFt : null,
     sources: {
       existGrade: Number.isFinite(fmSettings.existGradeFt) ? "manual" : (drainCtxData?.groundElevFt != null ? "3dep" : null),
       padElev: Number.isFinite(fmSettings.padFfeFt) ? "manual" : null,
+      derivedBfe: fmDerivedBfe ? "bfe-line-interp" : null,
     },
   };
   const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
@@ -6197,7 +6227,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const det = e.det || {};
     const pring = ringOf(e);
     const facts = fmZones.length
-      ? pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt }, fmZonesSig)
+      ? pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt }, fmZonesSig)
       : { wseFt: null, inTrigger: false };
     const estPool = detRegime && detRegime.regime === "B"
       ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: det.depth ?? 8, freeboardFt: det.freeboard ?? 1 })
@@ -6253,7 +6283,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Buildability (B710): FFE / pathway / LOMR-F / §404 screens off the same zones +
   // WSE inputs. Wetlands presence comes from the Site Analysis screen's own finding
   // (lifted via onFindings — no new fetch).
-  const fmGoverningBfe = fmZones.reduce((best, z) => (z.staticBfeFt != null && (best == null || z.staticBfeFt > best) ? z.staticBfeFt : best), null) ?? fmElev.bfeFt;
+  // Governing 1% WSE for buildability/FFE: highest published static BFE → manual → the
+  // derived BFE-line estimate (B755). Same precedence the mitigation engine uses.
+  const fmGoverningBfe = fmZones.reduce((best, z) => (z.staticBfeFt != null && (best == null || z.staticBfeFt > best) ? z.staticBfeFt : best), null) ?? fmElev.bfeFt ?? fmElev.derivedBfeFt;
   const fmBuildingIn1pct = fmZones.length
     ? els.some((e) => {
         if (e.type !== "building") return false;
@@ -6295,12 +6327,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pondFullyInundated,
     unanchoredInTrigger,
     pondExcavationCf,
-    floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length } : null,
+    floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length, derivedBfe: floodGeo.derivedBfe || null, bfeLineFlags: floodGeo.bfeLineFlags || null } : null,
     buildability: fmBuild,
     floodMit: {
       settings: fmSettings,
       jurKey: floodJurKey,
       rules: floodRules,
+      derivedBfe: fmDerivedBfe, // B755 — the FEMA-BFE-line estimate, for the input placeholder
       onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
       onRuleChange: (jk, patch) => setFloodRules((r) => { const next = { ...r, [jk]: { ...r[jk], ...patch } }; saveFloodplainRules(next); return next; }),
     },
@@ -7316,6 +7349,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pairs.push(["Floodplain mitigation", "UNKNOWN (source unavailable)"]);
     } else if (mit && mit.intersectAcres > 0) {
       let v = mit.volumeCf != null ? `${f2(mit.volumeAcFt)} ac-ft` : "UNKNOWN";
+      if (mit.volumeCf != null && mit.providers?.wse1pct === "bfe-line-interp") v += " (derived BFE — screening est.)";
       if (mit.volumeCf != null && d.floodGeo && d.floodGeo.truncated) v += " (floor — capped pull)";
       if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
       pairs.push(["Floodplain mitigation", v]);
@@ -14280,7 +14314,21 @@ function YieldPanel({
               const mit = d.mitigation;
               if (mit && mit.intersectAcres > 0) {
                 if (mit.volumeCf != null) {
-                  out.push(row("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`, mit.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : ""));
+                  const mitTag = mit.expertBypass ? "expert avg-depth"
+                    : d.mitigationStraddle ? "straddle worst-case"
+                    : mit.providers?.wse1pct === "bfe-line-interp" ? "BFE derived"
+                    : "";
+                  out.push(row("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`, mitTag));
+                  // B755 — when the volume is priced off a DERIVED BFE, say so loudly (an
+                  // estimate to verify, never a published number) and show the conservative bound.
+                  if (mit.providers?.wse1pct === "bfe-line-interp" && d.floodGeo?.derivedBfe) {
+                    const db = d.floodGeo.derivedBfe;
+                    const dt = db.detail || {};
+                    const bracket = dt.hiElev != null && dt.hiElev !== dt.loElev
+                      ? ` (between FEMA's ${f1(dt.loElev)}′ and ${f1(dt.hiElev)}′ lines; conservative bound ${f1(dt.hiElev)}′)`
+                      : (db.method === "nearest-line" ? " (nearest single BFE line — ±~0.5′)" : "");
+                    out.push(warnNote(`BFE ≈ ${f1(db.bfeFt)}′ DERIVED from FEMA's Base Flood Elevation lines${bracket} — a screening estimate, not a published BFE. Type a BFE below to override.`, "mit-derived"));
+                  }
                   if (d.mitigationStraddle && d.mitigationStraddle.anyUnknown) out.push(warnNote("Jurisdiction straddle with an UNKNOWN candidate — the worst PRICED case is shown; the unknown candidate could govern. Enter its elevations.", "mit-straddle-unk"));
                   if (req && req.kind === "point" && req.requiredAcFt > 0) {
                     out.push(row("Combined basin volume", `${f2(req.requiredAcFt + mit.volumeAcFt)} ac-ft`));
@@ -14378,7 +14426,9 @@ function YieldPanel({
                   </div>
                   {fmRow("Pad / finished floor (FFE)", "padFfeFt", "—", "The plan-level pad elevation; a selected element's own padElevFt overrides it")}
                   {fmRow("Existing grade", "existGradeFt", "3DEP auto", "Blank = the 3DEP bare-earth median sampled by this drainage check")}
-                  {fmRow("BFE (1% WSE)", "bfeFt", "often needed", "Many AE reaches publish NO static BFE — manual entry is the COMMON path (FIRM panel / effective model)")}
+                  {fmRow("BFE (1% WSE)", "bfeFt",
+                    fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) && !Number.isFinite(fm.settings.bfeFt) ? `~${f1(fm.derivedBfe.bfeFt)} derived` : "often needed",
+                    "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (shown greyed as ‘~x derived’); anything you type here overrides it (FIRM panel / effective model)")}
                   {fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIS / HCFCD", "Not an NFHL attribute — from the FEMA FIS profile or HCFCD model data; hook for MAAPnext grids later")}
                   {fmRow("Dock-high drop: court below slab FF (ft)", "dockDropFt", "4", "Industrial dock-high: building-attached truck courts + their trailer strips auto-price at slab FF minus this drop (typ. 48\u2033 docks); blank = 4")}
                   {fmRow("Expert: average depth of fill below the flood elevation (ft)", "avgFillDepthFt", "bypass", "Expert bypass: volume = intersect area × this constant depth")}

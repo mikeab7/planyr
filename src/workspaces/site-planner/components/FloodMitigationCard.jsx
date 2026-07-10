@@ -1,6 +1,6 @@
 import React from "react";
 import { formatAge } from "../lib/gisCache.js";
-import { NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE } from "../lib/floodplainMitigation.js";
+import { NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, DERIVED_BFE_NOTE } from "../lib/floodplainMitigation.js";
 
 /* Floodplain mitigation & buildability card (B707/B710/B712) — rendered by
  * SitePlanner directly under the Site Analysis screen. Deliberately a SIBLING of
@@ -88,6 +88,23 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
           {mit.volumeCf != null
             ? row("Required compensating storage", `${f2(mit.volumeAcFt)} ac-ft · ${f2(mit.cutCy)} cy`, "total")
             : <div style={warnStyle}>⚠ Mitigation volume UNKNOWN — {mit.unknownReason}. The intersect geometry above still stands.</div>}
+          {/* B755 — the number was priced off a DERIVED BFE (FEMA BFE lines interpolated
+              at the fill): say so, show the bracket + conservative bound, never let it
+              read as a published value. */}
+          {geo && geo.derivedBfe && mit.providers.wse1pct === "bfe-line-interp" && (
+            <div style={warnStyle}>
+              ⚑ BFE ≈ {f2(geo.derivedBfe.bfeFt)}′ DERIVED from FEMA's Base Flood Elevation lines
+              {geo.derivedBfe.detail && geo.derivedBfe.detail.hiElev != null && geo.derivedBfe.detail.hiElev !== geo.derivedBfe.detail.loElev
+                ? ` (interpolated between the ${f2(geo.derivedBfe.detail.loElev)}′ and ${f2(geo.derivedBfe.detail.hiElev)}′ contours; conservative bound ${f2(geo.derivedBfe.detail.hiElev)}′)`
+                : (geo.derivedBfe.method === "nearest-line" ? " (nearest single BFE line — ±~0.5′)" : "")}
+              {" "}— a screening estimate, not a published or surveyed BFE. Confirm before design; enter a BFE to override.
+            </div>
+          )}
+          {/* BFE lines are mapped but publish a datum we can't safely compare — say why
+              we still can't derive, rather than a bare UNKNOWN. */}
+          {geo && geo.bfeLineFlags && geo.bfeLineFlags.usable === 0 && geo.bfeLineFlags.datumExcluded > 0 && (
+            <div style={warnStyle}>⚠ FEMA Base Flood Elevation lines are mapped here but publish a non-NAVD88 datum — the tool won't derive a BFE from a mixed datum (a multi-foot silent error); enter one manually, converted to NAVD88.</div>
+          )}
           {mit.flags.includes("floodway_intersect") && (
             <div style={dangerStyle}>⚑ FILL IN THE FLOODWAY IS PROHIBITED — {f2(mit.floodwayAcres)} ac of fill footprint sits in the regulatory floodway. Relocate that fill; no mitigation ratio prices it.</div>
           )}
@@ -107,7 +124,7 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
             {mit.flags.includes("rule_unverified") ? " RULE UNVERIFIED — edit & confirm in settings." : ""}
           </div>
           <div style={noteStyle}>
-            Providers: pad FFE {mit.providers.padElev || "—"} · grade {mit.providers.existGrade || "—"} · 1% WSE {mit.providers.wse1pct || "—"} · 0.2% WSE {mit.providers.wse02pct || "—"}
+            Providers: pad FFE {mit.providers.padElev || "—"} · grade {mit.providers.existGrade || "—"} · 1% WSE {mit.providers.wse1pct === "bfe-line-interp" ? "derived (BFE lines)" : (mit.providers.wse1pct || "—")} · 0.2% WSE {mit.providers.wse02pct || "—"}
             {geo && geo.ts != null ? ` · flood data ${formatAge(Date.now() - geo.ts)}` : ""}
           </div>
         </>
@@ -138,6 +155,7 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
 
       <div style={{ marginTop: 7, borderTop: `1px solid ${line}`, paddingTop: 6, fontSize: 10, color: muted, lineHeight: 1.5 }}>
         {NAVD88_NOTE} {NEWER_MODEL_NOTE}
+        {geo && geo.derivedBfe && <><br />{DERIVED_BFE_NOTE}</>}
         <br />{EXCLUSIONS_NOTE}
         <br />{OFFSITE_NOTE} Screening only — confirm with your engineer and the reviewing authority.
       </div>
