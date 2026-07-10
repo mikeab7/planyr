@@ -8,7 +8,7 @@ import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
-import { rowsToModel, KIND_TO_FIELD } from "./lib/elementRows.js";
+import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal } from "./lib/elementRows.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement } from "./lib/editorNames.js";
 import { toastForSyncEvent } from "./lib/conflictToasts.js";
@@ -2279,22 +2279,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // cloud — the husk heals into a proper delete (B690 root-cause leg; see isHuskParcel).
       parcels: sub("parcel", model.parcels).filter((pc) => !isHuskParcel("parcel", pc)),
     };
+    // B756 — DATA-LOSS FIX (recurrence of B473 via the B672 read-cutover). A brand-new signed-in site
+    // created from the map ("Plan N parcels →") writes its parcels only to localStorage + the SLIM cloud
+    // header (slimForCloud strips every element collection); NOTHING commits them to site_elements. This
+    // first refetch fetches 0 rows, so the rows-canonical replace below would BLANK the canvas — and the
+    // follow-on autosave would persist the empty state — vanishing the parcels (0 rows, empty header, empty
+    // mirror). Fold back the never-synced local-only elements (a (kind,id) with NO row at all — not live,
+    // not a tombstone) so they survive AND get committed by the reconcile at the end. SAFE vs the V229 #5
+    // stale-tab clobber and delete-resurrection: any (kind,id) that already has a row is left untouched —
+    // rows stay canonical (see foldNeverSyncedLocal). rowKeys covers LIVE + TOMBSTONE rows on purpose.
+    const rowKeys = new Set((r.rows || []).map((row) => row && (row.kind + ":" + row.id)));
+    const merged = foldNeverSyncedLocal(next, stateRef.current, rowKeys, isHuskParcel);
     const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
-    replace(setEls, next.els); replace(setMarkups, next.markups); replace(setMeasures, next.measures);
-    replace(setCallouts, next.callouts); replace(setParcels, next.parcels);
+    replace(setEls, merged.els); replace(setMarkups, merged.markups); replace(setMeasures, merged.measures);
+    replace(setCallouts, merged.callouts); replace(setParcels, merged.parcels);
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
     // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
     const liveIds = new Set(r.rows.filter((row) => row && !row.deleted_at).map((row) => row.id));
     setDeletedIds((prev) => (prev.some((id) => liveIds.has(id)) ? prev.filter((id) => !liveIds.has(id)) : prev));
     // One reconcile pass — against EXACTLY the collections just placed on the canvas (rows ∪ pending
-    // local edits), NEVER stateRef: stateRef still holds the PRE-replace canvas here, and on a tab
-    // whose socket dropped that canvas is genuinely STALE — diffing it against the fresh shadow
-    // committed old geometry as valid rev-guarded updates and clobbered everyone (V229 #5, the
-    // reproduced lost-update). Edits made during the fetch window are already in the dirty queue
+    // local edits ∪ the B756 never-synced local-only fold), NEVER a blind stateRef diff: stateRef still
+    // holds the PRE-replace canvas here, and on a tab whose socket dropped that canvas is genuinely STALE
+    // — diffing it wholesale against the fresh shadow committed old geometry as valid rev-guarded updates
+    // and clobbered everyone (V229 #5, the reproduced lost-update). The B756 fold takes ONLY the subset of
+    // stateRef whose (kind,id) has no row at all (an element the server has never seen), which can produce
+    // creates but never a stale rev-guarded update, so the V229 guarantee holds. Edits made during the
+    // fetch window are already in the dirty queue
     // (every canvas edit reconciles through the autosave effect), so nothing is lost by diffing
-    // the substituted result instead.
-    try { eng.reconcile(next, { busy: false }); } catch (_) {}
+    // the substituted result instead. `merged` folds in never-synced local-only elements (B756) so a
+    // brand-new site's parcels are enqueued as creates here instead of being silently dropped.
+    try { eng.reconcile(merged, { busy: false }); } catch (_) {}
   };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {

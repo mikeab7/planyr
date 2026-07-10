@@ -5,7 +5,17 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-07._
+_Last updated: 2026-07-10._
+
+## 🩹 Optional — a few older sites lost their parcels before today's fix (B756)
+- [ ] **Nothing required; read only if you want an older site back.** A bug (fixed + shipped 2026-07-10)
+      made brand-new sites you created from the map **lose their parcel boundary** when signed in. Going
+      forward this can't happen again. Four sites created since 2026-07-06 were hit — the **Katy "27211 Hoyt
+      LN"** one you just made (re-create it in 10 seconds: open the map, select the parcels, click "Plan
+      parcels"), plus **GREEN RIVER, HOLLISTER, WAYSIDE**. If any of those three held real work, open it on
+      the **same computer/browser you first created it on** and check the planner's **version history (↺)** —
+      the pre-loss copy may still be saved locally there and can be restored. If they were just quick
+      attempts, ignore this.
 
 ## 🔌 Turn on the new Claude connector (B675 — ~5 minutes, copy-paste)
 - [ ] **Add 3 settings in Cloudflare Pages, then add the connector in Claude.** Claude handed you the
