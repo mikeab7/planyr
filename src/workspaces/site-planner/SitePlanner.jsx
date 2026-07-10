@@ -4480,9 +4480,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (file.size > OVERLAY_MAX_BYTES)
           flashWarn(`“${ov.name}” is ${(file.size / 1048576) | 0} MB — too large to back up to the cloud (50 MB limit). It's on this device but won't reload on another until you re-add it.`, 10000);
         else
+          // Inside isCloudActive() + past the oversize pre-check, a null result means a GENUINE upload
+          // failure (Storage/RLS/network) — surface it, never a silent skip of the cross-device backup.
           uploadOverlayFile(siteId, id, file).then((res) => {
             if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
-          }).catch(() => {});
+            else flashWarn(`Couldn't back up “${ov.name}” to the cloud — it's saved on this device but won't reload on another until you re-add it (check your connection).`, 9000);
+          }).catch(() => flashWarn(`Couldn't back up “${ov.name}” to the cloud — it's saved on this device but won't reload on another until you re-add it.`, 9000));
         // B748 — best-effort provenance copy of the original DWG (the true source of truth).
         if (originalDwg && originalDwg.size <= OVERLAY_MAX_BYTES)
           uploadOverlayFile(siteId, id + "-dwg", originalDwg).then((res) => {
@@ -4549,6 +4552,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // cloud object when no OTHER overlay still points at it (else we'd orphan the sibling's image).
     const shared = o.storageKey && sheetOverlays.some((x) => x.id !== id && x.storageKey === o.storageKey);
     if (o.storageKey && !shared) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
+    // B748 — the DWG provenance object rides its own key; drop it too (ref-counted) so a delete doesn't orphan it in Storage.
+    const sharedDwg = o.sourceDwgKey && sheetOverlays.some((x) => x.id !== id && x.sourceDwgKey === o.sourceDwgKey);
+    if (o.sourceDwgKey && !sharedDwg) deleteOverlayObject(o.sourceDwgKey);
     // B474 review (#23) — evict the cached IndexedDB raster too, ref-counted like storageKey (a Duplicate/Paste
     // copies the key, so only drop the entry when no other overlay still points at it).
     const sharedIdb = o.idbKey && sheetOverlays.some((x) => x.id !== id && x.idbKey === o.idbKey);
@@ -4796,10 +4802,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * untouched and the hi-res never bloats state. Drop back to the base raster (and revoke) when
    * zoomed out, so multiple hi-res overlays can't accumulate in memory. */
   const [hiresById, setHiresById] = useState({});     // id → hi-res object URL (render override only; never persisted)
-  const hiresRef = useRef({});                         // id → { url, scale, revoke } (revoke bookkeeping)
+  const hiresRef = useRef({});                         // id → { url, scale, page, knockout, revoke } (revoke bookkeeping)
   const hiresBusy = useRef(new Set());
-  const commitHires = () => setHiresById(Object.fromEntries(Object.entries(hiresRef.current).map(([id, v]) => [id, v.url])));
-  useEffect(() => () => { Object.values(hiresRef.current).forEach((v) => { try { v.revoke && v.revoke(); } catch (_) {} }); hiresRef.current = {}; }, []); // revoke all on unmount
+  const hiresMounted = useRef(true);                   // false after unmount — an in-flight raster must not resurrect state / leak a URL
+  const viewPpfRef = useRef(view.ppf);
+  viewPpfRef.current = view.ppf;                       // freshest zoom, so an async completion re-checks against the CURRENT view
+  const commitHires = () => { if (hiresMounted.current) setHiresById(Object.fromEntries(Object.entries(hiresRef.current).map(([id, v]) => [id, v.url]))); };
+  useEffect(() => () => { hiresMounted.current = false; Object.values(hiresRef.current).forEach((v) => { try { v.revoke && v.revoke(); } catch (_) {} }); hiresRef.current = {}; }, []); // revoke all on unmount
+  const wantsHires = (o) => { const pm = Math.max(o.imgW, o.imgH); return chooseOverlayRasterScale({ ftPerPx: o.ftPerPx, ppf: viewPpfRef.current, pageMaxPts: pm, baseScale: baseRasterScale(pm) }); };
   // Get a PDF proxy for an overlay: the in-session doc, or load once from stored bytes (cached in overlayDocs).
   const ensureOverlayPdf = async (o) => {
     if (overlayDocs.current.has(o.id)) return overlayDocs.current.get(o.id);
@@ -4808,6 +4818,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!bytes) return null;
     const { loadPdf } = await import("../doc-review/lib/pdf.js");
     const pdf = await loadPdf(bytes);
+    // Unmounted (or the overlay was removed) while loading → don't leak an undestroyed proxy in overlayDocs.
+    if (!hiresMounted.current || !stateRef.current.sheetOverlays.some((x) => x.id === o.id)) { try { pdf.destroy(); } catch (_) {} return null; }
     overlayDocs.current.set(o.id, pdf);
     return pdf;
   };
@@ -4821,23 +4833,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (o.visible === false || !o.src) continue;
         const isPdf = overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf");
         if (!isPdf) continue; // a DXF base is already vector-crisp at 4500px; an image can't re-raster
-        const pageMaxPts = Math.max(o.imgW, o.imgH);
-        const dec = chooseOverlayRasterScale({ ftPerPx: o.ftPerPx, ppf: view.ppf, pageMaxPts, baseScale: baseRasterScale(pageMaxPts) });
+        const dec = wantsHires(o);
         const existing = cur[o.id];
         if (!dec.isHires) { if (existing) { try { existing.revoke && existing.revoke(); } catch (_) {} delete cur[o.id]; changed = true; } continue; } // zoomed out → base
-        if (existing && Math.abs(existing.scale - dec.scale) <= existing.scale * 0.1) continue; // already close enough
+        const page = o.page || 1, knockout = o.knockout !== false;
+        // Re-raster unless we already hold a hi-res for the SAME page + knockout at a close-enough scale — so a
+        // page change / knockout toggle invalidates a stale hi-res instead of leaving the old page displayed.
+        if (existing && existing.page === page && existing.knockout === knockout && Math.abs(existing.scale - dec.scale) <= existing.scale * 0.1) continue;
         if (hiresBusy.current.has(o.id)) continue;
         hiresBusy.current.add(o.id);
         (async () => {
           try {
             const pdf = await ensureOverlayPdf(o);
             if (!pdf) return;
-            const rr = await rasterizePageHiRes(pdf, o.page || 1, dec.scale, { knockout: o.knockout !== false });
-            // The overlay may have been removed / hidden while we rasterized — don't resurrect or leak it.
-            const stillLive = stateRef.current.sheetOverlays.some((x) => x.id === o.id && x.visible !== false);
-            if (!stillLive) { try { rr.revoke && rr.revoke(); } catch (_) {} return; }
+            const rr = await rasterizePageHiRes(pdf, page, dec.scale, { knockout });
+            // Bail if we unmounted, the overlay was removed/hidden, or the user zoomed back out while we
+            // rasterized — don't resurrect state or leave a hi-res mounted when it's no longer wanted (revoke).
+            const o2 = stateRef.current.sheetOverlays.find((x) => x.id === o.id && x.visible !== false);
+            if (!hiresMounted.current || !o2 || !wantsHires(o2).isHires) { try { rr.revoke && rr.revoke(); } catch (_) {} return; }
             const prev = cur[o.id];
-            cur[o.id] = { url: rr.src, scale: dec.scale, revoke: rr.revoke };
+            cur[o.id] = { url: rr.src, scale: dec.scale, page, knockout, revoke: rr.revoke };
             if (prev) { try { prev.revoke && prev.revoke(); } catch (_) {} }
             commitHires();
           } catch (_) { /* keep the base raster */ } finally { hiresBusy.current.delete(o.id); }
@@ -6966,7 +6981,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let aerialDropped = false;
     const overlaysDropped = [];
     await Promise.all(imgs.map(async (img) => {
-      const href = img.getAttribute("href") || img.getAttributeNS(XL, "href");
+      let href = img.getAttribute("href") || img.getAttributeNS(XL, "href");
+      // B749 — a placed overlay may be showing a TRANSIENT hi-res object URL (blob:) while zoomed in;
+      // that URL is session-local and could be revoked mid-export → a silently dropped overlay. Swap it
+      // for the overlay's PERSISTED base raster (a data: URL) so the export always has valid, inline-able
+      // bytes (LOUD-FAILURE / PDF-PARITY — the export uses the same picture, never nothing).
+      if (href && href.startsWith("blob:") && img.hasAttribute("data-overlay-id")) {
+        const ov = stateRef.current.sheetOverlays.find((o) => o.id === img.getAttribute("data-overlay-id"));
+        if (ov && ov.src) { img.setAttribute("href", ov.src); img.removeAttributeNS(XL, "href"); href = ov.src; }
+      }
       if (!href || href.startsWith("data:")) return;
       const isAerial = img.hasAttribute("data-export-aerial");
       const isOverlay = img.hasAttribute("data-export-overlay");
@@ -10128,7 +10151,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {o.src ? (
                       // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
                       // B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
-                      <image data-overlay-image="1" href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+                      // data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
+                      <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
                     ) : (<g data-export="skip">
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
                       <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{(o.idbKey || o.storageKey) ? "Loading drawing…" : `Re-add “${o.name}” — image not on this device`}</text>
