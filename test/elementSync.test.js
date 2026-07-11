@@ -504,6 +504,72 @@ describe("B757 — a single tab never sees a false 'another window' conflict on 
     release(); await tick(); await tick();
     expect(s.shadowSnapshot().get("el:e1").rev).toBe(7); // adopted the foreign rev
   });
+
+  // WRITE-PATH self-conflict: an 8 s COMMIT_TIMEOUT_MS aborts a commit that actually landed
+  // server-side; the retry re-flushes at the stale expected rev, hits OUR OWN committed row (a
+  // 'conflict' whose data === our data), and pre-fix emitted edit-vs-edit-lost-race in a single tab.
+  it("a timed-out-but-committed edit whose retry conflicts with our OWN row → silent (no edit-vs-edit toast)", async () => {
+    const h = makeHarness();
+    h.sync.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    let call = 0;
+    h.setResponder((ops) => {
+      call += 1;
+      if (call === 1) return { ok: false, results: [], error: "commit timeout" };   // aborted, but it committed at rev 2
+      return { ok: true, results: ops.map((o) => ({ id: o.id, status: "conflict", row: { data: o.data, rev: 2, z_index: o.z, updated_by: "me" } })) };
+    });
+    h.sync.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); h.sync.flushGesture(); await tick(); // attempt 1 → timeout → requeue + backoff
+    h.runTimers(); await tick();                          // backoff → retry (attempt 2) → conflict = our own data
+    expect(call).toBe(2);
+    expect(h.events.filter((e) => e.type === "edit-vs-edit-lost-race")).toHaveLength(0); // our own committed data, not a foreign edit
+    expect(h.sync.shadowSnapshot().get("el:e1").rev).toBe(2); // converged at the fresh rev
+    expect(h.sync.pendingCount()).toBe(0);                // not re-committed
+  });
+
+  // Same class on the RESTORE path.
+  it("a timed-out-but-committed restore whose retry conflicts with our OWN row → silent (no restore-conflict toast)", async () => {
+    const h = makeHarness();
+    h.sync.seed([]);
+    let call = 0;
+    h.setResponder((ops) => {
+      call += 1;
+      if (call === 1) return { ok: false, results: [], error: "commit timeout" };
+      return { ok: true, results: ops.map((o) => ({ id: o.id, status: "conflict", row: { data: o.data, rev: 9, z_index: o.z, updated_by: "me" } })) };
+    });
+    h.sync.restore("el", "e1", { id: "e1", cx: 7, z: 0 }); await tick(); // restore attempt 1 → timeout → requeue
+    h.runTimers(); await tick();                          // retry → conflict = our own data
+    expect(h.events.filter((e) => e.type === "restore-conflict")).toHaveLength(0);
+    expect(h.sync.shadowSnapshot().get("el:e1").rev).toBe(9);
+  });
+
+  // GUARD: a genuine write-path conflict carrying DIFFERENT data still fires the toast (already covered
+  // by the L156 test for the happy retry; here via the timeout→retry path to pin the self-dup gate).
+  it("a timed-out edit whose retry conflicts with DIFFERENT (foreign) data still fires edit-vs-edit", async () => {
+    const h = makeHarness();
+    h.sync.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    let call = 0;
+    h.setResponder((ops) => {
+      call += 1;
+      if (call === 1) return { ok: false, results: [], error: "commit timeout" };
+      return { ok: true, results: ops.map((o) => ({ id: o.id, status: "conflict", row: { data: { id: "e1", cx: 999, z: 0 }, rev: 4, z_index: 0, updated_by: "u2" } })) };
+    });
+    h.sync.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); h.sync.flushGesture(); await tick();
+    h.runTimers(); await tick();
+    expect(h.events.filter((e) => e.type === "edit-vs-edit-lost-race")).toHaveLength(1); // real foreign write → still surfaced
+  });
+
+  // Residual: the realtime echo of a committed-but-unacked write, after a NEWER edit queued during the
+  // retry backoff — inflight is cleared and dirty holds D2, so only the recentSent backstop recognizes it.
+  it("a committed-but-unacked write's realtime echo, after a newer edit queued during backoff → silent", async () => {
+    const h = makeHarness();
+    h.sync.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    h.setResponder(() => ({ ok: false, results: [], error: "timeout" })); // D1 aborted but committed at rev 2 server-side
+    h.sync.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); h.sync.flushGesture(); await tick(); // D1 on wire → timeout → requeued; backoff pending (not run)
+    h.sync.reconcile({ els: [{ id: "e1", cx: 60, z: 0 }] }, {}); // D2 queued during backoff, overwrites the requeued D1 in dirty
+    // the realtime echo of the committed D1 (rev 2) lands — matches neither inflight (cleared) nor dirty (D2)
+    const instr = h.sync.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 50, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
+    expect(instr.action).toBe("ignore");
+    expect(h.events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // recognized as ours via recentSent
+  });
 });
 
 // B756 — the refetch-replace integration the data-loss fix restores: a brand-new signed-in site's

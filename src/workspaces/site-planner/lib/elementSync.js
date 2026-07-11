@@ -81,6 +81,23 @@ export function createElementSync(opts = {}) {
     tombstoned.set(skey(kind, id), { at: t, rev: typeof rev === "number" ? rev : 0 });
     for (const [k, v] of tombstoned) if (t - v.at > recentWindowMs) tombstoned.delete(k); // bound memory
   }
+  // key -> { json, at }  (the last data serialization THIS tab put ON THE WIRE for the key). Unlike
+  // inflightKeys — cleared the instant an RPC settles — this SURVIVES a transport failure, so a
+  // committed-but-unacked write's realtime echo is still recognized as ours even after onTransportFailure
+  // clears inflight and a newer edit has queued into dirty (the B757 transport-failure echo variant).
+  // On the SUCCESS path the rev guard / inflight match already suppress the echo; this only backstops
+  // the ok:false-but-actually-committed case. Pruned to the recent window so it stays tiny.
+  const recentSent = new Map();
+  function recordSent(kind, id, el) {
+    if (!el) return; // deletes carry no data to match an echo against
+    const t = now();
+    recentSent.set(skey(kind, id), { json: stableStringify(el), at: t });
+    for (const [k, v] of recentSent) if (t - v.at > recentWindowMs) recentSent.delete(k); // bound memory
+  }
+  const sentMatches = (kind, id, json) => {
+    const s = recentSent.get(skey(kind, id));
+    return !!s && now() - s.at <= recentWindowMs && s.json === json;
+  };
 
   let debounceHandle = null;
   let backoffHandle = null;
@@ -219,7 +236,7 @@ export function createElementSync(opts = {}) {
     clearDebounce();
     const batch = [...dirty.values()];
     dirty.clear();
-    for (const e of batch) inflightKeys.set(skey(e.kind, e.id), e); // protected like dirty until the result lands
+    for (const e of batch) { inflightKeys.set(skey(e.kind, e.id), e); recordSent(e.kind, e.id, e.el); } // protected like dirty until the result lands; recentSent survives a transport failure (B757)
     inflight = true;
     setState("syncing");
     serialize(siteId, async () => {
@@ -270,16 +287,38 @@ export function createElementSync(opts = {}) {
       } else if (r.status === "conflict") {
         const row = r.row || {};
         if (e.cls === "restore") {
-          // someone restored/edited it first — the live row is the truth; adopt it, don't re-push
+          // someone restored/edited it first — the live row is the truth; adopt it, don't re-push. BUT
+          // if the live row already holds EXACTLY our data, our OWN restore already landed — a timed-out-
+          // but-committed restore (COMMIT_TIMEOUT_MS) whose retry now sees its own row — so adopt silently,
+          // no toast (B757). Data-equality gated (not updated_by alone) so a genuine race that restored
+          // DIFFERENT data still surfaces per the B673 matrix.
+          const selfDup = row.data && stableStringify(row.data) === stableStringify(e.el);
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(row.data), rev: row.rev, z: row.z_index });
-          report("element-restore-conflict", "restore raced a live row", { siteId, id: e.id, kind: e.kind });
-          onEvent({ type: "restore-conflict", id: e.id, kind: e.kind, remote: row });
+          tombstoned.delete(key);
+          if (selfDup) {
+            recent.set(key, { at: now(), rev: row.rev });
+            report("element-restore-self-dup", "restore conflict row IS our own committed data — silent", { siteId, id: e.id, kind: e.kind });
+          } else {
+            report("element-restore-conflict", "restore raced a live row", { siteId, id: e.id, kind: e.kind });
+            onEvent({ type: "restore-conflict", id: e.id, kind: e.kind, remote: row });
+          }
         } else if (e.cls === "delete") {
           // delete-vs-edit: delete WINS — re-issue at the fresh rev (per the B673 matrix)
           shadow.set(key, { kind: e.kind, id: e.id, json: shadow.get(key)?.json || "", rev: row.rev, z: e.z });
           enqueue(key, { kind: e.kind, id: e.id, cls: "delete", el: null, z: e.z });
           report("element-delete-reapplied", "delete re-applied at fresh rev", { siteId, id: e.id, kind: e.kind });
           onEvent({ type: "delete-reapplied", id: e.id, kind: e.kind, remote: row });
+        } else if (row.data && stableStringify(row.data) === stableStringify(e.el)) {
+          // SELF-DUPLICATE: the "conflicting" live row already holds EXACTLY our data — this is our OWN
+          // write echoing back as a conflict, i.e. a timed-out/aborted commit (COMMIT_TIMEOUT_MS) that
+          // actually landed server-side, whose retry now races its own committed row. Adopt the rev
+          // silently, do NOT re-commit, do NOT toast — it's not a foreign edit (B757). Gated on DATA
+          // equality (not updated_by alone) so a genuine same-account two-window conflict carrying
+          // DIFFERENT data still surfaces per the B673 matrix.
+          shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(row.data), rev: row.rev, z: e.z });
+          tombstoned.delete(key);
+          recent.set(key, { at: now(), rev: row.rev });
+          report("element-conflict-self-dup", "conflict row IS our own committed data — silent", { siteId, id: e.id, kind: e.kind });
         } else {
           // edit-vs-edit: second writer wins — adopt the remote rev and re-commit local on top (LWW)
           shadow.set(key, { kind: e.kind, id: e.id, json: "", rev: row.rev, z: e.z });
@@ -385,7 +424,8 @@ export function createElementSync(opts = {}) {
       const rowJson = !row.deleted_at && row.data ? stableStringify(row.data) : null;
       const sameData = rowJson != null && (
         (pendInflight && pendInflight.el && stableStringify(pendInflight.el) === rowJson) ||
-        (pendDirty && pendDirty.el && stableStringify(pendDirty.el) === rowJson)
+        (pendDirty && pendDirty.el && stableStringify(pendDirty.el) === rowJson) ||
+        sentMatches(row.kind, row.id, rowJson) // our own committed-but-unacked write echoing back after a transport failure requeued a newer edit (B757)
       );
       // A queued identical update can be dropped outright (server already has it); otherwise local data
       // stays on canvas, the commit re-targets the fresh rev (LWW re-commit), and B673 gets the event.
