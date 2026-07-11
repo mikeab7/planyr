@@ -199,10 +199,13 @@ export const JURISDICTION_LAYERS = {
         // routed through the same-origin B445 cache proxy (see probeService); the f=image export
         // already proxies and renders via a CORS-exempt <img>.
         kind: "dynamic",
-        label: "1-ft contours (drainage)",
+        // B762: folds into the Basemap group under the USGS contour row (Fort Bend is a
+        // single-layer county, so it no longer gets its own dropdown). Label names the county
+        // + authority since it sits next to the statewide USGS contours there.
+        label: "1-ft contours (Fort Bend DD)",
         url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
         layers: null,
-        note: "Fort Bend Drainage District 1-foot contours.",
+        note: "Fort Bend Drainage District 1-foot contours. Exists ONLY in Fort Bend County — the statewide USGS contour layer above covers everywhere else.",
         opacity: 0.7,
       },
     },

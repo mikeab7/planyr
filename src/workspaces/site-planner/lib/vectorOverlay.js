@@ -61,6 +61,9 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
   const lineColor = cfg.color || "#374151";
   const baseStyle = () => ({
     color: lineColor, weight: cfg.weight || 2, opacity,
+    // B761: a boundary source can request a DASHED stroke (cfg.dash) — used to draw ETJ
+    // in the same hue as solid city limits, so line-style (not color) tells them apart.
+    ...(cfg.dash ? { dashArray: "6 5" } : {}),
     // fill is the hover/click hit area; at 0.02 it's imperceptible on imagery. The
     // className lets select mode neutralize Leaflet's `.leaflet-interactive
     // {cursor:pointer}` (which would otherwise override the parcel-select cursor

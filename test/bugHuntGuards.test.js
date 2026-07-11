@@ -24,7 +24,15 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     const src = read("../src/workspaces/site-planner/components/LayerPanel.jsx");
     expect(src).not.toMatch(/#3b3a36|#fbfaf6|#b45309/);                       // the old hardcoded warm-dark hexes
     expect(src).toMatch(/active \? "var\(--accent\)" : "transparent"/);       // tokenized active fill
-    expect(src).toMatch(/ls\.stale \? "var\(--warn-text\)"/);                 // tokenized stale stamp
+    expect(src).toMatch(/var\(--warn-text\)/);                               // warn text stays a theme token (out-of-coverage caption)
+    // B760 moved the stale stamp behind the per-row ⓘ: the stale → "warn" tone is decided in
+    // the pure layerPanelInfo module and RowInfo renders that tone with the --warn-text token.
+    // The theme token stays the single source of warn text across ALL three files (never a hex).
+    const info = read("../src/workspaces/site-planner/lib/layerPanelInfo.js");
+    expect(info).toMatch(/ls && ls\.stale \? "warn"/);                       // stale → warn tone
+    const rowInfo = read("../src/workspaces/site-planner/components/RowInfo.jsx");
+    expect(rowInfo).not.toMatch(/#b45309|#8a5410|#efb54e/i);                 // no hardcoded amber
+    expect(rowInfo).toMatch(/tone === "warn" \? "var\(--warn-text\)"/);      // warn tone → theme token
   });
 
   it("B522: the Mapillary proxy clamps a no-body upstream status instead of forwarding it", () => {

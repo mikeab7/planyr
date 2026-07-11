@@ -18,6 +18,8 @@
  * meta-filter, so it sits BELOW the groups (B696), not above them.
  */
 import { useEffect, useState } from "react";
+import RowInfo from "./RowInfo.jsx";
+import { rowInfoSections, combineLayerStatus } from "../lib/layerPanelInfo.js";
 import { STATEWIDE, JURISDICTIONS, EVIDENCE, TERRAIN, jurisdictionFor, layerVintage } from "../lib/layers.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT, MIN_CORRIDOR_WIDTH_FT, MAX_CORRIDOR_WIDTH_FT } from "../lib/pipelineCorridor.js";
 import { PLANNER_BASEMAP_CHOICES } from "../lib/basemaps.js";
@@ -31,7 +33,6 @@ import {
 // be theme tokens — the old warm cream-era hexes were dark-on-dark in dark mode (B341).
 const MUTED = "var(--text-secondary)", LINE = "var(--border-default)", INK = "var(--text-primary)";
 const groupHdr = { fontSize: 10, color: MUTED, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "6px 0 4px" };
-const groupNote = { fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "0 0 4px" };
 const STATUS = {
   loading: { color: "var(--warn-text)", label: "loading…" },
   loaded: { color: "var(--status-active)", label: "loaded" },
@@ -84,20 +85,24 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     const age = ls && ls.ts ? formatAge(Date.now() - ls.ts) : "";
     const vintage = layerVintage(k, cfg); // B236: source vintage, distinct from refreshed-age
     const outHere = st.on && coverage[k] === "out"; // honest "no data here" for an ON regional layer
+    // B760: ALL persistent explanatory text (source, vintage/age, sublabel, note, and any
+    // has-jurisdiction caveat) moves behind the per-row ⓘ so the row itself stays ONE line.
+    const infoSections = rowInfoSections(cfg, { vintage, age, ls });
     return (
       <div key={k} style={{ marginBottom: 5, opacity: dim ? 0.55 : 1 }}>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-          <input type="checkbox" checked={st.on} onChange={(e) => set(k, { on: e.target.checked })} />
-          <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{cfg.label}</span>
+        {/* Row: checkbox + label + ⓘ + status dot — one line (B760). The ⓘ is a real
+            <button> OUTSIDE the <label> so clicking it never toggles the checkbox. */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
+            <input type="checkbox" checked={st.on} onChange={(e) => set(k, { on: e.target.checked })} />
+            <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{cfg.label}</span>
+          </label>
+          <RowInfo label={cfg.label} sections={infoSections} />
           {meta && (
             <span title={meta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: meta.color,
               animation: ls.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
           )}
-        </label>
-        {/* NEW-3: plain-language sublabel (and a demoted source/attribution note). */}
-        {cfg.sublabel && (
-          <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.4, margin: "1px 0 0 22px" }}>{cfg.sublabel}</div>
-        )}
+        </div>
         {st.on && (
           <input type="range" min={0.1} max={1} step={0.05} value={st.opacity}
             title="Layer opacity" aria-label={`${cfg.label} opacity`}
@@ -120,36 +125,21 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             ft
           </label>
         )}
-        {/* B236 vintage + B75 refreshed-age, folded into ONE line (the B96 note):
-            "as of" = the DATA's own currency; "refreshed" = when WE last pulled the
-            cached copy. Both honest, both here, never conflated. */}
-        {st.on && (
-          <div title={`Source vintage — ${cfg.label}'s own effective / publication date (when the underlying data is current as of). "refreshed" is when we last pulled our cached copy — screening only; verify against the source.`}
-            style={{ fontSize: 9.5, color: MUTED, lineHeight: 1.35, marginTop: 1, fontStyle: vintage ? "normal" : "italic" }}>
-            as of: {vintage || "vintage unknown"}
-            {age && (ls.state === "loaded" || ls.state === "empty") && (
-              <span style={{ color: ls.stale ? "var(--warn-text)" : MUTED, fontStyle: "normal" }}>
-                {" "}· refreshed {age}{ls.stale ? " (updating…)" : ""}
-              </span>
-            )}
-          </div>
-        )}
-        {/* NEW-1: honest out-of-coverage caption for an ON layer (e.g. COH sewer in
-            Dallas) — the map still renders everything the source returns for the view. */}
+        {/* SIGNAL kept inline (A1): honest out-of-coverage caption for an ON layer (e.g. COH
+            sewer in Dallas) — the map still renders everything the source returns for the view. */}
         {outHere && (
           <div style={{ fontSize: 10, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 1 }}>
             No data in this area — this layer only covers its home region. The map still shows whatever the source returns here.
           </div>
         )}
-        {/* status reason (failed / empty / needs-setup) */}
+        {/* SIGNAL kept inline: status reason (failed / empty / needs-setup) */}
         {meta && (ls.state === "failed" || ls.state === "empty" || ls.state === "unconfigured") && (
           <div style={{ fontSize: 10, color: meta.color, lineHeight: 1.35, marginTop: 1 }}>
             {ls.msg || meta.label}
           </div>
         )}
-        {/* NEW-2/B571: categorical legend for a per-feature-colored overlay (road
-            authority) — shown only while the layer is on, so the colors on the map are
-            named. Unknown is drawn dashed (a neutral, never a faded line). */}
+        {/* SIGNAL kept inline (NEW-2/B571): categorical legend for a per-feature-colored overlay
+            (road authority) — names the on-map colors while the layer is on. */}
         {st.on && cfg.legend && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 10px", margin: "4px 0 1px 22px" }}>
             {cfg.legend.map((lg) => (
@@ -160,13 +150,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             ))}
           </div>
         )}
-        {st.on && cfg.note && (
-          <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.4, marginTop: 2 }}>{cfg.note}</div>
-        )}
-        {cfg.source && (
-          <div style={{ fontSize: 9.5, color: MUTED, lineHeight: 1.3, marginTop: 1 }}>Source: {cfg.source}</div>
-        )}
-        {/* NEW-2: why it sank to the bottom / is dimmed. */}
+        {/* SIGNAL kept inline (NEW-2): why it sank to the bottom / is dimmed. */}
         {dim && (
           <div style={{ fontSize: 10, color: MUTED, fontStyle: "italic", marginTop: 1 }}>
             {cfg.needsSetup && !tok ? "Needs setup — not configured." : "No data in this area."}
@@ -176,17 +160,89 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     );
   };
 
+  // B761: the merged "City limits & ETJ" row is driven from the PRIMARY entry (jur_city);
+  // its `mergeWith` secondary (jur_etj) folds into that one row and is never listed alone.
+  const mergeSecondaries = new Set(Object.values(JURISDICTIONS).map((c) => c.mergeWith).filter(Boolean));
+
+  // ⓘ content for the merged row: both sources' notes + vintages + the has-jurisdiction caveat.
+  const mergedInfoSections = (pk, pcfg, sk, scfg, anyOn) => {
+    const line = (id, cfg, lead) => {
+      const v = layerVintage(id, cfg);
+      const ls = anyOn ? layerStatus[id] : null;
+      const age = ls && ls.ts ? formatAge(Date.now() - ls.ts) : "";
+      const refreshed = age && ls && (ls.state === "loaded" || ls.state === "empty") ? ` · refreshed ${age}` : "";
+      return [{ text: `${lead} — ${cfg.note}` }, { text: `As of: ${v || "vintage unknown"}${refreshed}` }];
+    };
+    const out = [...line(pk, pcfg, "City limits"), ...line(sk, scfg, "ETJ")];
+    if (pcfg.infoCaveat) out.push({ text: pcfg.infoCaveat, tone: "warn" });
+    return out;
+  };
+
+  // The composite City-limits-&-ETJ row (B761): ONE checkbox + opacity slider + ⓘ driving
+  // BOTH underlying layers. checked = either on; toggle/opacity write both; the status dot is
+  // the combined status; a small solid/dashed key names the two on-map line styles while on.
+  const compositeRow = (pk, pcfg, { dim = false } = {}) => {
+    const sk = pcfg.mergeWith, scfg = JURISDICTIONS[sk];
+    const pst = overlays[pk], sst = overlays[sk];
+    if (!pst || !sst || !scfg) return null;
+    const anyOn = !!(pst.on || sst.on);
+    const opacity = Math.max(pst.opacity ?? 0.85, sst.opacity ?? 0.85);
+    const combined = anyOn ? combineLayerStatus(layerStatus[pk], layerStatus[sk]) : null;
+    const meta = combined && STATUS[combined.state];
+    const label = pcfg.mergeLabel || pcfg.label;
+    const setBoth = (patch) => { set(pk, patch); set(sk, patch); };
+    return (
+      <div key={pk} style={{ marginBottom: 5, opacity: dim ? 0.55 : 1 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
+            <input type="checkbox" checked={anyOn} onChange={(e) => setBoth({ on: e.target.checked })} />
+            <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{label}</span>
+          </label>
+          <RowInfo label={label} sections={mergedInfoSections(pk, pcfg, sk, scfg, anyOn)} />
+          {meta && (
+            <span title={meta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: meta.color,
+              animation: combined.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+          )}
+        </div>
+        {anyOn && (
+          <input type="range" min={0.1} max={1} step={0.05} value={opacity}
+            title="Layer opacity" aria-label={`${label} opacity`}
+            onChange={(e) => setBoth({ opacity: +e.target.value })}
+            style={{ width: "100%", marginTop: 2 }} />
+        )}
+        {/* SIGNAL: solid = city limits, dashed = ETJ — names the two on-map line styles */}
+        {anyOn && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 12px", margin: "4px 0 1px 22px" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: INK }}>
+              <span style={{ width: 16, height: 0, flex: "none", borderTop: `2.5px solid ${pcfg.color}` }} /> City limits
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: INK }}>
+              <span style={{ width: 16, height: 0, flex: "none", borderTop: `2.5px dashed ${pcfg.color}` }} /> ETJ
+            </span>
+          </div>
+        )}
+        {meta && (combined.state === "failed" || combined.state === "empty") && (
+          <div style={{ fontSize: 10, color: meta.color, lineHeight: 1.35, marginTop: 1 }}>{combined.msg || meta.label}</div>
+        )}
+      </div>
+    );
+  };
+
+  const renderEntry = ([k, cfg], opts) => (cfg.mergeWith ? compositeRow(k, cfg, opts) : row(k, cfg, opts));
+
   // Render a group's rows with the relevance treatment applied (NEW-2). Ordering /
-  // visibility ONLY — the map is never touched.
+  // visibility ONLY — the map is never touched. Merge secondaries (jur_etj) are dropped —
+  // they render folded into their primary's composite row (B761).
   const groupRows = (entries, groupKey) => {
-    if (mode === "all") return entries.map(([k, cfg]) => row(k, cfg));
+    const ents = entries.filter(([k]) => !mergeSecondaries.has(k));
+    if (mode === "all") return ents.map((e) => renderEntry(e));
     const hi = [], lo = [];
-    for (const e of entries) (lowRel(e[0], e[1]) ? lo : hi).push(e);
+    for (const e of ents) (lowRel(e[0], e[1]) ? lo : hi).push(e);
     return (
       <>
-        {hi.map(([k, cfg]) => row(k, cfg))}
+        {hi.map((e) => renderEntry(e))}
         {lo.length > 0 && (mode === "dim"
-          ? lo.map(([k, cfg]) => row(k, cfg, { dim: true }))
+          ? lo.map((e) => renderEntry(e, { dim: true }))
           : (
             <>
               <button onClick={() => setRevealHidden((s) => ({ ...s, [groupKey]: !s[groupKey] }))}
@@ -194,11 +250,36 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
                 style={{ background: "transparent", border: "none", color: MUTED, fontSize: 10.5, cursor: "pointer", padding: "2px 0", textAlign: "left", width: "100%" }}>
                 {revealHidden[groupKey] ? "▾ Hide" : "▸ Show"} {lo.length} layer{lo.length > 1 ? "s" : ""} with no local data here
               </button>
-              {revealHidden[groupKey] && lo.map(([k, cfg]) => row(k, cfg, { dim: true }))}
+              {revealHidden[groupKey] && lo.map((e) => renderEntry(e, { dim: true }))}
             </>
           ))}
       </>
     );
+  };
+
+  // B761: count the merged City/ETJ pair as ONE toward the Jurisdictions "N on" chip.
+  const jurOnCount = () => {
+    let n = 0;
+    for (const [k, cfg] of Object.entries(JURISDICTIONS)) {
+      if (mergeSecondaries.has(k)) continue; // counted via its primary
+      if (cfg.mergeWith) { if (overlays[k]?.on || overlays[cfg.mergeWith]?.on) n++; }
+      else if (overlays[k]?.on) n++;
+    }
+    return n;
+  };
+
+  // B762: a single-layer county folds its ONE local layer into the Basemap group (right
+  // after the USGS contour row) instead of getting its own dropdown; the "This jurisdiction"
+  // group renders only when a county contributes ≥2 layers. Generic (count-based).
+  const foldEntry = jur && Object.keys(jur.layers || {}).length === 1 ? Object.entries(jur.layers)[0] : null;
+  const basemapEntries = () => {
+    const terrain = Object.entries(TERRAIN);
+    if (!foldEntry) return terrain;
+    const out = [];
+    let placed = false;
+    for (const e of terrain) { out.push(e); if (e[0] === "contours") { out.push(foldEntry); placed = true; } }
+    if (!placed) out.push(foldEntry);
+    return out;
   };
 
   const segBtn = (active) => ({
@@ -253,35 +334,26 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
 
   return (
     <div>
-      {/* ——— Basemap (B693) + terrain (B696: terrain isn't utility evidence) ——— */}
-      {groupHead("basemap", "Basemap", onCount(TERRAIN) + (basemap && basemap.value !== "off" && !basemap.disabledReason ? 1 : 0))}
+      {/* ——— Basemap (B693) + terrain (B696) + any single-layer county fold (B762) ——— */}
+      {groupHead("basemap", "Basemap", onCount(TERRAIN) + (foldEntry && overlays[foldEntry[0]]?.on ? 1 : 0) + (basemap && basemap.value !== "off" && !basemap.disabledReason ? 1 : 0))}
       {!collapsed.basemap && <>
         {basemapControl}
-        {groupRows(Object.entries(TERRAIN), "basemap")}
+        {groupRows(basemapEntries(), "basemap")}
       </>}
 
-      {/* ——— The current county's local layers — most site-specific, so first after the base ——— */}
-      {groupHead("jurisdiction", jur ? jur.label : "This jurisdiction", jur ? onCount(jur.layers || {}) : 0)}
-      {!collapsed.jurisdiction && <>
-        <div style={groupNote}>Local agency layers for this county — screening only; verify with the agency.</div>
-        {jur && Object.keys(jur.layers || {}).length > 0
-          ? groupRows(Object.entries(jur.layers), "jurisdiction")
-          : <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.4 }}>{(jur && jur.note) || "No local GIS layers wired for this jurisdiction yet."}</div>}
+      {/* ——— The current county's local layers — rendered ONLY when the county contributes ≥2
+             layers (B762); a lone layer (Fort Bend contours) folds into Basemap above, and a
+             county with no public GIS renders nothing (absence is the honest signal). ——— */}
+      {jur && Object.keys(jur.layers || {}).length >= 2 && <>
+        {groupHead("jurisdiction", jur.label, onCount(jur.layers || {}))}
+        {!collapsed.jurisdiction && groupRows(Object.entries(jur.layers), "jurisdiction")}
       </>}
 
-      {groupHead("jurbounds", "Jurisdictions", onCount(JURISDICTIONS))}
-      {!collapsed.jurbounds && <>
-        <div style={groupNote}>
-          District lines for screening — a boundary means a district <b>has jurisdiction</b> (can tax/regulate), not that it serves/connects utilities here.
-        </div>
-        {groupRows(Object.entries(JURISDICTIONS), "jurbounds")}
-      </>}
+      {groupHead("jurbounds", "Jurisdictions", jurOnCount())}
+      {!collapsed.jurbounds && groupRows(Object.entries(JURISDICTIONS), "jurbounds")}
 
       {groupHead("evidence", "Utility evidence", onCount(EVIDENCE))}
-      {!collapsed.evidence && <>
-        <div style={groupNote}>Field evidence for screening — hints at what's nearby, never proof of service. Verify with the utility.</div>
-        {groupRows(Object.entries(EVIDENCE), "evidence")}
-      </>}
+      {!collapsed.evidence && groupRows(Object.entries(EVIDENCE), "evidence")}
       {/* B308: the layer works for everyone via the same-origin proxy (no token needed).
           The box is now an OPTIONAL power-user override — paste your own token to query
           Mapillary directly from this device instead of going through Planyr. */}
@@ -301,10 +373,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
 
       {/* Renamed from "Map layers" (B696) — these are the environmental/hazard screens. */}
       {groupHead("statewide", "Environmental & hazards", onCount(STATEWIDE))}
-      {!collapsed.statewide && <>
-        <div style={groupNote}>Screening only — verify with the issuing agency (FEMA / USFWS / RRC) before relying on it.</div>
-        {groupRows(Object.entries(STATEWIDE), "statewide")}
-      </>}
+      {!collapsed.statewide && groupRows(Object.entries(STATEWIDE), "statewide")}
 
       {/* Relevance control (NEW-2): a meta-filter over the LIST above (ordering/visibility
           only; never the map) — so it sits below the layers, not as the panel's lead (B696). */}
@@ -331,6 +400,12 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             <span style={{ flex: "none", color: INK, fontWeight: 600, whiteSpace: "nowrap" }}>{radius} mi</span>
           </label>
         )}
+      </div>
+
+      {/* B760: the ONE quiet screening footer for the whole panel — replaces the four
+          per-group disclaimer paragraphs (each layer's own caveats now live in its ⓘ). */}
+      <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 8 }}>
+        Screening data — verify before relying on it.
       </div>
     </div>
   );
