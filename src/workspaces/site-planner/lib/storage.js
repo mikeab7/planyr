@@ -27,6 +27,40 @@ export const isCloudActive = () => !!activeUser;
 export const activeUid = () => activeUser; // signed-in user's id, or null (B475 — warm the project cache)
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 
+// B757 — DURABLE, per-user record-delete tombstones ({ id: ts }). The in-memory `recentlyDeleted`
+// set below (B372) is per-tab and cleared on reload, and it only guards `saveSite` — it does NOT
+// stop `pullCloud` → `mergePulledSites` from RE-ADDING a cloud row whose delete never landed
+// (offline / transient failure). So a deliberately-deleted PLAN resurrects on the next reload or
+// sign-in. These tombstones survive reload; on every pull they (a) SUPPRESS an owned cloud row that
+// is still pending removal, and (b) drive a delete RETRY until the cloud confirms it's gone. A row
+// whose cloud copy is genuinely NEWER than our delete (updatedAt > ts) means it was legitimately
+// edited on another device AFTER we deleted here — the delete is stale, so we drop the tombstone and
+// keep the row (cross-device safety). Only used signed-in (logged-out has no cloud to resurrect from).
+const tombKey = (uid) => "planarfit:sites:deltomb:v1:" + uid;
+const MAX_SITE_TOMBS = 300; // bound the list; an old tombstone whose row is long gone is harmless to drop
+function readSiteTombs(uid) {
+  if (!uid) return {};
+  try { return JSON.parse(localStorage.getItem(tombKey(uid))) || {}; } catch (_) { return {}; }
+}
+function writeSiteTombs(uid, obj) {
+  if (!uid) return;
+  try {
+    let entries = Object.entries(obj || {});
+    if (entries.length > MAX_SITE_TOMBS) entries = entries.sort((a, b) => toMs(b[1]) - toMs(a[1])).slice(0, MAX_SITE_TOMBS);
+    localStorage.setItem(tombKey(uid), JSON.stringify(Object.fromEntries(entries)));
+  } catch (_) {}
+}
+export function recordSiteTombstone(uid, id, ts) {
+  if (!uid || !id) return;
+  const t = readSiteTombs(uid); t[id] = ts || Date.now(); writeSiteTombs(uid, t);
+}
+export function clearSiteTombstone(uid, id) {
+  if (!uid || !id) return;
+  const t = readSiteTombs(uid);
+  if (id in t) { delete t[id]; writeSiteTombs(uid, t); }
+}
+export const _readSiteTombs = readSiteTombs; // test seam
+
 // Session tombstone (per-tab): ids deleted in THIS tab. The bug it kills (B372): when you delete
 // a site from the map, the planner that's still MOUNTED (hidden) for that site unmounts, and its
 // persist-on-leave / beforeunload / debounced-autosave flush fires AFTER the delete — re-writing
@@ -38,7 +72,12 @@ const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // delete has settled), or explicitly when a same-id record is deliberately re-created (re-import).
 const recentlyDeleted = new Set();
 export const _recentlyDeleted = recentlyDeleted; // test seam
-export function clearRecentlyDeleted(id) { if (id == null) recentlyDeleted.clear(); else recentlyDeleted.delete(id); }
+export function clearRecentlyDeleted(id) {
+  if (id == null) recentlyDeleted.clear(); else recentlyDeleted.delete(id);
+  // A deliberate re-create / re-import of a same-id record cancels the durable tombstone too (B757),
+  // so the resurrected-by-the-user record isn't suppressed on the next pull.
+  if (activeUser && id != null) clearSiteTombstone(activeUser, id);
+}
 // Pure merge of the local cache with the cloud's records (exported for tests).
 // CRITICAL (B124/B126 data-loss fix): build from the LOCAL cache first (so a site the
 // cloud didn't return is PRESERVED, never dropped — B124), and reconcile a site present
@@ -82,15 +121,18 @@ function contentSig(m, headerOnly) {
     sigArr(m && m.parcelDrawings).slice().sort(sigById),
   ]);
 }
-export function mergePulledSites(existing, cloudModels, selfUid) {
+export function mergePulledSites(existing, cloudModels, selfUid, tombstones) {
+  const tombs = tombstones || {};
   const map = {};
   for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
   const cloudAt = {};
   const cloudSig = {};
   const cloudSlim = {};
+  const cloudIds = new Set();
   for (const m of (cloudModels || [])) {
     const slim = !!(m && m.elementsInRows);
     const n = createSiteModel(m); if (!n.id) continue;
+    cloudIds.add(n.id);
     cloudAt[n.id] = n.updatedAt || 0;
     cloudSlim[n.id] = slim;
     cloudSig[n.id] = contentSig(n, slim);
@@ -107,6 +149,22 @@ export function mergePulledSites(existing, cloudModels, selfUid) {
   // conflict on the real owner's edits. A row with no ownerId (legacy local-only) or no selfUid
   // (older callers / tests) is treated as ours, preserving the prior heal behavior.
   const mine = (m) => !selfUid || !m.ownerId || m.ownerId === selfUid;
+  // B757 — honor durable record-delete tombstones so a deliberately-deleted PLAN can't resurrect via
+  // the pull. For each pending-delete id:
+  //   • cloud no longer has the row → the delete landed → prune the tombstone (tombClear).
+  //   • cloud still has it, it's OURS, and it is NOT newer than our delete → the delete didn't land
+  //     (offline / failed): SUPPRESS it (drop from the merge — never resurrect) and RETRY the delete.
+  //   • cloud row is genuinely NEWER than our delete → a real later edit on another device: the delete
+  //     is stale — keep the row and drop the tombstone (cross-device safety, mirrors the B18/B511 rule).
+  //   • not ours (a teammate's shared row we can't delete) → let it show; drop the tombstone.
+  const deleteRetry = [];
+  const tombClear = [];
+  for (const id of Object.keys(tombs)) {
+    if (!cloudIds.has(id)) { tombClear.push(id); continue; }
+    const row = map[id];
+    if (row && mine(row) && toMs(cloudAt[id]) <= toMs(tombs[id])) { delete map[id]; deleteRetry.push(id); }
+    else tombClear.push(id);
+  }
   // B460 — re-push ONLY when the merge actually changed the cloud's CONTENT (an add/move/delete the
   // cloud lacks), or the row is cloud-absent. The old rule also re-pushed on a merely-newer updatedAt
   // — which B458's immediate mirror write makes routine (every edit advances the local timestamp while
@@ -115,7 +173,7 @@ export function mergePulledSites(existing, cloudModels, selfUid) {
   // so this can never push a thinner row; an identical re-open now pushes nothing (no version churn).
   const toPush = Object.keys(map).filter((id) =>
     mine(map[id]) && (!(id in cloudAt) || contentSig(map[id], cloudSlim[id]) !== cloudSig[id]));
-  return { map, toPush };
+  return { map, toPush, deleteRetry, tombClear };
 }
 
 // Pull the signed-in user's sites from the cloud into their local cache. Returns
@@ -132,9 +190,16 @@ export async function pullCloud(uid) {
   }
   let existing = {};
   try { existing = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  const { map, toPush } = mergePulledSites(existing, models, uid);
+  const { map, toPush, deleteRetry, tombClear } = mergePulledSites(existing, models, uid, readSiteTombs(uid));
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
   pruneMigratedLegacy(map); // B473 — free the ~MB of dead logged-out duplicates now safely in the cloud
+  // B757 — prune tombstones the cloud has already honored (or a not-ours / newer-edit row), then
+  // RETRY the cloud delete for a plan whose removal never landed, so a deliberate delete STICKS
+  // instead of resurrecting on the next pull. Clear the tombstone only on a confirmed removal.
+  for (const id of (tombClear || [])) clearSiteTombstone(uid, id);
+  for (const id of (deleteRetry || [])) {
+    cloudDelete(uid, id).then((r) => { if (r && r.ok && (r.removed > 0 || r.skipped)) clearSiteTombstone(uid, id); }).catch(() => {});
+  }
   // Heal the split: re-push anything the cloud is missing / older on, so a push that didn't
   // land doesn't strand work on this device (fire-and-forget; the next autosave would too).
   for (const id of toPush) cloudUpsert(uid, map[id]).catch(() => {});
@@ -800,7 +865,8 @@ export function deleteSite(id) {
   delete sites[id];
   writeSites(sites);
   if (id) idbDeleteByPrefix(`raster:${id}:`); // B474 review — evict this site's cached underlay/overlay/drawing rasters from IndexedDB so they don't orphan forever (#13/#24); no-op when idb is absent
-  recentlyDeleted.add(id); // tombstone so no in-flight flush can resurrect it (B372)
+  recentlyDeleted.add(id); // in-tab tombstone so no in-flight flush can resurrect it this session (B372)
+  if (activeUser && id) recordSiteTombstone(activeUser, id, Date.now()); // B757 — DURABLE tombstone: survives reload so a failed/offline cloud delete can't resurrect the plan on the next pull
   if (getCurrentSiteId() === id) setCurrentSiteId(null);
   // Return the cloud-removal result so the caller can report an honest failure / no-op (B372).
   // TEAM: cloudDelete scopes by id and lets RLS decide (owner or team-admin) — a regular member
