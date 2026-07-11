@@ -610,6 +610,15 @@ describe("governingCrossSectionWsel — nearest reach, highest WSEL_REG (B763)",
     expect(r.wselFt).toBe(95);          // never the 120 from the unrelated creek
     expect(r.detail.usedSections).toBe(1);
   });
+  it("BLANK WTR_NM sections do NOT merge: each unnamed reach is isolated, nearest wins (no cross-creek pick)", () => {
+    // Two unnamed sections at different distances with different WSE — a blank name must NOT
+    // be assumed to be the same reach, so we take the NEAREST one's WSE, never the higher far one.
+    const sections = [vsec(100, 95, ""), vsec(300, 120, null)];
+    const r = governingCrossSectionWsel({ point: { x: 0, y: 0 }, sections, maxDistFt: 2500 });
+    expect(r.wselFt).toBe(95);            // the nearest unnamed section, NOT the merged-highest 120
+    expect(r.detail.usedSections).toBe(1);
+    expect(r.detail.wtrNm).toBeNull();    // the synthetic __unnamed__ key never surfaces to the UI
+  });
   it("only in-range sections of the nearest reach count toward the highest WSE + usedSections", () => {
     const sections = [vsec(100, 95, "Bayou"), vsec(3000, 130, "Bayou")]; // the 130 section is out of range
     const r = governingCrossSectionWsel({ point: { x: 0, y: 0 }, sections, maxDistFt: 2500 });

@@ -305,12 +305,18 @@ export function deriveBfeFromLines({ point, lines, maxLineDistFt = 2500, maxGapF
 export function governingCrossSectionWsel({ point, sections, maxDistFt = 2500 } = {}) {
   if (!point || !Array.isArray(sections) || !sections.length) return null;
   // Group sections by reach (WTR_NM), keeping each section's distance to the point.
+  // A BLANK/missing WTR_NM can't be assumed to be the same reach as another blank one, so
+  // each unnamed section is its OWN isolated reach (unique key) — never merge two unnamed
+  // sections, which would re-open the cross-creek multi-foot silent-error this function
+  // exists to prevent (a named reach still groups all its sections).
   const byReach = new Map();
-  for (const sec of sections) {
+  for (let i = 0; i < sections.length; i++) {
+    const sec = sections[i];
     if (sec == null || !isFinite(sec.wselFt) || !Array.isArray(sec.pts) || !sec.pts.length) continue;
     const d = distToPolyline(point, sec.pts);
     if (!isFinite(d)) continue;
-    const key = sec.wtrNm || "";
+    const named = sec.wtrNm && String(sec.wtrNm).trim();
+    const key = named ? sec.wtrNm : `__unnamed__${i}`;
     if (!byReach.has(key)) byReach.set(key, []);
     byReach.get(key).push({ wselFt: sec.wselFt, d });
   }
@@ -332,7 +338,8 @@ export function governingCrossSectionWsel({ point, sections, maxDistFt = 2500 } 
     wselFt,
     provider: "xs-wsel",
     method: "nearest-reach",
-    detail: { wtrNm: nearestKey, dNearFt: nearestD, usedSections: inRange.length },
+    // Don't surface the synthetic __unnamed__ key as a stream name in the UI.
+    detail: { wtrNm: String(nearestKey).startsWith("__unnamed__") ? null : nearestKey, dNearFt: nearestD, usedSections: inRange.length },
   };
 }
 

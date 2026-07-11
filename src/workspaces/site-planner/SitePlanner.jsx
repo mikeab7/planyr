@@ -7420,8 +7420,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (b.ffe.status === "short") v += ` (pad ${f2(b.ffe.shortByFt)} ft short)`;
       if (b.ffe.pendingBases && b.ffe.pendingBases.length) v += " (max-of — more bases pending)";
       pairs.push(["Required FFE", v]);
-    } else if (b && b.ffe && b.ffe.status === "unknown") {
-      pairs.push(["Required FFE", "UNKNOWN"]);
+    } else if (b && b.ffe && (b.ffe.status === "unknown" || b.ffe.status === "no_rule")) {
+      // Mirror the on-screen card's no_rule/unknown advisory so the sheet doesn't drop it
+      // (PDF-PARITY — no_rule is the generic / Montgomery / Chambers / Waller fallback).
+      pairs.push(["Required FFE", b.ffe.status === "no_rule" ? "no rule modeled" : "UNKNOWN"]);
     }
     return pairs;
   };
