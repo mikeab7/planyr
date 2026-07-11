@@ -117,6 +117,27 @@ export function findDuplicateIds(repo, files, letter) {
   return findDuplicateIdsIn(texts, letter);
 }
 
+/* Known-legacy collision baseline (B780, audited 2026-07-11): every id below is ALREADY assigned to
+ * two (B445/V45: three) DIFFERENT features across the live+archive pair — historical concurrent-mint
+ * collisions that merged silently before the uniqueness guard existed. They are GRANDFATHERED, not
+ * approved: renumbering them now would break scattered cross-references in the write-only archives,
+ * `--against-main` prevents minting over them, and the ids never drive runtime behavior (comments/
+ * provenance only). The cross-file guard (test/idUniqueness.test.js) allows AT MOST these, at AT MOST
+ * these counts — any id newly collided, or any listed id collided one more time, fails the build.
+ * Shrinking is welcome (fix a legacy dup → delete its row here in the same commit). */
+export const KNOWN_LEGACY_ID_COLLISIONS = {
+  B: { B127: 2, B128: 2, B131: 2, B147: 2, B151: 2, B180: 2, B181: 2, B182: 2, B183: 2, B239: 2, B316: 2, B341: 2, B343: 2, B348: 2, B350: 2, B360: 2, B364: 2, B417: 2, B418: 2, B445: 3, B471: 2, B485: 2, B489: 2, B495: 2, B562: 2, B566: 2, B568: 2, B569: 2, B590: 2, B594: 2, B597: 2, B664: 2, B682: 2, B717: 2, B737: 2, B755: 2, B757: 2 },
+  V: { V24: 2, V25: 2, V39: 2, V40: 2, V45: 3, V92: 2, V99: 2, V100: 2, V119: 2, V120: 2, V122: 2, V123: 2, V130: 2, V131: 2, V132: 2, V136: 2, V137: 2, V152: 2, V154: 2, V173: 2, V275: 2 },
+};
+
+/* Cross-file collision check for a family: duplicates across the FULL live+archive pair that are NOT
+ * covered by the grandfathered baseline (unknown id, or a known id at a higher count). This is the
+ * detector for the race the live-only guard can't see — session A ships + ARCHIVES its item while
+ * session B's same-numbered item stays open, so the two headings land in different files. Pure. */
+export function newCrossFileCollisions(repo, files, letter, baseline = KNOWN_LEGACY_ID_COLLISIONS[letter] || {}) {
+  return findDuplicateIds(repo, files, letter).filter(({ id, count }) => count > (baseline[id] || 1));
+}
+
 /* Read a file as it exists on origin/main (not the local branch) — so `--against-main` sees ids
  * that other sessions merged AFTER we branched (the concurrent-mint case next-id can't otherwise
  * see). Never throws: no git / no origin/main / missing file → null, and the caller falls back to

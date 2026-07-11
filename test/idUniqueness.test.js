@@ -13,7 +13,10 @@
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { findDuplicateIds, findDuplicateIdsIn, LIVE_B_FILES, LIVE_V_FILES } from "../scripts/next-id.mjs";
+import {
+  findDuplicateIds, findDuplicateIdsIn, newCrossFileCollisions,
+  LIVE_B_FILES, LIVE_V_FILES, B_FILES, V_FILES, KNOWN_LEGACY_ID_COLLISIONS,
+} from "../scripts/next-id.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -44,5 +47,46 @@ describe("backlog id uniqueness — the concurrent-mint collision guard (B779)",
   it("doesn't confuse the B and V families", () => {
     expect(findDuplicateIdsIn(["### B5 — a\n### V5 — b"], "B")).toEqual([]);
     expect(findDuplicateIdsIn(["### B5 — a\n### V5 — b"], "V")).toEqual([]);
+  });
+});
+
+describe("cross-file collisions — live↔archive guard with a frozen legacy baseline (B780)", () => {
+  // The live-only guard above can't see the race where session A ships + ARCHIVES its item while
+  // session B's same-numbered item stays open (the headings land in different files). This check
+  // covers the FULL live+archive pair, grandfathering the 58 audited historical collisions at their
+  // exact counts — any NEW cross-file collision (unknown id, or a known id +1) fails the build.
+  it("no B# collision beyond the grandfathered baseline (BACKLOG.md + BACKLOG-DONE.md)", () => {
+    const fresh = newCrossFileCollisions(REPO, B_FILES, "B");
+    expect(fresh, `\nNEW cross-file B# collision (not in the KNOWN_LEGACY_ID_COLLISIONS baseline) — renumber the newer item (git fetch origin main && npm run next-id -- --against-main):\n${JSON.stringify(fresh)}\n`).toEqual([]);
+  });
+
+  it("no V# collision beyond the grandfathered baseline (VERIFICATION.md + VERIFICATION-DONE.md)", () => {
+    const fresh = newCrossFileCollisions(REPO, V_FILES, "V");
+    expect(fresh, `\nNEW cross-file V# collision — renumber the newer item to the next free V#:\n${JSON.stringify(fresh)}\n`).toEqual([]);
+  });
+
+  it("the baseline is honest — every grandfathered id still exists at ≤ its recorded count (shrink-only)", () => {
+    // If a legacy dup gets cleaned up, its baseline row must be deleted in the same commit — the
+    // baseline may only shrink, never silently overstate. Guards against a stale allowlist masking
+    // a future collision on a recycled id.
+    for (const [letter, files] of [["B", B_FILES], ["V", V_FILES]]) {
+      const current = new Map(findDuplicateIds(REPO, files, letter).map((d) => [d.id, d.count]));
+      for (const [id, count] of Object.entries(KNOWN_LEGACY_ID_COLLISIONS[letter])) {
+        const cur = current.get(id) || 1;
+        expect(cur, `${id}: baseline says ${count} but the files now have ${cur} — update the baseline row (or delete it if the dup was cleaned)`).toBe(count);
+      }
+    }
+  });
+
+  it("actually catches a NEW cross-file collision (proves the baseline check is not a no-op)", () => {
+    // simulate: a fresh id collides across two files (live + archive)
+    const dups = findDuplicateIdsIn(["### B9001 — open item", "### B9001 — archived twin"], "B");
+    const fresh = dups.filter(({ id, count }) => count > (KNOWN_LEGACY_ID_COLLISIONS.B[id] || 1));
+    expect(fresh).toEqual([{ id: "B9001", count: 2 }]);
+    // and: a GRANDFATHERED id at its recorded count passes, but one MORE collision on it fails
+    const atBaseline = [{ id: "B445", count: 3 }].filter(({ id, count }) => count > (KNOWN_LEGACY_ID_COLLISIONS.B[id] || 1));
+    expect(atBaseline).toEqual([]);
+    const oneMore = [{ id: "B445", count: 4 }].filter(({ id, count }) => count > (KNOWN_LEGACY_ID_COLLISIONS.B[id] || 1));
+    expect(oneMore).toEqual([{ id: "B445", count: 4 }]);
   });
 });
