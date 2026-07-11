@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-11 @ `813fa6d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-11 @ `64c414b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_235 source files mapped._
+_237 source files mapped._
 
 ## infra
 
@@ -166,6 +166,10 @@ _235 source files mapped._
   - _exports_: `ThemeProvider`, `usePalette`, `useTheme`
 - **`src/shared/thoroughfare/classification.js`** — Canonical thoroughfare classification vocabulary (B720): the normalized road-class enum + labels shared by the DB CHECK, ingestion crosswalks (B721/B722), overlay legend (B723) and analysis (B724); normalizeClassification maps a raw source value through a per-jurisdiction crosswalk (unknown → 'other'), normalizeStatus → existing/proposed
   - _exports_: `CLASSIFICATION_LABELS`, `CLASSIFICATIONS`, `isClassification`, `normalizeClassification`, `normalizeStatus`, `STATUSES`
+- **`src/shared/thoroughfare/houston.js`** — City of Houston MTFP ingestion config (B721): the ArcGIS endpoint, field map, hierarchy→canonical classification crosswalk, and §42-122 ROW standards (major_thoroughfare=100 confirmed, rest provisional pending V274); the one-config-per-jurisdiction shape B722 generalizes
+  - _exports_: `HOUSTON`, `HOUSTON_ROW_STANDARDS`
+- **`src/shared/thoroughfare/ingestTransform.js`** — Pure config-driven transform from an ArcGIS GeoJSON feature → a thoroughfare_segments upsert row (B721): crosswalk classification + status, resolve ROW widths from standards, and build WGS84 + EPSG:2278 MULTILINESTRING EWKT (reusing src/shared/coordinates); the reusable heart of every jurisdiction adapter
+  - _exports_: `buildQueryUrl`, `ewkt2278`, `ewkt4326`, `featureToRow`, `geometryToParts`
 - **`src/shared/ui/AnchoredMenu.jsx`** — Portal-to-body dropdown/flyout that escapes rail stacking-context + overflow clipping; rect-anchored fixed positioning, click-away + Esc
   - _exports_: `default (AnchoredMenu)`
 - **`src/shared/ui/anchoredMenuPlacement.js`** — Pure viewport-placement math for AnchoredMenu: left/below-left/below-right anchoring + edge clamp; returns null for a zero-sized (display:none) anchor so a mis-anchored menu hides instead of pinning top-left (B734)
@@ -512,6 +516,7 @@ server/
   auth/
   convert/
   filing/
+  ingest/
   oauth/
   storage/
     backends/
