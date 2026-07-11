@@ -97,6 +97,12 @@ do $$ begin
     for select to anon, authenticated using (true);
 exception when duplicate_object then null; end $$;
 
+-- Explicit table grants so the public-read intent holds regardless of Supabase's ambient default
+-- privileges. SELECT only — no insert/update/delete grant, so writes stay service-role-only.
+grant select on public.jurisdictions              to anon, authenticated;
+grant select on public.jurisdiction_row_standards to anon, authenticated;
+grant select on public.thoroughfare_segments      to anon, authenticated;
+
 -- ── Seed the jurisdictions registry (CONFIG only — factual; asserts no ROW widths) ────────────
 -- Phase-1 targets: B721 ingests Houston first; B722 generalizes to the rest. Only the Houston
 -- COHGIS MTFP endpoint is known-good today; the others carry null source_url until B722 wires
