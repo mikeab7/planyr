@@ -208,6 +208,43 @@ export function bfeLinesFromFeatureCollection(fc, origin) {
   return out;
 }
 
+/* FEMA S_XS (cross-section) FeatureCollection (featuresToGeoJson output — LineString /
+ * MultiLineString per feature) → the modeled regulatory 1% water-surface elevations
+ * (WSEL_REG) at each cross-section, in the planner's site-feet frame, filtered to
+ * feet-NAVD88. Mirrors bfeLinesFromFeatureCollection: a WSEL_REG at the -9999 sentinel
+ * is dropped as "no elevation"; a non-NAVD88 datum is EXCLUDED and counted (a mixed
+ * datum is a multi-foot silent error). Each output section carries its REACH identity
+ * (WTR_NM), station (STREAM_STN), letter (XS_LTR), and streambed elevation (STRMBED_EL)
+ * so a consumer can pick the governing WSE per stream reach — never a globally-nearest
+ * polyline across unrelated creeks. S_XS publishes no LEN_UNIT, so there is no meters
+ * check. Missing/sentinel numeric attributes read as honest null, never a fabricated
+ * value. `total` counts real-WSEL candidate sections. Pure. */
+export function crossSectionWselFromFeatureCollection(fc, origin) {
+  const out = { sections: [], excludedDatum: 0, total: 0 };
+  if (!fc || !Array.isArray(fc.features) || !origin) return out;
+  for (const f of fc.features) {
+    const p = (f && f.properties) || {};
+    const wselFt = realElev(p.WSEL_REG);
+    if (wselFt == null) continue; // -9999 / missing — not a real elevation
+    out.total += 1;
+    if (!isNavd88Datum(p.V_DATUM)) { out.excludedDatum += 1; continue; }
+    const wtrNm = p.WTR_NM == null ? "" : String(p.WTR_NM).trim();
+    const streamStn = num(p.STREAM_STN);
+    const xsLtr = p.XS_LTR == null || String(p.XS_LTR).trim() === "" ? null : String(p.XS_LTR).trim();
+    const strmbedElFt = realElev(p.STRMBED_EL);
+    const geom = (f && f.geometry) || {};
+    const paths = geom.type === "MultiLineString" ? geom.coordinates
+      : geom.type === "LineString" ? [geom.coordinates]
+      : [];
+    for (const path of paths) {
+      if (!Array.isArray(path) || !path.length) continue;
+      const pts = lngLatRingToFeet(path, origin.lon, origin.lat);
+      if (pts && pts.length) out.sections.push({ wselFt, wtrNm, streamStn, xsLtr, strmbedElFt, pts });
+    }
+  }
+  return out;
+}
+
 /* Interpolate a screening BFE (feet NAVD88) at a site-feet point from S_BFE lines.
  * Returns { bfeFt, provider:"bfe-line-interp", method, detail } or null.
  *   method "two-line-interp" — distance-weighted between the nearest line and the
@@ -256,11 +293,61 @@ export function deriveBfeFromLines({ point, lines, maxLineDistFt = 2500, maxGapF
   };
 }
 
+/* The governing (highest) regulatory 1% WSE (WSEL_REG) at a site-feet point from FEMA
+ * S_XS cross-sections. Cross-sections belong to a STREAM: a section on an unrelated
+ * creek next door carries a water surface that has nothing to do with THIS reach, so
+ * pricing off a globally-nearest polyline across creeks is wrong. We therefore GROUP by
+ * reach (WTR_NM), snap to the NEAREST reach (its closest section to the point), and among
+ * THAT reach's sections within maxDistFt take the HIGHEST WSEL_REG (the conservative
+ * screening pick along a reach). Returns { wselFt, provider:"xs-wsel",
+ * method:"nearest-reach", detail } or null (honest UNKNOWN) when no reach has a section
+ * within maxDistFt. Pure. */
+export function governingCrossSectionWsel({ point, sections, maxDistFt = 2500 } = {}) {
+  if (!point || !Array.isArray(sections) || !sections.length) return null;
+  // Group sections by reach (WTR_NM), keeping each section's distance to the point.
+  // A BLANK/missing WTR_NM can't be assumed to be the same reach as another blank one, so
+  // each unnamed section is its OWN isolated reach (unique key) — never merge two unnamed
+  // sections, which would re-open the cross-creek multi-foot silent-error this function
+  // exists to prevent (a named reach still groups all its sections).
+  const byReach = new Map();
+  for (let i = 0; i < sections.length; i++) {
+    const sec = sections[i];
+    if (sec == null || !isFinite(sec.wselFt) || !Array.isArray(sec.pts) || !sec.pts.length) continue;
+    const d = distToPolyline(point, sec.pts);
+    if (!isFinite(d)) continue;
+    const named = sec.wtrNm && String(sec.wtrNm).trim();
+    const key = named ? sec.wtrNm : `__unnamed__${i}`;
+    if (!byReach.has(key)) byReach.set(key, []);
+    byReach.get(key).push({ wselFt: sec.wselFt, d });
+  }
+  if (!byReach.size) return null;
+  // The nearest reach = the WTR_NM group whose closest section sits closest to the point.
+  let nearestKey = null, nearestD = Infinity;
+  for (const [key, list] of byReach) {
+    let dMin = Infinity;
+    for (const s of list) if (s.d < dMin) dMin = s.d;
+    if (dMin < nearestD) { nearestD = dMin; nearestKey = key; }
+  }
+  if (nearestD > maxDistFt) return null; // nearest reach is out of range — honest UNKNOWN
+  // Within that reach only, among sections in range, take the highest regulatory WSE.
+  const inRange = byReach.get(nearestKey).filter((s) => s.d <= maxDistFt);
+  if (!inRange.length) return null;
+  let wselFt = -Infinity;
+  for (const s of inRange) if (s.wselFt > wselFt) wselFt = s.wselFt;
+  return {
+    wselFt,
+    provider: "xs-wsel",
+    method: "nearest-reach",
+    // Don't surface the synthetic __unnamed__ key as a stream name in the UI.
+    detail: { wtrNm: String(nearestKey).startsWith("__unnamed__") ? null : nearestKey, dNearFt: nearestD, usedSections: inRange.length },
+  };
+}
+
 /* The governing (highest) 1% water surface across the zones that touch a ring —
  * static BFE where published, else the manual BFE, else the derived BFE-line estimate.
  * B708's pond split consumes this. Returns { wseFt, provider } — provider
  * "static-bfe" | "ao-depth" | "manual" | "bfe-line-interp" | null. Pure. */
-export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null, derivedBfeFt = null } = {}) {
+export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null, derivedXsWselFt = null, derivedBfeFt = null } = {}) {
   const fb = ringBBox(ring);
   let best = null, provider = null;
   for (const z of zones) {
@@ -280,6 +367,7 @@ export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null,
     // Fallbacks, manual before derived: a value the user typed wins over the auto
     // BFE-line estimate. Only meaningful when the ring actually touches a 1% zone.
     const fallback = (bfeFt != null && isFinite(bfeFt)) ? { v: bfeFt, p: "manual" }
+      : (derivedXsWselFt != null && isFinite(derivedXsWselFt)) ? { v: derivedXsWselFt, p: "xs-wsel" }
       : (derivedBfeFt != null && isFinite(derivedBfeFt)) ? { v: derivedBfeFt, p: "bfe-line-interp" }
       : null;
     if (fallback) {
@@ -339,7 +427,10 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   const wse02 = realElev(elev.wse02Ft);
   const manualBfe = realElev(elev.bfeFt);
   const derivedBfe = realElev(elev.derivedBfeFt); // DERIVED from FEMA BFE lines (B755)
+  const derivedXsWsel = realElev(elev.derivedXsWselFt); // DERIVED 1% WSE from FEMA S_XS WSEL_REG (B763)
+  const derived02 = realElev(elev.derivedWse02Ft); // DERIVED 0.2% WSE — engine seam (B763)
   const wseProviders = new Set();
+  const wse02Providers = new Set(); // tracked SEPARATELY so the 0.2% "manual" never collides with the 1% "manual"
 
   for (const z of zones) {
     const bucket = perClass[z.cls];
@@ -357,12 +448,19 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
       if (z.staticBfeFt != null) { wse = z.staticBfeFt; wseSrc = "static-bfe"; }
       else if (z.aoDepthFt != null && grade != null) { wse = grade + z.aoDepthFt; wseSrc = "ao-depth"; }
       else if (manualBfe != null) { wse = manualBfe; wseSrc = "manual"; }
+      // Derived screening 1% WSE from FEMA's S_XS cross-sections (WSEL_REG on the nearest
+      // reach, B763) — ranks below manual entry but ABOVE the S_BFE-line interpolation
+      // (a modeled regulatory WSE beats a read-between-contours estimate).
+      else if (derivedXsWsel != null) { wse = derivedXsWsel; wseSrc = "xs-wsel"; }
       // Last resort before UNKNOWN: a BFE DERIVED by interpolating FEMA's S_BFE lines
       // (B755). Manual entry above still wins; a zone's own published data (static BFE,
       // AO depth) always wins — the derived value only fills a genuine gap.
       else if (derivedBfe != null) { wse = derivedBfe; wseSrc = "bfe-line-interp"; }
     } else if (z.cls === "02pct") {
+      // 0.2% band: a manually-entered WSE wins; else a derived 0.2% WSE (B763 engine
+      // seam — a named hook for an HCFCD/MAAPnext or S_XS 500-yr model later).
       if (wse02 != null) { wse = wse02; wseSrc = "manual"; }
+      else if (derived02 != null) { wse = derived02; wseSrc = "xs-wsel-02"; }
     }
 
     for (const fp of footprints) {
@@ -396,7 +494,7 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
       bucket.acres += areaSf / SQFT_PER_ACRE;
       if (priceable) {
         bucket.volumeCf = (bucket.volumeCf || 0) + sumDepthArea;
-        if (wseSrc) wseProviders.add(wseSrc);
+        if (wseSrc) (z.cls === "02pct" ? wse02Providers : wseProviders).add(wseSrc);
       } else if (!bucket.unknown) {
         bucket.unknown =
           wse == null
@@ -450,8 +548,12 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
         : wseProviders.has("static-bfe") ? "static-bfe"
         : wseProviders.has("ao-depth") ? "ao-depth"
         : wseProviders.has("manual") ? "manual"
+        : wseProviders.has("xs-wsel") ? "xs-wsel"
         : wseProviders.has("bfe-line-interp") ? "bfe-line-interp" : null,
-      wse02pct: wse02 != null ? "manual" : null,
+      // 0.2% provider is mixed-aware but its own tier ("xs-wsel-02"), tracked apart from
+      // the 1% chain so a priced 0.2% zone never reads as a 1% "manual".
+      wse02pct: wse02Providers.has("manual") ? "manual"
+        : wse02Providers.has("xs-wsel-02") ? "xs-wsel-02" : null,
       expert: expert ? "avg-fill-depth" : null,
     },
   };
@@ -546,3 +648,7 @@ export const OFFSITE_NOTE =
 export const EXPERT_BYPASS_LABEL = "average depth of fill below the flood elevation (ft)";
 export const DERIVED_BFE_NOTE =
   "This BFE was DERIVED by interpolating FEMA's published Base Flood Elevation lines at your fill — a screening estimate, not a published or surveyed value. Confirm before design; type a BFE to override.";
+export const DERIVED_XS_WSEL_NOTE =
+  "This 1% water surface was DERIVED from FEMA's published S_XS cross-section regulatory water-surface elevation (WSEL_REG) on the nearest modeled stream reach — a screening estimate, not a surveyed value, and never a cross-creek pick. Confirm before design; type a BFE to override.";
+export const DERIVED_WSE02_NOTE =
+  "This 0.2% (500-yr) water surface was DERIVED from a cross-section / regional model at your fill — a screening estimate, not a published or surveyed value. Confirm before design; type a 0.2% WSE to override.";

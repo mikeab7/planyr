@@ -101,6 +101,7 @@ import { gridRequest } from "./lib/demGrid.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger,
   floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines,
+  crossSectionWselFromFeatureCollection, governingCrossSectionWsel,
   NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
 } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, triggerClasses } from "./lib/floodplainRules.js";
@@ -671,7 +672,7 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
   const sig = [
     fp.id, fp.ring.length, ringHash(fp.ring), polyArea(fp.ring).toFixed(0),
     fp.padElevFt ?? "", zonesSig, rule ? `${rule.trigger}|${rule.ratio}|${rule.verified}` : "",
-    elev.padElevFt ?? "", elev.existGradeFt ?? "", elev.bfeFt ?? "", elev.derivedBfeFt ?? "", elev.wse02Ft ?? "", elev.avgFillDepthFt ?? "",
+    elev.padElevFt ?? "", elev.existGradeFt ?? "", elev.bfeFt ?? "", elev.derivedBfeFt ?? "", elev.derivedXsWselFt ?? "", elev.derivedWse02Ft ?? "", elev.wse02Ft ?? "", elev.avgFillDepthFt ?? "",
   ].join("~");
   if (_mitMemo.has(sig)) {
     const hit = _mitMemo.get(sig);
@@ -689,15 +690,15 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
  * grid tests would otherwise jank drags on exactly the in-floodplain sites this
  * feature targets. */
 const _pondFactsMemo = new Map();
-function pondFloodFacts(ring, zones, rule, { bfeFt, existGradeFt, derivedBfeFt }, zonesSig) {
-  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", existGradeFt ?? "", derivedBfeFt ?? ""].join("~");
+function pondFloodFacts(ring, zones, rule, { bfeFt, existGradeFt, derivedBfeFt, derivedXsWselFt }, zonesSig) {
+  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", existGradeFt ?? "", derivedBfeFt ?? "", derivedXsWselFt ?? ""].join("~");
   if (_pondFactsMemo.has(sig)) {
     const hit = _pondFactsMemo.get(sig);
     _pondFactsMemo.delete(sig); _pondFactsMemo.set(sig, hit);
     return hit;
   }
   const val = {
-    wseFt: wse1pctForRing(ring, zones, { bfeFt, existGradeFt, derivedBfeFt }).wseFt,
+    wseFt: wse1pctForRing(ring, zones, { bfeFt, existGradeFt, derivedBfeFt, derivedXsWselFt }).wseFt,
     inTrigger: ringInTrigger(ring, zones, rule),
   };
   _pondFactsMemo.set(sig, val);
@@ -6133,10 +6134,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             .then((r) => ({ ...bfeLinesFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }), ts: r.ts ?? null, state: "loaded" }))
             .catch(() => ({ lines: [], excludedDatum: 0, excludedUnit: 0, total: 0, ts: null, state: "failed" }))
         : Promise.resolve({ lines: [], excludedDatum: 0, excludedUnit: 0, total: 0, ts: null, state: "empty" });
-      const [ctx, floodGeo, bfeLines] = await Promise.all([
+      // B762: FEMA regulatory cross-sections (S_XS) — the governing 1% water-surface
+      // elevation (WSEL_REG) at the nearest stream reach. Same explicit click + SWR cache.
+      // A failure/empty reads honest UNKNOWN (no sections → no derived WSEL), never a fake clear.
+      const crossSectionsP = fmBbox
+        ? fetchCached(VECTOR_SOURCES.crossSections, fmBbox, { cache: gisCache })
+            .then((r) => ({ ...crossSectionWselFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }), ts: r.ts ?? null, state: "loaded" }))
+            .catch(() => ({ sections: [], excludedDatum: 0, total: 0, ts: null, state: "failed" }))
+        : Promise.resolve({ sections: [], excludedDatum: 0, total: 0, ts: null, state: "empty" });
+      const [ctx, floodGeo, bfeLines, xs] = await Promise.all([
         resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
         floodGeoP,
         bfeLinesP,
+        crossSectionsP,
       ]);
       if (tok !== drainTok.current) return;
       // Representative point for the derived BFE: the centroid of the fill footprints
@@ -6151,6 +6161,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const bfePt = bfePtSrc.reduce((s, p) => ({ x: s.x + p.x / bfePtSrc.length, y: s.y + p.y / bfePtSrc.length }), { x: 0, y: 0 });
       floodGeo.derivedBfe = bfeLines.lines.length ? deriveBfeFromLines({ point: bfePt, lines: bfeLines.lines }) : null;
       floodGeo.bfeLineFlags = { datumExcluded: bfeLines.excludedDatum, unitExcluded: bfeLines.excludedUnit, total: bfeLines.total, usable: bfeLines.lines.length, state: bfeLines.state };
+      // B762 — governing 1% WSEL from the nearest stream reach's cross-sections (stream-
+      // matched by WTR_NM). Ranks BELOW a manual BFE, ABOVE the interpolated BFE-line value.
+      floodGeo.derivedXsWsel = xs.sections.length ? governingCrossSectionWsel({ point: bfePt, sections: xs.sections }) : null;
+      floodGeo.xsFlags = { datumExcluded: xs.excludedDatum, total: xs.total, usable: xs.sections.length, state: xs.state };
       const checkedAt = Date.now();
       setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt });
       // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
@@ -6180,13 +6194,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const authOverride = settings.drainage?.authorityId || null;
   const { authorityId: drainAuthorityId, source: reviewerSource } = effectiveReviewer(authOverride, detectedAuthorityId);
   const { value: drainsToChanEff, source: channelSource } = effectiveChannelDischarge(chanOverride, drainCtxData?.channel?.near ?? null);
+  // B761 — unincorporated Harris sets the detention minimum by outfall type (HCED Infra
+  // Regs): storm-sewer 0.75 · roadside-ditch 1.0 ac-ft/ac. Unset → the engine returns the
+  // honest 0.75–1.0 band (never a silent 0.65). The user's pick resolves it to a point.
+  const outfallTypeEff = settings.drainage?.outfallType || null;
   const drainFloodOk = !!drainCtxData?.flood && drainCtxData.flood.state !== "failed";
   const acresActive = siteSqft / SQFT_PER_ACRE;
   const drainCityCount = drainCtxData?.authority?.jurisdiction?.city?.length ?? 0;
   // Overriding the reviewer to City of Houston asserts city-limits jurisdiction (so the
   // >20 ac greater-of branch fires); otherwise use the detected city membership.
   const drainInCity = authOverride === "coh" ? true : drainCityCount > 0;
-  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff };
+  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff, outfallType: outfallTypeEff };
   const detReq = drainCtxData && siteSqft > 0 && drainAuthorityId
     ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
     : null;
@@ -6230,17 +6248,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // overwrites the manual bfeFt (which would masquerade as user entry) — it rides its
   // own field, used only when no static/manual BFE exists (precedence in computeMitigation).
   const fmDerivedBfe = floodGeo?.derivedBfe || null;
+  // B762 — the governing 1% WSEL derived from FEMA cross-sections (its own field, never
+  // overwriting a manual BFE; used in precedence only when no static/manual BFE exists).
+  const fmDerivedXsWsel = floodGeo?.derivedXsWsel || null;
   const fmElev = {
     padElevFt: Number.isFinite(fmSettings.padFfeFt) ? fmSettings.padFfeFt : null,
     existGradeFt: Number.isFinite(fmSettings.existGradeFt) ? fmSettings.existGradeFt : (drainCtxData?.groundElevFt ?? null),
     bfeFt: Number.isFinite(fmSettings.bfeFt) ? fmSettings.bfeFt : null,
     derivedBfeFt: fmDerivedBfe && Number.isFinite(fmDerivedBfe.bfeFt) ? fmDerivedBfe.bfeFt : null,
+    derivedXsWselFt: fmDerivedXsWsel && Number.isFinite(fmDerivedXsWsel.wselFt) ? fmDerivedXsWsel.wselFt : null,
     wse02Ft: Number.isFinite(fmSettings.wse02Ft) ? fmSettings.wse02Ft : null,
+    // B763 — the wse02pct provider seam. No live 0.2% WSE source is wired yet (the FBCDD
+    // Atlas-14 watershed-studies endpoint needs a live browser check to lock its layer id —
+    // see WSE02_PROVIDER_NOTES / VERIFICATION V###), so this stays null and manual entry is
+    // the path; the engine's 02pct precedence (manual → xs-wsel-02) already consumes it.
+    derivedWse02Ft: null,
     avgFillDepthFt: Number.isFinite(fmSettings.avgFillDepthFt) ? fmSettings.avgFillDepthFt : null,
     sources: {
       existGrade: Number.isFinite(fmSettings.existGradeFt) ? "manual" : (drainCtxData?.groundElevFt != null ? "3dep" : null),
       padElev: Number.isFinite(fmSettings.padFfeFt) ? "manual" : null,
       derivedBfe: fmDerivedBfe ? "bfe-line-interp" : null,
+      derivedXsWsel: fmDerivedXsWsel ? "xs-wsel" : null,
     },
   };
   const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
@@ -6248,7 +6276,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const det = e.det || {};
     const pring = ringOf(e);
     const facts = fmZones.length
-      ? pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt }, fmZonesSig)
+      ? pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt }, fmZonesSig)
       : { wseFt: null, inTrigger: false };
     const estPool = detRegime && detRegime.regime === "B"
       ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: det.depth ?? 8, freeboardFt: det.freeboard ?? 1 })
@@ -6306,7 +6334,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (lifted via onFindings — no new fetch).
   // Governing 1% WSE for buildability/FFE: highest published static BFE → manual → the
   // derived BFE-line estimate (B755). Same precedence the mitigation engine uses.
-  const fmGoverningBfe = fmZones.reduce((best, z) => (z.staticBfeFt != null && (best == null || z.staticBfeFt > best) ? z.staticBfeFt : best), null) ?? fmElev.bfeFt ?? fmElev.derivedBfeFt;
+  const fmGoverningBfe = fmZones.reduce((best, z) => (z.staticBfeFt != null && (best == null || z.staticBfeFt > best) ? z.staticBfeFt : best), null) ?? fmElev.bfeFt ?? fmElev.derivedXsWselFt ?? fmElev.derivedBfeFt;
   const fmBuildingIn1pct = fmZones.length
     ? els.some((e) => {
         if (e.type !== "building") return false;
@@ -6320,7 +6348,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         rule: buildRules[floodJurKey] || buildRules.generic,
         padFfeFt: fmElev.padElevFt,
         wse1pctFt: fmGoverningBfe,
-        wse02Ft: fmElev.wse02Ft,
+        wse02Ft: fmElev.wse02Ft ?? fmElev.derivedWse02Ft,
         buildingIn1pct: fmBuildingIn1pct,
         floodplainPresent: fmFloodplainPresent,
         wetlandsPresent: analysisWetlands === "present",
@@ -6348,7 +6376,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pondFullyInundated,
     unanchoredInTrigger,
     pondExcavationCf,
-    floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length, derivedBfe: floodGeo.derivedBfe || null, bfeLineFlags: floodGeo.bfeLineFlags || null } : null,
+    floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length, derivedBfe: floodGeo.derivedBfe || null, bfeLineFlags: floodGeo.bfeLineFlags || null, derivedXsWsel: floodGeo.derivedXsWsel || null, xsFlags: floodGeo.xsFlags || null } : null,
     buildability: fmBuild,
     floodMit: {
       settings: fmSettings,
@@ -6392,6 +6420,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       source: channelSource,
       detected: drainCtxData?.channel || null, // { near, unitNo, name, distFt, state }
       onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), drainsToHcfcdChannel: v } })),
+    },
+    // B761 — the outfall-type picker for unincorporated Harris (HCED Infra Regs). Relevant
+    // only where the county drainage minimum is outfall-type-driven (the HCFCD authority).
+    // Unset → the readout shows the 0.75–1.0 band; a pick resolves it to 0.75 or 1.0.
+    outfallType: {
+      relevant: drainAuthorityId === "hcfcd",
+      value: outfallTypeEff, // null | "stormSewer" | "roadsideDitch" | "unknown"
+      onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), outfallType: v || null } })),
     },
     onCheck: checkDrainage,
   } : null;
@@ -7412,6 +7448,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
       pairs.push(["Floodplain mitigation", v]);
       if (reqAcFt != null && mit.volumeCf != null) pairs.push(["Combined basin", `${f2(reqAcFt + mit.volumeAcFt)} ac-ft`]);
+    }
+    // B759/B760 (PDF-PARITY): the required finished-floor elevation is a screening output
+    // too — mirror it on the sheet so print and the on-screen buildability card can't drift.
+    // A multi-basis rule (Fort Bend) whose other bases aren't computed here is flagged, never
+    // silently shown as a lone number; an unknown prints UNKNOWN, never omitted.
+    const b = d && d.buildability;
+    if (b && b.ffe && (b.ffe.status === "pass" || b.ffe.status === "short")) {
+      let v = `${f2(b.ffe.requiredFfeFt)} ft`;
+      if (b.ffe.status === "short") v += ` (pad ${f2(b.ffe.shortByFt)} ft short)`;
+      if (b.ffe.pendingBases && b.ffe.pendingBases.length) v += " (max-of — more bases pending)";
+      pairs.push(["Required FFE", v]);
+    } else if (b && b.ffe && (b.ffe.status === "unknown" || b.ffe.status === "no_rule")) {
+      // Mirror the on-screen card's no_rule/unknown advisory so the sheet doesn't drop it
+      // (PDF-PARITY — no_rule is the generic / Montgomery / Chambers / Waller fallback).
+      pairs.push(["Required FFE", b.ffe.status === "no_rule" ? "no rule modeled" : "UNKNOWN"]);
     }
     return pairs;
   };
@@ -14214,16 +14265,17 @@ function YieldPanel({
             const keyedNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
             // B750 — one segmented button for the Auto/Yes/No channel control (mirrors the
             // per-pond Outfall toggle). Selected rides the global accent + --on-accent text.
-            const seg = (label, selected, onClick, key) => (
-              <button key={key} onClick={onClick} aria-label={`Drains to HCFCD channel: ${label}`} aria-pressed={selected} style={{ flex: 1, padding: "4px 6px", borderRadius: 6, border: `1px solid ${selected ? "var(--accent)" : Y.border}`, background: selected ? "var(--accent)" : Y.cardBg, color: selected ? "var(--on-accent)" : Y.text, fontWeight: 700, fontSize: 10.5, fontFamily: "inherit", cursor: "pointer" }}>{label}</button>
+            const seg = (label, selected, onClick, key, aria = "Drains to HCFCD channel") => (
+              <button key={key} onClick={onClick} aria-label={`${aria}: ${label}`} aria-pressed={selected} style={{ flex: 1, padding: "4px 6px", borderRadius: 6, border: `1px solid ${selected ? "var(--accent)" : Y.border}`, background: selected ? "var(--accent)" : Y.cardBg, color: selected ? "var(--on-accent)" : Y.text, fontWeight: 700, fontSize: 10.5, fontFamily: "inherit", cursor: "pointer" }}>{label}</button>
             );
             // B750 — the two overridable assumptions, grouped so the user can correct either:
             // which agency reviews drainage, and whether the site drains to an HCFCD channel.
             const assumptionsBlock = () => {
-              const cd = d.channelDischarge, ac = d.authorityChoice;
+              const cd = d.channelDischarge, ac = d.authorityChoice, ot = d.outfallType;
               const showAuth = ac && (ac.detectedId || ac.override);
               const showChan = cd && cd.relevant;
-              if (!showAuth && !showChan) return null;
+              const showOutfall = ot && ot.relevant;
+              if (!showAuth && !showChan && !showOutfall) return null;
               const rows = [];
               if (showAuth) rows.push(
                 <div key="auth" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
@@ -14259,6 +14311,27 @@ function YieldPanel({
                       </span>
                     </div>
                     <div style={{ fontSize: 10.5, color: warn ? Y.warnText : Y.muted, lineHeight: 1.45, margin: "3px 0 0", fontStyle: warn ? "italic" : "normal" }}>{msg}</div>
+                  </div>
+                );
+              }
+              if (showOutfall) {
+                const ov = ot.value;
+                const otNote = ov === "stormSewer"
+                  ? "Storm-sewer outfall — unincorporated Harris County's minimum detention is 0.75 ac-ft/ac."
+                  : ov === "roadsideDitch"
+                  ? "Roadside-ditch outfall — unincorporated Harris County's minimum detention is 1.0 ac-ft/ac."
+                  : "Unincorporated Harris County sets the minimum detention by how the site drains out: to a storm sewer → 0.75, to a roadside ditch → 1.0 ac-ft/ac. Pick one for a single number; left on Auto, the 0.75–1.0 range is shown.";
+                rows.push(
+                  <div key="outfall" style={{ marginTop: rows.length ? 6 : 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                      <span style={{ fontSize: 11, color: Y.rowLabel }}>Outfall type</span>
+                      <span style={{ display: "flex", gap: 4, width: 200 }}>
+                        {seg("Auto", ov == null || ov === "unknown", () => ot.onSet(null), "a", "Outfall type")}
+                        {seg("Storm sewer", ov === "stormSewer", () => ot.onSet("stormSewer"), "s", "Outfall type")}
+                        {seg("Ditch", ov === "roadsideDitch", () => ot.onSet("roadsideDitch"), "d", "Outfall type")}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.45, margin: "3px 0 0" }}>{otNote}</div>
                   </div>
                 );
               }
@@ -14324,9 +14397,12 @@ function YieldPanel({
                 out.push(keyedNote(ruleBadge(req.overlayRule), "overlay-badge"));
                 if (req.overlayRule.params?.runoffReductionPct) out.push(warnNote(`${req.overlayRule.authorityLabel} also requires a ${req.overlayRule.params.runoffReductionPct}% runoff reduction on top of detention.`, "runoff"));
               }
-              out.push(warnNote(req.flags.includes("verify-with-county-engineer")
-                ? "No published flat rate for this county — verify the requirement with the county engineer."
-                : "Exact criteria tables pending transcription — treat as a screening band only.", "band"));
+              out.push(warnNote(
+                req.flags.includes("hced-infra-outfall-min")
+                  ? "Unincorporated Harris County's minimum depends on the outfall type — 0.75 ac-ft/ac to a storm sewer, 1.0 to a roadside ditch. Set the outfall type under “Assumptions” below for a single number (a formal Method-2 analysis can lower it, but never below 0.75)."
+                  : req.flags.includes("verify-with-county-engineer")
+                  ? "No published flat rate for this county — verify the requirement with the county engineer."
+                  : "Exact criteria tables pending transcription — treat as a screening band only.", "band"));
             } else if (req && req.kind === "unknown") {
               out.push(row("Detention required", "unknown"));
               out.push(warnNote(req.basis, "unk"));

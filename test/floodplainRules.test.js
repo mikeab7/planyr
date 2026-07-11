@@ -16,8 +16,12 @@ const memStore = () => {
   return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, v) };
 };
 
+// The seeds that are now research-confirmed (B758 Fort Bend, B760 Harris) and so ship
+// verified:true; every OTHER seed is still an honest unverified placeholder.
+const VERIFIED_SEEDS = ["fortbend", "harris"];
+
 describe("seed integrity", () => {
-  it("every jurisdiction carries the full schema and ships UNVERIFIED", () => {
+  it("every jurisdiction carries the full schema; only the still-placeholder seeds ship UNVERIFIED", () => {
     for (const [key, r] of Object.entries(DEFAULT_FLOODPLAIN_RULES)) {
       expect(r.label, key).toBeTruthy();
       expect(["1pct", "1pct_plus_02pct"], key).toContain(r.trigger);
@@ -26,15 +30,48 @@ describe("seed integrity", () => {
       expect(["storage", "storage_and_conveyance"], key).toContain(r.offsetScope);
       expect(r.locationRule, key).toBeTruthy();
       expect(r.source, key).toBeTruthy();
-      expect(r.verified, key).toBe(false); // no seed may claim verification
-      expect(r.note, key).toMatch(/VERIFY/i);
+      if (VERIFIED_SEEDS.includes(key)) {
+        expect(r.verified, key).toBe(true);     // research-confirmed this session (B758/B760)
+        expect(r.sourceDate, key).toBeTruthy();  // a verified seed must carry its date
+      } else {
+        expect(r.verified, key).toBe(false);     // no unverified seed may claim verification
+        expect(r.note, key).toMatch(/VERIFY/i);  // ...and must stamp the VERIFY caveat
+      }
     }
   });
-  it("COH's trigger extends to the 0.2% band; Harris offsets storage AND conveyance", () => {
+  it("COH's trigger extends to the 0.2% band; Harris now offsets storage AND conveyance across the 500-yr band", () => {
     expect(DEFAULT_FLOODPLAIN_RULES.coh.trigger).toBe("1pct_plus_02pct");
-    expect(DEFAULT_FLOODPLAIN_RULES.harris.trigger).toBe("1pct");
+    expect(DEFAULT_FLOODPLAIN_RULES.harris.trigger).toBe("1pct_plus_02pct");
     expect(DEFAULT_FLOODPLAIN_RULES.harris.offsetScope).toBe("storage_and_conveyance");
     expect(DEFAULT_FLOODPLAIN_RULES.harris.note).toMatch(/no-rise|hydraulic/i);
+  });
+});
+
+describe("verified seeds (B758 Fort Bend, B760 Harris)", () => {
+  it("Fort Bend carries the verified FBC compensating-storage record", () => {
+    const fb = DEFAULT_FLOODPLAIN_RULES.fortbend;
+    expect(fb.trigger).toBe("1pct_plus_02pct");
+    expect(fb.ratio).toBe(1);
+    expect(fb.floodwayPolicy).toBe("prohibit_fill");
+    expect(fb.offsetScope).toBe("storage_and_conveyance");
+    expect(fb.verified).toBe(true);
+    expect(fb.sourceDate).toBe("2024-10-08");
+    expect(fb.source).toMatch(/5\.02\(h\)\(1\)/);            // FDPR compensating-storage cite
+    expect(fb.source).toMatch(/Interim Atlas-14/i);         // the §9 500-yr extension basis
+    expect(fb.note).toMatch(/confirm/i);                    // honest lettering caveat, not "opened the PDF"
+    expect(triggerClasses(fb)).toEqual(["1pct", "02pct"]);
+  });
+  it("Harris updated to the 500-yr storage/conveyance offset, verified", () => {
+    const h = DEFAULT_FLOODPLAIN_RULES.harris;
+    expect(h.trigger).toBe("1pct_plus_02pct");
+    expect(h.offsetScope).toBe("storage_and_conveyance");
+    expect(h.verified).toBe(true);
+    expect(h.sourceDate).toBe("2019-07-09");
+    expect(h.source).toMatch(/7\/9\/2019/);                 // effective-date provenance
+    expect(h.source).toMatch(/4\.07\(e\)/);                 // the 1:1 offset subsection
+    expect(h.note).toMatch(/coastal/i);                     // coastal-area exemption surfaced
+    expect(h.note).toMatch(/confirm/i);                     // honest lettering caveat
+    expect(triggerClasses(h)).toEqual(["1pct", "02pct"]);
   });
 });
 
@@ -58,7 +95,7 @@ describe("load / save", () => {
     // must survive AND coh must pick up whatever the current seeds carry.
     const back = loadFloodplainRules(store);
     expect(back.harris.ratio).toBe(1.5);
-    expect(back.harris.trigger).toBe("1pct");          // untouched fields ride the merge
+    expect(back.harris.trigger).toBe("1pct_plus_02pct"); // untouched fields ride the merge
     expect(back.coh.floodwayPolicy).toBe("prohibit_fill"); // seed fields present even after a whole-object save
   });
   it("a corrupted store falls back to the seeds instead of throwing", () => {
@@ -85,8 +122,9 @@ describe("jurisdiction defaulting", () => {
     expect(defaultFloodJurForCounty("bexar")).toBe("generic");
   });
   it("triggerClasses expands the trigger band", () => {
-    expect(triggerClasses(DEFAULT_FLOODPLAIN_RULES.harris)).toEqual(["1pct"]);
+    expect(triggerClasses(DEFAULT_FLOODPLAIN_RULES.montgomery)).toEqual(["1pct"]); // still a 1%-only placeholder
     expect(triggerClasses(DEFAULT_FLOODPLAIN_RULES.coh)).toEqual(["1pct", "02pct"]);
+    expect(triggerClasses(DEFAULT_FLOODPLAIN_RULES.harris)).toEqual(["1pct", "02pct"]); // B760 now spans the 500-yr band
     expect(triggerClasses(null)).toEqual(["1pct"]);
   });
 });

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-11 @ `1ae477c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-11 @ `04b12b6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_240 source files mapped._
+_241 source files mapped._
 
 ## infra
 
@@ -306,7 +306,7 @@ _240 source files mapped._
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export
   - _exports_: `PRINT_WEIGHTS`, `printStrokeWidth`, `PT_PER_CENTI_INCH`, `sheetFitScale`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
-  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `distToPolyline`, `effectivePadElev`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `floodGeoBbox`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wse1pctForRing`, `zonesFromFeatureCollection`
+  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wse1pctForRing`, `zonesFromFeatureCollection`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
   - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed
@@ -367,6 +367,8 @@ _240 source files mapped._
   - _exports_: `_resetSnapshots`, `ensureSnapshot`, `featureAtPoint`, `featureBbox`, `featuresForView`, `getSnapshot`, `onSnapshotChange`, `snapshotEnabled`, `snapshotVintage`
 - **`src/workspaces/site-planner/lib/parking.js`** — Pure parking-layout math: rows-to-depth, split into double-loaded modules, explode into stall-row/aisle bands, curb-adjacency test
   - _exports_: `edgeAbutsPaving`, `explodeParkingBands`, `parkDepthForRows`, `parkRowsForDepth`, `PAVED_NEIGHBOR_TYPES`, `splitParkingPieces`
+- **`src/workspaces/site-planner/lib/pfds.js`** — Pure NOAA Atlas-14 PFDS text parser (0.2%/500-yr + 100-yr design-storm depths) + the wse02pct-provider documentation notes (FBCDD candidate endpoint / MAAPnext / M3 pointers). B763; honest-null on out-of-coverage
+  - _exports_: `parsePfdsText`, `pfdsDepthFor`, `WSE02_PROVIDER_NOTES`
 - **`src/workspaces/site-planner/lib/pipelineCommodity.js`** — Pure RRC pipeline commodity crosswalk + fixed map symbology (B751): free-text COMMODITY_DESCRIPTION → six hazard-ranked buckets (color/weight/dash), high-hazard outliers routed to the red HVL style, Leaflet style + panel legend
   - _exports_: `COMMODITY_BUCKETS`, `commodityBucket`, `commodityBucketRecord`, `isHazardOutlier`, `PIPELINE_LEGEND`, `pipelineStyleFor`
 - **`src/workspaces/site-planner/lib/pipelineCorridor.js`** — Pure pipeline easement screening-corridor geometry (B752): buffers a WGS84 [lon,lat] centerline into an ASSUMED band via the shared bufferPolyline (local feet frame), plus the editable default/min/max width constants

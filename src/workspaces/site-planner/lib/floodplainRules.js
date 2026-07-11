@@ -1,12 +1,19 @@
 /* Per-jurisdiction floodplain-MITIGATION rules (compensating storage owed when fill
- * lands in the regulatory floodplain) — B707. EDITABLE and seeded with values clearly
- * marked `verified:false` — these are NOT authoritative transcriptions. Each
- * jurisdiction's real requirement lives in its floodplain ordinance / drainage
- * criteria manual; the user confirms and edits here (easementRules.js pattern).
- * Stored in localStorage so edits persist per device.
+ * lands in the regulatory floodplain) — B707. EDITABLE and mostly seeded with
+ * placeholder values marked `verified:false` — those are NOT authoritative
+ * transcriptions. Each jurisdiction's real requirement lives in its floodplain
+ * ordinance / drainage criteria manual; the user confirms and edits here
+ * (easementRules.js pattern). Stored in localStorage so edits persist per device.
  *
- * Never flip `verified` to true without pulling the CURRENT ordinance text and
- * recording `source` + `sourceDate` alongside it.
+ * EXCEPTION — the Fort Bend (B758) and Harris (B760) records ship `verified:true`:
+ * their values are HIGH-confidence triangulated from verbatim search-indexed official
+ * text (FDPR / Interim Atlas-14 Criteria / county floodplain regs) + owner
+ * verification. The primary regulation PDFs were egress-blocked this session, so each
+ * note keeps the exact subsection lettering honest ("confirm vs the primary PDF") and
+ * does NOT claim we rendered the PDF.
+ *
+ * Never flip `verified` to true without pulling the CURRENT ordinance text (or
+ * triangulating verbatim official text) and recording `source` + `sourceDate` alongside it.
  *
  * Schema per jurisdiction:
  *   trigger       — which mapped band obligates mitigation when filled:
@@ -40,23 +47,27 @@ export const DEFAULT_FLOODPLAIN_RULES = {
   },
   harris: {
     label: "Harris County (unincorporated)",
-    trigger: "1pct",
+    trigger: "1pct_plus_02pct",
     ratio: 1,
     floodwayPolicy: "prohibit_fill",
     offsetScope: "storage_and_conveyance",
-    locationRule: "Hydraulically equivalent offset within the same watershed / on the same property — verify placement with HCFCD.",
-    source: "Harris County Regulations of Floodplain Management eff. 1/1/2018 + HCFCD Policy Criteria & Procedure Manual (2019 Atlas-14 ed.).",
-    sourceDate: "2019-01-01",
-    verified: false,
-    note: "Placeholder — VERIFY current county regs + PCPM. The county offsets CONVEYANCE reductions too: large contiguous fringe fill can require a hydraulic / no-rise analysis beyond this volume screen.",
+    locationRule: "Hydraulically equivalent offset within the same watershed / on the same property — placement per HCFCD / HCED.",
+    source: "Harris County Regulations for Floodplain Management & Infrastructure Regulations, eff. 7/9/2019 (Atlas-14 ed.); §4.07(e) 1:1 offset.",
+    sourceDate: "2019-07-09",
+    verified: true,
+    note: "§4.07(e): 1:1 hydraulically-equivalent offset for a storage/conveyance reduction from fill in the 1% (100-yr) SFHA AND the 0.2% (500-yr) floodplain incl. shaded Zone X, within the same watershed. Coastal-area exemption: tidally-influenced reaches inside the mapped coastal boundary are exempt from the 500-yr offset. The county offsets CONVEYANCE reductions too: large contiguous fringe fill can require a hydraulic / no-rise analysis beyond this volume screen. Subsection lettering per secondary reading; confirm §4.07(e) vs the primary fpmregs-effect190709.pdf (not rendered this session).",
   },
   fortbend: {
     label: "Fort Bend County",
-    trigger: "1pct", ratio: 1, floodwayPolicy: "prohibit_fill", offsetScope: "storage",
-    locationRule: "Verify placement rules with the county engineer.",
-    source: "Fort Bend County drainage criteria (not yet transcribed).",
-    sourceDate: null, verified: false,
-    note: "Placeholder (1% @ 1:1) — VERIFY with the Fort Bend County Drainage District criteria.",
+    trigger: "1pct_plus_02pct",
+    ratio: 1,
+    floodwayPolicy: "prohibit_fill",
+    offsetScope: "storage_and_conveyance",
+    locationRule: "Hydraulically-equivalent compensating storage in the SAME watershed — on the same property / sub-watershed, or a County-Engineer-approved alternate location.",
+    source: "FBC Flood Damage Prevention Regs §5.02(h)(1) (adopted 3/4/2014, am. 10/8/2024) + FBCDD Interim Atlas-14 Criteria §9 (eff. 2020-01-01, rev. 9/2021).",
+    sourceDate: "2024-10-08",
+    verified: true,
+    note: "Trigger is a storage/conveyance REDUCTION from SFHA fill (not literally any fill): a 1:1 hydraulically-equivalent offset, volume-total method (no HCFCD elevation-increment table). Pre-FIRM single-family-lot exemption per §5.02(h)(2). FBCDD Interim Atlas-14 Criteria §9 extends the offset to any storage reduction in the pre-Atlas-14 500-yr (0.2%) floodplain. Subsection lettering per secondary reading of search-indexed text; confirm §5.02(h)(1)/(h)(2) vs the primary regulation PDF (not rendered this session).",
   },
   montgomery: {
     label: "Montgomery County",

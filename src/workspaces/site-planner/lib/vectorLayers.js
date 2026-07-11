@@ -92,9 +92,11 @@ export const VECTOR_SOURCES = {
     note: "FEMA NFHL Base Flood Elevation lines — screening only; verify with the official FEMA Flood Map Service Center.",
   },
   // Regulatory Cross-Sections (S_XS, B755) — carry WSEL_REG (1% water surface at a
-  // station). REGISTERED for v2 but NOT consumed in v1: correct use needs stream
-  // matching (WTR_NM) + along-station interpolation, not nearest-line distance, or an
-  // unrelated creek's WSE would be misattributed (the multi-foot silent-error class).
+  // station). Its PARSE first ships now (B763): correct use groups by stream (WTR_NM)
+  // and takes the highest WSEL_REG in the nearest reach — never a nearest-line distance
+  // across unrelated creeks (the multi-foot silent-error class). keyRev 1→2 (B762): the
+  // consumer now reads these attributes, so any pre-B763 attribute-less cache entry must
+  // be discarded rather than served for a whole 30-day TTL.
   // NOTE: sublayer index 14 = "Cross-Sections" — same renumber caveat as bfeLines.
   crossSections: {
     id: "crossSections",
@@ -102,7 +104,7 @@ export const VECTOR_SOURCES = {
     style: "xs",
     query: {
       url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/14/query",
-      keyRev: 1,
+      keyRev: 2,
       outFields: ["WSEL_REG", "WTR_NM", "STREAM_STN", "XS_LTR", "V_DATUM", "STRMBED_EL"],
       where: "1=1",
       pageSize: 1000,

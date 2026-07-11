@@ -65,6 +65,14 @@ describe("VECTOR_SOURCES — registry shape", () => {
     expect(VECTOR_SOURCES.crossSections.query.url).toContain("/NFHL/MapServer/14/query");
     expect(VECTOR_SOURCES.crossSections.query.outFields).toContain("WSEL_REG");
   });
+  it("B762: crossSections keyRev bumped 1→2 (its parse first ships; discard stale attribute-less entries)", () => {
+    expect(VECTOR_SOURCES.crossSections.query.keyRev).toBe(2);
+    // outFields unchanged by the bump — the S_XS attribute set the mitigation engine reads.
+    expect(VECTOR_SOURCES.crossSections.query.outFields).toEqual(["WSEL_REG", "WTR_NM", "STREAM_STN", "XS_LTR", "V_DATUM", "STRMBED_EL"]);
+    // bfeLines keyRev untouched (its fields didn't change).
+    expect(VECTOR_SOURCES.bfeLines.query.keyRev).toBe(1);
+    expect(VECTOR_SOURCES.bfeLines.query.outFields).toEqual(["ELEV", "LEN_UNIT", "V_DATUM", "SOURCE_CIT"]);
+  });
 });
 
 describe("VECTOR_SOURCES — boundary rows (B694)", () => {
