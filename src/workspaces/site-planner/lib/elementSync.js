@@ -69,6 +69,18 @@ export function createElementSync(opts = {}) {
   const inflightKeys = new Map();
   // key -> { at, rev }  (elements this tab committed recently; feeds the B673 15s window)
   const recent = new Map();
+  // key -> { at, rev }  (elements THIS tab tombstoned; the delete's rev). A delete does shadow.delete()
+  // which removes the element's rev CEILING, so a late self-echo of a PRE-delete write (rev <= this)
+  // would sail past the rev guard and RESURRECT the deleted element + raise a false "another window"
+  // toast (B757). This memory restores the ceiling: an incoming row at a rev no newer than our delete
+  // is a stale self-echo → ignored; a genuine re-create by another session arrives at a HIGHER rev and
+  // passes. Pruned to the recent window so it stays tiny.
+  const tombstoned = new Map();
+  function recordTombstone(kind, id, rev) {
+    const t = now();
+    tombstoned.set(skey(kind, id), { at: t, rev: typeof rev === "number" ? rev : 0 });
+    for (const [k, v] of tombstoned) if (t - v.at > recentWindowMs) tombstoned.delete(k); // bound memory
+  }
 
   let debounceHandle = null;
   let backoffHandle = null;
@@ -245,13 +257,14 @@ export function createElementSync(opts = {}) {
       const r = byId.get(e.id) || {};
       const key = skey(e.kind, e.id);
       if (r.status === "ok") {
-        if (e.cls === "delete") { shadow.delete(key); }
+        if (e.cls === "delete") { shadow.delete(key); recordTombstone(e.kind, e.id, r.rev); } // remember the delete's rev → a stale pre-delete self-echo can't resurrect it (B757)
         else {
           // keep the shadow rev MONOTONIC: a foreign realtime row may have advanced it past this
           // commit's rev while the op was in flight (applyRemoteRow's in-flight branch) — adopting
           // the older r.rev back would make the next commit a guaranteed spurious conflict.
           const cur = shadow.get(key);
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(e.el), rev: cur && cur.rev > r.rev ? cur.rev : r.rev, z: e.z });
+          tombstoned.delete(key); // element is live again → drop any stale-delete floor
         }
         recent.set(key, { at: now(), rev: r.rev });
       } else if (r.status === "conflict") {
@@ -277,6 +290,7 @@ export function createElementSync(opts = {}) {
       } else if (r.status === "deleted") {
         // edit-vs-deleted: someone tombstoned it. Do NOT auto-restore — B673 offers a Restore action.
         shadow.delete(key);
+        recordTombstone(e.kind, e.id, (r.row && r.row.rev) || 0); // ceiling so a stale echo can't resurrect (B757)
         report("element-edit-vs-deleted", "edit hit a tombstone", { siteId, id: e.id, kind: e.kind });
         onEvent({ type: "edit-vs-deleted", id: e.id, kind: e.kind, local: e.el, remote: r.row || {} });
       } else if (r.status === "exists") {
@@ -342,18 +356,43 @@ export function createElementSync(opts = {}) {
     const shad = shadow.get(key);
     const rev = typeof row.rev === "number" ? row.rev : 0;
     if (shad && rev <= shad.rev) return { action: "ignore" }; // own echo or stale replay
-    const pend = dirty.get(key) || inflightKeys.get(key); // an in-flight commit is as "ours" as a dirty one
+    // A non-tombstone row for an element THIS tab already deleted, at a rev no newer than our delete,
+    // is a stale pre-delete self-echo racing in late — the delete cleared the shadow's rev ceiling, so
+    // without this it would resurrect the element + raise a false "another window" toast (B757). A
+    // genuine re-create by another session arrives at a HIGHER rev than our delete and falls through.
+    const tomb = tombstoned.get(key);
+    if (tomb != null) {
+      if (now() - tomb.at > recentWindowMs) tombstoned.delete(key); // aged out — bound memory, let it through
+      else if (!row.deleted_at && rev <= tomb.rev) return { action: "ignore" };
+    }
+    const pendDirty = dirty.get(key);
+    const pendInflight = inflightKeys.get(key); // an in-flight commit is as "ours" as a dirty one
+    const pend = pendDirty || pendInflight;
     if (pend) {
-      // A pending local commit exists for this element. If the incoming row carries EXACTLY the
-      // data we're committing (our own commit echoing back ahead of its RPC result, or a foreign
-      // write that happens to be identical), adopt it silently — canvas already shows it, and a
-      // queued identical update can be dropped outright. Otherwise: local data stays on canvas,
-      // the commit re-targets the fresh rev (LWW re-commit), and B673 gets the heads-up event.
-      const sameData = !row.deleted_at && row.data && pend.el && stableStringify(row.data) === stableStringify(pend.el);
-      shadow.set(key, { kind: row.kind, id: row.id, json: sameData ? stableStringify(row.data) : (shad ? shad.json : ""), rev, z: row.z_index });
+      // A pending local commit exists for this element. Recognize OUR OWN echo: the realtime broadcast
+      // of a write races its own RPC result, so the wire can still carry the IN-FLIGHT batch's data (D1)
+      // AFTER a newer edit (D2) has queued into `dirty`, or a tombstone for a delete we ourselves have
+      // in flight. Comparing only the dirty||inflight WINNER (D2) missed the in-flight echo (D1) and
+      // mis-fired a foreign "another window" conflict during active SINGLE-TAB editing (the reported
+      // false pop-up, B757). So match the row against EITHER pending serialization — and treat our own
+      // delete's tombstone echo as ours. A genuine other-window write matches NEITHER, so it still
+      // surfaces as a real conflict; two writes that produce identical data aren't a conflict anyway.
+      if (row.deleted_at && ((pendInflight && pendInflight.cls === "delete") || (pendDirty && pendDirty.cls === "delete"))) {
+        // our own delete (or a concurrent same-element delete → identical outcome) echoing back while a
+        // delete is pending: the canvas already dropped it; processResults owns the shadow transition.
+        return { action: "ignore" };
+      }
+      const rowJson = !row.deleted_at && row.data ? stableStringify(row.data) : null;
+      const sameData = rowJson != null && (
+        (pendInflight && pendInflight.el && stableStringify(pendInflight.el) === rowJson) ||
+        (pendDirty && pendDirty.el && stableStringify(pendDirty.el) === rowJson)
+      );
+      // A queued identical update can be dropped outright (server already has it); otherwise local data
+      // stays on canvas, the commit re-targets the fresh rev (LWW re-commit), and B673 gets the event.
+      shadow.set(key, { kind: row.kind, id: row.id, json: sameData ? rowJson : (shad ? shad.json : ""), rev, z: row.z_index });
       if (sameData) {
         const q = dirty.get(key);
-        if (q && q.el && stableStringify(q.el) === stableStringify(row.data)) dirty.delete(key); // server already has it
+        if (q && q.el && stableStringify(q.el) === rowJson) dirty.delete(key); // server already has it
       } else {
         onEvent({ type: "remote-while-dirty", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
       }
@@ -366,6 +405,7 @@ export function createElementSync(opts = {}) {
       return { action: "remove", kind: row.kind, id: row.id, row };
     }
     if (!row.data) return { action: "ignore" }; // malformed live row (CHECK should prevent this)
+    tombstoned.delete(key); // a genuine higher-rev row (another session re-created it) → element is live again
     shadow.set(key, { kind: row.kind, id: row.id, json: stableStringify(row.data), rev, z: row.z_index });
     onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
     return { action: "upsert", kind: row.kind, id: row.id, el: row.data, row };

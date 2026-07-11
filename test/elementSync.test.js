@@ -403,6 +403,109 @@ describe("refetch-replace safety (V229 #5 lost-update class)", () => {
   });
 });
 
+// B757 — the single-tab false "you (another window)" conflict. During ACTIVE manipulation of one
+// element in ONE tab, our own write echoes back over realtime AHEAD of its own RPC result. If a
+// NEWER edit has meanwhile queued, comparing the echo only against the dirty||inflight WINNER missed
+// the in-flight data and mis-fired `remote-while-dirty` → a bogus "someone else edited it" pop-up
+// with nobody else present. The echo must be recognized as ours by matching EITHER pending entry
+// (and our own delete's tombstone echo while a delete is in flight).
+describe("B757 — a single tab never sees a false 'another window' conflict on its own echo", () => {
+  // In-flight commit's own echo, arriving after a NEWER edit queued: recognized as ours, silent.
+  it("in-flight edit echo while a newer edit is queued → silent (no remote-while-dirty)", async () => {
+    let release; const gate = new Promise((r) => { release = r; });
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => { await gate; return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // D1 (cx:50) in flight
+    s.reconcile({ els: [{ id: "e1", cx: 60, z: 0 }] }, {});                                 // D2 (cx:60) queued while D1 in flight
+    // the realtime echo of our OWN D1 write lands (rev bumped, authored by self)
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 50, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
+    expect(instr.action).toBe("ignore");
+    expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // ← the fix: recognized as our own echo
+    expect(s.pendingCount()).toBe(1);                     // D2 is still queued (not our echo, not dropped)
+    release(); await tick(); await tick();
+  });
+
+  // Our own DELETE's tombstone echo, arriving before its RPC result, is not a foreign conflict.
+  it("in-flight delete's own tombstone echo → silent (no remote-while-dirty)", async () => {
+    let release; const gate = new Promise((r) => { release = r; });
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => { await gate; return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 3, z_index: 0 }]);
+    s.reconcile({ els: [] }, {}); await tick();          // delete flushed immediately → in flight
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 4, z_index: 0, deleted_at: "2026-07-11T00:00:00Z", deleted_by: "me" });
+    expect(instr.action).toBe("ignore");
+    expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // our own tombstone echo, not a conflict
+    release(); await tick(); await tick();
+  });
+
+  // After editing THEN deleting an element, a delayed echo of the pre-delete UPDATE must not resurrect
+  // it (the delete removed the shadow rev ceiling). The delete's remembered rev is the floor.
+  it("a stale pre-delete edit echo after a local delete → ignored (no resurrect, no toast)", async () => {
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // edit → rev 2
+    s.reconcile({ els: [] }, {}); await tick();                                             // delete → rev 3, shadow.delete
+    expect(s.shadowSnapshot().has("el:e1")).toBe(false);
+    // the delayed echo of the earlier UPDATE (rev 2, our own uid) lands after the delete
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 50, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
+    expect(instr.action).toBe("ignore");                 // ← the fix: not resurrected
+    expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(0); // no false "another window" toast
+  });
+
+  // GUARD: a genuine re-create by ANOTHER window (rev ABOVE our delete's rev) still comes through, so
+  // the tombstone floor doesn't swallow a real re-add.
+  it("a genuine re-create above the delete rev still upserts (tombstone floor doesn't over-suppress)", async () => {
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // edit → rev 2
+    s.reconcile({ els: [] }, {}); await tick();                                             // delete → rev 3
+    // another window re-created it → rev 8 (above our delete's rev 3)
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 99, z: 0 }, rev: 8, z_index: 0, updated_by: "someone-else" });
+    expect(instr.action).toBe("upsert");                 // genuinely live again → comes through
+    expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(1);
+  });
+
+  // GUARD: a GENUINE other-window edit (data matching NEITHER pending entry) still surfaces loudly —
+  // the fix must not silence real two-window conflicts.
+  it("a genuine foreign edit (data ≠ inflight AND ≠ dirty) still fires remote-while-dirty", async () => {
+    let release; const gate = new Promise((r) => { release = r; });
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => { await gate; return { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }; },
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // D1 in flight
+    s.reconcile({ els: [{ id: "e1", cx: 60, z: 0 }] }, {});                                 // D2 queued
+    // another window committed cx:99 — matches neither our in-flight (50) nor our dirty (60)
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 99, z: 0 }, rev: 7, z_index: 0, updated_by: "someone-else" });
+    expect(instr.action).toBe("ignore");                 // local data stays on canvas
+    expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(1); // real conflict → still surfaced
+    release(); await tick(); await tick();
+    expect(s.shadowSnapshot().get("el:e1").rev).toBe(7); // adopted the foreign rev
+  });
+});
+
 // B756 — the refetch-replace integration the data-loss fix restores: a brand-new signed-in site's
 // parcels live only in local state (rows are empty on the first fetch). foldNeverSyncedLocal folds them
 // back into `next`, and the post-substitution reconcile must COMMIT them as creates (they used to be
