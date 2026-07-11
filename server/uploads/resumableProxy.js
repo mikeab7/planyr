@@ -78,7 +78,9 @@ async function mapDriveReply(res) {
 export async function relayChunk({ sessionUri, bytes, contentRange, fetchImpl = fetch } = {}) {
   let res;
   try {
-    res = await fetchImpl(sessionUri, { method: "PUT", headers: { "content-range": contentRange }, body: bytes });
+    // redirect:"manual" — a 308 must reach US, never the fetch redirect machinery. Google's
+    // 308 carries no Location so "follow" would deliver it anyway, but this removes the bet.
+    res = await fetchImpl(sessionUri, { method: "PUT", headers: { "content-range": contentRange }, body: bytes, redirect: "manual" });
   } catch (e) {
     return { kind: "error", status: 502, error: `Couldn't reach Google Drive: ${(e && e.message) || e}` };
   }
@@ -90,7 +92,7 @@ export async function relayChunk({ sessionUri, bytes, contentRange, fetchImpl = 
 export async function probeSession({ sessionUri, totalBytes, fetchImpl = fetch } = {}) {
   let res;
   try {
-    res = await fetchImpl(sessionUri, { method: "PUT", headers: { "content-range": `bytes */${totalBytes}` } });
+    res = await fetchImpl(sessionUri, { method: "PUT", headers: { "content-range": `bytes */${totalBytes}` }, redirect: "manual" });
   } catch (e) {
     return { kind: "error", status: 502, error: `Couldn't reach Google Drive: ${(e && e.message) || e}` };
   }

@@ -19,7 +19,10 @@ create table if not exists public.upload_sessions (
   total_bytes       bigint not null,
   bytes_received    bigint not null default 0,
   drive_file_id     text,                     -- set when Drive acknowledges the final chunk
-  status            text not null default 'in_progress' check (status in ('in_progress','complete','aborted')),
+  -- in_progress → complete (Drive has every byte) → recorded (drive_files mapping written;
+  -- kept, not deleted, so a retried /complete after a lost response succeeds idempotently);
+  -- aborted = rolled back / dead session.
+  status            text not null default 'in_progress' check (status in ('in_progress','complete','recorded','aborted')),
   created_at        timestamptz not null default now(),
   -- Google expires a resumable session URI after ~1 week; expired rows are purged
   -- opportunistically by /api/uploads/start (best-effort, caller-scoped).

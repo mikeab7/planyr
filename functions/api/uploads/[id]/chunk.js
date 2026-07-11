@@ -29,8 +29,11 @@ export async function onRequestPut(context) {
   if (!range) return json({ ok: false, error: 'Missing or malformed Content-Range (expected "bytes a-b/total").' }, 400);
   if (range.total !== Number(session.total_bytes))
     return json({ ok: false, error: `Content-Range total (${range.total}) doesn't match this upload (${session.total_bytes}).` }, 400);
-  if (range.start > Number(session.bytes_received))
-    return json({ ok: false, error: "Chunks must arrive in order — this one starts past the received bytes." }, 400);
+  // Deliberately NO start-vs-bytes_received ordering check here: bytes_received is best-effort
+  // bookkeeping (the PATCH below may miss), and an ordering guard against a stale row would 400
+  // a perfectly ordered chunk — bricking a healthy upload (adversarial-review finding). Drive
+  // validates offsets AUTHORITATIVELY: an out-of-order or overlapping PUT gets a 308 carrying
+  // the true cumulative Range, which flows back to the client as { received } to re-sync on.
 
   // Read the ONE chunk (bounded; the only buffering in the whole pipeline).
   const len = Number(request.headers.get("content-length"));

@@ -18,8 +18,8 @@ export async function onRequestGet(context) {
   const session = s.session;
   const total = Number(session.total_bytes);
 
-  // Already recorded complete → answer from the row (no Drive round-trip needed).
-  if (session.status === "complete") return json({ ok: true, received: total, complete: true });
+  // Already complete (or complete AND recorded) → answer from the row, no Drive round-trip.
+  if (session.status === "complete" || session.status === "recorded") return json({ ok: true, received: total, complete: true });
   if (session.status !== "in_progress") return json({ ok: false, error: `This upload is ${session.status}.` }, 409);
 
   const r = await probeSession({ sessionUri: session.drive_session_uri, totalBytes: total });

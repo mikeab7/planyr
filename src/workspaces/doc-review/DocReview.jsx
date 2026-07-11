@@ -570,7 +570,10 @@ export default function DocReview({
         // to be silent. Surface it — but only when signed in (logged-out is by-design local-only: the bytes
         // are cached via cacheSourceBytes and the work layer still mirrors locally, so no cloud store is owed).
         if (!r.ok && !r.oversize && (await cloudReady())) {
-          const m = "Couldn't save this PDF to the cloud — your markups might open without their drawing next time. Check your connection and drop the file again.";
+          // Name the real cause when the uploader gave one (e.g. "Google Drive is out of
+          // storage space…" — advice like "check your connection" can't fix that).
+          const why = r.driveError || "Check your connection and drop the file again.";
+          const m = `Couldn't save this PDF to the cloud — your markups might open without their drawing next time. ${why}`;
           setErr(m); setOpenErr(m);
         }
       }).catch(() => {}); // best-effort store; a rejection mustn't become an unhandled rejection

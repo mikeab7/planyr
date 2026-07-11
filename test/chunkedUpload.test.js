@@ -177,6 +177,75 @@ describe("uploadFileInChunks — sequential chunks, resume, retry, quota", () =>
     expect(r).toEqual({ ok: false, skipped: true, error: "Drive not enabled yet." });
   });
 
+  it("a dead Drive session (sessionLost) short-circuits with the actionable message — no futile retry burn", async () => {
+    const file = new Blob([new Uint8Array(10)]);
+    let tries = 0;
+    const { fetchImpl } = fakeServer({
+      start: { ok: true, uploadId: "u1", chunkSize: 256 * K },
+      chunk: () => { tries += 1; return { ok: false, status: 410, json: async () => ({ ok: false, error: "The upload session expired — start the upload again.", sessionLost: true }) }; },
+    });
+    const r = await uploadFileInChunks({ file, token: "t", planyrKey: "k", name: "n", contentType: "x", fetchImpl, sleep: noSleep });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/session expired/);
+    expect(tries).toBe(1); // no retry loop against a condition the server declared unrecoverable
+  });
+
+  it("accepts a token GETTER and re-reads it per request (long uploads outlive one JWT)", async () => {
+    const total = 512 * K;
+    const file = new Blob([new Uint8Array(total)]);
+    let n = 0;
+    const { calls, fetchImpl } = fakeServer({
+      start: { ok: true, uploadId: "u1", chunkSize: 256 * K },
+      chunk: (call) => {
+        const m = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(call.headers["content-range"]);
+        const received = Number(m[2]) + 1;
+        return { ok: true, status: 200, json: async () => ({ ok: true, received, complete: received === total }) };
+      },
+    });
+    const r = await uploadFileInChunks({ file, token: async () => `tok-${++n}`, planyrKey: "k", name: "n", contentType: "x", fetchImpl, sleep: noSleep });
+    expect(r.ok).toBe(true);
+    const auths = calls.map((c) => c.headers.authorization);
+    expect(new Set(auths).size).toBe(auths.length); // every request carried a FRESH token read
+  });
+
+  it("resets the retry budget when the /status resync shows progress (bodies land, responses drop)", async () => {
+    // A network that delivers every 16 MiB PUT body but times out the responses: each chunk
+    // "fails", yet the probe shows steady progress. That's a healthy upload — it must finish,
+    // not die after maxAttempts chunks.
+    const total = 5 * 256 * K; // 5 chunks > maxAttempts of 3
+    const file = new Blob([new Uint8Array(total)]);
+    let got = 0;
+    const { fetchImpl } = fakeServer({
+      start: { ok: true, uploadId: "u1", chunkSize: 256 * K },
+      chunk: (call) => {
+        const m = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(call.headers["content-range"]);
+        got = Number(m[2]) + 1;
+        throw new Error("response timed out"); // the body reached Drive; the reply is lost
+      },
+      status: () => ({ ok: true, status: 200, json: async () => ({ ok: true, received: got, complete: got >= total }) }),
+    });
+    const r = await uploadFileInChunks({ file, token: "t", planyrKey: "k", name: "n", contentType: "x", fetchImpl, sleep: noSleep, maxAttempts: 3 });
+    expect(r).toEqual({ ok: true, driveKey: "k" });
+  });
+
+  it("falls back to the default chunk size when the server hands back a non-256 KiB-multiple", async () => {
+    const file = new Blob([new Uint8Array(1000)]);
+    const { calls, fetchImpl } = fakeServer({
+      start: { ok: true, uploadId: "u1", chunkSize: 1_000_000 }, // NOT a 256 KiB multiple
+      chunk: () => ({ ok: true, status: 200, json: async () => ({ ok: true, received: 1000, complete: true }) }),
+    });
+    const r = await uploadFileInChunks({ file, token: "t", planyrKey: "k", name: "n", contentType: "x", fetchImpl, sleep: noSleep });
+    expect(r.ok).toBe(true);
+    // One chunk covering the whole 1000-byte file at the safe default size.
+    expect(calls.filter((c) => c.url.endsWith("/chunk")).map((c) => c.headers["content-range"])).toEqual(["bytes 0-999/1000"]);
+  });
+
+  it("a quota failure at session-mint time also maps to the plain-English message", async () => {
+    const fetchImpl = async () => ({ ok: false, status: 502, json: async () => ({ ok: false, error: "The user's Drive storage quota has been exceeded. (storageQuotaExceeded)" }) });
+    const r = await uploadFileInChunks({ file: new Blob([new Uint8Array(1)]), token: "t", planyrKey: "k", name: "n", contentType: "x", fetchImpl, sleep: noSleep });
+    expect(r.error).toBe(QUOTA_MESSAGE);
+  });
+
   it("an already-complete status during resume finishes cleanly (no chunk re-sent past the end)", async () => {
     const total = 256 * K;
     const file = new Blob([new Uint8Array(total)]);

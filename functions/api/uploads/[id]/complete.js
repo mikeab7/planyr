@@ -20,6 +20,13 @@ export async function onRequestPost(context) {
   const s = await ownSession(c, params && params.id);
   if (s.error) return s.error;
   const session = s.session;
+  // Idempotent success: the mapping already landed but the RESPONSE was lost — the client's
+  // retry must succeed, not 404/409 a fully-successful upload (adversarial-review finding).
+  if (session.status === "recorded") return json({ ok: true, planyrKey: session.planyr_key });
+  // A rolled-back upload can never complete — say so, distinctly from "not finished yet"
+  // (the generic 409 sent the user hunting for missing chunks whose bytes were deleted).
+  if (session.status === "aborted")
+    return json({ ok: false, error: "This upload was rolled back — start it again.", sessionLost: true }, 410);
   if (session.status !== "complete" || !session.drive_file_id)
     return json({ ok: false, error: "This upload hasn't finished — send the remaining chunks first." }, 409);
 
@@ -32,6 +39,9 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: "Uploaded to Drive but couldn't record the file; it was rolled back — please retry." }, 502);
   }
 
-  await c.store.remove(session.id); // mapping recorded — nothing left to resume
+  // Mark recorded rather than delete: if THIS response is lost in transit, the client's retry
+  // finds the row and returns success idempotently (above) instead of a 404 that would report
+  // a fully-successful upload as failed. The row is retired by the expires_at housekeeping.
+  await c.store.update(session.id, { status: "recorded" });
   return json({ ok: true, planyrKey: session.planyr_key });
 }

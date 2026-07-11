@@ -425,14 +425,18 @@ export async function listFileFacts() {
  * { ok:false, error }. Best-effort — never throws. */
 export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName, folderId = null, onProgress = null } = {}) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
-  let token = null;
-  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { /* none */ }
-  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
+  // Token as a GETTER, not a snapshot: a multi-GB upload outlives a Supabase access token
+  // (~1 h), so every request re-reads the current (auto-refreshed) session token.
+  const getToken = async () => {
+    try { const { data } = await supabase.auth.getSession(); return (data && data.session && data.session.access_token) || ""; }
+    catch (_) { return ""; }
+  };
+  if (!(await getToken())) return { ok: false, skipped: true, error: "Not signed in." };
   const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
   const name = fileName || "document.pdf";
   const driveKey = `${folder}/${name}`; // the key the read-back GET uses (server prefixes the uid)
   return uploadFileInChunks({
-    file, token, planyrKey: driveKey, name, contentType: guessContentType(name, file.type),
+    file, token: getToken, planyrKey: driveKey, name, contentType: guessContentType(name, file.type),
     // Tree targeting (B650 follow-on): the server files the bytes into the project's standard
     // folder tree when it's mirrored; an explicit folder pick (B686) wins over the discipline
     // route; the flat path derived from the key stays the never-blocking fallback.

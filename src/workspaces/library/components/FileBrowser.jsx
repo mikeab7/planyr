@@ -309,9 +309,12 @@ export default function FileBrowser({
           const filed = [];
           let firstId = null;
           let lastErr = null;
-          for (const part of parts) {
+          for (const [pi, part] of parts.entries()) {
             const need = !pid || !part.discipline || part.discipline === "Other";
-            const r = await fileOne({ pid, discipline: part.discipline, item_: part.item, docDate, blob: part.blob, fileName: part.fileName, facts: route && route.facts, needsFiling: need, onProgress });
+            // One CONTINUOUS bar across all parts — a per-part sent/total would snap back to
+            // 0% between disciplines and read like a stalled/restarting upload.
+            const partProgress = (sent, t) => onProgress(pi * (t || 1) + Math.min(sent, t || 0), (t || 1) * parts.length);
+            const r = await fileOne({ pid, discipline: part.discipline, item_: part.item, docDate, blob: part.blob, fileName: part.fileName, facts: route && route.facts, needsFiling: need, onProgress: partProgress });
             if (r && r.ok) { filed.push({ d: part.discipline, n: part.pageNums.length }); firstId = firstId || r.id; }
             else lastErr = (r && r.error) || "Couldn't file a split.";
           }

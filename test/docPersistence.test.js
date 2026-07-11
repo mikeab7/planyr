@@ -47,10 +47,10 @@ describe("isStoredSource — only a really-stored source is persistable (B323)",
   });
 });
 
-/* B322/NEW-2 — interactively-opened + stitched sources go through the same Drive-first,
- * Supabase-fallback path as filing. With no cloud configured the helper degrades cleanly
- * (no key, never throws) rather than half-writing. */
-describe("storeSource — Drive-first/Supabase-fallback, degrades gracefully (B322)", () => {
+/* B322/NEW-2 — interactively-opened + stitched sources go through the same Drive chunked-
+ * upload path as filing (B409 rework: no Supabase upload fallback anymore). With no cloud
+ * configured the helper degrades cleanly (no key, never throws) rather than half-writing. */
+describe("storeSource — Drive chunked path, degrades gracefully (B322/B409)", () => {
   it("returns an unstored-but-clean result when the cloud isn't configured", async () => {
     const r = await storeSource("src1", { size: 10, type: "application/pdf" }, { projectId: "p1", discipline: "Civil", fileName: "a.pdf" });
     expect(r.ok).toBe(false);

@@ -163,12 +163,11 @@ describe("PUT /api/uploads/<id>/chunk — ownership, relay, protocol", () => {
     expect(state.sessions["sess-1"]).toMatchObject({ status: "complete", drive_file_id: "drive-file-7" });
   });
 
-  it("protocol violations are 400s: bad header, wrong total, body/range mismatch, out-of-order", async () => {
+  it("protocol violations are 400s: bad header, wrong total, body/range mismatch", async () => {
     const cases = [
       [chunkReq(null, new Uint8Array(10)), /Content-Range/],
       [chunkReq("bytes 0-9/999", new Uint8Array(10)), /doesn't match/],
       [chunkReq("bytes 0-9/2000", new Uint8Array(5)), /spans/],
-      [chunkReq("bytes 500-509/2000", new Uint8Array(10)), /in order/],
     ];
     for (const [req, msg] of cases) {
       world({ sessions: { "sess-1": SESSION_ROW } });
@@ -177,6 +176,19 @@ describe("PUT /api/uploads/<id>/chunk — ownership, relay, protocol", () => {
       expect((await resp.json()).error).toMatch(msg);
       vi.unstubAllGlobals();
     }
+  });
+
+  it("a STALE bytes_received row does not block a later legitimate chunk — Drive arbitrates", async () => {
+    // The progress PATCH is best-effort; if one misses, the row lags reality. A chunk whose
+    // start exceeds the stale count must still relay (Drive answers with its true Range) —
+    // an ordering guard here bricked a healthy upload (adversarial-review finding).
+    const state = world({
+      sessions: { "sess-1": SESSION_ROW }, // bytes_received: 0 (stale — Drive already has 1000)
+      drive: () => hres({}, 308, { range: "bytes=0-1999" }),
+    });
+    const resp = await chunkPut({ env: ENV, request: chunkReq("bytes 1000-1999/2000", new Uint8Array(1000)), params: { id: "sess-1" } });
+    expect(await resp.json()).toEqual({ ok: true, received: 2000 });
+    expect(state.driveCalls.length).toBe(1); // relayed, not rejected
   });
 
   it("a Drive failure surfaces its reason loudly (LOUD-FAILURE), quota included", async () => {
@@ -209,12 +221,14 @@ describe("GET /api/uploads/<id>/status — the resume point", () => {
     expect(state.sessions["sess-1"]).toMatchObject({ status: "complete", drive_file_id: "f9" });
   });
 
-  it("an already-complete row answers without a Drive round-trip; foreign id is 404", async () => {
-    const state = world({ sessions: { "sess-1": { ...SESSION_ROW, status: "complete", drive_file_id: "f1" } } });
-    const resp = await statusGet({ env: ENV, request: idReq("status"), params: { id: "sess-1" } });
-    expect(await resp.json()).toEqual({ ok: true, received: 2000, complete: true });
-    expect(state.driveCalls.length).toBe(0);
-    vi.unstubAllGlobals();
+  it("an already-complete (or recorded) row answers without a Drive round-trip; foreign id is 404", async () => {
+    for (const status of ["complete", "recorded"]) {
+      const state = world({ sessions: { "sess-1": { ...SESSION_ROW, status, drive_file_id: "f1" } } });
+      const resp = await statusGet({ env: ENV, request: idReq("status"), params: { id: "sess-1" } });
+      expect(await resp.json()).toEqual({ ok: true, received: 2000, complete: true });
+      expect(state.driveCalls.length).toBe(0);
+      vi.unstubAllGlobals();
+    }
     world({ uid: "attacker", sessions: { "sess-1": SESSION_ROW } });
     expect((await statusGet({ env: ENV, request: idReq("status"), params: { id: "sess-1" } })).status).toBe(404);
   });
@@ -227,12 +241,26 @@ describe("POST /api/uploads/<id>/complete — mapping + rollback", () => {
     expect(resp.status).toBe(409);
   });
 
-  it("records the uid-scoped drive_files mapping and retires the session", async () => {
+  it("records the uid-scoped drive_files mapping, marks the row recorded, and is IDEMPOTENT on retry", async () => {
     const state = world({ sessions: { "sess-1": { ...SESSION_ROW, status: "complete", drive_file_id: "f7", bytes_received: 2000 } } });
     const resp = await completePost({ env: ENV, request: idReq("complete", "POST"), params: { id: "sess-1" } });
     expect(await resp.json()).toEqual({ ok: true, planyrKey: "project-x/civil/GPL.pdf" });
     expect(state.mappings[0]).toMatchObject({ planyr_key: "u1/project-x/civil/GPL.pdf", drive_id: "f7", name: "GPL.pdf" });
-    expect(state.sessions["sess-1"]).toBeUndefined(); // session row retired
+    // The row is KEPT (status recorded), not deleted — so a retry whose predecessor's
+    // response was lost still finds it and succeeds instead of 404ing a successful upload.
+    expect(state.sessions["sess-1"]).toMatchObject({ status: "recorded" });
+    const again = await completePost({ env: ENV, request: idReq("complete", "POST"), params: { id: "sess-1" } });
+    expect(await again.json()).toEqual({ ok: true, planyrKey: "project-x/civil/GPL.pdf" });
+    expect(state.mappings.length).toBe(1); // no double mapping write
+  });
+
+  it("an ABORTED (rolled-back) session answers a distinct restartable 410, not 'send remaining chunks'", async () => {
+    world({ sessions: { "sess-1": { ...SESSION_ROW, status: "aborted", drive_file_id: "f7" } } });
+    const resp = await completePost({ env: ENV, request: idReq("complete", "POST"), params: { id: "sess-1" } });
+    expect(resp.status).toBe(410);
+    const jr = await resp.json();
+    expect(jr.sessionLost).toBe(true);
+    expect(jr.error).toMatch(/rolled back/i);
   });
 
   it("NEW-4: a failed mapping write rolls the Drive file back and fails honestly", async () => {

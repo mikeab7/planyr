@@ -62,7 +62,10 @@ export const QUOTA_MESSAGE =
  *   { ok:true, driveKey }                 — bytes in Drive + mapping recorded
  *   { ok:false, skipped:true, error }     — Drive/storage backend not enabled (404/503)
  *   { ok:false, error }                   — a real, already-retried failure
- * `onProgress(sentBytes, totalBytes)` fires as the server confirms bytes (resume-accurate:
+ * `token` is a bearer-token STRING or an async FUNCTION returning one — pass a function for
+ * long transfers: a multi-GB upload outlives a Supabase access token (~1 h), so each request
+ * re-reads the current (auto-refreshed) token instead of riding one snapshot to a mid-upload
+ * 401. `onProgress(sentBytes, totalBytes)` fires as the server confirms bytes (resume-accurate:
  * after a drop it continues from the server's count, and so does the progress bar). */
 export async function uploadFileInChunks({
   file, token, planyrKey, name, contentType, projectId = null, discipline = null, folderId = null,
@@ -71,8 +74,13 @@ export async function uploadFileInChunks({
   if (!file || !token || !planyrKey) return { ok: false, error: "Missing file, session, or key." };
   const total = file.size;
   if (!(total > 0)) return { ok: false, error: "This file is empty or couldn’t be read." };
-  const auth = { authorization: `Bearer ${token}` };
+  const auth = async () => ({ authorization: `Bearer ${typeof token === "function" ? await token() : token}` });
   const progress = (n) => { try { if (onProgress) onProgress(Math.min(n, total), total); } catch (_) { /* UI-only */ } };
+  // A resume offset must sit on Google's 256 KiB granule — Drive commits whole granules, so
+  // its byte counts should already align, but a misaligned count would make every following
+  // chunk violate the granularity rule. Rounding DOWN just re-sends a few bytes Drive
+  // already holds, which the protocol tolerates; a completed count passes through as-is.
+  const aligned = (n) => (n >= total ? n : n - (n % DRIVE_CHUNK_GRANULE));
 
   // 1) START — the server mints the Drive resumable session and keeps its URI; we only
   // ever hold the opaque uploadId.
@@ -80,22 +88,31 @@ export async function uploadFileInChunks({
   try {
     const res = await fetchImpl("/api/uploads/start", {
       method: "POST",
-      headers: { ...auth, "content-type": "application/json" },
+      headers: { ...(await auth()), "content-type": "application/json" },
       body: JSON.stringify({ fileName: name, mimeType: contentType, totalBytes: total, planyrKey, projectId, discipline, folderId }),
     });
     if (res.status === 404 || res.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
     const jr = await jsonOf(res);
+    if (QUOTA_RE.test((jr && jr.error) || "")) return { ok: false, error: QUOTA_MESSAGE }; // a full Drive can fail the session mint too
     if (!res.ok || !jr.ok || !jr.uploadId) return { ok: false, error: jr.error || `HTTP ${res.status}` };
     start = jr;
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
   const { uploadId } = start;
-  const chunkSize = Number(start.chunkSize) || CHUNK_SIZE;
+  // Trust-but-verify the server's chunk size: a non-256 KiB-multiple would make Drive reject
+  // every non-final chunk, so a bad value falls back to the known-good default instead.
+  let chunkSize = Number(start.chunkSize) || CHUNK_SIZE;
+  if (!(chunkSize > 0) || chunkSize % DRIVE_CHUNK_GRANULE !== 0) chunkSize = CHUNK_SIZE;
   progress(0);
+
+  // A dead Drive session (they expire after ~1 week; Google can kill one mid-flight) is
+  // un-retryable by definition — it must short-circuit, not burn the whole retry budget.
+  const lost = (msg) => { const e = new Error(msg || "The upload session expired — start the upload again."); e.sessionLost = true; return e; };
 
   // Ask the server how many bytes Drive actually has — the resume point after a drop.
   const syncOffset = async () => {
-    const res = await fetchImpl(`/api/uploads/${encodeURIComponent(uploadId)}/status`, { headers: auth });
+    const res = await fetchImpl(`/api/uploads/${encodeURIComponent(uploadId)}/status`, { headers: await auth() });
     const jr = await jsonOf(res);
+    if (jr && jr.sessionLost) throw lost(jr.error);
     if (!res.ok || !jr.ok) throw new Error(jr.error || `HTTP ${res.status}`);
     return { received: Number(jr.received) || 0, complete: !!jr.complete };
   };
@@ -110,26 +127,40 @@ export async function uploadFileInChunks({
     try {
       const res = await fetchImpl(`/api/uploads/${encodeURIComponent(uploadId)}/chunk`, {
         method: "PUT",
-        headers: { ...auth, "content-type": "application/octet-stream", "content-range": contentRangeFor(offset, end, total) },
+        headers: { ...(await auth()), "content-type": "application/octet-stream", "content-range": contentRangeFor(offset, end, total) },
         body: file.slice(offset, end),
       });
       const jr = await jsonOf(res);
       if (!res.ok || !jr.ok) {
         if (QUOTA_RE.test(jr.error || "")) return { ok: false, error: QUOTA_MESSAGE }; // retrying can't fix a full Drive
+        if (jr && jr.sessionLost) throw lost(jr.error);
         throw new Error(jr.error || `HTTP ${res.status}`);
       }
-      const received = Number(jr.received) || 0;
+      const received = aligned(Number(jr.received) || 0);
       if (jr.complete) { offset = total; done = true; }
       else if (received > offset) offset = received;
       else throw new Error("The upload didn’t advance."); // a stuck offset must not loop forever
       attempts = 0; // a chunk landed — reset the retry budget for the next one
       progress(offset);
     } catch (e) {
+      if (e && e.sessionLost) return { ok: false, error: e.message }; // dead at Google — retries can't revive it
       attempts += 1;
       if (attempts >= maxAttempts) return { ok: false, error: (e && e.message) || "Upload failed." };
       await sleep(backoffMs(attempts));
-      try { const s = await syncOffset(); offset = s.received; if (s.complete) { offset = total; done = true; } progress(offset); }
-      catch (_) { /* status probe failed too — the next loop retries the chunk from the last known offset */ }
+      try {
+        const before = offset;
+        const s = await syncOffset();
+        offset = aligned(s.received);
+        if (s.complete) { offset = total; done = true; }
+        // Bytes ARE landing even though responses are being lost (e.g. a proxy that times out
+        // long PUT responses) — that's a healthy upload, so the retry budget resets; only a
+        // genuinely stuck offset keeps consuming attempts.
+        if (offset > before) attempts = 0;
+        progress(offset);
+      } catch (e2) {
+        if (e2 && e2.sessionLost) return { ok: false, error: e2.message };
+        /* status probe failed too — the next loop retries the chunk from the last known offset */
+      }
     }
   }
 
@@ -137,7 +168,7 @@ export async function uploadFileInChunks({
   // Drive file if the mapping write fails, so there's never a stored-but-unfindable file).
   for (let i = 1; i <= maxAttempts; i++) {
     try {
-      const res = await fetchImpl(`/api/uploads/${encodeURIComponent(uploadId)}/complete`, { method: "POST", headers: auth });
+      const res = await fetchImpl(`/api/uploads/${encodeURIComponent(uploadId)}/complete`, { method: "POST", headers: await auth() });
       const jr = await jsonOf(res);
       if (res.ok && jr.ok) { progress(total); return { ok: true, driveKey: planyrKey }; }
       if (res.status >= 400 && res.status < 500) return { ok: false, error: jr.error || `HTTP ${res.status}` }; // no point retrying a rejection
