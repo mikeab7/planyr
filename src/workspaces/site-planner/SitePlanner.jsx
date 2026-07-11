@@ -78,7 +78,9 @@ import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
-import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters } from "./lib/jurisdiction.js";
+import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge } from "./lib/jurisdiction.js";
+import { representativeRing, ringCentroid, ringsSignature } from "./lib/siteAnalysis.js";
+import JurisdictionBadge from "./components/JurisdictionBadge.jsx";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx } from "./lib/roadGeometry.js";
@@ -6521,6 +6523,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </span>
     </div>
   );
+
+  // B763 — the PASSIVE jurisdiction badge (site header). Deliberately revises B93's
+  // "click / explicit request only" policy FOR THE ACTIVE PARCEL ONLY (owner decision
+  // 2026-07-11): auto-run the same whole-parcel, straddle-aware, SWR-cached identify once
+  // per active-parcel geometry so the user reads WHICH jurisdiction the site is in without
+  // toggling boundary layers. It fires on activation / add (the geometry signature changes),
+  // NEVER per pan (pan doesn't change parcel geometry), and memoizes per signature so
+  // unrelated re-renders don't re-run it. Map-click identify (checkJurisdiction) is unchanged.
+  const jurActiveRings = useMemo(() => {
+    if (!origin) return [];
+    return parcels
+      .filter((p) => p.active !== false && (p.points?.length || 0) >= 3)
+      .map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
+  }, [parcels, origin]);
+  const jurBadgeSig = jurActiveRings.length ? ringsSignature(jurActiveRings) : "";
+  const [jurBadge, setJurBadge] = useState(null);
+  const jurBadgeCache = useRef(new Map()); // signature → badge (cache by parcel geometry hash)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!jurBadgeSig) { setJurBadge(null); return; }
+    const cached = jurBadgeCache.current.get(jurBadgeSig);
+    if (cached) { setJurBadge(cached); return; }
+    let cancelled = false;
+    const rep = representativeRing(jurActiveRings);
+    if (!rep) { setJurBadge(null); return; }
+    const c = ringCentroid(rep);
+    identifyJurisdiction(c.lng, c.lat, { ring: rep })
+      .then((j) => {
+        const b = formatJurisdictionBadge(j);
+        if (!b) return; // failed / empty identify → no badge (display-only screening info)
+        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC" };
+        jurBadgeCache.current.set(jurBadgeSig, badge);
+        if (!cancelled) setJurBadge(badge);
+      })
+      .catch(() => { /* screening/display-only — a failed identify just shows no badge */ });
+    return () => { cancelled = true; };
+  }, [jurBadgeSig]);
   // A click in identify mode ADDS the lot under the cursor straight to the plan (no
   // preview-then-confirm) — click more lots to add more; re-click a lot you just added
   // to toggle it off. The info card then shows that lot's appraisal + the jurisdiction
@@ -10070,7 +10109,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
         onRetrySave={() => { retryCloudSave(); retryElems(); }}
         saveDetail={elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined}
-        centerContent={null}
+        centerContent={<JurisdictionBadge badge={jurBadge} />}
         planSlot={plannerPlanCrumb}
         authControl={authControl}
         accountActive={accountActive}

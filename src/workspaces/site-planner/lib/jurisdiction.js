@@ -436,6 +436,30 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   return out;
 }
 
+/* B763 — compact jurisdiction badge for the ACTIVE parcel/site. Turns an
+ * `identifyJurisdiction` result into ONE screening-line string a developer reads
+ * without toggling any boundary layer:
+ *   • in a city            → "City of Houston · Harris County"
+ *   • in an ETJ, no city    → "City of Baytown — ETJ · Harris County"
+ *   • neither               → "Unincorporated · Waller County"
+ *   • straddle              → both listed ("City of Houston / City of Katy · …"),
+ *                             `straddle:true` so the badge can mark it (⚑).
+ * ETJ names already covered by a matched city are dropped (a limit straddle reads
+ * "City of Houston", not "… / City of Houston — ETJ"). Once B764 lands, an ISD name
+ * appends via `opts.isd`. Pure → unit-tested; null when there's nothing to show. */
+export function formatJurisdictionBadge(j, opts = {}) {
+  if (!j) return null;
+  const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
+  const etjs = uniq((j.etj || []).filter((v) => v != null && v !== "").map(String)).filter((e) => !cities.includes(e));
+  const counties = uniq((j.county || []).filter((v) => v != null && v !== "").map(String));
+  const parts = [...cities.map((c) => `City of ${c}`), ...etjs.map((c) => `City of ${c} — ETJ`)];
+  const jur = parts.length ? parts.join(" / ") : "Unincorporated";
+  const county = counties.length ? counties.map((c) => `${c} County`).join(" / ") : null;
+  const isd = opts.isd ? String(opts.isd) : null; // B764: appended when the ISD layer lands
+  const text = [jur, county, isd].filter(Boolean).join(" · ");
+  return { text, jur, county, isd, straddle: !!j.straddle };
+}
+
 // Configured CAD county keys (those with a wired parcel service) — maps a TxDOT
 // county name back onto the app's routing keys for the B36(a) label correction.
 const COUNTY_NAME_TO_KEY = { harris: "harris", "fort bend": "fortbend", chambers: "chambers" };

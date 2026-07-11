@@ -79,6 +79,14 @@ try {
   ok("ⓘ popover shows a vintage line", noteText.includes("As of:"));
   await page.keyboard.press("Escape");
   ok("Escape closes the ⓘ popover", await note.count() === 0 || !(await note.isVisible().catch(() => false)));
+
+  // ── B763: the passive jurisdiction badge renders each case ──
+  ok("badge (in city) reads 'City of Houston · Harris County'", (await text("#badge-city")).includes("City of Houston · Harris County"));
+  ok("badge (in ETJ) reads 'City of Baytown — ETJ · Harris County'", (await text("#badge-etj")).includes("City of Baytown — ETJ · Harris County"));
+  ok("badge (unincorporated) reads 'Unincorporated · Waller County'", (await text("#badge-uninc")).includes("Unincorporated · Waller County"));
+  ok("badge (straddle) lists both cities + ⚑ marker", /City of Houston \/ City of Katy · Harris County/.test(await text("#badge-straddle")) && (await text("#badge-straddle")).includes("⚑"));
+  ok("badge tooltip carries source + screening note", (await page.locator('#badge-city [data-testid="jurisdiction-badge"]').getAttribute("title") || "").includes("Source: TxDOT / TxGIO / H-GAC"));
+  ok("null badge renders nothing", (await page.locator('#badge-null [data-testid="jurisdiction-badge"]').count()) === 0);
 } finally {
   await browser.close();
 }

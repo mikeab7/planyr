@@ -51,12 +51,6 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
-### B763 — Passive jurisdiction badge on the active parcel/site `[Site Planner]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-4"; §A6)*
-`[ ]` The user should never toggle boundary layers to learn which jurisdiction a parcel is in. Auto-run the existing B93 identify for the ACTIVE parcel (whole-parcel, straddle-aware, cached by geometry hash, once per activation — never per-pan) and surface a compact badge in the site header, e.g. "City of Baytown — ETJ · Harris County" / "City of Houston · Harris County" / "Unincorporated · Waller County". Once B764 lands, append ISD ("… · Goose Creek CISD").
-- Verify: live
-- Origin: filed 2026-07-11 from chat (owner NEW-4)
-- Reuse `identifyJurisdiction` + `representativeRing`/`ringCentroid`/`ringsSignature`. Deliberately revises B93's "click-only" trigger for the ACTIVE parcel only (owner decision 2026-07-11); map-click identify unchanged. Align with the open B147 item-4 re-home so there aren't three renderings of the same result.
-
 ### B764 — School district (ISD) boundaries layer + identify `[Site Planner / GIS]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-5"; §B1 — highest priority of Part B)*
 `[ ]` Statewide ISD boundary overlay in the Jurisdictions group (row "School districts (ISD)") riding the standard registry/vector/cache/identify pipeline, plus ISD in the jurisdiction identify + the B763 badge. Biggest single tax line for a developer.
 - Verify: live
@@ -1454,6 +1448,12 @@ browser-equipped teammate (Cowork) or Michael on planyr.io confirms them. An ite
 back to 🔲 Open, `Recurrence:` line, `(×N)` title). Cross-reference: the live-browser click-throughs are
 also tracked in `VERIFICATION.md` (`V###`) — that file is the canonical to-do list for the teammate; this
 section is the backlog-side mirror so an item is never "done" until it's actually been seen working.
+
+### B763 — Passive jurisdiction badge on the active parcel/site `[Site Planner]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-4"; §A6. → V276. Implemented + shipped PR2 same session; parked here for the live signed-in badge + correct-jurisdiction check.)*
+`[x]` **DONE this session — the site-header now shows a compact chip (`components/JurisdictionBadge.jsx`) reading which jurisdiction the ACTIVE parcel is in — "City of Houston · Harris County" / "City of Baytown — ETJ · Harris County" / "Unincorporated · Waller County" — without the user toggling any boundary layer. Auto-runs the SAME whole-parcel, straddle-aware, SWR-cached `identifyJurisdiction` once per active-parcel geometry (memoized per `ringsSignature`; a `useRef(Map)` caches by geometry hash), so it fires on activation/add and NEVER per pan. Map-click identify (`checkJurisdiction`) is unchanged. Pure formatter `formatJurisdictionBadge` (jurisdiction.js) + 9 unit tests; 6-check headless render (`ui-audit/layerpanel-verify.mjs`); full suite (3453) + lint + build green.**
+- Verify: live — **GIS endpoint behavior + real-parcel repro** class (mandatory LIVE-VERIFY): the format + component render + the once-per-activation caching are proven in the sandbox, but that the badge shows the CORRECT jurisdiction for a real signed-in site (live TxDOT/TxGIO/H-GAC identify) — and truly never re-queries on pan — can only be confirmed on planyr.io. Owed on V276.
+- Origin: filed 2026-07-11 from chat (owner NEW-4).
+- Deliberately revises B93's "click / explicit request only" trigger FOR THE ACTIVE PARCEL ONLY (owner decision 2026-07-11). Reuses `identifyJurisdiction` + `representativeRing`/`ringCentroid`/`ringsSignature` (no engine change). Forward-compat: `formatJurisdictionBadge(j, { isd })` appends the ISD once B764 lands. Aligns with the open B147 item-4 re-home (one identify result, not three renderings).
 
 ### B761 — One "City limits & ETJ" toggle (solid limits / dashed ETJ) `[Site Planner]` (feature) #site-planner #ui #gis  *(owner review 2026-07-11 as "NEW-2"; §A4. → V275 (minted V274, renumbered on merge-in of `origin/main` which took V274 for B721). Implemented + shipped PR1 same session; parked here for the live dashed-ETJ paint check.)*
 `[x]` **DONE this session — merged the two Jurisdictions rows into ONE "City limits & ETJ" checkbox driving both underlying layers; city draws SOLID, ETJ draws DASHED in the same blue (`#1d4ed8`). UI-level merge only: `jur_city` + `jur_etj` keep separate `VECTOR_SOURCES`, cache keys, labels, and identify wiring. `checked = on(jur_city) || on(jur_etj)`; toggle/opacity write both (opacity = max); combined status dot; counted as ONE in the group chip. `vectorOverlay.js baseStyle()` now emits `dashArray` on `cfg.dash`. 10 new unit tests (`layerPanelInfo.test.js`) + 7 config guards (`layerPanelV2Guards.test.js`) + a 28-check headless render (`ui-audit/layerpanel-verify.mjs`) all green; build + lint + full suite (3429) green. Parked here ONLY for the live on-aerial dashed paint.**
