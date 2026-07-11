@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _59 open · 53 awaiting live verification._
+> _59 open · 54 awaiting live verification._
 
 ## 🔲 Open
 
@@ -74,6 +74,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B758 | App white-screens when the MAIN bundle 404s during a deploy (no recovery exists for the entry chunk) | [App shell / infra] | #infra #ui | ⏳ live — awaiting |
 | B757 | Deliberately-deleted PLAN can resurrect on reload/sign-in when its cloud delete never landed (offline / transient) — no DURABLE record-delete tombstone | [Site Planner / Persistence] | #site-planner #persistence | ⏳ live — awaiting |
 | B756 | DATA LOSS: a new signed-in site created from the map ("Plan N parcels →") silently loses ALL its parcels | [Site Planner / persistence] | #site-planner #persistence #infra | ⏳ live — awaiting |
 | B625 | Metes-and-bounds deed rotates grossly off-angle on "Align to county parcel" (×2) | [Site Planner] | #site-planner #coordinates #gis | ⏳ live — awaiting |
@@ -141,7 +142,7 @@
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
 - **#floodplain** — B755
 - **#gis** — B752, B753, B720, B721, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B625, B755, B751, B754, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
-- **#infra** — B735, B726, B408, B406, B179, B63, B756, B748, B734, B675, B669
+- **#infra** — B735, B726, B408, B406, B179, B63, B758, B756, B748, B734, B675, B669
 - **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B750, B746, B740, B737
 - **#perf** — B495, B484, B479, B749, B704, B694, B669
@@ -154,5 +155,5 @@
 - **#stitching** — B413
 - **#testing** — B269, B63, B743
 - **#thoroughfare** — B720, B721, B722, B723, B724, B725, B726
-- **#ui** — B741, B735, B723, B115, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
+- **#ui** — B741, B735, B723, B115, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
 - **#yield** — B724, B553, B755, B751, B754, B715, B712, B651
