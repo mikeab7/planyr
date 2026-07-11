@@ -8,10 +8,10 @@
  * Two stores per review (see db/doc_reviews.sql):
  *   - public.doc_reviews (Postgres): the small work layer — markups, measurements,
  *     calibration, stitch transforms, takeoff, plus the list of source-file refs.
- *   - storage 'doc-review-files' (private): the source PDF bytes at
- *     <uid>/<reviewId>/<srcId>.pdf. Free tier caps a file at 50 MB; larger files
- *     are skipped and flagged `oversize` so the work layer still saves and the file
- *     is "re-drop on load".
+ *   - source-file BYTES: Google Drive, via the chunked same-origin upload (B409 rework —
+ *     ~16 MB slices through /api/uploads/*, so ANY file size works; no whole-file request
+ *     ever rides through the Worker). The old Supabase Storage 'doc-review-files' bucket
+ *     (50 MB cap) is READ-BACK ONLY for files stored there before the cutover.
  *
  * A synchronous localStorage mirror of the work layer backs the beforeunload flush
  * (a cloud upsert can't reliably complete during page unload) and lets a refresh
@@ -24,9 +24,14 @@ import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { STATUSES, STATUS_META, statusOf } from "../../site-planner/lib/siteModel.js";
+import { uploadFileInChunks } from "../../../shared/files/chunkedUpload.js";
 
 export const BUCKET = "doc-review-files";
-export const MAX_BYTES = 50 * 1024 * 1024; // Supabase free-tier per-file upload limit
+// The OLD Supabase free-tier per-file cap. It no longer limits uploads (B409 rework:
+// chunked Drive uploads are size-unbounded); it survives as (a) the threshold above which
+// a Drive-stored PDF opens by RANGE-STREAMING instead of a full download, and (b) the
+// size that classifies LEGACY never-stored `oversize` records (sourceState).
+export const MAX_BYTES = 50 * 1024 * 1024;
 export const REVIEW_SCHEMA = 1;
 
 // Filing taxonomy. Disciplines are a fixed set (the filing dropdown / library folders); the
@@ -73,13 +78,6 @@ export const newSourceId = () => "src" + Math.random().toString(36).slice(2, 9);
 // requested project/discipline structure. srcId is the object name (unique, safe); the
 // human filename lives in the index/metadata.
 const slug = (s) => (s || "").toString().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
-// Header values must be printable ASCII — fetch() THROWS on non-Latin-1 header bytes, which
-// would kill the whole upload over a free-typed discipline like "Landscaping (北)". The server
-// match is fuzzy (slug-tolerant) and unknown disciplines fall back to the Drawings folder, so
-// a stripped value degrades gracefully instead of failing loudly-in-the-wrong-place.
-const headerSafe = (s) => String(s || "").replace(/[^\x20-\x7E]/g, "-").trim() || "Other";
-const storageKeyFor = (uid, projectId, discipline, srcId) =>
-  `${uid}/project-${projectId ? slug(projectId) : "unfiled"}/${discipline ? slug(discipline) : "other"}/${srcId}.pdf`;
 
 // Best-effort MIME for a stored file (B685 — any file type). The browser fills `file.type` for
 // most picks, but drag-dropped CAD files (.dwg/.dxf) and some pickers hand back an EMPTY type;
@@ -414,11 +412,18 @@ export async function listFileFacts() {
   return error || !data ? [] : data;
 }
 
-/* Push a file's bytes to Google Drive via the /server files API (B207 wiring). Returns
- * { ok, driveKey } on success (driveKey = the stable key to read it back with),
- * { ok:false, skipped:true } when Drive isn't enabled yet, or { ok:false, error }.
- * Best-effort — never throws. */
-export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName, folderId = null } = {}) {
+/* Push a file's bytes to Google Drive through the CHUNKED same-origin upload (B409 rework).
+ * Works at ANY size: the file goes up in ~16 MB slices via /api/uploads/* — the server
+ * relays each slice to a Drive resumable session it holds — so no single request is ever
+ * large and neither the Worker's ~100 MB body cap, its 128 MB memory, nor any per-file
+ * storage ceiling applies. (The previous two transports both hit walls: the whole-file
+ * POST buffered in the Worker, and B409's browser-direct PUT to Google was CORS-dead.)
+ * Sequential chunks, 5× retry with backoff, and resume-from-offset after a drop live in
+ * shared/files/chunkedUpload.js. `onProgress(sentBytes, totalBytes)` drives the Library
+ * tray's per-file progress bar. Returns { ok, driveKey } on success (driveKey = the stable
+ * key to read it back with), { ok:false, skipped:true } when Drive isn't enabled yet, or
+ * { ok:false, error }. Best-effort — never throws. */
+export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName, folderId = null, onProgress = null } = {}) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   let token = null;
   try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { /* none */ }
@@ -426,73 +431,16 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
   const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
   const name = fileName || "document.pdf";
   const driveKey = `${folder}/${name}`; // the key the read-back GET uses (server prefixes the uid)
-  try {
-    const resp = await fetch("/api/files", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": guessContentType(name, file.type),
-        "x-planyr-key": driveKey, "x-planyr-folder": folder, "x-planyr-name": name,
-        // Tree targeting (B650 follow-on): the server files the bytes into the project's
-        // standard folder tree (Design → Drawings → discipline → Current) when it's mirrored;
-        // the flat x-planyr-folder path above stays the fallback, so nothing regresses.
-        ...(projectId ? { "x-planyr-project": String(projectId) } : {}),
-        // Explicit folder pick (B686): the user dropped into a folder they clicked → the server
-        // files the bytes into THAT folder's Drive folder, overriding the discipline route.
-        ...(folderId ? { "x-planyr-folder-id": String(folderId) } : {}),
-        "x-planyr-discipline": headerSafe(discipline) },
-      body: file,
-    });
-    if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
-    let jr = {}; try { jr = await resp.json(); } catch (_) { /* ignore */ }
-    return resp.ok && jr.ok ? { ok: true, driveKey } : { ok: false, error: jr.error || `HTTP ${resp.status}` };
-  } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
-}
-
-/* Upload a LARGE file (> the Supabase per-file cap) straight to Google Drive, bypassing the
- * Cloudflare Worker entirely (B409). pushFileToDrive() above POSTs the whole file through the
- * Pages Function, which buffers it (request.arrayBuffer) and Drive-creates it with
- * uploadType=multipart — Google's ≤5 MB path — so it's capped by the Worker's ~100 MB body
- * limit + 128 MB memory and a real E-size civil set (100 MB+) silently fails. Here the server
- * only MINTS a resumable session; the browser PUTs the bytes DIRECTLY to Google (cross-origin),
- * so neither limit applies (multi-GB works). Mirrors pushFileToDrive's return:
- * { ok, driveKey } | { ok:false, skipped:true, error } | { ok:false, error }. Never throws. */
-export async function uploadLargeToDrive(file, { projectId = null, discipline = "Other", fileName, folderId = null } = {}) {
-  if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
-  let token = null;
-  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { /* none */ }
-  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
-  const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
-  const name = fileName || "document.pdf";
-  const driveKey = `${folder}/${name}`; // the key the read-back GET uses (server prefixes the uid)
-  const contentType = guessContentType(name, file.type);
-  try {
-    // 1) INIT — server mints a resumable session bound to this origin (for the cross-origin PUT).
-    const initResp = await fetch("/api/files/resumable", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "x-planyr-key": driveKey, "x-planyr-folder": folder,
-        "x-planyr-name": name, "x-planyr-content-type": contentType, "x-planyr-size": String(file.size || 0),
-        // Tree targeting (B650 follow-on) — same as pushFileToDrive; flat path stays the fallback.
-        ...(projectId ? { "x-planyr-project": String(projectId) } : {}),
-        ...(folderId ? { "x-planyr-folder-id": String(folderId) } : {}), // explicit folder pick wins (B686)
-        "x-planyr-discipline": headerSafe(discipline) },
-    });
-    if (initResp.status === 404 || initResp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
-    let init = {}; try { init = await initResp.json(); } catch (_) { /* ignore */ }
-    if (!initResp.ok || !init.ok || !init.uploadUri) return { ok: false, error: init.error || `HTTP ${initResp.status}` };
-    // 2) PUT the bytes STRAIGHT to Google — never through the Worker, so no body/memory limit.
-    const putResp = await fetch(init.uploadUri, { method: "PUT", headers: { "content-type": contentType }, body: file });
-    if (!putResp.ok) return { ok: false, error: `Drive upload didn’t finish (HTTP ${putResp.status}).` };
-    let meta = {}; try { meta = await putResp.json(); } catch (_) { /* ignore */ }
-    if (!meta.id) return { ok: false, error: "Drive upload returned no file id." };
-    // 3) COMMIT — server records the key ↔ Drive-id mapping so the file reads back later.
-    const commitResp = await fetch("/api/files/resumable", {
-      method: "PUT",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ planyrKey: driveKey, fileId: meta.id, name }),
-    });
-    let commit = {}; try { commit = await commitResp.json(); } catch (_) { /* ignore */ }
-    if (!commitResp.ok || !commit.ok) return { ok: false, error: commit.error || "Couldn’t record the Drive file." };
-    return { ok: true, driveKey };
-  } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
+  return uploadFileInChunks({
+    file, token, planyrKey: driveKey, name, contentType: guessContentType(name, file.type),
+    // Tree targeting (B650 follow-on): the server files the bytes into the project's standard
+    // folder tree when it's mirrored; an explicit folder pick (B686) wins over the discipline
+    // route; the flat path derived from the key stays the never-blocking fallback.
+    projectId: projectId ? String(projectId) : null,
+    discipline: discipline ? String(discipline) : null,
+    folderId: folderId ? String(folderId) : null,
+    onProgress,
+  });
 }
 
 /* Delete a file's bytes FROM Google Drive (DELETE /api/files?key=…). Best-effort —
@@ -544,11 +492,11 @@ export async function getShareLink(driveKey) {
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }
 
-// File a dropped PDF as a new (single-sheet) review under a project/discipline. Drive is
-// the home: push there first; only fall back to Supabase Storage if Drive didn't take it,
-// so a file is never left unstored AND the redundant Supabase copy stops consuming storage
-// on the happy path. Then upsert the indexed record. Returns { ok, id }.
-export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", docDate = null, blob, fileName, folderId = null }) {
+// File a dropped file as a new (single-sheet) review under a project/discipline. Drive is
+// the one home for bytes (chunked upload, any size — B409 rework); a failed upload is
+// reported loudly (uploadFailed) rather than degraded into a capped fallback store. Then
+// upsert the indexed record. Returns { ok, id }.
+export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", docDate = null, blob, fileName, folderId = null, onProgress = null }) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const id = newReviewId();
   const srcId = newSourceId();
@@ -557,9 +505,10 @@ export async function fileNewReview({ projectId = null, project = "", discipline
   const itemLabel = item || stripFileExt(fileName || "Document");
   // Store the bytes Drive-first, Supabase-fallback (the one shared policy — see storeSource).
   const stored = blob
-    ? await storeSource(srcId, blob, { projectId, discipline, fileName, folderId })
+    ? await storeSource(srcId, blob, { projectId, discipline, fileName, folderId, onProgress })
     : { ok: false, storageKey: null, driveKey: null, oversize: false, driveError: null, driveSkipped: true };
-  // Unstored only if NEITHER backend took it (and it wasn't merely oversize for Supabase).
+  // stored.oversize is always false on the chunked path (there is no size cap anymore);
+  // the guard survives for the shape's sake — any not-ok store is a loud upload failure.
   const uploadFailed = !stored.ok && !stored.oversize;
   const record = {
     id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate: filedDate }),
@@ -588,44 +537,38 @@ export async function fileNewReview({ projectId = null, project = "", discipline
 // (B323/NEW-3).
 export const isStoredSource = (s) => !!(s && (s.storageKey || s.driveKey || s.oversize));
 
-/* Store ONE interactively-opened source PDF (the "Open PDF…" single sheet and every Stitcher
- * sheet) the same way filing does: Google Drive is the primary home, Supabase Storage the
- * fallback — so these files (a) live in Drive like filed ones and (b) bypass Supabase's 50 MB
- * per-file cap (the cap otherwise silently flagged big E-size drawings "oversize"). Files OVER
- * that cap take the browser-direct resumable path (uploadLargeToDrive, B409) so their bytes
- * skip the Cloudflare Worker's body/memory limits; smaller files keep the proven multipart
- * path. Returns { ok, storageKey, driveKey, oversize, large, driveError, driveSkipped }.
- * Never throws. (B322/NEW-2; B409 large-file path.) */
-export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName, folderId = null } = {}) {
-  // A file over the Supabase cap can't go through the Worker AND Supabase rejects it as
-  // "oversize" — so route it straight to Drive (B409). If that path is unavailable it falls back
-  // to the Supabase attempt (still flags oversize), so behaviour is never worse than before.
+/* Store ONE source file (filing drops, "Open PDF…", every Stitcher sheet): Google Drive,
+ * via the chunked same-origin upload — ANY size (B409 rework). The old Supabase Storage
+ * upload FALLBACK is deliberately GONE: its 50 MB cap is what produced the silent
+ * "oversize" dead end, and a fallback that stores some files and rejects others is worse
+ * than an honest failure. A failed Drive upload now surfaces loudly and retryably
+ * (LOUD-FAILURE); files stored in Supabase before the cutover still read back via
+ * downloadSource. `srcId` no longer names the stored object (the driveKey does) but stays
+ * in the signature for its callers. Returns
+ * { ok, storageKey:null, driveKey, oversize:false, large, driveError, driveSkipped }. Never throws. */
+export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName, folderId = null, onProgress = null } = {}) {
+  void srcId;
   const isLarge = !!(blob && blob.size > MAX_BYTES);
   const drive = blob
-    ? (isLarge ? await uploadLargeToDrive(blob, { projectId, discipline, fileName, folderId })
-               : await pushFileToDrive(blob, { projectId, discipline, fileName, folderId }))
-    : { ok: false, skipped: true };
+    ? await pushFileToDrive(blob, { projectId, discipline, fileName, folderId, onProgress })
+    : { ok: false, skipped: true, error: "No file bytes." };
   if (drive.ok) return { ok: true, storageKey: null, driveKey: drive.driveKey, oversize: false, large: isLarge, driveError: null, driveSkipped: false };
-  const up = await uploadSource(srcId, blob, projectId, discipline);
-  return { ok: up.ok, storageKey: up.storageKey || null, driveKey: null, oversize: !!up.oversize, large: isLarge,
+  return { ok: false, storageKey: null, driveKey: null, oversize: false, large: isLarge,
     driveError: drive.skipped ? null : (drive.error || null), driveSkipped: !!drive.skipped };
 }
 
-// Upload one source PDF. Returns { ok, oversize, storageKey, error }. A file over
-// the free-tier cap is NOT uploaded (oversize:true, no key) so the caller can still
-// save the work layer and flag the file "re-drop on load".
-export async function uploadSource(srcId, blob, projectId, discipline) {
-  if (!supabase) return { ok: false, error: "Cloud not configured." };
-  const uid = await currentUid();
-  if (!uid) return { ok: false, error: "Sign in to save." };
-  if (!blob) return { ok: false, error: "No file bytes." };
-  if (blob.size > MAX_BYTES) return { ok: false, oversize: true, storageKey: null };
-  const key = storageKeyFor(uid, projectId, discipline, srcId);
-  const { error } = await supabase.storage.from(BUCKET).upload(key, blob, {
-    contentType: guessContentType(blob && blob.name, blob && blob.type), upsert: true,
-  });
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, oversize: false, storageKey: key };
+/* A pdf.js-ready STREAMING source for a Drive-stored file (B409 rework — the read half of
+ * unlimited-size files): the viewer opens `/api/files?key=…` BY URL and pdf.js reads it
+ * with HTTP Range requests (206 Partial Content) through the streaming proxy — so a huge
+ * PDF renders progressively instead of downloading in full first. Returns
+ * { url, httpHeaders } for loadPdf, or null when signed out / not configured (callers
+ * fall back to the buffered download). Never throws. */
+export async function driveStreamSource(driveKey) {
+  if (!supabase || !driveKey) return null;
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return null; }
+  if (!token) return null;
+  return { url: `/api/files?key=${encodeURIComponent(driveKey)}`, httpHeaders: { authorization: `Bearer ${token}` } };
 }
 
 // Download a source PDF as an ArrayBuffer (ready for loadPdf), or null if missing.

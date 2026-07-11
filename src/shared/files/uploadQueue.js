@@ -88,6 +88,7 @@ export function makeQueueItem(file, { uploadId } = {}) {
     status: accepted ? QUEUE_STATUS.PROCESSING : QUEUE_STATUS.REJECTED,
     error: accepted ? null : "This file is empty or couldn’t be read.",
     warn: null,    // non-fatal note on an otherwise-filed item (e.g. upload / Drive degraded)
+    progress: null, // 0..1 upload progress while PROCESSING (B409 chunked uploads); null = not uploading yet
     filedAt: null, // set when it reaches a terminal "filed" state; drives the demote beat
     reviewId: null,
     target: null,  // human label of where it filed (project name / holding area)

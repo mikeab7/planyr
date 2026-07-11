@@ -238,8 +238,9 @@ export default function FileBrowser({
 
   // File one blob as a review + its facts row. Returns the fileNewReview result (or null on fail).
   // `folderId` (B686) files the bytes into an explicitly-picked tree folder (Drive + on-screen).
-  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling, folderId = null }) => {
-    const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName, folderId });
+  // `onProgress(sent,total)` surfaces the chunked upload's byte progress in the tray (B409).
+  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling, folderId = null, onProgress = null }) => {
+    const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName, folderId, onProgress });
     if (!r || !r.ok) return r || null;
     const factsIn = facts ? { ...facts } : { discipline, item: item_, docDate };
     factsIn.projectId = pid; factsIn.discipline = discipline; factsIn.item = item_; factsIn.needsFiling = needsFiling;
@@ -248,14 +249,17 @@ export default function FileBrowser({
   };
 
   const processItem = async (item, targetFolderId = null, { forceNeedsFiling = false } = {}) => {
-    patchItem(item.uploadId, { status: QUEUE_STATUS.PROCESSING, error: null, warn: null });
+    patchItem(item.uploadId, { status: QUEUE_STATUS.PROCESSING, error: null, warn: null, progress: null });
+    // Byte progress from the chunked Drive upload (B409) → the row's progress bar. A 125 MB
+    // set uploads for minutes; a bar beats an inscrutable spinner for that long.
+    const onProgress = (sent, total) => patchItem(item.uploadId, { progress: total ? Math.min(1, sent / total) : null });
     try {
       // The file came from a dropped subfolder that matches NO tree folder (B699): the user's
       // own structure is the routing signal here, and it points nowhere we know — so it needs
       // a human decision, not a title-block guess. Straight to the holding area.
       if (forceNeedsFiling) {
         const pid = cross ? null : projectId;
-        const r = await fileOne({ pid, discipline: "Other", item_: "", docDate: null, blob: item.file, fileName: item.name, facts: null, needsFiling: true });
+        const r = await fileOne({ pid, discipline: "Other", item_: "", docDate: null, blob: item.file, fileName: item.name, facts: null, needsFiling: true, onProgress });
         if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn’t file." }); return; }
         const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
         patchItem(item.uploadId, { status: QUEUE_STATUS.NEEDS_FILING, reviewId: r.id, filedAt: Date.now(), warn, target: "Needs filing" });
@@ -272,7 +276,7 @@ export default function FileBrowser({
         // slips past DRAWING_DISCIPLINES/classifyDocClass and mis-categorizes the file).
         const rawLabel = (folder && displayLabel(folder.name)) || "Other";
         const discipline = DISCIPLINES.find((d) => d.toLowerCase() === rawLabel.toLowerCase()) || rawLabel;
-        const r = await fileOne({ pid: projectId, discipline, item_: "", docDate: null, blob: item.file, fileName: item.name, facts: { discipline }, needsFiling: false, folderId: targetFolderId });
+        const r = await fileOne({ pid: projectId, discipline, item_: "", docDate: null, blob: item.file, fileName: item.name, facts: { discipline }, needsFiling: false, folderId: targetFolderId, onProgress });
         if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn’t file." }); return; }
         const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
         patchItem(item.uploadId, { status: QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: folder ? displayLabel(folder.name) : projName(projectId) });
@@ -307,7 +311,7 @@ export default function FileBrowser({
           let lastErr = null;
           for (const part of parts) {
             const need = !pid || !part.discipline || part.discipline === "Other";
-            const r = await fileOne({ pid, discipline: part.discipline, item_: part.item, docDate, blob: part.blob, fileName: part.fileName, facts: route && route.facts, needsFiling: need });
+            const r = await fileOne({ pid, discipline: part.discipline, item_: part.item, docDate, blob: part.blob, fileName: part.fileName, facts: route && route.facts, needsFiling: need, onProgress });
             if (r && r.ok) { filed.push({ d: part.discipline, n: part.pageNums.length }); firstId = firstId || r.id; }
             else lastErr = (r && r.error) || "Couldn't file a split.";
           }
@@ -330,7 +334,7 @@ export default function FileBrowser({
       // can be re-filed anytime) instead of piling every upload into the holding area; with no
       // project (cross mode) it still needs a home, so it goes to Needs filing.
       const needsFiling = isPdf ? (!pid || !discipline || discipline === "Other") : !pid;
-      const r = await fileOne({ pid, discipline, item_, docDate, blob: item.file, fileName: item.name, facts: route && route.facts, needsFiling });
+      const r = await fileOne({ pid, discipline, item_, docDate, blob: item.file, fileName: item.name, facts: route && route.facts, needsFiling, onProgress });
       if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn't file." }); return; }
       const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
       patchItem(item.uploadId, { status: needsFiling ? QUEUE_STATUS.NEEDS_FILING : QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: pid ? projName(pid) : "Holding area" });
@@ -879,7 +883,9 @@ function DropQueue({ queue, onDismiss, onTriage }) {
   if (!active.length) return null;
   const S = QUEUE_STATUS;
   const meta = (it) => ({
-    [S.PROCESSING]: { color: "var(--text-secondary)", label: "Reading title block…" },
+    // While the chunked upload runs (B409), the label is honest byte progress; before it
+    // (title-block read) and after the final chunk (recording) it names those phases.
+    [S.PROCESSING]: { color: "var(--text-secondary)", label: it.progress == null ? "Reading title block…" : (it.progress >= 1 ? "Recording the file…" : `Uploading — ${Math.floor(it.progress * 100)}%`) },
     [S.DONE]: { color: "var(--success-text, #15803d)", label: it.target ? `Filed · ${it.target}` : "Filed" },
     [S.NEEDS_FILING]: { color: "var(--warn-text)", label: "Needs filing — confirm a discipline" },
     [S.FAILED]: { color: "var(--danger-text)", label: it.error || "Failed" },
@@ -899,6 +905,11 @@ function DropQueue({ queue, onDismiss, onTriage }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11.5, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
               <div style={{ fontSize: 10, color: m.color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.label}{it.warn ? ` · ${it.warn}` : ""}</div>
+              {it.status === S.PROCESSING && it.progress != null && it.progress < 1 && (
+                <div style={{ marginTop: 3, height: 3, borderRadius: 2, background: "var(--border-default)", overflow: "hidden" }}>
+                  <div style={{ width: `${Math.floor(it.progress * 100)}%`, height: "100%", background: "var(--accent-library)", transition: "width 0.3s ease" }} />
+                </div>
+              )}
             </div>
             {it.status === S.NEEDS_FILING && <button onClick={() => onTriage(it.uploadId)} style={miniBtn}>Triage</button>}
             {(it.status === S.FAILED || it.status === S.REJECTED) && <button onClick={() => onDismiss(it.uploadId)} style={miniBtn}>Dismiss</button>}

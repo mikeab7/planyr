@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _61 open · 60 awaiting live verification._
+> _60 open · 60 awaiting live verification._
 
 ## 🔲 Open
 
@@ -41,7 +41,6 @@
 | B422 | Named markup Layers (show / hide / lock / rename / reorder) | [Doc Review / Markup] | #doc-review #markup | — |
 | B413 | Auto-stitch scanned, scale-less survey sheets that carry NO match-line text | [Doc Review / stitching] | #doc-review #stitching | — |
 | B411 | Auto-filing residual gaps after the multi-discipline split (B410) | [Doc Review / auto-filing] | #doc-review #filing | — |
-| B409 | Large files (>~100 MB) now upload to Drive via a browser-direct resumable path — no more silent "oversize" | [Doc Review / storage] | #doc-review #drive | — |
 | B408 | Decide &, if chosen, consolidate the Scheduler onto the main Supabase project | [Infra / Scheduler] | #infra #scheduler | — |
 | B406 | Shared team workspaces: invite by email, share a project with a team | [Site Planner + Doc Review] | #site-planner #doc-review #infra | — |
 | B370 | Migrate the remaining MAP-DISPLAY layer endpoints into the GIS source registry | [Site Planner / Platform] | #site-planner #gis | — |
@@ -142,8 +141,8 @@
 - **#auth** — B483, B676, B714
 - **#compare** — B471
 - **#coordinates** — B625, B684
-- **#doc-review** — B484, B471, B423, B422, B413, B411, B409, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B750, B746, B687, B685, B667, B659
-- **#drive** — B663, B662, B629, B409, B699, B701, B687
+- **#doc-review** — B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B750, B746, B687, B685, B667, B659
+- **#drive** — B663, B662, B629, B699, B701, B687
 - **#entitlements** — B725, B726
 - **#export** — B752, B745, B739, B738, B712, B684
 - **#files** — B180, B181, B182, B183, B747, B748, B699, B687, B685, B675, B668, B664, B659

@@ -454,18 +454,23 @@ conflate them.
    Don't lump them: the **Drive storage backend is LIVE on the edge**; the **heavy CAD/AI compute
    is built in-repo but not yet deployed** to Cloud Run.
    - **✅ LIVE & DEPLOYED — Google Drive storage (bytes I/O).** The storage backend
-     (`server/storage/`, B206–B209 / B207) runs **IN the same-origin Cloudflare Pages Function**
-     `functions/api/files.js` — Drive byte-I/O is light (multipart upload/download over `fetch`),
-     so it needs no container, and same-origin means no CORS. It is the live home for Document
-     Review source PDFs: `reviewStore.storeSource` files **Drive-first**, with Supabase Storage as
-     the fallback. The Planyr-key↔Drive-file-id map persists in **Supabase Postgres**
+     (`server/storage/`, B206–B209 / B207) runs **IN same-origin Cloudflare Pages Functions** —
+     Drive byte-I/O needs no container, and same-origin means no CORS. It is the one home for
+     Document Review source files: **uploads go CHUNKED through `/api/uploads/*`** (B409 rework —
+     ~16 MB slices relayed to a Drive resumable session held server-side in `public.upload_sessions`,
+     so ANY file size works; no whole-file request ever rides through the Worker) and **downloads
+     STREAM through `GET /api/files` with Range→206** so huge PDFs open progressively. The old
+     Supabase Storage upload fallback was REMOVED (its 50 MB cap caused silent "oversize" failures;
+     pre-cutover files still read back). The Planyr-key↔Drive-file-id map persists in **Supabase Postgres**
      (`server/storage/db/drive_files.sql`, own-row RLS) so the stateless Function can't lose it;
      the queryable **file-facts index** also lives in Supabase (`doc-review/db/file_facts.sql`),
      not Drive. The one-time OAuth *consent* callback is a sibling Pages Function
      (`functions/api/auth/google/*`); `functions/api/drive/selftest.js` is a guarded round-trip
      smoke test. **Provisioned + owner-verified 2026-06-22 in Cloudflare Pages Production:**
      `GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN` + `PLANYR_STORAGE_BACKEND=drive` + `SUPABASE_URL/ANON_KEY`.
-     Drive **removes the Supabase 50 MB-per-file ceiling** on the happy path. **⛔ Do NOT re-mint
+     The chunked path **removes every per-file size ceiling** (Worker body/memory caps + the old
+     Supabase 50 MB cap all cleared). **⛔ Do NOT attempt browser-direct-to-Drive uploads** — CORS-dead
+     (no readable `Location` header, no ACAO on preflight; refuted 2026-07-11). **⛔ Do NOT re-mint
      `GOOGLE_REFRESH_TOKEN`** — a fresh consent no longer matches the deployed secret and would take
      Drive filing offline.
    - **⏳ Built in-repo, NOT yet deployed — Cloud Run.** Scale-to-zero containers (idle = free; a

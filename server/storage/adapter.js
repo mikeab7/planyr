@@ -58,6 +58,16 @@ export function createStorageAdapter({ backend, idMap = createIdMap(), linkProvi
       return attempt(() => backend.get(backendId), "Download");
     },
 
+    /* Fetch bytes by Planyr key as a pass-through STREAM (B409 rework — the large-file
+     * download path). `range` (an HTTP Range header value) is forwarded to the backend so
+     * a viewer can read a slice (206 Partial Content) instead of the whole file; the body
+     * is never buffered in this process. */
+    async fetchStream(planyrKey, { range } = {}) {
+      const backendId = await resolved(planyrKey);
+      if (!backendId) return fail(`No file is filed under "${planyrKey}".`);
+      return attempt(() => backend.getStream(backendId, { range }), "Download");
+    },
+
     /* List files (by a Planyr-level query, e.g. { folder }). Returns items keyed by
      * Planyr key only — backend objects with no Planyr binding are omitted, never leaked. */
     async list(query = {}) {
