@@ -34,6 +34,25 @@ export function memoryBackend() {
       if (!f) return fail("File not found.");
       return ok({ bytes: f.bytes, contentType: f.contentType, name: f.name });
     },
+    // Streamed read with HTTP-Range emulation — mirrors driveBackend.getStream so the
+    // adapter's streaming path is testable without Drive. `body` is plain bytes here
+    // (a Response accepts either bytes or a stream).
+    async getStream(backendId, { range } = {}) {
+      const f = files.get(backendId);
+      if (!f) return fail("File not found.");
+      const all = f.bytes instanceof Uint8Array ? f.bytes : new Uint8Array(f.bytes || []);
+      const m = /^bytes=(\d+)-(\d*)$/.exec(String(range || ""));
+      const start = m ? Number(m[1]) : 0;
+      const end = m && m[2] !== "" ? Math.min(Number(m[2]), all.length - 1) : all.length - 1;
+      if (m && start >= all.length) return fail("Range not satisfiable.");
+      const part = m ? all.slice(start, end + 1) : all;
+      return ok({
+        status: m ? 206 : 200, body: part,
+        contentType: f.contentType, name: f.name, size: all.length,
+        contentLength: String(part.length),
+        contentRange: m ? `bytes ${start}-${end}/${all.length}` : null,
+      });
+    },
     async list({ folder } = {}) {
       const items = [...files.entries()]
         .filter(([, f]) => folder == null || f.folder === folder)

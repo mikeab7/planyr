@@ -49,12 +49,21 @@ const PDFJS_ASSETS = {
 
 const deviceDpr = () => (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
-export async function loadPdf(fileOrBuffer) {
-  const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer : await fileOrBuffer.arrayBuffer();
+export async function loadPdf(source) {
+  // A { url, httpHeaders } descriptor STREAMS the document over HTTP instead of loading
+  // bytes up front: pdf.js probes Accept-Ranges/Content-Length on the URL and then reads
+  // the file with Range requests (206 Partial Content) — how a 125 MB drawing set renders
+  // progressively through the /api/files streaming proxy (B409 rework). Anything else is
+  // the classic in-memory path: an ArrayBuffer, or a File/Blob via .arrayBuffer().
+  const isUrlSource = source && typeof source === "object" && typeof source.url === "string";
+  const data = isUrlSource ? undefined : (source instanceof ArrayBuffer ? source : await source.arrayBuffer());
   // useSystemFonts:false — render non-embedded fonts from the shipped standardFontDataUrl substitutes
   // instead of the viewer's local system fonts, so a construction sheet renders identically on every
   // machine (B489c). Harmless to the text-extraction callers below (they never rasterize).
-  return pdfjsLib.getDocument({ data, useSystemFonts: false, ...PDFJS_ASSETS }).promise;
+  return pdfjsLib.getDocument({
+    ...(isUrlSource ? { url: source.url, httpHeaders: source.httpHeaders } : { data }),
+    useSystemFonts: false, ...PDFJS_ASSETS,
+  }).promise;
 }
 
 /* Pull a page's embedded text as one string (for stated-scale / title-block reads, B267).

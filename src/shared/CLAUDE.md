@@ -11,7 +11,9 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   renderers `MarkupRenderer.jsx`, `PropertyPanel.jsx`, `SelectionChrome.jsx`.
 - `coordinates/` — the EPSG:2278 ↔ WGS84 projection (shared coordinate spine). Read-only
   screening use today; grow additively, not a planner rewrite.
-- `files/` — pure PDF/sheet parsers: `titleBlockParse.js`, `sheetMeta.js`, `sheetTitleSet.js`
+- `files/` — `chunkedUpload.js` (any-size chunked Drive upload via /api/uploads/* — pure chunk
+  math + the retry/resume loop, B409 rework) + `uploadQueue.js` (the upload-tray queue model).
+  Pure PDF/sheet parsers: `titleBlockParse.js`, `sheetMeta.js`, `sheetTitleSet.js`
   (set-aware sheet-title refinement — cross-page boilerplate + known-project demotion, B659),
   `sheetGroups.js`, `sheetNotes.js`, `detailRefs.js`, `matchProject.js`, `sheetScale.js`,
   `matchLineFit.js`, `ocrMatchLines.js`. The B340 auto-assembly CV engines (pure; the browser extraction seam is

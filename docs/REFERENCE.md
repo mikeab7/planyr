@@ -223,13 +223,19 @@ create table public.profiles (
 Reuses the SAME Supabase client/session (imports `site-planner/lib/supabase.js` +
 `auth.js`); no second client/keys. A "review" is `kind:'single'|'stitch'`; the work
 layer (markups, calibration, stitch transforms, measures, takeoff, source-file refs)
-is the `data` jsonb, with source PDFs in the private `doc-review-files` bucket at
-`<uid>/<reviewId>/<srcId>.pdf`. `reviewStore.js` = I/O (upsert/load/list/delete +
-upload/download + the localStorage mirror); `usePersistence.js` = the data-loss hook
-(debounced first-edit save, honest badge, synchronous mirror + beforeunload/visibility/
-unmount flush). 50 MB+ files skip Storage (`oversize`), flagged "re-drop on load"; the
-work layer still saves. Reload re-fetches PDFs and re-applies transforms/markups. Full
-migration (table + RLS + bucket + Storage policies) in `doc-review/db/doc_reviews.sql`.
+is the `data` jsonb. Source-file BYTES live in Google Drive via the CHUNKED same-origin
+upload (B409 rework: `src/shared/files/chunkedUpload.js` → `/api/uploads/*` → a Drive
+resumable session persisted in `public.upload_sessions`; ANY size, resume + progress);
+reads stream through `GET /api/files` with Range→206 (`driveStreamSource` + URL-source
+`loadPdf` for >50 MB PDFs). The old private `doc-review-files` Supabase bucket
+(`<uid>/<reviewId>/<srcId>.pdf`, 50 MB cap) is READ-BACK ONLY for pre-cutover files —
+its upload fallback was removed; `oversize`/`too-large` states classify legacy records.
+`reviewStore.js` = I/O (upsert/load/list/delete + upload/download + the localStorage
+mirror); `usePersistence.js` = the data-loss hook (debounced first-edit save, honest
+badge, synchronous mirror + beforeunload/visibility/unmount flush). Reload re-fetches
+PDFs and re-applies transforms/markups. Full migration (table + RLS + bucket + Storage
+policies) in `doc-review/db/doc_reviews.sql`; the upload-session table is
+`server/storage/db/upload_sessions.sql`.
 ```sql
 create table public.doc_reviews (
   id text not null, user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
@@ -241,7 +247,8 @@ create table public.doc_reviews (
 -- planyr-production 2026-06-23). user_id stays the owner column + RLS predicate; upserts
 -- target onConflict "id" (with a "user_id,id" fallback only for a not-yet-migrated DB).
 -- RLS: same 4 own-rows policies as public.sites (private by default).
--- Storage bucket 'doc-review-files' (private, 50 MB cap): 4 own-folder policies on
+-- Storage bucket 'doc-review-files' (private, 50 MB cap; READ-BACK ONLY since the B409
+-- rework — new uploads go chunked to Drive): 4 own-folder policies on
 -- storage.objects keyed by (storage.foldername(name))[1] = auth.uid()::text.
 ```
 **Project library (B14):** `reviewStore.js` also has `listProjects` (Site groups +

@@ -500,10 +500,11 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(adapter).toMatch(/const bound = await idMap\.bind\(/);
     expect(adapter).toMatch(/if \(bound && bound\.ok === false\)/);
     expect(adapter).toMatch(/backend\.remove\(r\.backendId\)/);
-    const resumable = read("../functions/api/files/resumable.js");
-    // the large-file COMMIT rolls the Drive file back if the mapping doesn't persist
-    expect(resumable).toMatch(/if \(setRes && setRes\.ok === false\)/);
-    expect(resumable).toMatch(/client\.del\(fileId\)/);
+    const complete = read("../functions/api/uploads/[id]/complete.js");
+    // the chunked-upload COMPLETE rolls the Drive file back if the mapping doesn't persist
+    // (B409 rework moved this guard from the retired /api/files/resumable commit)
+    expect(complete).toMatch(/if \(setRes && setRes\.ok === false\)/);
+    expect(complete).toMatch(/client\.del\(session\.drive_file_id\)/);
   });
 
   it("B735: the export aerial + viewBox share ONE extent (no dev-only guard that blanks a parcels-only site)", () => {

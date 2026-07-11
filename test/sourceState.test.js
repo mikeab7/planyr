@@ -71,6 +71,12 @@ describe("fileWarn — the Files-browser / drawer queue warn mirrors the taxonom
     expect(fileWarn({ uploadFailed: true })).toMatch(/re-open to upload/);
     expect(fileWarn({ driveError: true })).toMatch(/Drive copy failed/);
   });
+  it("upload-failed surfaces the CONCRETE cause when the store path handed one back (B409)", () => {
+    // "re-open to upload" can't fix a full Drive — the real message must reach the tray.
+    const quota = "Google Drive is out of storage space — free up room in the connected Drive account and try again.";
+    expect(fileWarn({ uploadFailed: true, driveError: quota })).toContain(quota);
+    expect(fileWarn({ uploadFailed: true, driveError: null })).toMatch(/re-open to upload/);
+  });
   it("oversize takes precedence over a drive error", () => {
     expect(fileWarn({ oversize: true, driveError: true })).toMatch(/cloud limit/);
   });

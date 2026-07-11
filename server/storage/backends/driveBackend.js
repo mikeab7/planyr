@@ -68,6 +68,21 @@ export function driveBackend({ client = null } = {}) {
       return ok({ bytes: m.bytes, contentType: m.contentType, name: m.name });
     },
 
+    /* Streamed read (B409 rework): the body is Drive's own ReadableStream, passed through
+     * unbuffered; `range` (an HTTP Range header value) is forwarded so viewers can read a
+     * slice — status is then 206 and contentRange echoes Drive's Content-Range. */
+    async getStream(backendId, { range } = {}) {
+      const n = need(); if (n) return n;
+      const m = await client.mediaStream(backendId, { range });
+      return ok({
+        status: m.res.status, // 200, or 206 for a range read
+        body: m.res.body,     // ReadableStream — never buffered in the Worker
+        contentType: m.contentType, name: m.name, size: m.size,
+        contentLength: m.res.headers.get("content-length") || (m.size != null ? String(m.size) : null),
+        contentRange: m.res.headers.get("content-range") || null,
+      });
+    },
+
     async list({ folder } = {}) {
       const n = need(); if (n) return n;
       const parentFolderId = await folderId(folder);

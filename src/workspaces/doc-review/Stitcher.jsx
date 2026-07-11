@@ -29,7 +29,7 @@ import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import CloudSyncBadge from "../../shared/ui/CloudSyncBadge.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { writeLastDoc, readLegacyPointers } from "./lib/lastDoc.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
@@ -146,6 +146,16 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     for (const h of liveHrefsRef.current) if (h && h.startsWith("blob:")) { try { URL.revokeObjectURL(h); } catch (_) {} }
   }, []);
 
+  // A GENUINE cloud-store failure leaves the sheet permanently keyless — buildSnapshot then
+  // silently drops it and the stitch reloads without that drawing. Pre-B409 the Supabase
+  // fallback usually absorbed these; now the one Drive path failing must be VISIBLE
+  // (LOUD-FAILURE, the same B579 rule DocReview applies). Signed-out is by-design local-only.
+  const surfaceStoreFailure = async (r, name) => {
+    if (!r || r.ok || r.oversize || !(await cloudReady())) return;
+    const why = r.driveError || "Check your connection and drop it again.";
+    setErr(`Couldn't save “${name}” to the cloud — its sheets may reload without their drawing. ${why}`);
+  };
+
   // B51/B52: loadStitch rebuilds pdfs[]/placed[] wholesale, so block user adds while a
   // load runs (an add's sheet would be clobbered by the load's blind setPlaced), and let
   // a newer open supersede an older in-flight load by token.
@@ -166,12 +176,13 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         const srcId = newSourceId();
         setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, driveKey: null, oversize: false, missing: false, groups: null }]);
         readGroupsFor(srcId, doc); // B335/B336: read each page + collapse into logical sheets (background)
-        // Store Drive-first, Supabase-fallback (B322) — the same path filing uses, so stitched
-        // sheets live in Drive and aren't bound by Supabase's 50 MB cap. A sheet stays keyless
-        // in state until this resolves; buildSnapshot won't persist a keyless source (B323).
-        storeSource(srcId, f, { projectId: meta.projectId, discipline: meta.discipline, fileName: f.name }).then((r) =>
-          setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : x)))
-        ).catch(() => {}); // best-effort store; don't leak an unhandled rejection
+        // Store to Drive via the chunked path (any size — B409 rework); same path filing uses.
+        // A sheet stays keyless in state until this resolves; buildSnapshot won't persist a
+        // keyless source (B323).
+        storeSource(srcId, f, { projectId: meta.projectId, discipline: meta.discipline, fileName: f.name }).then(async (r) => {
+          setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : x)));
+          await surfaceStoreFailure(r, f.name); // B579-class: a keyless sheet must never fail silently
+        }).catch(() => {}); // best-effort store; don't leak an unhandled rejection
       }
     } catch (_) { setErr("One of those files wasn't a readable PDF."); }
     finally { setBusy(false); }
@@ -212,9 +223,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const needsStore = !src || src.oversize || (!src.driveKey && !src.storageKey);
     if (blob && needsStore) {
       const name = (blob && blob.name) || (src && src.name) || "document.pdf";
-      storeSource(srcId, blob, { projectId: meta.projectId, discipline: meta.discipline, fileName: name }).then((r) =>
-        setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : x)))
-      ).catch(() => {}); // best-effort persist; don't leak an unhandled rejection
+      storeSource(srcId, blob, { projectId: meta.projectId, discipline: meta.discipline, fileName: name }).then(async (r) => {
+        setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : x)));
+        await surfaceStoreFailure(r, name); // B579-class: the re-drop recovery failing must be visible too
+      }).catch(() => {}); // best-effort persist; don't leak an unhandled rejection
     }
   };
 

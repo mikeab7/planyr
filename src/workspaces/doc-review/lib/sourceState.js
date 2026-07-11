@@ -66,7 +66,10 @@ export function sourceUnavailableMessage(state, { name = "this file" } = {}) {
 export function fileWarn({ oversize = false, uploadFailed = false, driveError = false, large = false } = {}) {
   if (oversize && large) return `large file — cloud upload didn’t finish, re-open to retry`;
   if (oversize) return `over the ${CLOUD_FILE_LIMIT_MB} MB cloud limit — re-open to view`;
-  if (uploadFailed) return `couldn’t be stored — re-open to upload`;
+  // The concrete cause beats a generic instruction (B409 rework): "Google Drive is out of
+  // storage space" can't be fixed by re-opening, so when the store path handed us the real
+  // message (driveError is a string), surface it instead of the boilerplate.
+  if (uploadFailed) return typeof driveError === "string" && driveError ? `couldn’t be stored — ${driveError}` : `couldn’t be stored — re-open to upload`;
   if (driveError) return `filed; Drive copy failed`;
   return null;
 }

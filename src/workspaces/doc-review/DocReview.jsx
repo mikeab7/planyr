@@ -20,7 +20,7 @@ import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, driveStreamSource, MAX_BYTES, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveResume } from "./lib/lastDoc.js";
 import { recordOpen } from "../../shared/recents/recentDocs.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
@@ -570,7 +570,10 @@ export default function DocReview({
         // to be silent. Surface it — but only when signed in (logged-out is by-design local-only: the bytes
         // are cached via cacheSourceBytes and the work layer still mirrors locally, so no cloud store is owed).
         if (!r.ok && !r.oversize && (await cloudReady())) {
-          const m = "Couldn't save this PDF to the cloud — your markups might open without their drawing next time. Check your connection and drop the file again.";
+          // Name the real cause when the uploader gave one (e.g. "Google Drive is out of
+          // storage space…" — advice like "check your connection" can't fix that).
+          const why = r.driveError || "Check your connection and drop the file again.";
+          const m = `Couldn't save this PDF to the cloud — your markups might open without their drawing next time. ${why}`;
           setErr(m); setOpenErr(m);
         }
       }).catch(() => {}); // best-effort store; a rejection mustn't become an unhandled rejection
@@ -786,28 +789,41 @@ export default function DocReview({
     // keyless because its upload is mid-flight, the backdrop stays viewable. A File re-reads
     // cleanly (unlike a worker-transferred ArrayBuffer), so this never strands a blank canvas.
     let blob = src && src.srcId ? getSourceBytes(src.srcId) : null;
+    let pdf = null; // set early by the large-file STREAMING open below; else loaded from blob
     if (!blob) {
       // Name the PRECISE cause, never a silent return or a one-size "Couldn't fetch" (B405).
       // Pre-download states: no source / never-stored / oversize / signed-out all surface here.
       const pre = classifySource(src, { signedIn });
       if (pre) { setRedrop(sourceUnavailableMessage(pre, { name: src?.name })); return; }
-      // Read-back: prefer Google Drive (the file's home), fall back to Supabase Storage so a
-      // pre-Drive file — or any Drive miss — still opens. (B207 read-back, fallback-safe.)
-      let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
-      if (superseded()) return; // superseded while downloading
-      if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
-      if (superseded()) return; // a newer review opened while downloading
-      // The file IS stored (it had a key) but the bytes didn't come back — a transient fetch /
-      // permission failure, NOT a missing file. Distinct, retryable wording; auth if signed out.
-      if (!buf) { setRedrop(sourceUnavailableMessage(signedIn ? "fetch-failed" : "signed-out", { name: src.name })); return; }
-      blob = buf;
+      // B409 rework: a LARGE Drive-stored PDF opens BY URL, so pdf.js reads it with HTTP
+      // Range requests (206) through the streaming proxy — progressive render instead of
+      // waiting out a 125 MB download. Any failure falls through to the buffered path
+      // below, so this is pure enhancement, never a new way to fail.
+      if (src.driveKey && (src.size || 0) > MAX_BYTES && isPdfName(src.name)) {
+        const streamSrc = await driveStreamSource(src.driveKey);
+        if (superseded()) return;
+        if (streamSrc) { try { pdf = await loadPdf(streamSrc); } catch (_) { pdf = null; } }
+        if (superseded()) { if (pdf) { try { pdf.destroy(); } catch (_) {} } return; }
+      }
+      if (!pdf) {
+        // Read-back: prefer Google Drive (the file's home), fall back to Supabase Storage so a
+        // pre-Drive file — or any Drive miss — still opens. (B207 read-back, fallback-safe.)
+        let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+        if (superseded()) return; // superseded while downloading
+        if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
+        if (superseded()) return; // a newer review opened while downloading
+        // The file IS stored (it had a key) but the bytes didn't come back — a transient fetch /
+        // permission failure, NOT a missing file. Distinct, retryable wording; auth if signed out.
+        if (!buf) { setRedrop(sourceUnavailableMessage(signedIn ? "fetch-failed" : "signed-out", { name: src.name })); return; }
+        blob = buf;
+      }
     }
     // B685/B686 — the Library stores ANY file type, but the markup canvas can only render a PDF.
     // A non-PDF reaches here when it's opened from a Library-Home pin (or an older resume). We
     // already have the bytes, so DOWNLOAD the original right here — never a dead-end note — and
     // show a clear message. (Non-PDFs are barred from becoming the resume target below, so this
     // only fires on a deliberate open, never as a surprise download on load.)
-    if (src && src.name && !isPdfName(src.name)) {
+    if (!pdf && src && src.name && !isPdfName(src.name)) {
       try {
         const dl = blob instanceof Blob ? blob : new Blob([blob]);
         const url = URL.createObjectURL(dl);
@@ -819,9 +835,10 @@ export default function DocReview({
       }
       return;
     }
-    let pdf;
-    try { pdf = await loadPdf(blob); }
-    catch (_) { setRedrop(`“${src.name || "That file"}” couldn’t be opened as a PDF — it may be a different file type or a damaged PDF. Open it from the Library to download the original.`); return; }
+    if (!pdf) {
+      try { pdf = await loadPdf(blob); }
+      catch (_) { setRedrop(`“${src.name || "That file"}” couldn’t be opened as a PDF — it may be a different file type or a damaged PDF. Open it from the Library to download the original.`); return; }
+    }
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
     readOcg(pdf); // B490: populate the Layers panel from the new doc's optional content

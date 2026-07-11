@@ -139,6 +139,17 @@ export function createDriveClient({ getAccessToken, fetchImpl = fetch, appRootNa
       return { bytes, contentType: meta.mimeType, name: meta.name };
     },
 
+    /* Streamed media read (B409 rework — the large-file download path). Unlike media(),
+     * the bytes are NEVER buffered here: the raw alt=media Response is returned so the
+     * caller can pass its ReadableStream straight through (a 125 MB PDF would blow the
+     * Worker's 128 MB memory if buffered). The caller's HTTP Range header is forwarded to
+     * Drive, so a viewer can read a slice (Drive answers 206 Partial Content). */
+    async mediaStream(fileId, { range } = {}) {
+      const meta = await api("GET", `${DRIVE}/files/${fileId}?fields=name,mimeType,size`);
+      const res = await api("GET", `${DRIVE}/files/${fileId}?alt=media`, { raw: true, headers: range ? { range } : {} });
+      return { res, contentType: meta.mimeType, name: meta.name, size: meta.size != null ? Number(meta.size) : undefined };
+    },
+
     async list({ parentFolderId }) {
       const query = `'${parentFolderId}' in parents and trashed=false`;
       const r = await api("GET", `${DRIVE}/files?q=${q(query)}&fields=files(id,name,size,mimeType,parents,modifiedTime)&pageSize=1000`);
