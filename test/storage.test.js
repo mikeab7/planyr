@@ -86,6 +86,55 @@ describe("mergePulledSites — pullCloud must never drop local-only work (B124)"
   });
 });
 
+// B757 — a deliberately-deleted PLAN must not resurrect on the next pull when its cloud delete
+// never landed (offline / transient failure). Durable {id: ts} tombstones suppress the pending
+// row in the merge and drive a delete retry; a genuinely-newer cross-device edit overrides.
+describe("mergePulledSites — durable record-delete tombstones (B757)", () => {
+  it("SUPPRESSES an owned cloud row whose delete is still pending, and flags it for retry", () => {
+    // local already removed it (existing {}); the cloud still has it because the delete never landed.
+    const { map, deleteRetry, tombClear } = mergePulledSites({}, [site("s", 100, [bld("a")], { ownerId: "u1" })], "u1", { s: 200 });
+    expect(map.s).toBeUndefined();          // NOT resurrected
+    expect(deleteRetry).toContain("s");     // retry the cloud delete so it actually sticks
+    expect(tombClear).not.toContain("s");   // keep the tombstone until the cloud confirms removal
+  });
+
+  it("KEEPS the row (and clears the tombstone) when the cloud copy is genuinely NEWER than the delete", () => {
+    // A real later edit on another device AFTER our delete → the delete is stale; don't suppress.
+    const { map, deleteRetry, tombClear } = mergePulledSites({}, [site("s", 500, [bld("a")], { ownerId: "u1" })], "u1", { s: 200 });
+    expect(map.s).toBeTruthy();
+    expect(deleteRetry).not.toContain("s");
+    expect(tombClear).toContain("s");       // stale tombstone dropped (cross-device safety)
+  });
+
+  it("clears a tombstone whose row the cloud no longer has (the delete already landed)", () => {
+    const { map, deleteRetry, tombClear } = mergePulledSites({}, [], "u1", { s: 200 });
+    expect(map.s).toBeUndefined();
+    expect(deleteRetry).toEqual([]);
+    expect(tombClear).toContain("s");
+  });
+
+  it("does NOT suppress a teammate's shared row we can't delete (it should still show)", () => {
+    const { map, deleteRetry, tombClear } = mergePulledSites({}, [site("s", 100, [bld("a")], { ownerId: "someone-else" })], "u1", { s: 200 });
+    expect(map.s).toBeTruthy();             // a shared row we don't own stays visible
+    expect(deleteRetry).not.toContain("s");
+    expect(tombClear).toContain("s");       // give up on it (not ours to delete)
+  });
+
+  it("never drops a NON-tombstoned row (no over-suppression)", () => {
+    const { map, deleteRetry } = mergePulledSites({}, [site("s", 100, [bld("a")], { ownerId: "u1" })], "u1", { other: 200 });
+    expect(map.s).toBeTruthy();
+    expect(deleteRetry).toEqual([]);
+  });
+
+  it("is byte-for-byte the old behavior when no tombstones are supplied (backward compatible)", () => {
+    const { map, toPush, deleteRetry, tombClear } = mergePulledSites({}, [site("s", 100, [bld("a")], { ownerId: "u1" })], "u1");
+    expect(map.s).toBeTruthy();
+    expect(toPush).not.toContain("s");
+    expect(deleteRetry).toEqual([]);
+    expect(tombClear).toEqual([]);
+  });
+});
+
 // B126 — the real cure: reconciling two copies of ONE site must UNION their content, so
 // a thinner copy (saved last on a stale tab / second device) can never erase a fuller one.
 describe("mergeSiteContent — a thinner copy can never erase a fuller one (B126)", () => {
