@@ -64,8 +64,8 @@ create table if not exists public.thoroughfare_segments (
   plan_name          text,
   plan_adopted_date  date,
   source_url         text,
-  geom               extensions.geometry(LineString, 4326) not null,  -- WGS84 centerline (as published)
-  geom_2278          extensions.geometry(LineString, 2278),           -- projected copy for measurement (ftUS); filled at ingest (B724)
+  geom               extensions.geometry(MultiLineString, 4326) not null,  -- WGS84 centerline (as published; ArcGIS polylines can be multi-part)
+  geom_2278          extensions.geometry(MultiLineString, 2278),           -- projected copy for measurement (ftUS); filled at ingest (B721)
   ingested_at        timestamptz not null default now(),
   -- Idempotent refresh: re-running an adapter updates the SAME row in place, never duplicates.
   unique (jurisdiction, source_feature_id)

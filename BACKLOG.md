@@ -98,15 +98,6 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
      sweeps of BACKLOG.md + BACKLOG-DONE.md): all seven are net-new — no existing item builds a server-side
      thoroughfare/ROW reference dataset. Nearest prior art to BUILD ON is noted per item. -->
 
-### B721 — Ingestion adapter #1: City of Houston Major Thoroughfare & Freeway Plan (MTFP) `[Site Planner / GIS · ingestion]` (feature) #thoroughfare #gis  *(filed 2026-07-08 from chat, provisional NEW-2; epic B720–B726)*
-`[ ]` Build the FIRST ingestion adapter against the COH MTFP on COHGIS and land normalized rows in `thoroughfare_segments` (B720). Idempotent refresh keyed on `source_feature_id` (re-running updates in place — no duplicates); capture plan version / amendment date.
-- Verify: live — GIS endpoint behavior against a live ArcGIS REST service (mandatory LIVE-VERIFY class); the COHGIS host may also be egress-blocked from the build sandbox, so a code-complete adapter is confirmed only against the real endpoint.
-- Origin: filed 2026-07-08 from chat (provisional NEW-2)
-- **Endpoint:** ArcGIS REST layer `mycity2.houstontx.gov/pubgis02/rest/services/HoustonMap/Transportation/MapServer/1` (also on the COHGIS Open Data hub as GeoJSON/Shapefile).
-- **Field map → canonical:** `NAME`/`FULL_NAME` → `street_name`; `ROW_STATUS` → `classification`; `ST_STATUS` → `status` (existing/proposed); `HIER_TABLE` → functional class.
-- **ROW width:** derive `ultimate_row_ft` + `building_line_ft` from a Chapter-42 classification→width table SEEDED into `jurisdiction_row_standards` (B720) — the source attributes do NOT carry width.
-- DEDUPE-FIRST (net-new — no MTFP / thoroughfare-plan ingestion exists). Build on: **B629** (Open — the Drive-backed county PARCEL snapshot cache: the closest scheduled-ArcGIS-ingestion + idempotent-refresh + keep-last-good pattern to reuse) · **B245**/**B369** (Done — the "each source is a registry row on the shared ArcGIS-REST connector" pattern) · **B287** (Done — retry/backoff on jurisdiction vector services). None is the same deliverable.
-
 ### B722 — Config-driven ingestion adapters: surrounding jurisdictions (Harris · Fort Bend · Pearland · Montgomery · H-GAC) `[Site Planner / GIS · ingestion]` (feature) #thoroughfare #gis  *(filed 2026-07-08 from chat, provisional NEW-3; epic B720–B726)*
 `[ ]` Generalize B721 into a config-driven adapter framework — one config per jurisdiction (endpoint, field map, classification crosswalk, standards table) — so new sources are data, not code.
 - Verify: live — multiple live jurisdiction feeds (GIS endpoint class, mandatory).
@@ -1439,6 +1430,15 @@ browser-equipped teammate (Cowork) or Michael on planyr.io confirms them. An ite
 back to 🔲 Open, `Recurrence:` line, `(×N)` title). Cross-reference: the live-browser click-throughs are
 also tracked in `VERIFICATION.md` (`V###`) — that file is the canonical to-do list for the teammate; this
 section is the backlog-side mirror so an item is never "done" until it's actually been seen working.
+
+### B721 — Ingestion adapter #1: City of Houston Major Thoroughfare & Freeway Plan (MTFP) `[Site Planner / GIS · ingestion]` (feature) #thoroughfare #gis  *(filed 2026-07-08 from chat, provisional NEW-2; epic B720–B726)*
+`[x]` **BUILT + unit-tested this session (branch `claude/thoroughfare-model-houston-ejq2zg`) — the live PULL is egress-BLOCKED from the sandbox (org policy denies houstontx.gov / elaws.us, confirmed via the agent proxy), so it parks in ⏳ Verify → V274.** The adapter is code-complete and tested; only the network fetch of the real Houston layer + the reconcile against its live schema/widths is owed.
+- Verify: live — GIS endpoint behavior against a live ArcGIS REST service (mandatory LIVE-VERIFY). V274 runs the adapter from a network-enabled context: confirm/adjust the field map + crosswalk vs the live layer's real coded domains, seed the verified Chapter-42 width table, then load prod (service-role).
+- **What shipped (sandbox-verified, 24 tests):** `src/shared/thoroughfare/ingestTransform.js` (pure ArcGIS-feature → row: crosswalk classification/status, resolve widths from standards, build WGS84 + EPSG:2278 **MultiLineString** EWKT reusing `src/shared/coordinates`) · `src/shared/thoroughfare/houston.js` (Houston config: endpoint, field map, hierarchy crosswalk, §42-122 standards) · `server/ingest/thoroughfare.mjs` (runnable adapter: paged fetch → transform → idempotent upsert on `jurisdiction+source_feature_id` + seed standards; service-role, LOUD-FAILURE).
+- **Schema fix (AUDIT-FIRST):** real ArcGIS polylines are multi-part, so widened `thoroughfare_segments.geom`/`geom_2278` from LineString → **MultiLineString** — applied to `planyr_production` (0 rows) and the B720 `.sql`.
+- **Data honesty:** only `major_thoroughfare` = 100 ft is seeded as CONFIRMED (Houston Code §42-122, verified via municode); the other classes' widths are left NULL — the official "MTFP Minimum ROW by Street Classification" table is on the egress-blocked host, so they're filled at V274, never guessed.
+- Origin: filed 2026-07-08 from chat (provisional NEW-2)
+- DEDUPE-FIRST (net-new). Built on B629 (scheduled-ArcGIS-ingestion pattern) · B245/B369 (registry pattern) · B287 (retry/backoff). Consumes B720's tables + reuses the shared EPSG:2278 projection.
 
 ### B758 — App white-screens when the MAIN bundle 404s during a deploy (no recovery exists for the entry chunk) `[App shell / infra]` (bug) #infra #ui  *(owner-reported 2026-07-11 from chat — "I pressed control shift r, and I guess we had just merged to change. And now the thing isn't even loading." Console showed `Failed to load resource: … 404 … index-CgI4uzRL.js`. Branch `claude/app-not-loading-merge-t7dwnu`. → V272.)*
 `[x]` **FIXED this session — recovery mechanism proven headless (3-scenario browser test), build green; the real Cloudflare deploy-window race parks in ⏳ Verify → V272.** A hard reload during the seconds a fresh deploy was still propagating served the current `index.html` but 404'd its entry bundle `/assets/index-<hash>.js` at the owner's edge → blank white screen. **Confirmed transient:** that exact file returned HTTP 200 minutes later, and the live entry hash rolled `CgI4uzRL → DwgvooFK` (build id `6e67849`) between two checks — i.e. active deploy churn, not a broken build.
