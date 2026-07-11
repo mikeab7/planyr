@@ -27,6 +27,7 @@
  * stray prose typo like "B99999" permanently inflating every future id.
  */
 import { readFileSync, existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -37,6 +38,14 @@ const REPO = resolve(HERE, "..");
 // headings for every id ever assigned, so the union's max is the true max.
 export const B_FILES = ["BACKLOG.md", "BACKLOG-DONE.md"];
 export const V_FILES = ["VERIFICATION.md", "VERIFICATION-DONE.md"];
+// The LIVE (active) surfaces — where a fresh concurrent-mint collision between two currently-worked
+// items shows up, and where the uniqueness guard is enforced. The write-only *-DONE.md archives are
+// excluded on purpose: they carry ~50 historical cross-file collisions (e.g. B755, V275) + benign
+// same-item re-listings that predate this guard and can't be safely renumbered in-place; `--against-main`
+// prevents minting OVER an archived id in the first place, and the full-pair audit stays available via
+// findDuplicateIds(REPO, B_FILES, "B") for a future archive cleanup. (B779.)
+export const LIVE_B_FILES = ["BACKLOG.md"];
+export const LIVE_V_FILES = ["VERIFICATION.md"];
 
 /**
  * Highest assigned id of a family (`letter` = "B" or "V") in `text`.
@@ -83,9 +92,65 @@ export function computeNextIds(repo = REPO) {
   return { maxB, maxV, nextB: maxB + 1, nextV: maxV + 1 };
 }
 
+/* --- Collision guard (B779): every assigned id has EXACTLY ONE `### <L>###` heading across its
+ * file pair. A second heading for the same id = a concurrent-mint collision that slipped through
+ * (two branches minted it before either merged). Count each heading's PRIMARY id (its first number,
+ * so range headings like `### B300–B302` count once, at 300) and flag any id seen more than once.
+ * Pure over the given text set → the CI uniqueness test imports it. Returns [{id, count}] sorted. */
+export function findDuplicateIdsIn(texts, letter) {
+  const counts = new Map();
+  const re = new RegExp(`^###\\s+${letter}(\\d+)\\b`, "gm");
+  for (const text of texts) {
+    for (const m of (text || "").matchAll(re)) {
+      const id = `${letter}${m[1]}`;
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+  }
+  return [...counts.entries()].filter(([, n]) => n > 1)
+    .map(([id, count]) => ({ id, count }))
+    .sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+}
+
+/** findDuplicateIdsIn over the on-disk file pair for a family (missing files skipped). */
+export function findDuplicateIds(repo, files, letter) {
+  const texts = files.map((f) => join(repo, f)).filter(existsSync).map((p) => readFileSync(p, "utf8"));
+  return findDuplicateIdsIn(texts, letter);
+}
+
+/* Read a file as it exists on origin/main (not the local branch) — so `--against-main` sees ids
+ * that other sessions merged AFTER we branched (the concurrent-mint case next-id can't otherwise
+ * see). Never throws: no git / no origin/main / missing file → null, and the caller falls back to
+ * the local-only max. `git show` only, read-only. */
+function readOriginMain(repo, file) {
+  try {
+    return execSync(`git show origin/main:${file}`, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  } catch { return null; }
+}
+
+/** Max id across BOTH the local files AND their origin/main versions. */
+export function maxAgainstMain(repo, files, letter) {
+  let max = maxAcross(repo, files, letter);
+  for (const f of files) {
+    const t = readOriginMain(repo, f);
+    if (t != null) { const m = maxId(t, letter); if (m > max) max = m; }
+  }
+  return max;
+}
+
+/** Like computeNextIds but folding in origin/main (for the late-bind / ship-time mint). */
+export function computeNextIdsAgainstMain(repo = REPO) {
+  const maxB = maxAgainstMain(repo, B_FILES, "B");
+  const maxV = maxAgainstMain(repo, V_FILES, "V");
+  return { maxB, maxV, nextB: maxB + 1, nextV: maxV + 1 };
+}
+
 // ---- CLI -------------------------------------------------------------------------------
 function main(argv) {
-  const { nextB, nextV, maxB, maxV } = computeNextIds();
+  // `--against-main` (B779): fold in the numbers on origin/main, so a LATE mint (assign the id as
+  // the last step before push, `git fetch origin main` first) steps around ids another session
+  // merged after we branched — the concurrent-collision fix. Default stays local-only (unchanged).
+  const againstMain = argv.includes("--against-main");
+  const { nextB, nextV, maxB, maxV } = againstMain ? computeNextIdsAgainstMain() : computeNextIds();
   if (argv.includes("--json")) {
     process.stdout.write(JSON.stringify({ nextB, nextV, maxB, maxV }) + "\n");
     return;
@@ -93,10 +158,19 @@ function main(argv) {
   if (argv.includes("--b")) return void process.stdout.write(`B${nextB}\n`);
   if (argv.includes("--v")) return void process.stdout.write(`V${nextV}\n`);
   process.stdout.write(
-    `Next free → B${nextB} · V${nextV}   (highest assigned: B${maxB} / V${maxV})\n` +
+    `Next free → B${nextB} · V${nextV}   (highest assigned: B${maxB} / V${maxV})${againstMain ? "  [incl. origin/main]" : ""}\n` +
       `Mint from here. Multi-mint runs consecutively (e.g. B${nextB}, B${nextB + 1}). ` +
       `Don't grep the archives — this is the whole answer.\n`,
   );
+  // Loud heads-up if two ACTIVE items share an id (a fresh concurrent-mint collision) — the CI
+  // uniqueness guard (test/idUniqueness.test.js) enforces the same on the live files. Scoped to the
+  // live surfaces so it's actionable, not drowned by the historical archive collisions.
+  const dupB = findDuplicateIds(REPO, LIVE_B_FILES, "B");
+  const dupV = findDuplicateIds(REPO, LIVE_V_FILES, "V");
+  if (dupB.length || dupV.length) {
+    const fmt = (d) => d.map((x) => `${x.id}×${x.count}`).join(", ");
+    process.stderr.write(`⚠ DUPLICATE ACTIVE ids — renumber before shipping: ${fmt([...dupB, ...dupV])}\n`);
+  }
 }
 
 // Run only as a script, not when imported by the test.

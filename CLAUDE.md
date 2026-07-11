@@ -30,6 +30,27 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > from `nextB` (e.g. B755, B756). (This finds the *number*; **DEDUPE-FIRST** below still governs
 > *whether* to mint at all — a recurrence re-opens the original B#, it doesn't take a new one.)
 >
+> **⏱ LATE-BIND the real number — assign it as the LAST step before you push, against fresh main (B779).**
+> `next-id` reads only YOUR branch, so if you stamp a real `B###`/`V###` at the *start* of a session, a
+> concurrent session (branched from the same main, its mint not merged yet) can honestly grab the same
+> number — and whoever merges second renumbers. That's the collision that keeps happening; it is NOT a
+> `next-id` bug (two branches can't see each other until they merge). To make it rare: **do the work under
+> the provisional `NEW-#` / branch label everywhere in code, tests, and commits** (already the house rule —
+> code/tests keep the provisional label through any renumber), and **assign the real backlog number only
+> when you're about to push**, computed against the just-fetched main:
+> ```
+> git fetch origin main && npm run next-id -- --against-main    # folds in ids merged after you branched
+> ```
+> Assigning seconds before merge (not hours) collapses the collision window from the whole session to a
+> few seconds, and because only the BACKLOG/VERIFICATION *heading* carries the real number, a rare late
+> clash renumbers a couple of heading lines — never code. **A collision that still slips through is caught
+> LOUDLY:** `test/idUniqueness.test.js` fails the build if two ACTIVE items share a `B#`/`V#` (in
+> `BACKLOG.md` / `VERIFICATION.md`), so a colliding PR goes red *before* it merges — renumber the newer
+> item then (the reconcile-on-merge rule in *Workflow & deploy* is now the rare, loud backstop, not the
+> routine tax). `next-id` also prints a `⚠ DUPLICATE ACTIVE ids` line if the live files already collide.
+> (The write-only `*-DONE.md` archives still carry ~50 historical cross-file dupes the guard deliberately
+> ignores — a separate cleanup; `--against-main` keeps you from minting over them.)
+>
 > **🔄 Keep the per-folder pointers fresh.** Some module folders carry a short `CLAUDE.md`
 > pointer (what's here + key files) that auto-loads only when you work in that folder. **When
 > you rename, move, or delete a key file, update that folder's pointer in the SAME commit.**
