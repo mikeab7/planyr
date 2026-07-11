@@ -9,6 +9,7 @@ import {
   interpolateCurve,
   governingRequirement,
   computeRequiredDetention,
+  TIER_THRESHOLDS,
   ruleBadge,
   pondDefaultsFor,
   runoffCoefficient,
@@ -72,21 +73,68 @@ describe("ruleFor — the versioning seam", () => {
 });
 
 describe("computeRequiredDetention — HCFCD (the Goose Creek merge gate)", () => {
-  it("276 ac × 0.65 ac-ft/ac (entire tract) = 179.4 ac-ft — matches the DIA", () => {
-    // Source check (owner-verified 2026-07-03): the Goose Creek drainage impact
-    // analysis states a MINIMUM REQUIRED detention of 179.38 ac-ft for the
-    // ~276-ac tract under the HCFCD Atlas-14 rate; 276 × 0.65 = 179.40. The
-    // 0.02 delta is the DIA's exact surveyed acreage vs the rounded 276.
-    const r = computeRequiredDetention({ acres: 276, authorityId: "hcfcd" });
+  it("276 ac × 0.65 ac-ft/ac (PCPM methods baseline) = 179.4 ac-ft — matches the DIA", () => {
+    // Source check (owner-verified): the Goose Creek drainage impact analysis states a
+    // MINIMUM REQUIRED detention of 179.38 ac-ft for the ~276-ac tract under the HCFCD
+    // Atlas-14 PCPM rate; 276 × 0.65 = 179.40. The 0.02 delta is the DIA's exact surveyed
+    // acreage vs the rounded 276. B761: 0.65 is the HCFCD PCPM METHODS BASELINE (a full
+    // impact analysis / DIA), reached via hcfcdMethod:"pcpm" — it is NO LONGER the silent
+    // unincorporated default (that default is the HCED outfall-type minimum / band below).
+    const r = computeRequiredDetention({ acres: 276, authorityId: "hcfcd", hcfcdMethod: "pcpm" });
     expect(r.kind).toBe("point");
     expect(r.requiredAcFt).toBeCloseTo(179.4, 1);
     expect(r.rateAcFtPerAc).toBe(0.65);
     // The carrier invariant: no volume ever travels without its rule record.
     expect(r.rule.id).toBe("hcfcd-pcpm-atlas14-2021");
     expect(r.rule.source.name).toMatch(/HCFCD/);
-    expect(r.rule.effectiveDate).toBe("2021-03-31");
-    expect(r.rule.verifiedOn).toBe("2026-07-03");
+    expect(r.rule.effectiveDate).toBe("2019-07-09"); // B761: corrected from the mis-attributed 2021-03-31 (COH IDM) date
+    expect(r.rule.verifiedOn).toBe("2026-07-11");
+    expect(r.flags).toContain("hcfcd-pcpm-baseline");
     expect(r.caveat).toMatch(/screening/i);
+  });
+});
+
+describe("computeRequiredDetention — HCFCD outfall-type minimum (B761, unincorporated Harris)", () => {
+  it("storm-sewer outfall → 0.75 ac-ft/ac point (HCED Infra Regs)", () => {
+    const r = computeRequiredDetention({ acres: 10, authorityId: "hcfcd", outfallType: "stormSewer" });
+    expect(r.kind).toBe("point");
+    expect(r.rateAcFtPerAc).toBe(0.75);
+    expect(r.requiredAcFt).toBeCloseTo(7.5, 4);
+    expect(r.flags).toContain("hced-infra-outfall-min");
+    expect(r.rule.id).toBe("hcfcd-pcpm-atlas14-2021");
+    expect(r.rule.effectiveDate).toBe("2019-07-09");
+  });
+  it("roadside-ditch outfall → 1.0 ac-ft/ac point", () => {
+    const r = computeRequiredDetention({ acres: 10, authorityId: "hcfcd", outfallType: "roadsideDitch" });
+    expect(r.kind).toBe("point");
+    expect(r.rateAcFtPerAc).toBe(1.0);
+    expect(r.requiredAcFt).toBeCloseTo(10, 4);
+    expect(r.flags).toContain("hced-infra-outfall-min");
+  });
+  it("outfall type 'unknown' → BAND [0.75, 1.0] × acres + flags, never a silent 0.65 point", () => {
+    const r = computeRequiredDetention({ acres: 10, authorityId: "hcfcd", outfallType: "unknown" });
+    expect(r.kind).toBe("band");
+    expect(r.requiredAcFt).toBeNull();
+    expect(r.rateAcFtPerAc).toBeNull();
+    expect(r.bandAcFt[0]).toBeCloseTo(7.5, 4); // 0.75 × 10
+    expect(r.bandAcFt[1]).toBeCloseTo(10, 4);  // 1.0 × 10
+    expect(r.flags).toContain("outfall-type-unknown");
+    expect(r.flags).toContain("hced-infra-outfall-min");
+  });
+  it("no outfallType at all (default) → the SAME honest band, not a quiet 0.65", () => {
+    const r = computeRequiredDetention({ acres: 10, authorityId: "hcfcd" });
+    expect(r.kind).toBe("band");
+    expect(r.requiredAcFt).toBeNull();
+    expect(r.bandAcFt).toEqual([7.5, 10]);
+    expect(r.flags).toContain("outfall-type-unknown");
+    expect(r.rateAcFtPerAc).not.toBe(0.65); // 0.65 must NOT leak as the default rate
+  });
+  it("the 0.65 PCPM baseline stays reachable via hcfcdMethod:'pcpm'", () => {
+    const r = computeRequiredDetention({ acres: 10, authorityId: "hcfcd", hcfcdMethod: "pcpm" });
+    expect(r.kind).toBe("point");
+    expect(r.rateAcFtPerAc).toBe(0.65);
+    expect(r.requiredAcFt).toBeCloseTo(6.5, 4);
+    expect(r.flags).toContain("hcfcd-pcpm-baseline");
   });
 });
 
@@ -267,6 +315,32 @@ describe("computeRequiredDetention — Fort Bend Table 6-1 (transcribed → poin
   });
 });
 
+describe("B764 — Fort Bend (fbcdd) record params + tier note", () => {
+  const p = DETENTION_RULES.fortbend[0].params;
+  it("keeps Table 6-1 (transcribed rows) intact — the point path is unchanged", () => {
+    expect(p.table.transcribed).toBe(true);
+    expect(p.table.rows[0]).toEqual([10, 0.62]);
+    expect(p.table.rows[p.table.rows.length - 1]).toEqual([100, 0.98]);
+    // the point path still resolves from Table 6-1
+    expect(computeRequiredDetention({ acres: 10, impPct: 50, authorityId: "fortbend" }).rateAcFtPerAc).toBeCloseTo(0.78, 2);
+  });
+  it("reconciles the release rate (renamed, not duplicated) + adds the Interim-criteria params", () => {
+    expect(p.maxReleaseCfsPerAc).toBe(0.125);
+    expect(p.releaseRateCfsPerAc).toBeUndefined(); // renamed → maxReleaseCfsPerAc, no duplicate
+    expect(p.pondFreeboardFt).toBe(1);
+    expect(p.gravityDrainFraction).toBe(0.5);
+    expect(p.postLePreEvents).toEqual(["atlas14-10yr", "atlas14-100yr"]);
+    expect(p.offsiteSheetFlow).toMatch(/no adverse impact/i);
+    expect(p.feeInLieu).toBe(false);
+  });
+  it("TIER_THRESHOLDS.fortbend: diaAcres 50 kept; note corrected (HMS ≥640, optional 50–640)", () => {
+    expect(TIER_THRESHOLDS.fortbend.diaAcres).toBe(50);
+    expect(TIER_THRESHOLDS.fortbend.note).toMatch(/640/);
+    expect(TIER_THRESHOLDS.fortbend.note).toMatch(/optional 50/i);
+    expect(TIER_THRESHOLDS.fortbend.note).not.toMatch(/above 50 ac/i); // the old (wrong) note is gone
+  });
+});
+
 
 describe("computeRequiredDetention — Montgomery Eq. 6-2 (≤20 ac, transcribed → point)", () => {
   it("≤25% impervious → flat 0.35 ac-ft/ac", () => {
@@ -344,7 +418,7 @@ describe("edges + helpers", () => {
     const b = ruleBadge(ruleFor("hcfcd"));
     expect(b).toMatch(/Harris County Flood Control District/);
     expect(b).toMatch(/0\.65 ac-ft\/ac/);
-    expect(b).toMatch(/eff\. Mar 2021/);
+    expect(b).toMatch(/eff\. Jul 2019/); // B761: corrected effectiveDate (was Mar 2021)
     expect(b).toMatch(/verified Jul 2026/);
   });
   it("pondDefaultsFor reads authority pond params (HCFCD 3:1, 1 ft freeboard), safe fallback", () => {

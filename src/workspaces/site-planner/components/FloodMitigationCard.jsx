@@ -1,6 +1,25 @@
 import React from "react";
 import { formatAge } from "../lib/gisCache.js";
-import { NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, DERIVED_BFE_NOTE } from "../lib/floodplainMitigation.js";
+import { NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, DERIVED_BFE_NOTE, DERIVED_XS_WSEL_NOTE } from "../lib/floodplainMitigation.js";
+
+// Human-readable label for a WSE provider tag (the engine emits terse strings).
+const WSE_PROVIDER_LABEL = {
+  "static-bfe": "published BFE", "ao-depth": "AO depth + grade", "manual": "manual",
+  "bfe-line-interp": "derived (BFE lines)", "xs-wsel": "derived (cross-sections)",
+  "xs-wsel-02": "derived (cross-sections)", "mixed": "mixed",
+};
+const wseProvLabel = (p) => WSE_PROVIDER_LABEL[p] || p || "—";
+// Human-readable label for an FFE basis (single or multi-basis / governing).
+const FFE_BASIS_LABEL = {
+  "wse02pct": "0.2% (500-yr) WSE", "wse1pct": "FEMA BFE", "atlas14_100yr": "Atlas-14 100-yr WSE",
+  "pre_atlas14_100yr": "pre-Atlas-14 100-yr WSE", "zone_a_est_bfe": "Zone A estimated BFE",
+  "site": "outside-SFHA site basis",
+};
+const ffeBasisText = (ffe) => {
+  const g = ffe.governingBasis;
+  if (g) return `${g.label || FFE_BASIS_LABEL[g.basis] || g.basis} + ${g.plusFt}′`;
+  return `${FFE_BASIS_LABEL[ffe.basis] || (ffe.basis === "wse02pct" ? "0.2% WSE" : "BFE")} + ${ffe.plusFt}′`;
+};
 
 /* Floodplain mitigation & buildability card (B707/B710/B712) — rendered by
  * SitePlanner directly under the Site Analysis screen. Deliberately a SIBLING of
@@ -100,6 +119,15 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
               {" "}— a screening estimate, not a published or surveyed BFE. Confirm before design; enter a BFE to override.
             </div>
           )}
+          {/* B762 — the 1% WSE was read from FEMA's regulatory cross-sections (WSEL_REG at
+              the nearest stream reach). A regulatory value, but still effective-model vintage. */}
+          {geo && geo.derivedXsWsel && mit.providers.wse1pct === "xs-wsel" && (
+            <div style={warnStyle}>
+              ⚑ 1% WSE ≈ {f2(geo.derivedXsWsel.wselFt)}′ read from FEMA's regulatory cross-sections
+              {geo.derivedXsWsel.detail && geo.derivedXsWsel.detail.wtrNm ? ` on ${geo.derivedXsWsel.detail.wtrNm}` : ""}
+              {" "}— the effective-model regulatory water surface at the nearest reach; a jurisdiction may enforce a newer model. Enter a BFE to override.
+            </div>
+          )}
           {/* BFE lines are mapped but publish a datum we can't safely compare — say why
               we still can't derive, rather than a bare UNKNOWN. */}
           {geo && geo.bfeLineFlags && geo.bfeLineFlags.usable === 0 && geo.bfeLineFlags.datumExcluded > 0 && (
@@ -124,7 +152,7 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
             {mit.flags.includes("rule_unverified") ? " RULE UNVERIFIED — edit & confirm in settings." : ""}
           </div>
           <div style={noteStyle}>
-            Providers: pad FFE {mit.providers.padElev || "—"} · grade {mit.providers.existGrade || "—"} · 1% WSE {mit.providers.wse1pct === "bfe-line-interp" ? "derived (BFE lines)" : (mit.providers.wse1pct || "—")} · 0.2% WSE {mit.providers.wse02pct || "—"}
+            Providers: pad FFE {mit.providers.padElev || "—"} · grade {mit.providers.existGrade || "—"} · 1% WSE {wseProvLabel(mit.providers.wse1pct)} · 0.2% WSE {wseProvLabel(mit.providers.wse02pct)}
             {geo && geo.ts != null ? ` · flood data ${formatAge(Date.now() - geo.ts)}` : ""}
           </div>
         </>
@@ -135,12 +163,17 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
 
       {b && (
         <div style={{ marginTop: 7, borderTop: `1px solid ${line}`, paddingTop: 6 }}>
-          {b.ffe.status === "pass" && row("Required FFE", `${f2(b.ffe.requiredFfeFt)}′ — pad PASSES`, "ffe")}
+          {b.ffe.status === "pass" && row("Required FFE", `${f2(b.ffe.requiredFfeFt)}′ (${ffeBasisText(b.ffe)}) — pad PASSES`, "ffe")}
           {b.ffe.status === "short" && (
-            <div style={dangerStyle}>⚠ Pad FFE is {f2(b.ffe.shortByFt)}′ SHORT of the required {f2(b.ffe.requiredFfeFt)}′ ({b.ffe.basis === "wse02pct" ? "0.2% WSE" : "BFE"} + {b.ffe.plusFt}′).</div>
+            <div style={dangerStyle}>⚠ Pad FFE is {f2(b.ffe.shortByFt)}′ SHORT of the required {f2(b.ffe.requiredFfeFt)}′ ({ffeBasisText(b.ffe)}).</div>
           )}
           {(b.ffe.status === "unknown" || b.ffe.status === "no_rule") && (
             <div style={noteStyle}>Required FFE unknown — {b.ffe.unknownReason}.</div>
+          )}
+          {/* B759 — a multi-basis rule (Fort Bend) takes the MAX of several elevations
+              (more-restrictive controls); bases with no input yet are named, never dropped. */}
+          {b.ffe.pendingBases && b.ffe.pendingBases.length > 0 && (
+            <div style={noteStyle}>The finished floor must clear the HIGHEST of several bases (more-restrictive controls governs). Not computed here yet — enter or confirm: {b.ffe.pendingBases.map((pb) => `${pb.label || pb.basis} +${pb.plusFt}′`).join(" · ")}.</div>
           )}
           {b.pathway && (
             <div style={b.pathway.fillToElevate === "restricted" ? warnStyle : noteStyle}>
@@ -156,6 +189,7 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
       <div style={{ marginTop: 7, borderTop: `1px solid ${line}`, paddingTop: 6, fontSize: 10, color: muted, lineHeight: 1.5 }}>
         {NAVD88_NOTE} {NEWER_MODEL_NOTE}
         {geo && geo.derivedBfe && <><br />{DERIVED_BFE_NOTE}</>}
+        {geo && geo.derivedXsWsel && <><br />{DERIVED_XS_WSEL_NOTE}</>}
         <br />{EXCLUSIONS_NOTE}
         <br />{OFFSITE_NOTE} Screening only — confirm with your engineer and the reviewing authority.
       </div>

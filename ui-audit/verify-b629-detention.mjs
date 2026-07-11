@@ -10,11 +10,12 @@
  * the required/badge assertions still hold at the same Harris test point; the
  * flood/regime assertions are mock-specific and are relaxed in LIVE mode.
  *
- * Scenario (mock): 40-ac square parcel, unincorporated Harris (Cypress area) → HCFCD
- * 0.65 × 40 = 26.00 ac-ft required; one 300′×300′ pond ≈ 12.00 ac-ft provided; Zone AE
- * + FLOODWAY with BFE 95 vs ground 100 → Regime B (wet-bottom); nearest HCFCD unit
- * W100-00-00; CYPRESS CREEK watershed → the B635 overlay note; a real MUD district.
- * Asserts: check button → required (badge: eff. Mar 2021 · verified Jul 2026) →
+ * Scenario (mock): 40-ac square parcel, unincorporated Harris (Cypress area), outfall
+ * type = storm sewer (B761) → HCED Infra-Regs 0.75 × 40 = 30.00 ac-ft required; one
+ * 300′×300′ pond ≈ 12.00 ac-ft provided; Zone AE + FLOODWAY with BFE 95 vs ground 100 →
+ * Regime B (wet-bottom); nearest HCFCD unit W100-00-00; CYPRESS CREEK watershed → the
+ * B635 overlay note; a real MUD district.
+ * Asserts: check button → required (badge: eff. Jul 2019 · verified Jul 2026) →
  * provided → Shortfall → Full-DIA triggers → Regime-B banner → MUD + watershed notes
  * → B750 channel Auto/Yes/No control + detected-channel + reviewing-agency picker →
  * pond "Size for required detention" → solver expands to MEET the requirement.
@@ -42,7 +43,7 @@ const site = {
     origin: { lat: 29.96, lon: -95.69 }, county: "harris",
     parcels: [{ id: "pA", points: PARCEL, locked: true }],
     els: [POND], measures: [], callouts: [], markups: [],
-    deletedIds: [], settings: { showSetback: false }, underlay: null, updatedAt: Date.now(),
+    deletedIds: [], settings: { showSetback: false, drainage: { outfallType: "stormSewer" } }, underlay: null, updatedAt: Date.now(),
   },
 };
 const seed = `(() => { try {
@@ -115,15 +116,15 @@ async function run() {
 
   const railText = async () => (await page.locator("body").innerText()).replace(/\s+/g, " ");
   let t = await railText();
-  expect("required = 26.00 ac-ft (40 ac × HCFCD 0.65, whole tract)", /26\.00\s*ac-ft/.test(t), t.match(/Detention required[^A-Z]*/)?.[0]?.slice(0, 80));
-  expect("rule badge carries the record (eff. Mar 2021 · verified Jul 2026)", /eff\. Mar 2021/.test(t) && /verified Jul 2026/.test(t));
+  expect("required = 30.00 ac-ft (40 ac × HCED storm-sewer 0.75, B761)", /30\.00\s*ac-ft/.test(t), t.match(/Detention required[^A-Z]*/)?.[0]?.slice(0, 80));
+  expect("rule badge carries the record (eff. Jul 2019 · verified Jul 2026)", /eff\. Jul 2019/.test(t) && /verified Jul 2026/.test(t));
   expect("'Detention provided' ≈ 12.00 ac-ft · 1 pond", /Detention provided/.test(t) && /12\.0\d?\s*ac-ft/.test(t) && /1 pond/.test(t));
   if (!LIVE) {
     // Regime B here (BFE 95 vs ground 100): the ~3-ft permanent pool (~4.69 ac-ft dead
-    // storage) is UNCREDITED, so the honest shortfall is 26 − (12 − 4.69) ≈ 18.7 ac-ft,
-    // NOT the gross 14.0 — and the panel says so via the "usable … permanent pool" note.
+    // storage) is UNCREDITED, so the honest shortfall is 30 − (12 − 4.69) ≈ 22.7 ac-ft,
+    // NOT the gross 18.0 — and the panel says so via the "usable … permanent pool" note.
     expect("usable-volume note shows the uncredited Regime-B permanent pool", /permanent pool/i.test(t) && /Usable/.test(t));
-    expect("Shortfall reflects USABLE volume (dead pool excluded, ~18.7 ac-ft)", /Shortfall/.test(t) && /18\.\d\d?\s*ac-ft/.test(t));
+    expect("Shortfall reflects USABLE volume (dead pool excluded, ~22.7 ac-ft)", /Shortfall/.test(t) && /22\.\d\d?\s*ac-ft/.test(t));
   } else {
     expect("Shortfall line renders (provided < required)", /Shortfall/.test(t));
   }
@@ -143,6 +144,7 @@ async function run() {
   expect("B750 channel Auto/Yes/No control renders", /Drains to HCFCD channel/.test(t));
   expect("B750 detected channel is named (auto transparency)", /HCFCD channel detected/.test(t) && /W100-00-00/.test(t));
   expect("B750 reviewing-agency picker renders", /Reviewing agency/.test(t));
+  expect("B761 outfall-type control renders (unincorporated Harris)", /Outfall type/.test(t) && /Storm sewer/.test(t));
   const chanBtn = (label) => page.getByRole("button", { name: `Drains to HCFCD channel: ${label}` });
   if (await chanBtn("No").count() > 0) {
     await chanBtn("No").click(); await page.waitForTimeout(300); t = await railText();
@@ -172,12 +174,12 @@ async function run() {
       expect("auto-size lands in expand mode (baseline + ghost + Done/Reset)", /Expanding · existing locked/i.test(t));
       expect("storage delta renders in expand mode", /Storage gained|Proposed storage/i.test(t));
       // The solver's own output proves it closed the shortfall: Proposed storage reaches
-      // ≥ the 26.00 ac-ft required (usable target + dead pool → gross well above required).
+      // ≥ the 30.00 ac-ft required (usable target + dead pool → gross well above required).
       // Read here in expand mode — reliable, unlike navigating the rail back after commit.
       const prop = t.match(/Proposed storage\s+([\d.]+)\s*ac-ft/);
       const proposedAcFt = prop ? parseFloat(prop[1]) : null;
       expect("auto-size expands the pond to MEET the required detention (shortfall closed)",
-        proposedAcFt != null && proposedAcFt >= 26.0, proposedAcFt != null ? `proposed ${proposedAcFt} ac-ft ≥ 26.00 required` : "no Proposed storage figure");
+        proposedAcFt != null && proposedAcFt >= 30.0, proposedAcFt != null ? `proposed ${proposedAcFt} ac-ft ≥ 30.00 required` : "no Proposed storage figure");
     }
   }
 
