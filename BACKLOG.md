@@ -51,6 +51,78 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+<!-- Fort Bend / Harris floodplain + detention criteria epic — filed 2026-07-11 from chat (provisional
+     NEW-1…NEW-7 → B758–B764). One cohesive spine: verified-verbatim jurisdiction rule records for the
+     regulatory engines (floodplainRules.js / buildability.js / detentionRules.js) + the two GIS WSE/BFE
+     provider tiers (floodplainMitigation.js) that feed them. Referenced spec `claude/jurisdiction-criteria-
+     spec-fbc-harris.md` is NOT in the repo — each item carries its own detail. Dedupe-verified against
+     Open / ⏳ Verify / Done: B755 (⏳ Verify) already shipped the S_BFE-line BFE-derive tier + REGISTERED
+     (not consumed) S_XS cross-sections and deferred MAAPnext to v2 — NEW-5/NEW-6 are scoped to exactly that
+     deferred remainder; the rest are net-new jurisdiction data the engines model as verified:false today. -->
+
+### B758 — Fort Bend floodplain-mitigation rule: replace the 1:1 placeholder in `floodplainRules.js` with the verified FBC record `[Site Planner]` (task) #site-planner #yield #floodplain  *(owner-dropped 2026-07-11 as "NEW-1"; minted **B758** via `npm run next-id`. Spec ref `claude/jurisdiction-criteria-spec-fbc-harris.md §2.2` — NOT in the repo; detail carried inline.)*
+`[ ]` The `fortbend` seed in `floodplainRules.js` is today an unverified 1:1 placeholder (`trigger: "1pct"`, `ratio: 1`, `offsetScope: "storage"`, `verified: false`, `sourceDate: null` — confirmed in code). Replace it with the verified, current-ordinance record and flip `verified: true`.
+- Verify: sandbox
+- Origin: filed 2026-07-11 from chat (owner NEW-1)
+- **Verified record to encode:** `trigger: "1pct_plus_02pct"`. Basis — FBC Flood Damage Prevention Regs §5.02(h)(1) (adopted 3/4/2014, current amendment 10/8/2024) requires a 1:1 "hydraulically equivalent" offset for SFHA fill that reduces storage or conveyance; the FBCDD Interim Atlas-14 Criteria §9 (eff. 2020-01-01, rev. 9/2021) extends the obligation to any storage reduction in the pre-Atlas-14 500-yr floodplain, in the same watershed (same property / sub-watershed, or a County-Engineer-approved alternate).
+- **Copy nuances to preserve:** the trigger is a storage/conveyance REDUCTION (not literally "any fill"); the pre-FIRM single-family-lot exemption is §5.02(h)(2); the method is volume-total (no HCFCD-style elevation-increment table).
+- **Sources on the record:** both citations + dates (FBC regs adopted 3/4/2014, am. 10/8/2024; Interim Atlas-14 Criteria eff. 2020-01-01, rev. 9/2021).
+- **DEDUPE-FIRST:** net-new jurisdiction data. Not covered by B707/B708 (the mitigation ENGINE — Done) or B712 (⏳ Verify — the card that DISPLAYS the rule); this fills the unverified `fortbend` record those consume. No existing Open / ⏳ item transcribes the FBC record.
+
+### B759 — Fort Bend FFE/buildability record: multi-basis `max()` FFE rule (currently `null`) `[Site Planner]` (feature) #site-planner #yield #floodplain  *(owner-dropped 2026-07-11 as "NEW-2"; minted **B759**. Spec ref §2.3 — not in repo; detail inline.)*
+`[ ]` `buildability.js` `fortbend` is fully null today (`ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false` — confirmed). Fill it, which needs a small SHAPE extension: today `requiredFfe` reads a single `{ basis, plusFt }`; Fort Bend combines MULTIPLE bases by `max()` (Regs §3.02(b) — the more restrictive controls).
+- Verify: sandbox
+- Origin: filed 2026-07-11 from chat (owner NEW-2)
+- **`ffeRule` as a set of bases combined by `max()`:** `{ bfe +2 }`, `{ Atlas-14 100-yr WSE +2 or +2.5 — ⚠ conflicting reads of Interim Criteria §2; transcribe the PDF VERBATIM before encoding }`, `{ pre-Atlas-14 500-yr WSE +2 }`, and a Zone-A-no-data basis `{ estimated pre-Atlas-14 BFE +4 }`.
+- **Outside-SFHA rule (new `basis: "site"` concept — copy-only if not modeled):** Regs §5.01 → +2 ft over the highest of {detention-pond 100-yr WSE, top of curb, natural ground}.
+- **Other fields:** `fillToElevate: "allowed_with_mitigation"` (contrast Harris's `restricted`); `pathwayNote` — 1:1 offset + full H&H analysis + a floodplain development permit from the County Engineer ($150); LOMR-F flag unchanged.
+- **Sources:** FBC regs 10/8/2024 + Interim Criteria rev. 9/2021.
+- **⚠ Ambiguity flagged (not a blocker to filing):** the +2 vs +2.5 Atlas-14 read is unresolved pending the verbatim PDF — mark that one basis `[?]` at implementation if still ambiguous rather than guessing.
+- **DEDUPE-FIRST:** net-new. The `max()`-of-bases shape does not exist in `buildability.js` today; B712 (⏳ Verify) renders whatever `assessBuildability` returns, so the new "site" basis display rides that surface (log a `V###` live check only if new visible UI is added). No existing item models a Fort Bend FFE rule.
+
+### B760 — Harris floodplain + buildability seeds: verify & correct against the 7/9/2019 regs `[Site Planner]` (task) #site-planner #yield #floodplain  *(owner-dropped 2026-07-11 as "NEW-3"; minted **B760**. Verified against eng.hctx.net/portals/23/fpmregs-effect190709.pdf.)*
+`[ ]` Correct + flip the Harris seeds in both `floodplainRules.js` and `buildability.js` (both `verified: false` today; harris `trigger: "1pct"`, effectiveDate `2018-01-01` — confirmed in code).
+- Verify: sandbox
+- Origin: filed 2026-07-11 from chat (owner NEW-3)
+- **`floodplainRules.js` harris:** `trigger: "1pct"` → `"1pct_plus_02pct"` (§4.07(e): 1:1 hydraulically-equivalent offset for storage/conveyance reduction in the 0.2%/500-yr floodplain incl. shaded X; same-watershed rule confirmed; coastal-area exemption noted in copy); `effectiveDate: "2018-01-01"` → `"2019-07-09"`.
+- **`buildability.js` harris:** the `wse02pct +2 ft` seed is confirmed (§4.07(b)(1): "24 in above the 0.2% WSE or 12 in above street crown, whichever higher" — add the crown alternate as copy) → flip `verified: true`. Strengthen `pathwayNote` with §4.07(b)(9) verbatim: "No fill may be used to elevate structures in the 1 percent floodplain" (open foundations/piers or vented walls — stronger than the current "commonly requires LOMR").
+- **Zone specials to carry as copy:** floodway/V → lowest member 500-yr + 36 in; AO → slab depth + 36 in; Zone A → slab HAG + 6 ft; critical facilities + 36 in.
+- **DEDUPE-FIRST:** net-new correction of existing unverified seeds. Distinct from B755 (⏳ Verify — the BFE-derive tier that FEEDS `wse1pct`) and B712 (the display card). No open item corrects the Harris regs.
+
+### B761 — Harris detention: HCED Infrastructure-Regs outfall-type minimums layer (0.75 / 1.0) `[Site Planner]` (feature) #site-planner #yield  *(owner-dropped 2026-07-11 as "NEW-4"; minted **B761**. HCED Infrastructure Regs eff. 7/9/2019 verified verbatim.)*
+`[ ]` The flat `0.65` (PCPM) in `detentionRules.js` under-counts UNINCORPORATED Harris: the county Infrastructure Regulations (eff. 7/9/2019) set minimums by OUTFALL TYPE — storm-sewer outfall 0.75 ac-ft/ac, roadside-ditch outfall 1.0 ac-ft/ac — reducible by a formal Method-2 analysis but never below 0.75.
+- Verify: sandbox
+- Origin: filed 2026-07-11 from chat (owner NEW-4)
+- **Add an `outfallType` input** (`stormSewer | roadsideDitch | unknown` → band 0.75–1.0, never a silent 0.65) layered on the `hcfcd` record for unincorporated sites. PCPM 0.65 remains the HCFCD-methods floor (>640 ac Method 3 = 0.55; pumped 0.75).
+- **Also on the `hcfcd` record (`hcfcd-pcpm-atlas14-2021`, confirmed `effectiveDate: "2021-03-31"` today):** fix `effectiveDate` → `2019-07-09` ("PCPM Revised July 2019" — still current per TxDOT 7/2025); add params — ≤1-ac fee-in-lieu (§2.15.12), >300-ac projects add a 0.2% event analysis, redevelopment = net-new impervious only + exemptions (one SFR, 150-ft road frontage).
+- **Note:** 2023 Infrastructure-Regs editions are presumed unchanged but were NOT fetched — keep a verify note on the record.
+- **DEDUPE-FIRST:** net-new. The outfall-type band does not exist in `detentionRules.js` (the `hcfcd` record is a flat 0.65 today). Distinct from B751/B754 (⏳ Verify — drainage-context transparency + ETJ routing) and B629–B642 (Done — the detention engine). Live confirmation of the `outfallType` routing on a real unincorporated site can ride B712/B751's surface if new UI is added.
+
+### B762 — `wse1pct` provider: consume NFHL cross-sections (S_XS) alongside the shipped BFE-lines tier `[Site Planner / GIS]` (feature) #site-planner #gis #yield #floodplain  *(owner-dropped 2026-07-11 as "NEW-5"; minted **B762**. SCOPED DOWN by dedupe — see below.)*
+`[ ]` ⚠ **Half of this already shipped in B755 (⏳ Verify).** The owner's NEW-5 asked to add BOTH S_BFE lines AND cross-sections (S_XS) as a `wse1pct` provider tier to kill the "no published BFE" UNKNOWN on the Bain AE polygon. B755 already added the S_BFE-line BFE-derive tier (`bfe-line-interp` in `floodplainMitigation.js`) AND REGISTERED the `crossSections` (sublayer 14) source "registered, not consumed." So the genuinely net-new remainder is: **CONSUME S_XS** — query the site bbox, take the governing (highest intersecting / nearest-reach) regulatory WSEL, and fold it into the `wse1pct` provider precedence alongside the shipped BFE-lines value.
+- Verify: live (GIS endpoint behavior — mandatory LIVE-VERIFY class)
+- Origin: filed 2026-07-11 from chat (owner NEW-5)
+- **Honest labels (same discipline as B755):** "interpolated from effective-FIRM BFE lines / cross-sections — effective-model vintage; jurisdictions may enforce newer models."
+- **Repo-houses rule:** fetch inside the existing `checkDrainage` click, SWR cache, per-source failure isolation, keyRev cache-bust — the provider seam already exists (zero engine rework), matching B755.
+- **DEDUPE-FIRST:** this is the deferred-to-v2 remainder of **B755** (⏳ Verify), whose DEDUPE note reads "cross-sections (WSEL_REG)… deliberately deferred (v2; the S_XS source is registered, not consumed)." NOT a recurrence (B755's BFE-line tier works) and NOT a fresh full item — scoped to S_XS consumption only. The S_BFE-lines half of the owner's NEW-5 is DONE; do not re-implement it.
+
+### B763 — `wse02pct` + Atlas-14 WSE providers: MAAPnext (draft-advisory), M3 pointer, FBCDD Atlas-14 studies layer `[Site Planner / GIS]` (feature) #site-planner #gis #yield #floodplain  *(owner-dropped 2026-07-11 as "NEW-6"; minted **B763**. Implements the deferred `wse02pct` hook + Atlas-14 sourcing. Spec ref §Part 4 — not in repo.)*
+`[ ]` Implement the named `wse02pct` provider hook (no GIS provider feeds `wse02Ft` today — `requiredFfe` reads it but nothing supplies it) plus the Atlas-14 WSE sourcing the FFE/mitigation rules key on.
+- Verify: live (GIS endpoint behavior — mandatory LIVE-VERIFY class)
+- Origin: filed 2026-07-11 from chat (owner NEW-6)
+- **Harris:** MAAPnext is still DRAFT as of 7/2026 (not regulatory; prelim FIRMs projected end-2026) — if its grids are consumable, label "draft — advisory only." M3 (m3models.org) hosts all FEMA-effective HEC-RAS/HMS models but is download-only → render as a "get the effective model" pointer + manual entry, NOT a fetch.
+- **Fort Bend:** the FFE/mitigation overlay (B758/B759) keys on Atlas-14 WSEs the effective 2014 FIRM doesn't show — probe the FBCDD "Local Watershed Studies Atlas 14 Results" layer (gisportal.fortbendcountytx.gov, REST endpoint discoverable from the county Maps page) as a provider; otherwise manual + the existing "newer model elevations" caveat.
+- **Optional:** NOAA Atlas-14 PFDS CSV API (live-verified: `hdsc.nws.noaa.gov/cgi-bin/hdsc/new/fe_text_mean.csv?lat=&lon=&data=depth&units=english&series=pds`) to display governing design-storm depths per site.
+- **DEDUPE-FIRST:** this is the deferred-to-v2 "HCFCD MAAPnext" remainder called out in **B755**'s DEDUPE note. Net-new `wse02pct` provider seam (parallels the shipped `wse1pct` tiers). Feeds B758/B759 (Fort Bend Atlas-14 FFE) and B760 (Harris 0.2% WSE).
+
+### B764 — Fort Bend detention record enrichment + HEC-HMS tier-threshold correction `[Site Planner]` (task) #site-planner #yield  *(owner-dropped 2026-07-11 as "NEW-7"; minted **B764**. FBCDD DCM / Interim Atlas-14 Criteria verified.)*
+`[ ]` Enrich the `fbcdd-dcm-atlas14-2020` record in `detentionRules.js` (Table 6-1 already verified — keep) and correct the Fort Bend HEC-HMS tier note.
+- Verify: sandbox
+- Origin: filed 2026-07-11 from chat (owner NEW-7)
+- **Add params:** max release 0.125 cfs/ac (100-yr, §6.4.1); pond freeboard 1 ft (§6.4.7); Interim §5 — ≥50% of volume must drain by gravity (+ an additional-storage assessment if the pro-rata release is <0.125); Interim §4.a — post ≤ pre for the Atlas-14 10-yr AND 100-yr; offsite 100-yr sheet flow must be intercepted/conveyed (no adverse impact); no fee-in-lieu program found.
+- **Correct `TIER_THRESHOLDS.fortbend`:** HEC-HMS is REQUIRED ≥640 ac (§6.4.3), OPTIONAL 50–640 (§6.4.2) — 50 ac is where the simplified method stops being mandatory and the drainage-review bar rises, NOT the HMS line (fix the note accordingly; `hecHmsAboveAcres: 640` / `pointMaxAcres: 640` are already correct in code).
+- **DEDUPE-FIRST:** net-new enrichment of an existing verified record. Distinct from NEW-4/B761 (the Harris `hcfcd` outfall band) and B629–B642 (Done — the detention engine). No open item enriches the FBCDD record.
+
 ### B752 — Pipeline layer: crisp vector rendering + commodity styling + click-identify (replace raster at working zoom) `[Site Planner / GIS]` (feature) #site-planner #gis #export  *(owner-dropped 2026-07-10 as "NEW-1"; minted **B752** = highest B# across both files (B751) + 1 on merge-in of `origin/main`, which took B751/V264 for the drainage-check feature — the code/tests/commit/branch (`claude/pipeline-vector-rendering-2kfnn2`) keep the provisional **B751** label. → V265. Implemented + shipped same session; parked in ⏳ Verify for the live RRC/zoom-switch checks.)*
 `[ ]` The pipeline overlay rendered as a flat raster and pixelated on zoom. Repro: enable Pipelines, zoom to parcel level over a Houston-MSA site → grainy lines; zoom out → pixel blocks. Expected: crisp vector polylines at working zoom (matching the FEMA/NWI vectors), colored by commodity.
 - Verify: live
