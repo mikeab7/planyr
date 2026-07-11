@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-11 @ `fa48c28` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-11 @ `813fa6d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_234 source files mapped._
+_235 source files mapped._
 
 ## infra
 
@@ -164,6 +164,8 @@ _234 source files mapped._
   - _exports_: `default (ThemePicker)`
 - **`src/shared/theme/ThemeProvider.jsx`** — Light/dark/system theme context: persists choice to localStorage, drives data-theme on <html>, live OS-flip listener, usePalette()
   - _exports_: `ThemeProvider`, `usePalette`, `useTheme`
+- **`src/shared/thoroughfare/classification.js`** — Canonical thoroughfare classification vocabulary (B720): the normalized road-class enum + labels shared by the DB CHECK, ingestion crosswalks (B721/B722), overlay legend (B723) and analysis (B724); normalizeClassification maps a raw source value through a per-jurisdiction crosswalk (unknown → 'other'), normalizeStatus → existing/proposed
+  - _exports_: `CLASSIFICATION_LABELS`, `CLASSIFICATIONS`, `isClassification`, `normalizeClassification`, `normalizeStatus`, `STATUSES`
 - **`src/shared/ui/AnchoredMenu.jsx`** — Portal-to-body dropdown/flyout that escapes rail stacking-context + overflow clipping; rect-anchored fixed positioning, click-away + Esc
   - _exports_: `default (AnchoredMenu)`
 - **`src/shared/ui/anchoredMenuPlacement.js`** — Pure viewport-placement math for AnchoredMenu: left/below-left/below-right anchoring + edge clamp; returns null for a zero-sized (display:none) anchor so a mis-anchored menu hides instead of pinning top-left (B734)
