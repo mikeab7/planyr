@@ -45,11 +45,15 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > few seconds, and because only the BACKLOG/VERIFICATION *heading* carries the real number, a rare late
 > clash renumbers a couple of heading lines — never code. **A collision that still slips through is caught
 > LOUDLY:** `test/idUniqueness.test.js` fails the build if two ACTIVE items share a `B#`/`V#` (in
-> `BACKLOG.md` / `VERIFICATION.md`), so a colliding PR goes red *before* it merges — renumber the newer
-> item then (the reconcile-on-merge rule in *Workflow & deploy* is now the rare, loud backstop, not the
-> routine tax). `next-id` also prints a `⚠ DUPLICATE ACTIVE ids` line if the live files already collide.
-> (The write-only `*-DONE.md` archives still carry ~50 historical cross-file dupes the guard deliberately
-> ignores — a separate cleanup; `--against-main` keeps you from minting over them.)
+> `BACKLOG.md` / `VERIFICATION.md`), **and** (B780) if any NEW collision appears across the live+archive
+> pair — the race where one session ships-and-archives its item while the other's same-numbered item stays
+> open. So a colliding PR goes red *before* it merges — renumber the newer item then (the reconcile-on-merge
+> rule in *Workflow & deploy* is now the rare, loud backstop, not the routine tax). `next-id` also prints a
+> `⚠ DUPLICATE ACTIVE ids` line if the live files already collide. The 58 historical cross-file dupes that
+> merged before the guard existed are GRANDFATHERED at their exact counts in `KNOWN_LEGACY_ID_COLLISIONS`
+> (`scripts/next-id.mjs`) — audited 2026-07-11: every one is two different features sharing a number,
+> comments/provenance only, zero runtime dependence; renumbering them would break archive cross-refs, so
+> the baseline may only SHRINK (clean a dup → delete its row in the same commit).
 >
 > **🔄 Keep the per-folder pointers fresh.** Some module folders carry a short `CLAUDE.md`
 > pointer (what's here + key files) that auto-loads only when you work in that folder. **When
