@@ -4,7 +4,11 @@
  * ranges — and (b) be IMMUNE to a stray inline prose mention inflating the max (the one dangerous
  * error is UNDER-counting, i.e. reusing a live number; over-counting from a typo is what we prevent). */
 import { describe, it, expect } from "vitest";
-import { maxId, computeNextIds } from "../scripts/next-id.mjs";
+import { maxId, computeNextIds, findDuplicateIdsIn, maxAgainstMain, B_FILES, V_FILES } from "../scripts/next-id.mjs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("maxId — parses only the authoritative id forms", () => {
   it("reads a plain `### B123` heading", () => {
@@ -63,5 +67,35 @@ describe("computeNextIds — real repo files", () => {
     const { maxB, maxV } = computeNextIds();
     expect(maxB).toBeGreaterThan(700); // sanity floor as of B755
     expect(maxV).toBeGreaterThan(200);
+  });
+});
+
+describe("findDuplicateIdsIn — the concurrent-mint collision detector (B779)", () => {
+  it("flags an id whose heading appears more than once", () => {
+    expect(findDuplicateIdsIn(["### B764 — a\n### B764 — b"], "B")).toEqual([{ id: "B764", count: 2 }]);
+  });
+  it("counts a range heading once, at its primary id (no false positive)", () => {
+    expect(findDuplicateIdsIn(["### B300–B302 — multi\n### B303 — ok"], "B")).toEqual([]);
+  });
+  it("returns [] when every id is unique", () => {
+    expect(findDuplicateIdsIn(["### B1 — a\n### B2 — b\n### B3 — c"], "B")).toEqual([]);
+  });
+  it("only counts `### <L>###` headings, never bold mints or prose", () => {
+    // a `**B5**` re-mint / a prose "B5" must NOT read as a second heading occurrence
+    expect(findDuplicateIdsIn(["### B5 — the item\n... see **B5** again, and note B5 in passing"], "B")).toEqual([]);
+  });
+  it("sorts duplicates numerically", () => {
+    const d = findDuplicateIdsIn(["### B30 — a\n### B30 — a2\n### B9 — b\n### B9 — b2"], "B");
+    expect(d.map((x) => x.id)).toEqual(["B9", "B30"]);
+  });
+});
+
+describe("maxAgainstMain — folds in origin/main (B779)", () => {
+  it("is never LESS than the local-only max (origin/main only adds ids), and never throws", () => {
+    // In CI origin/main may or may not be fetched; either way this must be safe + monotone.
+    const local = computeNextIds().maxB;
+    const withMain = maxAgainstMain(REPO, B_FILES, "B");
+    expect(withMain).toBeGreaterThanOrEqual(local);
+    expect(maxAgainstMain(REPO, V_FILES, "V")).toBeGreaterThanOrEqual(computeNextIds().maxV);
   });
 });
