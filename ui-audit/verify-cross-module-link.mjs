@@ -47,8 +47,11 @@ const navState = (projects, activeId) => ({ type: "planar:nav-state", section: "
 async function newPage(browser, sites) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
   await ctx.addInitScript(seedScript(sites));
-  // The embedded app's Supabase ref is unreachable here and would hang init; fail it fast.
-  await ctx.route(/ksetjztkplttbcehyicv\.supabase\.co/, (r) => r.abort());
+  // The embedded scheduler's Supabase calls are unreachable here and would hang init; fail them fast.
+  // B408 consolidation: scheduler data now rides the MAIN project's planar_* tables — abort those
+  // paths only (don't blanket-abort the main ref; the shell's own supabase calls handle failure).
+  await ctx.route(/lyeqzkuiwngunutlkkmi\.supabase\.co\/rest\/v1\/planar_/, (r) => r.abort());
+  await ctx.route(/ksetjztkplttbcehyicv\.supabase\.co/, (r) => r.abort()); // legacy pre-consolidation ref
   const page = await ctx.newPage();
   return { ctx, page };
 }

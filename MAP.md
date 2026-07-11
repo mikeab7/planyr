@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-11 @ `fcb4bd2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-11 @ `fc28429` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_241 source files mapped._
+_242 source files mapped._
 
 ## infra
 
@@ -215,6 +215,8 @@ _241 source files mapped._
   - _exports_: `default (AuthPanel)`
 - **`src/workspaces/site-planner/components/FloodMitigationCard.jsx`** — B712 card under Site Analysis: the floodplain-mitigation ledger by zone class + buildability/LOMR-F/§404 flags, button-gated by the drainage check with honest UNKNOWN/outage states
   - _exports_: `default (FloodMitigationCard)`
+- **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
+  - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
   - _exports_: `default (LayerPanel)`
 - **`src/workspaces/site-planner/components/RowInfo.jsx`** — Per-row ⓘ info popover for the Layers panel (source · vintage/age · notes); hover/click, portal via AnchoredMenu (B760)
@@ -324,7 +326,7 @@ _241 source files mapped._
 - **`src/workspaces/site-planner/lib/imagePdf.js`** — Pure dependency-free JPEG-to-one-page-PDF wrapper at an exact physical page size, so exports carry no browser print-dialog chrome
   - _exports_: `jpegToPdf`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
-  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
+  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelLayout.js`** — Pure label level-of-detail plus collision engine: line-dropping by priority, greedy overlap resolution, leader overflow, and dimension-callout zoom gates

@@ -12509,8 +12509,10 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
 // Layer 2: sanity-check refuses silent overwrite if task count drops drastically.
 // Layer 3: RLS policies (server-side) prevent DELETE via anon key — see README.
 (function() {
-  const SUPABASE_URL = "https://ksetjztkplttbcehyicv.supabase.co";
-  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtzZXRqenRrcGx0dGJjZWh5aWN2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2ODk3MTksImV4cCI6MjA5NTI2NTcxOX0.7_C4mH0m7vdJ0N_TQ82o-JmDcub1xdK4sBE5kU45FDQ";
+  // B408 consolidation (2026-07-11): scheduler data now lives in the MAIN Planyr project
+  // (planyr-production, ref lyeqzkuiwngunutlkkmi) — same planar_* tables, data migrated + verified.
+  const SUPABASE_URL = "https://lyeqzkuiwngunutlkkmi.supabase.co";
+  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5ZXF6a3Vpd25ndW51dGxra21pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzNjc0NjMsImV4cCI6MjA5Njk0MzQ2M30.1jyFWeEPWDR4-YYu5azWbWQN8P48cgyZCBqfOwrAnlk";
   const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   window.__sb = sb;            // exposed for the Suggestions view (planar_suggestions subscribe)
   const TABLE = "planar_data";

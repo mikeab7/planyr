@@ -69,6 +69,19 @@ describe("authoritative sources (B368 — no more silent false-clean)", () => {
     expect(outFieldsFor(gisSource("oilgas"))).toBe("API,SYMNUM,GIS_SYMBOL_DESCRIPTION,GIS_WELL_NUMBER");
     expect(outFieldsFor(gisSource("pipelines"))).toBe("OPERATOR,COMMODITY_DESCRIPTION,DIAMETER,STATUS,SYSTEM_NAME,COUNTY_NAME");
   });
+
+  it("the TEA ISD source (B764) is a production statewide polygon with verified coverage fixtures", () => {
+    const isd = gisSource("isd");
+    expect(isd.provider).toMatch(/Texas Education Agency/);
+    expect(isd.tier).toBe("production");
+    expect(isd.geometryType).toBe("polygon");
+    expect(isd.fields.name).toBe("NAME");
+    expect(isd.fields.number).toBe("DISTRICT_N");
+    expect(outFieldsFor(isd)).toBe("NAME,DISTRICT_N");
+    // Coverage fixtures verified live 2026-07-11 — a county-clipped/wrong source fails these.
+    expect(isd.fixtures.some((f) => /Goose Creek/.test(f.label) && f.point && f.expectMinCount >= 1)).toBe(true);
+    expect(isd.fixtures.some((f) => /Houston ISD/.test(f.label))).toBe(true);
+  });
 });
 
 describe("no inline endpoints in the analysis path", () => {

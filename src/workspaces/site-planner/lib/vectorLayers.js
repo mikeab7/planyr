@@ -275,6 +275,34 @@ export const VECTOR_SOURCES = {
     },
     note: "City ETJ across the H-GAC 13-county region.",
   },
+  jur_isd: {
+    id: "jur_isd",
+    label: "School districts (ISD)",
+    labelField: "NAME", // TEA NAME already carries the "ISD"/"CISD"/"Consolidated ISD" suffix
+    labelZoom: { min: 8, max: 12 }, // districts are large — names on at region/metro zoom, off at parcel zoom
+    nameTemplate: "{name}", // don't append "ISD" — the NAME already has it
+    identifyNote: "School district (ISD) — a taxing / attendance boundary, not a service network (it's usually the biggest single line on a Texas tax bill). Screening only.",
+    sourceName: "Texas Education Agency (TEA)",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.isd.serviceUrl + "/query", // …/Current_Districts_2023/FeatureServer/0/query
+      outFields: ["NAME", "DISTRICT_N"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000, // district lines change rarely (~annual TEA refresh)
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      // 1,018 large statewide polygons: too heavy for ONE "all" entry, so bbox-scoped like
+      // city limits (a metro view is a handful of districts). The widest tier thins hardest.
+      tiers: [
+        { maxZoom: 9, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 11, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "TEA school-district boundaries (SY 2022-23).",
+  },
 };
 
 // ---------------------------------------------------------------------------

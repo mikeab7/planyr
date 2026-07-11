@@ -12,15 +12,16 @@
  * (context.env), never in the browser bundle. Do not add a second query path.
  * ─────────────────────────────────────────────────────────────────────────────
  *
- * The scheduler lives in a SECOND Supabase project (see public/sequence/index.html);
- * its URL + anon key are already public in that shipped HTML, so baking them here as
- * fallbacks leaks nothing. PLANYR_SEQ_URL / PLANYR_SEQ_ANON_KEY env vars override
- * for future rotation.
+ * B408 consolidation (2026-07-11): the scheduler's planar_* tables now live in the SAME
+ * (main) Supabase project as everything else — the old dedicated project is retired.
+ * These constants keep using the ANON key on purpose (read path is anon-readable, same
+ * as the shipped scheduler HTML, so baking it here as a fallback leaks nothing).
+ * PLANYR_SEQ_URL / PLANYR_SEQ_ANON_KEY env vars still override for future rotation.
  */
 import { summarizeSite } from "./_metrics.js";
 
-const SEQ_URL = "https://ksetjztkplttbcehyicv.supabase.co";
-const SEQ_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtzZXRqenRrcGx0dGJjZWh5aWN2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2ODk3MTksImV4cCI6MjA5NTI2NTcxOX0.7_C4mH0m7vdJ0N_TQ82o-JmDcub1xdK4sBE5kU45FDQ";
+const SEQ_URL = "https://lyeqzkuiwngunutlkkmi.supabase.co";
+const SEQ_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5ZXF6a3Vpd25ndW51dGxra21pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzNjc0NjMsImV4cCI6MjA5Njk0MzQ2M30.1jyFWeEPWDR4-YYu5azWbWQN8P48cgyZCBqfOwrAnlk";
 const SEQ_KEY = "hs-v1"; // the one planar_data row the scheduler reads/writes
 
 /** JSON-RPC "invalid params" — the transport surfaces this as -32602, not a tool error. */

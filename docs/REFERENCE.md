@@ -149,27 +149,27 @@ key** — renaming the org or project changes **neither the ref, the URL, nor th
 save/load/auth keep working with **no redeploy**. Only creating a *different* project (a new ref) or
 rotating keys would force a rebuild of the build-time env.
 
-**⚠ There are TWO live Supabase projects, not one — match the `ref` before renaming/deleting ANYTHING.**
-The suite currently spans two *separate* Supabase projects (different immutable refs), so "the spare
-Planar project" is almost certainly NOT spare:
-- **Main app (Site Planner + Document Review)** → ref **`lyeqzkuiwngunutlkkmi`**, set via the Cloudflare
-  `VITE_SUPABASE_URL` build env (tables `public.sites`, `public.doc_reviews`, `public.profiles`, …).
-- **Scheduler (the embedded `/sequence/` app)** → a DIFFERENT ref **`ksetjztkplttbcehyicv`**,
-  **hardcoded** in `public/sequence/index.html` (its own anon key; tables `planar_data` /
-  `planar_history` / `planar_suggestions`).
+**✅ CONSOLIDATED — ONE live Supabase project (B408, executed 2026-07-11).** The old two-project split
+(main app on `lyeqzkuiwngunutlkkmi`, Scheduler on its own project `ksetjztkplttbcehyicv`) is resolved:
+the Scheduler's three tables (`planar_data` / `planar_history` / `planar_suggestions`) were recreated
+in **`planyr-production` (ref `lyeqzkuiwngunutlkkmi`)** with identical columns, the
+`planar_history_id_seq` sequence (setval'd to max id), the `planar_history_key_created_idx` index,
+identical RLS policies (anon read/insert/update — the scheduler talks to PostgREST with the anon key),
+and realtime enabled on `planar_suggestions` (the Suggestions view subscribes). All 679 rows
+(1 `planar_data` / 669 `planar_history` / 9 `planar_suggestions`) were copied with ids + timestamps
+preserved and verified byte-identical via full-table md5 checksums (migrations
+`scheduler_consolidation_planar_tables` + `planar_suggestions_realtime` in the target's migration
+history). Code repointed in the same change: `public/sequence/index.html` (hardcoded URL + anon key),
+`functions/api/mcp/_tools.js` (`SEQ_URL`/`SEQ_ANON` fallbacks), `ui-audit/verify-cross-module-link.mjs`
+(abort route). The old project ("Planar", AWS `us-west-2`, ref `ksetjztkplttbcehyicv`) is **retired —
+after a post-deploy delta re-sync + live check it is safe to delete**, freeing the second free-plan
+slot (the owner is repurposing it for a personal, non-Planyr database). If any doc still says "TWO live
+projects," it predates this. `planyr-staging` remains reserved as a name for a future second environment.
 
-So the second dashboard project ("Planar", AWS `us-west-2`) is most likely the **Scheduler's live
-backend — its data is the schedule history, not a leftover.** **Owner-action checklist (do NOT delete
-on assumption):** in Supabase → each project's **Project Settings → API / project URL**, read its 20-char
-ref and match against BOTH refs above. A project matching **either** ref is LIVE → rename it for what it
-*is* (the Scheduler's is **not** `planyr-staging`; name it e.g. `planyr-scheduler`), **never delete it**.
-Only a project matching **neither** ref is genuinely unused (then repurpose as `planyr-staging` or
-delete). Renaming stays cosmetic/safe (above); **deleting a live project is irreversible data loss.**
-
-**Open architectural question (not yet decided):** the Scheduler riding its OWN Supabase project,
-separate from the main app, predates the one-product direction. Whether to consolidate it onto the main
-project (one backend) or keep it split and just name them per-component is a future decision — recorded
-here so the two-project reality isn't mistaken for a stray duplicate to be cleaned up.
+**Follow-up worth knowing (not urgent):** the migrated `planar_*` RLS policies are wide-open anon
+read/write — exact parity with how the scheduler has always worked, but now those tables sit in the
+production project. Tightening them to authenticated/owner-scoped access is a future item; it requires
+scheduler auth work, not just a policy flip.
 
 **Table schema** (one row per plan; `data` jsonb = serialized Site Model):
 ```sql
