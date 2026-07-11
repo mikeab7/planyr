@@ -19,7 +19,8 @@ _Last updated: 2026-07-11._
       `*.arcgis.com` plus the Harris / Fort Bend / Pearland / Montgomery / H-GAC GIS hosts. **Network changes only
       take effect in a NEW session**, so after changing it, start a fresh session and tell me *"load the Houston
       thoroughfare data."* Docs: https://code.claude.com/docs/en/claude-code-on-the-web (network policy). Nothing is
-      exposed by this — it only lets me READ public government map data. (Tracked as VERIFICATION V274.)
+      exposed by this — it only lets me READ public government map data. (Tracked as VERIFICATION V274; the
+      next session's full step-by-step is in `THOROUGHFARE-HANDOFF.md` at the repo root.)
 
 ## 🩹 Optional — a few older sites lost their parcels before today's fix (B756)
 - [ ] **Nothing required; read only if you want an older site back.** A bug (fixed + shipped 2026-07-10)

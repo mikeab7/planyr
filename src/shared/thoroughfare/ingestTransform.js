@@ -1,7 +1,12 @@
-/* Pure, config-driven transform from an ArcGIS GeoJSON feature → a `thoroughfare_segments` upsert
- * row (B721). The reusable heart of every jurisdiction adapter: B721 (Houston) and B722 (the rest)
+/* Pure, config-driven transform from an ArcGIS feature → a `thoroughfare_segments` upsert row
+ * (B721). The reusable heart of every jurisdiction adapter: B721 (Houston) and B722 (the rest)
  * supply only a config; this file is the shared normalization + geometry logic. No I/O — the
  * runnable adapter (server/ingest/thoroughfare.mjs) does the fetch + DB upsert.
+ *
+ * FORMAT-AGNOSTIC: handles BOTH ArcGIS response shapes so an adapter can't silently skip every
+ * feature if a layer doesn't serve GeoJSON — Esri JSON (`attributes` + polyline `paths`, the
+ * universally-supported `f=json`) and GeoJSON (`properties` + `geometry.type/coordinates`,
+ * `f=geojson`, only on ArcGIS 10.4+).
  *
  * Geometry: ArcGIS polylines can be MULTI-PART, so every centerline is emitted as a PostGIS
  * MULTILINESTRING (a single LineString is wrapped as a one-part multi). Two EWKT copies are built:
@@ -14,12 +19,13 @@ import { projectToGrid } from "../coordinates/index.js";
 const f6 = (n) => Number(n.toFixed(6));
 const f3 = (n) => Number(n.toFixed(3));
 
-/* Normalize a GeoJSON line geometry to an array of parts (each part = array of [lon, lat]).
- * Points / polygons / null → [] (not a centerline). */
+/* Normalize a line geometry to an array of parts (each part = array of [lon, lat]). Accepts Esri
+ * JSON polylines (`paths`) AND GeoJSON LineString/MultiLineString. Points / polygons / null → []. */
 export function geometryToParts(geometry) {
-  if (!geometry || !geometry.coordinates) return [];
-  if (geometry.type === "LineString") return [geometry.coordinates];
-  if (geometry.type === "MultiLineString") return geometry.coordinates;
+  if (!geometry) return [];
+  if (Array.isArray(geometry.paths)) return geometry.paths;              // Esri JSON polyline
+  if (geometry.type === "LineString" && geometry.coordinates) return [geometry.coordinates];
+  if (geometry.type === "MultiLineString" && geometry.coordinates) return geometry.coordinates;
   return [];
 }
 
@@ -55,11 +61,12 @@ const pick = (props, fields) => {
   return null;
 };
 
-/* Transform one GeoJSON feature → a thoroughfare_segments upsert row per a jurisdiction `config`.
- * Returns null (caller counts it as skipped) when the feature has no usable line geometry or no
- * stable source id — never throws on a single bad feature (LOUD-FAILURE stays at the batch level). */
+/* Transform one ArcGIS feature → a thoroughfare_segments upsert row per a jurisdiction `config`.
+ * Reads attributes from `.attributes` (Esri JSON) OR `.properties` (GeoJSON). Returns null (caller
+ * counts it as skipped) when the feature has no usable line geometry or no stable source id —
+ * never throws on a single bad feature (LOUD-FAILURE stays at the batch level). */
 export function featureToRow(feature, config) {
-  const props = feature?.properties || {};
+  const props = feature?.attributes ?? feature?.properties ?? {};
   const parts = geometryToParts(feature?.geometry).filter(partValid);
   if (!parts.length) return null;
 
@@ -88,18 +95,21 @@ export function featureToRow(feature, config) {
   };
 }
 
-/* Build a paged ArcGIS REST query URL (GeoJSON output, reprojected to WGS84). `resultOffset`
- * paging assumes the layer advertises pagination; the live run confirms that (else fall back to
- * OBJECTID-window paging — noted on V274). */
-export function buildQueryUrl(config, { offset = 0, pageSize = 1000 } = {}) {
+/* Build a paged ArcGIS REST query URL. Defaults to `f=json` (Esri JSON — supported on every ArcGIS
+ * MapServer, unlike `f=geojson`). Pass `pageSize` to cap `resultRecordCount`; omit it to let the
+ * server return up to its own `maxRecordCount` (the adapter paginates on `exceededTransferLimit`).
+ * `orderByObjectId` adds an ORDER BY on the id field — needed for OBJECTID-window paging when a
+ * layer doesn't honor `resultOffset`. */
+export function buildQueryUrl(config, { offset = 0, pageSize, orderByObjectId = false } = {}) {
   const p = new URLSearchParams({
     where: config.where || "1=1",
     outFields: "*",
     outSR: "4326",
-    f: "geojson",
+    f: "json",
     returnGeometry: "true",
     resultOffset: String(offset),
-    resultRecordCount: String(pageSize),
   });
+  if (pageSize) p.set("resultRecordCount", String(pageSize));
+  if (orderByObjectId && config.idField) p.set("orderByFields", config.idField);
   return `${config.serviceUrl}/query?${p.toString()}`;
 }
