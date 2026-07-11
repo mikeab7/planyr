@@ -51,6 +51,30 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+### B763 — Passive jurisdiction badge on the active parcel/site `[Site Planner]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-4"; §A6)*
+`[ ]` The user should never toggle boundary layers to learn which jurisdiction a parcel is in. Auto-run the existing B93 identify for the ACTIVE parcel (whole-parcel, straddle-aware, cached by geometry hash, once per activation — never per-pan) and surface a compact badge in the site header, e.g. "City of Baytown — ETJ · Harris County" / "City of Houston · Harris County" / "Unincorporated · Waller County". Once B764 lands, append ISD ("… · Goose Creek CISD").
+- Verify: live
+- Origin: filed 2026-07-11 from chat (owner NEW-4)
+- Reuse `identifyJurisdiction` + `representativeRing`/`ringCentroid`/`ringsSignature`. Deliberately revises B93's "click-only" trigger for the ACTIVE parcel only (owner decision 2026-07-11); map-click identify unchanged. Align with the open B147 item-4 re-home so there aren't three renderings of the same result.
+
+### B764 — School district (ISD) boundaries layer + identify `[Site Planner / GIS]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-5"; §B1 — highest priority of Part B)*
+`[ ]` Statewide ISD boundary overlay in the Jurisdictions group (row "School districts (ISD)") riding the standard registry/vector/cache/identify pipeline, plus ISD in the jurisdiction identify + the B763 badge. Biggest single tax line for a developer.
+- Verify: live
+- Origin: filed 2026-07-11 from chat (owner NEW-5)
+- Evidence-first candidates (verify in order): TEA ISD boundaries on ArcGIS Online; TxGIO/StratMap school-district boundaries. Recipe: `GIS_SOURCES.isd` → `VECTOR_SOURCES.jur_isd` (`nameTemplate:"{name} ISD"`) → `JURISDICTIONS.jur_isd` → `LAYER_VINTAGE.jur_isd` → identify `role:"isd"`. Coverage fixture: Goose Creek CISD over the Baytown site. Drop + document any source that fails verification — never fake an endpoint.
+
+### B765 — Special-district layers: ESD, TIRZ (+ audit LID/FWSD coverage of the TCEQ row) `[Site Planner / GIS]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-6"; §B2)*
+`[ ]` Evidence-first source hunt + registry rows for Emergency Services Districts and TIRZs (Houston-area first); audit which district TYPES the current TCEQ water-districts service actually carries (MUD/WCID/LID/FWSD/SUD…) and close or honestly document gaps in the `jur_mud` ⓘ. Management districts = stretch.
+- Verify: live
+- Origin: filed 2026-07-11 from chat (owner NEW-6)
+- Audit query: `…/TCEQ_Water_Districts/MapServer/0/query?where=1=1&outFields=TYPE,TYPE_DESCRIPTION&returnDistinctValues=true&f=json`; reconcile against `detentionRules.js PARCEL_DISTRICT_TYPES` (MUD/WCID/LID/DD/FWSD/SUD/WID). ESD candidates: TxGIO, Comptroller SPD, H-GAC, HCAD taxing-jurisdiction GIS (Houston-region v1 ok — say so). TIRZ: City of Houston COHGIS (Houston-only v1 ok). Panel budget: one "Special districts (ESD / TIRZ)" row with sub-toggles only if the panel stays clean, else separate one-line rows (each obeys A1). Not a duplicate of B177/B178 (tax rate/choropleth) — this adds the boundary substrate those need.
+
+### B766 — Subsidence district boundaries (HGSD + Fort Bend SD) `[Site Planner / GIS]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-7"; §B3)*
+`[ ]` Harris-Galveston and Fort Bend Subsidence District regulatory boundaries as a small Jurisdictions overlay ("Subsidence districts") — they govern groundwater wells, which matters whenever MUD/city service is in doubt.
+- Verify: live
+- Origin: filed 2026-07-11 from chat (owner NEW-7)
+- Check for published GIS (HGSD/FBSD, TWDB, TxGIO). Owner-approved exception (2026-07-11): if no live service exists, ship official boundary geometry as static data WITH cited provenance + a fixed `LAYER_VINTAGE` (geometry is county-line-based, near-static) via a small static-GeoJSON render path. ⓘ: what they regulate (groundwater-well permitting/fees), why a developer cares, source + vintage. District outline is the requirement; regulatory subzones nice-to-have. Coverage check: HGSD Area 3 over a Harris parcel.
+
 ### B752 — Pipeline layer: crisp vector rendering + commodity styling + click-identify (replace raster at working zoom) `[Site Planner / GIS]` (feature) #site-planner #gis #export  *(owner-dropped 2026-07-10 as "NEW-1"; minted **B752** = highest B# across both files (B751) + 1 on merge-in of `origin/main`, which took B751/V264 for the drainage-check feature — the code/tests/commit/branch (`claude/pipeline-vector-rendering-2kfnn2`) keep the provisional **B751** label. → V265. Implemented + shipped same session; parked in ⏳ Verify for the live RRC/zoom-switch checks.)*
 `[ ]` The pipeline overlay rendered as a flat raster and pixelated on zoom. Repro: enable Pipelines, zoom to parcel level over a Houston-MSA site → grainy lines; zoom out → pixel blocks. Expected: crisp vector polylines at working zoom (matching the FEMA/NWI vectors), colored by commodity.
 - Verify: live
@@ -1452,6 +1476,12 @@ browser-equipped teammate (Cowork) or Michael on planyr.io confirms them. An ite
 back to 🔲 Open, `Recurrence:` line, `(×N)` title). Cross-reference: the live-browser click-throughs are
 also tracked in `VERIFICATION.md` (`V###`) — that file is the canonical to-do list for the teammate; this
 section is the backlog-side mirror so an item is never "done" until it's actually been seen working.
+
+### B761 — One "City limits & ETJ" toggle (solid limits / dashed ETJ) `[Site Planner]` (feature) #site-planner #ui #gis  *(owner review 2026-07-11 as "NEW-2"; §A4. → V275 (minted V274, renumbered on merge-in of `origin/main` which took V274 for B721). Implemented + shipped PR1 same session; parked here for the live dashed-ETJ paint check.)*
+`[x]` **DONE this session — merged the two Jurisdictions rows into ONE "City limits & ETJ" checkbox driving both underlying layers; city draws SOLID, ETJ draws DASHED in the same blue (`#1d4ed8`). UI-level merge only: `jur_city` + `jur_etj` keep separate `VECTOR_SOURCES`, cache keys, labels, and identify wiring. `checked = on(jur_city) || on(jur_etj)`; toggle/opacity write both (opacity = max); combined status dot; counted as ONE in the group chip. `vectorOverlay.js baseStyle()` now emits `dashArray` on `cfg.dash`. 10 new unit tests (`layerPanelInfo.test.js`) + 7 config guards (`layerPanelV2Guards.test.js`) + a 28-check headless render (`ui-audit/layerpanel-verify.mjs`) all green; build + lint + full suite (3429) green. Parked here ONLY for the live on-aerial dashed paint.**
+- Verify: live — **zoom-/data-density-dependent rendering** class (mandatory LIVE-VERIFY): the merge logic + checkbox/opacity/status + `dashArray` config are proven in the sandbox (unit + guard + headless DOM), but the actual dashed-ETJ vs solid-city stroke painting over the real aerial (and that it reads at metro→parcel zoom) can only be confirmed on planyr.io. Owed on V275.
+- Origin: filed 2026-07-11 from chat (owner NEW-2).
+- Overlay state is session-only, so no persisted migration was needed — the either-on rule reproduces "ON if either was ON" (an overlays object with `jur_etj.on` loads the merged row checked; headless-verified).
 
 ### B721 — Ingestion adapter #1: City of Houston Major Thoroughfare & Freeway Plan (MTFP) `[Site Planner / GIS · ingestion]` (feature) #thoroughfare #gis  *(filed 2026-07-08 from chat, provisional NEW-2; epic B720–B726)*
 `[x]` **BUILT + unit-tested this session (branch `claude/thoroughfare-model-houston-ejq2zg`) — the live PULL is egress-BLOCKED from the sandbox (org policy denies houstontx.gov / elaws.us, confirmed via the agent proxy), so it parks in ⏳ Verify → V274.** The adapter is code-complete and tested; only the network fetch of the real Houston layer + the reconcile against its live schema/widths is owed.

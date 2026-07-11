@@ -183,7 +183,8 @@ export const EVIDENCE = {
  * the layer keeps its id (`elevation`) and every saved toggle state survives. */
 export const TERRAIN = {
   elevation: {
-    kind: "esriImage", label: "Ground relief (low = blue, high = red)",
+    kind: "esriImage", label: "Elevation shading", // B760: plain label; the blue→red key lives in the ⓘ note
+
     url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
     // B703: a custom rendering-rule CHAIN (object, passed through whole by
     // imageLayerOptions) instead of a named template. The old named template
@@ -221,7 +222,7 @@ export const TERRAIN = {
       },
     },
     opacity: 0.55, source: "USGS 3DEP",
-    note: "Colors are RELATIVE TO THE CURRENT VIEW — the ramp re-stretches to the lowest/highest ground on screen, so blue here ≠ blue after panning. LiDAR bare-earth (NAVD88); screening only — verify with survey. The cross-section tool samples the same data.",
+    note: "Low = blue, high = red. Colors are RELATIVE TO THE CURRENT VIEW — the ramp re-stretches to the lowest/highest ground on screen, so blue here ≠ blue after panning. LiDAR bare-earth (NAVD88); screening only — verify with survey. The cross-section tool samples the same data. Loads at site/neighborhood zoom.",
   },
   /* B704: labeled 1-ft contour lines generated CLIENT-SIDE from the raw 3DEP grid
    * (the public service's canned contour renderings are raster-only and unlabeled —
@@ -237,7 +238,7 @@ export const TERRAIN = {
    * the tract sheets. Flat/ambiguous ground gets NO arrow (never invent a direction).
    * Seed of the future storm-outfall flow-accumulation feature (D8 in flowField.js). */
   flowdir: {
-    kind: "flowdir", label: "Drainage direction (screening)",
+    kind: "flowdir", label: "Water flow direction", // B760: plain label; arrow semantics live in the ⓘ note
     source: "USGS 3DEP", opacity: 0.9,
     note: `Downhill direction of the ground surface — bolder/longer arrow = steeper fall. Flat or unclear spots get no arrow rather than a guess. Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — confirm drainage with your civil engineer.`,
   },
@@ -266,15 +267,22 @@ export const JURISDICTIONS = {
     url: JURISDICTION_SOURCES.county.url, minZoom: 6, color: "#374151", weight: 2.4, opacity: 0.85,
     note: "Texas county lines (TxDOT). A has-jurisdiction boundary, not a service area.",
   },
+  // B761: city limits + ETJ are presented as ONE panel row ("City limits & ETJ") that
+  // drives BOTH of these layers. They stay two separate data pipelines / cache keys /
+  // identify wirings — only the panel toggle merges. City draws SOLID; ETJ draws DASHED in
+  // the SAME hue (line-style, not color, is the limits-vs-ETJ distinction — it survives every
+  // basemap and colorblindness). The merged row's ⓘ carries both sources + the caveat below.
   jur_city: {
     kind: "vector", label: "City limits",
     url: JURISDICTION_SOURCES.city.url, minZoom: 9, color: "#1d4ed8", weight: 1.8, opacity: 0.85,
     note: "Texas city limits (TxGIO). Inside = in the city; a parcel in no city is unincorporated. NOT proof of utility service.",
+    mergeWith: "jur_etj", mergeLabel: "City limits & ETJ", // B761: the composite panel row
+    infoCaveat: "A boundary means the city HAS JURISDICTION here (it can tax / regulate) — not that it serves or connects utilities to a parcel.",
   },
   jur_etj: {
     kind: "vector", label: "City ETJ (Houston region)",
-    url: HGAC_ETJ.url, minZoom: 9, color: "#7c3aed", weight: 1.6, opacity: 0.85,
-    note: "City extraterritorial jurisdiction across the H-GAC 13-county region (blank elsewhere — there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
+    url: HGAC_ETJ.url, minZoom: 9, color: "#1d4ed8", dash: true, weight: 1.6, opacity: 0.85, // B761: same hue as city, dashed
+    note: "City ETJ across the H-GAC 13-county region — blank elsewhere (there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
   },
   jur_mud: {
     // Statewide MUD / WCID / water-district boundaries from TCEQ (the agency with
@@ -286,9 +294,12 @@ export const JURISDICTIONS = {
     // status still flag a genuine outage honestly. (harcresearch.org on the env egress
     // allowlist since 2026-06-19; MUD tile paint verified headless from a fresh session
     // 2026-06-19 — V44 PASS, see VERIFICATION.md.)
-    kind: "dynamic", label: "MUD / water districts (TCEQ, statewide)",
+    kind: "dynamic", label: "MUD / water districts", // B760: plain label; TCEQ/statewide provenance lives in the ⓘ
     url: GIS_SOURCES.mud.serviceUrl, layers: null, opacity: 0.55, // registry row (B629) — render + identify share one source of truth
     note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. Verify against the district / tax statement.",
+    // B760: the has-jurisdiction caveat that used to be the Jurisdictions group paragraph now
+    // survives ONLY here (and on the merged limits/ETJ row), where a district outline is a real trap.
+    infoCaveat: "A boundary means the district HAS JURISDICTION here (it can tax / regulate) — not that it serves or connects water/sewer to a parcel.",
   },
   jur_road_authority: {
     // NEW-2/B571 — the road-authority overlay: the actual fronting roads drawn and

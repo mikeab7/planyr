@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-11 @ `1ee7d30` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-11 @ `3565a9f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_238 source files mapped._
+_240 source files mapped._
 
 ## infra
 
@@ -215,6 +215,8 @@ _238 source files mapped._
   - _exports_: `default (FloodMitigationCard)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
   - _exports_: `default (LayerPanel)`
+- **`src/workspaces/site-planner/components/RowInfo.jsx`** — Per-row ⓘ info popover for the Layers panel (source · vintage/age · notes); hover/click, portal via AnchoredMenu (B760)
+  - _exports_: `default (RowInfo)`
 - **`src/workspaces/site-planner/components/SiteAnalysis.jsx`** — Site Analysis panel: presence-first environmental/regulatory screening of active parcels with honest present/none/unknown/unavailable states
   - _exports_: `default (SiteAnalysis)`
 - **`src/workspaces/site-planner/components/SiteReviewModal.jsx`** — Legacy-site migration wizard: step through on-device sites to save-to-cloud, keep-on-device, or discard one by one
@@ -325,6 +327,8 @@ _238 source files mapped._
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelLayout.js`** — Pure label level-of-detail plus collision engine: line-dropping by priority, greedy overlap resolution, leader overflow, and dimension-callout zoom gates
   - _exports_: `boxesOverlap`, `boxOf`, `buildingLabelLines`, `DETAIL_LABEL_MIN_PX`, `detailLabelVisible`, `DIM_CALLOUT_MIN_PPF`, `dimCalloutVisible`, `fitLines`, `layoutLabels`, `suppressedDimIds`
+- **`src/workspaces/site-planner/lib/layerPanelInfo.js`** — Pure Layers-panel row helpers: per-row ⓘ content assembly + merged City/ETJ combined-status precedence (B760/B761)
+  - _exports_: `combineLayerStatus`, `rowInfoSections`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
   - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `TRANSIENT_STATUS`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
