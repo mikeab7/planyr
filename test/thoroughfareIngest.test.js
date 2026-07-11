@@ -67,7 +67,7 @@ describe("EWKT geometry", () => {
 describe("featureToRow (Houston config)", () => {
   it("normalizes a major-thoroughfare feature end to end", () => {
     const row = featureToRow(
-      lineFeature({ OBJECTID: 42, FULL_NAME: "Westheimer Rd", HIER_TABLE: "Major Thoroughfare", ST_STATUS: "Existing" }, HOU),
+      lineFeature({ OBJECTID: 42, FULL_NAME: "Westheimer Rd", ST_TYPE: "Major Thoroughfare", ST_STATUS: "Existing" }, HOU),
       HOUSTON,
     );
     expect(row.jurisdiction).toBe("coh");
@@ -85,17 +85,17 @@ describe("featureToRow (Houston config)", () => {
 
   it("maps a proposed transit corridor; width null until verified", () => {
     const row = featureToRow(
-      lineFeature({ OBJECTID: 7, NAME: "Future Transit", HIER_TABLE: "Transit Corridor", ST_STATUS: "Proposed" }, HOU),
+      lineFeature({ OBJECTID: 7, NAME: "Future Transit", ST_TYPE: "Transit Corridor Street", ST_STATUS: "Proposed" }, HOU),
       HOUSTON,
     );
     expect(row.classification).toBe("transit_corridor");
     expect(row.status).toBe("proposed");
-    expect(row.ultimate_row_ft).toBeNull(); // provisional class — not guessed
+    expect(row.ultimate_row_ft).toBeNull(); // MTFP: "No specific ROW minimum" — not guessed
   });
 
-  it("falls back to 'other' for an unknown hierarchy value (never dropped)", () => {
+  it("falls back to 'other' for an unknown ST_TYPE value (never dropped)", () => {
     const row = featureToRow(
-      lineFeature({ OBJECTID: 9, NAME: "Cul de sac", HIER_TABLE: "Alleyway", ST_STATUS: "Existing" }, HOU),
+      lineFeature({ OBJECTID: 9, NAME: "Cul de sac", ST_TYPE: "Alleyway", ST_STATUS: "Existing" }, HOU),
       HOUSTON,
     );
     expect(row.classification).toBe("other");
@@ -105,17 +105,18 @@ describe("featureToRow (Houston config)", () => {
 
   it("prefers FULL_NAME over NAME, and defaults status to existing when blank", () => {
     const row = featureToRow(
-      lineFeature({ OBJECTID: 1, FULL_NAME: "Kirby Dr", NAME: "KIRBY", HIER_TABLE: "Collector", ST_STATUS: "" }, HOU),
+      lineFeature({ OBJECTID: 1, FULL_NAME: "Kirby Dr", NAME: "KIRBY", ST_TYPE: "Major Collector", ST_STATUS: "" }, HOU),
       HOUSTON,
     );
     expect(row.street_name).toBe("Kirby Dr");
     expect(row.classification).toBe("collector_major");
+    expect(row.ultimate_row_ft).toBe(80); // resolved from the verified MTFP Major Collector standard
     expect(row.status).toBe("existing");
   });
 
   it("handles a multi-part centerline", () => {
     const row = featureToRow(
-      { type: "Feature", properties: { OBJECTID: 5, HIER_TABLE: "Freeway" },
+      { type: "Feature", properties: { OBJECTID: 5, ST_TYPE: "Freeway" },
         geometry: { type: "MultiLineString", coordinates: [HOU, HOU] } },
       HOUSTON,
     );
@@ -126,7 +127,7 @@ describe("featureToRow (Houston config)", () => {
 
   it("reads an Esri JSON feature (attributes + paths), not just GeoJSON", () => {
     const row = featureToRow(
-      { attributes: { OBJECTID: 11, FULL_NAME: "Bissonnet St", HIER_TABLE: "Major Thoroughfare", ST_STATUS: "Existing" },
+      { attributes: { OBJECTID: 11, FULL_NAME: "Bissonnet St", ST_TYPE: "Major Thoroughfare", ST_STATUS: "Existing" },
         geometry: { paths: [HOU] } },
       HOUSTON,
     );
@@ -136,6 +137,30 @@ describe("featureToRow (Houston config)", () => {
     expect(row.ultimate_row_ft).toBe(100);
     expect(row.geom).toMatch(/^SRID=4326;MULTILINESTRING/);
     expect(row.geom_2278).toMatch(/^SRID=2278;MULTILINESTRING/);
+  });
+
+  // Locks in the crosswalk + width resolution against the ACTUAL live ST_TYPE domain values
+  // reconciled on V274 (2026-07-11). All 10 live values + the fall-through are covered here.
+  it.each([
+    ["Freeway", "freeway", null],
+    ["Tollway", "freeway", null],
+    ["Frontage", "freeway", null],
+    ["Major Thoroughfare", "major_thoroughfare", 100],
+    ["Principal Thoroughfare", "major_thoroughfare", 100],
+    ["Thoroughfare", "major_thoroughfare", 100],
+    ["Transit Corridor Street", "transit_corridor", null],
+    ["Major Collector", "collector_major", 80],
+    ["Minor Collector", "collector_minor", 60],
+    ["N/A", "other", null],
+  ])("maps live ST_TYPE %s → %s (width %s)", (stType, klass, width) => {
+    const row = featureToRow(
+      lineFeature({ OBJECTID: 1, FULL_NAME: "Some St", ST_TYPE: stType, ST_STATUS: "Sufficient width" }, HOU),
+      HOUSTON,
+    );
+    expect(row.classification).toBe(klass);
+    expect(row.raw_classification).toBe(stType);
+    expect(row.ultimate_row_ft).toBe(width);
+    expect(row.status).toBe("existing"); // "Sufficient width" is an existing road, not proposed
   });
 
   it("skips features with no line geometry or no id", () => {
