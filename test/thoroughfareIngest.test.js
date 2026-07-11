@@ -35,6 +35,9 @@ describe("geometryToParts", () => {
     const mls = { type: "MultiLineString", coordinates: [HOU, HOU] };
     expect(geometryToParts(mls)).toEqual([HOU, HOU]);
   });
+  it("reads an Esri JSON polyline's paths (f=json shape)", () => {
+    expect(geometryToParts({ paths: [HOU, HOU] })).toEqual([HOU, HOU]);
+  });
   it("returns [] for points/polygons/null", () => {
     expect(geometryToParts({ type: "Point", coordinates: [-95, 29] })).toEqual([]);
     expect(geometryToParts(null)).toEqual([]);
@@ -121,6 +124,20 @@ describe("featureToRow (Houston config)", () => {
     expect(row.geom).toContain("), ("); // two parts joined into one MULTILINESTRING
   });
 
+  it("reads an Esri JSON feature (attributes + paths), not just GeoJSON", () => {
+    const row = featureToRow(
+      { attributes: { OBJECTID: 11, FULL_NAME: "Bissonnet St", HIER_TABLE: "Major Thoroughfare", ST_STATUS: "Existing" },
+        geometry: { paths: [HOU] } },
+      HOUSTON,
+    );
+    expect(row.source_feature_id).toBe("11");
+    expect(row.street_name).toBe("Bissonnet St");
+    expect(row.classification).toBe("major_thoroughfare");
+    expect(row.ultimate_row_ft).toBe(100);
+    expect(row.geom).toMatch(/^SRID=4326;MULTILINESTRING/);
+    expect(row.geom_2278).toMatch(/^SRID=2278;MULTILINESTRING/);
+  });
+
   it("skips features with no line geometry or no id", () => {
     expect(featureToRow(lineFeature({ OBJECTID: 1 }, [[-95, 29]]), HOUSTON)).toBeNull(); // 1-point line
     expect(featureToRow({ type: "Feature", properties: { OBJECTID: 1 }, geometry: { type: "Point", coordinates: [-95, 29] } }, HOUSTON)).toBeNull();
@@ -129,13 +146,18 @@ describe("featureToRow (Houston config)", () => {
 });
 
 describe("buildQueryUrl", () => {
-  it("builds a paged GeoJSON query reprojected to WGS84", () => {
+  it("builds a paged Esri-JSON query reprojected to WGS84", () => {
     const url = buildQueryUrl(HOUSTON, { offset: 2000, pageSize: 500 });
     expect(url).toContain(`${HOUSTON.serviceUrl}/query?`);
-    expect(url).toContain("f=geojson");
+    expect(url).toContain("f=json");
     expect(url).toContain("outSR=4326");
     expect(url).toContain("returnGeometry=true");
     expect(url).toContain("resultOffset=2000");
     expect(url).toContain("resultRecordCount=500");
+  });
+  it("omits resultRecordCount without a pageSize (server uses its maxRecordCount) and can order by OBJECTID", () => {
+    const url = buildQueryUrl(HOUSTON, { offset: 0, orderByObjectId: true });
+    expect(url).not.toContain("resultRecordCount");
+    expect(url).toContain("orderByFields=OBJECTID");
   });
 });
