@@ -476,6 +476,9 @@ export function buildJurisdictionFinding(j) {
   rows.push(["City", j.unincorporated ? "Unincorporated" : j.city.join(" + "), j.ages.city]);
   const etjState = (j.sources.find((s) => s.id === "etj") || {}).state;
   rows.push(["ETJ", j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : (etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
+  // B764: the school district (ISD) — the biggest single line on most Texas tax bills. Only
+  // rows out when the identify actually ran ISD (j.isd present), so older callers are unchanged.
+  if (Array.isArray(j.isd)) rows.push(["School district", j.isd.length ? j.isd.join(" + ") : "—", j.ages.isd]);
   return {
     id: "jurisdiction", category: "Jurisdiction", label: "City / ETJ / county",
     status: "info", summary: null, detail: [], rows,

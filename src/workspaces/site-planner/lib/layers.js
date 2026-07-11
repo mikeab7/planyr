@@ -284,6 +284,16 @@ export const JURISDICTIONS = {
     url: HGAC_ETJ.url, minZoom: 9, color: "#1d4ed8", dash: true, weight: 1.6, opacity: 0.85, // B761: same hue as city, dashed
     note: "City ETJ across the H-GAC 13-county region — blank elsewhere (there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
   },
+  jur_isd: {
+    // B764: statewide school-district boundaries (TEA). ISD is usually the biggest single
+    // line on a Texas tax bill, and was the most glaring absence in this group. Cached vector
+    // tier (VECTOR_SOURCES.jur_isd) with zoom-gated name labels + click-identify; the `url` is
+    // the live esri-leaflet fallback. Violet — the hue freed up when ETJ moved to city blue (B761).
+    kind: "vector", label: "School districts (ISD)", source: "Texas Education Agency (TEA)",
+    url: JURISDICTION_SOURCES.isd.url, minZoom: 8, color: "#7c3aed", weight: 1.6, opacity: 0.85,
+    note: "Texas school-district boundaries (TEA, SY 2022-23). A taxing/attendance boundary — NOT a service network. Verify with the district.",
+    infoCaveat: "ISD lines are TAXING / attendance boundaries (usually the biggest line on a Texas tax bill) — not a utility service area.",
+  },
   jur_mud: {
     // Statewide MUD / WCID / water-district boundaries from TCEQ (the agency with
     // supervisory authority over Texas water districts), republished by HARC (Houston
@@ -361,6 +371,7 @@ export const LAYER_VINTAGE = {
   jur_county: "TxDOT county boundaries — current edition",
   jur_city: "TxGIO city limits — current edition",
   jur_etj: "H-GAC ETJ — current edition",
+  jur_isd: "TEA school districts — SY 2022-23 edition",
   jur_mud: "TCEQ water districts (via HARC) — current edition",
   jur_road_authority: "TxDOT Roadway Inventory — current edition",
   // Per-county utility layers

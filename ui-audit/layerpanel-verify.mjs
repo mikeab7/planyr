@@ -77,8 +77,10 @@ try {
   ok("ⓘ popover shows the layer name", noteText.includes("Elevation shading"));
   ok("ⓘ popover shows source (USGS 3DEP)", noteText.includes("USGS 3DEP"));
   ok("ⓘ popover shows a vintage line", noteText.includes("As of:"));
+  await page.mouse.move(2, 2); // move the pointer off the ⓘ so hover can't hold the popover open
   await page.keyboard.press("Escape");
-  ok("Escape closes the ⓘ popover", await note.count() === 0 || !(await note.isVisible().catch(() => false)));
+  const closedByEsc = await note.waitFor({ state: "detached", timeout: 3000 }).then(() => true).catch(() => false);
+  ok("Escape closes the ⓘ popover", closedByEsc);
 
   // ── B763: the passive jurisdiction badge renders each case ──
   ok("badge (in city) reads 'City of Houston · Harris County'", (await text("#badge-city")).includes("City of Houston · Harris County"));
@@ -87,6 +89,15 @@ try {
   ok("badge (straddle) lists both cities + ⚑ marker", /City of Houston \/ City of Katy · Harris County/.test(await text("#badge-straddle")) && (await text("#badge-straddle")).includes("⚑"));
   ok("badge tooltip carries source + screening note", (await page.locator('#badge-city [data-testid="jurisdiction-badge"]').getAttribute("title") || "").includes("Source: TxDOT / TxGIO / H-GAC"));
   ok("null badge renders nothing", (await page.locator('#badge-null [data-testid="jurisdiction-badge"]').count()) === 0);
+
+  // ── B764: ISD panel row + ⓘ (the live endpoint itself is curl-verified via the proxy) ──
+  ok("Jurisdictions group lists 'School districts (ISD)'", harris.includes("School districts (ISD)"));
+  const isdInfo = page.locator('#panel-harris button[aria-label="About School districts (ISD)"]');
+  await isdInfo.click();
+  const isdNote = page.locator('[role="note"]');
+  await isdNote.waitFor({ state: "visible", timeout: 5000 });
+  ok("ISD ⓘ names the TEA source", (await isdNote.innerText()).includes("Texas Education Agency"));
+  await page.keyboard.press("Escape");
 } finally {
   await browser.close();
 }

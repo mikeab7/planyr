@@ -36,7 +36,7 @@ function fakeFetch(routes) {
   fn.calls = 0;
   return fn;
 }
-const CITY = "Texas_City_Boundaries", COUNTY = "Texas_County_Boundaries", ROAD = "TxDOT_Roadway_Inventory", ETJ = "HGAC_City_ETJ";
+const CITY = "Texas_City_Boundaries", COUNTY = "Texas_County_Boundaries", ROAD = "TxDOT_Roadway_Inventory", ETJ = "HGAC_City_ETJ", ISD = "Current_Districts";
 
 // ----------------------------------------------------------------------------
 describe("roadAuthority — coded agency → who maintains (calibrated)", () => {
@@ -208,6 +208,7 @@ describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
       ? [{ attributes: { city_name: "Houston" } }, { attributes: { city_name: "Bellaire" } }] // a parcel straddling two cities
       : [{ attributes: { city_name: "Houston" } }],
     [ETJ]: () => [], // in-city / most points are NOT in the (Houston-only) ETJ ring
+    [ISD]: () => [{ attributes: { NAME: "Houston ISD", DISTRICT_N: 101912 } }], // B764: ISD joins the identify
   };
   it("a point in one city + county: names resolved, no straddle, not unincorporated", async () => {
     const seen = [];
@@ -217,10 +218,12 @@ describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
     });
     expect(out.county).toEqual(["Harris"]);
     expect(out.city).toEqual(["Houston"]);
+    expect(out.isd).toEqual(["Houston ISD"]); // B764
     expect(out.unincorporated).toBe(false);
     expect(out.straddle).toBe(false);
     expect(seen).toContain("city:loaded");
     expect(seen).toContain("county:loaded");
+    expect(seen).toContain("isd:loaded");
     // ETJ source is wired (COHGIS) but this in-city point isn't in the ETJ ring → empty
     expect(out.etj).toEqual([]);
     expect(out.sources.find((s) => s.id === "etj").state).toBe("empty");
@@ -487,10 +490,19 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
     expect(b.text).toBe("Unincorporated · Harris County / Fort Bend County");
   });
 
-  it("appends an ISD when provided (B764 forward-compat)", () => {
-    const b = formatJurisdictionBadge({ city: [], etj: ["Baytown"], county: ["Harris"] }, { isd: "Goose Creek CISD" });
-    expect(b.text).toBe("City of Baytown — ETJ · Harris County · Goose Creek CISD");
-    expect(b.isd).toBe("Goose Creek CISD");
+  it("appends the ISD from the identify result (B764: j.isd)", () => {
+    const b = formatJurisdictionBadge({ city: [], etj: ["Baytown"], county: ["Harris"], isd: ["Goose Creek Consolidated ISD"] });
+    expect(b.text).toBe("City of Baytown — ETJ · Harris County · Goose Creek Consolidated ISD");
+    expect(b.isd).toBe("Goose Creek Consolidated ISD");
+  });
+  it("an explicit opts.isd overrides the result's ISD", () => {
+    const b = formatJurisdictionBadge({ city: [], etj: ["Baytown"], county: ["Harris"], isd: ["A ISD"] }, { isd: "B ISD" });
+    expect(b.text).toBe("City of Baytown — ETJ · Harris County · B ISD");
+  });
+  it("lists both districts when a parcel straddles two ISDs", () => {
+    const b = formatJurisdictionBadge({ city: ["Houston"], etj: [], county: ["Harris"], isd: ["Houston ISD", "Aldine ISD"], straddle: true });
+    expect(b.text).toBe("City of Houston · Harris County · Houston ISD / Aldine ISD");
+    expect(b.straddle).toBe(true);
   });
 
   it("returns null for a missing result (failed identify → no badge)", () => {

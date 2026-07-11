@@ -9,6 +9,11 @@ import JurisdictionBadge from "../src/workspaces/site-planner/components/Jurisdi
 import { defaultOverlayState } from "../src/workspaces/site-planner/lib/layers.js";
 import { formatJurisdictionBadge } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 
+// NB: the ISD endpoint itself is verified LIVE via curl (through the sandbox HTTPS proxy) — see
+// the B764 evidence in VERIFICATION.md. A browser-side fetch can't be used to verify it HERE
+// because headless Chromium in this sandbox has no external-network egress (it doesn't use the
+// proxy), so any in-page fetch to an agency host fails — that on-map render check is owed live.
+
 function Panel({ id, county, mutate }) {
   const [ov, setOv] = useState(() => { const o = defaultOverlayState(); if (mutate) mutate(o); return o; });
   return (

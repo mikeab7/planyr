@@ -54,6 +54,14 @@ export const JURISDICTION_SOURCES = {
     sourceName: "TxGIO (statewide)",
     note: "Texas city limits (TxGIO). A point in no city reads as unincorporated. Screening only — verify with the city.",
   },
+  isd: {
+    id: "isd", role: "isd", label: "School district", kind: "polygon",
+    url: GIS_SOURCES.isd.serviceUrl, // TEA statewide school-district boundaries (B764) — from the registry
+    fields: { name: "NAME", number: "DISTRICT_N" },
+    ttl: 30 * 24 * 3600 * 1000, // districts change rarely; a month keeps the cached copy fresh
+    sourceName: "Texas Education Agency (TEA)",
+    note: "School district (ISD) — a taxing / attendance boundary, not a service network. Screening only; verify with the district.",
+  },
   // ETJ is fragmented — there is NO statewide ETJ layer, and unlike Houston (where
   // H-GAC publishes ONE regional layer) the Austin/DFW metros publish ETJ city-by-city.
   // So ETJ is a REGION-ROUTED LIST of sources (see ETJ_SOURCES below), not one row here:
@@ -396,13 +404,13 @@ const humanize = (e) => gisErrorMessage(e);
 // ---------------------------------------------------------------------------
 export async function identifyJurisdiction(lng, lat, opts = {}) {
   const geom = opts.ring && opts.ring.length >= 3 ? { ring: opts.ring } : { lng, lat };
-  const roles = opts.roles || ["county", "city", "etj"];
+  const roles = opts.roles || ["county", "city", "etj", "isd"]; // B764: ISD joins the default identify
   const out = {
-    point: { lng, lat }, city: [], county: [], etj: [],
+    point: { lng, lat }, city: [], county: [], etj: [], isd: [],
     unincorporated: false, straddle: false, ages: {}, sources: [],
     note: "Screening only — verify with the jurisdiction. Boundaries (especially ETJ) change.",
   };
-  // Each role resolves to ONE source (county/city) or a region-routed LIST (etj).
+  // Each role resolves to ONE source (county/city/isd) or a region-routed LIST (etj).
   const sourcesForRole = (role) =>
     role === "etj" ? etjSourcesForPoint(lat, lng) : (JURISDICTION_SOURCES[role] ? [JURISDICTION_SOURCES[role]] : []);
   await Promise.all(roles.map(async (role) => {
@@ -432,7 +440,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     opts.onStatus && opts.onStatus(role, state, errPart ? humanize(errPart.error) : null, { ts: parts[0]?.ts ?? null, stale: parts.some((p) => p.stale) });
   }));
   out.unincorporated = out.city.length === 0;
-  out.straddle = out.city.length > 1 || out.county.length > 1;
+  out.straddle = out.city.length > 1 || out.county.length > 1 || out.isd.length > 1;
   return out;
 }
 
@@ -455,7 +463,10 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const parts = [...cities.map((c) => `City of ${c}`), ...etjs.map((c) => `City of ${c} — ETJ`)];
   const jur = parts.length ? parts.join(" / ") : "Unincorporated";
   const county = counties.length ? counties.map((c) => `${c} County`).join(" / ") : null;
-  const isd = opts.isd ? String(opts.isd) : null; // B764: appended when the ISD layer lands
+  // B764: the ISD from the identify result (j.isd, TEA names already carry the ISD/CISD suffix),
+  // or an explicit opts.isd override. Multiple → a straddle across districts.
+  const isds = uniq((j.isd || []).filter((v) => v != null && v !== "").map(String));
+  const isd = opts.isd ? String(opts.isd) : (isds.length ? isds.join(" / ") : null);
   const text = [jur, county, isd].filter(Boolean).join(" · ");
   return { text, jur, county, isd, straddle: !!j.straddle };
 }

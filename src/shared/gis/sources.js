@@ -193,6 +193,35 @@ export const GIS_SOURCES = {
     lastVerified: "2026-06-29",
     fixtures: [],
   },
+  isd: {
+    key: "isd",
+    label: "School districts (ISD)",
+    provider: "Texas Education Agency (TEA)",
+    // Authoritative statewide school-district boundaries, published by the TEA GIS admin
+    // (owner GISAdmin_TEA_Texas) on ArcGIS Online. Layer index is in the URL (FeatureServer/0
+    // = "SchoolDistricts_SY2223"). Verified live 2026-07-11: 1,018 districts statewide, CORS
+    // `*` (clean from any origin), NAME already carries the "ISD"/"CISD"/"Consolidated ISD"
+    // suffix, DISTRICT_N = the TEA district number. Native SR is NAD83 Texas Lambert (meters),
+    // so a query MUST pass inSR/outSR 4326 + a geometry spatialReference (both the identify and
+    // the vector pull already do) — a bare x,y with no spatialReference returns nothing.
+    serviceUrl: "https://services2.arcgis.com/5MVN2jsqIrNZD4tP/arcgis/rest/services/Current_Districts_2023/FeatureServer/0",
+    layerId: null, // url already includes the layer index
+    geometryType: "polygon",
+    fields: { name: "NAME", number: "DISTRICT_N" },
+    coverage: "statewide",
+    tier: "production",
+    lastVerified: "2026-07-11",
+    fixtures: [
+      // Coverage sanity — a county-clipped or wrong source fails these immediately.
+      { label: "Goose Creek CISD (Baytown)", point: [-94.977, 29.735], expectMinCount: 1 },
+      { label: "Houston ISD (downtown)", point: [-95.37, 29.76], expectMinCount: 1 },
+      { label: "Katy ISD", point: [-95.79, 29.79], expectMinCount: 1 },
+    ],
+    notes:
+      "TEA school-district boundaries (SY 2022-23 edition), a TAXING / attendance boundary — " +
+      "NOT a service network. Approximate, for general information; updated ~annually by TEA.",
+  },
+
   etj_hgac: {
     key: "etj_hgac",
     label: "ETJ — Houston-Galveston (H-GAC)",
@@ -300,7 +329,7 @@ export const GIS_SOURCES = {
 
 // Keys grouped by the surface that consumes them (handy for the audit + tests).
 export const ANALYSIS_KEYS = ["flood", "wetlands", "oilgas", "pipelines"];
-export const JURISDICTION_KEYS = ["county", "city", "road", "etj_hgac", "etj_austin", "etj_fortworth"];
+export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth"];
 export const DETENTION_KEYS = ["mud", "hcfcdChannels", "hcfcdWatersheds"]; // B629 drainage resolver
 
 /* Look a row up by key (throws on a typo so a bad reference fails fast, not silently). */

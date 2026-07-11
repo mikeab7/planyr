@@ -9698,6 +9698,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
                                 {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
                                 {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "no ETJ layer here (Houston/Austin/DFW covered)" : "not in a city ETJ"), jurInfo.j.ages.etj)}
+                                {Array.isArray(jurInfo.j.isd) && jurRow("School dist.", jurInfo.j.isd.length ? jurInfo.j.isd.join(" + ") : "—", jurInfo.j.ages.isd)}
                                 {jurRow("Road maint.", jurInfo.road.authorities.length ? jurInfo.road.authorities.join(" · ") + (jurInfo.road.nearest?.route ? ` (${jurInfo.road.nearest.route})` : "") : "unknown", jurInfo.road.ageMs)}
                                 {jurInfo.j.straddle && <div style={{ color: PAL.warn, marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
                                 <div style={{ color: PAL.muted, marginTop: 4, fontStyle: "italic" }}>Screening only — verify with the jurisdiction.</div>

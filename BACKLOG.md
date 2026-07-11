@@ -51,12 +51,6 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
-### B764 — School district (ISD) boundaries layer + identify `[Site Planner / GIS]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-5"; §B1 — highest priority of Part B)*
-`[ ]` Statewide ISD boundary overlay in the Jurisdictions group (row "School districts (ISD)") riding the standard registry/vector/cache/identify pipeline, plus ISD in the jurisdiction identify + the B763 badge. Biggest single tax line for a developer.
-- Verify: live
-- Origin: filed 2026-07-11 from chat (owner NEW-5)
-- Evidence-first candidates (verify in order): TEA ISD boundaries on ArcGIS Online; TxGIO/StratMap school-district boundaries. Recipe: `GIS_SOURCES.isd` → `VECTOR_SOURCES.jur_isd` (`nameTemplate:"{name} ISD"`) → `JURISDICTIONS.jur_isd` → `LAYER_VINTAGE.jur_isd` → identify `role:"isd"`. Coverage fixture: Goose Creek CISD over the Baytown site. Drop + document any source that fails verification — never fake an endpoint.
-
 ### B765 — Special-district layers: ESD, TIRZ (+ audit LID/FWSD coverage of the TCEQ row) `[Site Planner / GIS]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-6"; §B2)*
 `[ ]` Evidence-first source hunt + registry rows for Emergency Services Districts and TIRZs (Houston-area first); audit which district TYPES the current TCEQ water-districts service actually carries (MUD/WCID/LID/FWSD/SUD…) and close or honestly document gaps in the `jur_mud` ⓘ. Management districts = stretch.
 - Verify: live
@@ -1448,6 +1442,12 @@ browser-equipped teammate (Cowork) or Michael on planyr.io confirms them. An ite
 back to 🔲 Open, `Recurrence:` line, `(×N)` title). Cross-reference: the live-browser click-throughs are
 also tracked in `VERIFICATION.md` (`V###`) — that file is the canonical to-do list for the teammate; this
 section is the backlog-side mirror so an item is never "done" until it's actually been seen working.
+
+### B764 — School district (ISD) boundaries layer + identify `[Site Planner / GIS]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-5"; §B1. → V277. Implemented + shipped PR3 same session; parked here for the on-aerial render/label/identify check.)*
+`[x]` **DONE this session — added a statewide "School districts (ISD)" overlay to the Jurisdictions group riding the standard registry → vector → cache → identify pipeline, plus ISD in the jurisdiction identify AND the B763 header badge. EVIDENCE-FIRST source, verified LIVE via the sandbox HTTPS proxy (curl): TEA's `Current_Districts_2023/FeatureServer/0` (owner GISAdmin_TEA_Texas) — 1,018 districts statewide, CORS `*`, `NAME` (already carries the ISD/CISD suffix) + `DISTRICT_N` (TEA number), native NAD83 Texas Lambert so a query passes inSR/outSR 4326 + geometry SR (both our identify + vector-pull builders already do). Coverage confirmed live: Baytown → Goose Creek Consolidated ISD, downtown Houston → Houston ISD, Katy → Katy ISD, Sugar Land → Fort Bend ISD.**
+- Verify: live — **GIS-endpoint + zoom-/data-density-dependent rendering** class: the endpoint is proven live (curl), and the wiring is proven in the sandbox (unit tests + a headless panel render showing the row + its TEA ⓘ), but the actual on-aerial polygon PAINT + zoom-gated name labels + click-identify popover need a real Leaflet map — which the headless browser here can't network-load (no external egress for in-page fetch). Owed on V277.
+- Origin: filed 2026-07-11 from chat (owner NEW-5).
+- Recipe: `GIS_SOURCES.isd` (sources.js) → `VECTOR_SOURCES.jur_isd` (bbox tiers like city; `nameTemplate:"{name}"` since NAME already has the suffix) → `JURISDICTIONS.jur_isd` (violet `#7c3aed` — the hue freed when ETJ moved to blue) → `LAYER_VINTAGE.jur_isd` → `JURISDICTION_SOURCES.isd` + `role:"isd"` in the default identify. `formatJurisdictionBadge` appends `j.isd`; the Site Analysis + point-identify cards row out "School district". Tests: +ISD identify/badge cases in `jurisdiction.test.js`, an ISD registry+fixtures test in `gisSources.test.js`. Full suite 3456 + lint + build green.
 
 ### B763 — Passive jurisdiction badge on the active parcel/site `[Site Planner]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-4"; §A6. → V276. Implemented + shipped PR2 same session; parked here for the live signed-in badge + correct-jurisdiction check.)*
 `[x]` **DONE this session — the site-header now shows a compact chip (`components/JurisdictionBadge.jsx`) reading which jurisdiction the ACTIVE parcel is in — "City of Houston · Harris County" / "City of Baytown — ETJ · Harris County" / "Unincorporated · Waller County" — without the user toggling any boundary layer. Auto-runs the SAME whole-parcel, straddle-aware, SWR-cached `identifyJurisdiction` once per active-parcel geometry (memoized per `ringsSignature`; a `useRef(Map)` caches by geometry hash), so it fires on activation/add and NEVER per pan. Map-click identify (`checkJurisdiction`) is unchanged. Pure formatter `formatJurisdictionBadge` (jurisdiction.js) + 9 unit tests; 6-check headless render (`ui-audit/layerpanel-verify.mjs`); full suite (3453) + lint + build green.**
