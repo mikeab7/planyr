@@ -2320,7 +2320,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (!siteId) return undefined;
     const onStore = (e) => {
-      if (e && e.key && !e.key.startsWith("planarfit:sites:")) return;
+      // Only the actual sites STORE keys (planarfit:sites:v1 / :cloud:<uid>) drive the cross-tab fold.
+      // The prefix also matches the version-history ring (:history:) and the B757 delete-tombstone
+      // (:deltomb:) keys — a write to either is not a content change, so skip it (B757; every default
+      // save writes the history ring too, which otherwise ran this fold 2-3× per cross-tab edit).
+      if (e && e.key && (!e.key.startsWith("planarfit:sites:") || e.key.startsWith("planarfit:sites:history:") || e.key.startsWith("planarfit:sites:deltomb:"))) return;
       // B672 — signed-in tabs converge through the site_elements realtime channel + refetch-replace
       // (rows are canonical); the localStorage union fold below would fight that (it can resurrect
       // an element a row-tombstone just removed). It remains the signed-OUT cross-tab convergence.
