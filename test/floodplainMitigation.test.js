@@ -18,6 +18,8 @@ import {
   distToPolyline,
   deriveBfeFromLines,
   bfeLinesFromFeatureCollection,
+  crossSectionWselFromFeatureCollection,
+  governingCrossSectionWsel,
 } from "../src/workspaces/site-planner/lib/floodplainMitigation.js";
 import { DEFAULT_FLOODPLAIN_RULES, triggerClasses } from "../src/workspaces/site-planner/lib/floodplainRules.js";
 import { feetToLatLng } from "../src/workspaces/site-planner/lib/arcgis.js";
@@ -174,9 +176,12 @@ describe("computeMitigation — the volume core", () => {
     expect(r.unknownReason).toMatch(/0\.2%/);
     expect(r.perClass["02pct"].acres).toBeGreaterThan(0);
   });
-  it("a 0.2% zone under a 1%-only rule (Harris) is simply not in the ledger", () => {
+  it("a 0.2% zone under a 1%-only rule is simply not in the ledger", () => {
+    // (Harris/Fort Bend now extend to the 0.2% band per B758/B760, so use an explicit
+    // 1%-only rule to exercise the "class outside the trigger" path.)
+    const oneOnly = { ...harris, trigger: "1pct" };
     const zone = mkZone("02pct", [rect(0, 0, 100, 100)]);
-    const r = computeMitigation({ footprints: [fp100], zones: [zone], rule: harris,
+    const r = computeMitigation({ footprints: [fp100], zones: [zone], rule: oneOnly,
       elev: { padElevFt: 100, existGradeFt: 90 } });
     expect(r.volumeCf).toBe(0);
     expect(r.intersectAcres).toBe(0);
@@ -241,7 +246,9 @@ describe("computeMitigation — the volume core", () => {
 
   it("flags: unverified rule stamps; unstudied A; NGVD29 datum mismatch", () => {
     const zone = mkZone("1pct", [rect(0, 0, 100, 100)], { zone: "A", unstudiedA: true, vdatum: "NGVD29" });
-    const r = computeMitigation({ footprints: [fp100], zones: [zone], rule: DEFAULT_FLOODPLAIN_RULES.harris,
+    // harris now ships verified:true (B760), so use an explicitly-unverified rule to
+    // exercise the rule_unverified stamp.
+    const r = computeMitigation({ footprints: [fp100], zones: [zone], rule: { ...DEFAULT_FLOODPLAIN_RULES.harris, verified: false },
       elev: { padElevFt: 100, existGradeFt: 90, bfeFt: 95 } });
     expect(r.flags).toContain("rule_unverified");
     expect(r.flags).toContain("unstudied_a");
@@ -338,9 +345,10 @@ describe("straddle + pond-side helpers", () => {
   it("ringInTrigger respects the rule's trigger classes (floodway always counts)", () => {
     const z02 = mkZone("02pct", [rect(0, 0, 100, 100)]);
     const zfw = mkZone("floodway", [rect(0, 0, 100, 100)]);
-    expect(ringInTrigger(rect(0, 0, 50, 50), [z02], harris)).toBe(false); // 0.2% isn't Harris' trigger
+    const oneOnly = { ...harris, trigger: "1pct" }; // harris now extends to 0.2% (B760) — use a 1%-only rule
+    expect(ringInTrigger(rect(0, 0, 50, 50), [z02], oneOnly)).toBe(false); // 0.2% isn't a 1%-only rule's trigger
     expect(ringInTrigger(rect(0, 0, 50, 50), [z02], coh)).toBe(true);
-    expect(ringInTrigger(rect(0, 0, 50, 50), [zfw], harris)).toBe(true);
+    expect(ringInTrigger(rect(0, 0, 50, 50), [zfw], oneOnly)).toBe(true);
     expect(triggerClasses(coh)).toEqual(["1pct", "02pct"]);
   });
   it("floodGeoBbox pads the site envelope and rejects empties", () => {
@@ -509,5 +517,177 @@ describe("computeMitigation / wse1pctForRing — derived-BFE provider precedence
     const ring = rect(10, 10, 30, 30);
     expect(wse1pctForRing(ring, [zone], { derivedBfeFt: 96 })).toEqual({ wseFt: 96, provider: "bfe-line-interp" });
     expect(wse1pctForRing(ring, [zone], { bfeFt: 95, derivedBfeFt: 96 })).toEqual({ wseFt: 95, provider: "manual" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B763 — derived WSE from FEMA S_XS cross-sections (WSEL_REG) + the 0.2% engine seam
+// ---------------------------------------------------------------------------
+describe("crossSectionWselFromFeatureCollection — parse S_XS WSEL_REG with datum guard (B763)", () => {
+  const origin = { lat: 29.77, lon: -95.85 };
+  const xsFeat = (props, coords = [[-95.85, 29.77], [-95.849, 29.771]]) => ({
+    type: "Feature", properties: props, geometry: { type: "LineString", coordinates: coords },
+  });
+  const fc = (features) => ({ type: "FeatureCollection", features });
+
+  it("keeps a NAVD88 cross-section, carrying reach identity + station/letter/streambed", () => {
+    const out = crossSectionWselFromFeatureCollection(fc([
+      xsFeat({ WSEL_REG: 96.4, V_DATUM: "NAVD88", WTR_NM: "Buffalo Bayou", STREAM_STN: 1200, XS_LTR: "K", STRMBED_EL: 80 }),
+    ]), origin);
+    expect(out.sections).toHaveLength(1);
+    expect(out.sections[0].wselFt).toBe(96.4);
+    expect(out.sections[0].wtrNm).toBe("Buffalo Bayou");
+    expect(out.sections[0].streamStn).toBe(1200);
+    expect(out.sections[0].xsLtr).toBe("K");
+    expect(out.sections[0].strmbedElFt).toBe(80);
+    expect(out.sections[0].pts.length).toBeGreaterThanOrEqual(2);
+    expect(Number.isFinite(out.sections[0].pts[0].x)).toBe(true);
+    expect(out.total).toBe(1);
+  });
+  it("drops the -9999 WSEL_REG sentinel entirely (not even a candidate)", () => {
+    const out = crossSectionWselFromFeatureCollection(fc([xsFeat({ WSEL_REG: -9999, V_DATUM: "NAVD88", WTR_NM: "Creek" })]), origin);
+    expect(out.sections).toHaveLength(0);
+    expect(out.total).toBe(0);
+  });
+  it("excludes a non-NAVD88 datum and counts it (never silently mixed)", () => {
+    const out = crossSectionWselFromFeatureCollection(fc([xsFeat({ WSEL_REG: 96, V_DATUM: "NGVD29", WTR_NM: "Creek" })]), origin);
+    expect(out.sections).toHaveLength(0);
+    expect(out.excludedDatum).toBe(1);
+    expect(out.total).toBe(1);
+  });
+  it("uses only the NAVD88 subset when datums are mixed", () => {
+    const out = crossSectionWselFromFeatureCollection(fc([
+      xsFeat({ WSEL_REG: 96, V_DATUM: "NAVD88", WTR_NM: "Creek" }),
+      xsFeat({ WSEL_REG: 96, V_DATUM: "NGVD29", WTR_NM: "Creek" }),
+    ]), origin);
+    expect(out.sections).toHaveLength(1);
+    expect(out.excludedDatum).toBe(1);
+    expect(out.total).toBe(2);
+  });
+  it("streambed sentinel + missing station/letter read as honest null (never fabricated)", () => {
+    const out = crossSectionWselFromFeatureCollection(fc([xsFeat({ WSEL_REG: 96, V_DATUM: "NAVD88", WTR_NM: "Creek", STRMBED_EL: -9999 })]), origin);
+    expect(out.sections[0].strmbedElFt).toBeNull();
+    expect(out.sections[0].streamStn).toBeNull();
+    expect(out.sections[0].xsLtr).toBeNull();
+  });
+  it("a MultiLineString yields one section entry per path, same WSEL/reach", () => {
+    const feat = { type: "Feature", properties: { WSEL_REG: 97, V_DATUM: "NAVD88", WTR_NM: "Creek" }, geometry: { type: "MultiLineString", coordinates: [[[-95.85, 29.77], [-95.849, 29.771]], [[-95.848, 29.772], [-95.847, 29.773]]] } };
+    const out = crossSectionWselFromFeatureCollection(fc([feat]), origin);
+    expect(out.sections).toHaveLength(2);
+    expect(out.sections.every((s) => s.wselFt === 97 && s.wtrNm === "Creek")).toBe(true);
+  });
+  it("null / malformed input → empty result (no throw)", () => {
+    expect(crossSectionWselFromFeatureCollection(null, origin)).toEqual({ sections: [], excludedDatum: 0, total: 0 });
+    expect(crossSectionWselFromFeatureCollection(fc([]), null)).toEqual({ sections: [], excludedDatum: 0, total: 0 });
+  });
+});
+
+describe("governingCrossSectionWsel — nearest reach, highest WSEL_REG (B763)", () => {
+  // A vertical cross-section polyline at x = `x`, on reach `wtrNm`, carrying WSEL_REG.
+  const vsec = (x, wselFt, wtrNm) => ({ wselFt, wtrNm, streamStn: null, xsLtr: null, strmbedElFt: null, pts: [{ x, y: -1000 }, { x, y: 1000 }] });
+
+  it("takes the HIGHEST WSEL_REG among the nearest reach's in-range sections", () => {
+    const sections = [vsec(100, 95, "Bayou"), vsec(200, 97, "Bayou"), vsec(400, 99, "Bayou")];
+    const r = governingCrossSectionWsel({ point: { x: 0, y: 0 }, sections, maxDistFt: 2500 });
+    expect(r.provider).toBe("xs-wsel");
+    expect(r.method).toBe("nearest-reach");
+    expect(r.wselFt).toBe(99); // highest of the in-range sections on this reach
+    expect(r.detail.wtrNm).toBe("Bayou");
+    expect(r.detail.dNearFt).toBeCloseTo(100, 6);
+    expect(r.detail.usedSections).toBe(3);
+  });
+  it("returns null when nothing is within maxDistFt (honest UNKNOWN, never zeros)", () => {
+    const sections = [vsec(3000, 96, "Bayou")];
+    expect(governingCrossSectionWsel({ point: { x: 0, y: 0 }, sections, maxDistFt: 2500 })).toBeNull();
+  });
+  it("does NOT cross WTR_NM groups: snaps to the nearest reach even when a farther creek is higher", () => {
+    const sections = [
+      vsec(100, 95, "Nearby Creek"),   // the nearest reach
+      vsec(300, 120, "Other Creek"),   // higher WSE but an unrelated, farther reach
+    ];
+    const r = governingCrossSectionWsel({ point: { x: 0, y: 0 }, sections, maxDistFt: 2500 });
+    expect(r.detail.wtrNm).toBe("Nearby Creek");
+    expect(r.wselFt).toBe(95);          // never the 120 from the unrelated creek
+    expect(r.detail.usedSections).toBe(1);
+  });
+  it("BLANK WTR_NM sections do NOT merge: each unnamed reach is isolated, nearest wins (no cross-creek pick)", () => {
+    // Two unnamed sections at different distances with different WSE — a blank name must NOT
+    // be assumed to be the same reach, so we take the NEAREST one's WSE, never the higher far one.
+    const sections = [vsec(100, 95, ""), vsec(300, 120, null)];
+    const r = governingCrossSectionWsel({ point: { x: 0, y: 0 }, sections, maxDistFt: 2500 });
+    expect(r.wselFt).toBe(95);            // the nearest unnamed section, NOT the merged-highest 120
+    expect(r.detail.usedSections).toBe(1);
+    expect(r.detail.wtrNm).toBeNull();    // the synthetic __unnamed__ key never surfaces to the UI
+  });
+  it("only in-range sections of the nearest reach count toward the highest WSE + usedSections", () => {
+    const sections = [vsec(100, 95, "Bayou"), vsec(3000, 130, "Bayou")]; // the 130 section is out of range
+    const r = governingCrossSectionWsel({ point: { x: 0, y: 0 }, sections, maxDistFt: 2500 });
+    expect(r.wselFt).toBe(95);
+    expect(r.detail.usedSections).toBe(1);
+  });
+  it("empty / null sections → null", () => {
+    expect(governingCrossSectionWsel({ point: { x: 0, y: 0 }, sections: [] })).toBeNull();
+    expect(governingCrossSectionWsel({ point: { x: 0, y: 0 }, sections: null })).toBeNull();
+  });
+});
+
+describe("computeMitigation / wse1pctForRing — S_XS derived 1% WSE precedence (B763)", () => {
+  const fp = { id: "b1", ring: rect(0, 0, 100, 100) };
+  it("a derived xs-wsel prices the 1% volume when no static/AO/manual exists", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)]);
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, derivedXsWselFt: 96 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 6, -2); // min(96,100) - 90 = 6
+    expect(r.providers.wse1pct).toBe("xs-wsel");
+  });
+  it("manual BFE outranks the derived xs-wsel", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)]);
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, bfeFt: 95, derivedXsWselFt: 96 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 5, -2); // 95 governs
+    expect(r.providers.wse1pct).toBe("manual");
+  });
+  it("the xs-wsel derived WSE outranks the bfe-line-interp derived BFE", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)]);
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, derivedXsWselFt: 96, derivedBfeFt: 94 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 6, -2); // 96 (xs-wsel) governs, not 94
+    expect(r.providers.wse1pct).toBe("xs-wsel");
+  });
+  it("a published static BFE still outranks the derived xs-wsel", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)], { staticBfeFt: 94 });
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, derivedXsWselFt: 96 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 4, -2); // 94 governs
+    expect(r.providers.wse1pct).toBe("static-bfe");
+  });
+  it("wse1pctForRing fallback chain: manual > xs-wsel > bfe-line-interp on a touching ring", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)]);
+    const ring = rect(10, 10, 30, 30);
+    expect(wse1pctForRing(ring, [zone], { derivedXsWselFt: 96 })).toEqual({ wseFt: 96, provider: "xs-wsel" });
+    expect(wse1pctForRing(ring, [zone], { derivedXsWselFt: 96, derivedBfeFt: 94 })).toEqual({ wseFt: 96, provider: "xs-wsel" });
+    expect(wse1pctForRing(ring, [zone], { bfeFt: 93, derivedXsWselFt: 96 })).toEqual({ wseFt: 93, provider: "manual" });
+  });
+});
+
+describe("computeMitigation — the 0.2% derived-WSE engine seam (B763)", () => {
+  const fp = { id: "b1", ring: rect(0, 0, 100, 100) };
+  it("a 0.2% zone prices from the derived 0.2% WSE and tags xs-wsel-02", () => {
+    const zone = mkZone("02pct", [rect(0, 0, 100, 100)]);
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: coh, elev: { padElevFt: 100, existGradeFt: 90, derivedWse02Ft: 96 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 6, -2);
+    expect(r.providers.wse02pct).toBe("xs-wsel-02");
+  });
+  it("a manual 0.2% WSE outranks the derived 0.2% WSE", () => {
+    const zone = mkZone("02pct", [rect(0, 0, 100, 100)]);
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: coh, elev: { padElevFt: 100, existGradeFt: 90, wse02Ft: 94, derivedWse02Ft: 96 } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 4, -2); // 94 governs
+    expect(r.providers.wse02pct).toBe("manual");
+  });
+  it("the 0.2% provider is tracked apart: a priced 0.2% manual never pollutes the 1% wse1pct tag", () => {
+    const zones = [
+      mkZone("1pct", [rect(0, 0, 100, 100)], { staticBfeFt: 95 }),
+      mkZone("02pct", [rect(200, 0, 100, 100)]),
+    ];
+    const fps = [{ id: "a", ring: rect(0, 0, 100, 100) }, { id: "b", ring: rect(200, 0, 100, 100) }];
+    const r = computeMitigation({ footprints: fps, zones, rule: coh, elev: { padElevFt: 100, existGradeFt: 90, wse02Ft: 93 } });
+    expect(r.providers.wse1pct).toBe("static-bfe"); // NOT "mixed" — the 0.2% manual stays out of the 1% set
+    expect(r.providers.wse02pct).toBe("manual");
   });
 });

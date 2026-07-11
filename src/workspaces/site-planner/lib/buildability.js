@@ -3,16 +3,25 @@
  * slab-on-grade tilt-wall pad be permitted at all, by what pathway, at what FFE?
  *
  * Three screens, all copy-first and provider-fed by B707's WSE inputs:
- *   1. Required FFE — per-jurisdiction rule (COH & unincorporated Harris seed:
- *      0.2% WSE + 2 ft; verified:false — VERIFY current text). Non-residential
- *      DRY-FLOODPROOFING alternatives exist under the NFIP — noted in copy, never
- *      modeled here.
+ *   1. Required FFE — per-jurisdiction rule. Two shapes now (B759):
+ *        • SINGLE basis  { basis, plusFt }              (COH & Harris seed).
+ *        • MULTI  basis  { bases:[{ basis, plusFt, label }] } — take the MAX
+ *          over every computable basis ("more restrictive controls"; Fort Bend
+ *          §3.02(b)). Bases whose WSE input isn't supplied yet surface as
+ *          `pendingBases` copy — NEVER fabricated (LOUD-FAILURE).
+ *      Non-residential DRY-FLOODPROOFING alternatives exist under the NFIP —
+ *      noted in copy, never modeled here.
  *   2. Foundation pathway — is fill-to-elevate allowed (with mitigation) or
  *      restricted (LOMR pathway commonly required)?
  *   3. LOMR-F flag — a pad in the 1% floodplain usually needs the fill +
  *      CLOMR-F/LOMR-F pathway to exit the SFHA; copy only, no timeline math.
  * Plus the wetlands cross-flag (floodplain ∩ NWI wetlands → Section 404 note),
  * sourced from the EXISTING wetlands finding — no new fetch.
+ *
+ * Provenance caveat (B759/B760): the Fort Bend & Harris values below were
+ * triangulated from verbatim search-indexed official text + owner verification —
+ * the primary regulation PDFs were egress-blocked this session, so subsection
+ * lettering is "confirm vs the primary PDF" and we do NOT claim we rendered one.
  *
  * Editable/verified pattern (easementRules.js); keys match floodplainRules.js. */
 const LS = "planarfit:buildabilityRules:v1";
@@ -30,17 +39,43 @@ export const DEFAULT_BUILDABILITY_RULES = {
   },
   harris: {
     label: "Harris County (unincorporated)",
+    // §4.07(b)(1): FFE = 24 in above the 0.2% (500-yr) WSE (CONFIRMED, B760).
     ffeRule: { basis: "wse02pct", plusFt: 2 },
     fillToElevate: "restricted",
-    pathwayNote: "Harris County: fill-to-elevate is restricted in the 1% floodplain — a slab-on-grade pad commonly requires the LOMR pathway.",
-    verified: false,
-    source: "Harris County Regulations of Floodplain Management (eff. 1/1/2018).",
-    sourceDate: "2018-01-01",
-    note: "Placeholder — VERIFY current county regs. NFIP non-residential dry-floodproofing alternatives exist; noted, not modeled.",
+    pathwayNote:
+      "Harris County §4.07(b)(9): “No fill may be used to elevate structures in the 1 percent floodplain” — a slab-on-grade pad is restricted; elevate on open foundations / piers or vented walls, and the LOMR pathway is commonly required to exit the SFHA. (Confirm subsection lettering vs the primary fpmregs-effect190709.pdf.)",
+    verified: true,
+    source: "Harris County Regulations for Floodplain Management, eff. 7/9/2019 (Atlas-14 ed.) §4.07(b)(1) / (b)(9).",
+    sourceDate: "2019-07-09",
+    note:
+      "§4.07(b)(1): FFE = 24 in above the 0.2% (500-yr) WSE, OR 12 in above the nearest street crown, whichever is higher (crown alternate is copy, not modeled). Zone specials (copy, not modeled): floodway / Zone V lowest member = 500-yr WSE + 36 in; Zone AO = slab at depth number + 36 in; Zone A = slab at highest-adjacent-grade + 6 ft; critical facilities + 36 in. NFIP non-residential dry-floodproofing alternatives exist; noted, not modeled. Values triangulated from verbatim official text + owner verification — primary PDF egress-blocked this session; confirm subsection lettering vs the primary fpmregs-effect190709.pdf.",
   },
-  // No modeled FFE rule for the remaining counties — an honest "verify locally"
-  // beats a fabricated elevation rule (the silent-error principle).
-  fortbend: { label: "Fort Bend County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
+  // Fort Bend takes the MOST RESTRICTIVE (highest) FFE across six bases per Regs
+  // §3.02(b) ("more restrictive controls" = take the MAX) — B759. Only the 500-yr
+  // (wse02pct) and FIRM-BFE (wse1pct) bases are computable today; the rest surface
+  // as pending copy until their WSE is supplied (B763 / user entry).
+  fortbend: {
+    label: "Fort Bend County",
+    ffeRule: {
+      bases: [
+        { basis: "atlas14_100yr", plusFt: 2, label: "Atlas-14 100-yr WSE" },
+        { basis: "pre_atlas14_100yr", plusFt: 2.5, label: "pre-Atlas-14 100-yr WSE / legacy pond" },
+        { basis: "wse02pct", plusFt: 2, label: "pre-Atlas-14 500-yr WSE" },
+        { basis: "wse1pct", plusFt: 1.5, label: "FEMA FIRM BFE (18 in)" },
+        { basis: "zone_a_est_bfe", plusFt: 4, label: "Zone A estimated BFE (no data)" },
+        { basis: "site", plusFt: 2, label: "outside SFHA: pond 100-yr WSE / top of curb / natural ground" },
+      ],
+    },
+    fillToElevate: "allowed_with_mitigation",
+    pathwayNote:
+      "Fort Bend County: fill-to-elevate is allowed with mitigation — the pad elevates on fill, but fill that reduces floodplain storage or conveyance needs a 1:1 hydraulically-equivalent offset in the same watershed, full H&H modeling, and a County-Engineer floodplain-development permit ($150 fee). The fill + CLOMR-F/LOMR-F pathway to exit the SFHA is unchanged.",
+    verified: true,
+    source:
+      "FBC Flood Damage Prevention Regs (signed 10-08-2024) §3.02(b) & §5.01; FBCDD Interim Atlas-14 Criteria §2 (eff. 2020-01-01, rev. 9/2021); FBC Regs for Floodplain Management (2023-09) 18-in-above-BFE mapped-SFHA rule.",
+    sourceDate: "2024-10-08",
+    note:
+      "FFE = the HIGHEST of six bases (§3.02(b) more-restrictive-controls): Atlas-14 100-yr WSE +2.0; pre-Atlas-14 100-yr WSE / legacy-pond max ponding +2.5; pre-Atlas-14 500-yr WSE +2.0; FEMA FIRM BFE +1.5 (18 in); Zone-A estimated BFE +4.0; outside-SFHA §5.01 +2.0 over the highest of {detention-pond 100-yr WSE, top of curb, natural ground}. Only the 500-yr (wse02pct) and 1% FIRM (wse1pct) bases compute today; the Atlas-14 / pre-Atlas-14 / Zone-A / site bases surface as pending until their WSE is supplied. NFIP non-residential dry-floodproofing alternatives exist; noted, not modeled. Values triangulated from verbatim official text + owner verification — primary PDF egress-blocked this session; confirm subsection lettering vs the primary PDF.",
+  },
   montgomery: { label: "Montgomery County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
   chambers: { label: "Chambers County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
   waller: { label: "Waller County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
@@ -74,22 +109,96 @@ export const LOMR_NOTE =
 export const WETLANDS_404_NOTE =
   "Likely waters of the U.S. — USACE Section 404 (the federal Clean Water Act dredge/fill permit) may govern channel or wetland work.";
 
-/* Required FFE from the rule + the WSE providers (B707's inputs). Returns
- * { requiredFfeFt, basis, plusFt, unknownReason } — requiredFfeFt null with the
- * reason when the governing WSE isn't available. Pure. */
-export function requiredFfe(rule, { wse1pctFt = null, wse02Ft = null } = {}) {
-  if (!rule || !rule.ffeRule) return { requiredFfeFt: null, basis: null, plusFt: null, unknownReason: "no FFE rule modeled for this jurisdiction — verify locally" };
-  const { basis, plusFt } = rule.ffeRule;
-  const wse = basis === "wse02pct" ? wse02Ft : wse1pctFt;
-  if (wse == null || !isFinite(wse)) {
+/* Basis → which field in the inputs bag supplies its water-surface elevation.
+ * This is the ONE B759 basis→input map; panel and print read the same source. */
+const BASIS_INPUT = {
+  wse1pct: "wse1pctFt",
+  wse02pct: "wse02Ft",
+  atlas14_100yr: "atlas14Wse100Ft",
+  pre_atlas14_100yr: "preAtlas100Ft",
+  zone_a_est_bfe: "zoneAEstBfeFt",
+  site: "siteBasisFt",
+};
+
+/* Human copy for a basis when the rule row carries no label of its own (used by
+ * the single-basis unknownReason and as a fallback in the multi-basis listing). */
+const BASIS_COPY = {
+  wse1pct: "1% water-surface elevation (BFE)",
+  wse02pct: "0.2% (500-yr) water-surface elevation",
+  atlas14_100yr: "Atlas-14 100-yr WSE",
+  pre_atlas14_100yr: "pre-Atlas-14 100-yr WSE / legacy pond",
+  zone_a_est_bfe: "Zone A estimated BFE",
+  site: "outside-SFHA site basis (pond 100-yr WSE / top of curb / natural ground)",
+};
+
+/* Pull a basis's WSE from the bag, honestly: an absent or non-finite value reads
+ * as null (never a fabricated 0) so the caller can surface it as pending. */
+function inputForBasis(basis, bag) {
+  const key = BASIS_INPUT[basis];
+  if (!key) return null;
+  const v = bag[key];
+  return v == null || !isFinite(v) ? null : v;
+}
+
+/* Required FFE from the rule + the WSE providers (B707/B759 inputs). Returns
+ * { requiredFfeFt, basis, plusFt, governingBasis, pendingBases, unknownReason }.
+ * requiredFfeFt is null with a reason when no governing WSE is available.
+ *
+ * The rule's `ffeRule` may be EITHER:
+ *   • { basis, plusFt }                  — single basis (COH & Harris; unchanged).
+ *   • { bases:[{ basis, plusFt, label }] } — multi basis: FFE = MAX over every
+ *     COMPUTABLE basis (input present). Bases whose input is null surface in
+ *     `pendingBases` as copy (never fabricated). If NO basis is computable the
+ *     required FFE is null and `unknownReason` lists what's needed. Pure. */
+export function requiredFfe(rule, inputs = {}) {
+  const bag = {
+    wse1pctFt: null, wse02Ft: null, atlas14Wse100Ft: null,
+    preAtlas100Ft: null, zoneAEstBfeFt: null, siteBasisFt: null,
+    ...inputs,
+  };
+  if (!rule || !rule.ffeRule) {
+    return { requiredFfeFt: null, basis: null, plusFt: null, governingBasis: null, pendingBases: [], unknownReason: "no FFE rule modeled for this jurisdiction — verify locally" };
+  }
+  const ffeRule = rule.ffeRule;
+
+  // Multi-basis (B759): take the MAX over every computable basis.
+  if (Array.isArray(ffeRule.bases)) {
+    let best = null; // { basis, plusFt, label, requiredFfeFt }
+    const pendingBases = [];
+    for (const b of ffeRule.bases) {
+      const wse = inputForBasis(b.basis, bag);
+      if (wse == null) { pendingBases.push({ basis: b.basis, label: b.label, plusFt: b.plusFt }); continue; }
+      const ffe = wse + b.plusFt;
+      if (best == null || ffe > best.requiredFfeFt) best = { basis: b.basis, plusFt: b.plusFt, label: b.label, requiredFfeFt: ffe };
+    }
+    if (best == null) {
+      const needed = ffeRule.bases.map((b) => b.label || BASIS_COPY[b.basis] || b.basis).join("; ");
+      return { requiredFfeFt: null, basis: null, plusFt: null, governingBasis: null, pendingBases, unknownReason: `no water-surface elevation available for any FFE basis — need one of: ${needed}` };
+    }
     return {
-      requiredFfeFt: null, basis, plusFt,
-      unknownReason: basis === "wse02pct"
-        ? "0.2% (500-yr) water-surface elevation not entered — the FFE rule measures from it"
-        : "1% water-surface elevation (BFE) unavailable",
+      requiredFfeFt: best.requiredFfeFt,
+      basis: best.basis,
+      plusFt: best.plusFt,
+      governingBasis: { basis: best.basis, plusFt: best.plusFt, label: best.label },
+      pendingBases,
+      unknownReason: null,
     };
   }
-  return { requiredFfeFt: wse + plusFt, basis, plusFt, unknownReason: null };
+
+  // Single-basis (existing; back-compat).
+  const { basis, plusFt } = ffeRule;
+  const wse = inputForBasis(basis, bag);
+  if (wse == null) {
+    return {
+      requiredFfeFt: null, basis, plusFt, governingBasis: null, pendingBases: [],
+      unknownReason: basis === "wse02pct"
+        ? "0.2% (500-yr) water-surface elevation not entered — the FFE rule measures from it"
+        : basis === "wse1pct"
+          ? "1% water-surface elevation (BFE) unavailable"
+          : `${BASIS_COPY[basis] || basis} not available — the FFE rule measures from it`,
+    };
+  }
+  return { requiredFfeFt: wse + plusFt, basis, plusFt, governingBasis: null, pendingBases: [], unknownReason: null };
 }
 
 /* The full buildability screen. Inputs are FACTS the caller already holds (no
@@ -102,11 +211,15 @@ export function assessBuildability({
   padFfeFt = null,
   wse1pctFt = null,
   wse02Ft = null,
+  atlas14Wse100Ft = null,
+  preAtlas100Ft = null,
+  zoneAEstBfeFt = null,
+  siteBasisFt = null,
   buildingIn1pct = false,
   floodplainPresent = false,
   wetlandsPresent = false,
 } = {}) {
-  const req = requiredFfe(rule, { wse1pctFt, wse02Ft });
+  const req = requiredFfe(rule, { wse1pctFt, wse02Ft, atlas14Wse100Ft, preAtlas100Ft, zoneAEstBfeFt, siteBasisFt });
   let ffeStatus;
   let shortByFt = null;
   if (req.requiredFfeFt == null) ffeStatus = rule && rule.ffeRule ? "unknown" : "no_rule";
@@ -118,7 +231,7 @@ export function assessBuildability({
   if (rule && rule.verified === false) flags.push("rule_unverified");
 
   return {
-    ffe: { status: ffeStatus, requiredFfeFt: req.requiredFfeFt, basis: req.basis, plusFt: req.plusFt, shortByFt, unknownReason: req.unknownReason },
+    ffe: { status: ffeStatus, requiredFfeFt: req.requiredFfeFt, basis: req.basis, plusFt: req.plusFt, governingBasis: req.governingBasis, pendingBases: req.pendingBases, shortByFt, unknownReason: req.unknownReason },
     pathway: rule && rule.fillToElevate ? { fillToElevate: rule.fillToElevate, note: rule.pathwayNote } : null,
     lomr: buildingIn1pct ? { note: LOMR_NOTE } : null,
     wetlands404: floodplainPresent && wetlandsPresent ? { note: WETLANDS_404_NOTE } : null,

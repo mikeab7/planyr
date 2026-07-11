@@ -50,20 +50,42 @@ export const SQFT_PER_ACRE = 43560;
 export const DETENTION_RULES = {
   hcfcd: [
     {
-      id: "hcfcd-pcpm-atlas14-2021",
+      id: "hcfcd-pcpm-atlas14-2021", // id kept stable (external refs); effectiveDate corrected below
       authority: "hcfcd",
       authorityLabel: "Harris County Flood Control District",
       ruleType: "rate",
-      effectiveDate: "2021-03-31",
-      verifiedOn: "2026-07-03",
+      // B761: corrected from "2021-03-31" — that date was the City of Houston IDM doc,
+      // mis-attributed here. The HCFCD PCPM is "Revised July 2019" and the HCED
+      // Infrastructure Regulations took effect 7/9/2019.
+      effectiveDate: "2019-07-09",
+      verifiedOn: "2026-07-11",
+      // B761 provenance: values triangulated this session from search-indexed official text
+      // (PCPM "Revised July 2019" + HCED Infrastructure Regs 7/9/2019) + owner verification;
+      // the primary PDFs (hcfcd.org / eng.hctx.net) were egress-blocked this session, so the
+      // exact subsection lettering (e.g. §2.15.12) is per secondary reading — confirm vs the
+      // primary PDF. See infraRegsNote re: the presumed-unchanged 2023 editions.
       source: {
-        name: "HCFCD Policy, Criteria & Procedure Manual + Interim Guidelines and Criteria for Atlas 14 Implementation",
-        section: "Detention rate (large tracts)",
+        name: "HCFCD 2019 Atlas 14 Policy, Criteria & Procedure Manual (PCPM, Revised July 2019) + Harris County Engineering Dept (HCED) Infrastructure Regulations (eff. 7/9/2019)",
+        section: "PCPM detention rate (large tracts) + HCED Infra Regs outfall-type minimums (unincorporated Harris)",
         url: "https://www.hcfcd.org/Resources/Technical-Manuals",
       },
       params: {
+        // 0.65 is the HCFCD PCPM METHODS BASELINE — the number a full impact analysis / DIA
+        // uses (e.g. the Goose Creek 276-ac DIA). It is NOT the unincorporated screening
+        // minimum. Kept available (reach it via hcfcdMethod:"pcpm"); the DEFAULT for an
+        // unincorporated Harris parcel is the HCED outfall-type minimum below — never a
+        // silent 0.65 (LOUD-FAILURE). (>640 ac Method 3 ≈ 0.55; pumped ≈ 0.75.)
         rateAcFtPerAc: 0.65,
         appliesTo: "tract", // the ENTIRE tract, not just impervious area
+        // HCED Infrastructure Regulations (eff. 7/9/2019) outfall-type MINIMUM detention for
+        // UNINCORPORATED Harris: storm-sewer outfall 0.75 ac-ft/ac, roadside-ditch outfall
+        // 1.0 ac-ft/ac. A Method-2 (PCPM) analysis may reduce the rate but NEVER below 0.75.
+        outfallMinAcFtPerAc: { stormSewer: 0.75, roadsideDitch: 1.0, method2FloorAcFtPerAc: 0.75 },
+        feeInLieuMaxAcres: 1, // §2.15.12: fee-in-lieu of on-site detention only for ≤1-ac projects
+        largeProjectEventAnalysisAcres: 300, // >300 ac must add a 0.2% (500-yr) event analysis
+        redevelopment: { basis: "net new impervious", exemptions: ["one SFR", "150-ft road frontage"] },
+        infraRegsNote:
+          "Outfall-type minimums are from the HCED Infrastructure Regulations eff. 7/9/2019; the 2023 editions are PRESUMED unchanged on these values but were NOT fetched this session (primary PDFs egress-blocked) — confirm against the current edition.",
         drawdown: {
           volumeFraction: 0.8,
           dischargeFactor: 0.5,
@@ -185,7 +207,19 @@ export const DETENTION_RULES = {
         },
         screeningBand: false, // resolves to a POINT when impervious % is known; band only as an impervious-unknown / large-tract fallback
         bandAcFtPerAc: [0.62, 0.98], // Table 6-1 endpoints (10% … 100% impervious)
-        releaseRateCfsPerAc: 0.125, // §6.4.1: max 100-yr release rate
+        // B764 additions — triangulated this session from the FBCDD Interim Atlas-14 Criteria
+        // + DCM Ch. 6 via search-indexed official text (primary PDFs egress-blocked); confirm
+        // the exact § letter/number against the primary PDF.
+        // §6.4.1: max 100-yr release rate = 0.125 cfs per acre of drainage area. ONE name for
+        // it — the former `releaseRateCfsPerAc` was RENAMED here (reconciled, not duplicated).
+        maxReleaseCfsPerAc: 0.125,
+        pondFreeboardFt: 1, // §6.4.7: minimum 1 ft of freeboard above the 100-yr pond WSE
+        gravityDrainFraction: 0.5, // Interim §5: ≥50% of the detention volume must drain by gravity
+        gravityDrainNote:
+          "Interim §5: ≥50% of volume drains by gravity; assess ADDITIONAL storage if the pro-rata allowable release falls below the 0.125 cfs/ac max.",
+        postLePreEvents: ["atlas14-10yr", "atlas14-100yr"], // Interim §4.a: post-dev peak ≤ pre-dev for BOTH events
+        offsiteSheetFlow: "intercept-or-convey, no adverse impact", // 100-yr off-site sheet flow intercepted/conveyed with no adverse impact
+        feeInLieu: false, // no fee-in-lieu-of-detention program found in the FBCDD DCM
         hecHmsAboveAcres: 640,
         tailwater: {
           convention:
@@ -460,6 +494,8 @@ export function computeRequiredDetention({
   lotSf = null,
   addedImperviousAcres = null,
   removedImperviousAcres = 0,
+  outfallType = null, // null | "stormSewer" | "roadsideDitch" | "unknown" — HCED outfall-type minimum (unincorporated Harris)
+  hcfcdMethod = null, // null (default → outfall-type minimum) | "pcpm" (→ 0.65 HCFCD PCPM methods baseline)
   onDate = null,
 } = {}) {
   if (!(acres > 0)) return { kind: "none", requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null, basis: "no site area", rule: null, governing: null, flags: [], caveat: SCREENING_CAVEAT };
@@ -509,7 +545,7 @@ export function computeRequiredDetention({
   // ---- municipal overlays: dispatch through the parent -------------------
   if (rule.ruleType === "overlay") {
     if (p.parentAuthority) {
-      const parent = computeRequiredDetention({ acres, impPct, authorityId: p.parentAuthority, inCityLimits, drainsToHcfcdChannel, onDate });
+      const parent = computeRequiredDetention({ acres, impPct, authorityId: p.parentAuthority, inCityLimits, drainsToHcfcdChannel, outfallType, hcfcdMethod, onDate });
       parent.flags = [...parent.flags, "municipal-overlay"];
       parent.basis += ` · via ${rule.authorityLabel} adopt-by-reference${p.runoffReductionPct ? ` (+${p.runoffReductionPct}% runoff-reduction requirement)` : ""}`;
       parent.overlayRule = rule;
@@ -530,7 +566,7 @@ export function computeRequiredDetention({
     }
     // ≥ 20 ac: parent is hcfcd|fortbend by watershed drained to — surfaced, not guessed.
     const candidates = (p.largeParent?.parentAuthorities || []).map((pa) => {
-      const c = computeRequiredDetention({ acres, impPct, authorityId: pa, inCityLimits, drainsToHcfcdChannel, onDate });
+      const c = computeRequiredDetention({ acres, impPct, authorityId: pa, inCityLimits, drainsToHcfcdChannel, outfallType, hcfcdMethod, onDate });
       return { authorityId: pa, acFt: c.requiredAcFt ?? (c.bandAcFt ? c.bandAcFt[1] : 0), basis: c.basis, rule: c.rule, result: c };
     });
     return {
@@ -541,10 +577,32 @@ export function computeRequiredDetention({
     };
   }
 
-  // ---- hcfcd: flat rate on the whole tract --------------------------------
+  // ---- hcfcd: unincorporated Harris — HCED outfall-type minimum governs ----
+  // The default for an unincorporated parcel is the HCED Infrastructure Regs outfall-type
+  // MINIMUM (storm-sewer 0.75, roadside-ditch 1.0); an unknown outfall type resolves to the
+  // honest [0.75, 1.0] band, NEVER a silent 0.65 (LOUD-FAILURE / B761). The 0.65 PCPM
+  // methods baseline (a full impact analysis / DIA) stays reachable via hcfcdMethod:"pcpm".
   if (authorityId === "hcfcd") {
-    const r = p.rateAcFtPerAc;
-    return pointResult(r * acres, r, `${r} ac-ft/ac × ${acres.toFixed(2)} ac (entire tract)`, rule);
+    const om = p.outfallMinAcFtPerAc || null;
+    if (hcfcdMethod === "pcpm" || !om) {
+      const r = p.rateAcFtPerAc;
+      return pointResult(r * acres, r, `${r} ac-ft/ac × ${acres.toFixed(2)} ac (entire tract — HCFCD PCPM methods baseline)`, rule, om ? ["hcfcd-pcpm-baseline"] : []);
+    }
+    const baseFlags = ["hced-infra-outfall-min"];
+    if (outfallType === "stormSewer") {
+      return pointResult(om.stormSewer * acres, om.stormSewer, `${om.stormSewer} ac-ft/ac × ${acres.toFixed(2)} ac (unincorporated Harris — storm-sewer outfall minimum, HCED Infra Regs)`, rule, baseFlags);
+    }
+    if (outfallType === "roadsideDitch") {
+      return pointResult(om.roadsideDitch * acres, om.roadsideDitch, `${om.roadsideDitch} ac-ft/ac × ${acres.toFixed(2)} ac (unincorporated Harris — roadside-ditch outfall minimum, HCED Infra Regs)`, rule, baseFlags);
+    }
+    // outfallType unknown / null → BAND [storm-sewer, roadside-ditch]; never a silent point.
+    const lo = om.stormSewer, hi = om.roadsideDitch;
+    return bandResult(
+      [lo * acres, hi * acres],
+      `${lo}–${hi} ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer ${lo} vs roadside-ditch ${hi}; set the outfall type for the exact point) × ${acres.toFixed(2)} ac`,
+      rule,
+      [...baseFlags, "outfall-type-unknown"],
+    );
   }
 
   // ---- coh: tier dispatch (record-shape driven, so 2019 and 2026 coexist) --
@@ -631,7 +689,7 @@ export function computeRequiredDetention({
 }
 
 /* One formatter for the rule sub-note so panel/print never drift:
- * "HCFCD 0.65 ac-ft/ac · eff. Mar 2021 · verified Jul 2026". */
+ * "HCFCD 0.65 ac-ft/ac · eff. Jul 2019 · verified Jul 2026". */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const fmtYm = (iso) => {
   if (!iso) return "?";
@@ -661,7 +719,7 @@ export const TIER_THRESHOLDS = {
   coh: { diaAcres: 20 },
   montgomery: { diaAcres: 20, masterPlanAcres: 640 },
   chambers: { diaAcres: 200 },
-  fortbend: { diaAcres: 50, note: "HEC-HMS modeling above 50 ac" },
+  fortbend: { diaAcres: 50, note: "simplified method optional 50–640 ac; HEC-HMS required ≥640 ac (DIA bar rises at 50 ac)" },
 };
 
 const isSfhaZone = (z) => /^(A|V)/i.test(String(z || "").trim());
