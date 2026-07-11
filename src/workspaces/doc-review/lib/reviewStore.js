@@ -306,14 +306,18 @@ export async function deleteReview(id) {
   } catch (_) { cleanupErr = true; }
   // Scope by id only; RLS decides (own review OR team-admin on a shared one). A user_id filter
   // would block an admin from deleting a teammate's shared review, which the policy permits.
-  const { error } = await supabase.from("doc_reviews").delete().eq("id", id);
+  // B757 — `.select("id")` returns the rows actually removed, so a 0-row no-op (RLS/ownership
+  // mismatch, or an already-deleted row) is DISTINGUISHABLE from a real removal — matching the
+  // sites path (B372/B468). A bare `.delete()` reported success on both, the silent no-op this fixes.
+  const { data, error } = await supabase.from("doc_reviews").delete().eq("id", id).select("id");
+  const removed = Array.isArray(data) ? data.length : 0;
   // B579: clear the localStorage mirror only AFTER the cloud delete succeeds. Clearing it first
   // (the old order) meant a failed delete (network/auth) left the cloud row alive but the local
   // mirror gone → the row stayed in the library yet could no longer auto-resume; keep them in
   // step so a failed delete leaves a fully consistent, retry-able state.
   if (!error && uid) clearDraft(uid, id);
   const cleanupFailed = orphaned > 0 || cleanupErr;
-  return { ok: !error, error: error ? error.message : null, orphaned: orphaned || undefined, cleanupFailed: cleanupFailed || undefined };
+  return { ok: !error, removed, error: error ? error.message : null, orphaned: orphaned || undefined, cleanupFailed: cleanupFailed || undefined };
 }
 
 // Re-file an existing review under a (different) project/discipline — the one-click

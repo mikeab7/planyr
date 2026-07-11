@@ -2320,7 +2320,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (!siteId) return undefined;
     const onStore = (e) => {
-      if (e && e.key && !e.key.startsWith("planarfit:sites:")) return;
+      // Only the actual sites STORE keys (planarfit:sites:v1 / :cloud:<uid>) drive the cross-tab fold.
+      // The prefix also matches the version-history ring (:history:) and the B757 delete-tombstone
+      // (:deltomb:) keys — a write to either is not a content change, so skip it (B757; every default
+      // save writes the history ring too, which otherwise ran this fold 2-3× per cross-tab edit).
+      if (e && e.key && (!e.key.startsWith("planarfit:sites:") || e.key.startsWith("planarfit:sites:history:") || e.key.startsWith("planarfit:sites:deltomb:"))) return;
       // B672 — signed-in tabs converge through the site_elements realtime channel + refetch-replace
       // (rows are canonical); the localStorage union fold below would fight that (it can resurrect
       // an element a row-tombstone just removed). It remains the signed-OUT cross-tab convergence.
@@ -8660,7 +8664,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     // No parcel to fit → grid-convergence correction about the deed centroid.
-    if (!origin) { flashWarn("No county parcel to align to. Add the parcel (Add parcel → Identify from county GIS), or rotate the deed by hand to match the aerial.", 8000); return; }
+    if (!origin) { flashWarn("No county parcel to align to. Add the parcel (＋ Add → Click a lot on the map), or rotate the deed by hand to match the aerial.", 8000); return; }
     const c = deedCentroid(main.pts);
     const [lat, lon] = feetToLatLng(c, origin.lat, origin.lon);
     const conv = gridConvergenceDeg(lat, lon);
@@ -9501,24 +9505,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ＋ Add <span style={{ opacity: 0.8, fontSize: 11 }}>▾</span>
                 </button>
                 <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
-                  {/* Identify from county GIS — the headline path (needs a georeferenced frame). */}
+                  {/* Identify from the county's parcel map — the headline path (needs a georeferenced frame). */}
                   {origin ? (
                     <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
-                      <div style={{ fontWeight: 650 }}>🔍 Identify from county GIS</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>County parcel lines light up on the aerial — click lots to add them (one or many).</div>
+                      <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Property lines from the county appraisal district light up on the aerial — click one lot or several.</div>
                     </button>
                   ) : (
                     <div style={{ padding: "7px 10px", opacity: 0.7 }}>
-                      <div style={{ fontWeight: 650, color: PAL.ink }}>🔍 Identify from county GIS</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Identify needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
+                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>🔍 Click a lot on the map</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add a parcel from the map first to turn this on.</div>
                     </div>
                   )}
                   {/* Add by address (B384) — geocode a typed address, then identify-and-add the lot
                       at that point through the SAME quickAddAt path. Needs a georeferenced frame. */}
                   {origin ? (
                     <div style={{ padding: "7px 10px" }} onClick={(e) => e.stopPropagation()}>
-                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>Type a street address — we'll find that lot in the county GIS and add it.</div>
+                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>📍 Add by address</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>We'll look up that address at the county and add the lot.</div>
                       <div style={{ display: "flex", gap: 6 }}>
                         <input
                           value={addrQuery}
@@ -9536,14 +9540,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </div>
                   ) : (
                     <div style={{ padding: "7px 10px", opacity: 0.7 }}>
-                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
-                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add-by-address needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
+                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>📍 Add by address</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add a parcel from the map first to turn this on.</div>
                     </div>
                   )}
                   {/* Draw a new boundary — always available (no GIS frame needed). */}
                   <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
-                    <div style={{ fontWeight: 650 }}>✏️ Draw a new boundary</div>
-                    <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Trace a lot by clicking points on the canvas; close on the first dot.</div>
+                    <div style={{ fontWeight: 650, fontSize: 13 }}>✏️ Draw a new boundary</div>
+                    <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>For a lot that's not in county records yet.</div>
                   </button>
                 </AnchoredMenu>
               </div>

@@ -1,12 +1,12 @@
 /* Verification for B383 — "Add parcel" front-door in the Parcel panel + the map-style
- * "Identify from county GIS" tool (parcel lines light up, click to add one or many).
+ * "Click a lot on the map" tool (parcel lines light up, click to add one or many).
  *
  * The Parcel panel leads with a primary ＋ Add parcel control (accent chip) → an
  * AnchoredMenu with:
- *   • Identify from county GIS — arms identify mode; the county parcel OUTLINES light up
+ *   • Click a lot on the map — arms identify mode; the county parcel OUTLINES light up
  *     on the aerial (esri-leaflet featureLayer, shared with the map's Select-parcels tool)
  *     and each CLICK adds that lot to the plan (one or many); a re-click toggles it off.
- *     Disabled with a "needs a georeferenced plan" note when origin is null.
+ *     Disabled with a "Add a parcel from the map first" note when origin is null.
  *   • Draw a new boundary — selectTool("parcel"); always available.
  *
  * Logged-out against the built app (vite preview on :4173). The live county GIS host is
@@ -103,11 +103,11 @@ console.log("Scenario A — georeferenced plan (Identify enabled):");
 
   await addBtn.click();
   await page.waitForTimeout(350);
-  ok(await page.getByText(/Identify from county GIS/).count() > 0, "menu shows 'Identify from county GIS'");
+  ok(await page.getByText(/Click a lot on the map/).count() > 0, "menu shows 'Click a lot on the map'");
   ok(await page.getByText(/Draw a new boundary/).count() > 0, "menu shows 'Draw a new boundary'");
   await page.screenshot({ path: OUT + "b383-add-parcel-menu.png" });
 
-  await page.getByText(/Identify from county GIS/).first().click();
+  await page.getByText(/Click a lot on the map/).first().click();
   await page.waitForTimeout(400);
   // Scope to the BUTTON (the panel status row) — the footer hint shares the same wording.
   const statusRow = page.locator("button").filter({ hasText: /Click lit-up lots to add/ });
@@ -123,7 +123,7 @@ console.log("Scenario A — georeferenced plan (Identify enabled):");
   await page.waitForTimeout(300);
   await page.getByText(/Draw a new boundary/).first().click();
   await page.waitForTimeout(350);
-  ok(await page.getByText(/Click to drop boundary points/).count() > 0, "'Draw a new boundary' arms the parcel draw tool");
+  ok(await page.getByText(/Click on the plan to drop boundary points/).count() > 0, "'Draw a new boundary' arms the parcel draw tool");
   ok(await page.getByText(/🔍 Identify parcel/).count() === 0, "the old standalone '🔍 Identify parcel' toggle is consolidated away");
 
   { const ae = appErrors(errors); ok(ae.length === 0, `no app console/page errors (saw ${ae.length}; ${errors.length - ae.length} env GIS-CORS lines ignored)`); if (ae.length) console.log("    app errors:", ae.slice(0, 5)); }
@@ -137,11 +137,11 @@ console.log("Scenario B — no georeferenced frame (origin null):");
   ok(await addBtn.count() > 0 && await addBtn.isVisible(), "＋ Add parcel present even without a GIS frame");
   await addBtn.click();
   await page.waitForTimeout(350);
-  ok(await page.getByText(/needs a georeferenced plan/).count() > 0, "Identify shows the disabled 'needs a georeferenced plan' copy");
+  ok(await page.getByText(/Add a parcel from the map first/).count() > 0, "Identify shows the disabled 'Add a parcel from the map first' copy");
   ok(await page.getByText(/Draw a new boundary/).count() > 0, "Draw a new boundary still offered");
   await page.getByText(/Draw a new boundary/).first().click();
   await page.waitForTimeout(350);
-  ok(await page.getByText(/Click to drop boundary points/).count() > 0, "Draw works without origin");
+  ok(await page.getByText(/Click on the plan to drop boundary points/).count() > 0, "Draw works without origin");
   { const ae = appErrors(errors); ok(ae.length === 0, `no app console/page errors (saw ${ae.length}; ${errors.length - ae.length} env GIS-CORS lines ignored)`); if (ae.length) console.log("    app errors:", ae.slice(0, 5)); }
   await ctx.close();
 }
@@ -153,7 +153,7 @@ console.log("Scenario C — Identify→add: click lots to add one or many (mocke
   ok((await parcelCount(page)) === 0, "starts at Parcels · 0");
   await addBtn.click();
   await page.waitForTimeout(300);
-  await page.getByText(/Identify from county GIS/).first().click();
+  await page.getByText(/Click a lot on the map/).first().click();
   await page.waitForTimeout(500);
 
   const canvas = page.locator('svg[aria-label="Site plan canvas"]').first();
