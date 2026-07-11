@@ -34,6 +34,10 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   12-category template) + `folderTree.js` (pure flatten / treeify / validate / seed-row builder).
   Shared by the Library editor + the server Drive-mirror; the server-side reconcile executor lives
   under `/server/storage/` and the mirror route under `/functions/api/`.
+- `thoroughfare/` — the Thoroughfare-Plan data spine's shared vocabulary (B720): `classification.js`
+  (the canonical road-class enum + per-jurisdiction crosswalk `normalizeClassification` + `normalizeStatus`),
+  shared by the DB CHECK constraints, ingestion (B721/B722), the overlay legend (B723), and parcel
+  analysis (B724). The Postgres schema itself lives under the site-planner workspace's `db/` folder.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `telemetry/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.
