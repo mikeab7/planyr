@@ -5,7 +5,22 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-10._
+_Last updated: 2026-07-11._
+
+## 🌐 Open your environment's network so I can load real Houston road data (thoroughfare epic — needs a NEW session)
+- [ ] **Allow the GIS servers, then start a fresh session.** The thoroughfare-plan feature — loading Houston's
+      real major-road network so it can drive right-of-way / setback analysis — is built, tested, and shipped
+      (B720 + B721), but the current work session's network policy **blocks the City of Houston's servers**, so I
+      can't pull the live data from here. The best-practice way to finish it is to run the importer I built from a
+      session that can reach Houston (that also lets me read Houston's live data so the road-category translations
+      and the exact right-of-way widths are correct, not guessed). **What to do:** in your Claude Code environment's
+      network settings, switch to a policy that allows outbound web access (or add these hosts to the allowlist) —
+      for Houston now: `mycity2.houstontx.gov` and `www.houstontx.gov`; for the surrounding counties later:
+      `*.arcgis.com` plus the Harris / Fort Bend / Pearland / Montgomery / H-GAC GIS hosts. **Network changes only
+      take effect in a NEW session**, so after changing it, start a fresh session and tell me *"load the Houston
+      thoroughfare data."* Docs: https://code.claude.com/docs/en/claude-code-on-the-web (network policy). Nothing is
+      exposed by this — it only lets me READ public government map data. (Tracked as VERIFICATION V274; the
+      next session's full step-by-step is in `THOROUGHFARE-HANDOFF.md` at the repo root.)
 
 ## 🩹 Optional — a few older sites lost their parcels before today's fix (B756)
 - [ ] **Nothing required; read only if you want an older site back.** A bug (fixed + shipped 2026-07-10)
