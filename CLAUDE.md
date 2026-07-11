@@ -13,6 +13,9 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > - **`docs/ROADMAP.md`** — what's not built yet (read when planning new work).
 > - **`docs/REFERENCE.md`** — deep implementation detail (Site Model schema, layer/GIS
 >   plumbing, Supabase DDL/RLS, persistence internals, the sandbox Playwright quirk).
+> - **`THOROUGHFARE-HANDOFF.md`** (repo root, ⚡ TRANSIENT) — read if Michael says _"load the Houston
+>   thoroughfare data"_ or asks about thoroughfares / ROW / the MTFP: the live data-load handoff for
+>   the thoroughfare epic (B721 → V274). Delete when V274 closes.
 >
 > **⛔ Never slurp a giant tracking file to find one thing.** `BACKLOG.md`, `VERIFICATION.md`,
 > and the two `*-DONE.md` archives are large. To pick work, **Grep the item headings**

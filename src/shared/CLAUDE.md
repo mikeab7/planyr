@@ -34,6 +34,14 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   12-category template) + `folderTree.js` (pure flatten / treeify / validate / seed-row builder).
   Shared by the Library editor + the server Drive-mirror; the server-side reconcile executor lives
   under `/server/storage/` and the mirror route under `/functions/api/`.
+- `thoroughfare/` — the Thoroughfare-Plan data spine (B720–B721): `classification.js` (canonical
+  road-class enum + `normalizeClassification` / `normalizeStatus`), `ingestTransform.js` (pure
+  ArcGIS-feature → `thoroughfare_segments` row: crosswalk + Chapter-42 width resolution + WGS84 /
+  EPSG:2278 EWKT geometry, reusing `../coordinates`), and `houston.js` (the City of Houston MTFP
+  jurisdiction config — endpoint, field map, crosswalk, §42-122 ROW standards). Shared by the DB
+  CHECK, ingestion (B721/B722; the runnable adapter lives under `server/ingest/`), the overlay
+  legend (B723), and parcel analysis (B724). The Postgres schema lives under the site-planner
+  workspace's `db/` folder.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `telemetry/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

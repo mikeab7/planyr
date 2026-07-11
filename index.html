@@ -63,6 +63,113 @@
         }
       })();
     </script>
+    <!-- Boot watchdog (B758): the app's stale-chunk recovery (src/app/chunkReload.js +
+         ErrorBoundary) lives INSIDE the main bundle, so it can't help when the main bundle
+         ITSELF fails to load — e.g. a transient 404 on /assets/index-<hash>.js during the
+         few seconds a fresh Cloudflare deploy is still propagating to an edge node. Without
+         this, that window is a blank white screen: no app JS ran, so nothing can recover.
+         This inline script is part of index.html (the one file that is never content-hashed
+         and so never 404s), so it survives that failure and can act. It catches (A) a
+         definitive load error on the entry <script>, and (B) a never-mounts timeout, then
+         shows an honest "updating" message and does a BOUNDED, cache-busting reload to pick
+         up the finished deploy — the entry-bundle analogue of the lazy-chunk guard
+         (B221/B239). Runs only when the app is expected to boot; the /landing/ redirect
+         above has already fired for brand-new visitors, so it never touches that path. -->
+    <script>
+      (function () {
+        try {
+          if (navigator.webdriver) return; // never reload automated browsers (e2e / ui-audit)
+          var KEY = "planyr:bootReloadCount";
+          var MAX = 3;          // most auto-reloads on a definitive load error, then manual
+          var DELAY = 2500;     // ms to show the message + let the edge settle before reload
+          var MOUNT_MS = 15000; // if #root never fills in this long, treat as a boot failure
+          var handled = false, mounted = false, pollId = 0;
+
+          function rootEl() { return document.getElementById("root"); }
+          function isMounted() { var r = rootEl(); return !!(r && r.childElementCount > 0); }
+          function getCount() { try { return Number(sessionStorage.getItem(KEY)) || 0; } catch (e) { return 0; } }
+          function setCount(n) { try { sessionStorage.setItem(KEY, String(n)); } catch (e) {} }
+          function clearCount() { try { sessionStorage.removeItem(KEY); } catch (e) {} }
+
+          function overlay(title, body, stuck) {
+            try {
+              if (!document.body) return;
+              var dark = document.documentElement.getAttribute("data-theme") === "dark";
+              var bg = dark ? "#14181d" : "#EAEEF3", fg = dark ? "#e7ecf2" : "#20262e",
+                  sub = dark ? "#9fb0c0" : "#5b6672", acc = "#EF9F27";
+              var el = document.getElementById("planyr-boot-overlay");
+              if (!el) { el = document.createElement("div"); el.id = "planyr-boot-overlay"; document.body.appendChild(el); }
+              el.setAttribute("style", "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;"
+                + "justify-content:center;background:" + bg + ";color:" + fg + ";font-family:Inter,system-ui,sans-serif;");
+              var tail = stuck
+                ? '<button id="planyr-boot-retry" style="margin-top:16px;padding:9px 18px;border:0;border-radius:8px;'
+                  + 'background:' + acc + ';color:#1a1205;font-weight:700;font-size:14px;cursor:pointer;">Try again</button>'
+                : '<div style="margin:16px auto 0;width:26px;height:26px;border:3px solid rgba(127,127,127,.3);'
+                  + 'border-top-color:' + acc + ';border-radius:50%;animation:planyrspin .8s linear infinite;"></div>';
+              el.innerHTML = '<style>@keyframes planyrspin{to{transform:rotate(360deg)}}</style>'
+                + '<div style="text-align:center;max-width:340px;padding:24px;">'
+                + '<div style="font-size:17px;font-weight:800;letter-spacing:-.01em;">' + title + '</div>'
+                + '<div style="margin-top:8px;font-size:13.5px;line-height:1.5;color:' + sub + ';">' + body + '</div>'
+                + tail + '</div>';
+              var btn = document.getElementById("planyr-boot-retry");
+              if (btn) btn.onclick = function () { clearCount(); location.reload(); };
+            } catch (e) { /* overlay is best-effort — never let it throw */ }
+          }
+
+          function reloadFresh() {
+            try {
+              var u = new URL(window.location.href);
+              u.searchParams.set("_r", String(Date.now())); // cache-buster; the app strips it after boot
+              window.location.replace(u.toString());          // replace() so the dead page leaves no back-trap
+            } catch (e) { try { window.location.reload(); } catch (e2) {} }
+          }
+
+          // kind "error" = a real load failure on the entry script (safe to auto-retry up
+          // to MAX); kind "timeout" = never painted, cause unknown (allow only ONE auto
+          // reload so a slow-but-fine bundle isn't re-downloaded to death), then manual.
+          function recover(kind) {
+            if (handled || mounted) return;
+            handled = true;
+            if (pollId) { clearInterval(pollId); pollId = 0; }
+            var n = getCount(), cap = kind === "timeout" ? 1 : MAX;
+            if (n >= cap) {
+              overlay("Planyr is finishing an update",
+                "A new version is still rolling out. Give it a moment, then try again — your work is saved.", true);
+              return;
+            }
+            setCount(n + 1);
+            overlay("Updating Planyr…", "Getting the latest version — this only takes a moment.", false);
+            setTimeout(reloadFresh, DELAY);
+          }
+
+          // Signal A — the entry bundle failed to load (transient deploy-window 404, or a
+          // network drop). Capture phase, because resource-load errors don't bubble. Filtered
+          // to a not-yet-mounted app + an /assets/*.js <script> so a font/CSS/image error or a
+          // late runtime throw (target === window) never trips it.
+          window.addEventListener("error", function (e) {
+            var t = e && e.target;
+            if (!t || t === window || String(t.tagName).toLowerCase() !== "script") return;
+            if (!isMounted() && /\/assets\/[^"']*\.js(\?|$)/.test(t.src || "")) recover("error");
+          }, true);
+
+          // Signal B — nothing errored but the app never painted (module threw at eval, a
+          // statically-imported chunk 404'd, or a very slow link). Conservative timeout,
+          // capped auto-retry so a genuinely slow connection isn't reloaded to death.
+          setTimeout(function () { if (!mounted && !isMounted()) recover("timeout"); }, MOUNT_MS);
+
+          // Success — clear the retry counter so a *future*, separate deploy gets a fresh
+          // budget, drop any overlay, and stand down. Poll (cheap) so we catch the mount
+          // whenever React first paints, independent of load-event timing.
+          function onMount() {
+            mounted = true; clearCount();
+            if (pollId) { clearInterval(pollId); pollId = 0; }
+            var el = document.getElementById("planyr-boot-overlay");
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+          }
+          pollId = setInterval(function () { if (isMounted()) onMount(); }, 200);
+        } catch (e) { /* the watchdog must never block or break boot */ }
+      })();
+    </script>
     <meta name="theme-color" content="#EAEEF3" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
