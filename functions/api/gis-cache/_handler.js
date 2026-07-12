@@ -105,6 +105,8 @@ export async function handleGisCache({
 }
 
 // Create a fresh copy then drop older same-name copies (no gap for concurrent readers).
+// Hard client.del is DELIBERATE here (NEW-F2): this is a regenerable public GIS cache, not
+// user data — trashing stale copies would just hold Drive quota for 30 days of junk.
 export async function store(client, folderId, name, bytes, contentType) {
   try {
     const created = await client.create({ bytes, contentType, name, parentFolderId: folderId });

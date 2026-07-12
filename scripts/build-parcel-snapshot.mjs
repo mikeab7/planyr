@@ -169,7 +169,8 @@ async function buildCounty(county, { dryRun, bbox, maxPages }) {
 }
 
 /* Upload the snapshot + meta to the shared Drive `parcelcache` folder, then drop older same-name
- * copies (create-then-delete = no gap for a concurrent reader; mirrors the B445 store()). */
+ * copies (create-then-delete = no gap for a concurrent reader; mirrors the B445 store()).
+ * Hard client.del is DELIBERATE (NEW-F2): regenerable cache, not user data — no trash needed. */
 async function uploadToDrive(county, gzBytes, meta) {
   const { storageConfig, defaultDriveClientFactory } = await import("../server/storage/index.js");
   const client = defaultDriveClientFactory(storageConfig(process.env).drive);

@@ -58,8 +58,10 @@ alter table public.project_folders enable row level security;
 -- folder_set_drive_meta() (SECURITY DEFINER → runs as the owner role, so the trigger allows it).
 -- Structure-only client updates (name / parent_id / sort_order / trashed) never touch drive_*, so
 -- they are unaffected.
+-- search_path pinned (NEW-F8 advisor hardening): a trigger without a fixed search_path can be
+-- redirected by a role-mutable path; pg_catalog is all this body needs.
 create or replace function public.project_folders_guard_drive_cols()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = pg_catalog as $$
 begin
   if current_user = 'authenticated' and (
        new.drive_folder_id is distinct from old.drive_folder_id

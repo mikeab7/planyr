@@ -180,6 +180,17 @@ describe("drive backend — scaffold reports 'not connected' until creds (B207/N
     expect(r.ok).toBe(true);
     expect(r.backendId).toBe("drive_abc");
   });
+  it("remove() TRASHES via the client — never a permanent delete (NEW-F2 delete-safety)", async () => {
+    const calls = [];
+    const client = {
+      trash: async (id) => { calls.push(["trash", id]); },
+      del: async (id) => { calls.push(["del", id]); },
+    };
+    const d = driveBackend({ client });
+    const r = await d.remove("drive_abc");
+    expect(r.ok).toBe(true);
+    expect(calls).toEqual([["trash", "drive_abc"]]); // bytes stay recoverable ~30 days in Drive trash
+  });
   it("with a stub client, shareLink returns Drive's native webViewLink (B208 default)", async () => {
     const client = { permitAnyoneReader: async (id) => ({ webViewLink: `https://drive.google.com/file/d/${id}/view` }) };
     const d = driveBackend({ client });

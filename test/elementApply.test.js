@@ -114,6 +114,6 @@ describe("dirtyEntries + isSeeded — the refetch-replace contract", () => {
     const { sync } = makeEngine({ commit: () => new Promise(() => {}), setTimer: () => 1 });
     sync.seed([{ kind: "el", id: "e1", data: { id: "e1", w: 10 }, rev: 1, z_index: 0 }]);
     sync.reconcile({ els: [{ id: "e1", w: 33 }] }, {}); // dirty update, unsent
-    expect(sync.dirtyEntries()).toEqual([{ kind: "el", id: "e1", cls: "update", el: { id: "e1", w: 33 } }]);
+    expect(sync.dirtyEntries()).toEqual([{ kind: "el", id: "e1", cls: "update", el: { id: "e1", w: 33 }, baseRev: 1 }]); // baseRev rides along for the NEW-F4 journal
   });
 });
