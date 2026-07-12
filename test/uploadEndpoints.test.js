@@ -33,7 +33,7 @@ function world({ uid = "u1", sessions = {}, drive = null, driveFilesFail = false
     uid, sessions: Object.fromEntries(Object.entries(sessions).map(([k, v]) => [k, { ...v }])),
     mappings: [], driveCalls: [], patches: [], deleted: [],
     drive: drive || (() => hres({ id: "drive-file-1" }, 200)),
-    driveFilesFail, driveDeletes: [],
+    driveFilesFail, driveDeletes: [], driveTrashes: [],
   };
   const fetchStub = async (url, opts = {}) => {
     const u = String(url);
@@ -47,9 +47,13 @@ function world({ uid = "u1", sessions = {}, drive = null, driveFilesFail = false
     // Drive resumable INIT → session URI in the Location header
     if (u.startsWith("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable"))
       return hres({}, 200, { location: SESSION_URI });
-    // Drive file delete (the COMPLETE rollback)
+    // Drive file delete (permanent — regenerable data only since NEW-F2)
     if (method === "DELETE" && u.startsWith("https://www.googleapis.com/drive/v3/files/")) {
       state.driveDeletes.push(u); return hres({}, 204);
+    }
+    // Drive file TRASH (the COMPLETE rollback since NEW-F2 — recoverable ~30 days)
+    if (method === "PATCH" && u.startsWith("https://www.googleapis.com/drive/v3/files/")) {
+      state.driveTrashes.push({ url: u, body: opts.body }); return hres({ id: "x" }, 200);
     }
     // The resumable session itself (chunk relay + probe)
     if (u.startsWith(SESSION_URI)) { const call = { url: u, method, headers: opts.headers || {}, body: opts.body }; state.driveCalls.push(call); return state.drive(call); }
@@ -271,7 +275,9 @@ describe("POST /api/uploads/<id>/complete — mapping + rollback", () => {
     const resp = await completePost({ env: ENV, request: idReq("complete", "POST"), params: { id: "sess-1" } });
     expect(resp.status).toBe(502);
     expect((await resp.json()).error).toMatch(/rolled back/i);
-    expect(state.driveDeletes.some((u) => u.includes("/files/f7"))).toBe(true); // bytes rolled back
+    // NEW-F2: the rollback TRASHES (recoverable ~30 days), never a permanent DELETE
+    expect(state.driveTrashes.some((t) => t.url.includes("/files/f7") && String(t.body).includes("trashed"))).toBe(true);
+    expect(state.driveDeletes).toEqual([]); // no permanent delete anywhere in the rollback
     expect(state.sessions["sess-1"].status).toBe("aborted");
   });
 });
