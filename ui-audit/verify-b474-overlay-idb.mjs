@@ -38,7 +38,7 @@ check("new site created", !!siteId, `id=${siteId}`);
 // Open the "Overlay" panel so its file input mounts, then drop a site-plan overlay image.
 const ovTab = page.locator('button[title="Overlay"]').first();
 if (await ovTab.count()) { await ovTab.click(); await page.waitForTimeout(900); }
-const input = page.locator('input[accept="application/pdf,image/*"]').first();
+const input = page.locator('input[accept="application/pdf,image/*,.dxf,.dwg"]').first();
 check("overlay file input present", (await input.count()) > 0);
 if ((await input.count()) > 0) {
   await input.setInputFiles({ name: "siteplan.png", mimeType: "image/png", buffer: Buffer.from(PNG_B64, "base64") });
