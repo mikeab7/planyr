@@ -407,6 +407,10 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   const roles = opts.roles || ["county", "city", "etj", "isd"]; // B764: ISD joins the default identify
   const out = {
     point: { lng, lat }, city: [], county: [], etj: [], isd: [],
+    // B793 — when a ring is queried, cityCentroid holds the CITY names at the centroid
+    // point (null = not tested / outage). A ring-hit city absent here is a frontage
+    // sliver the badge demotes to "— edge only".
+    cityCentroid: null,
     unincorporated: false, straddle: false, ages: {}, sources: [],
     note: "Screening only — verify with the jurisdiction. Boundaries (especially ETJ) change.",
   };
@@ -438,6 +442,16 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     const state = names.length ? "loaded" : errPart ? "failed" : "empty";
     out.sources.push({ id: role, state, ageMs: out.ages[role], msg: errPart ? humanize(errPart.error) : null });
     opts.onStatus && opts.onStatus(role, state, errPart ? humanize(errPart.error) : null, { ts: parts[0]?.ts ?? null, stale: parts.some((p) => p.stale) });
+    // B793 — a ring query unions EVERY touching city, so a frontage sliver reads exactly
+    // like real membership. Test the CENTROID point too (same SWR cache) so the badge can
+    // demote edge-only hits. An outage leaves cityCentroid null — never claim "edge only"
+    // off a failed lookup.
+    if (role === "city" && geom.ring && names.length) {
+      try {
+        const rc = await identifySource(srcs[0], { lng, lat }, opts).fresh;
+        out.cityCentroid = rc.error ? null : uniq(rc.items.map((it) => normalizeFeature(srcs[0], it.attrs).name).filter((v) => v != null && v !== "").map(String));
+      } catch (_) { out.cityCentroid = null; }
+    }
   }));
   out.unincorporated = out.city.length === 0;
   out.straddle = out.city.length > 1 || out.county.length > 1 || out.isd.length > 1;
@@ -460,7 +474,18 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
   const etjs = uniq((j.etj || []).filter((v) => v != null && v !== "").map(String)).filter((e) => !cities.includes(e));
   const counties = uniq((j.county || []).filter((v) => v != null && v !== "").map(String));
-  const parts = [...cities.map((c) => `City of ${c}`), ...etjs.map((c) => `City of ${c} — ETJ`)];
+  // B793 — with a POSITIVE centroid answer, a ring-hit city the centroid is not inside is
+  // a frontage sliver: it demotes to the tail with an "edge only" qualifier so the badge
+  // leads with the dominant jurisdiction. No centroid data (point query / outage) → the
+  // pre-B793 behavior, no demotion claims.
+  const centroid = Array.isArray(j.cityCentroid) ? j.cityCentroid : null;
+  const coreCities = centroid === null ? cities : cities.filter((c) => centroid.includes(c));
+  const edgeCities = centroid === null ? [] : cities.filter((c) => !centroid.includes(c));
+  const parts = [
+    ...coreCities.map((c) => `City of ${c}`),
+    ...etjs.map((c) => `City of ${c} — ETJ`),
+    ...edgeCities.map((c) => `City of ${c} — edge only`),
+  ];
   const jur = parts.length ? parts.join(" / ") : "Unincorporated";
   const county = counties.length ? counties.map((c) => `${c} County`).join(" / ") : null;
   // B764: the ISD from the identify result (j.isd, TEA names already carry the ISD/CISD suffix),
@@ -468,7 +493,12 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const isds = uniq((j.isd || []).filter((v) => v != null && v !== "").map(String));
   const isd = opts.isd ? String(opts.isd) : (isds.length ? isds.join(" / ") : null);
   const text = [jur, county, isd].filter(Boolean).join(" · ");
-  return { text, jur, county, isd, straddle: !!j.straddle };
+  // B793 — a mere edge-only sliver is qualified in-line, not flagged: the ⚑ straddle mark
+  // stays for real multi-jurisdiction membership (2+ core cities, counties, or ISDs — or
+  // 2+ cities with no centroid answer to arbitrate).
+  const straddle = counties.length > 1 || isds.length > 1 || coreCities.length > 1
+    || (centroid === null && cities.length > 1);
+  return { text, jur, county, isd, straddle, edgeOnlyCities: edgeCities };
 }
 
 // Configured CAD county keys (those with a wired parcel service) — maps a TxDOT

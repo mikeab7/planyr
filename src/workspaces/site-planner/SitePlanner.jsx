@@ -29,7 +29,7 @@ import { uploadOverlayFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloa
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, gisProxyEnabled } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, gisProxyEnabled, layerVintage } from "./lib/layers.js";
 import { overlayExportRequest } from "./lib/layerRequest.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -6686,7 +6686,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .then((j) => {
         const b = formatJurisdictionBadge(j);
         if (!b) return; // failed / empty identify → no badge (display-only screening info)
-        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC" };
+        // B793 — an ETJ chip carries its layer vintage + the SB 2038 volatility caveat in
+        // the tooltip: ETJ answers are only as fresh as the H-GAC layer, and cities' ETJs
+        // are actively shrinking as landowners opt out.
+        const etjNote = (j.etj || []).length
+          ? `ETJ boundaries: ${layerVintage("jur_etj") || "vintage unknown"}. ETJs shrink as landowners opt out (SB 2038) — screening only, verify before relying on an ETJ answer.`
+          : null;
+        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC", etjNote };
         jurBadgeCache.current.set(jurBadgeSig, badge);
         if (!cancelled) setJurBadge(badge);
       })

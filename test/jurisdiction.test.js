@@ -272,6 +272,19 @@ describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
     expect(out.city.sort()).toEqual(["Bellaire", "Houston"]);
     expect(out.straddle).toBe(true);
   });
+  it("B793 — a ring query ALSO tests the centroid: cityCentroid carries the point answer", async () => {
+    // base mocks the CITY layer as Houston+Bellaire for the polygon, Houston-only at the point
+    const ring = [[-95.46, 29.70], [-95.46, 29.72], [-95.44, 29.72], [-95.44, 29.70]];
+    const out = await identifyJurisdiction(-95.45, 29.71, { ring, cache: freshCache(), fetchJson: fakeFetch(base) });
+    expect(out.cityCentroid).toEqual(["Houston"]); // Bellaire is a ring-only (edge) hit
+    const b = formatJurisdictionBadge(out);
+    expect(b.text).toMatch(/^City of Houston \/ City of Bellaire — edge only/);
+    expect(b.straddle).toBe(false); // demoted to a qualifier, not a ⚑
+  });
+  it("B793 — a POINT query leaves cityCentroid null (no ring, nothing to arbitrate)", async () => {
+    const out = await identifyJurisdiction(-95.37, 29.76, { cache: freshCache(), fetchJson: fakeFetch(base) });
+    expect(out.cityCentroid).toBeNull();
+  });
   it("a point in no city reads as unincorporated", async () => {
     const out = await identifyJurisdiction(-95.0, 30.5, {
       cache: freshCache(),
@@ -481,6 +494,29 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
 
   it("straddle lists BOTH cities and flags straddle", () => {
     const b = formatJurisdictionBadge({ city: ["Houston", "Katy"], etj: [], county: ["Harris"], straddle: true });
+    expect(b.text).toBe("City of Houston / City of Katy · Harris County");
+    expect(b.straddle).toBe(true);
+  });
+
+  it("B793 — a frontage-sliver city (centroid outside) demotes to '— edge only' at the tail, no ⚑", () => {
+    // The Bain shape: ring intersects Katy, centroid outside it; Houston-ETJ; Fort Bend.
+    const b = formatJurisdictionBadge({ city: ["Katy"], cityCentroid: [], etj: ["Houston"], county: ["Fort Bend"], isd: ["Katy ISD"], straddle: false });
+    expect(b.text).toBe("City of Houston — ETJ / City of Katy — edge only · Fort Bend County · Katy ISD");
+    expect(b.straddle).toBe(false);
+    expect(b.edgeOnlyCities).toEqual(["Katy"]);
+  });
+  it("B793 — a centroid-confirmed city stays the leading part, unqualified", () => {
+    const b = formatJurisdictionBadge({ city: ["Houston"], cityCentroid: ["Houston"], etj: [], county: ["Harris"] });
+    expect(b.text).toBe("City of Houston · Harris County");
+    expect(b.edgeOnlyCities).toEqual([]);
+  });
+  it("B793 — two ring cities with the centroid in one: dominant leads, sliver trails, no ⚑", () => {
+    const b = formatJurisdictionBadge({ city: ["Houston", "Katy"], cityCentroid: ["Houston"], etj: [], county: ["Harris"], straddle: true });
+    expect(b.text).toBe("City of Houston / City of Katy — edge only · Harris County");
+    expect(b.straddle).toBe(false); // an edge sliver is qualified, not flagged
+  });
+  it("B793 — NO centroid answer (point query / outage) keeps the pre-B793 behavior: no edge-only claims, ⚑ stands", () => {
+    const b = formatJurisdictionBadge({ city: ["Houston", "Katy"], cityCentroid: null, etj: [], county: ["Harris"], straddle: true });
     expect(b.text).toBe("City of Houston / City of Katy · Harris County");
     expect(b.straddle).toBe(true);
   });

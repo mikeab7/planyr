@@ -38,6 +38,9 @@ function App() {
         <span id="badge-etj"><JurisdictionBadge badge={badgeOf({ city: [], etj: ["Baytown"], county: ["Harris"], unincorporated: true })} /></span>
         <span id="badge-uninc"><JurisdictionBadge badge={badgeOf({ city: [], etj: [], county: ["Waller"], unincorporated: true })} /></span>
         <span id="badge-straddle"><JurisdictionBadge badge={badgeOf({ city: ["Houston", "Katy"], etj: [], county: ["Harris"], straddle: true })} /></span>
+        {/* B793 — the Bain shape: the ring intersects Katy but the centroid is outside it
+            (frontage sliver), Houston ETJ, Fort Bend. Dominant leads; sliver trails "— edge only". */}
+        <span id="badge-sliver"><JurisdictionBadge badge={{ ...badgeOf({ city: ["Katy"], cityCentroid: [], etj: ["Houston"], county: ["Fort Bend"], isd: ["Katy ISD"], straddle: false }), etjNote: "ETJ boundaries: H-GAC ETJ — current edition. ETJs shrink as landowners opt out (SB 2038) — screening only, verify before relying on an ETJ answer." }} /></span>
         <span id="badge-null"><JurisdictionBadge badge={null} /></span>
       </div>
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
