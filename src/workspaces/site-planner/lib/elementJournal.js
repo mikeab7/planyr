@@ -31,10 +31,16 @@ export function writeJournal(siteId, entries, at, storage = globalThis.localStor
   try {
     if (!Array.isArray(entries) || entries.length === 0) { storage.removeItem(KEY(siteId)); return true; }
     const s = JSON.stringify({ at: at || 0, entries });
-    if (s.length > MAX_BYTES) return false; // absurdly large → skip (mirror + version ring still hold the data)
+    // A write we can't make must also DROP any previous journal: a stale snapshot left behind
+    // would later fold OLDER geometry over the user's newer edits (adversarial-review finding)
+    // — no journal is strictly safer than a stale one (mirror + version ring still hold data).
+    if (s.length > MAX_BYTES) { try { storage.removeItem(KEY(siteId)); } catch (_) {} return false; }
     storage.setItem(KEY(siteId), s);
     return true;
-  } catch (_) { return false; } // quota / privacy mode — degrade silently, never throw
+  } catch (_) {
+    try { storage.removeItem(KEY(siteId)); } catch (_) {} // quota/privacy: never leave a stale journal
+    return false;
+  }
 }
 
 // Read a site's journal entries, or [] — an expired journal reads empty AND is removed.

@@ -265,12 +265,22 @@ export async function fetchReviews() {
   const FULL = "id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed,sfile:data->>sourceFile,folderId:data->>folderId";
   // Newest tier adds the NEW-F3 soft-delete filter: a review in Recently-deleted leaves every list.
   let res = await supabase.from("doc_reviews").select(FULL).is("deleted_at", null).order("updated_at", { ascending: false });
-  if (res.error) res = await supabase.from("doc_reviews").select(FULL).order("updated_at", { ascending: false }); // deleted_at un-migrated
-  // team_id/user_id may be un-migrated → drop to the prior column set; then the older core set.
-  if (res.error) res = await supabase.from("doc_reviews")
-    .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at,placed:data->placed")
-    .order("updated_at", { ascending: false });
-  if (res.error) res = await supabase.from("doc_reviews").select("id,title,kind,project,discipline,updated_at").order("updated_at", { ascending: false });
+  if (res.error) {
+    // The filterless fallback tiers may run ONLY when deleted_at genuinely isn't migrated in
+    // (then no soft-deleted rows can exist, so dropping the filter is safe). Any OTHER tier-1
+    // error — a transient 5xx/timeout on a MIGRATED DB — must be an honest ok:false, or the
+    // fallback would list Recently-deleted reviews as live (adversarial-review finding; the
+    // caller's NEW-F5 keep-last-list path handles the failure). Migration order guarantees a
+    // DB with deleted_at also has every older column, so the sub-tiers stay nested here.
+    if (!isMissingColumn(res.error, "deleted_at"))
+      return { ok: false, rows: [], error: res.error.message || "Couldn't load your files." };
+    res = await supabase.from("doc_reviews").select(FULL).order("updated_at", { ascending: false });
+    // team_id/user_id may be un-migrated → drop to the prior column set; then the older core set.
+    if (res.error) res = await supabase.from("doc_reviews")
+      .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at,placed:data->placed")
+      .order("updated_at", { ascending: false });
+    if (res.error) res = await supabase.from("doc_reviews").select("id,title,kind,project,discipline,updated_at").order("updated_at", { ascending: false });
+  }
   if (res.error || !res.data) return { ok: false, rows: [], error: (res.error && res.error.message) || "Couldn't load your files." };
   return { ok: true, rows: res.data };
 }
@@ -280,14 +290,17 @@ export async function listReviews() {
 }
 
 // The Recently-deleted bin (NEW-F3): light rows for soft-deleted reviews, newest delete first.
-// Empty (never an error) on a pre-migration DB — there's nothing soft-deleted to show.
+// Empty on a pre-migration DB (nothing soft-deleted can exist) — but a FAILED read returns
+// NULL, never a fake-empty [] (the same failed-read≠empty rule as fetchReviews): the caller
+// keeps its last-known bin instead of rendering it wiped.
 export async function listDeletedReviews() {
   if (!supabase || !(await currentUid())) return [];
   const { data, error } = await supabase.from("doc_reviews")
     .select("id,title,kind,project,project_id,discipline,item,updated_at,deleted_at,sfile:data->>sourceFile")
     .not("deleted_at", "is", null)
     .order("deleted_at", { ascending: false });
-  return error || !data ? [] : data;
+  if (error) return isMissingColumn(error, "deleted_at") ? [] : null;
+  return data || [];
 }
 
 // Mark a review as placed on the map at least once (NEW-3) — the write half of the
@@ -420,12 +433,13 @@ export async function purgeExpiredDeleted({ days = 30 } = {}) {
   const { data, error } = await supabase.from("doc_reviews").select("id").not("deleted_at", "is", null).lt("deleted_at", cutoff);
   if (error) // un-migrated DB (no deleted_at) has nothing soft-deleted to purge — that's fine
     return isMissingColumn(error, "deleted_at") ? { ok: true, purged: 0, failed: 0 } : { ok: false, purged: 0, failed: 0, error: error.message };
-  let purged = 0, failed = 0;
+  let purged = 0, failed = 0, cleanupFailed = false;
   for (const row of data || []) {
     const r = await purgeReview(row.id);
     if (r.ok && r.removed > 0) purged += 1; else if (!r.ok) failed += 1;
+    if (r.cleanupFailed) cleanupFailed = true; // stranded bytes surface, even from the automated purge
   }
-  return { ok: failed === 0, purged, failed };
+  return { ok: failed === 0, purged, failed, cleanupFailed };
 }
 
 // Re-file an existing review under a (different) project/discipline — the one-click

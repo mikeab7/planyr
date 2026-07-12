@@ -37,7 +37,7 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
   };
 
   useEffect(() => { // fetch the lists when the menu opens / auth flips (refresh is token-guarded)
-    if (!open) return;
+    if (!open) { setPendingDel(null); return; } // closing the menu disarms any pending delete confirm
     if (signedIn) refresh(); else { setRows([]); setProjects([]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, signedIn]);
@@ -105,7 +105,7 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
             {!busy && rows && rows.map((r) => (
               <div key={r.id} onClick={() => { onOpen?.(r); setOpen(false); }}
                 role="button" tabIndex={0} aria-label={`Open ${r.title || "untitled review"}`}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen?.(r); setOpen(false); } }} /* B531: keyboard-reachable row */
+                onKeyDown={(e) => { if (e.target !== e.currentTarget) return; /* a child button (delete confirm ✓/✕) handles its own Enter/Space — the row must not hijack it and open the review mid-confirm */ if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen?.(r); setOpen(false); } }} /* B531: keyboard-reachable row */
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 6px", borderRadius: 7, cursor: "pointer" }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>

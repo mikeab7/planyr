@@ -2205,6 +2205,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // (self-healing loop, no double-apply).
     const merged = foldJournal(foldedNew, readJournal(siteId, Date.now()), r.rows, {
       isHusk: isHuskParcel,
+      // The engine's LIVE pending edits (already substituted via `sub` above) always beat the
+      // journal — a stale journal snapshot must never fold older geometry over them.
+      skipKeys: new Set(dirtyByKey.keys()),
       onDiscard: (e, row) => reportClientEvent("journal-superseded", "pending-edit journal entry discarded — a newer copy won", { id: siteId, kind: e.kind, el: e.id, baseRev: e.baseRev, rowRev: row && row.rev }),
     });
     clearJournal(siteId);
@@ -2249,7 +2252,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         try {
           const live = elSyncRef.current;
           if (!live || live !== eng) return;
-          if (s.pending > 0) writeJournal(siteId, live.dirtyEntries(), Date.now());
+          // `pending` counts only the dirty queue; a just-flushed op rides IN FLIGHT with
+          // pending 0 — journal during committing/retrying/failed too (dirtyEntries includes
+          // the in-flight batch), so a reload mid-RPC doesn't drop the op. Known limitation:
+          // the journal is one key per SITE, so a second tab on the same site (multi-writer)
+          // can overwrite/clear the first tab's journal — the mirror + version ring remain
+          // the backstop there; the journal is belt-and-suspenders, not the primary store.
+          if (s.pending > 0 || s.state === "committing" || s.state === "retrying" || s.state === "failed")
+            writeJournal(siteId, live.dirtyEntries(), Date.now());
           else if (s.state === "idle") clearJournal(siteId);
         } catch (_) { /* journaling is belt-and-suspenders — never let it break sync */ }
       },

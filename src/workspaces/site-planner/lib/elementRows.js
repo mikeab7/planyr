@@ -159,7 +159,7 @@ export function foldNeverSyncedLocal(next, local, rowKeys, isHusk = () => false)
 //     genuinely older than our edit's base (rare rev race; the tombstone row still wins by rev).
 //   • husk parcels are never folded (B690).
 // Pure: returns a NEW model object; inputs untouched. `rows` = the fetched site_elements rows.
-export function foldJournal(next, journal, rows, { isHusk = () => false, onDiscard = () => {} } = {}) {
+export function foldJournal(next, journal, rows, { isHusk = () => false, onDiscard = () => {}, skipKeys = null } = {}) {
   const entries = arr(journal);
   if (!entries.length) return next;
   const rowByKey = new Map(arr(rows).filter((r) => r && r.id).map((r) => [r.kind + ":" + r.id, r]));
@@ -167,6 +167,10 @@ export function foldJournal(next, journal, rows, { isHusk = () => false, onDisca
   for (const e of entries) {
     const field = KIND_TO_FIELD[e && e.kind];
     if (!field || typeof (e && e.id) !== "string") continue;
+    // skipKeys = the LIVE engine's current pending (kind:id)s: an in-memory dirty edit is
+    // strictly fresher than any journal snapshot and has already substituted into `next` —
+    // a journal entry (possibly stale, e.g. after a failed re-write) must never override it.
+    if (skipKeys && skipKeys.has(e.kind + ":" + e.id)) continue;
     const row = rowByKey.get(e.kind + ":" + e.id);
     const baseRev = Number(e.baseRev) || 1;
     const isDelete = e.cls === "delete";

@@ -236,6 +236,33 @@ describe("fetchReviews — failed read ≠ empty account (NEW-F5)", () => {
     expect(r.ok).toBe(true);
     expect(r.rows).toHaveLength(1);
   });
+  it("a TRANSIENT tier-1 failure on a migrated DB is ok:false — the filterless fallbacks never run (no resurfacing of Recently-deleted rows)", async () => {
+    let calls = 0;
+    h.exec = ({ ops }) => {
+      calls += 1;
+      if (ops.some((o) => o[0] === "is")) return { data: null, error: { message: "upstream connect error 503" } }; // tier 1 blips
+      return { data: [{ id: "rv-deleted" }], error: null }; // a filterless tier WOULD succeed — it must never be asked
+    };
+    const r = await fetchReviews();
+    expect(r.ok).toBe(false);
+    expect(calls).toBe(1); // stopped at tier 1 — the fallback is gated on isMissingColumn(deleted_at)
+  });
+  it("a genuinely un-migrated DB (deleted_at missing) still falls back filterless", async () => {
+    h.exec = ({ ops }) =>
+      ops.some((o) => o[0] === "is")
+        ? { data: null, error: { message: 'column doc_reviews.deleted_at does not exist', code: "42703" } }
+        : { data: [{ id: "rv1" }], error: null };
+    const r = await fetchReviews();
+    expect(r.ok).toBe(true);
+    expect(r.rows).toHaveLength(1);
+  });
+  it("listDeletedReviews: a FAILED read is null (keep the last bin), a missing column is honest-empty", async () => {
+    const { listDeletedReviews } = await import("../src/workspaces/doc-review/lib/reviewStore.js");
+    h.exec = () => ({ data: null, error: { message: "fetch failed" } });
+    expect(await listDeletedReviews()).toBe(null);
+    h.exec = () => ({ data: null, error: { message: 'column "deleted_at" does not exist', code: "42703" } });
+    expect(await listDeletedReviews()).toEqual([]);
+  });
   it("ok:false when EVERY fallback tier fails — and listReviews still degrades to []", async () => {
     h.exec = () => ({ data: null, error: { message: "fetch failed" } });
     const r = await fetchReviews();

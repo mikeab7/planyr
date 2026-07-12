@@ -177,15 +177,15 @@ export default function FileBrowser({
       // which is exactly the same-name collision trap NEW-F1 closes). Loud notice + Retry.
       if (p.ok) setProjects(p.rows);
       if (r.ok && ff.ok) setReviews(mergeFactsIntoReviews(r.rows, ff.rows));
-      setDeletedRows(dead);
+      if (dead !== null) setDeletedRows(dead); // null = FAILED bin read → keep the last-known bin
       const failed = [r, ff, p].find((x) => !x.ok);
       setLoadNotice(failed ? { error: failed.error || "Couldn't refresh." } : null);
       // NEW-F3: lazy 30-day purge of expired Recently-deleted items — best-effort, silent on
-      // success, loud on failure; a successful purge re-reads the (now shorter) deleted list.
+      // success, loud on failure OR stranded-bytes cleanup; a successful purge re-reads the bin.
       purgeExpiredDeleted().then((res) => {
         if (!res) return;
-        if (!res.ok) setDelNotice((n) => n || { purgeFailed: true });
-        else if (res.purged > 0) listDeletedReviews().then((d2) => { if (tok === reqRef.current) setDeletedRows(d2); });
+        if (!res.ok || res.cleanupFailed) setDelNotice((n) => n || { purgeFailed: true });
+        if (res.ok && res.purged > 0) listDeletedReviews().then((d2) => { if (tok === reqRef.current && d2 !== null) setDeletedRows(d2); });
       }).catch(() => {});
     } finally { if (tok === reqRef.current) setBusy(false); }
   };
@@ -498,10 +498,12 @@ export default function FileBrowser({
     const title = (reviews.find((x) => x.id === id) || {}).title || "file";
     const r = await deleteReview(id);
     if (r && (r.orphaned || r.cleanupFailed)) setDelNotice({ orphaned: r.orphaned || 0, sharedKept: r.sharedKept || 0 });
-    if (r && r.ok && r.soft) { // ~10s undo toast — the fastest restore path
+    if (r && r.ok && r.soft && r.removed > 0) { // ~10s undo toast — ONLY for a delete that really landed (B757 removed-count honesty)
       if (undoTimer.current) clearTimeout(undoTimer.current);
       setUndoDel({ id, title });
       undoTimer.current = setTimeout(() => setUndoDel(null), 10000);
+    } else if (!r || !r.ok || (r.soft && r.removed === 0)) {
+      setDelNotice({ deleteFailed: true }); // a failed/0-row delete is never a silent dead click (NEW-4)
     }
     refresh();
   };
@@ -689,9 +691,10 @@ export default function FileBrowser({
               color: showHolding ? "var(--on-accent)" : (holdingCount ? "var(--warn-text)" : "var(--text-tertiary)") }}>
             ⚑ Needs filing{holdingCount ? ` · ${holdingCount}` : ""}
           </button>
-          {/* Recently deleted (NEW-F3): the restore bin. Only rendered when it has items —
-              an empty bin is noise; a populated one must be findable. */}
-          {deadShown.length > 0 && (
+          {/* Recently deleted (NEW-F3): the restore bin. Rendered when it has items — OR while
+              the view is open, so restoring/purging the last item can't strand the user in a
+              bin with no exit toggle (adversarial-review finding). */}
+          {(deadShown.length > 0 || showDeleted) && (
             <button onClick={() => { setShowDeleted((v) => !v); }}
               title="Deleted files wait here ~30 days — restore them or delete them forever"
               style={{ fontSize: 11.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 999, padding: "4px 12px", whiteSpace: "nowrap",
@@ -756,7 +759,8 @@ export default function FileBrowser({
             border: "1px solid var(--warn-border, #d6a64a)", background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
             <span style={{ flex: 1 }}>
               {delNotice.restoreFailed ? "Couldn’t restore that file — check your connection and try again from Recently deleted."
-                : delNotice.purgeFailed ? "Couldn’t clear expired items from Recently deleted — they’ll be retried next time this list loads."
+                : delNotice.deleteFailed ? "Couldn’t delete that file — it may already be deleted, or the cloud is unreachable. Refresh and try again."
+                : delNotice.purgeFailed ? "Couldn’t fully clear expired items from Recently deleted — anything left will be retried next time this list loads."
                 : <>Deleted — but {delNotice.orphaned ? `${delNotice.orphaned} ` : ""}file{delNotice.orphaned === 1 ? "" : "s"} couldn’t be removed from storage, so a copy may linger. You can remove it directly in Google Drive.{delNotice.sharedKept ? ` ${delNotice.sharedKept} stored file${delNotice.sharedKept === 1 ? " was" : "s were"} kept because another drawing still uses ${delNotice.sharedKept === 1 ? "it" : "them"}.` : ""}</>}
             </span>
             <button onClick={() => setDelNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>

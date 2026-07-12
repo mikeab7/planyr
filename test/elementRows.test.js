@@ -308,6 +308,14 @@ describe("foldJournal (NEW-F4 pending-edit journal)", () => {
     expect(foldJournal(next, null, [])).toBe(next);
   });
 
+
+  it("skipKeys: a LIVE in-memory pending edit always beats the journal (never overridden by a stale snapshot)", () => {
+    const next = { ...emptyModel(), els: [{ id: "e1", w: 555 }] }; // the fresher dirty edit, already substituted
+    const j = [{ kind: "el", id: "e1", cls: "update", el: { id: "e1", w: 111 }, baseRev: 3 }]; // stale journal
+    const out = foldJournal(next, j, [row("el", "e1", 3)], { skipKeys: new Set(["el:e1"]) });
+    expect(out.els).toEqual([{ id: "e1", w: 555 }]); // the live edit survives; the stale entry is skipped
+  });
+
   it("does not mutate its inputs", () => {
     const next = { ...emptyModel(), els: [{ id: "e1", w: 100 }] };
     const j = [{ kind: "el", id: "e1", cls: "update", el: { id: "e1", w: 999 }, baseRev: 3 }];

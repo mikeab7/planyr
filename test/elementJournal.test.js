@@ -62,6 +62,19 @@ describe("elementJournal — write / read / clear round-trip", () => {
     expect(readJournal("siteA", 1000, s).map((e) => e.id)).toEqual(["e1"]);
   });
 
+
+  it("a refused (oversize) or throwing write DROPS any previous journal — stale is worse than none", () => {
+    const s = memStorage();
+    writeJournal("siteA", [entry("e1")], 1000, s);
+    const huge = Array.from({ length: 2000 }, (_, i) => entry("e" + i, { el: { id: "e" + i, blob: "x".repeat(600) } }));
+    expect(writeJournal("siteA", huge, 2000, s)).toBe(false);
+    expect(s.size).toBe(0); // the old journal is gone, not left to fold stale geometry later
+    writeJournal("siteB", [entry("e1")], 1000, s);
+    const quota = { getItem: s.getItem, setItem: () => { throw new Error("quota"); }, removeItem: s.removeItem };
+    expect(writeJournal("siteB", [entry("e2")], 2000, quota)).toBe(false);
+    expect(readJournal("siteB", 2000, s)).toEqual([]); // cleared via the catch path too
+  });
+
   it("a throwing storage degrades silently (quota / privacy mode)", () => {
     const boom = { getItem: () => { throw new Error("nope"); }, setItem: () => { throw new Error("quota"); }, removeItem: () => { throw new Error("nope"); } };
     expect(writeJournal("siteA", [entry("e1")], 1000, boom)).toBe(false);
