@@ -316,6 +316,11 @@ describe("countyAtPoint (B13/B36) — point-in-county primitive", () => {
     expect(out.name).toBeNull();
     expect(out.key).toBeNull();
   });
+  it("B792 — the FIPS code rides along for persistence-side cross-checks", async () => {
+    const out = await countyAtPoint(-95.8548, 29.7722, { cache: freshCache(), fetchJson: fakeFetch({ [COUNTY]: () => [{ attributes: { CNTY_NM: "Fort Bend", FIPS_ST_CNTY_CD: "48157" } }] }) });
+    expect(out.name).toBe("Fort Bend");
+    expect(out.fips).toBe("48157");
+  });
 });
 
 // ----------------------------------------------------------------------------

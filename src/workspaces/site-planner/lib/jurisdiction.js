@@ -486,9 +486,11 @@ const COUNTY_NAME_TO_KEY = { harris: "harris", "fort bend": "fortbend", chambers
 export async function countyAtPoint(lng, lat, opts = {}) {
   const src = JURISDICTION_SOURCES.county;
   const r = await identifySource(src, { lng, lat }, opts).fresh;
-  const name = r.items.map((it) => normalizeFeature(src, it.attrs).name).find(Boolean) || null;
-  if (!name) return { name: null, key: null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
-  return { name: String(name), key: COUNTY_NAME_TO_KEY[String(name).toLowerCase()] || null, ageMs: r.ageMs, ts: r.ts };
+  const feat = r.items.map((it) => normalizeFeature(src, it.attrs)).find((f) => f.name) || null;
+  if (!feat) return { name: null, key: null, fips: null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
+  // B792 — fips rides along (48157 = Fort Bend, …) so persistence-side callers can
+  // cross-check parcel attributes against the boundary answer.
+  return { name: String(feat.name), key: COUNTY_NAME_TO_KEY[String(feat.name).toLowerCase()] || null, fips: feat.fips ? String(feat.fips) : null, ageMs: r.ageMs, ts: r.ts };
 }
 
 // ---------------------------------------------------------------------------

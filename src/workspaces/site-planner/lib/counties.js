@@ -365,6 +365,17 @@ export const STATEWIDE_KEYS = Object.entries(COUNTIES_MAP).filter(([, c]) => c.s
 // (Chambers now has its own CCAD source); this is the dedicated statewide layer const.
 export const STATEWIDE_PARCEL_LAYER = TXGIO_STATEWIDE_LAYER;
 
+/* B792 — map a county DISPLAY NAME (e.g. the TxDOT boundary layer's "Fort Bend") onto the
+ * app's routing key, but ONLY when that key is a real configured county (never a statewide
+ * pseudo-key, never a guess). Returns null for anything unrecognized so a caller can never
+ * make a stored county WORSE by writing an unknown key. Pure. */
+export function countyKeyForName(name) {
+  if (!name) return null;
+  const slug = String(name).toLowerCase().replace(/\bcounty\b/g, "").replace(/[^a-z]/g, "");
+  const entry = COUNTIES_MAP[slug];
+  return entry && !entry.statewide ? slug : null;
+}
+
 // The value of TxGIO's `county` attribute for each configured county — used to SCOPE a
 // statewide-backup ID/address search to that one county, so an account number or street
 // name can't match a like-named parcel in another county (the Chambers caveat applied

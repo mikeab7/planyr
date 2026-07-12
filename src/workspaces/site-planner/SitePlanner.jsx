@@ -53,7 +53,7 @@ import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
-import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates } from "./lib/counties.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./lib/kmzExport.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
@@ -79,7 +79,7 @@ import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
-import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge } from "./lib/jurisdiction.js";
+import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
 import { representativeRing, ringCentroid, ringsSignature } from "./lib/siteAnalysis.js";
 import JurisdictionBadge from "./components/JurisdictionBadge.jsx";
 import { formatAge } from "./lib/gisCache.js";
@@ -6792,6 +6792,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
+  // B792 — the county stored at CREATION can be wrong (overlapping county bboxes + a
+  // spatially-unscoped statewide parcel source let "waller" persist on a Fort Bend site),
+  // and every consumer — the identify CAD, tax rates, the flood/easement jurisdiction
+  // defaults — reads the row as truth. On load, confirm it once against the TxDOT
+  // county-boundary layer (SWR-cached, non-blocking); a confirmed DIFFERENT configured
+  // key heals the record through the normal save path. Unrecognized/failed answers
+  // change nothing (countyKeyForName never returns an unconfigured key).
+  const [, setCountyHealTick] = useState(0);
+  useEffect(() => {
+    const o = restored?.origin;
+    if (!siteId || !o || !Number.isFinite(o.lat) || !Number.isFinite(o.lon)) return;
+    let live = true;
+    countyAtPoint(o.lon, o.lat).then((ans) => {
+      if (!live || !ans?.name) return;
+      const key = countyKeyForName(ans.name);
+      if (!key || key === (restored?.county || null)) return;
+      const wrong = restored?.county ?? null;
+      if (restored) restored.county = key; // metaRef re-reads restored.county every render
+      metaRef.current = { ...metaRef.current, county: key }; // flush below must not save the stale meta
+      setCountyHealTick((n) => n + 1);     // re-render the consumers (siteCounty & friends)
+      flushSite();                          // persist the healed row to the device mirror
+      try { cloudPushWithWatchdog(siteId); } catch (_) {}
+      console.warn(`[B792] Site county healed: "${wrong}" → "${key}" (TxDOT county boundary${ans.fips ? `, FIPS ${ans.fips}` : ""}).`);
+      reportClientEvent("county-healed", `site county corrected ${wrong} → ${key}`, { id: siteId, from: wrong, to: key, fips: ans.fips || null });
+    }).catch(() => {});
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteId]);
   // B466/B471 — ONE "Take over editing here" that resumes saving no matter WHY it stalled:
   //   • Same browser, another TAB holds the editor lock → steal the Web Lock (instant, in place) and
   //     push the pent-up work. The thin-clobber + CAS guards (B459/B314) still protect the cloud.

@@ -45,17 +45,17 @@ const lastCheck = {
   checkedAt: CHECKED_AT,
 };
 
-const siteFor = (drainage, floodMitigation) => ({
+const siteFor = (drainage, floodMitigation, county = "fortbend") => ({
   s_b788: {
     id: "s_b788", groupId: "s_b788", site: "B788 Test", name: "Plan 1", status: "active",
-    origin: { lat: 29.7722, lon: -95.8548 }, county: "fortbend",
+    origin: { lat: 29.7722, lon: -95.8548 }, county,
     parcels: [{ id: "pA", points: PARCEL, locked: true }],
     els: [], measures: [], callouts: [], markups: [],
     deletedIds: [], settings: { showSetback: false, drainage, ...(floodMitigation ? { floodMitigation } : {}) }, underlay: null, updatedAt: Date.now(),
   },
 });
-const seedFor = (drainage, floodMitigation) => `(() => { try {
-  localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(siteFor(drainage, floodMitigation))}));
+const seedFor = (drainage, floodMitigation, county) => `(() => { try {
+  localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(siteFor(drainage, floodMitigation, county))}));
   localStorage.setItem('planarfit:currentSite:v1', 's_b788');
 } catch (e) {} })();`;
 
@@ -73,9 +73,9 @@ const ok = (b) => (b ? "PASS" : "FAIL");
 let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${ok(cond)}] ${label}${extra ? ` — ${extra}` : ""}`); };
 
-async function openYield(browser, drainage, clickCheck, floodMitigation = null) {
+async function openYield(browser, drainage, clickCheck, floodMitigation = null, county = "fortbend") {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 860 }, deviceScaleFactor: 2 });
-  await ctx.addInitScript(seedFor(drainage, floodMitigation));
+  await ctx.addInitScript(seedFor(drainage, floodMitigation, county));
   for (const [needle, payload] of GIS_MOCKS) {
     await ctx.route(`**${needle}**`, (route) =>
       route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(payload) }));
@@ -150,6 +150,30 @@ async function run() {
     const t2 = (await page.locator("body").innerText()).replace(/\s+/g, " ");
     expect("B790: switching to Auto clears the mismatch warning",
       !/county map reads Fort Bend —/.test(t2));
+    await ctx.close();
+  }
+
+  console.log("\nScenario 4 — B792: county:'waller' stored on the Fort Bend-origin site self-heals on load:");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 860 }, deviceScaleFactor: 2 });
+    await ctx.addInitScript(seedFor({ lastCheck }, null, "waller"));
+    for (const [needle, payload] of GIS_MOCKS) {
+      await ctx.route(`**${needle}**`, (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(payload) }));
+    }
+    const page = await ctx.newPage();
+    const consoleMsgs = [];
+    page.on("console", (m) => consoleMsgs.push(m.text()));
+    await page.goto(BASE, { waitUntil: "load" });
+    await page.waitForTimeout(2800);
+    await page.locator('svg[aria-label="Site plan canvas"]').waitFor({ timeout: 12000 }).catch(() => {});
+    await page.waitForTimeout(2500); // give the non-blocking heal + flush a beat
+    const storedCounty = await page.evaluate(() => {
+      try { return JSON.parse(localStorage.getItem("planarfit:sites:v1"))?.s_b788?.county ?? null; } catch { return null; }
+    });
+    expect("B792: the persisted site row healed waller → fortbend", storedCounty === "fortbend", `stored: ${storedCounty}`);
+    expect("B792: the heal announced itself (console line, never silent)",
+      consoleMsgs.some((m) => /\[B792\] Site county healed/.test(m)));
     await ctx.close();
   }
 
