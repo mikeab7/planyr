@@ -45,17 +45,17 @@ const lastCheck = {
   checkedAt: CHECKED_AT,
 };
 
-const siteFor = (drainage) => ({
+const siteFor = (drainage, floodMitigation) => ({
   s_b788: {
     id: "s_b788", groupId: "s_b788", site: "B788 Test", name: "Plan 1", status: "active",
     origin: { lat: 29.7722, lon: -95.8548 }, county: "fortbend",
     parcels: [{ id: "pA", points: PARCEL, locked: true }],
     els: [], measures: [], callouts: [], markups: [],
-    deletedIds: [], settings: { showSetback: false, drainage }, underlay: null, updatedAt: Date.now(),
+    deletedIds: [], settings: { showSetback: false, drainage, ...(floodMitigation ? { floodMitigation } : {}) }, underlay: null, updatedAt: Date.now(),
   },
 });
-const seedFor = (drainage) => `(() => { try {
-  localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(siteFor(drainage))}));
+const seedFor = (drainage, floodMitigation) => `(() => { try {
+  localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(siteFor(drainage, floodMitigation))}));
   localStorage.setItem('planarfit:currentSite:v1', 's_b788');
 } catch (e) {} })();`;
 
@@ -73,9 +73,9 @@ const ok = (b) => (b ? "PASS" : "FAIL");
 let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${ok(cond)}] ${label}${extra ? ` — ${extra}` : ""}`); };
 
-async function openYield(browser, drainage, clickCheck) {
+async function openYield(browser, drainage, clickCheck, floodMitigation = null) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 860 }, deviceScaleFactor: 2 });
-  await ctx.addInitScript(seedFor(drainage));
+  await ctx.addInitScript(seedFor(drainage, floodMitigation));
   for (const [needle, payload] of GIS_MOCKS) {
     await ctx.route(`**${needle}**`, (route) =>
       route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(payload) }));
@@ -133,6 +133,23 @@ async function run() {
       /outside Harris County/.test(t));
     expect("B789 engine: no HCFCD greater-of compare under the off-Harris override",
       !/greater-of/.test(t));
+    await ctx.close();
+  }
+
+  console.log("\nScenario 3 — B790: sticky floodMitigation.jurKey:'harris' on the Fort Bend site:");
+  {
+    const { ctx, page, t } = await openYield(browser, { lastCheck }, false, { jurKey: "harris" });
+    expect("B790: the county-mismatch warning names the contradiction",
+      /county map reads Fort Bend/.test(t) && /Switch the Jurisdiction to Auto/.test(t));
+    const autoOpt = await page.locator('option[value=""]').filter({ hasText: /Auto — detected/ }).count();
+    expect("B790: an 'Auto — detected: …' option exists on the Jurisdiction picker", autoOpt >= 1);
+    // Switch to Auto → the warning clears and the detected (Fort Bend) rule takes over.
+    const fmSelect = page.locator("select").filter({ has: page.locator('option[value=""]', { hasText: /Auto — detected/ }) }).last();
+    await fmSelect.selectOption("").catch(() => {});
+    await page.waitForTimeout(400);
+    const t2 = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+    expect("B790: switching to Auto clears the mismatch warning",
+      !/county map reads Fort Bend —/.test(t2));
     await ctx.close();
   }
 

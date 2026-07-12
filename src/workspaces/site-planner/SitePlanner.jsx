@@ -105,7 +105,7 @@ import {
   crossSectionWselFromFeatureCollection, governingCrossSectionWsel,
   NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
 } from "./lib/floodplainMitigation.js";
-import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, triggerClasses } from "./lib/floodplainRules.js";
+import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
 import { loadBuildabilityRules, assessBuildability } from "./lib/buildability.js";
 import {
@@ -6324,8 +6324,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmSettings = settings.floodMitigation || {};
   const floodGeo = drainCtxData?.floodGeo || null;
   const fmZones = (floodGeo && floodGeo.zones) || [];
-  const floodJurKey = fmSettings.jurKey
-    || (drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(restored?.county));
+  // B790 — keep the DETECTED key distinct from the override so the picker can offer
+  // "Auto — detected: <X>" and a hand-picked rule can be compared against the map.
+  const floodJurDetected = drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(restored?.county);
+  const floodJurKey = fmSettings.jurKey || floodJurDetected;
   const fmRule = floodRules[floodJurKey] || floodRules.generic;
   // Derived BFE (B755): the FEMA-BFE-line estimate computed at check time. It NEVER
   // overwrites the manual bfeFt (which would masquerade as user entry) — it rides its
@@ -6468,6 +6470,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     floodMit: {
       settings: fmSettings,
       jurKey: floodJurKey,
+      // B790 — the picker distinguishes the user's override from the detected key so
+      // "Auto — detected: <X>" is a real, reachable state (jurKey null → auto re-engages).
+      jurKeyOverride: fmSettings.jurKey || null,
+      detectedJurKey: floodJurDetected,
+      // B790 — a hand-picked rule is compared against the identify county for the
+      // mismatch warning (floodJurCounty maps a rules key to its implied county).
+      identifyCounties: drainCtxData?.authority?.jurisdiction?.county || [],
       rules: floodRules,
       derivedBfe: fmDerivedBfe, // B755 — the FEMA-BFE-line estimate, for the input placeholder
       onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
@@ -14697,10 +14706,23 @@ function YieldPanel({
                   <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4 }}>Floodplain mitigation inputs (ft NAVD88)</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
                     <span style={{ fontSize: 11, color: Y.muted }}>Jurisdiction</span>
-                    <select value={fm.jurKey} onChange={(e) => fm.onChange({ jurKey: e.target.value })} style={{ ...fmInputStyle, width: 168, textAlign: "left", cursor: "pointer" }}>
+                    {/* B790 — Auto is a real, reachable state (the B750 agency-picker pattern):
+                        selecting it writes jurKey:null so detection re-engages; a hand-pick
+                        sticks until the user returns to Auto. */}
+                    <select value={fm.jurKeyOverride || ""} onChange={(e) => fm.onChange({ jurKey: e.target.value || null })} style={{ ...fmInputStyle, width: 168, textAlign: "left", cursor: "pointer" }}>
+                      <option value="">Auto — detected: {(fm.rules[fm.detectedJurKey] || fm.rules.generic).label}</option>
                       {Object.entries(fm.rules).map(([k, r2]) => <option key={k} value={k}>{r2.label}</option>)}
                     </select>
                   </div>
+                  {(() => {
+                    // B790 — a hand-picked rule whose implied county contradicts the identify
+                    // county gets a loud mismatch row (the sticky-"harris"-on-Fort-Bend class).
+                    const impliedCounty = fm.jurKeyOverride ? floodJurCounty(fm.jurKeyOverride) : null;
+                    const ids = fm.identifyCounties || [];
+                    if (!impliedCounty || !ids.length || ids.some((c) => String(c).toLowerCase().includes(impliedCounty))) return null;
+                    const detectedLabel = (fm.rules[fm.detectedJurKey] || fm.rules.generic).label;
+                    return warnNote(`⚠ You picked ${fmRuleRow.label}, but the county map reads ${ids.join(" + ")} — the ${detectedLabel} rule likely applies. Switch the Jurisdiction to Auto to use it.`, "fm-jur-mismatch");
+                  })()}
                   {fmRow("Pad / finished floor (FFE)", "padFfeFt", "—", "The plan-level pad elevation; a selected element's own padElevFt overrides it")}
                   {fmRow("Existing grade", "existGradeFt", "3DEP auto", "Blank = the 3DEP bare-earth median sampled by this drainage check")}
                   {fmRow("BFE (1% WSE)", "bfeFt",
