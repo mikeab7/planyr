@@ -700,3 +700,39 @@ describe("computeMitigation — the 0.2% derived-WSE engine seam (B763)", () => 
     expect(r.providers.wse02pct).toBe("manual");
   });
 });
+
+describe("B794 — 0.2% (500-yr) missing-input copy + the below-1% sanity guard", () => {
+  const fp = { id: "b1", ring: rect(0, 0, 100, 100) };
+  it("an unpriced 0.2% band names the missing input and points at the EFFECTIVE FIS profile", () => {
+    const zone = mkZone("02pct", [rect(0, 0, 100, 100)]);
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: coh, elev: { padElevFt: 100, existGradeFt: 90 } });
+    expect(r.volumeCf).toBeNull();
+    expect(r.unknownReason).toMatch(/no 0\.2% \(500-yr\) WSE/);
+    expect(r.unknownReason).toMatch(/EFFECTIVE FIS profile/);
+  });
+  it("a derived 0.2% BELOW the best-known 1% WSE flags wse02-below-1pct — and never clamps", () => {
+    const zones = [
+      mkZone("1pct", [rect(0, 0, 100, 100)], { staticBfeFt: 97 }),   // 1% surface at 97
+      mkZone("02pct", [rect(200, 0, 100, 100)]),
+    ];
+    const fps = [{ id: "a", ring: rect(0, 0, 100, 100) }, { id: "b", ring: rect(200, 0, 100, 100) }];
+    const r = computeMitigation({ footprints: fps, zones, rule: coh, elev: { padElevFt: 100, existGradeFt: 90, derivedWse02Ft: 96, derivedWse02Src: "fbcdd-wse02-draft" } });
+    expect(r.flags).toContain("wse02-below-1pct");
+    // flag, don't clamp: the 0.2% band still priced off the raw 96 (min(96,100)−90 = 6 ft)
+    expect(r.perClass["02pct"].volumeCf).toBeCloseTo(10000 * 6, -2);
+  });
+  it("a derived 0.2% properly ABOVE the 1% raises no flag", () => {
+    const zones = [
+      mkZone("1pct", [rect(0, 0, 100, 100)], { staticBfeFt: 95 }),
+      mkZone("02pct", [rect(200, 0, 100, 100)]),
+    ];
+    const fps = [{ id: "a", ring: rect(0, 0, 100, 100) }, { id: "b", ring: rect(200, 0, 100, 100) }];
+    const r = computeMitigation({ footprints: fps, zones, rule: coh, elev: { padElevFt: 100, existGradeFt: 90, derivedWse02Ft: 96 } });
+    expect(r.flags).not.toContain("wse02-below-1pct");
+  });
+  it("a MANUAL 1% BFE is part of the sanity reference too", () => {
+    const zones = [mkZone("02pct", [rect(0, 0, 100, 100)])];
+    const r = computeMitigation({ footprints: [fp], zones, rule: coh, elev: { padElevFt: 100, existGradeFt: 90, bfeFt: 98, derivedWse02Ft: 96 } });
+    expect(r.flags).toContain("wse02-below-1pct");
+  });
+});

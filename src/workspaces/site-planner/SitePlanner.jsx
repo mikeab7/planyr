@@ -6477,6 +6477,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B790 — a hand-picked rule is compared against the identify county for the
       // mismatch warning (floodJurCounty maps a rules key to its implied county).
       identifyCounties: drainCtxData?.authority?.jurisdiction?.county || [],
+      siteCounty: restored?.county || null, // B794 — county-specific FIS pointer on the 0.2% input
       rules: floodRules,
       derivedBfe: fmDerivedBfe, // B755 — the FEMA-BFE-line estimate, for the input placeholder
       onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
@@ -7575,7 +7576,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } else if (mit && mit.intersectAcres > 0) {
       let v = mit.volumeCf != null ? `${f2(mit.volumeAcFt)} ac-ft` : "UNKNOWN";
       if (mit.volumeCf != null && mit.providers?.wse1pct === "bfe-line-interp") v += " (derived BFE — screening est.)";
-      if (mit.volumeCf != null && mit.providers?.wse02pct === "fbcdd-wse02-draft") v += " (0.2% from DRAFT study)";
+      // B794 (PDF-PARITY with the card's basis note): the DRAFT label carries the §9-basis
+      // qualifier — the Atlas-14 read stands in for the pre-Atlas-14 FIS basis, not equals it.
+      if (mit.volumeCf != null && mit.providers?.wse02pct === "fbcdd-wse02-draft") v += " (0.2% from DRAFT Atlas-14 study — §9 basis is the 2014 FIS)";
+      if (mit.flags && mit.flags.includes("wse02-below-1pct")) v += " (⚠ derived 0.2% reads below the 1% — mismatched studies)";
       if (mit.volumeCf != null && d.floodGeo && d.floodGeo.truncated) v += " (floor — capped pull)";
       if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
       pairs.push(["Floodplain mitigation", v]);
@@ -14762,7 +14766,12 @@ function YieldPanel({
                   {fmRow("BFE (1% WSE)", "bfeFt",
                     fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) && !Number.isFinite(fm.settings.bfeFt) ? `~${f1(fm.derivedBfe.bfeFt)} derived` : "often needed",
                     "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (shown greyed as ‘~x derived’); anything you type here overrides it (FIRM panel / effective model)")}
-                  {fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIS / HCFCD", "Not an NFHL attribute — from the FEMA FIS profile or HCFCD model data; hook for MAAPnext grids later")}
+                  {/* B794 — the placeholder names WHERE the number comes from, county-specific:
+                      Fort Bend's mitigation basis is the effective FIRM 48157C FIS (2014-04-02,
+                      pre-Atlas-14 — exactly what Interim §9 references). */}
+                  {(fm.siteCounty === "fortbend" || (fm.identifyCounties || []).some((c) => /fort\s*bend/i.test(String(c))))
+                    ? fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIRM 48157C FIS", "From the EFFECTIVE FIS profile — Fort Bend: countywide FIRM 48157C, eff. 2014-04-02 (pre-Atlas-14, the basis FBCDD Interim §9 references). The Atlas-14 DRAFT raster auto-fills a labeled stand-in when it can; your entry overrides it.")
+                    : fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIS / HCFCD", "Not an NFHL attribute — from the effective FEMA FIS profile or HCFCD model data; hook for MAAPnext grids later")}
                   {fmRow("Dock-high drop: court below slab FF (ft)", "dockDropFt", "4", "Industrial dock-high: building-attached truck courts + their trailer strips auto-price at slab FF minus this drop (typ. 48\u2033 docks); blank = 4")}
                   {fmRow("Expert: average depth of fill below the flood elevation (ft)", "avgFillDepthFt", "bypass", "Expert bypass: volume = intersect area × this constant depth")}
                   <label style={{ display: "flex", gap: 7, alignItems: "center", fontSize: 11, color: Y.text, cursor: "pointer", padding: "3px 0" }}>

@@ -133,10 +133,19 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
             </div>
           )}
           {/* B770 — the 0.2% band was priced off FBCDD's Atlas-14 watershed-study raster:
-              DRAFT results, so the number must never read as an effective value. */}
+              DRAFT results, so the number must never read as an effective value. B794 adds
+              the BASIS distinction: Interim §9's mitigation trigger keys the PRE-Atlas-14
+              0.2% (the effective 2014 FIS), so the Atlas-14 read is a labeled stand-in. */}
           {geo && geo.derivedWse02 && mit.providers.wse02pct === "fbcdd-wse02-draft" && (
             <div style={warnStyle}>
-              ⚑ 0.2% WSE ≈ {f2(geo.derivedWse02.wseFt)}′ read from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results, screening only. Enter a 0.2% WSE to override.
+              ⚑ 0.2% WSE ≈ {f2(geo.derivedWse02.wseFt)}′ read from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results, screening only. Basis note: FBCDD Interim §9 references the PRE-Atlas-14 0.2% (effective 2014 FIS profile) — this Atlas-14 value stands in for it, labeled, not equal to it. Enter the FIS 0.2% WSE to override.
+            </div>
+          )}
+          {/* B794 — sanity guard: a 0.2% surface can never sit below the 1% surface; a
+              derived value that does signals a study/vintage mismatch. Flag, never clamp. */}
+          {mit.flags.includes("wse02-below-1pct") && (
+            <div style={warnStyle}>
+              ⚠ The derived 0.2% (500-yr) WSE reads BELOW the 1% (100-yr) water surface here — physically impossible on one reach, so the two values come from mismatched studies or vintages. Don't rely on the 0.2% number; enter one from the effective FIS profile.
             </div>
           )}
           {/* BFE lines are mapped but publish a datum we can't safely compare — say why
