@@ -124,6 +124,28 @@ describe("handleGisCache — fail-open", () => {
   });
 });
 
+describe("handleGisCache — bounded upstream timeout (NEW-1/B788)", () => {
+  // A fetch that never settles on its own but rejects when its AbortSignal fires — models a
+  // degraded agency (FEMA held/killed exports 20–30 s in the 2026-07-11 NFHL slowdown).
+  const hangFetch = () => (url, init) => new Promise((_, reject) => {
+    if (init && init.signal) init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+  });
+  it("fails OPEN (302) instead of hanging when the agency never answers within the cap", async () => {
+    const res = await handleGisCache({
+      client: fakeDrive(), segs: SEGS, search: SEARCH, fetchImpl: hangFetch(),
+      upstreamTimeoutMs: 10, folderIdFor, defer: () => {},
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(reconstruct(SEGS, SEARCH));
+  });
+  it("passes an AbortSignal on the upstream fetch (so the cap can actually abort it)", async () => {
+    let sawSignal = false;
+    const recFetch = async (_url, init) => { sawSignal = !!(init && init.signal); return new Response("IMG", { status: 200, headers: { "content-type": "image/png" } }); };
+    await handleGisCache({ client: fakeDrive(), segs: SEGS, search: SEARCH, fetchImpl: recFetch, folderIdFor, defer: () => {} });
+    expect(sawSignal).toBe(true);
+  });
+});
+
 describe("handleGisCache — meta (age badge)", () => {
   it("reports cached:false with no upstream call when nothing is stored", async () => {
     let fetched = false;

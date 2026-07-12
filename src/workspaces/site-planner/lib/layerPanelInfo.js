@@ -35,5 +35,7 @@ export function combineLayerStatus(...list) {
   const states = list.filter(Boolean);
   if (!states.length) return null;
   const pick = (s) => states.find((x) => x.state === s);
-  return pick("loading") || pick("failed") || pick("loaded") || pick("empty") || states[0] || null;
+  // "slow" (NEW-3/B790) ranks just under "failed": a stalled sublayer is more actionable than a
+  // loaded one, but a genuinely-failed sublayer still wins the combined dot.
+  return pick("loading") || pick("failed") || pick("slow") || pick("loaded") || pick("empty") || states[0] || null;
 }
