@@ -184,6 +184,14 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
       {b && (
         <div style={{ marginTop: 7, borderTop: `1px solid ${line}`, paddingTop: 6 }}>
           {b.ffe.status === "pass" && row("Required FFE", `${f2(b.ffe.requiredFfeFt)}′ (${ffeBasisText(b.ffe)}) — pad PASSES`, "ffe")}
+          {/* NEW-3 — no pad entered: the pad defaulted to the code minimum, so this is an
+              ASSUMED floor (the rule dictates it), not a verified pass on a real pad FFE. */}
+          {b.ffe.status === "assumed" && (
+            <>
+              {row("Required FFE", `${f2(b.ffe.requiredFfeFt)}′ (${ffeBasisText(b.ffe)})`, "ffe")}
+              <div style={noteStyle}>No pad entered — the pad is ASSUMED at this code minimum. Enter a finished-floor elevation to check a real design.</div>
+            </>
+          )}
           {b.ffe.status === "short" && (
             <div style={dangerStyle}>⚠ Pad FFE is {f2(b.ffe.shortByFt)}′ SHORT of the required {f2(b.ffe.requiredFfeFt)}′ ({ffeBasisText(b.ffe)}).</div>
           )}
@@ -197,7 +205,7 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
           )}
           {/* B770 — the governing FFE basis is the 0.2% WSE and that WSE came from the
               FBCDD DRAFT raster: the verdict itself must carry the draft caveat. */}
-          {(b.ffe.status === "pass" || b.ffe.status === "short") && b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft" && (
+          {(b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft" && (
             <div style={warnStyle}>⚑ The 0.2% WSE behind this required FFE is a DRAFT Fort Bend watershed-study value — screening only; confirm before design.</div>
           )}
           {b.pathway && (

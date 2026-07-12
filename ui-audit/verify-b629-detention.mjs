@@ -122,23 +122,39 @@ async function run() {
   if (!LIVE) {
     // Regime B here (BFE 95 vs ground 100): the ~3-ft permanent pool (~4.69 ac-ft dead
     // storage) is UNCREDITED, so the honest shortfall is 30 − (12 − 4.69) ≈ 22.7 ac-ft,
-    // NOT the gross 18.0 — and the panel says so via the "usable … permanent pool" note.
-    expect("usable-volume note shows the uncredited Regime-B permanent pool", /permanent pool/i.test(t) && /Usable/.test(t));
+    // NOT the gross 18.0. NEW-1(a): the usable figure stays visible on the provided row while
+    // the "dead storage earns no credit" teaching copy folds into the row's ⓘ (title) hover.
+    expect("usable figure shown on the provided row (Regime-B dead pool)", /usable\s+[\d.]+/i.test(t));
+    expect("dead-storage detail folds into the provided-row ⓘ", await page.locator('div[title*="dead storage earns no credit"][title*="permanent pool"]').count() > 0);
     expect("Shortfall reflects USABLE volume (dead pool excluded, ~22.7 ac-ft)", /Shortfall/.test(t) && /22\.\d\d?\s*ac-ft/.test(t));
   } else {
     expect("Shortfall line renders (provided < required)", /Shortfall/.test(t));
   }
   if (!LIVE) {
-    expect("Analysis tier = Full DIA with all four triggers", /Analysis tier/.test(t) && /Full DIA/.test(t) && /Floodplain/.test(t) && /Floodway/.test(t) && /Regulated channel/.test(t) && /Tract size/.test(t));
-    expect("Regime B banner (BFE 95 within pond depth of ground 100), datum-tagged", /Regime B/i.test(t) && /NAVD88/.test(t));
-    expect("wet-bottom warning renders in Regime B", /permanent pool below the static water surface/i.test(t));
+    // NEW-1(a): tier + triggers + unknowns collapse to ONE verdict line; the four triggers
+    // fold into the tier row's ⓘ (title) rather than a separate wrapped note.
+    expect("Analysis tier = Full DIA (verdict line)", /Analysis tier/.test(t) && /Full DIA/.test(t));
+    expect("all four DIA triggers fold into the tier ⓘ", await page.locator('div[title*="Floodplain"][title*="Floodway"][title*="Regulated channel"][title*="Tract size"]').count() > 0);
+    // NEW-1(a): the regime collapses to a one-line verdict; its datum-tagged reasons + the
+    // wet-bottom note fold into the regime row's ⓘ.
+    expect("Regime B verdict line", /Regime B/i.test(t));
+    expect("regime reasons (datum-tagged) + wet-bottom fold into the regime ⓘ", await page.locator('div[title*="NAVD88"][title*="permanent pool below the static water surface"]').count() > 0);
     expect("MUD district surfaced (never silent)", /Harris County MUD 61/.test(t));
     expect("B635 watershed overlay note (Upper Cypress)", /Upper Cypress/.test(t) && /retention/i.test(t));
   } else {
-    expect("Analysis tier renders (tract-size trigger at minimum)", /Analysis tier/.test(t) && /Tract size/.test(t));
+    expect("Analysis tier renders (verdict line)", /Analysis tier/.test(t));
+    expect("tract-size trigger folds into the tier ⓘ", await page.locator('div[title*="Tract size"]').count() > 0);
     expect("hydraulic-regime banner renders (A/B/unknown — never absent)", /Regime (A|B|unknown)/i.test(t));
   }
   expect("screening caveat present", /Screening estimate — confirm with your engineer/.test(t));
+
+  // ── 5a. NEW-1 verdict-first density redesign: the single status line (date + inline
+  // Re-check), the mitigation-inputs 'Advanced' fold, and the datum footnote folded into
+  // the inputs-header ⓘ (a live check this session reads present-tense "Checked <date>").
+  expect("NEW-1: single status line shows the check date", /Checked\s+\d/.test(t));
+  expect("NEW-1: inline Re-check button in the status line", await page.getByRole("button", { name: /Re-check/ }).count() > 0);
+  expect("NEW-1: mitigation-inputs 'Advanced' fold present", await page.getByRole("button", { name: /Advanced/ }).count() > 0);
+  expect("NEW-1: datum footnote folds into the inputs-header ⓘ", await page.locator('div[title*="mixed datums are a multi-foot silent error"]').count() > 0);
 
   // ── 5b. B750: channel-discharge control + detected-channel transparency ─────
   expect("B750 channel Auto/Yes/No control renders", /Drains to HCFCD channel/.test(t));

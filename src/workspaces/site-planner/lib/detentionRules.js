@@ -750,7 +750,7 @@ export const TIER_THRESHOLDS = {
 
 const isSfhaZone = (z) => /^(A|V)/i.test(String(z || "").trim());
 
-export function assessAnalysisTier({ acres = 0, authorityId = null, floodZones = [], channel = null } = {}) {
+export function assessAnalysisTier({ acres = 0, authorityId = null, floodZones = [], channel = null, channelDataApplicable = true } = {}) {
   const triggers = [];
   const unknowns = [];
   const zones = floodZones || [];
@@ -767,7 +767,13 @@ export function assessAnalysisTier({ acres = 0, authorityId = null, floodZones =
       label: "Regulated channel",
       detail: `HCFCD unit ${channel.unitNo || "?"}${channel.name ? ` (${channel.name})` : ""}${channel.distFt != null ? ` within ~${Math.round(channel.distFt)} ft` : ""} — adjacency screen, not a traced discharge path (B634)`,
     });
-  } else if (!channel || channel.near == null) {
+  } else if (channelDataApplicable && (!channel || channel.near == null)) {
+    // B789 county-gating (NEW-4): the HCFCD channel-adjacency screen only has a data
+    // source in Harris County. Outside Harris the adjacency can NEVER resolve, so a
+    // permanent "Channel adjacency unknown" is pure noise — the caller passes
+    // channelDataApplicable=false there and we omit the unknown entirely. (A different
+    // regulated channel authority may still exist; that's a separate, county-specific
+    // check, not this HCFCD screen.)
     unknowns.push({ id: "regulated-channel", label: "Channel adjacency unknown" });
   }
   const th = TIER_THRESHOLDS[authorityId];

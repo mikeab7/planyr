@@ -69,6 +69,35 @@ describe("requiredFfe + the compare paths (single-basis)", () => {
   });
 });
 
+describe("NEW-3 — auto pad defaults to the code-minimum FFE (status 'assumed')", () => {
+  it("padIsAuto flips a would-be pass into an 'assumed' verdict, keeping the required FFE + basis", () => {
+    // Caller defaults the pad to the code minimum (= requiredFfeFt) and flags it auto.
+    const a = assessBuildability({ rule: coh, padFfeFt: 100, padIsAuto: true, wse02Ft: 98 });
+    expect(a.ffe.status).toBe("assumed");
+    expect(a.ffe.requiredFfeFt).toBe(100);
+    expect(a.ffe.basis).toBe("wse02pct");
+    expect(a.ffe.shortByFt).toBeNull();
+  });
+  it("a REAL (typed) pad is unaffected — padIsAuto:false still passes / falls short", () => {
+    expect(assessBuildability({ rule: coh, padFfeFt: 100, padIsAuto: false, wse02Ft: 98 }).ffe.status).toBe("pass");
+    expect(assessBuildability({ rule: coh, padFfeFt: 98.5, padIsAuto: false, wse02Ft: 98 }).ffe.status).toBe("short");
+    // default padIsAuto (omitted) is false — unchanged behavior
+    expect(assessBuildability({ rule: coh, padFfeFt: 100, wse02Ft: 98 }).ffe.status).toBe("pass");
+  });
+  it("no computable WSE → still unknown even with padIsAuto (nothing to assume from)", () => {
+    const a = assessBuildability({ rule: coh, padFfeFt: null, padIsAuto: false });
+    expect(a.ffe.status).toBe("unknown");
+    expect(a.ffe.requiredFfeFt).toBeNull();
+  });
+  it("Fort Bend multi-basis: the assumed pad reflects the MAX-of governing basis", () => {
+    // wse1pct 110+2=112 governs over wse02pct 100+2=102; auto pad = 112 → assumed
+    const a = assessBuildability({ rule: fortbend, padFfeFt: 112, padIsAuto: true, wse02Ft: 100, wse1pctFt: 110 });
+    expect(a.ffe.status).toBe("assumed");
+    expect(a.ffe.requiredFfeFt).toBeCloseTo(112, 6);
+    expect(a.ffe.governingBasis.basis).toBe("wse1pct");
+  });
+});
+
 describe("single-basis back-compat (B759 additive)", () => {
   it("the COH single-basis path is unchanged, plus governingBasis:null / pendingBases:[]", () => {
     const r = requiredFfe(coh, { wse02Ft: 98 });

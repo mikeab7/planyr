@@ -291,6 +291,23 @@ describe("combineMitigation — per-element results merge into one ledger", () =
     expect(combineMitigation([])).toBeNull();
     expect(combineMitigation([null])).toBeNull();
   });
+  it("NEW-2: the combined ledger is a SLIM, JSON-safe summary (no geometry / functions) — persistable in the remembered check", () => {
+    // NEW-2 stores this ledger in settings.drainage.lastCheck.mitigation so a reload shows
+    // last-known mitigation. That only works if the result carries no rings / functions.
+    const a = computeMitigation({ footprints: [{ id: "a", ring: rect(0, 0, 100, 100) }], zones: [zone95()], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } });
+    const summary = combineMitigation([a]);
+    const round = JSON.parse(JSON.stringify(summary));
+    // the round-tripped copy is byte-for-byte the same (nothing lost to a ring / fn / regex)
+    expect(round).toEqual(summary);
+    // and it carries the numbers/provenance/flags the remembered readout + print re-render from
+    expect(round.volumeAcFt).toBeCloseTo(summary.volumeAcFt, 6);
+    expect(round.intersectAcres).toBeGreaterThan(0);
+    expect(round.providers).toBeTruthy();
+    expect(Array.isArray(round.flags)).toBe(true);
+    // no smuggled geometry
+    const s = JSON.stringify(summary);
+    expect(s).not.toMatch(/"rings"|"ring"|"geometry"|"bbox"/);
+  });
 });
 
 describe("effectivePadElev — dock-high industrial pads (B713)", () => {
