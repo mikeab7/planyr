@@ -33,10 +33,10 @@ const _trimUrl = (u) => String(u || "").replace(/\/+$/, "");
  * click/outage fallback? Prefer it for DISPLAY only when the live source can't itself draw
  * current, client-selectable outlines: an image-only source — the statewide TxGIO layer,
  * whose /query is disabled upstream, matched by URL (mirrors `parcelDisplayIsImageOnly`).
- * A healthy queryable CAD (e.g. Chambers → CCAD after B784, or HCAD/FBCAD) draws its OWN
+ * A healthy queryable CAD (e.g. Chambers → CCAD after B787, or HCAD/FBCAD) draws its OWN
  * current vectors, so it owns the display and the snapshot stays purely a click/outage
  * fallback — otherwise a stale harvested snapshot would shadow the live CAD and Planyr's
- * parcels wouldn't match the county's own map (the exact B784 complaint). Requires a known
+ * parcels wouldn't match the county's own map (the exact B787 complaint). Requires a known
  * `liveUrl`: until it resolves we DON'T prefer the snapshot, so a queryable CAD is never
  * permanently shadowed by a snapshot that happened to load first. Pure. */
 export function preferSnapshotForDisplay({ hasSnapshot, liveUrl } = {}) {

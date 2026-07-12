@@ -68,7 +68,7 @@ describe("sourceHealth — parcel-server circuit breaker (B244)", () => {
 // identify race to a faster TxGIO (B630 — the false "Fort Bend server unavailable" notice
 // on every healthy Fort Bend click).
 describe("isStatewideBackup — honest 'statewide backup' labeling (B630)", () => {
-  const SW = ["txgio_statewide"]; // the statewide TxGIO source has its own key since B784 (was `chambers`)
+  const SW = ["txgio_statewide"]; // the statewide TxGIO source has its own key since B787 (was `chambers`)
 
   it("is NOT a backup when a real county CAD answered directly", () => {
     // FBCAD answered → hit.county is a real primary, not the statewide key.
