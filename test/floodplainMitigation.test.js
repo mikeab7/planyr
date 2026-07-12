@@ -680,6 +680,15 @@ describe("computeMitigation — the 0.2% derived-WSE engine seam (B763)", () => 
     expect(r.volumeCf).toBeCloseTo(10000 * 4, -2); // 94 governs
     expect(r.providers.wse02pct).toBe("manual");
   });
+  it("B770: the caller-named derived source (FBCDD DRAFT raster) rides the provider tag", () => {
+    const zone = mkZone("02pct", [rect(0, 0, 100, 100)]);
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: coh, elev: { padElevFt: 100, existGradeFt: 90, derivedWse02Ft: 96, derivedWse02Src: "fbcdd-wse02-draft" } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 6, -2); // priced exactly like any derived 0.2%
+    expect(r.providers.wse02pct).toBe("fbcdd-wse02-draft"); // provenance label preserved
+    // and a manual entry still beats it (precedence unchanged)
+    const manual = computeMitigation({ footprints: [fp], zones: [zone], rule: coh, elev: { padElevFt: 100, existGradeFt: 90, wse02Ft: 94, derivedWse02Ft: 96, derivedWse02Src: "fbcdd-wse02-draft" } });
+    expect(manual.providers.wse02pct).toBe("manual");
+  });
   it("the 0.2% provider is tracked apart: a priced 0.2% manual never pollutes the 1% wse1pct tag", () => {
     const zones = [
       mkZone("1pct", [rect(0, 0, 100, 100)], { staticBfeFt: 95 }),

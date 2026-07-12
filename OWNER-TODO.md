@@ -5,7 +5,12 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-11._
+_Last updated: 2026-07-12._
+
+## 🧹 Optional 10-second cleanup — delete the "GREENHOUSE" test plan
+- [ ] The live testing on 2026-07-11 used a throwaway plan called **"GREENHOUSE / Concept A"** in your
+      account (a 14.66-acre Cypress-area parcel with a test pad elevation typed in). It's safe to delete
+      whenever you notice it — or leave it; it hurts nothing. Nothing else was changed in your projects.
 
 ## 🌐 Open your environment's network so I can load real Houston road data (thoroughfare epic)
 - [x] ~~**Allow the GIS servers, then start a fresh session.**~~ **DONE — you opened `mycity2.houstontx.gov` +
