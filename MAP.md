@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-12 @ `6b5014b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-12 @ `646b988` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -262,7 +262,7 @@ _243 source files mapped._
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver
-  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `detectField`, `FEET_WKID`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `SNAPSHOT_COUNTIES`, `STATEWIDE_KEYS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`
+  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyKeyForName`, `detectField`, `FEET_WKID`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `SNAPSHOT_COUNTIES`, `STATEWIDE_KEYS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
   - _exports_: `_resetCoverageCache`, `_resetRelevancePrefs`, `boundsFromLeaflet`, `boundsIntersect`, `bufferBounds`, `computeCoverage`, `COVERAGE_STATE`, `DEFAULT_RADIUS_MI`, `DEFAULT_RELEVANCE`, `displayCoverage`, `esriExtentToBounds`, `getCachedExtent`, `getNearbyRadiusMiles`, `getRelevanceMode`, `isRegional`, `LAYER_SCOPE`, `layerScope`, `normalizeMode`, `normalizeRadius`, `prefetchExtents`, `regionCoverage`, `RELEVANCE_MODES`, `setLayerExtent`, `setNearbyRadiusMiles`, `setRelevanceMode`, `srPointToLatLon`, `subscribeRelevance`
 - **`src/workspaces/site-planner/lib/deedAlign.js`** — Deed-to-parcel basis-of-bearings fix: rigid rotate+translate best-fit overlay plus theoretical grid-convergence fallback
@@ -312,7 +312,7 @@ _243 source files mapped._
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
   - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wse1pctForRing`, `zonesFromFeatureCollection`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
-  - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
+  - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed
   - _exports_: `d8Direction`, `flowArrows`
 - **`src/workspaces/site-planner/lib/geocode.js`** — Shared address geocoder (Esri World primary, Nominatim fallback) with honest hit/not-found/service-down return contract, used by map and planner
