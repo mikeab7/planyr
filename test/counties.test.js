@@ -6,14 +6,14 @@ import {
 
 // candidateCountiesForPoint routes a map click to the CAD service(s) that could
 // own the clicked lot, WITHOUT a county pre-pick (B11). The statewide TxGIO layer
-// (its own `txgio_statewide` key since B783 decoupled it from Chambers) paints parcel
+// (its own `txgio_statewide` key since B784 decoupled it from Chambers) paints parcel
 // outlines across all of Texas, so it must also be queryable everywhere as a universal
 // fallback — otherwise a click over a county whose own CAD is down/unconfigured sees an
 // outline it can't select (the Fort Bend symptom, B130).
-describe("candidateCountiesForPoint — click routing (B11/B130/B783)", () => {
+describe("candidateCountiesForPoint — click routing (B11/B130/B784)", () => {
   const STATEWIDE = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
 
-  it("the statewide source is its own `txgio_statewide` key, not chambers (B783)", () => {
+  it("the statewide source is its own `txgio_statewide` key, not chambers (B784)", () => {
     expect(STATEWIDE).toEqual(["txgio_statewide"]);
     expect(STATEWIDE).not.toContain("chambers"); // chambers is now a real CAD (CCAD)
   });
@@ -67,9 +67,9 @@ describe("candidateCountiesForPoint — click routing (B11/B130/B783)", () => {
 // The statewide TxGIO layer is the universal fallback when a county's own CAD server
 // is down. statewideFallbackFor returns that layer scoped to the requested county, so
 // an ID/address search can't leak into another county (B244).
-describe("statewideFallbackFor — county-scoped TxGIO backup (B244/B783)", () => {
+describe("statewideFallbackFor — county-scoped TxGIO backup (B244/B784)", () => {
   it("exposes the statewide key(s) and the all-Texas layer URL", () => {
-    expect(STATEWIDE_KEYS).toEqual(["txgio_statewide"]); // B783: its own key, not chambers
+    expect(STATEWIDE_KEYS).toEqual(["txgio_statewide"]); // B784: its own key, not chambers
     expect(STATEWIDE_PARCEL_LAYER).toMatch(/stratmap_land_parcels/);
   });
 
@@ -85,7 +85,7 @@ describe("statewideFallbackFor — county-scoped TxGIO backup (B244/B783)", () =
     expect(statewideFallbackFor("harris").scopeWhere).toBe("county='HARRIS'");
   });
 
-  it("Chambers → the TxGIO layer scoped to CHAMBERS (B783: CCAD primary now HAS a backup)", () => {
+  it("Chambers → the TxGIO layer scoped to CHAMBERS (B784: CCAD primary now HAS a backup)", () => {
     const ch = statewideFallbackFor("chambers");
     expect(ch).not.toBeNull();
     expect(ch.layerUrl).toBe(STATEWIDE_PARCEL_LAYER);

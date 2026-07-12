@@ -19,7 +19,7 @@
  *   Chambers — CCAD's OWN live public MapServer (ChambersCADPublic, Pandai-hosted,
  *              /query enabled, no token). This is the SAME service the CCAD website's
  *              map draws, so Planyr's parcels match what an owner sees on the CAD site —
- *              the statewide TxGIO harvest lagged it (B783). TxGIO stays the outage
+ *              the statewide TxGIO harvest lagged it (B784). TxGIO stays the outage
  *              fallback (statewideFallbackFor), never the primary.
  *   Waller   — no public CAD of its own → rides the statewide TxGIO layer scoped to Waller.
  */
@@ -33,7 +33,7 @@ export const FEET_WKID = 2278;
 // covering all 254 counties. It is the UNIVERSAL outage fallback for every county: its
 // own /query is disabled upstream (B627), so it renders as a server /export image and
 // clicks route through /identify. Referenced by the `txgio_statewide` COUNTIES_MAP entry
-// (the statewide display/click source, decoupled from Chambers in B783 when Chambers got
+// (the statewide display/click source, decoupled from Chambers in B784 when Chambers got
 // its own CCAD source), by any county that has no CAD of its own (Waller), and by
 // STATEWIDE_PARCEL_LAYER / statewideFallbackFor. One const so all references stay identical.
 const TXGIO_STATEWIDE_LAYER =
@@ -70,7 +70,7 @@ export const COUNTIES = {
     label: "Chambers County · CCAD",
     // CCAD's OWN live public parcel service (ChambersCADPublic, Pandai-hosted). This is the
     // exact MapServer the CCAD website's map draws, so Planyr's Chambers parcels match what
-    // an owner sees on the CAD site — B783 repoint off the lagged statewide TxGIO harvest.
+    // an owner sees on the CAD site — B784 repoint off the lagged statewide TxGIO harvest.
     // /query IS enabled here (no token/auth), so unlike the TxGIO source: ID/address text
     // SEARCH works again, outlines render as a queryable vector layer (which also backs the
     // instant client-side click highlight), and clicks select via /query — no scopeWhere
@@ -95,7 +95,7 @@ export const COUNTIES = {
     // clicks via /identify). Waller is one of the B629 snapshot-cached counties
     // (SNAPSHOT_COUNTIES), so a Drive snapshot backs it when TxGIO is down. Because its
     // primary IS the statewide layer, statewideFallbackFor(waller) returns null (no separate
-    // backup) — same self-referential case Chambers used to be before its B783 CCAD repoint.
+    // backup) — same self-referential case Chambers used to be before its B784 CCAD repoint.
     layerUrl: TXGIO_STATEWIDE_LAYER,
     idField: "prop_id",
     addrField: "situs_addr",
@@ -280,7 +280,7 @@ export const COUNTIES_MAP = {
     zoom: 11,
     bbox: [29.36, -94.92, 29.92, -94.39],
     mapServer: null,
-    // CCAD's own live public parcel layer (see COUNTIES.chambers) — B783 repoint off the
+    // CCAD's own live public parcel layer (see COUNTIES.chambers) — B784 repoint off the
     // lagged statewide TxGIO harvest so displayed parcels match the CCAD website. /query is
     // enabled, so this draws as a queryable vector layer and answers clicks directly. It is
     // NO LONGER the `statewide` universal source — that role moved to the dedicated
@@ -301,7 +301,7 @@ export const COUNTIES_MAP = {
     // a second statewide key would just double the TxGIO query on every click.
     layerUrl: TXGIO_STATEWIDE_LAYER,
   },
-  // The statewide TxGIO parcel source, as its OWN key (decoupled from Chambers in B783 once
+  // The statewide TxGIO parcel source, as its OWN key (decoupled from Chambers in B784 once
   // Chambers got its live CCAD source). `statewide:true` makes it the UNIVERSAL parcel source:
   // its /export image layer paints parcel outlines anywhere you zoom in (backing the visible
   // lines wherever a county's own CAD is down/unconfigured), and `candidateCountiesForPoint`
@@ -361,7 +361,7 @@ export function candidateCountiesForPoint(lat, lng) {
 export const STATEWIDE_KEYS = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
 
 // The statewide TxGIO parcel layer URL (all of Texas) — the search/click fallback for
-// any county whose own CAD endpoint is down. Decoupled from COUNTIES.chambers in B783
+// any county whose own CAD endpoint is down. Decoupled from COUNTIES.chambers in B784
 // (Chambers now has its own CCAD source); this is the dedicated statewide layer const.
 export const STATEWIDE_PARCEL_LAYER = TXGIO_STATEWIDE_LAYER;
 
@@ -375,7 +375,7 @@ const TXGIO_COUNTY_NAME = { harris: "HARRIS", fortbend: "FORT BEND", chambers: "
 /* The statewide-backup parcel source for a county whose primary CAD is unavailable,
  * or null when there's no stand-in. Returns null for a county that has NO statewide
  * scope wired, and for one whose PRIMARY is already the statewide layer (Waller — it
- * has no separate fallback). Chambers, since its B783 CCAD repoint, now DOES get a
+ * has no separate fallback). Chambers, since its B784 CCAD repoint, now DOES get a
  * TxGIO backup here (its primary is no longer the statewide layer). The returned
  * `scopeWhere` confines the search to that county on the all-Texas layer (B244). */
 export function statewideFallbackFor(county) {

@@ -705,7 +705,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // source can't itself draw current selectable outlines (an image-only statewide source — Waller).
     // The snapshot is a reliable local vector layer that renders outlines AND (via optimisticHitAt,
     // which iterates its eachFeature) selects a lot even with the county server fully down. Served
-    // from the browser, so no network + no hang-guard. B783: a queryable CAD (Chambers → CCAD) draws
+    // from the browser, so no network + no hang-guard. B784: a queryable CAD (Chambers → CCAD) draws
     // its OWN current vectors, so it takes display precedence — the snapshot stays a click/outage
     // fallback (see the snapshot promote below + statewide outlines), never shadowing the live CAD
     // with a staler harvest. (Fort Bend, Tier B, is tiled — Phase 2 — and has no whole-county
@@ -788,7 +788,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (!selectModeRef.current || !mapRef.current) return;
       const cur = displaysRef.current[county];
       if (cur && cur._isSnapshot) return; // already the snapshot layer (self-refreshing)
-      // B783 — only swap the on-map display to the snapshot when it's actually the preferred
+      // B784 — only swap the on-map display to the snapshot when it's actually the preferred
       // display source for this county (an image-only/unreachable live source — Waller). A healthy
       // queryable CAD (Chambers → CCAD) keeps its own current vectors; don't flicker them out for a
       // staler snapshot (the snapshot still serves clicks/outage via the promote path).

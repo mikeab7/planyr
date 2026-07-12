@@ -57,7 +57,7 @@ describe("apprRows — TxGIO statewide-backup field mapping (B244)", () => {
   });
 });
 
-// B783 — Chambers now rides CCAD's own live service (ChambersCADPublic), whose column
+// B784 — Chambers now rides CCAD's own live service (ChambersCADPublic), whose column
 // names differ from both the other CADs and TxGIO. The curated appraisal panel must
 // surface the same rows from CCAD's schema, or the repoint would look broken. Field
 // names + the sample parcel (53773, Angel Brothers Properties LLC @ Grand Port) are from
@@ -79,7 +79,7 @@ const CCAD = {
   Shape__Area: 544500.0, // a system field — must be ignored
 };
 
-describe("apprRows — CCAD (ChambersCADPublic) field mapping (B783)", () => {
+describe("apprRows — CCAD (ChambersCADPublic) field mapping (B784)", () => {
   const rows = apprRows(CCAD);
   const byLabel = Object.fromEntries(rows.map((r) => [r.label, String(r.value)]));
 

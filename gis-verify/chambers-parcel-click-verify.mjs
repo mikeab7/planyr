@@ -1,5 +1,5 @@
 /* Live click-through: prove a Chambers County lot SELECTS + its outlines RENDER from
- * CCAD's own live public service (ChambersCADPublic, Pandai-hosted) after the B783
+ * CCAD's own live public service (ChambersCADPublic, Pandai-hosted) after the B784
  * repoint off the lagged statewide TxGIO harvest. Unlike TxGIO (whose /query is disabled
  * → /export image display + /identify clicks), CCAD has /query ENABLED, so outlines draw
  * as a queryable vector layer and a click selects via /query directly. Drives the real
@@ -17,7 +17,7 @@ const PROXY = process.env.HTTPS_PROXY || "http://127.0.0.1:43417";
 // A Mont Belvieu (Chambers Co.) parcel. Grand Port (CCAD-verified parcel 53773) is an
 // alternative if this point moves.
 const PT = [29.846, -94.886];
-const CCAD_RE = /gisdata\.pandai\.com/;                 // CCAD's own live service (the B783 primary)
+const CCAD_RE = /gisdata\.pandai\.com/;                 // CCAD's own live service (the B784 primary)
 const TXGIO_RE = /geographic\.texas\.gov/;              // statewide fallback (outlines/identify)
 
 const browser = await chromium.launch({ executablePath: EXEC, headless: true, proxy: { server: PROXY }, args: ["--ignore-certificate-errors"] });
@@ -75,7 +75,7 @@ const acres = (card.match(/[\d.]+\s*AC\b/gi) || []);
 const parcelWord = (card.match(/\d+\s*PARCEL/gi) || []);
 const unavailable = /unavailable|couldn.t reach|no parcel right there/i.test(card);
 
-console.log("\n--- CHAMBERS CLICK VERIFY @ -94.886,29.846 (Mont Belvieu) — B783 CCAD repoint ---");
+console.log("\n--- CHAMBERS CLICK VERIFY @ -94.886,29.846 (Mont Belvieu) — B784 CCAD repoint ---");
 console.log("  CCAD /query responses:", JSON.stringify(net.ccadQuery), net.ccadQuery.some((x) => x.n > 0) ? "✅ CCAD answered" : "⚠️ no CCAD /query hit");
 console.log("  TxGIO fallback — /export images:", net.txgioExport, " /identify:", JSON.stringify(net.txgioIdentify));
 console.log("  overlay highlight paths after click:", hlPaths);
@@ -87,7 +87,7 @@ const ccadHit = net.ccadQuery.some((x) => x.n > 0);
 const txgioFallback = net.txgioIdentify.some((x) => x.prop != null) || net.txgioExport > 0;
 const selected = hlPaths > 0 && (acres.length > 0 || parcelWord.length > 0) && !unavailable;
 console.log("\nRESULT:",
-  ccadHit && selected ? "✅ PASS — Chambers lot selected from CCAD's own /query, outlines rendered, card populated (B783 goal met)"
-  : selected && txgioFallback ? "⚠️ FALLBACK — CCAD unreachable; served by the statewide TxGIO fallback (no regression, but the B783 goal — matching the CCAD website — is unmet until CCAD is reachable)"
+  ccadHit && selected ? "✅ PASS — Chambers lot selected from CCAD's own /query, outlines rendered, card populated (B784 goal met)"
+  : selected && txgioFallback ? "⚠️ FALLBACK — CCAD unreachable; served by the statewide TxGIO fallback (no regression, but the B784 goal — matching the CCAD website — is unmet until CCAD is reachable)"
   : `❌ CHECK (ccadHit=${ccadHit} selected=${selected} txgioFallback=${txgioFallback})`);
 await browser.close();

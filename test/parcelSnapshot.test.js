@@ -114,10 +114,10 @@ describe("ensureSnapshot — download, hold, and SWR-refresh only when Drive is 
 });
 
 // preferSnapshotForDisplay decides whether the Drive snapshot is the DISPLAYED outline
-// source or just a click/outage fallback (B783). A staler harvested snapshot must NOT
-// shadow a live queryable CAD (the exact B783 complaint), but SHOULD back an image-only
+// source or just a click/outage fallback (B784). A staler harvested snapshot must NOT
+// shadow a live queryable CAD (the exact B784 complaint), but SHOULD back an image-only
 // statewide source (whose /query is disabled, so its vector layer draws nothing).
-describe("preferSnapshotForDisplay — snapshot shows only when the live source can't draw current selectable outlines (B783)", () => {
+describe("preferSnapshotForDisplay — snapshot shows only when the live source can't draw current selectable outlines (B784)", () => {
   it("prefers the snapshot for an image-only statewide (TxGIO) live source — Waller", () => {
     expect(preferSnapshotForDisplay({ hasSnapshot: true, liveUrl: STATEWIDE_PARCEL_LAYER })).toBe(true);
     // and matches the actual Waller config, which rides the statewide layer

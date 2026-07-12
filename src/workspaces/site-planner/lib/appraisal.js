@@ -9,7 +9,7 @@
 // Patterns cover the per-county CAD columns (HCAD / FBCAD / CCAD) AND the statewide TxGIO
 // columns (prop_id, owner_name, situs_addr, legal_area/gis_area, land_value, imp_value,
 // mkt_value, stat_land_use, year_built) so a parcel answered by any source — a county's
-// own CAD or the statewide backup — surfaces the same curated rows (B244/B783).
+// own CAD or the statewide backup — surfaces the same curated rows (B244/B784).
 export const APPR_FIELDS = [
   // ...|owner_?name matches TxGIO owner_name AND CCAD's Owner_Name.
   [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
