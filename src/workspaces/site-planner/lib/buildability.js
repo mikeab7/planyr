@@ -216,6 +216,7 @@ export function requiredFfe(rule, inputs = {}) {
 export function assessBuildability({
   rule = null,
   padFfeFt = null,
+  padIsAuto = false,
   wse1pctFt = null,
   wse02Ft = null,
   atlas14Wse100Ft = null,
@@ -231,6 +232,10 @@ export function assessBuildability({
   let shortByFt = null;
   if (req.requiredFfeFt == null) ffeStatus = rule && rule.ffeRule ? "unknown" : "no_rule";
   else if (padFfeFt == null || !isFinite(padFfeFt)) { ffeStatus = "unknown"; req.unknownReason = "pad / finished-floor elevation not entered"; }
+  // NEW-3 — when no pad was entered, the caller defaults it to the AUTO code-minimum FFE
+  // (this same requiredFfeFt). That's not a verified pass: it's the rule dictating the floor,
+  // so it reads "meets code minimum (assumed)" — distinct from a pad the user actually set.
+  else if (padIsAuto) ffeStatus = "assumed";
   else if (padFfeFt >= req.requiredFfeFt - 1e-9) ffeStatus = "pass";
   else { ffeStatus = "short"; shortByFt = req.requiredFfeFt - padFfeFt; }
 

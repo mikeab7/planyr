@@ -108,7 +108,7 @@ import {
 } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
-import { loadBuildabilityRules, assessBuildability } from "./lib/buildability.js";
+import { loadBuildabilityRules, assessBuildability, requiredFfe } from "./lib/buildability.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt,
@@ -6332,7 +6332,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     : null;
   // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
   const detTier = drainCtxData && siteSqft > 0 && drainFloodOk
-    ? assessAnalysisTier({ acres: acresActive, authorityId: drainAuthorityId, floodZones: drainCtxData.flood.zones, channel: drainCtxData.channel })
+    ? assessAnalysisTier({ acres: acresActive, authorityId: drainAuthorityId, floodZones: drainCtxData.flood.zones, channel: drainCtxData.channel, channelDataApplicable: drainCountyHarris })
     : null;
   const detRegime = drainCtxData && siteSqft > 0 && drainFloodOk
     ? assessHydraulicRegime({ floodZones: drainCtxData.flood.zones, groundElevFt: drainCtxData.groundElevFt, groundDatum: drainCtxData.groundDatum, pondDepthFt: maxPondDepthFt || 8 })
@@ -6371,23 +6371,48 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B762 — the governing 1% WSEL derived from FEMA cross-sections (its own field, never
   // overwriting a manual BFE; used in precedence only when no static/manual BFE exists).
   const fmDerivedXsWsel = floodGeo?.derivedXsWsel || null;
+  // Elevation intermediates that DON'T depend on the pad — computed first so the AUTO
+  // pad (NEW-3) can be derived from them before fmElev is assembled.
+  const fmManualPadFt = Number.isFinite(fmSettings.padFfeFt) ? fmSettings.padFfeFt : null;
+  const fmManualBfeFt = Number.isFinite(fmSettings.bfeFt) ? fmSettings.bfeFt : null;
+  const fmDerivedBfeFt = fmDerivedBfe && Number.isFinite(fmDerivedBfe.bfeFt) ? fmDerivedBfe.bfeFt : null;
+  const fmDerivedXsWselFt = fmDerivedXsWsel && Number.isFinite(fmDerivedXsWsel.wselFt) ? fmDerivedXsWsel.wselFt : null;
+  const fmManualWse02Ft = Number.isFinite(fmSettings.wse02Ft) ? fmSettings.wse02Ft : null;
+  const fmDerivedWse02Ft = floodGeo?.derivedWse02 && Number.isFinite(floodGeo.derivedWse02.wseFt) ? floodGeo.derivedWse02.wseFt : null;
+  // Governing 1% WSE for buildability/FFE: highest published static BFE → manual → the
+  // derived XS WSEL → the derived BFE-line estimate (same precedence the engine uses).
+  const fmGoverningBfe = fmZones.reduce((best, z) => (z.staticBfeFt != null && (best == null || z.staticBfeFt > best) ? z.staticBfeFt : best), null) ?? fmManualBfeFt ?? fmDerivedXsWselFt ?? fmDerivedBfeFt;
+  // NEW-3 — the AUTO pad: the code-minimum required FFE from the buildability rule. The
+  // owner shouldn't have to type a pad on a floodplain fill — the code (FBC: 2′ above the
+  // 500-yr, or the governing basis) dictates the minimum. When no pad is entered we assume
+  // the site builds to this floor, so mitigation prices WSE-governed (pad ≥ WSE by
+  // construction) instead of blocking on a missing FFE. A typed pad still overrides.
+  const fmBuildRule = buildRules[floodJurKey] || buildRules.generic;
+  const fmAutoFfe = requiredFfe(fmBuildRule, { wse1pctFt: fmGoverningBfe, wse02Ft: fmManualWse02Ft ?? fmDerivedWse02Ft });
+  const fmAutoFfeFt = fmAutoFfe && Number.isFinite(fmAutoFfe.requiredFfeFt) ? fmAutoFfe.requiredFfeFt : null;
+  // Plan-level pad precedence: manual padFfeFt → AUTO code-min FFE (per-element padElevFt
+  // still overrides in effectivePadElev). padIsAuto drives the "assumed" buildability verdict
+  // + the greyed input placeholder + the DRAFT/assumed tags on card and print (PDF-PARITY).
+  const fmPadIsAuto = fmManualPadFt == null && fmAutoFfeFt != null;
+  const fmEffectivePadFt = fmManualPadFt ?? fmAutoFfeFt;
   const fmElev = {
-    padElevFt: Number.isFinite(fmSettings.padFfeFt) ? fmSettings.padFfeFt : null,
+    padElevFt: fmEffectivePadFt,
     existGradeFt: Number.isFinite(fmSettings.existGradeFt) ? fmSettings.existGradeFt : (drainCtxData?.groundElevFt ?? null),
-    bfeFt: Number.isFinite(fmSettings.bfeFt) ? fmSettings.bfeFt : null,
-    derivedBfeFt: fmDerivedBfe && Number.isFinite(fmDerivedBfe.bfeFt) ? fmDerivedBfe.bfeFt : null,
-    derivedXsWselFt: fmDerivedXsWsel && Number.isFinite(fmDerivedXsWsel.wselFt) ? fmDerivedXsWsel.wselFt : null,
-    wse02Ft: Number.isFinite(fmSettings.wse02Ft) ? fmSettings.wse02Ft : null,
+    bfeFt: fmManualBfeFt,
+    derivedBfeFt: fmDerivedBfeFt,
+    derivedXsWselFt: fmDerivedXsWselFt,
+    wse02Ft: fmManualWse02Ft,
     // B770 — the wse02pct provider seam, now fed by the FBCDD Atlas-14 watershed-study
     // raster on Fort Bend sites (sampled at check time, above). DRAFT screening values:
     // the source tag keeps the provenance visible everywhere the number surfaces, and a
     // manual wse02Ft always wins (engine precedence).
-    derivedWse02Ft: floodGeo?.derivedWse02 && Number.isFinite(floodGeo.derivedWse02.wseFt) ? floodGeo.derivedWse02.wseFt : null,
+    derivedWse02Ft: fmDerivedWse02Ft,
     derivedWse02Src: floodGeo?.derivedWse02 ? floodGeo.derivedWse02.source : null,
     avgFillDepthFt: Number.isFinite(fmSettings.avgFillDepthFt) ? fmSettings.avgFillDepthFt : null,
     sources: {
       existGrade: Number.isFinite(fmSettings.existGradeFt) ? "manual" : (drainCtxData?.groundElevFt != null ? "3dep" : null),
-      padElev: Number.isFinite(fmSettings.padFfeFt) ? "manual" : null,
+      // NEW-3 — "auto (code min)" when the pad defaulted to the required FFE; "manual" when typed.
+      padElev: fmManualPadFt != null ? "manual" : (fmPadIsAuto ? "auto (code min)" : null),
       derivedBfe: fmDerivedBfe ? "bfe-line-interp" : null,
       derivedXsWsel: fmDerivedXsWsel ? "xs-wsel" : null,
       derivedWse02: floodGeo?.derivedWse02 ? floodGeo.derivedWse02.source : null,
@@ -6451,12 +6476,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmWorst = fmCandidates && fmCandidates.length ? pickWorstCase(fmCandidates) : null;
   const fmResult = fmWorst ? fmWorst.result : fmCompute(fmRule);
 
+  // NEW-2 — remembered mitigation. B750's slimDrainageContext deliberately drops the flood
+  // GEOMETRY, so on a restored (remembered) check fmZones is empty → fmResult is null → the
+  // whole mitigation ledger would silently vanish (the "mitigation isn't calculating" report).
+  // Fix: persist a SLIM ledger summary (numbers / provenance / flags — no geometry) alongside
+  // the remembered check and surface it here, under the same remembered/re-check tag.
+  const drainLastMitRecord = settings.drainage?.lastCheck?.mitigation || null; // { screened, summary } | null
+  const drainIsRestored = !!drainViewCtx?.restored;
+  const restoredMitSummary = drainIsRestored && drainLastMitRecord ? (drainLastMitRecord.summary || null) : null;
+  // Display ledger: the live result, else the remembered summary.
+  const fmResultView = fmResult || restoredMitSummary;
+  // (b) A remembered check with NO restorable mitigation (a legacy check saved before this fix,
+  // or one whose flood-geometry screen failed) says so explicitly + prompts a re-check, instead
+  // of hiding the ledger with no row and no reason.
+  const drainMitRememberedMissing = drainIsRestored && !fmResultView && (
+    drainLastMitRecord ? drainLastMitRecord.screened === false
+      : (drainCtxData?.flood?.zones?.length > 0)
+  );
+  // (a) Mirror the LIVE mitigation ledger into the remembered check record so a reload shows
+  // last-known mitigation. Only a live (this-session), non-stale check writes; a restored view
+  // never overwrites the record it hydrated from. Rides the existing settings autosave — no
+  // schema/version bump (the B750 pattern).
+  const drainMitToPersist = drainCtx?.ctx && !drainIsRestored && settings.drainage?.lastCheck?.sig === drainSigNow
+    ? { screened: !!(floodGeo && floodGeo.state === "loaded"), summary: fmResult || null }
+    : null;
+  const drainMitPersistSig = drainMitToPersist ? JSON.stringify(drainMitToPersist) : "";
+  useEffect(() => {
+    if (!drainMitToPersist) return;
+    const cur = settings.drainage?.lastCheck?.mitigation || null;
+    if (JSON.stringify(cur) === drainMitPersistSig) return; // already stored — never loops
+    setSettings((sx) => (sx.drainage?.lastCheck && sx.drainage.lastCheck.sig === drainSigNow
+      ? { ...sx, drainage: { ...sx.drainage, lastCheck: { ...sx.drainage.lastCheck, mitigation: drainMitToPersist } } }
+      : sx));
+  }, [drainMitPersistSig]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Buildability (B710): FFE / pathway / LOMR-F / §404 screens off the same zones +
   // WSE inputs. Wetlands presence comes from the Site Analysis screen's own finding
-  // (lifted via onFindings — no new fetch).
-  // Governing 1% WSE for buildability/FFE: highest published static BFE → manual → the
-  // derived BFE-line estimate (B755). Same precedence the mitigation engine uses.
-  const fmGoverningBfe = fmZones.reduce((best, z) => (z.staticBfeFt != null && (best == null || z.staticBfeFt > best) ? z.staticBfeFt : best), null) ?? fmElev.bfeFt ?? fmElev.derivedXsWselFt ?? fmElev.derivedBfeFt;
+  // (lifted via onFindings — no new fetch). fmGoverningBfe + fmEffectivePadFt + fmPadIsAuto
+  // were computed up with the elevation intermediates (NEW-3 auto-pad).
   const fmBuildingIn1pct = fmZones.length
     ? els.some((e) => {
         if (e.type !== "building") return false;
@@ -6467,8 +6524,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmFloodplainPresent = fmZones.some((z) => z.cls === "1pct" || z.cls === "floodway");
   const fmBuild = floodGeo && floodGeo.state === "loaded"
     ? assessBuildability({
-        rule: buildRules[floodJurKey] || buildRules.generic,
-        padFfeFt: fmElev.padElevFt,
+        rule: fmBuildRule,
+        padFfeFt: fmEffectivePadFt,
+        padIsAuto: fmPadIsAuto,
         wse1pctFt: fmGoverningBfe,
         wse02Ft: fmElev.wse02Ft ?? fmElev.derivedWse02Ft,
         buildingIn1pct: fmBuildingIn1pct,
@@ -6490,7 +6548,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     req: detReq, reqCandidates: detReqCandidates,
     tier: detTier, regime: detRegime, outfall: outfallNote,
     // B707/B708/B710/B712 — the floodplain-mitigation ledger + pond split + buildability.
-    mitigation: fmResult,
+    // NEW-2 — fmResultView falls back to the remembered slim summary on a restored check.
+    mitigation: fmResultView,
+    mitRememberedMissing: drainMitRememberedMissing,
     mitigationRule: fmRule,
     mitigationStraddle: fmWorst ? { candidates: fmCandidates, anyUnknown: fmWorst.anyUnknown } : null,
     mitCandidateCf: siteMitCandidateCf,
@@ -6515,6 +6575,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       siteCounty: restored?.county || null, // B794 — county-specific FIS pointer on the 0.2% input
       rules: floodRules,
       derivedBfe: fmDerivedBfe, // B755 — the FEMA-BFE-line estimate, for the input placeholder
+      autoFfe: fmAutoFfe, // NEW-3 — the code-min required FFE, for the greyed pad placeholder
+      padIsAuto: fmPadIsAuto, // NEW-3 — pad currently defaulted to the code minimum
+      // NEW-1 — auto-resolved values shown as grey "value · source" text until tapped to edit.
+      autoGradeFt: drainCtxData?.groundElevFt ?? null, // 3DEP bare-earth median
+      derivedWse02: floodGeo?.derivedWse02 || null, // FBCDD Atlas-14 DRAFT 0.2% WSE (Fort Bend)
+      hasDockElements: els.some((e) => e && (e.truckCourt || e.forCourt)), // NEW-1(c) — gate the dock-drop row
       onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
       onRuleChange: (jk, patch) => setFloodRules((r) => { const next = { ...r, [jk]: { ...r[jk], ...patch } }; saveFloodplainRules(next); return next; }),
     },
@@ -7625,9 +7691,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // A multi-basis rule (Fort Bend) whose other bases aren't computed here is flagged, never
     // silently shown as a lone number; an unknown prints UNKNOWN, never omitted.
     const b = d && d.buildability;
-    if (b && b.ffe && (b.ffe.status === "pass" || b.ffe.status === "short")) {
+    if (b && b.ffe && (b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed")) {
       let v = `${f2(b.ffe.requiredFfeFt)} ft`;
       if (b.ffe.status === "short") v += ` (pad ${f2(b.ffe.shortByFt)} ft short)`;
+      // NEW-3 (PDF-PARITY with the card's assumed note): no pad was entered, so the sheet
+      // shows the code minimum as an ASSUMED floor, never a verified pass on a real pad.
+      if (b.ffe.status === "assumed") v += " (assumed code min)";
       if (b.ffe.pendingBases && b.ffe.pendingBases.length) v += " (max-of — more bases pending)";
       // B770 (PDF-PARITY with the card's ⚑ note): an FFE governed by the 0.2% basis whose
       // WSE came from the FBCDD DRAFT raster must carry the draft label on the sheet too.
@@ -10147,10 +10216,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const prices = settings.prices || {};
             const pondCy = pondExcavationCf / 27;
             const drainageChecked = !!drainCtxData;
-            const mitKnown = fmResult && fmResult.volumeCf != null;
-            const mitCy = mitKnown ? fmResult.cutCy : null;
+            // NEW-2 — fmResultView carries the remembered mitigation summary on a restored check
+            // (fmResult is null then), so the earthwork cut line survives a reload too.
+            const mitKnown = fmResultView && fmResultView.volumeCf != null;
+            const mitCy = mitKnown ? fmResultView.cutCy : null;
             const fmGeoFailed = drainageChecked && drainCtxData?.floodGeo?.state === "failed";
-            const mitRelevant = drainageChecked && ((fmResult && fmResult.intersectAcres > 0) || fmGeoFailed);
+            const mitRelevant = drainageChecked && ((fmResultView && fmResultView.intersectAcres > 0) || fmGeoFailed);
             if (!(pondCy > 0) && !mitRelevant) return null;
             const usd = (n) => `$${Math.round(n).toLocaleString()}`;
             const pEarthRaw = prices.earthworkCy;
@@ -14296,6 +14367,10 @@ function YieldPanel({
   parcelOverlaps, // B652: {count,names,overlapAcres} when active parcels overlap, else null
 }) {
   const [openPanel, setOpenPanel] = useState(!collapsed);
+  // NEW-1 — the drainage/mitigation readout redesign: an "Advanced" fold for the expert
+  // inputs, and which auto-resolved elevation field (if any) the user has tapped to edit.
+  const [drainAdvOpen, setDrainAdvOpen] = useState(false);
+  const [drainEditField, setDrainEditField] = useState(null);
   const Y = YIELD_PAL;
   const acres = siteSqft / SQFT_PER_ACRE;
   const hasSite = siteSqft > 0;
@@ -14460,6 +14535,22 @@ function YieldPanel({
             const d = drainage;
             const warnNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.warnText, lineHeight: 1.45, margin: "3px 0 0", fontStyle: "italic" }}>{text}</div>;
             const keyedNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
+            // NEW-1 — verdict-first density: ONE line per concept (value or honest state) with
+            // the basis / source / caveats tucked into an ⓘ hover (native title — the Impervious-
+            // row pattern), so the ~30-row floodplain-101 wall collapses. `info` is the teaching
+            // copy; `tone` colours the value (warn/danger) without fading the label (theming rule).
+            const infoRow = (label, value, info, opts = {}) => {
+              const { tone, sub, key } = opts;
+              const vColor = tone === "danger" ? Y.dangerText : tone === "warn" ? Y.warnText : Y.text;
+              return (
+                <div key={key || label} title={info || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: info ? "help" : "default" }}>
+                  <span style={{ fontSize: 12, color: Y.rowLabel }}>{label}{info ? <span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span> : null}</span>
+                  <span style={{ fontFamily: YMONO, fontSize: 13, color: vColor, fontWeight: 650, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
+                    {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
+                  </span>
+                </div>
+              );
+            };
             // B750 — one segmented button for the Auto/Yes/No channel control (mirrors the
             // per-pond Outfall toggle). Selected rides the global accent + --on-accent text.
             const seg = (label, selected, onClick, key, aria = "Drains to HCFCD channel") => (
@@ -14567,21 +14658,26 @@ function YieldPanel({
             const detectedPhrase = (d.restored || d.stale) && checkedOnDate
               ? `(from city-limits GIS, checked ${checkedOnDate})`
               : "(detected from city-limits GIS)";
-            // B791 — a stale check LEADS with the demotion: banner + Re-check at the very top,
-            // so the old reviewer/pricing below can't read as current-boundary truth.
-            if (d.stale) out.push(
-              <div key="stale-banner" style={{ display: "flex", alignItems: "center", gap: 8, border: `1px solid ${Y.warnText}`, borderRadius: 8, padding: "7px 9px", margin: "7px 0 2px", background: Y.cardBg }}>
-                <div style={{ flex: 1, fontSize: 11, color: Y.warnText, fontWeight: 700, lineHeight: 1.45 }}>
-                  ⚠ Site boundary changed since this check{checkedOnDate ? ` (checked ${checkedOnDate})` : ""} — the numbers below reflect the old boundary.
+            // NEW-1(e) — ONE status line merges the old stale banner + the remembered line + the
+            // bottom re-check button + the in-flight hint: "As of <date> · ↻ Re-check". A stale
+            // check demotes it (warn colour + a "boundary changed" clause) and it leads the readout
+            // so old numbers can't read as current-boundary truth; a live check reads present-tense.
+            {
+              const busy = d.status === "busy";
+              let statusText, statusWarn = false;
+              if (d.stale) { statusText = `⚠ As of ${checkedOnDate || "your last check"} — site boundary changed since; numbers below reflect the old boundary`; statusWarn = true; }
+              else if (d.showingPrior && !busy) { statusText = `Re-check failed (${d.error}) — showing the previous result`; statusWarn = true; }
+              else if (busy) statusText = d.showingPrior ? "Re-checking… showing the previous result" : "Checking…";
+              else if (d.restored && checkedOnDate) statusText = `As of ${checkedOnDate} · remembered from your last check`;
+              else if (checkedOnDate) statusText = `Checked ${checkedOnDate}`;
+              else statusText = "Checked this session";
+              out.push(
+                <div key="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "7px 0 2px", ...(statusWarn ? { border: `1px solid ${Y.warnText}`, borderRadius: 8, padding: "6px 9px", background: Y.cardBg } : {}) }}>
+                  <span style={{ fontSize: statusWarn ? 11 : 10.5, color: statusWarn ? Y.warnText : Y.muted, fontWeight: statusWarn ? 700 : 400, lineHeight: 1.4 }}>{statusText}</span>
+                  <button onClick={d.onCheck} disabled={busy} style={{ padding: "4px 9px", border: `1px solid ${Y.border}`, borderRadius: 7, background: statusWarn ? Y.cardBg : "transparent", color: statusWarn ? Y.text : Y.muted, fontWeight: statusWarn ? 700 : 400, fontSize: 10.5, whiteSpace: "nowrap", cursor: busy ? "default" : "pointer" }}>↻ Re-check</button>
                 </div>
-                <button onClick={d.onCheck} disabled={d.status === "busy"} style={{ padding: "5px 9px", border: `1px solid ${Y.border}`, borderRadius: 7, background: Y.cardBg, color: Y.text, fontWeight: 700, fontSize: 10.5, whiteSpace: "nowrap", cursor: d.status === "busy" ? "default" : "pointer" }}>↻ Re-check</button>
-              </div>
-            );
-            // A re-check that's still running or failed, over a preserved prior answer:
-            // keep showing the old numbers under an honest hint.
-            if (d.showingPrior) out.push(d.status === "busy"
-              ? keyedNote("Re-checking… showing the previous result.", "prior-busy")
-              : warnNote(`Re-check failed (${d.error}) — showing the previous result.`, "prior-err"));
+              );
+            }
             if (req && (req.kind === "point" || req.kind === "none")) {
               out.push(row("Detention required", `${f2(req.requiredAcFt ?? 0)} ac-ft`, req.governing ? "greater-of" : ""));
               out.push(keyedNote(ruleBadge(req.rule, req.rateAcFtPerAc), "badge"));
@@ -14661,8 +14757,15 @@ function YieldPanel({
             // B789(c) — a stored channel answer where HCFCD doesn't govern is IGNORED, visibly
             // (never silently applied, never silently dropped).
             if (d.channelDischarge?.overrideIgnored) out.push(warnNote("Your saved “drains to HCFCD channel” answer doesn't apply here — HCFCD only governs in Harris County, so it's being ignored for this site.", "chan-ignored"));
-            out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
-            if (d.deadCf > 0) out.push(keyedNote(`Usable ${f2(usableAcFt)} ac-ft after ${f2(d.deadCf / 43560)} ac-ft below the flood WSE / permanent pool (anchored ponds split at their real water surfaces; the rest use the Regime-B estimate — dead storage earns no credit).`, "usable"));
+            // NEW-1(a) — the "dead storage earns no credit" teaching copy + the usable figure fold
+            // into an ⓘ on the provided row (the pond count stays as the visible sub).
+            if (d.deadCf > 0) {
+              out.push(infoRow("Detention provided", `${f2(providedAcFt)} ac-ft`,
+                `Usable ${f2(usableAcFt)} ac-ft after ${f2(d.deadCf / 43560)} ac-ft sits below the flood WSE / permanent pool — dead storage earns no credit. Anchored ponds split at their real water surfaces; the rest use the Regime-B estimate.`,
+                { key: "provided", sub: d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""} · usable ${f2(usableAcFt)}` : `· usable ${f2(usableAcFt)}` }));
+            } else {
+              out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
+            }
             {
               // B712 — the mitigation ledger joins the readout. ADDITIVE with detention:
               // the same acre-foot can't count twice, and the copy names which band went
@@ -14676,7 +14779,10 @@ function YieldPanel({
                     : d.mitigationStraddle ? "straddle worst-case"
                     : mit.providers?.wse1pct === "bfe-line-interp" ? "BFE derived"
                     : "";
-                  out.push(row("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`, mitTag));
+                  // NEW-1(a) — "volumes are additive" teaching copy → ⓘ on the row.
+                  out.push(infoRow("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`,
+                    "Additive with detention — the same acre-foot can't count twice. The mitigation cut must be hydraulically connected to the floodplain at flood stages; full detail in Site Analysis → Floodplain mitigation.",
+                    { key: "mit", sub: mitTag }));
                   // B755 — when the volume is priced off a DERIVED BFE, say so loudly (an
                   // estimate to verify, never a published number) and show the conservative bound.
                   if (mit.providers?.wse1pct === "bfe-line-interp" && d.floodGeo?.derivedBfe) {
@@ -14691,7 +14797,6 @@ function YieldPanel({
                   if (req && req.kind === "point" && req.requiredAcFt > 0) {
                     out.push(row("Combined basin volume", `${f2(req.requiredAcFt + mit.volumeAcFt)} ac-ft`));
                   }
-                  out.push(keyedNote("Volumes are additive; the same acre-foot can't count twice. Mitigation cut must be hydraulically connected at flood stages — detail in Site Analysis → Floodplain mitigation.", "mit-add"));
                 } else {
                   out.push(row("Floodplain mitigation", "UNKNOWN"));
                   out.push(warnNote(`Mitigation volume UNKNOWN — ${mit.unknownReason}. The floodplain geometry still stands (${f2(mit.intersectAcres)} ac of fill footprint intersects).`, "mit-unk"));
@@ -14703,6 +14808,11 @@ function YieldPanel({
                 );
                 if (mit.flags.includes("rule_unverified")) out.push(warnNote("Mitigation rule unverified — edit & confirm in the inputs below.", "mit-unv"));
                 if (d.mitCandidateCf > 0) out.push(keyedNote(`Candidate compensating storage in drawn ponds (below the flood WSE): ${f2(d.mitCandidateCf / 43560)} ac-ft — hydraulic connection + stage distribution: engineer confirms.`, "mit-cand"));
+              } else if (d.mitRememberedMissing) {
+                // NEW-2(b) — a remembered check with no restorable mitigation: an explicit row +
+                // re-check prompt, never a silently-missing ledger (the "isn't calculating" report).
+                out.push(row("Floodplain mitigation", "not screened in this remembered view"));
+                out.push(warnNote("Mitigation wasn't saved with this remembered check — ↻ re-check drainage criteria to screen fill volume against the mapped floodplain.", "mit-remembered-missing"));
               }
               if (d.unanchoredInTrigger > 0) out.push(warnNote(`${d.unanchoredInTrigger} pond${d.unanchoredInTrigger > 1 ? "s" : ""} in the mapped floodplain ${d.unanchoredInTrigger > 1 ? "are" : "is"} not elevation-anchored — the gross volume above OVERSTATES usable detention. Set each pond's top-of-bank elevation.`, "mit-unanch"));
               if (d.pondFullyInundated) out.push(warnNote("A pond's top of bank sits at/below the flood WSE — fully inundated in the design flood; its usable detention is ZERO.", "mit-inund"));
@@ -14721,32 +14831,55 @@ function YieldPanel({
               );
             }
             if (d.tier) {
-              out.push(row("Analysis tier", d.tier.tier === "dia" ? "Full DIA" : "Rate method"));
-              if (d.tier.triggers.length) out.push(keyedNote(`Triggers: ${d.tier.triggers.map((t) => t.label).join(" · ")}`, "trig"));
-              if (d.tier.unknowns.length) out.push(keyedNote(`Unknown: ${d.tier.unknowns.map((u) => u.label).join(" · ")}`, "trig-unk"));
+              // NEW-4 dedupe: on a Harris site whose HCFCD channel lookup FAILED, the dedicated
+              // "channel data unavailable" warning below already says adjacency is unknown — drop
+              // the tier's redundant "Channel adjacency unknown" so it renders once.
+              const tierUnknowns = d.channelFailed ? d.tier.unknowns.filter((u) => u.id !== "regulated-channel") : d.tier.unknowns;
+              // NEW-1(a) — triggers + unknowns fold into the tier row's ⓘ instead of two notes.
+              const tierInfo = [
+                d.tier.triggers.length ? `Triggers: ${d.tier.triggers.map((t) => `${t.label}${t.detail ? ` — ${t.detail}` : ""}`).join(" · ")}` : "",
+                tierUnknowns.length ? `Unknown: ${tierUnknowns.map((u) => u.label).join(" · ")}` : "",
+                d.tier.tier === "dia"
+                  ? "A full drainage impact analysis (H&H study) is the likely bar at this size / with these triggers."
+                  : "Rate-method detention is likely sufficient — no DIA trigger found on this screen.",
+              ].filter(Boolean).join("\n");
+              out.push(infoRow("Analysis tier", d.tier.tier === "dia" ? "Full DIA" : "Rate method", tierInfo, { key: "tier" }));
             }
             if (d.floodFailed) out.push(warnNote("Flood-zone data is unavailable right now — analysis tier and hydraulic regime can't be assessed (an outage is never an all-clear).", "floodfail"));
             if (d.regime) {
+              // NEW-1(a) — the regime collapses to ONE verdict line ("Regime B — floodplain/
+              // tailwater governed ⓘ"); reasons, consequence ("never assume a deep outfall helps
+              // here"), the wet-bottom note and the outfall value-of-information all move into ⓘ.
+              const regimeInfo = [
+                ...d.regime.reasons,
+                d.regime.consequence,
+                d.regime.wetBottomWarning ? "Wet-bottom note: permanent pool below the static water surface does not count toward detention." : "",
+                d.outfall ? `${d.outfall.headline} ${d.outfall.detail}` : "",
+              ].filter(Boolean).join("\n");
               out.push(
-                <div key="regime" style={{ marginTop: 7, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: d.regime.regime === "B" ? Y.warnText : Y.rowLabel }}>{d.regime.label}</div>
-                  {d.regime.reasons.map((rr, i) => <div key={i} style={{ fontSize: 10.5, color: Y.rowLabel, lineHeight: 1.45, marginTop: 3 }}>{rr}</div>)}
-                  <div style={{ fontSize: 10.5, color: Y.text, lineHeight: 1.45, marginTop: 3, fontWeight: 600 }}>{d.regime.consequence}</div>
-                  {d.regime.wetBottomWarning && <div style={{ fontSize: 10.5, color: Y.warnText, lineHeight: 1.45, marginTop: 3 }}>Wet-bottom note: permanent pool below the static water surface does not count toward detention.</div>}
-                  {d.outfall && <div style={{ fontSize: 10.5, color: Y.rowLabel, lineHeight: 1.45, marginTop: 5, borderTop: `1px solid ${Y.hairline}`, paddingTop: 5 }}>{d.outfall.headline} {d.outfall.detail}</div>}
+                <div key="regime" title={regimeInfo} style={{ display: "flex", alignItems: "baseline", gap: 4, padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "help" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: d.regime.regime === "B" ? Y.warnText : Y.rowLabel }}>{d.regime.label}</span>
+                  <span style={{ fontSize: 9.5, color: Y.muted }} aria-hidden="true">ⓘ</span>
                 </div>
               );
             }
             for (const w of d.watersheds) out.push(warnNote(`${w.authorityLabel}: ${w.note}`, w.id));
             if (d.watershedFailed) out.push(warnNote("HCFCD watershed data is unavailable — any Addicks/Barker or Upper-Cypress supplemental-retention requirement can't be screened.", "wsfail"));
-            if (d.mudDistricts.length) out.push(keyedNote(`In ${d.mudDistricts.map((m) => m.name).join(", ")} — district drainage criteria may also apply; verify with the district's engineer.`, "mud"));
+            // NEW-1(d) — suppress the "district criteria may ALSO apply" note for any district
+            // that is already the applied reviewing jurisdiction above (it isn't an ALSO then).
+            if (d.mudDistricts.length) {
+              const reviewerLbl = (d.reviewer?.label || "").toLowerCase();
+              const shownMuds = d.mudDistricts.filter((m) => {
+                const nm = String(m.name || "").toLowerCase();
+                return !(reviewerLbl && nm && (reviewerLbl.includes(nm) || nm.includes(reviewerLbl)));
+              });
+              if (shownMuds.length) out.push(keyedNote(`In ${shownMuds.map((m) => m.name).join(", ")} — district drainage criteria may also apply; verify with the district's engineer.`, "mud"));
+            }
             if (d.mudFailed) out.push(warnNote("MUD / water-district data is unavailable — can't tell whether a district's own drainage criteria apply.", "mudfail"));
             if (d.channelFailed) out.push(warnNote("HCFCD channel data is unavailable — channel adjacency unknown.", "chanfail"));
             if (d.multiParcel) out.push(keyedNote("Checked against the largest active parcel.", "multi"));
-            // B750 — restored from a saved check (no live lookup this session): show its age.
-            // (When STALE the B791 banner at the top of the card already carries the date and
-            // the re-check affordance — no trailing italic line.)
-            if (d.restored && d.lastCheckedAt && !d.stale) out.push(keyedNote(`Remembered from your last check on ${new Date(d.lastCheckedAt).toLocaleDateString()} — re-check to refresh.`, "restored"));
+            // NEW-1(e) — the remembered/stale provenance + re-check now live in the single status
+            // line at the TOP of the readout (no trailing "remembered" line, no bottom button).
             // B712 — the mitigation inputs: jurisdiction defaulted from the resolved
             // drainage authority (stored only on override — the B74 pattern) + the
             // elevation set. ALL blank by default (the road-cost unit-price pattern);
@@ -14774,9 +14907,51 @@ function YieldPanel({
                   </span>
                 </div>
               );
+              // NEW-1(b) — an AUTO-RESOLVED elevation reads as grey "~value · source" text (not an
+              // input) until tapped: the common case is "leave it on the auto value", so the input
+              // field is noise. Tap "edit" to override; the "auto" chip collapses back. Falls back
+              // to the plain input when there's no auto value to show.
+              const autoField = (label, key, autoVal, sourceLabel, title) => {
+                const manual = Number.isFinite(fm.settings[key]) ? fm.settings[key] : null;
+                const hasAuto = autoVal != null && isFinite(autoVal);
+                const editing = drainEditField === key;
+                if (manual == null && hasAuto && !editing) {
+                  return (
+                    <div key={"fm-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                      <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
+                      <button type="button" onClick={() => setDrainEditField(key)} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+                        <span style={{ fontSize: 11.5, fontFamily: YMONO, color: Y.rowLabel }}>~{f1(autoVal)}′</span>
+                        <span style={{ fontSize: 10, color: Y.muted }}>· {sourceLabel}</span>
+                        <span style={{ fontSize: 10, color: Y.muted, textDecoration: "underline" }}>edit</span>
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={"fm-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      {manual != null && (
+                        <button type="button" title="Clear — back to blank (auto / unknown)" onClick={() => { fm.onChange({ [key]: null }); setDrainEditField(null); }} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>×</button>
+                      )}
+                      {manual == null && hasAuto && (
+                        <button type="button" title={`Use the auto value (~${f1(autoVal)}′ · ${sourceLabel})`} onClick={() => setDrainEditField(null)} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>auto</button>
+                      )}
+                      <NumInput style={fmInputStyle} value={manual != null ? manual : ""} placeholder={hasAuto ? `~${f1(autoVal)}` : "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null })} />
+                    </span>
+                  </div>
+                );
+              };
+              // Fort Bend keys the 0.2% mitigation basis to the effective FIRM 48157C FIS (B794).
+              const fmFortBend = fm.siteCounty === "fortbend" || (fm.identifyCounties || []).some((c) => /fort\s*bend/i.test(String(c)));
               out.push(
                 <div key="fm-inputs" style={{ marginTop: 8, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4 }}>Floodplain mitigation inputs (ft NAVD88)</div>
+                  {/* NEW-1(c) — the datum / blank-reads-UNKNOWN / newer-model footnote folds into
+                      an ⓘ on the header instead of a paragraph at the bottom of the block. */}
+                  <div title={"Feet NAVD88 (convert NGVD29 documents first — mixed datums are a multi-foot silent error). Blank inputs read UNKNOWN, never zero. Jurisdictions may enforce newer model elevations than the effective FIRM — when in doubt, enter the higher. Only tick “verified” after confirming the CURRENT ordinance text."}
+                    style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: "help" }}>
+                    Floodplain mitigation inputs (ft NAVD88)<span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span>
+                  </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
                     <span style={{ fontSize: 11, color: Y.muted }}>Jurisdiction</span>
                     {/* B790 — Auto is a real, reachable state (the B750 agency-picker pattern):
@@ -14796,44 +14971,61 @@ function YieldPanel({
                     const detectedLabel = (fm.rules[fm.detectedJurKey] || fm.rules.generic).label;
                     return warnNote(`⚠ You picked ${fmRuleRow.label}, but the county map reads ${ids.join(" + ")} — the ${detectedLabel} rule likely applies. Switch the Jurisdiction to Auto to use it.`, "fm-jur-mismatch");
                   })()}
-                  {fmRow("Pad / finished floor (FFE)", "padFfeFt", "—", "The plan-level pad elevation; a selected element's own padElevFt overrides it")}
-                  {fmRow("Existing grade", "existGradeFt", "3DEP auto", "Blank = the 3DEP bare-earth median sampled by this drainage check")}
-                  {fmRow("BFE (1% WSE)", "bfeFt",
-                    fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) && !Number.isFinite(fm.settings.bfeFt) ? `~${f1(fm.derivedBfe.bfeFt)} derived` : "often needed",
-                    "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (shown greyed as ‘~x derived’); anything you type here overrides it (FIRM panel / effective model)")}
-                  {/* B794 — the placeholder names WHERE the number comes from, county-specific:
-                      Fort Bend's mitigation basis is the effective FIRM 48157C FIS (2014-04-02,
-                      pre-Atlas-14 — exactly what Interim §9 references). */}
-                  {(fm.siteCounty === "fortbend" || (fm.identifyCounties || []).some((c) => /fort\s*bend/i.test(String(c))))
-                    ? fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIRM 48157C FIS", "From the EFFECTIVE FIS profile — Fort Bend: countywide FIRM 48157C, eff. 2014-04-02 (pre-Atlas-14, the basis FBCDD Interim §9 references). The Atlas-14 DRAFT raster auto-fills a labeled stand-in when it can; your entry overrides it.")
-                    : fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIS / HCFCD", "Not an NFHL attribute — from the effective FEMA FIS profile or HCFCD model data; hook for MAAPnext grids later")}
-                  {fmRow("Dock-high drop: court below slab FF (ft)", "dockDropFt", "4", "Industrial dock-high: building-attached truck courts + their trailer strips auto-price at slab FF minus this drop (typ. 48\u2033 docks); blank = 4")}
-                  {fmRow("Expert: average depth of fill below the flood elevation (ft)", "avgFillDepthFt", "bypass", "Expert bypass: volume = intersect area × this constant depth")}
-                  <label style={{ display: "flex", gap: 7, alignItems: "center", fontSize: 11, color: Y.text, cursor: "pointer", padding: "3px 0" }}>
-                    <input type="checkbox" checked={!!fm.settings.wholeSiteAsPad} onChange={(e) => fm.onChange({ wholeSiteAsPad: e.target.checked || null })} />
-                    Treat the entire site as pad (fill everywhere, not just drawn elements)
-                  </label>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderTop: `1px solid ${Y.hairline}`, marginTop: 3 }}>
-                    <span style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4 }}>
-                      {fmRuleRow.label}: {fmRuleRow.trigger === "1pct_plus_02pct" ? "1% + 0.2%" : "1%"} trigger @
-                      <NumInput style={{ ...fmInputStyle, width: 44, margin: "0 4px" }} value={fmRuleRow.ratio} min={0.01} onCommit={(n) => Number.isFinite(n) && n > 0 && fm.onRuleChange(fm.jurKey, { ratio: n })} />:1
-                    </span>
-                    <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 10.5, color: fmRuleRow.verified ? Y.text : "var(--warn-text)", cursor: "pointer", whiteSpace: "nowrap", fontWeight: 700 }}>
-                      <input type="checkbox" checked={!!fmRuleRow.verified} onChange={(e) => fm.onRuleChange(fm.jurKey, { verified: e.target.checked })} />
-                      verified
-                    </label>
-                  </div>
-                  <div style={{ fontSize: 10, color: Y.muted, lineHeight: 1.45, marginTop: 3 }}>
-                    Feet NAVD88 (convert NGVD29 documents first — mixed datums are a multi-foot silent error). Blank inputs read UNKNOWN, never zero. Jurisdictions may enforce newer model elevations than the effective FIRM — when in doubt, enter the higher. Only tick “verified” after confirming the CURRENT ordinance text.
+                  {/* NEW-3 — a blank pad defaults to the code-minimum required FFE (greyed
+                      placeholder, the B755 derived-value pattern); typing overrides it. */}
+                  {/* NEW-1(b) + NEW-3 — pad / grade / BFE / 0.2% render as grey "~value · source"
+                      text until tapped (auto pad = code-min FFE, grade = 3DEP, BFE = derived lines,
+                      0.2% = FBCDD DRAFT raster). No auto value → the plain blank input. */}
+                  {autoField("Pad / finished floor (FFE)", "padFfeFt",
+                    fm.autoFfe && Number.isFinite(fm.autoFfe.requiredFfeFt) ? fm.autoFfe.requiredFfeFt : null,
+                    "code min",
+                    "Blank = the code-minimum required FFE is ASSUMED (the rule dictates the floor on a floodplain fill). The plan-level pad elevation; a selected element's own padElevFt overrides it. Tap edit to check a real design.")}
+                  {autoField("Existing grade", "existGradeFt", fm.autoGradeFt, "3DEP",
+                    "Auto = the 3DEP bare-earth median sampled by this drainage check. Tap edit to enter a surveyed grade.")}
+                  {autoField("BFE (1% WSE)", "bfeFt",
+                    fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? fm.derivedBfe.bfeFt : null,
+                    "derived (FEMA lines)",
+                    "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (a screening estimate). Tap edit to override with the FIRM panel / effective model.")}
+                  {/* B794 — the ⓘ names WHERE the number comes from, county-specific: Fort Bend's
+                      mitigation basis is the effective FIRM 48157C FIS (2014-04-02, pre-Atlas-14). */}
+                  {autoField("0.2% (500-yr) WSE", "wse02Ft",
+                    fm.derivedWse02 && Number.isFinite(fm.derivedWse02.wseFt) ? fm.derivedWse02.wseFt : null,
+                    "DRAFT (FBCDD)",
+                    fmFortBend
+                      ? "From the EFFECTIVE FIS profile — Fort Bend: countywide FIRM 48157C, eff. 2014-04-02 (pre-Atlas-14, the basis FBCDD Interim §9 references). The Atlas-14 DRAFT raster auto-fills a labeled stand-in when it can (screening only); tap edit to enter the FIS value."
+                      : "Not an NFHL attribute — from the effective FEMA FIS profile or HCFCD model data; hook for MAAPnext grids later.")}
+                  {/* NEW-1(c) — dock-drop row only when dock-stack court elements exist. */}
+                  {fm.hasDockElements && fmRow("Dock-high drop: court below slab FF (ft)", "dockDropFt", "4", "Industrial dock-high: building-attached truck courts + their trailer strips auto-price at slab FF minus this drop (typ. 48\u2033 docks); blank = 4")}
+                  {/* NEW-1(c) — expert bypass, whole-site-as-pad, and the ratio / verified rule
+                      editor live behind ONE Advanced fold so the common case stays lean. */}
+                  <div style={{ marginTop: 4, borderTop: `1px solid ${Y.hairline}`, paddingTop: 4 }}>
+                    <button type="button" onClick={() => setDrainAdvOpen((v) => !v)} style={{ background: "transparent", border: "none", padding: "2px 0", cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, color: Y.rowLabel, fontWeight: 700, letterSpacing: "0.04em" }}>
+                      {drainAdvOpen ? "▾" : "▸"} Advanced
+                    </button>
+                    {drainAdvOpen && (
+                      <div style={{ marginTop: 2 }}>
+                        {fmRow("Expert: average depth of fill below the flood elevation (ft)", "avgFillDepthFt", "bypass", "Expert bypass: volume = intersect area × this constant depth")}
+                        <label style={{ display: "flex", gap: 7, alignItems: "center", fontSize: 11, color: Y.text, cursor: "pointer", padding: "3px 0" }}>
+                          <input type="checkbox" checked={!!fm.settings.wholeSiteAsPad} onChange={(e) => fm.onChange({ wholeSiteAsPad: e.target.checked || null })} />
+                          Treat the entire site as pad (fill everywhere, not just drawn elements)
+                        </label>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                          <span style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4 }}>
+                            {fmRuleRow.label}: {fmRuleRow.trigger === "1pct_plus_02pct" ? "1% + 0.2%" : "1%"} trigger @
+                            <NumInput style={{ ...fmInputStyle, width: 44, margin: "0 4px" }} value={fmRuleRow.ratio} min={0.01} onCommit={(n) => Number.isFinite(n) && n > 0 && fm.onRuleChange(fm.jurKey, { ratio: n })} />:1
+                          </span>
+                          <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 10.5, color: fmRuleRow.verified ? Y.text : "var(--warn-text)", cursor: "pointer", whiteSpace: "nowrap", fontWeight: 700 }}>
+                            <input type="checkbox" checked={!!fmRuleRow.verified} onChange={(e) => fm.onRuleChange(fm.jurKey, { verified: e.target.checked })} />
+                            verified
+                          </label>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             }
-            out.push(
-              <div key="recheck" style={{ marginTop: 5 }}>
-                <button disabled={d.status === "busy"} onClick={d.onCheck} style={{ padding: "3px 9px", border: `1px solid ${Y.border}`, borderRadius: 7, background: "transparent", color: Y.muted, fontSize: 10.5, cursor: d.status === "busy" ? "default" : "pointer" }}>↻ Re-check</button>
-              </div>
-            );
+            // NEW-1(e) — the bottom "↻ Re-check" button folded into the top status line.
             out.push(keyedNote("Screening estimate — confirm with your engineer and the reviewing authority.", "caveat"));
             return out;
           })()}

@@ -36,6 +36,23 @@ describe("assessAnalysisTier", () => {
     expect(t2.unknowns.map((u) => u.id)).toContain("regulated-channel");
   });
 
+  it("NEW-4: outside Harris (channelDataApplicable:false) the channel-adjacency unknown is OMITTED, not permanent noise", () => {
+    // A Fort Bend site: HCFCD channel data doesn't exist here, so an unresolvable
+    // "Channel adjacency unknown" would sit forever — the caller gates it off.
+    const t = assessAnalysisTier({ acres: 5, authorityId: "fortbend", floodZones: [], channel: null, channelDataApplicable: false });
+    expect(t.unknowns.map((u) => u.id)).not.toContain("regulated-channel");
+    const t2 = assessAnalysisTier({ acres: 5, authorityId: "fortbend", floodZones: [], channel: { near: null, state: "not-applicable" }, channelDataApplicable: false });
+    expect(t2.unknowns.map((u) => u.id)).not.toContain("regulated-channel");
+    // gating never suppresses a DETECTED channel (near:true still fires as a trigger)
+    const t3 = assessAnalysisTier({ acres: 5, authorityId: "fortbend", floodZones: [], channel: { near: true, unitNo: "X" }, channelDataApplicable: false });
+    expect(t3.triggers.map((x) => x.id)).toContain("regulated-channel");
+  });
+
+  it("NEW-4: in Harris (default channelDataApplicable) the unknown still surfaces — a real, resolvable gap", () => {
+    const t = assessAnalysisTier({ acres: 5, authorityId: "hcfcd", floodZones: [], channel: { near: null }, channelDataApplicable: true });
+    expect(t.unknowns.map((u) => u.id)).toContain("regulated-channel");
+  });
+
   it("shaded X (0.2% zone) is NOT an SFHA trigger; Zone A / VE are", () => {
     expect(assessAnalysisTier({ acres: 5, floodZones: [{ zone: "X", subtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" }], channel: { near: false } }).tier).toBe("rate");
     expect(assessAnalysisTier({ acres: 5, floodZones: [{ zone: "A" }], channel: { near: false } }).tier).toBe("dia");
