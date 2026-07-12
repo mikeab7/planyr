@@ -51,6 +51,44 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+### B788 — Rehydrated drainage check must re-derive authority, not trust the stored verdict `[Site Planner / GIS · yield]` (bug) #site-planner #gis #yield #persistence  *(filed 2026-07-12 from a Cowork investigation brief as "NEW-1"; evidence: `COWORK-BRIEF-2026-07-12-stormwater-drainage-authority.md`. Defect in the B751 "remember the last drainage check" persistence path interacting with the B754 ETJ-authority fix.)*
+`[ ]` A remembered drainage check saved BEFORE an authority-logic fix rehydrates its stale verdict forever — rule fixes never self-heal remembered checks in the wild. Repro: Bain (`smr9olizi5ue`) `lastCheck.checkedAt` = Jul 10, 2:52 PM CDT — 38 min before the B754 ETJ fix (PR #574) merged; stored `primaryReviewerId:"coh"` (the old Houston-ETJ→COH routing) rehydrates and renders as present-tense "(detected from city-limits GIS)". The stored RAW jurisdiction facts are correct (city Katy · ETJ Houston · county Fort Bend) — only the derived verdict is stale.
+- Verify: live
+- Origin: filed 2026-07-12 from chat (Cowork NEW-1)
+- Expected: `hydrateDrainageContext` (`lib/detentionRules.js:1493`, consumed `SitePlanner.jsx:6255`) recomputes `primary` via `authorityForJurisdiction()` from the stored raw jurisdiction facts, so an authority-rule fix self-heals every remembered check; alternatively version-stamp `lastCheck` and invalidate on any authority-logic change. Copy rule either way: a rehydrated check must say "checked <date>", never present-tense "detected".
+- DEDUPE-FIRST: distinct from B751 (the remember-it feature itself, ⏳ Verify) and B754 (the fresh-check authority fix, ⏳ Verify) — this is the persistence path replaying the pre-B754 verdict.
+
+### B789 — County-gate the Harris-side detention criteria (HCFCD compare + channel question + `inCityLimits`) `[Site Planner / GIS · yield]` (bug) #site-planner #gis #yield  *(filed 2026-07-12 from a Cowork investigation brief as "NEW-2"; evidence: `COWORK-BRIEF-2026-07-12-stormwater-drainage-authority.md`.)*
+`[ ]` A Fort Bend site priced detention as "HCFCD 70.85 ac-ft governs" via the COH >20-ac greater-of branch — neither COH nor HCFCD has jurisdiction there (HCFCD ends at the Harris line). Cascade as displayed: HCFCD 0.65 × 109.0 ac = 70.85 vs COH 0.75 × 21.4 impervious ac = 16.05 → "HCFCD governs".
+- Verify: live
+- Origin: filed 2026-07-12 from chat (Cowork NEW-2)
+- Three guards: **(a)** the HCFCD candidate and the "Drains to HCFCD channel" Auto/Yes/No control render only when the identify county includes Harris; **(b)** `drainInCity` (`SitePlanner.jsx:6276`) must test HOUSTON membership specifically, not any-city (Bain's Katy frontage sliver satisfied it); **(c)** ignore/clear a stored `drainsToHcfcdChannel` override when the effective authority isn't coh/hcfcd (Bain carries a latent `true` stored against a `channel.state:"not-applicable"` detection).
+
+### B790 — Floodplain-mitigation Jurisdiction picker: add Auto + county-mismatch warning `[Site Planner / GIS · yield]` (bug) #site-planner #floodplain #yield #ui  *(filed 2026-07-12 from a Cowork investigation brief as "NEW-3"; evidence: `COWORK-BRIEF-2026-07-12-stormwater-drainage-authority.md`. Amends the B712 flood-mitigation surface.)*
+`[ ]` `floodMitigation.jurKey:"harris"` persisted on a Fort Bend site → the panel reads "Harris County (unincorporated)" directly above the FBCDD district note; ↻ Re-check can't fix it and there's no way back to automatic.
+- Verify: live
+- Origin: filed 2026-07-12 from chat (Cowork NEW-3)
+- Expected: an "Auto — detected: <X>" FIRST option (the B751 reviewing-agency-picker pattern), plus a warning row when the picked rule's county contradicts the identify county in the same stored context. Only writer today is the panel's Jurisdiction select (writes through the `onChange` patch at `SitePlanner.jsx:6461`; panel ~12555); `defaultFloodJurForAuthority` maps hcfcd→harris / coh→coh, so the sticky "harris" plausibly arrived via the same pre-B754 verdict B788 covers.
+
+### B791 — Stale drainage check must demote, not assert `[Site Planner / GIS · yield]` (bug) #site-planner #yield #ui #persistence  *(filed 2026-07-12 from a Cowork investigation brief as "NEW-4"; evidence: `COWORK-BRIEF-2026-07-12-stormwater-drainage-authority.md`. Staleness-presentation gap in the B751 remembered-check card.)*
+`[ ]` Boundary edited Jul 11 → signature mismatch → only a small italic line notes the staleness while the stale reviewer/pricing/copy stay fully authoritative.
+- Verify: live
+- Origin: filed 2026-07-12 from chat (Cowork NEW-4)
+- Expected: the stale state LEADS the card (banner + ↻ Re-check at top), detection claims switch to past tense with the `checkedAt` date, and stale-driven "you confirmed"-style assertions are visually downgraded.
+
+### B792 — `sites.county` mislabeled at creation ("waller" on a Fort Bend site) `[Site Planner / persistence · GIS]` (bug) #site-planner #gis #persistence  *(filed 2026-07-12 from a Cowork investigation brief as "NEW-5"; evidence: `COWORK-BRIEF-2026-07-12-stormwater-drainage-authority.md`.)*
+`[ ]` Bain's site row carries `county:"waller"` while every parcel attribute is FIPS 48157 (Fort Bend), and consumers read the row as truth: `resolveCountyLayer` (`SitePlanner.jsx:6592` — identify-mode add queries the wrong CAD), `resolveTaxRates(siteCounty, …)` (`SitePlanner.jsx:2546`), the easement `jurKey` default (`SitePlanner.jsx:1562`), and the `defaultFloodJurForCounty(restored?.county)` fallback (`SitePlanner.jsx:6315`).
+- Verify: live
+- Origin: filed 2026-07-12 from chat (Cowork NEW-5)
+- MapFinder's B36(a) relabel (`MapFinder.jsx` ~899–906 — note the `chambers` carve-out, since B787-adjusted) corrects the LABEL but does not persist to the site row. Expected: the corrected county (from `countyAtPoint` or parcel FIPS) is written back to the site record at save.
+- DEDUPE-FIRST: distinct from B13 (Open — precise county-boundary resolution); B13 improves how county is resolved, this makes the persisted row self-correct once a better answer exists.
+
+### B793 — Jurisdiction badge: qualify frontage-sliver city hits + ETJ vintage `[Site Planner / GIS]` (feature) #site-planner #gis #ui  *(filed 2026-07-12 from a Cowork investigation brief as "NEW-6"; evidence: `COWORK-BRIEF-2026-07-12-stormwater-drainage-authority.md`. Follow-on to B774 — the badge works as shipped; this qualifies its claims.)*
+`[ ]` The badge leads with "City of Katy / City of Houston — ETJ" although Katy's limits touch only the parcel edge (ring intersects Katy; centroid doesn't) and the dominant jurisdiction is unincorporated Fort Bend inside Houston's ETJ.
+- Verify: live
+- Origin: filed 2026-07-12 from chat (Cowork NEW-6)
+- Key points: annotate sliver membership ("City of Katy — edge only") when the city intersect is trivially small or excludes the centroid; lead with the dominant jurisdiction; carry the H-GAC layer vintage + the SB 2038 volatility caveat on ETJ chips (city ETJs are shrinking as landowners opt out, so an ETJ answer is only as fresh as its layer).
+
 ### B778 — Tighten the migrated `planar_*` tables off wide-open anon RLS `[Infra / Scheduler]` (task) #infra #scheduler #auth  *(spun out of the B408 consolidation on merge, 2026-07-11; minted **B778**)*
 `[ ]` The B408 consolidation moved the Scheduler's `planar_data`/`planar_history`/`planar_suggestions` tables onto the main production project (`lyeqzkuiwngunutlkkmi`) with their RLS policies carried over UNCHANGED — anon can read AND write all three tables, no auth check. That was safe parity while the Scheduler lived on its own disposable project; now those tables sit in the same production project as real user data, so the same-shaped exposure carries more weight even though behavior hasn't changed.
 - Verify: live
