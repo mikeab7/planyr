@@ -6,21 +6,26 @@ import {
 
 // candidateCountiesForPoint routes a map click to the CAD service(s) that could
 // own the clicked lot, WITHOUT a county pre-pick (B11). The statewide TxGIO layer
-// (configured under `chambers`) paints parcel outlines across all of Texas, so it
-// must also be queryable everywhere as a universal fallback — otherwise a click
-// over a county whose own CAD is down/unconfigured sees an outline it can't select
-// (the Fort Bend symptom, B130).
-describe("candidateCountiesForPoint — click routing (B11/B130)", () => {
+// (its own `txgio_statewide` key since B783 decoupled it from Chambers) paints parcel
+// outlines across all of Texas, so it must also be queryable everywhere as a universal
+// fallback — otherwise a click over a county whose own CAD is down/unconfigured sees an
+// outline it can't select (the Fort Bend symptom, B130).
+describe("candidateCountiesForPoint — click routing (B11/B130/B783)", () => {
   const STATEWIDE = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
+
+  it("the statewide source is its own `txgio_statewide` key, not chambers (B783)", () => {
+    expect(STATEWIDE).toEqual(["txgio_statewide"]);
+    expect(STATEWIDE).not.toContain("chambers"); // chambers is now a real CAD (CCAD)
+  });
 
   it("a Fort Bend point includes fortbend AND the statewide source (the B130 fix)", () => {
     // Sugar Land — squarely in Fort Bend, outside the narrow Chambers bbox.
     const cand = candidateCountiesForPoint(29.6197, -95.6349);
     expect(cand).toContain("fortbend");
-    // chambers == the statewide TxGIO layer; before B130 it was NOT a candidate here,
-    // so a click found nothing whenever FBCAD was down.
-    expect(cand).toContain("chambers");
-    expect(STATEWIDE).toContain("chambers"); // the statewide flag is what pulls it in
+    // txgio_statewide == the statewide TxGIO layer; before B130 it was NOT a candidate
+    // here, so a click found nothing whenever FBCAD was down.
+    expect(cand).toContain("txgio_statewide");
+    expect(cand).not.toContain("chambers"); // Sugar Land isn't in the Chambers bbox
   });
 
   it("the statewide source is appended LAST so a county's own CAD answers first", () => {
@@ -31,28 +36,30 @@ describe("candidateCountiesForPoint — click routing (B11/B130)", () => {
     expect(lastBboxIdx).toBeLessThan(firstStatewideIdx);
   });
 
-  it("does not duplicate the statewide key when the point is in its own bbox", () => {
-    // A point inside the Chambers bbox: chambers matches by bbox, must appear once.
+  it("a Chambers point routes to the real CCAD key first, with the statewide source appended once", () => {
+    // A point inside the Chambers bbox: chambers now matches by bbox (a real CAD), and
+    // txgio_statewide is appended once as the trailing fallback — neither is duplicated.
     const cand = candidateCountiesForPoint(29.7, -94.66);
     expect(cand.filter((k) => k === "chambers")).toHaveLength(1);
+    expect(cand.filter((k) => k === "txgio_statewide")).toHaveLength(1);
+    expect(cand.indexOf("chambers")).toBeLessThan(cand.indexOf("txgio_statewide"));
   });
 
   it("a Harris point still routes to harris first, with statewide as the trailing fallback", () => {
     const cand = candidateCountiesForPoint(29.76, -95.37);
     expect(cand[0]).toBe("harris");
-    expect(cand).toContain("chambers"); // fallback present, but harris answers first
+    expect(cand).toContain("txgio_statewide"); // fallback present, but harris answers first
   });
 
   it("a point outside every county bbox returns ALL counties, harris-first (jurisdiction default preserved)", () => {
-    // Far West Texas — outside all three configured county bboxes. The Layers-panel
-    // jurisdiction resolver reads candidate[0], so this must stay harris-first (the
-    // documented away-from-Houston default), while still including the statewide
-    // source so a click out there still has coverage. (Guards the B130 regression
-    // where an out-of-bbox point briefly returned statewide-only → flipped the
-    // default to "chambers".)
+    // Far West Texas — outside all configured county bboxes. The Layers-panel jurisdiction
+    // resolver reads candidate[0], so this must stay harris-first (the documented
+    // away-from-Houston default), while still including the statewide source so a click out
+    // there still has coverage. txgio_statewide has NO bbox, so it can only ever arrive via
+    // this "return all" branch or the trailing append — never as candidate[0].
     const cand = candidateCountiesForPoint(31.7619, -106.485); // El Paso
     expect(cand[0]).toBe("harris");
-    expect(cand).toContain("chambers");
+    expect(cand).toContain("txgio_statewide");
     expect(cand).toEqual(Object.keys(COUNTIES_MAP));
   });
 });
@@ -60,9 +67,9 @@ describe("candidateCountiesForPoint — click routing (B11/B130)", () => {
 // The statewide TxGIO layer is the universal fallback when a county's own CAD server
 // is down. statewideFallbackFor returns that layer scoped to the requested county, so
 // an ID/address search can't leak into another county (B244).
-describe("statewideFallbackFor — county-scoped TxGIO backup (B244)", () => {
+describe("statewideFallbackFor — county-scoped TxGIO backup (B244/B783)", () => {
   it("exposes the statewide key(s) and the all-Texas layer URL", () => {
-    expect(STATEWIDE_KEYS).toContain("chambers"); // the configured statewide source
+    expect(STATEWIDE_KEYS).toEqual(["txgio_statewide"]); // B783: its own key, not chambers
     expect(STATEWIDE_PARCEL_LAYER).toMatch(/stratmap_land_parcels/);
   });
 
@@ -78,8 +85,15 @@ describe("statewideFallbackFor — county-scoped TxGIO backup (B244)", () => {
     expect(statewideFallbackFor("harris").scopeWhere).toBe("county='HARRIS'");
   });
 
-  it("Chambers → null (its PRIMARY is already TxGIO; no separate backup)", () => {
-    expect(statewideFallbackFor("chambers")).toBeNull();
+  it("Chambers → the TxGIO layer scoped to CHAMBERS (B783: CCAD primary now HAS a backup)", () => {
+    const ch = statewideFallbackFor("chambers");
+    expect(ch).not.toBeNull();
+    expect(ch.layerUrl).toBe(STATEWIDE_PARCEL_LAYER);
+    expect(ch.scopeWhere).toBe("county='CHAMBERS'");
+  });
+
+  it("Waller → null (its PRIMARY is already TxGIO; no separate backup)", () => {
+    expect(statewideFallbackFor("waller")).toBeNull();
   });
 
   it("an unknown county → null", () => {

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
-import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint } from "./lib/parcelSnapshot.js";
+import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
 import { BASEMAPS } from "./lib/basemaps.js";
@@ -701,12 +701,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const map = mapRef.current;
     if (!map || displaysRef.current[key]) return;
 
-    // B629 — prefer the Drive PARCEL SNAPSHOT when this county's cached copy is loaded: a reliable
-    // local vector layer that renders outlines AND (via optimisticHitAt, which iterates its
-    // eachFeature) selects a lot even with the county server fully down. Served from the browser,
-    // so no network + no hang-guard. This is what makes Chambers/Waller keep working during a TxGIO
-    // outage. (Fort Bend, Tier B, is tiled — Phase 2 — and has no whole-county snapshot loaded.)
-    if (SNAPSHOT_COUNTIES.has(key) && getSnapshot(key)) {
+    // B629 — prefer the Drive PARCEL SNAPSHOT when this county's cached copy is loaded AND the live
+    // source can't itself draw current selectable outlines (an image-only statewide source — Waller).
+    // The snapshot is a reliable local vector layer that renders outlines AND (via optimisticHitAt,
+    // which iterates its eachFeature) selects a lot even with the county server fully down. Served
+    // from the browser, so no network + no hang-guard. B783: a queryable CAD (Chambers → CCAD) draws
+    // its OWN current vectors, so it takes display precedence — the snapshot stays a click/outage
+    // fallback (see the snapshot promote below + statewide outlines), never shadowing the live CAD
+    // with a staler harvest. (Fort Bend, Tier B, is tiled — Phase 2 — and has no whole-county
+    // snapshot loaded.)
+    if (SNAPSHOT_COUNTIES.has(key) && preferSnapshotForDisplay({ hasSnapshot: !!getSnapshot(key), liveUrl: layerUrlsRef.current[key] })) {
       const snapLayer = makeSnapshotLayer(key);
       snapLayer.addTo(map);
       displaysRef.current[key] = snapLayer;
@@ -784,6 +788,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (!selectModeRef.current || !mapRef.current) return;
       const cur = displaysRef.current[county];
       if (cur && cur._isSnapshot) return; // already the snapshot layer (self-refreshing)
+      // B783 — only swap the on-map display to the snapshot when it's actually the preferred
+      // display source for this county (an image-only/unreachable live source — Waller). A healthy
+      // queryable CAD (Chambers → CCAD) keeps its own current vectors; don't flicker them out for a
+      // staler snapshot (the snapshot still serves clicks/outage via the promote path).
+      if (!preferSnapshotForDisplay({ hasSnapshot: !!getSnapshot(county), liveUrl: layerUrlsRef.current[county] })) return;
       removeDisplay(county);
       addDisplay(county);
     });

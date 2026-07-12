@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   featureBbox, featuresForView, featureAtPoint,
   ensureSnapshot, getSnapshot, snapshotVintage, _resetSnapshots,
+  preferSnapshotForDisplay,
 } from "../src/workspaces/site-planner/lib/parcelSnapshot.js";
+import { COUNTIES, STATEWIDE_PARCEL_LAYER } from "../src/workspaces/site-planner/lib/counties.js";
 
 // A GeoJSON polygon Feature: an axis-aligned square centered at (lng,lat), half-size h, + props.
 const sq = (lng, lat, h, props = {}) => ({
@@ -108,5 +110,32 @@ describe("ensureSnapshot — download, hold, and SWR-refresh only when Drive is 
 
   it("ignores a non-snapshot county", async () => {
     expect(await ensureSnapshot("harris", { fetchImpl: async () => { throw new Error("should not fetch"); } })).toBeNull();
+  });
+});
+
+// preferSnapshotForDisplay decides whether the Drive snapshot is the DISPLAYED outline
+// source or just a click/outage fallback (B783). A staler harvested snapshot must NOT
+// shadow a live queryable CAD (the exact B783 complaint), but SHOULD back an image-only
+// statewide source (whose /query is disabled, so its vector layer draws nothing).
+describe("preferSnapshotForDisplay — snapshot shows only when the live source can't draw current selectable outlines (B783)", () => {
+  it("prefers the snapshot for an image-only statewide (TxGIO) live source — Waller", () => {
+    expect(preferSnapshotForDisplay({ hasSnapshot: true, liveUrl: STATEWIDE_PARCEL_LAYER })).toBe(true);
+    // and matches the actual Waller config, which rides the statewide layer
+    expect(preferSnapshotForDisplay({ hasSnapshot: true, liveUrl: COUNTIES.waller.layerUrl })).toBe(true);
+  });
+
+  it("does NOT prefer the snapshot for a queryable CAD — Chambers on CCAD draws its own current vectors", () => {
+    expect(preferSnapshotForDisplay({ hasSnapshot: true, liveUrl: COUNTIES.chambers.layerUrl })).toBe(false);
+    expect(COUNTIES.chambers.layerUrl).toMatch(/ChambersCADPublic/); // guards the repoint
+  });
+
+  it("never prefers the snapshot when none is loaded, or before the live URL is known", () => {
+    expect(preferSnapshotForDisplay({ hasSnapshot: false, liveUrl: STATEWIDE_PARCEL_LAYER })).toBe(false);
+    expect(preferSnapshotForDisplay({ hasSnapshot: true, liveUrl: undefined })).toBe(false);
+    expect(preferSnapshotForDisplay({})).toBe(false);
+  });
+
+  it("tolerates a trailing slash on the live URL (URL-equality, trimmed)", () => {
+    expect(preferSnapshotForDisplay({ hasSnapshot: true, liveUrl: STATEWIDE_PARCEL_LAYER + "/" })).toBe(true);
   });
 });
