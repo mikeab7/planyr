@@ -7,6 +7,17 @@
 
 _Last updated: 2026-07-12._
 
+## 🔐 Two 2-minute safety toggles in the Supabase dashboard (from the 2026-07-12 delete-safety audit)
+> Both live in the dashboard for the main app project `lyeqzkuiwngunutlkkmi` — no SQL, no files, just switches.
+- [ ] **Turn on leaked-password protection.** Supabase → Authentication → Sign In / Providers → Email →
+      enable "Leaked password protection." What it does: when anyone sets a password, Supabase quietly checks
+      it against the public list of passwords exposed in known data breaches and refuses ones that appear
+      there. Free, one click, no downside.
+- [ ] **Confirm database backups are on (and note the retention).** Supabase → Database → Backups. Free-tier
+      projects get daily backups kept ~7 days; paid tiers keep more and can add point-in-time recovery (a
+      rewind-to-any-minute safety net). Just confirm the page shows backups running and tell a Claude session
+      what it says — this is the final backstop under all the in-app delete protections that shipped today.
+
 ## 🧩 Turn on DWG uploads (deploy the converter — needs one cloud account)
 - [ ] **Decide the host + do the account setup, then a Cowork session deploys it with you.** DWG files
       can't be read in the browser — a tiny converter has to run on a server. It's built and tested; what's

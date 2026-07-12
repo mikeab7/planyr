@@ -171,6 +171,22 @@ read/write — exact parity with how the scheduler has always worked, but now th
 production project. Tightening them to authenticated/owner-scoped access is a future item; it requires
 scheduler auth work, not just a policy flip.
 
+**Supabase security-advisor ACCEPTANCES (audited 2026-07-12, delete-safety batch — don't re-litigate
+these on the next advisor sweep):**
+- `planar_data` / `planar_history` / `planar_suggestions` **anon INSERT/UPDATE policies are flagged by
+  the linter but DELIBERATE** — the standalone scheduler page (`public/sequence/index.html`) saves
+  signed-out by design. The protection layers are already in place: every save also snapshots to
+  `planar_history` (so an overwrite is recoverable), and **anon DELETE is blocked by policy**. Do NOT
+  "fix" these policies without doing the scheduler-auth work above first — a naive tightening breaks
+  the owner's scheduler saves. (Tracked as open item **B778**.)
+- The `anon/authenticated can execute SECURITY DEFINER function` warnings on the team helpers
+  (`is_team_member`, `list_my_teams`, `create_team`, `claim_team_invites`, …) are the working team
+  RPC surface — each is internally scoped to `auth.uid()`.
+- The two `function_search_path_mutable` warnings were REAL and are fixed by
+  `doc-review/db/advisor_hardening.sql` (pins `project_folders_guard_drive_cols` +
+  re-applies the already-pinned `guard_team_rehome` to the live DB).
+- Leaked-password protection is an Auth dashboard toggle → `OWNER-TODO.md`.
+
 **Table schema** (one row per plan; `data` jsonb = serialized Site Model):
 ```sql
 create table public.sites (
