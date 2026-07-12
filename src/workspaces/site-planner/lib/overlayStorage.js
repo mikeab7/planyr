@@ -74,27 +74,48 @@ export async function uploadUnderlayDataUrl(siteId, dataUrl) {
   return error ? null : { key, ext };
 }
 
-/* Download stored overlay bytes as an ArrayBuffer (ready for loadPdf), or null. */
-export async function downloadOverlayBytes(key) {
-  if (!supabase || !key) return null;
-  const { data, error } = await supabase.storage.from(BUCKET).download(key);
-  if (error || !data) return null;
-  try { return await data.arrayBuffer(); } catch (_) { return null; }
+/* Classify a Storage download failure so a caller can tell "the object is GONE (re-add it)" from
+ * "a transient network/5xx blip (retry)". Supabase Storage's download endpoint returns HTTP 400 with
+ * an "Object not found" message (NOT a 404) for a missing key — confirmed live against prod — so 400
+ * counts as terminal-missing here alongside a plain 404 / any "not found" text. Everything else
+ * (timeout, 5xx, offline) is transient. (B784/B785.) */
+export function classifyStorageError(error) {
+  const status = error && (error.status ?? error.statusCode);
+  const msg = (error && error.message) || "";
+  return (status === 400 || status === 404 || /not\s*found/i.test(msg)) ? "missing" : "network";
 }
 
-/* Download a stored image overlay as a data URL (its raster is the source, no rasterize),
- * or null. PDFs use downloadOverlayBytes + rasterizeStoredPdf instead. */
-export async function downloadOverlayDataUrl(key) {
-  if (!supabase || !key) return null;
+/* Discriminated downloads (B785) — return { data, missing } so the rehydrate loop can record WHY a
+ * fetch failed instead of collapsing every failure into a bare null. `missing:true` = the object is
+ * confirmed gone (heal the dead pointer + prompt a re-add); `missing:false` on a null = transient
+ * (stay retryable). The thin `download*` wrappers below keep the old "bytes or null" shape for callers
+ * that don't need the reason (ensureOverlayPdf, the underlay rehydrate). */
+export async function fetchOverlayBytes(key) {
+  if (!supabase || !key) return { data: null, missing: false };
   const { data, error } = await supabase.storage.from(BUCKET).download(key);
-  if (error || !data) return null;
+  if (error || !data) return { data: null, missing: !!error && classifyStorageError(error) === "missing" };
+  try { return { data: await data.arrayBuffer(), missing: false }; }
+  catch (_) { return { data: null, missing: false }; }
+}
+
+export async function fetchOverlayDataUrl(key) {
+  if (!supabase || !key) return { data: null, missing: false };
+  const { data, error } = await supabase.storage.from(BUCKET).download(key);
+  if (error || !data) return { data: null, missing: !!error && classifyStorageError(error) === "missing" };
   return new Promise((res) => {
     const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.onerror = () => res(null);
+    r.onload = () => res({ data: r.result, missing: false });
+    r.onerror = () => res({ data: null, missing: false });
     r.readAsDataURL(data);
   });
 }
+
+/* Download stored overlay bytes as an ArrayBuffer (ready for loadPdf), or null. */
+export async function downloadOverlayBytes(key) { return (await fetchOverlayBytes(key)).data; }
+
+/* Download a stored image overlay as a data URL (its raster is the source, no rasterize),
+ * or null. PDFs use downloadOverlayBytes + rasterizeStoredPdf instead. */
+export async function downloadOverlayDataUrl(key) { return (await fetchOverlayDataUrl(key)).data; }
 
 /* Best-effort delete of a stored overlay object (called when an overlay is removed so the
  * cloud copy doesn't orphan). Silent on any error. */

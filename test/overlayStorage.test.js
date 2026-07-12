@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { overlayKey, siteUnderlayKey, uploadUnderlayDataUrl, BUCKET, fileKind } from "../src/workspaces/site-planner/lib/overlayStorage.js";
+import { overlayKey, siteUnderlayKey, uploadUnderlayDataUrl, BUCKET, fileKind, classifyStorageError, fetchOverlayBytes, fetchOverlayDataUrl } from "../src/workspaces/site-planner/lib/overlayStorage.js";
 
 describe("overlay storage — key format (B72, RLS contract)", () => {
   it("puts the uid FIRST (the Storage RLS keys on the first folder)", () => {
@@ -50,5 +50,34 @@ describe("overlay storage — fileKind (B72 polish: PDF + images, else stay inli
   it("returns null for unsupported types (caller keeps it inline)", () => {
     expect(fileKind({ type: "image/tiff", name: "x.tif" })).toBe(null);
     expect(fileKind({ type: "", name: "x.zip" })).toBe(null);
+  });
+});
+
+describe("overlay storage — classifyStorageError (B784/B785: missing vs network)", () => {
+  it("treats a 400 as terminal-missing (Supabase's 'Object not found' status on this endpoint)", () => {
+    expect(classifyStorageError({ status: 400, message: "Object not found" })).toBe("missing");
+    expect(classifyStorageError({ statusCode: 400 })).toBe("missing"); // some clients use statusCode
+  });
+  it("treats a plain 404 as terminal-missing", () => {
+    expect(classifyStorageError({ status: 404 })).toBe("missing");
+  });
+  it("treats any 'not found' message as terminal-missing even without a status", () => {
+    expect(classifyStorageError({ message: "The resource was not found" })).toBe("missing");
+    expect(classifyStorageError({ message: "NotFound" })).toBe("missing");
+  });
+  it("treats a timeout / 5xx / offline as transient network (retryable, NOT missing)", () => {
+    expect(classifyStorageError({ status: 500, message: "Internal Server Error" })).toBe("network");
+    expect(classifyStorageError({ status: 503 })).toBe("network");
+    expect(classifyStorageError({ message: "Failed to fetch" })).toBe("network");
+    expect(classifyStorageError(null)).toBe("network"); // unknown → retryable, never a destructive heal
+  });
+});
+
+describe("overlay storage — discriminated fetch shape (B785)", () => {
+  it("returns the { data, missing } shape and never throws on empty inputs", async () => {
+    // No supabase client / no key in the test env → a safe non-missing null (caller keeps the placeholder as 'loading', not a false 're-add').
+    expect(await fetchOverlayBytes("")).toEqual({ data: null, missing: false });
+    expect(await fetchOverlayDataUrl("")).toEqual({ data: null, missing: false });
+    expect(await fetchOverlayBytes(null)).toEqual({ data: null, missing: false });
   });
 });
