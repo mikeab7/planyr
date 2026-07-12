@@ -19,8 +19,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  listProjects, listReviews, listFileFacts, fileNewReview, refileReview,
-  upsertFileFacts, deleteReview, loadReview, getShareLink, DISCIPLINES,
+  fetchProjects, fetchReviews, fetchFileFacts, fileNewReview, refileReview,
+  upsertFileFacts, deleteReview, restoreReview, purgeReview, listDeletedReviews,
+  purgeExpiredDeleted, loadReview, getShareLink, DISCIPLINES,
   downloadFromDrive, downloadSource,
 } from "../../doc-review/lib/reviewStore.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../../doc-review/lib/fileIndex.js";
@@ -114,6 +115,12 @@ export default function FileBrowser({
   const [pendingDel, setPendingDel] = useState(null);
   const [share, setShare] = useState({});                  // fileId -> { status, url, error }
   const [delNotice, setDelNotice] = useState(null);        // { orphaned } after a delete left bytes behind
+  const [loadNotice, setLoadNotice] = useState(null);      // a refresh FAILED — keeping the last loaded list (NEW-F5)
+  const [deletedRows, setDeletedRows] = useState([]);      // soft-deleted reviews (NEW-F3 Recently deleted)
+  const [showDeleted, setShowDeleted] = useState(false);   // "Recently deleted" view active
+  const [pendingPurge, setPendingPurge] = useState(null);  // two-click arm for "Delete forever"
+  const [undoDel, setUndoDel] = useState(null);            // { id, title } — ~10s undo toast after a delete
+  const undoTimer = useRef(null);
   const [moveNotice, setMoveNotice] = useState(null);      // refile moved metadata but not the Drive copy (B662 #3)
   const [folderNote, setFolderNote] = useState(null);      // { filed, skipped } after a FOLDER drop/pick (B664)
   const [dlNotice, setDlNotice] = useState(null);          // { name, busy?, error? } for a non-PDF download (B685)
@@ -132,8 +139,13 @@ export default function FileBrowser({
   // already-selected folder (or "All files") also clears — never a dead click.
   useEffect(() => {
     if (!navTick || !folderMode) return;
-    setShowHolding(false); setSearchQ("");
+    setShowHolding(false); setSearchQ(""); setShowDeleted(false);
   }, [navTick, folderMode]);
+
+  // Any navigation (tree click, search, holding view) exits the Recently-deleted view — its
+  // list ignores those filters, so leaving it up would make the click look dead. `node` is a
+  // fresh object on every tree click, so re-filtering always fires this.
+  useEffect(() => { setShowDeleted(false); }, [node, showHolding, searchQ, selectedFolderId]);
 
   // A cancelled drag (Esc, or an OS-file drag released outside the window — which fires
   // NO drop/dragend in the page) would strand the depth counter above zero and pin the
@@ -158,9 +170,23 @@ export default function FileBrowser({
     const tok = ++reqRef.current;
     setBusy(true);
     try {
-      const [p, r, ff] = await Promise.all([listProjects(), listReviews(), listFileFacts()]);
+      const [p, r, ff, dead] = await Promise.all([fetchProjects(), fetchReviews(), fetchFileFacts(), listDeletedReviews()]);
       if (tok !== reqRef.current) return;
-      setProjects(p); setReviews(mergeFactsIntoReviews(r, ff));
+      // NEW-F5: a FAILED read keeps the previous list — a network blip must never render the
+      // "no files" empty state ("all my drawings are gone" panics a user into re-uploading,
+      // which is exactly the same-name collision trap NEW-F1 closes). Loud notice + Retry.
+      if (p.ok) setProjects(p.rows);
+      if (r.ok && ff.ok) setReviews(mergeFactsIntoReviews(r.rows, ff.rows));
+      if (dead !== null) setDeletedRows(dead); // null = FAILED bin read → keep the last-known bin
+      const failed = [r, ff, p].find((x) => !x.ok);
+      setLoadNotice(failed ? { error: failed.error || "Couldn't refresh." } : null);
+      // NEW-F3: lazy 30-day purge of expired Recently-deleted items — best-effort, silent on
+      // success, loud on failure OR stranded-bytes cleanup; a successful purge re-reads the bin.
+      purgeExpiredDeleted().then((res) => {
+        if (!res) return;
+        if (!res.ok || res.cleanupFailed) setDelNotice((n) => n || { purgeFailed: true });
+        if (res.ok && res.purged > 0) listDeletedReviews().then((d2) => { if (tok === reqRef.current && d2 !== null) setDeletedRows(d2); });
+      }).catch(() => {});
     } finally { if (tok === reqRef.current) setBusy(false); }
   };
   // Keep-alive: the browser stays mounted while hidden, so returning to the Library tab
@@ -465,10 +491,41 @@ export default function FileBrowser({
       setDlNotice(null);
     } catch (e) { setDlNotice({ name: label, error: (e && e.message) || "Couldn’t download this file." }); }
   };
+  // Delete = move to Recently deleted (NEW-F3, soft) — restorable for ~30 days. The pre-migration
+  // degrade path can still hard-delete (r.soft absent); its cleanup failures stay loud (NEW-4).
   const del = async (id) => {
     setPendingDel(null);
+    const title = (reviews.find((x) => x.id === id) || {}).title || "file";
     const r = await deleteReview(id);
-    if (r && (r.orphaned || r.cleanupFailed)) setDelNotice({ orphaned: r.orphaned || 0 }); // never silent (NEW-4)
+    if (r && (r.orphaned || r.cleanupFailed)) setDelNotice({ orphaned: r.orphaned || 0, sharedKept: r.sharedKept || 0 });
+    if (r && r.ok && r.soft && r.removed > 0) { // ~10s undo toast — ONLY for a delete that really landed (B757 removed-count honesty)
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      setUndoDel({ id, title });
+      undoTimer.current = setTimeout(() => setUndoDel(null), 10000);
+    } else if (!r || !r.ok || (r.soft && r.removed === 0)) {
+      setDelNotice({ deleteFailed: true }); // a failed/0-row delete is never a silent dead click (NEW-4)
+    }
+    refresh();
+  };
+  const undoDelete = async () => {
+    const u = undoDel;
+    setUndoDel(null);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    if (!u) return;
+    const r = await restoreReview(u.id);
+    if (!r.ok) setDelNotice({ restoreFailed: true }); // never silent (NEW-4)
+    refresh();
+  };
+  const restoreRow = async (id) => {
+    const r = await restoreReview(id);
+    if (!r.ok) setDelNotice({ restoreFailed: true });
+    refresh();
+  };
+  // "Delete forever" out of Recently deleted — the only user-facing hard delete (NEW-F3).
+  const purgeRow = async (id) => {
+    setPendingPurge(null);
+    const r = await purgeReview(id);
+    if (r && (r.orphaned || r.cleanupFailed)) setDelNotice({ orphaned: r.orphaned || 0, sharedKept: r.sharedKept || 0 });
     refresh();
   };
   // Share-by-link: outward-facing, so confirm first, then mint a link. driveKey lives on the
@@ -531,6 +588,9 @@ export default function FileBrowser({
   }
 
   const holdingCount = holding.length;
+  // Recently-deleted rows in scope (NEW-F3): the project view shows this project's items plus
+  // never-filed ones (project_id null) so nothing deleted becomes unfindable; cross shows all.
+  const deadShown = cross ? deletedRows : deletedRows.filter((d) => d.project_id === projectId || !d.project_id);
   // Where a drop will file (B686): the selected tree folder wins; "All files"/no selection means
   // auto-file by title block. Drives the drop-strip copy + the drop-anywhere overlay so the two
   // modes are unmistakable ("Filing into 02. Electric" vs. "auto-file drawings by title block").
@@ -631,7 +691,31 @@ export default function FileBrowser({
               color: showHolding ? "var(--on-accent)" : (holdingCount ? "var(--warn-text)" : "var(--text-tertiary)") }}>
             ⚑ Needs filing{holdingCount ? ` · ${holdingCount}` : ""}
           </button>
+          {/* Recently deleted (NEW-F3): the restore bin. Rendered when it has items — OR while
+              the view is open, so restoring/purging the last item can't strand the user in a
+              bin with no exit toggle (adversarial-review finding). */}
+          {(deadShown.length > 0 || showDeleted) && (
+            <button onClick={() => { setShowDeleted((v) => !v); }}
+              title="Deleted files wait here ~30 days — restore them or delete them forever"
+              style={{ fontSize: 11.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 999, padding: "4px 12px", whiteSpace: "nowrap",
+                border: "1px solid var(--border-default)",
+                background: showDeleted ? "var(--hover-menu)" : "var(--surface-raised)",
+                color: "var(--text-secondary)" }}>
+              ↺ Recently deleted · {deadShown.length}
+            </button>
+          )}
         </div>
+
+        {/* a refresh failed — keep showing the last loaded list, loudly (NEW-F5) */}
+        {loadNotice && (
+          <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
+            border: "1px solid var(--warn-border, #d6a64a)", background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
+            <span style={{ flex: 1 }}>Couldn’t refresh your files — showing the last loaded list. Your files are safe; this is a connection hiccup.</span>
+            <button onClick={refresh} title="Try again"
+              style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 7, border: "1px solid var(--warn-border, #d6a64a)", background: "transparent", color: "var(--warn-text)", padding: "2px 10px" }}>Retry</button>
+            <button onClick={() => setLoadNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
+          </div>
+        )}
 
         {/* refile moved the metadata but not the Drive copy — surface it (LOUD-FAILURE) */}
         {moveNotice && (
@@ -669,19 +753,62 @@ export default function FileBrowser({
           </div>
         )}
 
-        {/* delete left bytes behind — surface it (never a silent cleanup failure, NEW-4) */}
+        {/* delete/restore/purge hiccups — surface them (never a silent cleanup failure, NEW-4) */}
         {delNotice && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
             border: "1px solid var(--warn-border, #d6a64a)", background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
-            <span style={{ flex: 1 }}>Deleted — but {delNotice.orphaned ? `${delNotice.orphaned} ` : ""}file{delNotice.orphaned === 1 ? "" : "s"} couldn’t be removed from storage, so a copy may linger. You can remove it directly in Google Drive.</span>
+            <span style={{ flex: 1 }}>
+              {delNotice.restoreFailed ? "Couldn’t restore that file — check your connection and try again from Recently deleted."
+                : delNotice.deleteFailed ? "Couldn’t delete that file — it may already be deleted, or the cloud is unreachable. Refresh and try again."
+                : delNotice.purgeFailed ? "Couldn’t fully clear expired items from Recently deleted — anything left will be retried next time this list loads."
+                : <>Deleted — but {delNotice.orphaned ? `${delNotice.orphaned} ` : ""}file{delNotice.orphaned === 1 ? "" : "s"} couldn’t be removed from storage, so a copy may linger. You can remove it directly in Google Drive.{delNotice.sharedKept ? ` ${delNotice.sharedKept} stored file${delNotice.sharedKept === 1 ? " was" : "s were"} kept because another drawing still uses ${delNotice.sharedKept === 1 ? "it" : "them"}.` : ""}</>}
+            </span>
             <button onClick={() => setDelNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
           </div>
         )}
 
         {/* file list */}
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 12px 4px" }}>
+          {showDeleted ? (
+            /* Recently deleted (NEW-F3): restore or permanently delete. Rows here are soft-
+               deleted doc_reviews — everything (markups, bytes, index) is still intact. */
+            <>
+              <div style={{ fontSize: 11.5, color: "var(--text-secondary)", padding: "4px 4px 10px", lineHeight: 1.5 }}>
+                Deleted files wait here about 30 days, then clear out on their own. Restore brings
+                everything back — the drawing and your markups.
+              </div>
+              {deadShown.length === 0 && <div style={{ fontSize: 12.5, color: "var(--text-secondary)", padding: 12 }}>Nothing in Recently deleted.</div>}
+              {deadShown.map((d) => (
+                <div key={d.id} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)", display: "flex", alignItems: "center", gap: 9 }}>
+                  <FileTypeIcon kind={d.kind} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {d.title || d.item || d.sfile || "Untitled"}
+                    </span>
+                    <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>
+                      Deleted {(() => { try { return new Date(d.deleted_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch (_) { return ""; } })()}
+                      {d.project ? ` · ${d.project}` : ""}
+                    </span>
+                  </span>
+                  <button onClick={() => restoreRow(d.id)} title="Put this file back in the Library"
+                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", padding: "3px 10px" }}>Restore</button>
+                  {pendingPurge === d.id ? (
+                    <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--danger-text)", fontWeight: 700 }}>
+                      Delete forever — markups too?
+                      <button onClick={() => purgeRow(d.id)} title="Permanently delete this file and its markups" style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✓</button>
+                      <button onClick={() => setPendingPurge(null)} title="Cancel" style={{ border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, padding: 2 }}>✕</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setPendingPurge(d.id)} title="Permanently delete (cannot be undone)"
+                      style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: "transparent", color: "var(--danger-text)", padding: "3px 8px" }}>Delete forever</button>
+                  )}
+                </div>
+              ))}
+            </>
+          ) : (
+          <>
           {busy && shown.length === 0 && <div style={{ fontSize: 12, color: "var(--text-secondary)", padding: 12 }}>Loading…</div>}
-          {!busy && shown.length === 0 && (
+          {!busy && shown.length === 0 && !loadNotice && (
             // ONE empty state (B699) — the old pane carried a second "No files here yet. Drop
             // files below…" line AND a dedicated drop card saying the same thing again.
             showHolding ? (
@@ -752,12 +879,16 @@ export default function FileBrowser({
                   <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 8, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
                   {pendingDel === f.id ? (
-                    <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "var(--text-secondary)" }}>
-                      <button onClick={() => del(f.id)} title="Confirm delete" style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✓</button>
+                    /* Wording, not a bare glyph pair (NEW-F3): say where the file goes. The
+                       delete is soft (Recently deleted, ~30-day restore), so the stakes match
+                       the light inline affordance. */
+                    <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, whiteSpace: "nowrap" }}>
+                      Move to Recently deleted?
+                      <button onClick={() => del(f.id)} title="Yes — move it (restorable ~30 days)" style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✓</button>
                       <button onClick={() => setPendingDel(null)} title="Cancel" style={{ border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, padding: 2 }}>✕</button>
                     </span>
                   ) : (
-                    <button onClick={() => setPendingDel(f.id)} title="Delete" style={{ flex: "none", border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 14, padding: 3 }}>×</button>
+                    <button onClick={() => setPendingDel(f.id)} title="Delete (moves to Recently deleted)" style={{ flex: "none", border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 14, padding: 3 }}>×</button>
                   )}
                 </div>
                 {/* re-file (re-assign category/subcategory) — inline, never auto-guesses */}
@@ -772,6 +903,8 @@ export default function FileBrowser({
               </div>
             );
           })}
+          </>
+          )}
         </div>
 
         {/* persistent processing queue (B260 lean) */}
@@ -786,6 +919,20 @@ export default function FileBrowser({
         <input ref={(el) => { folderInputRef.current = el; if (el) el.webkitdirectory = true; }}
           type="file" multiple style={{ display: "none" }} onChange={onPickFolder} />
       </div>
+
+      {/* undo toast (NEW-F3): ~10s window to un-delete without hunting for Recently deleted */}
+      {undoDel && (
+        <div style={{ position: "absolute", bottom: 14, right: 14, zIndex: 6, display: "flex", alignItems: "center", gap: 10,
+          padding: "9px 14px", borderRadius: 9, background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.18)", fontSize: 12, color: "var(--text-primary)" }}>
+          <span style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            Moved “{undoDel.title}” to Recently deleted.
+          </span>
+          <button onClick={undoDelete} title="Put it right back"
+            style={{ flex: "none", fontSize: 11.5, fontFamily: "inherit", fontWeight: 800, cursor: "pointer", borderRadius: 7, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", padding: "3px 12px" }}>Undo</button>
+          <button onClick={() => setUndoDel(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
+        </div>
+      )}
 
       {/* drop-anywhere overlay hint — the pill names the REAL target: the hovered folder row
           (rail drop), else the selected folder, else the auto-file path. */}

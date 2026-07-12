@@ -32,9 +32,21 @@ export async function onRequestPost(context) {
 
   // Record the key ↔ Drive-id mapping, scoped to the caller (mirrors /api/files exactly).
   const idStore = supabaseIdStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token: c.token });
-  const setRes = await idStore.set(`${c.user.id}/${session.planyr_key}`, session.drive_file_id, { name: session.file_name });
+  const fullKey = `${c.user.id}/${session.planyr_key}`;
+  // NEW-F1 telemetry: a mapping REBIND (same key, different Drive file) is the backdrop-swap
+  // signature. New uploads mint srcId-unique keys so this should now only fire for a retry of
+  // the same source or a legacy-format key from a stale (un-reloaded) client — log it, don't
+  // block, and never delete the old file (a share link may still point at its file id).
+  try {
+    const prior = await idStore.get(fullKey);
+    if (prior && prior !== session.drive_file_id)
+      console.warn(`drive-mapping-rebind: key ${session.planyr_key} rebinding ${prior} -> ${session.drive_file_id} (old file orphaned, not deleted)`);
+  } catch (_) { /* telemetry only */ }
+  const setRes = await idStore.set(fullKey, session.drive_file_id, { name: session.file_name });
   if (setRes && setRes.ok === false) {
-    try { const client = defaultDriveClientFactory(c.cfg.drive); if (client) await client.del(session.drive_file_id); } catch (_) { /* best-effort rollback */ }
+    // NEW-F2: rollback TRASHES (not hard-deletes) — if the mapping failure was a false
+    // negative (write landed, response lost), the bytes stay recoverable for ~30 days.
+    try { const client = defaultDriveClientFactory(c.cfg.drive); if (client) await client.trash(session.drive_file_id); } catch (_) { /* best-effort rollback */ }
     await c.store.update(session.id, { status: "aborted" });
     return json({ ok: false, error: "Uploaded to Drive but couldn't record the file; it was rolled back — please retry." }, 502);
   }

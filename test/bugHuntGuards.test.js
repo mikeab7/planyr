@@ -504,7 +504,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // the chunked-upload COMPLETE rolls the Drive file back if the mapping doesn't persist
     // (B409 rework moved this guard from the retired /api/files/resumable commit)
     expect(complete).toMatch(/if \(setRes && setRes\.ok === false\)/);
-    expect(complete).toMatch(/client\.del\(session\.drive_file_id\)/);
+    // NEW-F2: the rollback trashes (recoverable), never permanent-deletes
+    expect(complete).toMatch(/client\.trash\(session\.drive_file_id\)/);
+    expect(complete).not.toMatch(/client\.del\(session\.drive_file_id\)/);
   });
 
   it("B735: the export aerial + viewBox share ONE extent (no dev-only guard that blanks a parcels-only site)", () => {

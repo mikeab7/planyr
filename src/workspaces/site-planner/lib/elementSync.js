@@ -377,7 +377,10 @@ export function createElementSync(opts = {}) {
     const out = new Map();
     for (const [k, e] of inflightKeys) out.set(k, e);
     for (const [k, e] of dirty) out.set(k, e);
-    return [...out.values()].map((e) => ({ kind: e.kind, id: e.id, cls: e.cls, el: e.el }));
+    // baseRev = the shadow rev this op targets (NEW-F4): the pending-edit journal persists it so
+    // a post-reload fold can tell "my edit is newer than this row" (row.rev <= baseRev → fold)
+    // from "a foreign writer advanced it" (row.rev > baseRev → rows canonical, discard).
+    return [...out.values()].map((e) => ({ kind: e.kind, id: e.id, cls: e.cls, el: e.el, baseRev: revOf(e) }));
   }
 
   // ---- B672: the realtime READ side -------------------------------------------

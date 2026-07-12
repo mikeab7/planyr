@@ -37,6 +37,10 @@ const STATUS = {
   loading: { color: "var(--warn-text)", label: "loading…" },
   loaded: { color: "var(--status-active)", label: "loaded" },
   empty: { color: "var(--text-tertiary)", label: "no data" },
+  // NEW-3/B790: an honest "the picture never arrived" state — amber (warn-text), NOT red. RED is
+  // reserved for a genuine error (--danger); a stalled/degraded source is "too slow, data may be
+  // missing," which is retryable and clears on its own once the source recovers.
+  slow: { color: "var(--warn-text)", label: "source slow" },
   failed: { color: "var(--danger)", label: "failed" },
   unconfigured: { color: "var(--text-tertiary)", label: "needs setup" }, // NEW-4: not a failure, just not set up
 };
@@ -133,7 +137,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
           </div>
         )}
         {/* SIGNAL kept inline: status reason (failed / empty / needs-setup) */}
-        {meta && (ls.state === "failed" || ls.state === "empty" || ls.state === "unconfigured") && (
+        {meta && (ls.state === "failed" || ls.state === "slow" || ls.state === "empty" || ls.state === "unconfigured") && (
           <div style={{ fontSize: 10, color: meta.color, lineHeight: 1.35, marginTop: 1 }}>
             {ls.msg || meta.label}
           </div>
@@ -221,7 +225,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             </span>
           </div>
         )}
-        {meta && (combined.state === "failed" || combined.state === "empty") && (
+        {meta && (combined.state === "failed" || combined.state === "slow" || combined.state === "empty") && (
           <div style={{ fontSize: 10, color: meta.color, lineHeight: 1.35, marginTop: 1 }}>{combined.msg || meta.label}</div>
         )}
       </div>

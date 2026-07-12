@@ -106,6 +106,7 @@ export default function App({
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
   const [deleteError, setDeleteError] = useState(""); // a cloud DELETE that actually failed — loud, never a phantom success (B372)
+  const [pushError, setPushError] = useState("");     // a background cloud-mirror push failed (NEW-F6) — device copy is safe; heals on next push/pull
   const prevUid = useRef(null);
   const applySeq = useRef(0); // monotonic token so overlapping auth events can't interleave (B43)
   // "Bring my on-device sites into my account": signed-in uid drives the prompt; the
@@ -279,6 +280,23 @@ export default function App({
   }, []);
   const goPlan = (id) => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); };
 
+  // NEW-F6 (LOUD-FAILURE): the fire-and-forget cloud mirrors below (new site, duplicate, rename,
+  // status) used to `.catch(() => {})` — the op looked done while the cloud copy silently lagged.
+  // Not data loss (the device copy is authoritative and the next autosave/pull heal re-pushes),
+  // but silence is the B209 class. One dismissible banner; notify-only, no retry loop. Returns
+  // ok so multi-plan loops can aggregate to a single banner instead of N.
+  const pushLoud = async (id, what) => {
+    try {
+      const r = await pushSiteToCloud(id);
+      if (r && r.ok === false) throw new Error(r.error || "push failed");
+      return true;
+    } catch (e) {
+      setPushError(`${what} is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload.`);
+      reportClientEvent("cloud-push-failed", `background push failed (${what})`, { id, error: (e && e.message) || "" });
+      return false;
+    }
+  };
+
   // Open a saved site from the map.
   const openSite = (id) => { if (loadSite(id)) goPlan(id); };
 
@@ -289,7 +307,7 @@ export default function App({
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
     saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
-    pushSiteToCloud(id).catch(() => {}); // mirror to cloud when logged in (no-op otherwise)
+    pushLoud(id, "The new site"); // mirror to cloud when logged in (no-op otherwise); loud on failure (NEW-F6)
     // Seed this new project's standard folder tree + mirror it to Google Drive (B650). Idempotent
     // and graceful (no-op signed-out / Drive off); a dynamic import keeps the folder code off the
     // planner chunk, and folder rows are independent of the sites row so ordering doesn't matter.
@@ -378,7 +396,7 @@ export default function App({
     const id = newId();
     saveSite({ id, groupId: group, site: src.site || src.name, name: nextConceptForGroup(group),
       origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null });
-    pushSiteToCloud(id).catch(() => {});
+    pushLoud(id, "The new plan"); // NEW-F6
     refreshSites();
     goPlan(id);
   };
@@ -390,7 +408,7 @@ export default function App({
     const group = groupOf(src);
     const id = newId();
     saveSite({ ...src, id, groupId: group, name: `${src.name || "Plan"} (copy)` });
-    pushSiteToCloud(id).catch(() => {});
+    pushLoud(id, "The duplicated plan"); // NEW-F6
     refreshSites();
     goPlan(id);
   };
@@ -420,10 +438,12 @@ export default function App({
     const rec = loadSite(idOrGroup);
     const groupId = rec ? groupOf(rec) : idOrGroup;
     renameSiteGroup(groupId, site);
-    loadPlansOfGroup(groupId).forEach((s) => pushSiteToCloud(s.id).catch(() => {}));
+    // NEW-F6 — aggregate the per-plan pushes to ONE banner, not one per plan.
+    Promise.all(loadPlansOfGroup(groupId).map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
+      .then((oks) => { if (oks.some((ok) => !ok)) { setPushError("The rename is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload."); reportClientEvent("cloud-push-failed", "background push failed (rename site)", { id: groupId }); } });
     refreshSites();
   };
-  const renamePlan = (id, name) => { saveSite({ id, name }); pushSiteToCloud(id).catch(() => {}); refreshSites(); };
+  const renamePlan = (id, name) => { saveSite({ id, name }); pushLoud(id, "The plan rename"); refreshSites(); }; // NEW-F6
 
   // The planner dropped a blank, unedited site (never saved). Forget it.
   const handleSiteDropped = (id) => { if (id === activeSiteId) setActiveSiteId(null); refreshSites(); };
@@ -457,7 +477,11 @@ export default function App({
   // the group is represented. Persists + mirrors to cloud, then refreshes.
   const setSiteStatus = (id, status) => {
     const rec = loadSite(id); if (!rec) return;
-    loadPlansOfGroup(groupOf(rec)).forEach((s) => { saveSite({ id: s.id, status }); pushSiteToCloud(s.id).catch(() => {}); });
+    // NEW-F6 — save every plan locally first, then aggregate the pushes to ONE banner.
+    const plans = loadPlansOfGroup(groupOf(rec));
+    plans.forEach((s) => saveSite({ id: s.id, status }));
+    Promise.all(plans.map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
+      .then((oks) => { if (oks.some((ok) => !ok)) { setPushError("The status change is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload."); reportClientEvent("cloud-push-failed", "background push failed (site status)", { id }); } });
     refreshSites();
   };
 
@@ -576,6 +600,14 @@ export default function App({
         <div role="alert" style={{ position: "fixed", top: cloudError ? 136 : 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{deleteError}</span>
           <button onClick={() => setDeleteError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+      {/* NEW-F6 — a background cloud-mirror push failed. Informational (the device copy is safe
+          and the next push/pull heals), so warn styling, stacked under the harder alerts. */}
+      {pushError && (
+        <div role="alert" style={{ position: "fixed", top: (cloudError ? 57 : 0) + (deleteError ? 57 : 0) + 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", border: "1px solid var(--warn-border, #d6a64a)", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+          <span style={{ flex: 1 }}>{pushError}</span>
+          <button onClick={() => setPushError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--warn-text)", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 

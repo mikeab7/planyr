@@ -42,7 +42,7 @@ export async function onRequestGet(context) {
     if (got.ok) {
       try { steps[steps.length - 1].roundTrip = new TextDecoder().decode(got.bytes) === "planyr drive self-test — safe to delete"; } catch (_) { steps[steps.length - 1].roundTrip = false; }
     }
-    await run("delete (cleanup)", () => adapter.remove(key));
+    await run("trash (cleanup)", () => adapter.remove(key)); // adapter.remove now trashes (NEW-F2); tiny probe auto-purges in ~30d
   }
 
   // Resumable round-trip (B409) — proves the LARGE-file transport (session init → PUT →
@@ -69,6 +69,8 @@ export async function onRequestGet(context) {
         catch (e) { return { ok: false, error: (e && e.message) || "read-back failed" }; }
       });
       await run("resumable delete (cleanup)", async () => {
+        // Hard client.del is DELIBERATE (NEW-F2): a multi-MB zero-fill probe, not user data —
+        // trashing it would hold Drive quota for 30 days per selftest run.
         try { await client.del(rid); return { ok: true }; } catch (e) { return { ok: false, error: (e && e.message) || "delete failed" }; }
       });
     }

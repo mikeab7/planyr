@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-12 @ `646b988` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-12 @ `1b410f5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_243 source files mapped._
+_244 source files mapped._
 
 ## infra
 
@@ -297,8 +297,10 @@ _243 source files mapped._
   - _exports_: `createNameResolver`, `describeElement`
 - **`src/workspaces/site-planner/lib/elementApi.js`** — network seam for per-element sync (B671): the commit_elements RPC wrapper, element-row fetch, and the pure unload keepalive commit
   - _exports_: `COMMIT_TIMEOUT_MS`, `commitElements`, `ELEMENT_SELECT`, `fetchElements`, `keepaliveCommit`
+- **`src/workspaces/site-planner/lib/elementJournal.js`** — persisted pending-edit journal (NEW-F4): quota-safe per-site localStorage of un-committed element ops (+ baseRev) so a reload after a failed commit re-folds instead of reverting
+  - _exports_: `clearJournal`, `readJournal`, `writeJournal`
 - **`src/workspaces/site-planner/lib/elementRows.js`** — pure JS mirror of the site_elements explode/rebuild (B670): model⇄rows for the 5 vector collections, tombstone-aware, keyed by (kind,id)
-  - _exports_: `byRowOrder`, `ELEMENT_FIELDS`, `explodeModel`, `FIELD_TO_KIND`, `foldNeverSyncedLocal`, `KIND_TO_FIELD`, `rowsToModel`, `Z_GAP`
+  - _exports_: `byRowOrder`, `ELEMENT_FIELDS`, `explodeModel`, `FIELD_TO_KIND`, `foldJournal`, `foldNeverSyncedLocal`, `KIND_TO_FIELD`, `rowsToModel`, `Z_GAP`
 - **`src/workspaces/site-planner/lib/elementSync.js`** — the per-element write engine (B671): diffs live collections vs a shadow map, batches rev-guarded commits, LWW conflict events, dirty-queue backoff
   - _exports_: `createElementSync`, `stableStringify`
 - **`src/workspaces/site-planner/lib/elevation.js`** — USGS 3DEP bare-earth DEM sampling: profile elevations along a polyline (metres to survey-ft) plus ditch-depth screening stats
@@ -336,7 +338,7 @@ _243 source files mapped._
 - **`src/workspaces/site-planner/lib/layerPanelInfo.js`** — Pure Layers-panel row helpers: per-row ⓘ content assembly + merged City/ETJ combined-status precedence (B760/B761)
   - _exports_: `combineLayerStatus`, `rowInfoSections`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
-  - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `TRANSIENT_STATUS`
+  - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
   - _exports_: `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `gisProxyEnabled`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_VINTAGE`, `layerVintage`, `probeService`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
 - **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; durable home for the version-history ring and cached rasters
@@ -490,7 +492,7 @@ _243 source files mapped._
 - **`src/workspaces/doc-review/lib/renderBudget.js`** — Pure canvas backing-store budget math: two-layer backdrop/detail density, visible-region tiling and device-pixel rect rounding under a 24MP cap
   - _exports_: `BACKDROP_PX_BUDGET`, `backdropDensity`, `backingPixels`, `backingScale`, `CANVAS_PX_BUDGET`, `DETAIL_DENSITY_CAP`, `DETAIL_DENSITY_TARGET`, `deviceRect`, `tileCovers`, `visibleRegion`
 - **`src/workspaces/doc-review/lib/reviewStore.js`** — Document Review cloud persistence I/O: Supabase doc_reviews + file-facts index, Drive-first byte storage, filing/re-filing, localStorage flush mirror
-  - _exports_: `BUCKET`, `clearDraft`, `clearReviewVersions`, `cloudConfigured`, `cloudReady`, `composeTitle`, `currentUid`, `deleteFromDrive`, `deleteReview`, `DISCIPLINES`, `downloadFromDrive`, `downloadSource`, `driveStreamSource`, `fileNewReview`, `fmtDocDate`, `getShareLink`, `guessContentType`, `isStoredSource`, `keepaliveFlushReview`, `listFileFacts`, `listProjects`, `listReviews`, `loadReview`, `markReviewPlaced`, `MAX_BYTES`, `newReviewId`, `newSourceId`, `pushFileToDrive`, `readDraft`, `reconcile`, `refileReview`, `REVIEW_SCHEMA`, `reviewRowFor`, `setProjectStatus`, `STATUS_META`, `STATUSES`, `statusOf`, `storeSource`, `stripFileExt`, `upsertFileFacts`, `upsertReview`, `writeDraft`
+  - _exports_: `BUCKET`, `buildDriveKey`, `clearDraft`, `clearReviewVersions`, `cloudConfigured`, `cloudReady`, `composeTitle`, `currentUid`, `deleteFromDrive`, `deleteReview`, `DISCIPLINES`, `downloadFromDrive`, `downloadSource`, `driveStreamSource`, `fetchFileFacts`, `fetchProjects`, `fetchReviews`, `fileNewReview`, `fmtDocDate`, `getShareLink`, `guessContentType`, `isStoredSource`, `keepaliveFlushReview`, `listDeletedReviews`, `listFileFacts`, `listProjects`, `listReviews`, `loadReview`, `markReviewPlaced`, `MAX_BYTES`, `newReviewId`, `newSourceId`, `purgeExpiredDeleted`, `purgeReview`, `pushFileToDrive`, `readDraft`, `reconcile`, `refileReview`, `restoreReview`, `REVIEW_SCHEMA`, `reviewRowFor`, `setProjectStatus`, `shouldDeleteBytes`, `STATUS_META`, `STATUSES`, `statusOf`, `storeSource`, `stripFileExt`, `upsertFileFacts`, `upsertReview`, `writeDraft`
 - **`src/workspaces/doc-review/lib/sessionBytes.js`** — In-memory session-lifetime FIFO cache of dropped source Files by srcId so a backdrop reopens while its upload is still keyless
   - _exports_: `_clearSessionBytes`, `cacheSourceBytes`, `getSourceBytes`, `hasSourceBytes`, `SESSION_BYTES_CAP`
 - **`src/workspaces/doc-review/lib/sheetRead.js`** — Browser bridge from pdf.js to pure sheet engines: reads/groups pages, derives per-group stated/scale-bar calibration, flags not-to-scale sheets, with dormant OCR seam

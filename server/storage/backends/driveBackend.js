@@ -32,7 +32,8 @@
  *   client.media(fileId)                 -> { bytes, contentType, name }
  *   client.list({ parentFolderId })      -> [{ id, name, size, mimeType, parents }]
  *   client.update(fileId, { addParents, removeParents, name }) -> { id }
- *   client.del(fileId)                   -> void
+ *   client.del(fileId)                   -> void  (permanent — regenerable data only)
+ *   client.trash(fileId)                 -> void  (recoverable ~30d — all user-data removal)
  *   client.permitAnyoneReader(fileId)    -> { webViewLink }
  *   client.folderId(folderPath)          -> string   (ensures/loads the folder, returns id)
  */
@@ -104,9 +105,13 @@ export function driveBackend({ client = null } = {}) {
       return ok();
     },
 
+    // Removal = Drive TRASH, never a permanent delete (NEW-F2, extending the B650
+    // delete-safety rule from folders to files): a mistaken delete stays recoverable from
+    // Drive's trash for ~30 days. Regenerable non-user data (GIS cache, selftest probes,
+    // parcel snapshots) bypasses the adapter and hard-deletes via client.del deliberately.
     async remove(backendId) {
       const n = need(); if (n) return n;
-      await client.del(backendId);
+      await client.trash(backendId);
       return ok();
     },
 

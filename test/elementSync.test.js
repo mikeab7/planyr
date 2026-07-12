@@ -331,6 +331,7 @@ describe("refetch-replace safety (V229 #5 lost-update class)", () => {
     expect(pending).toHaveLength(1);
     expect(pending[0]).toMatchObject({ kind: "el", id: "e1" });
     expect(pending[0].el.cx).toBe(50);                     // the in-flight data, not the stale row
+    expect(pending[0].baseRev).toBe(1);                    // NEW-F4: the shadow rev the op targets rides along for the journal
     release(); await tick(); await tick();
     expect(s.dirtyEntries()).toHaveLength(0);              // settled after the result lands
   });

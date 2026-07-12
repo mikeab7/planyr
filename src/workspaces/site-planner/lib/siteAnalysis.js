@@ -44,6 +44,10 @@ function reg(key) {
     ...layerField,
     fields: s.fields,
     ...(s.outFields ? { outFields: s.outFields.join(",") } : {}),
+    // NEW-2/B789: an optional per-source screening-fetch timeout override (e.g. flood → 20 s),
+    // forwarded to fetchArcgisJson so a slow-but-healthy national source (FEMA answered in ~9.5 s
+    // during the 2026-07-11 slowdown) isn't aborted by the 9 s default a hair too early.
+    ...(s.timeoutMs ? { timeoutMs: s.timeoutMs } : {}),
     sourceName: s.provider,
     tier: s.tier,
   };
@@ -334,10 +338,12 @@ const defaultFetchJson = (url, opts) => fetchArcgisJson(url, opts);
 function queryLayer(source, layer, rings, fetchJson) {
   const params = buildAnalysisParams(source, rings);
   const getUrl = buildQueryUrl(source.url, layer, params);
+  // NEW-2/B789: forward the source's per-source timeout override (if any) to the fetch layer.
+  const t = source.timeoutMs ? { timeoutMs: source.timeoutMs } : null;
   if (getUrl.length > GIS_MAX_GET_URL) {
-    return fetchJson(buildQueryUrl(source.url, layer, {}), { body: params });
+    return fetchJson(buildQueryUrl(source.url, layer, {}), { body: params, ...(t || {}) });
   }
-  return fetchJson(getUrl);
+  return fetchJson(getUrl, t || undefined);
 }
 
 // Exact intersecting-feature COUNT for a count-mode source (wells / pipelines). Uses
@@ -347,9 +353,10 @@ function countLayer(source, layer, rings, fetchJson) {
   const params = { ...buildAnalysisParams(source, rings), returnCountOnly: true };
   delete params.outFields; delete params.resultRecordCount; delete params.returnGeometry;
   const getUrl = buildQueryUrl(source.url, layer, params);
+  const t = source.timeoutMs ? { timeoutMs: source.timeoutMs } : null; // NEW-2/B789 per-source override
   const p = getUrl.length > GIS_MAX_GET_URL
-    ? fetchJson(buildQueryUrl(source.url, layer, {}), { body: params })
-    : fetchJson(getUrl);
+    ? fetchJson(buildQueryUrl(source.url, layer, {}), { body: params, ...(t || {}) })
+    : fetchJson(getUrl, t || undefined);
   return Promise.resolve(p).then((j) => (j && typeof j.count === "number" ? j.count : (j && j.features ? j.features.length : 0)));
 }
 
