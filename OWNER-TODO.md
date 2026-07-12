@@ -7,6 +7,14 @@
 
 _Last updated: 2026-07-12._
 
+## 🩹 Optional — restore the one missing overlay on Grand Port (B784)
+- [ ] **Nothing required; the bug is fixed.** One overlay on your **Grand Port / Concept A** site (the
+      "2026.06.23 GPL - Site Plan.pdf") had its cloud copy go missing, so the drawing used to hang on a
+      spinning "Loading drawing…" forever. It now shows an honest **"Couldn't load … — click to re-add the
+      file"** message instead. If you want that specific drawing back, open Grand Port and **click that
+      message, then pick the PDF** — it re-uploads and drops back into its exact old spot/size/rotation. Only
+      you have that file, so this one's optional and yours; everything else about the site is unchanged.
+
 ## 🧹 Optional 10-second cleanup — delete the "GREENHOUSE" test plan
 - [ ] The live testing on 2026-07-11 used a throwaway plan called **"GREENHOUSE / Concept A"** in your
       account (a 14.66-acre Cypress-area parcel with a test pad elevation typed in). It's safe to delete
