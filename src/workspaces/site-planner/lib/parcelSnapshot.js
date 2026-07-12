@@ -13,7 +13,7 @@
  * than today. Kill switch: VITE_PARCEL_SNAPSHOT=0.
  */
 import { geoJsonToEsriFeature, outerRingsLngLat } from "./arcgis.js";
-import { SNAPSHOT_COUNTIES } from "./counties.js";
+import { SNAPSHOT_COUNTIES, STATEWIDE_PARCEL_LAYER } from "./counties.js";
 import { idbGet, idbPut } from "./localDb.js";
 
 const IDB_PREFIX = "parcel-snapshot:v1:";
@@ -25,6 +25,23 @@ export function snapshotEnabled() {
     const v = import.meta && import.meta.env ? import.meta.env.VITE_PARCEL_SNAPSHOT : undefined;
     return v !== "0" && v !== "false" && v !== "off" && v !== false;
   } catch (_) { return true; }
+}
+
+const _trimUrl = (u) => String(u || "").replace(/\/+$/, "");
+
+/* Should the Drive snapshot be the DISPLAYED outline source for this county, or just a
+ * click/outage fallback? Prefer it for DISPLAY only when the live source can't itself draw
+ * current, client-selectable outlines: an image-only source — the statewide TxGIO layer,
+ * whose /query is disabled upstream, matched by URL (mirrors `parcelDisplayIsImageOnly`).
+ * A healthy queryable CAD (e.g. Chambers → CCAD after B787, or HCAD/FBCAD) draws its OWN
+ * current vectors, so it owns the display and the snapshot stays purely a click/outage
+ * fallback — otherwise a stale harvested snapshot would shadow the live CAD and Planyr's
+ * parcels wouldn't match the county's own map (the exact B787 complaint). Requires a known
+ * `liveUrl`: until it resolves we DON'T prefer the snapshot, so a queryable CAD is never
+ * permanently shadowed by a snapshot that happened to load first. Pure. */
+export function preferSnapshotForDisplay({ hasSnapshot, liveUrl } = {}) {
+  if (!hasSnapshot || !liveUrl) return false;
+  return _trimUrl(liveUrl) === _trimUrl(STATEWIDE_PARCEL_LAYER);
 }
 
 // ---------------------------------------------------------------------------
