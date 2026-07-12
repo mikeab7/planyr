@@ -325,6 +325,41 @@ export const GIS_SOURCES = {
       "context). The precise Upper-Cypress overflow boundary is a separate service " +
       "(HCFCD/CypressCreekOverflow) — flagged in detentionRules.js as the exact-boundary follow-up.",
   },
+
+  fbcddWse02: {
+    key: "fbcddWse02",
+    label: "FBCDD Atlas-14 watershed-study 0.2% (500-yr) WSE — DRAFT",
+    provider: "Fort Bend County Drainage District (FBCDD) watershed studies",
+    // County-wide 500-yr WSE MOSAIC raster (F32 pixels, feet, SR 2278 / EPSG:102740) on the
+    // county portal's Image Server — NOT a FeatureServer layer/field (the V279 discovery
+    // corrected the old assumption). Consumed point-wise via getSamples (the 3DEP pattern);
+    // an out-of-coverage sample returns an empty value → honest null. CORS-clean from
+    // planyr.io (verified in-browser 2026-07-11; re-verified by direct fetch 2026-07-12).
+    // Source-of-truth portal item: web map 0d4791f2c9d143eeb62696850ce27e45 ("Fort Bend County
+    // Watershed Study Inundation Map All - 100YR and 500YR (Draft Results)").
+    // ⚠ The study results are DRAFT — every derived value must carry the draft-study
+    // screening label, never read as an effective/published elevation.
+    // (The 100-yr rasters have NO county-wide mosaic — 44 per-watershed services only, e.g.
+    // Willow_Creek/Willow_100YR_Existing_WSE — so atlas14Wse100Ft is not wired from here yet.)
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/image/rest/services/500YR_WSE/ImageServer",
+    layerId: null,
+    kind: "raster", // getSamples, not /query — the drift verifier branches on this
+    geometryType: "raster",
+    fields: {},
+    coverage: "Fort Bend County (published extent in SR 2278; value range ~24–167 ft NAVD88)",
+    tier: "production",
+    lastVerified: "2026-07-12",
+    // Raster fixtures: point getSamples with an expected value range (in-coverage) or an
+    // expected NO-DATA empty value (out-of-coverage) — the raster analog of expectMinCount.
+    sampleFixtures: [
+      { label: "Oyster Creek reach (in coverage)", point: [-95.62, 29.55], expectValueRange: [60, 90] }, // live 2026-07-11/12: 72.6968
+      { label: "NE of the county (out of coverage)", point: [-95.0, 30.2], expectNoData: true },
+    ],
+    fixtures: [], // no /query fixtures — raster (see sampleFixtures above)
+    notes:
+      "Feeds the drainage check's derivedWse02Ft (0.2% WSE engine seam, B763) for Fort Bend " +
+      "sites — screening only, DRAFT watershed-study values. Sampler: site-planner/lib/fbcdWse.js.",
+  },
 };
 
 // Keys grouped by the surface that consumes them (handy for the audit + tests).

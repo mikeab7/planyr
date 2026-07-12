@@ -130,5 +130,5 @@ check("no uncaught page errors", errs.length === 0, errs.join(" | ").slice(0, 20
 
 await browser.close();
 const passed = results.filter((r) => r.p).length;
-console.log(`\nB781/B785 overlay-missing-storage: ${passed}/${results.length} checks passed.`);
+console.log(`\nB784/B785 overlay-missing-storage: ${passed}/${results.length} checks passed.`);
 process.exit(passed === results.length ? 0 : 1);

@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _58 open · 65 awaiting live verification._
+> _58 open · 62 awaiting live verification._
 
 ## 🔲 Open
 
@@ -76,10 +76,7 @@
 | B784 | Site-plan overlay stuck on "Loading drawing…" forever when its Storage object is missing | [Site Planner / overlay] | #site-planner #persistence #files | ⏳ live — awaiting |
 | B785 | Overlay keeps a dead `storageKey`; the download layer couldn't tell "file gone" from "network blip" | [Site Planner / overlay] | #site-planner #persistence #files | ⏳ live — awaiting |
 | B786 | `doc-review-files` bucket allowed only `application/pdf`, so image/CAD overlays silently failed to back up | [Site Planner / storage config] | #site-planner #persistence #files #infra | ⏳ live — awaiting |
-| B773 | Fort Bend FFE/buildability record: multi-basis `max()` FFE rule | [Site Planner] | #site-planner #yield #floodplain | ⏳ live — awaiting |
-| B768 | Harris detention: HCED Infrastructure-Regs outfall-type minimums (0.75 / 1.0) | [Site Planner] | #site-planner #yield | ⏳ live — awaiting |
-| B769 | `wse1pct` provider: consume NFHL cross-sections (S_XS) | [Site Planner / GIS] | #site-planner #gis #yield #floodplain | ⏳ live — awaiting |
-| B770 | `wse02pct` + Atlas-14 WSE provider seam | [Site Planner / GIS] | #site-planner #gis #yield #floodplain | ⏳ live — awaiting |
+| B782 | Wire the FBCDD Atlas-14 WSE rasters into `derivedWse02Ft` | [Site Planner / GIS] | #site-planner #gis #yield #floodplain | ⏳ live — awaiting |
 | B775 | School district (ISD) boundaries layer + identify | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B774 | Passive jurisdiction badge on the active parcel/site | [Site Planner] | #site-planner #gis | ⏳ live — awaiting |
 | B761 | One "City limits & ETJ" toggle (solid limits / dashed ETJ) | [Site Planner] | #site-planner #ui #gis | ⏳ live — awaiting |
@@ -150,8 +147,8 @@
 - **#export** — B752, B745, B739, B738, B712, B684
 - **#files** — B180, B181, B182, B183, B784, B785, B786, B747, B748, B699, B687, B685, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
-- **#floodplain** — B773, B769, B770, B755
-- **#gis** — B776, B777, B752, B753, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B769, B770, B775, B774, B761, B625, B755, B751, B754, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
+- **#floodplain** — B782, B755
+- **#gis** — B776, B777, B752, B753, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B782, B775, B774, B761, B625, B755, B751, B754, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
 - **#infra** — B778, B735, B726, B406, B179, B63, B786, B759, B758, B756, B748, B734, B675, B669
 - **#library** — B663, B662, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B750, B746, B740, B737
@@ -161,9 +158,9 @@
 - **#road** — B742, B719
 - **#scheduler** — B778, B495, B255, B644
 - **#selection** — B741, B750, B746, B742, B743, B740, B737, B682, B651
-- **#site-planner** — B776, B777, B752, B753, B741, B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B784, B785, B786, B773, B768, B769, B770, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B776, B777, B752, B753, B741, B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B784, B785, B786, B782, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413
 - **#testing** — B269, B63, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
 - **#ui** — B741, B735, B723, B115, B761, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
-- **#yield** — B724, B553, B773, B768, B769, B770, B755, B751, B754, B715, B712, B651
+- **#yield** — B724, B553, B782, B755, B751, B754, B715, B712, B651
