@@ -32,7 +32,7 @@ const dropLargeOverlay = (page) => page.evaluate(async () => {
   const bin = atob(dataUrl.split(",")[1]); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   const file = new File([arr], "test-large.png", { type: "image/png" });
   const dt = new DataTransfer(); dt.items.add(file);
-  const input = document.querySelector('input[accept="application/pdf,image/*"]');
+  const input = document.querySelector('input[accept="application/pdf,image/*,.dxf,.dwg"]');
   if (!input) return -1;
   input.files = dt.files; input.dispatchEvent(new Event("change", { bubbles: true }));
   return dataUrl.length;
