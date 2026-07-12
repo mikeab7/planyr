@@ -8,7 +8,8 @@ import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
-import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal } from "./lib/elementRows.js";
+import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal } from "./lib/elementRows.js";
+import { writeJournal, readJournal, clearJournal } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement } from "./lib/editorNames.js";
 import { toastForSyncEvent } from "./lib/conflictToasts.js";
@@ -2192,7 +2193,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // stale-tab clobber and delete-resurrection: any (kind,id) that already has a row is left untouched —
     // rows stay canonical (see foldNeverSyncedLocal). rowKeys covers LIVE + TOMBSTONE rows on purpose.
     const rowKeys = new Set((r.rows || []).map((row) => row && (row.kind + ":" + row.id)));
-    const merged = foldNeverSyncedLocal(next, stateRef.current, rowKeys, isHuskParcel);
+    const foldedNew = foldNeverSyncedLocal(next, stateRef.current, rowKeys, isHuskParcel);
+    // NEW-F4 — fold the persisted pending-edit JOURNAL over the rebuild: an edit to an ALREADY-
+    // synced element whose commit failed before a reload lives only in the journal (the B756 fold
+    // above only covers zero-row elements; dirtyEntries only covers THIS engine's queue, empty
+    // after a reload). Entries whose row hasn't advanced (rev <= baseRev) substitute in and get
+    // re-enqueued by the reconcile below; rows a foreign writer advanced win and the stale entry
+    // is discarded LOUDLY (telemetry; the version ring stays the manual recovery). The journal is
+    // cleared after folding — if the re-commit fails again, onStatus re-persists fresh entries
+    // (self-healing loop, no double-apply).
+    const merged = foldJournal(foldedNew, readJournal(siteId, Date.now()), r.rows, {
+      isHusk: isHuskParcel,
+      onDiscard: (e, row) => reportClientEvent("journal-superseded", "pending-edit journal entry discarded — a newer copy won", { id: siteId, kind: e.kind, el: e.id, baseRev: e.baseRev, rowRev: row && row.rev }),
+    });
+    clearJournal(siteId);
     const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
     replace(setEls, merged.els); replace(setMarkups, merged.markups); replace(setMeasures, merged.measures);
     replace(setCallouts, merged.callouts); replace(setParcels, merged.parcels);
@@ -2226,7 +2240,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       now: () => Date.now(),
       setTimer: (fn, ms) => setTimeout(fn, ms),
       clearTimer: (h) => clearTimeout(h),
-      onStatus: (s) => setElemSync(s),
+      onStatus: (s) => {
+        setElemSync(s);
+        // NEW-F4 — persist the pending-edit journal while ops are un-committed, clear it when
+        // the queue drains. elSyncRef guards the construction-time status echo (ref not set yet
+        // — pending is 0 there anyway) and a late echo from a torn-down engine.
+        try {
+          const live = elSyncRef.current;
+          if (!live || live !== eng) return;
+          if (s.pending > 0) writeJournal(siteId, live.dirtyEntries(), Date.now());
+          else if (s.state === "idle") clearJournal(siteId);
+        } catch (_) { /* journaling is belt-and-suspenders — never let it break sync */ }
+      },
       onEvent: (ev) => { try { syncEventRef.current(ev); } catch (_) {} }, // B673 — late-bound (the handler needs helpers defined further down)
       patchElement: applyZPatch,
       report: reportClientEvent,

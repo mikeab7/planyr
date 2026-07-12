@@ -23,6 +23,9 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
   + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
+- `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
+  rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
+  a failed commit survives a reload instead of being reverted by the rows-canonical refetch).
 - `labelLayout.js` — LOD label tiering. `roadGeometry.js` — centerline road curves (pure).
 - Terrain pipeline (B703–B706): `demGrid.js` / `contours.js` / `flowField.js` (pure math,
   worker-safe) + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)

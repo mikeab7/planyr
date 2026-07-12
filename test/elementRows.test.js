@@ -233,3 +233,86 @@ describe("foldNeverSyncedLocal (B756 data-loss guard)", () => {
     expect(out).not.toBe(next);
   });
 });
+
+/* NEW-F4 — foldJournal: the persisted pending-edit journal folded over a rows-canonical
+ * rebuild. Protects a newer-but-uncommitted edit to an ALREADY-synced element across a reload
+ * (the "commit timed out → reload → refetch reverts the canvas" silent-overwrite window).
+ * Rev discipline: fold only where row.rev <= baseRev; a foreign-advanced row wins (V229 #5). */
+import { foldJournal } from "../src/workspaces/site-planner/lib/elementRows.js";
+
+describe("foldJournal (NEW-F4 pending-edit journal)", () => {
+  const emptyModel = () => ({ els: [], markups: [], measures: [], callouts: [], parcels: [] });
+  const isHuskParcel = (kind, el) => kind === "parcel" && !(el && (el.ring || el.points || []).length >= 3);
+  const row = (kind, id, rev, extra = {}) => ({ kind, id, rev, deleted_at: null, data: { id }, ...extra });
+
+  it("substitutes a journaled update whose row has NOT advanced (rev == baseRev)", () => {
+    const next = { ...emptyModel(), els: [{ id: "e1", w: 100 }] };
+    const j = [{ kind: "el", id: "e1", cls: "update", el: { id: "e1", w: 999 }, baseRev: 3 }];
+    const out = foldJournal(next, j, [row("el", "e1", 3)]);
+    expect(out.els).toEqual([{ id: "e1", w: 999 }]); // the newer local edit survives the rebuild
+  });
+
+  it("DISCARDS a journaled update when a foreign writer advanced the row (rev > baseRev)", () => {
+    const discarded = [];
+    const next = { ...emptyModel(), els: [{ id: "e1", w: 100 }] };
+    const j = [{ kind: "el", id: "e1", cls: "update", el: { id: "e1", w: 999 }, baseRev: 3 }];
+    const out = foldJournal(next, j, [row("el", "e1", 5)], { onDiscard: (e) => discarded.push(e.id) });
+    expect(out.els).toEqual([{ id: "e1", w: 100 }]); // rows canonical — stale intent never re-commits (V229 #5)
+    expect(discarded).toEqual(["e1"]);               // and the discard is LOUD, not silent
+  });
+
+  it("folds a journaled create whose row never landed (no row at all)", () => {
+    const j = [{ kind: "parcel", id: "p1", cls: "create", el: { id: "p1", ring: [1, 2, 3] }, baseRev: 1 }];
+    const out = foldJournal(emptyModel(), j, []);
+    expect(out.parcels.map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("applies a journaled delete only while the row hasn't advanced", () => {
+    const next = { ...emptyModel(), els: [{ id: "e1" }, { id: "e2" }] };
+    const j = [
+      { kind: "el", id: "e1", cls: "delete", baseRev: 2 }, // row still at rev 2 → delete applies
+      { kind: "el", id: "e2", cls: "delete", baseRev: 2 }, // row advanced to 4 → foreign edit wins, delete dropped
+    ];
+    const out = foldJournal(next, j, [row("el", "e1", 2), row("el", "e2", 4)]);
+    expect(out.els.map((x) => x.id)).toEqual(["e2"]);
+  });
+
+  it("a journaled delete with NO row is a no-op (already purged / never created)", () => {
+    const next = { ...emptyModel(), els: [{ id: "e1" }] };
+    const out = foldJournal(next, [{ kind: "el", id: "ghost", cls: "delete", baseRev: 1 }], []);
+    expect(out.els.map((x) => x.id)).toEqual(["e1"]);
+  });
+
+  it("never resurrects a remotely-deleted element: a tombstone row with an advanced rev wins", () => {
+    // The commit_elements delete always bumps rev, so a foreign delete lands as rev > baseRev.
+    const j = [{ kind: "el", id: "e1", cls: "update", el: { id: "e1", w: 999 }, baseRev: 3 }];
+    const out = foldJournal(emptyModel(), j, [row("el", "e1", 4, { deleted_at: "2026-07-12T00:00:00Z", data: null })]);
+    expect(out.els).toEqual([]); // TOMBSTONE-DELETES — the delete sticks
+  });
+
+  it("never folds a husk parcel, and tolerates malformed entries", () => {
+    const j = [
+      { kind: "parcel", id: "husk1", cls: "update", el: { id: "husk1", ring: [] }, baseRev: 1 },
+      { kind: "nope", id: "x", cls: "update", el: { id: "x" }, baseRev: 1 },
+      null,
+      { kind: "el", cls: "update", el: {}, baseRev: 1 }, // no id
+    ];
+    const out = foldJournal(emptyModel(), j, [], { isHusk: isHuskParcel });
+    expect(out.parcels).toEqual([]);
+    expect(out.els).toEqual([]);
+  });
+
+  it("an empty journal returns the input untouched (same reference — zero cost steady state)", () => {
+    const next = emptyModel();
+    expect(foldJournal(next, [], [])).toBe(next);
+    expect(foldJournal(next, null, [])).toBe(next);
+  });
+
+  it("does not mutate its inputs", () => {
+    const next = { ...emptyModel(), els: [{ id: "e1", w: 100 }] };
+    const j = [{ kind: "el", id: "e1", cls: "update", el: { id: "e1", w: 999 }, baseRev: 3 }];
+    const out = foldJournal(next, j, [row("el", "e1", 3)]);
+    expect(next.els[0].w).toBe(100);
+    expect(out).not.toBe(next);
+  });
+});

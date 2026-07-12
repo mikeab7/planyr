@@ -132,3 +132,60 @@ export function foldNeverSyncedLocal(next, local, rowKeys, isHusk = () => false)
   }
   return out;
 }
+
+// NEW-F4 — fold the persisted pending-edit JOURNAL (elementJournal.js) over a rows-canonical
+// rebuild. Companion to foldNeverSyncedLocal: that one protects elements the server has NEVER
+// seen; this one protects newer-but-uncommitted edits to elements that ALREADY have rows —
+// the "commit timed out, then the user reloaded" window where refetchReplace used to silently
+// revert the canvas to the older server copy.
+//
+// Per entry ({ kind, id, cls, el, baseRev }), against the fetched row for (kind,id):
+//   • update/create/restore, NO row            → fold `el` in (a create whose row never landed —
+//     covers a cleared-state device where the B756 stateRef fold has nothing local to keep).
+//   • update/…, row live, row.rev <= baseRev   → the row hasn't moved since this edit targeted
+//     it: substitute `el` (the caller's reconcile diffs canvas-vs-shadow and re-enqueues the
+//     commit; a genuine race from here resolves through the existing LWW/conflict matrix).
+//   • row.rev > baseRev                        → a FOREIGN writer advanced it after our edit:
+//     rows are canonical — DISCARD the entry (report via onDiscard; the 15-deep version ring
+//     stays the manual recovery). Never re-commit stale geometry over a newer foreign row
+//     (the V229 #5 stale-tab rule).
+//   • delete entries: apply (remove from the fold) only where row.rev <= baseRev — a journaled
+//     delete must not kill an element a foreign writer has since updated. This deliberately
+//     diverges from the live-conflict "delete wins" matrix: a journal replays STALE intent
+//     after an absence, so the safe default is keep-the-newer-edit. The un-deleted element
+//     simply reappears on canvas (loud), and deleting it again takes one click.
+//   • tombstoned row (deleted_at) counts as rev-advanced for updates: TOMBSTONE-DELETES — a
+//     journaled update must not resurrect a remotely-deleted element unless its delete is
+//     genuinely older than our edit's base (rare rev race; the tombstone row still wins by rev).
+//   • husk parcels are never folded (B690).
+// Pure: returns a NEW model object; inputs untouched. `rows` = the fetched site_elements rows.
+export function foldJournal(next, journal, rows, { isHusk = () => false, onDiscard = () => {} } = {}) {
+  const entries = arr(journal);
+  if (!entries.length) return next;
+  const rowByKey = new Map(arr(rows).filter((r) => r && r.id).map((r) => [r.kind + ":" + r.id, r]));
+  const out = { ...(next || {}) };
+  for (const e of entries) {
+    const field = KIND_TO_FIELD[e && e.kind];
+    if (!field || typeof (e && e.id) !== "string") continue;
+    const row = rowByKey.get(e.kind + ":" + e.id);
+    const baseRev = Number(e.baseRev) || 1;
+    const isDelete = e.cls === "delete";
+    const advanced = !!row && (Number(row.rev) || 1) > baseRev;
+    if (advanced) { onDiscard(e, row); continue; } // foreign writer won — rows canonical
+    if (isDelete) {
+      if (!row) continue; // nothing to delete — the row never existed / already purged
+      out[field] = arr(out[field]).filter((el) => !(el && el.id === e.id));
+      continue;
+    }
+    const el = e.el;
+    if (!el || typeof el.id !== "string" || isHusk(e.kind, el)) continue;
+    const base = arr(out[field]);
+    const i = base.findIndex((x) => x && x.id === e.id);
+    out[field] = i >= 0 ? [...base.slice(0, i), el, ...base.slice(i + 1)] : [...base, el];
+    // A journaled edit over a TOMBSTONED row (rev not advanced) is a restore of our own
+    // newer edit — drop the id from deletedIds so the fold's element isn't re-filtered.
+    if (row && row.deleted_at && Array.isArray(out.deletedIds))
+      out.deletedIds = out.deletedIds.filter((id) => id !== e.id);
+  }
+  return out;
+}
