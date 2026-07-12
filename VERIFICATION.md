@@ -1642,6 +1642,29 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
   1. **Open the real 27211 Hoyt Ln (Katy) site** (or any Houston-ETJ/Fort-Bend parcel) → ∑ Yield → Stormwater → ⛆ Check drainage criteria → the **Reviewing authority is the county drainage district (Fort Bend County Drainage District), NOT City of Houston**, and the amber ETJ note explains Houston reviews platting but the county's criteria govern detention (Houston's rate does not apply).
   2. **A genuine in-Houston-city-limits site** still resolves to **City of Houston** with the >20-ac greater-of wording (no regression).
 
+### V285 — B783: deleting a filed drawing lands the PDF in Google Drive's TRASH (recoverable), not gone ⏳ **LIVE APP (planyr.io), SIGNED IN + a look in Drive** (Drive-side behavior — cannot run in the logged-out sandbox)
+- **Added** 2026-07-12 · **Cadence** once (bug-fix acceptance)
+- **Self-verified (sandbox):** unit — `driveBackend.remove` issues `PATCH files/{id} {trashed:true}` and never `DELETE`; the upload-complete rollback asserts the same (`uploadEndpoints.test.js`: trash recorded, zero permanent deletes); full suite + build green. Headless smoke (logged-out) green.
+- **⏳ Owed (LIVE, signed in):**
+  1. In the Library, delete a filed drawing → **Delete forever** it from Recently deleted (this is the path that touches bytes).
+  2. Open the planyr.io Google Drive (the service Workspace Drive) → **Trash** → the PDF is THERE (trashed), not permanently gone; restore-from-trash brings the bytes back readable via a fresh upload of the same file.
+
+### V286 — B784: same-name re-upload no longer cross-wires two reviews; delete → Recently deleted → Restore round-trips ⏳ **LIVE APP (planyr.io), SIGNED IN** (real-project-data + Drive + signed-in-only surfaces)
+- **Added** 2026-07-12 · **Cadence** once (bug-fix acceptance)
+- **Self-verified (sandbox):** `test/reviewDeleteSafety.test.js` (21 cases — key uniqueness, legacy non-collision, the uploads/start folder-derivation invariant, fail-safe shared-key guard, soft-delete + pre-migration degrade, restore, purge cascade incl. `file_facts`, error-vs-empty reads); the `deleted_at` migration is LIVE in production (applied + schema-verified via MCP this session); headless smoke of the Library/Review signed-out states green; full suite + build green.
+- **⏳ Owed (LIVE, signed in):**
+  1. **The F1 repro:** upload `C-101.pdf` (any PDF) twice into the SAME project + discipline as two separate reviews; mark up review A → open review B → **A's backdrop is still A's file** (not swapped); delete review B (and Delete-forever it) → **review A still opens with its backdrop intact** (the shared-key guard / unique keys held).
+  2. **The F3 round-trip:** delete a review → the ~10s **Undo** toast restores it in place; delete again → it appears under **↺ Recently deleted** (markups intact on Restore); **Delete forever** removes it for good.
+  3. **The F5 notice:** with DevTools offline, hit refresh in the Library → the prior list stays with the amber "Couldn't refresh — showing the last loaded list" notice + Retry (never an empty "no files" state).
+
+### V287 — B785: an edit whose cloud save timed out survives a reload (pending-edit journal) ⏳ **LIVE APP (planyr.io), SIGNED IN** (timing/race class — mandatory live)
+- **Added** 2026-07-12 · **Cadence** once (bug-fix acceptance)
+- **Self-verified (sandbox):** `foldJournal` all-branch unit tests (substitute on `rev <= baseRev`, discard on foreign advance with telemetry, delete rev-gating, tombstone-wins, husk/malformed guards, no mutation) + `elementJournal` persistence tests (round-trip, 7-day age cap, size cap, quota-throw degrade) + `dirtyEntries.baseRev`; full suite + build green.
+- **⏳ Owed (LIVE, signed in):**
+  1. Open a synced site; move a building; **kill the network** (DevTools offline) so the element commit times out (>8s, badge goes retrying/failed); **reload with the network back**.
+  2. **Expect:** the moved geometry is still on the canvas after the reload (not reverted to the pre-move position), and within a few seconds it lands in `site_elements` (badge returns to saved; a second reload still shows the move).
+  3. Cross-writer sanity: with two windows on the same site, repeat — if the OTHER window moved the same element meanwhile, its newer edit wins and a `journal-superseded` event is logged (no resurrection, no clobber).
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
