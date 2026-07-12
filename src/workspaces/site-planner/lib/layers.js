@@ -20,6 +20,7 @@ import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 import { contourLayer, flowLayer, TERRAIN_MIN_ZOOM } from "./terrainLayers.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
+  wireRasterStatus, RASTER_STALL_MS,
 } from "./layerRequest.js";
 import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer } from "./vectorOverlay.js";
 import { PIPELINE_LEGEND } from "./pipelineCommodity.js";
@@ -635,34 +636,36 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             const buildRaster = (proxy) => (cfg.kind === "esriImage"
               ? EL.imageMapLayer(imageLayerOptions(cfg, st.opacity, pane, { proxy }))
               : EL.dynamicMapLayer(dynamicLayerOptions(cfg, st.opacity, pane, { proxy })));
+            // Honest status wiring (NEW-3/B790): status starts at "loading" and settles ONLY on the
+            // real 'load' event; a stall watchdog flips it to amber "slow" if the export never lands
+            // (a degraded agency fires no error), and a real error → "failed". The status machine
+            // is the pure wireRasterStatus (layerRequest.js); the leaflet-specific proxy→direct swap
+            // stays here as onProxyFallback.
             const wireRaster = (l, proxy) => {
-              let fellBack = false;
-              // 'load' = the export <img> landed → loaded; ask the proxy how old the copy is.
-              l.on("load", () => { onStatus && onStatus(k, "loaded"); if (proxy) reportCacheAge(l, k, onStatus); });
-              // A requesterror on an image/dynamic layer is often a NON-fatal hiccup — e.g. a
-              // CORS-blocked metadata fetch while the f=image export still renders via a
-              // CORS-exempt <img>. If we're on the proxy and it isn't serving here (e.g. not
-              // deployed), fall back ONCE to the direct agency URL — harmless (= prior behavior),
-              // and the cache simply doesn't apply in that environment. Otherwise surface a quiet
-              // per-layer status without dropping the layer (esri's own text wrongly fingers
-              // "CORS"/"could not parse JSON" even when the host is just down — so we stay plain).
-              l.on("requesterror", () => {
-                if (proxy && !fellBack && refs[k] === l) {
-                  fellBack = true;
+              wireRasterStatus(l, {
+                k, label: cfg.label, proxy,
+                onStatus: (id, s, msg) => onStatus && onStatus(id, s, msg),
+                reportAge: () => reportCacheAge(l, k, onStatus),
+                isActive: () => refs[k] === l,
+                stallMs: RASTER_STALL_MS,
+                onProxyFallback: () => {
                   try { map.removeLayer(l); } catch (_) {}
                   const direct = buildRaster(false);
                   wireRaster(direct, false);
                   if (direct.setOpacity) direct.setOpacity(st.opacity);
-                  direct.addTo(map); refs[k] = direct; onStatus && onStatus(k, "loaded");
-                  return;
-                }
-                onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`);
+                  // "loading", not an optimistic "loaded": the direct layer's own load / requesterror /
+                  // stall-watchdog settles the honest status (no more false blue on add).
+                  direct.addTo(map); refs[k] = direct; onStatus && onStatus(k, "loading");
+                },
               });
             };
             lyr = buildRaster(useProxy);
             wireRaster(lyr, useProxy);
             if (lyr.setOpacity) lyr.setOpacity(st.opacity);
-            lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
+            // Report "loading" (NOT an optimistic "loaded"): the real 'load' event flips the row to
+            // "loaded", and the stall watchdog flips it to honest "slow" if the export never lands —
+            // the fix for the "blue as if it's working over a blank map" bug (NEW-3/B790).
+            lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loading");
           }
         }).catch((e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "probe failed"}`); }); // don't leak an unhandled rejection (B55)
       }

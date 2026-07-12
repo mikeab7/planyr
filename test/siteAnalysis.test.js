@@ -184,6 +184,29 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     expect(f.status).toBe("absent");
     expect(f.summary).toMatch(/No mapped Special Flood Hazard/);
   });
+  it("NEW-2/B789: the flood source carries a per-source timeoutMs override, forwarded to the fetch layer", async () => {
+    // FEMA answered flood /query in ~9.5 s during the 2026-07-11 slowdown, past the 9 s default —
+    // so flood declares a longer per-source cap that reg() carries onto the endpoint.
+    expect(flood.timeoutMs).toBe(20000);
+    const cache = freshCache();
+    const seen = [];
+    const fetchJson = async (url, opts) => { seen.push({ url, opts }); return { features: [{ attributes: { FLD_ZONE: "AE" } }] }; };
+    await analyzeSource(flood, [SQUARE], { cache, fetchJson });
+    const call = seen.find((c) => c.url.includes("/NFHL/MapServer/28/query"));
+    expect(call).toBeTruthy();
+    expect(call.opts && call.opts.timeoutMs).toBe(20000);
+  });
+  it("NEW-2/B789: a source WITHOUT a timeoutMs passes no override (the 9 s default applies)", async () => {
+    const wet = ANALYSIS_SOURCES.find((s) => s.id === "wetlands");
+    expect(wet.timeoutMs).toBeUndefined();
+    const cache = freshCache();
+    const seen = [];
+    const fetchJson = async (url, opts) => { seen.push({ url, opts }); return { features: [] }; };
+    await analyzeSource(wet, [SQUARE], { cache, fetchJson });
+    const call = seen.find((c) => /Wetlands_gdb_split/.test(c.url));
+    expect(call).toBeTruthy();
+    expect(call.opts == null || call.opts.timeoutMs == null).toBe(true);
+  });
   it("flood: an intersecting Zone X reads ABSENT, not present (B147 live false-positive)", async () => {
     const cache = freshCache();
     const fetchJson = fakeFetch({ "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "X", ZONE_SUBTY: "AREA OF MINIMAL FLOOD HAZARD" } }] });

@@ -266,6 +266,13 @@ create table public.doc_reviews (
 -- Storage bucket 'doc-review-files' (private, 50 MB cap; READ-BACK ONLY since the B409
 -- rework — new uploads go chunked to Drive): 4 own-folder policies on
 -- storage.objects keyed by (storage.foldername(name))[1] = auth.uid()::text.
+-- allowed_mime_types (B786, widened 2026-07-12 via MCP on prod lyeqzkuiwngunutlkkmi —
+-- was ['application/pdf'] only, which silently rejected the non-PDF site-plan overlays
+-- overlayStorage.fileKind() sends): now
+--   ['application/pdf','image/png','image/jpeg','image/vnd.dxf','application/dxf',
+--    'image/vnd.dwg','application/acad','image/x-dwg'].
+-- This bucket also backs the Site Planner's overlay/underlay Storage backups
+-- (overlayStorage.js, uid-first keys under <uid>/site-overlays/ + <uid>/site-underlay/).
 ```
 **Project library (B14):** `reviewStore.js` also has `listProjects` (Site groups +
 status from `sites`), `setProjectStatus` (writes back via the Site Planner's

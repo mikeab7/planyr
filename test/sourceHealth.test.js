@@ -43,15 +43,15 @@ describe("sourceHealth — parcel-server circuit breaker (B244)", () => {
   it("filterHealthyCandidates drops an open primary but ALWAYS keeps the statewide key", () => {
     const t = 1000;
     for (let i = 0; i < SOURCE_FAIL_THRESHOLD; i++) recordSourceResult("fortbend", false, t);
-    const cands = [{ county: "fortbend", url: "u1" }, { county: "chambers", url: "u2" }];
-    const out = filterHealthyCandidates(cands, ["chambers"], t);
-    expect(out.map((c) => c.county)).toEqual(["chambers"]); // dead primary dropped, fallback kept
+    const cands = [{ county: "fortbend", url: "u1" }, { county: "txgio_statewide", url: "u2" }];
+    const out = filterHealthyCandidates(cands, ["txgio_statewide"], t);
+    expect(out.map((c) => c.county)).toEqual(["txgio_statewide"]); // dead primary dropped, fallback kept
   });
 
   it("keeps a healthy primary alongside the statewide fallback", () => {
-    const cands = [{ county: "harris", url: "u1" }, { county: "chambers", url: "u2" }];
-    const out = filterHealthyCandidates(cands, ["chambers"], 1000);
-    expect(out.map((c) => c.county)).toEqual(["harris", "chambers"]);
+    const cands = [{ county: "harris", url: "u1" }, { county: "txgio_statewide", url: "u2" }];
+    const out = filterHealthyCandidates(cands, ["txgio_statewide"], 1000);
+    expect(out.map((c) => c.county)).toEqual(["harris", "txgio_statewide"]);
   });
 
   it("never returns empty even if every candidate's breaker is open (coverage must survive)", () => {
@@ -68,13 +68,13 @@ describe("sourceHealth — parcel-server circuit breaker (B244)", () => {
 // identify race to a faster TxGIO (B630 — the false "Fort Bend server unavailable" notice
 // on every healthy Fort Bend click).
 describe("isStatewideBackup — honest 'statewide backup' labeling (B630)", () => {
-  const SW = ["chambers"]; // the statewide TxGIO source is configured under the `chambers` key
+  const SW = ["txgio_statewide"]; // the statewide TxGIO source has its own key since B787 (was `chambers`)
 
   it("is NOT a backup when a real county CAD answered directly", () => {
     // FBCAD answered → hit.county is a real primary, not the statewide key.
     expect(isStatewideBackup("fortbend", {
       realPrimaries: [{ county: "fortbend" }],
-      queried: [{ county: "fortbend" }, { county: "chambers" }],
+      queried: [{ county: "fortbend" }, { county: "txgio_statewide" }],
       statewideKeys: SW,
     })).toBe(false);
   });
@@ -83,9 +83,9 @@ describe("isStatewideBackup — honest 'statewide backup' labeling (B630)", () =
     // The reported case: FBCAD is healthy (a queried candidate) and returns 200, but the
     // statewide TxGIO layer answered a hair faster and won the eager race. That is a race
     // outcome, not an outage — the notice must NOT fire.
-    expect(isStatewideBackup("chambers", {
+    expect(isStatewideBackup("txgio_statewide", {
       realPrimaries: [{ county: "fortbend" }],
-      queried: [{ county: "fortbend" }, { county: "chambers" }],
+      queried: [{ county: "fortbend" }, { county: "txgio_statewide" }],
       statewideKeys: SW,
     })).toBe(false);
   });
@@ -93,9 +93,9 @@ describe("isStatewideBackup — honest 'statewide backup' labeling (B630)", () =
   it("IS a backup when the real CAD's breaker was open, so only statewide was queried", () => {
     // A genuine outage: FBCAD's breaker opened, so filterHealthyCandidates dropped it and
     // only the statewide layer remained to answer — TxGIO truly stood in.
-    expect(isStatewideBackup("chambers", {
+    expect(isStatewideBackup("txgio_statewide", {
       realPrimaries: [{ county: "fortbend" }],
-      queried: [{ county: "chambers" }],
+      queried: [{ county: "txgio_statewide" }],
       statewideKeys: SW,
     })).toBe(true);
   });
@@ -103,9 +103,9 @@ describe("isStatewideBackup — honest 'statewide backup' labeling (B630)", () =
   it("is NOT a backup in a statewide-only area (no real CAD covers the point)", () => {
     // A county with no configured CAD is served straight from TxGIO — that is its normal
     // source, not a stand-in, so no "backup" badge.
-    expect(isStatewideBackup("chambers", {
+    expect(isStatewideBackup("txgio_statewide", {
       realPrimaries: [],
-      queried: [{ county: "chambers" }],
+      queried: [{ county: "txgio_statewide" }],
       statewideKeys: SW,
     })).toBe(false);
   });
@@ -114,15 +114,15 @@ describe("isStatewideBackup — honest 'statewide backup' labeling (B630)", () =
     // Point near a county line: fortbend's breaker is open (dropped) but harris is healthy
     // and WAS queried. Even if statewide won the race, a real CAD was available — don't
     // cry "county server unavailable".
-    expect(isStatewideBackup("chambers", {
+    expect(isStatewideBackup("txgio_statewide", {
       realPrimaries: [{ county: "fortbend" }, { county: "harris" }],
-      queried: [{ county: "harris" }, { county: "chambers" }],
+      queried: [{ county: "harris" }, { county: "txgio_statewide" }],
       statewideKeys: SW,
     })).toBe(false);
   });
 
   it("defends against missing/empty inputs", () => {
-    expect(isStatewideBackup("chambers")).toBe(false);
+    expect(isStatewideBackup("txgio_statewide")).toBe(false);
     expect(isStatewideBackup(undefined, { statewideKeys: SW })).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-12 @ `8e120b1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-12 @ `b5e2528` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -338,7 +338,7 @@ _244 source files mapped._
 - **`src/workspaces/site-planner/lib/layerPanelInfo.js`** — Pure Layers-panel row helpers: per-row ⓘ content assembly + merged City/ETJ combined-status precedence (B760/B761)
   - _exports_: `combineLayerStatus`, `rowInfoSections`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
-  - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `TRANSIENT_STATUS`
+  - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
   - _exports_: `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `gisProxyEnabled`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_VINTAGE`, `layerVintage`, `probeService`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
 - **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; durable home for the version-history ring and cached rasters
@@ -360,7 +360,7 @@ _244 source files mapped._
 - **`src/workspaces/site-planner/lib/overlayScale.js`** — Pure drawing-scale helpers: engineer scale-note parsing, standard sheet detection, feet-per-point conversions, viewport-sanity auto-scale guard, and Bluebeam-style page=real distance/preset scale entry
   - _exports_: `chooseOverlayScale`, `COMMON_SCALES`, `detectSheet`, `feetPerInchForPreset`, `feetPerInchFromPair`, `ftPerPointForScale`, `matchScalePreset`, `PAGE_UNIT_TO_IN`, `PAGE_UNITS`, `parseDistanceInput`, `parseScaleNote`, `parseSheetScale`, `POINTS_PER_INCH`, `REAL_UNIT_TO_FT`, `REAL_UNITS`, `SCALE_PRESETS`, `scaleForFtPerPoint`
 - **`src/workspaces/site-planner/lib/overlayStorage.js`** — Supabase Storage I/O for overlay/parcel-drawing/aerial-underlay source files (uid-first RLS keys, upload/download/delete), fallback-safe to inline raster when logged-out/oversize/error
-  - _exports_: `BUCKET`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadUnderlayDataUrl`
+  - _exports_: `BUCKET`, `classifyStorageError`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fetchOverlayBytes`, `fetchOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadUnderlayDataUrl`
 - **`src/workspaces/site-planner/lib/overlayVectorSvg.js`** — Pure vector-overlay SVG emitter for the print export (B745): reprojects normalized [lon,lat] line/polygon/point features via an injected projection into styled `<path>`/`<circle>` (LOUD-skip on non-finite), plus esri/terrain normalizers (contour lines, drainage-arrow glyphs)
   - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors
@@ -370,7 +370,7 @@ _244 source files mapped._
 - **`src/workspaces/site-planner/lib/parcelSelect.js`** — Pure parcel merge-selection reducer: seeds the Combine set from the current single selection so plain-click-then-Shift-click accumulates, reusing shared nextSelection for toggle math plus the B170 inactive-parcel guard
   - _exports_: `extendMergeSelection`
 - **`src/workspaces/site-planner/lib/parcelSnapshot.js`** — Client loader for nightly Drive county parcel-snapshot cache: IndexedDB-held SWR download, pure viewport-filter/point-in-lot hit-test so a flaky county server never blanks the map
-  - _exports_: `_resetSnapshots`, `ensureSnapshot`, `featureAtPoint`, `featureBbox`, `featuresForView`, `getSnapshot`, `onSnapshotChange`, `snapshotEnabled`, `snapshotVintage`
+  - _exports_: `_resetSnapshots`, `ensureSnapshot`, `featureAtPoint`, `featureBbox`, `featuresForView`, `getSnapshot`, `onSnapshotChange`, `preferSnapshotForDisplay`, `snapshotEnabled`, `snapshotVintage`
 - **`src/workspaces/site-planner/lib/parking.js`** — Pure parking-layout math: rows-to-depth, split into double-loaded modules, explode into stall-row/aisle bands, curb-adjacency test
   - _exports_: `edgeAbutsPaving`, `explodeParkingBands`, `parkDepthForRows`, `parkRowsForDepth`, `PAVED_NEIGHBOR_TYPES`, `splitParkingPieces`
 - **`src/workspaces/site-planner/lib/pfds.js`** — Pure NOAA Atlas-14 PFDS text parser (0.2%/500-yr + 100-yr design-storm depths) + the wse02pct-provider documentation notes (FBCDD candidate endpoint / MAAPnext / M3 pointers). B763; honest-null on out-of-coverage

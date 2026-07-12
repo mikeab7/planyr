@@ -16,15 +16,28 @@
  *   Harris   — HCAD Parcels layer 0 on the Harris County GIS server
  *   Fort Bend— FBCAD parcels served from Esri's ArcGIS Online cloud (reliable +
  *              CORS-open), NOT FBCAD's chronically-down self-hosted gis.fbcad.org
- *   Chambers — TxGIO (Texas Geographic Information Office) statewide parcels. The
- *              old CCAD-only hosted test layer went private (499 Token Required), so
- *              we use the public all-Texas service and scope searches to Chambers.
+ *   Chambers — CCAD's OWN live public MapServer (ChambersCADPublic, Pandai-hosted,
+ *              /query enabled, no token). This is the SAME service the CCAD website's
+ *              map draws, so Planyr's parcels match what an owner sees on the CAD site —
+ *              the statewide TxGIO harvest lagged it (B787). TxGIO stays the outage
+ *              fallback (statewideFallbackFor), never the primary.
+ *   Waller   — no public CAD of its own → rides the statewide TxGIO layer scoped to Waller.
  */
 
 // NAD83 / Texas South Central (US survey feet) — the State Plane zone covering
 // Harris, Fort Bend and Chambers. Requesting geometry in this SR means returned
 // x/y are already in feet, so on-screen distances are true (no Web-Mercator stretch).
 export const FEET_WKID = 2278;
+
+// The TxGIO (Texas statewide) parcel MapServer layer — one public, CORS-open layer
+// covering all 254 counties. It is the UNIVERSAL outage fallback for every county: its
+// own /query is disabled upstream (B627), so it renders as a server /export image and
+// clicks route through /identify. Referenced by the `txgio_statewide` COUNTIES_MAP entry
+// (the statewide display/click source, decoupled from Chambers in B787 when Chambers got
+// its own CCAD source), by any county that has no CAD of its own (Waller), and by
+// STATEWIDE_PARCEL_LAYER / statewideFallbackFor. One const so all references stay identical.
+const TXGIO_STATEWIDE_LAYER =
+  "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0";
 
 export const COUNTIES = {
   harris: {
@@ -55,34 +68,35 @@ export const COUNTIES = {
   },
   chambers: {
     label: "Chambers County · CCAD",
-    // TxGIO statewide parcel service — one public, CORS-open layer covering all 254
-    // Texas counties. The old CCAD-only hosted layer went private (499 Token Required).
-    // Because this layer is statewide, ID/address searches are confined to Chambers via
-    // `scopeWhere`; click-to-select is a point query so it can only ever hit one parcel.
-    // OUTAGE NOTE (2026-07-03): TxGIO DISABLED the layer /query + /find ops on this
-    // service — both 400 with "operation is not supported" — while /identify and /export
-    // still serve the data. So parcel OUTLINES render via the MapServer /export image
-    // (makeParcelImageLayer) and CLICK-to-select routes through the MapServer /identify op
-    // (arcgis.js queryAtPoint → identifyAtPoint) instead of /query. Both self-heal: if
-    // TxGIO re-enables /query, the vector display + query path resume automatically.
-    // ID/address text SEARCH stays down until then (no text-query op survives) — the app
-    // degrades to "search unavailable; click the lot on the map", which works.
+    // CCAD's OWN live public parcel service (ChambersCADPublic, Pandai-hosted). This is the
+    // exact MapServer the CCAD website's map draws, so Planyr's Chambers parcels match what
+    // an owner sees on the CAD site — B787 repoint off the lagged statewide TxGIO harvest.
+    // /query IS enabled here (no token/auth), so unlike the TxGIO source: ID/address text
+    // SEARCH works again, outlines render as a queryable vector layer (which also backs the
+    // instant client-side click highlight), and clicks select via /query — no scopeWhere
+    // needed (this layer is Chambers-only). If CCAD is unreachable, the parcelQuery search
+    // path auto-falls-back to TxGIO scoped to Chambers, and the display/click paths lean on
+    // the always-present statewide TxGIO outlines (statewideFallbackFor / STATEWIDE_KEYS) —
+    // so a CCAD outage degrades to the old behavior, never a blank map.
+    // Field hints (idField/addrField) are self-healing fallbacks: at query time the app reads
+    // the layer's live field list and auto-detects, using these only if detection is empty.
+    // CCAD's situs is split across Prop_Street_Number/Dir/Suffix + Prop_Street, so Prop_Street
+    // (the name) is the addr hint (the ADDR_RE auto-detect finds no situs-style column here).
     layerUrl:
-      "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
-    idField: "prop_id",
-    addrField: "situs_addr",
-    scopeWhere: "county='CHAMBERS'",
-    help: "Texas statewide parcels (TxGIO) — searches are limited to Chambers County.",
+      "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
+    idField: "Parcel_Id",
+    addrField: "Prop_Street",
+    help: "Chambers CAD public parcels (CCAD's own live service). Search by parcel/account ID or a street name.",
   },
   waller: {
     label: "Waller County · WCAD",
-    // Waller CAD publishes no public parcel GIS of its own, so — like Chambers — it rides the
-    // statewide TxGIO layer scoped to WALLER. Same OUTAGE NOTE as Chambers applies (TxGIO
-    // /query+/find disabled 2026-07-03 → outlines via /export, clicks via /identify). Waller is
-    // one of the B629 snapshot-cached counties (SNAPSHOT_COUNTIES), so a Drive snapshot backs it
-    // when TxGIO is down.
-    layerUrl:
-      "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+    // Waller CAD publishes no public parcel GIS of its own, so it rides the statewide TxGIO
+    // layer scoped to WALLER (TxGIO /query+/find disabled 2026-07-03 → outlines via /export,
+    // clicks via /identify). Waller is one of the B629 snapshot-cached counties
+    // (SNAPSHOT_COUNTIES), so a Drive snapshot backs it when TxGIO is down. Because its
+    // primary IS the statewide layer, statewideFallbackFor(waller) returns null (no separate
+    // backup) — same self-referential case Chambers used to be before its B787 CCAD repoint.
+    layerUrl: TXGIO_STATEWIDE_LAYER,
     idField: "prop_id",
     addrField: "situs_addr",
     scopeWhere: "county='WALLER'",
@@ -266,29 +280,43 @@ export const COUNTIES_MAP = {
     zoom: 11,
     bbox: [29.36, -94.92, 29.92, -94.39],
     mapServer: null,
-    // TxGIO statewide parcels (see COUNTIES.chambers) — one layer covering all 254
-    // Texas counties. `statewide:true` marks it as the UNIVERSAL parcel source: its
-    // display layer paints outlines anywhere you zoom in (so it backs the visible
-    // lines wherever a county's own CAD is down/unconfigured), and `candidateCounties
-    // ForPoint` therefore also makes it queryable everywhere — appended as a fallback
-    // so a click can always select an outline it can see. Without that, a click over
-    // a Fort Bend lot (TxGIO outline shown, but FBCAD host down) found nothing (B130).
-    // The answering county is corrected post-hit via `countyAtPoint` (B36a).
-    statewide: true,
+    // CCAD's own live public parcel layer (see COUNTIES.chambers) — B787 repoint off the
+    // lagged statewide TxGIO harvest so displayed parcels match the CCAD website. /query is
+    // enabled, so this draws as a queryable vector layer and answers clicks directly. It is
+    // NO LONGER the `statewide` universal source — that role moved to the dedicated
+    // `txgio_statewide` entry below (STATEWIDE_KEYS), which still paints the all-Texas
+    // outline backdrop and is the appended click fallback everywhere. A Chambers point now
+    // matches this entry's own bbox (a real CAD), with txgio_statewide appended after it.
     layerUrl:
-      "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+      "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
   },
   waller: {
     center: [30.0, -95.86],
     zoom: 11,
     bbox: [29.75, -96.05, 30.20, -95.62],
     mapServer: null,
-    // Like Chambers, Waller has no CAD of its own, so the statewide TxGIO layer is its live source
-    // (outlines via /export, clicks via /identify). Its B629 Drive snapshot backs it when TxGIO is
-    // down. NOT flagged `statewide` — Chambers is already the single universal fallback source, and
-    // two statewide keys would just double the TxGIO query on every click.
-    layerUrl:
-      "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+    // Waller has no CAD of its own, so the statewide TxGIO layer is its live source (outlines
+    // via /export, clicks via /identify). Its B629 Drive snapshot backs it when TxGIO is down.
+    // NOT flagged `statewide` — `txgio_statewide` is the single universal fallback source, and
+    // a second statewide key would just double the TxGIO query on every click.
+    layerUrl: TXGIO_STATEWIDE_LAYER,
+  },
+  // The statewide TxGIO parcel source, as its OWN key (decoupled from Chambers in B787 once
+  // Chambers got its live CCAD source). `statewide:true` makes it the UNIVERSAL parcel source:
+  // its /export image layer paints parcel outlines anywhere you zoom in (backing the visible
+  // lines wherever a county's own CAD is down/unconfigured), and `candidateCountiesForPoint`
+  // appends it as a click fallback everywhere so a click can always select an outline it can
+  // see (the B130 fix — e.g. a Fort Bend lot with FBCAD down). It has NO bbox on purpose: it
+  // must never match a click BY bbox (that would tag a real-county click as statewide) — it is
+  // only ever appended as the trailing fallback. Kept LAST so candidate[0] stays a real county
+  // (harris when away from all bboxes — the jurisdiction-resolver default). The answering
+  // county of a statewide hit is corrected post-hit via `countyAtPoint` (B36a).
+  txgio_statewide: {
+    center: [31.0, -99.2], // Texas centroid — only used if this key is ever "picked" (it isn't; not in the search dropdown)
+    zoom: 6,
+    mapServer: null,
+    statewide: true,
+    layerUrl: TXGIO_STATEWIDE_LAYER,
   },
 };
 
@@ -333,8 +361,9 @@ export function candidateCountiesForPoint(lat, lng) {
 export const STATEWIDE_KEYS = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
 
 // The statewide TxGIO parcel layer URL (all of Texas) — the search/click fallback for
-// any county whose own CAD endpoint is down.
-export const STATEWIDE_PARCEL_LAYER = COUNTIES.chambers.layerUrl;
+// any county whose own CAD endpoint is down. Decoupled from COUNTIES.chambers in B787
+// (Chambers now has its own CCAD source); this is the dedicated statewide layer const.
+export const STATEWIDE_PARCEL_LAYER = TXGIO_STATEWIDE_LAYER;
 
 // The value of TxGIO's `county` attribute for each configured county — used to SCOPE a
 // statewide-backup ID/address search to that one county, so an account number or street
@@ -345,9 +374,10 @@ const TXGIO_COUNTY_NAME = { harris: "HARRIS", fortbend: "FORT BEND", chambers: "
 
 /* The statewide-backup parcel source for a county whose primary CAD is unavailable,
  * or null when there's no stand-in. Returns null for a county that has NO statewide
- * scope wired, and for one whose PRIMARY is already the statewide layer (Chambers —
- * it has no separate fallback). The returned `scopeWhere` confines the search to that
- * county on the all-Texas layer (B244). */
+ * scope wired, and for one whose PRIMARY is already the statewide layer (Waller — it
+ * has no separate fallback). Chambers, since its B787 CCAD repoint, now DOES get a
+ * TxGIO backup here (its primary is no longer the statewide layer). The returned
+ * `scopeWhere` confines the search to that county on the all-Texas layer (B244). */
 export function statewideFallbackFor(county) {
   const name = TXGIO_COUNTY_NAME[county];
   if (!name) return null;

@@ -6,23 +6,31 @@
  */
 
 // Curated field order: regex that matches a county's column name → the label we show.
-// Patterns cover both the per-county CAD columns AND the statewide TxGIO columns
-// (prop_id, owner_name, situs_addr, legal_area/gis_area, land_value, imp_value,
-// mkt_value, stat_land_use, year_built) so a parcel answered by the statewide backup
-// surfaces the same curated rows as one from its home county (B244).
+// Patterns cover the per-county CAD columns (HCAD / FBCAD / CCAD) AND the statewide TxGIO
+// columns (prop_id, owner_name, situs_addr, legal_area/gis_area, land_value, imp_value,
+// mkt_value, stat_land_use, year_built) so a parcel answered by any source — a county's
+// own CAD or the statewide backup — surfaces the same curated rows (B244/B787).
 export const APPR_FIELDS = [
+  // ...|owner_?name matches TxGIO owner_name AND CCAD's Owner_Name.
   [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
-  [/(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],
+  // ...|prop_?street(?!_) matches CCAD's Prop_Street (the situs street name) but NOT its
+  // Prop_Street_Number/Dir/Suffix sub-columns, so the row shows the name, not just a number.
+  [/(situs|site_?addr|prop_?addr|prop_?street(?!_)|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],
+  // ...|parcel_?id matches CCAD's Parcel_Id; |account matches CCAD's Account.
   [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
-  // ...|land_?size_?ac matches FBCAD's LANDSIZEAC (acres) — NOT LANDSIZEFT (square feet).
+  // ...|land_?size_?ac matches FBCAD's LANDSIZEAC (acres) — NOT LANDSIZEFT (square feet);
+  // ^acre matches CCAD's Acres.
   [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area|land_?size_?ac)/i, "Acreage"],
   [/(land_?val|land_?mkt|land_?value)/i, "Land value"],
   [/(imp_?val|improvement_?val|bld_?val|impr_?val)/i, "Improvement value"],
+  // ...|market_?val matches CCAD's Market_Value (and TxGIO mkt_value).
   [/(tot_?val|market_?val|appr_?val|assessed_?val|total_?val|tot_?mkt|mkt_?val|mkt_?value)/i, "Total value"],
-  // ...|land_?state_?code matches FBCAD's Land_State_Code (state land-use category code).
-  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type|stat_?land_?use|land_?state_?code)/i, "Land use"],
+  // ...|land_?state_?code matches FBCAD's Land_State_Code; |categor matches CCAD's
+  // Primary_Category_Code (the state land-use category code).
+  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type|stat_?land_?use|land_?state_?code|categor)/i, "Land use"],
   [/zoning/i, "Zoning"],
   [/(year_?built|yr_?built)/i, "Year built"],
+  // ...|^legal matches CCAD's Legal1–Legal4 (first match, Legal1, wins).
   [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
 ];
 

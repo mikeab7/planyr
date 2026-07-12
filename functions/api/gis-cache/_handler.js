@@ -18,6 +18,27 @@ const ALLOWED_HOST_RE = /(^|\.)planyr\.io$|(^|\.)planyr\.pages\.dev$/i;
 // browser-like UA on every server-side upstream fetch so they serve us like a normal client.
 const UPSTREAM_HEADERS = { "user-agent": "Mozilla/5.0 (compatible; PlanyrGISCache/1.0; +https://planyr.io)" };
 
+// NEW-1/B788: bound EVERY server-side upstream fetch so a degraded agency can't hang the Function
+// to the platform's subrequest ceiling — it fails OPEN fast instead (cache-miss → 302 to the real
+// upstream; background refresh → keep the copy we already serve). 25 s is generous (the durable
+// win is the served last-good copy on a cache HIT, which this never touches); it only caps the
+// first-ever, uncached view of an area during an outage. Live evidence (2026-07-11 NFHL slowdown):
+// FEMA's edge held exports 20–30 s and sometimes killed the connection at ~10 s.
+export const UPSTREAM_TIMEOUT_MS = 25000;
+
+// Fetch an upstream URL with a bounded abort timeout. Injectable timeoutMs + timers keep it
+// unit-testable with no real waiting. Rejects (→ the caller's fail-open) if the agency doesn't
+// answer in time.
+async function fetchUpstream(fetchImpl, url, timeoutMs = UPSTREAM_TIMEOUT_MS, setTimer = setTimeout, clearTimer = clearTimeout) {
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimer(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    return await fetchImpl(url, { headers: UPSTREAM_HEADERS, ...(ctrl ? { signal: ctrl.signal } : {}) });
+  } finally {
+    if (timer) clearTimer(timer);
+  }
+}
+
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 // Manual 302 (not Response.redirect) so the shape is identical across Node/Workers and testable.
@@ -38,6 +59,7 @@ export function originOk(origin, selfHost) {
 export async function handleGisCache({
   client, segs, search = "", origin = null, selfHost = "",
   fetchImpl = fetch, now = () => Date.now(), folderIdFor, defer = () => {},
+  upstreamTimeoutMs = UPSTREAM_TIMEOUT_MS,
 }) {
   if (!originOk(origin, selfHost)) return json({ error: "forbidden" }, 403);
 
@@ -64,14 +86,14 @@ export async function handleGisCache({
 
     if (existing) {
       const ts = Date.parse(existing.modifiedTime) || 0;
-      if (freshness(ts, now()).stale) defer(refresh(client, folderId, upstream.url, key, existing.id, fetchImpl));
+      if (freshness(ts, now()).stale) defer(refresh(client, folderId, upstream.url, key, existing.id, fetchImpl, upstreamTimeoutMs));
       const media = await client.media(existing.id);
       return bytesResponse(media.bytes, media.contentType);
     }
 
-    // Cache miss → fetch the agency once, serve it now, store it in the background.
+    // Cache miss → fetch the agency once (bounded), serve it now, store it in the background.
     let res;
-    try { res = await fetchImpl(upstream.url, { headers: UPSTREAM_HEADERS }); } catch (_) { return redirectTo(upstream.url); }
+    try { res = await fetchUpstream(fetchImpl, upstream.url, upstreamTimeoutMs); } catch (_) { return redirectTo(upstream.url); }
     if (!res || !res.ok) return redirectTo(upstream.url);
     const buf = new Uint8Array(await res.arrayBuffer());
     const ct = res.headers.get("content-type") || "image/png";
@@ -93,9 +115,9 @@ export async function store(client, folderId, name, bytes, contentType) {
   } catch (_) { /* best-effort — a failed store just means the next view re-fetches */ }
 }
 
-export async function refresh(client, folderId, upstreamUrl, name, oldId, fetchImpl = fetch) {
+export async function refresh(client, folderId, upstreamUrl, name, oldId, fetchImpl = fetch, timeoutMs = UPSTREAM_TIMEOUT_MS) {
   try {
-    const res = await fetchImpl(upstreamUrl, { headers: UPSTREAM_HEADERS });
+    const res = await fetchUpstream(fetchImpl, upstreamUrl, timeoutMs);
     if (!res || !res.ok) return; // agency still down → keep the copy we already serve
     const buf = new Uint8Array(await res.arrayBuffer());
     const ct = res.headers.get("content-type") || "image/png";

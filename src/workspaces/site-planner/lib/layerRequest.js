@@ -84,6 +84,82 @@ export function featureLayerOptions(cfg, opacity, pane) {
   return o;
 }
 
+/* How long a toggled-on RASTER export waits for its <img> to actually land before the panel
+ * tells the truth (NEW-3/B790). Generous, so a healthy-but-slow source (or a big first-ever
+ * export) virtually always fires 'load' well under it — only a genuine stall (a degraded agency
+ * that returns no bytes and, crucially, fires NO error event) trips it. Not a hard timeout: a
+ * later 'load' still flips the row back to "loaded". */
+export const RASTER_STALL_MS = 15000;
+
+/* Honest per-layer status wiring for a raster export layer (NEW-3/B790), kept pure of
+ * leaflet/esri so it unit-tests with a fake emitter + injected timer.
+ *
+ * THE BUG THIS FIXES: a raster overlay used to report "loaded" (blue dot) the instant it was
+ * added — BEFORE the server-rendered <img> arrived. When the agency was degraded (FEMA's NFHL
+ * held/killed exports for 20–30 s in the 2026-07-11 slowdown) the picture never came, esri-leaflet
+ * fired NO error for the silent hang, and the row sat on a false "loaded" over a blank map — the
+ * owner's exact complaint ("showing blue as if it's working, but it's not").
+ *
+ * The honest machine: start at "loading"; only a real 'load' event → "loaded"; a STALL WATCHDOG
+ * flips to amber "slow" ("source slow or unavailable — data may be missing") when no 'load' lands
+ * within `stallMs`; a real error event → "failed" (or, on the proxy, one proxy→direct fallback
+ * first). Amber (not red) for a stall: RED is reserved for a genuine error, and a hang is "we don't
+ * know yet — it's just too slow," which is retryable. A later 'load' clears "slow" back to "loaded".
+ *
+ *   layer     — a leaflet/esri layer (duck-typed: `.on(event, fn)` + a writable `.onRemove`).
+ *   k, label  — the overlay id + user-facing label (for onStatus + the message).
+ *   proxy     — is this the B445 cache-proxy layer (vs the direct-agency one)?
+ *   onStatus(id, state, msg) — the panel status channel.
+ *   reportAge()             — called after a proxy 'load' to surface the cached-copy age.
+ *   onProxyFallback()       — called ONCE on a proxy requesterror to swap to the direct layer
+ *                             (the leaflet-specific remove/build/add lives in the caller).
+ *   isActive()              — true while `layer` is still the current ref for `k`; gates a late
+ *                             watchdog/error callback so it can't touch a since-removed layer.
+ *   stallMs, setTimer, clearTimer — injectable for tests (no real timers).
+ */
+export function wireRasterStatus(layer, {
+  k, label, proxy = false, onStatus = () => {}, reportAge = () => {},
+  onProxyFallback = null, isActive = () => true,
+  stallMs = RASTER_STALL_MS, setTimer = setTimeout, clearTimer = clearTimeout,
+} = {}) {
+  let fellBack = false, settled = false, stall = null;
+  const clearStall = () => { if (stall != null) { clearTimer(stall); stall = null; } };
+  const armStall = () => {
+    clearStall();
+    stall = setTimer(() => {
+      stall = null;
+      if (isActive() && !settled) {
+        onStatus(k, "slow", `${label}: source slow or unavailable — the map may be missing data here (screening only).`);
+      }
+    }, stallMs);
+  };
+  // Clear a pending watchdog when the layer is removed (toggled off / swapped out), so it can't
+  // fire onStatus on a detached layer — the B557 onRemove-cleanup pattern.
+  const origOnRemove = layer.onRemove;
+  layer.onRemove = function (m) { clearStall(); if (origOnRemove) return origOnRemove.call(this, m); };
+  // 'load' = the export <img> landed → loaded; ask the proxy how old the served copy is.
+  layer.on("load", () => { settled = true; clearStall(); onStatus(k, "loaded"); if (proxy) reportAge(); });
+  // esri-leaflet re-fires 'loading' when it re-requests (pan/zoom); re-arm the watchdog and drop
+  // back to neutral "loading" so a stale "slow" can clear itself once the source recovers.
+  layer.on("loading", () => { settled = false; onStatus(k, "loading"); armStall(); });
+  // A requesterror on an image/dynamic layer is often a NON-fatal hiccup — e.g. a CORS-blocked
+  // metadata fetch while the f=image export still renders via a CORS-exempt <img>. On the proxy,
+  // fall back ONCE to the direct agency URL (harmless = prior behavior). Otherwise "failed"
+  // (esri's own text wrongly fingers "CORS"/"could not parse JSON" even when the host is just
+  // down — so we stay plain).
+  layer.on("requesterror", () => {
+    if (proxy && !fellBack && onProxyFallback && isActive()) {
+      fellBack = true; clearStall();
+      onProxyFallback();
+      return;
+    }
+    settled = true; clearStall();
+    onStatus(k, "failed", `${label}: the map service is not responding — it may be temporarily unavailable (screening only).`);
+  });
+  armStall();
+  return { clearStall };
+}
+
 /* Retry policy for a FeatureServer `requesterror` (NEW-5/B287). esri-leaflet issues its
  * own GeoJSON queries with no retry, so a transient 5xx/429 (or a codeless network/CORS
  * blip) on a jurisdiction vector service would otherwise drop the layer on one hiccup.

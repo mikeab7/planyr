@@ -26,7 +26,7 @@ import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPavin
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
-import { uploadOverlayFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
@@ -1391,8 +1391,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDeletedIds((d) => { const s = new Set(d); for (const x of add) s.add(x); return s.size === d.length ? d : [...s]; });
   };
   const overlayFileRef = useRef(null);
+  const reAddFileRef = useRef(null);                    // B784 — always-mounted picker for re-adding a missing overlay's file
+  const reAddIdRef = useRef(null);                      // B784 — id of the overlay a re-add picker will replace in place
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
   const overlayFetching = useRef(new Set());            // ids currently downloading their raster from Storage (B72)
+  // B784/B785 — a TERMINAL load state per overlay id: "missing" (object gone → re-add) | "network" (transient →
+  // retry). Recording it stops the old infinite "Loading drawing…" retry loop (a src-less overlay was re-selected
+  // into `missing` on every render, re-hitting Storage — a repeated 400 in prod). retryOverlay clears the flag so
+  // the rehydrate effect re-attempts a transient failure.
+  const [overlayLoadErr, setOverlayLoadErr] = useState({});
+  const retryOverlay = (id) => setOverlayLoadErr((m) => { if (!(id in m)) return m; const n = { ...m }; delete n[id]; return n; });
   const [ovCalib, setOvCalib] = useState(null);         // {id, kind:'trace'|'align', pts:[]} — canvas calibration in progress
 
   // county parcel lookup
@@ -4420,7 +4428,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Add a dropped PDF/image/DXF/DWG as a backdrop overlay, placed centered on the current view.
   // PDF/image size via the B73 scale heuristic; a DXF (or a DWG converted through the B238
   // service) auto-places at TRUE real-world size from its declared units.
-  const addOverlayFile = async (rawFile) => {
+  // B784 — `reuseId` re-imports a file for an EXISTING overlay (the "click to re-add" flow for one whose
+  // Storage object went missing): it replaces that overlay's raster in place and preserves its transform
+  // (position / scale / rotation / opacity), rather than dropping a brand-new overlay at view center.
+  const addOverlayFile = async (rawFile, reuseId = null) => {
     if (!rawFile) return;
     setOverlayBusy(true);
     try {
@@ -4437,7 +4448,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
 
       const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf,detectedScale,sheet} or the DXF shape (kind:"dxf",ftPerPx,unitsAssumed,unsupported)
-      const id = uid();
+      const prev = reuseId ? stateRef.current.sheetOverlays.find((x) => x.id === reuseId) : null; // B784 — the overlay we're re-adding into
+      const id = prev ? prev.id : uid();
       if (r.pdf) overlayDocs.current.set(id, r.pdf); // keep the doc for the in-session page picker
       const c = p2fStatic(size.w / 2, size.h / 2);   // view centre, in feet
 
@@ -4453,15 +4465,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
       const ovIdbKey = siteId ? `raster:${siteId}:overlay:${id}` : undefined;
       const ov = {
-        id, name: rawFile.name || file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
+        id, name: (prev && prev.name) || rawFile.name || file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
         page: r.page || 1, pageCount: r.pageCount || 1,
         x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
         ftPerPx, rotation: 0, opacity: 0.85, locked: false,
         detectedScale: r.detectedScale || null, sheet: r.sheet || null,
         kind: r.kind || null, unitsAssumed: !!r.unitsAssumed, unitsLabel: r.unitsLabel || null,
       };
+      // B784 — re-add: keep WHERE and HOW BIG the user had placed it (position / scale / rotation / opacity /
+      // lock / visibility). The user may have calibrated ftPerPx via "Trace a length" — that's their work to keep.
+      if (prev) {
+        ov.x = prev.x; ov.y = prev.y; ov.ftPerPx = prev.ftPerPx;
+        ov.rotation = prev.rotation || 0; ov.opacity = prev.opacity ?? 0.85;
+        ov.locked = !!prev.locked; ov.visible = prev.visible; ov.knockout = prev.knockout;
+        ov.storageMissing = false; // healed — a fresh upload/idb stash follows below
+      }
       pushHistory();
-      setSheetOverlays((arr) => [...arr, ov]);
+      setSheetOverlays((arr) => (prev ? arr.map((x) => (x.id === id ? ov : x)) : [...arr, ov]));
+      if (prev) retryOverlay(id); // clear any terminal load flag so the placeholder gives way to the raster
       setSel(null); setSelOverlay(id); setLeftPanel("references");
       // B474 review (#2): attach idbKey only AFTER the stash confirms — until then src stays inline so
       // dropIdbBackedSrc can't strip it before it's durable (overlays also have the cloud-Storage fallback below).
@@ -4495,6 +4516,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } finally {
       setOverlayBusy(false);
     }
+  };
+  // B784 — open the file picker to re-add a specific overlay's missing file; the chosen file replaces
+  // that overlay in place (transform preserved) via addOverlayFile(file, id). The picker input is
+  // always-mounted (below the canvas) so this works whether or not the References panel is open.
+  const reAddOverlay = (id) => {
+    reAddIdRef.current = id;
+    setSel(null); setSelOverlay(id); setLeftPanel("references");
+    reAddFileRef.current?.click();
   };
   const startMoveSheetOverlay = (e, id) => {
     if (ovAlignBase && e.button === 0) { e.stopPropagation(); alignOverlayToParcelEdge(p2f(e.clientX, e.clientY), null); return; } // B462: click resolves the align
@@ -4760,7 +4789,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Cross-device reload (B72): an overlay that synced only its transform (raster stripped
   // from the cloud row) but kept a Storage key → fetch the original PDF and re-rasterize.
   useEffect(() => {
-    const missing = sheetOverlays.filter((o) => (o.idbKey || o.storageKey) && !o.src && !overlayFetching.current.has(o.id));
+    // B784 — EXCLUDE ids we've already recorded a terminal load failure for, so a missing/failed fetch is NOT
+    // re-selected here on the next render. That is exactly what made the old effect loop forever on a src-less
+    // overlay whose Storage object is gone: it re-hit Storage (a repeated 400) every render and never showed
+    // anything but "Loading drawing…". Now each failure records a reason once, and the loop stops.
+    const missing = sheetOverlays.filter((o) => (o.idbKey || o.storageKey) && !o.src && !overlayFetching.current.has(o.id) && !overlayLoadErr[o.id]);
     if (!missing.length) return;
     missing.forEach((o) => overlayFetching.current.add(o.id));
     // B480-followup (NEW-1) — apply each result via a functional patch-by-id guarded on `!x.src`, and do NOT
@@ -4775,22 +4808,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           let cached = null;
           if (o.idbKey && idbAvailable()) cached = await idbGet(o.idbKey); // B474 — local IndexedDB cache first (fast, offline)
           if (cached) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: cached } : x))); continue; }
-          if ((o.storageKey || "").toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
-            const bytes = await downloadOverlayBytes(o.storageKey);
-            const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1, { knockout: o.knockout !== false }) : null; // honour the per-reference knockout (B654)
-            if (r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
-          } else if ((o.storageKey || "").toLowerCase().endsWith(".dxf")) { // B747 — DXF: re-render at the SAME dims so the on-map size is exact
-            const bytes = await downloadOverlayBytes(o.storageKey);
-            const r = bytes ? await rasterizeStoredDxf(bytes, { width: o.imgW, height: o.imgH }) : null;
-            if (r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src } : x)));
-          } else if (o.storageKey) { // image: its raster IS the source — restore the src directly (dims already known)
-            const src = await downloadOverlayDataUrl(o.storageKey);
-            if (src) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src } : x)));
+          const key = o.storageKey || "";
+          let res = { data: null, missing: false }; // B785 — discriminated: { data, missing } so we know WHY a fetch failed
+          let loaded = false;
+          if (key.toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
+            res = await fetchOverlayBytes(key);
+            if (res.data) { const r = await rasterizeStoredPdf(res.data, o.page || 1, { knockout: o.knockout !== false }); // honour the per-reference knockout (B654)
+              if (r) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x))); loaded = true; } }
+          } else if (key.toLowerCase().endsWith(".dxf")) { // B747 — DXF: re-render at the SAME dims so the on-map size is exact
+            res = await fetchOverlayBytes(key);
+            if (res.data) { const r = await rasterizeStoredDxf(res.data, { width: o.imgW, height: o.imgH });
+              if (r) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src } : x))); loaded = true; } }
+          } else if (key) { // image: its raster IS the source — restore the src directly (dims already known)
+            res = await fetchOverlayDataUrl(key);
+            if (res.data) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: res.data } : x))); loaded = true; }
           }
+          if (loaded) continue;
+          // B784/B785 — nothing loaded → record a TERMINAL reason (was: silent infinite "Loading…"). A cloud
+          // object confirmed gone (400/404) is "missing" (re-add); a transient failure is "network" (retryable).
+          // With no cloud key at all (idb-only, local copy evicted) the bytes are simply gone → "missing" too.
+          const reason = key ? (res.missing ? "missing" : "network") : "missing";
+          setOverlayLoadErr((m) => ({ ...m, [o.id]: reason }));
+          // NEW-2 (B785) — a CONFIRMED-missing cloud object with no local copy: drop the dead pointer so
+          // persistence + UI stop implying "it's in the cloud." Gated on isCloudActive() so a logged-out /
+          // RLS-masked 400 can't nuke a still-valid pointer that would recover on sign-in.
+          if (reason === "missing" && o.storageKey && !o.idbKey && isCloudActive())
+            setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, storageKey: null, storageMissing: true } : x)));
+        } catch (_) {
+          setOverlayLoadErr((m) => ({ ...m, [o.id]: "network" }));
         } finally { overlayFetching.current.delete(o.id); }
       }
     })();
-  }, [sheetOverlays]); // eslint-disable-line
+  }, [sheetOverlays, overlayLoadErr]);
 
   /* ---- B749 Tier 2 — zoom-aware re-raster of PDF overlays ----------------------------------
    * When a placed PDF overlay is zoomed past sheet-fit its base raster (≤4500px) softens. Once
@@ -10291,6 +10340,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       {/* body */}
       <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
+        {/* B784 — always-mounted re-add picker: the canvas "click to re-add" placeholder for a missing
+            overlay calls reAddOverlay(id) → this input; the chosen file replaces that overlay in place
+            (transform preserved). Mounted here (not in the References panel) so its ref is live even when
+            that panel is closed. */}
+        <input ref={reAddFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }}
+          onChange={(e) => { const f = e.target.files?.[0]; const tid = reAddIdRef.current; reAddIdRef.current = null; if (f) addOverlayFile(f, tid); e.target.value = ""; }} />
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}
           onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); canvasDragDepth.current += 1; setCanvasDropOver(true); }}
@@ -10418,10 +10473,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
                       // data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
                       <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
-                    ) : (<g data-export="skip">
-                      <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
-                      <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{(o.idbKey || o.storageKey) ? "Loading drawing…" : `Re-add “${o.name}” — image not on this device`}</text>
-                    </g>)}
+                    ) : (() => {
+                      // B784 — an honest, TERMINAL placeholder for an overlay with no raster. "missing" (or a
+                      // healed dead pointer) and the never-uploaded "no copy on this device" case are clickable
+                      // to re-add the file (transform preserved); a transient "network" failure is clickable to
+                      // retry. Only a genuinely-in-flight fetch shows the (now brief) "Loading drawing…".
+                      const ovErr = overlayLoadErr[o.id];
+                      const ovLoading = !ovErr && !o.storageMissing && (o.idbKey || o.storageKey);
+                      const label = (ovErr === "missing" || o.storageMissing)
+                        ? `Couldn't load “${o.name}” — click to re-add the file`
+                        : ovErr === "network"
+                          ? "Couldn't reach storage — click to retry"
+                          : ovLoading ? "Loading drawing…"
+                          : `Re-add “${o.name}” — image not on this device`;
+                      return (<g data-export="skip"
+                        style={{ cursor: ovLoading ? "default" : "pointer" }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
+                        <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
+                        <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
+                      </g>);
+                    })()}
                     {isSel && tool === "select" && (
                       <rect data-export="skip" x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
                     )}
