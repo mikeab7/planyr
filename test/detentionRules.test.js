@@ -622,3 +622,86 @@ describe("B750 — slim / hydrate drainage context", () => {
     expect(hEmpty.flood.zones).toEqual([]);
   });
 });
+
+describe("B788 — hydrate RE-DERIVES the authority verdict from the stored raw facts", () => {
+  // The Bain repro: a check remembered 38 min before the B754 ETJ fix merged stored the
+  // old wrong verdict (coh) next to CORRECT raw facts (Katy / Houston-ETJ / Fort Bend).
+  // Hydrate must re-run the resolver on the facts so rule fixes self-heal remembered checks.
+  const bainSlim = () => ({
+    authority: {
+      primaryReviewerId: "coh", // frozen pre-B754 verdict
+      channelAuthority: null,
+      overlays: [],
+      ambiguous: [],
+      flags: [],
+      mudState: "loaded",
+      jurisdiction: { city: ["Katy"], county: ["Fort Bend"], etj: ["Houston"] },
+    },
+    flood: { zones: [], state: "loaded", ageMs: 0 },
+    channel: { near: null, state: "not-applicable" },
+    watershed: null,
+    groundElevFt: 135.5,
+    groundDatum: "NAVD88",
+  });
+  it("a stale stored 'coh' verdict on Houston-ETJ Fort Bend facts self-heals to fortbend", () => {
+    const h = hydrateDrainageContext(bainSlim());
+    expect(h.authority.primaryReviewer.authorityId).toBe("fortbend");
+    expect(h.authority.channelAuthority).toBeNull(); // no Harris → no HCFCD
+    expect(h.authority.flags).toContain("houston-etj");
+    expect(h.authority.overlays.find((o) => o.kind === "etj")).toMatchObject({ city: "Houston" });
+  });
+  it("stored authority-derived flags/overlays are REPLACED by the re-derivation; query-outcome ones are preserved", () => {
+    const slim = bainSlim();
+    // a stale derived flag + a query-outcome flag + a mud overlay ride in from storage
+    slim.authority.flags = ["city-criteria-unverified", "jurisdiction-partial"];
+    slim.authority.overlays = [
+      { kind: "etj", city: "Houston", note: "STALE pre-fix wording" },
+      { kind: "mud", name: "FB MUD 1", type: "MUD" },
+    ];
+    const h = hydrateDrainageContext(slim);
+    // fresh derivation on these facts DOES produce city-criteria-unverified (Katy unmodeled)
+    // + houston-etj; the stored stale copies must not double up.
+    expect(h.authority.flags.filter((f) => f === "city-criteria-unverified")).toHaveLength(1);
+    expect(h.authority.flags).toContain("jurisdiction-partial"); // check-time outcome, kept
+    const etjOverlays = h.authority.overlays.filter((o) => o.kind === "etj");
+    expect(etjOverlays).toHaveLength(1);
+    expect(etjOverlays[0].note).not.toMatch(/STALE/); // fresh wording, not the stored copy
+    expect(h.authority.overlays.find((o) => o.kind === "mud")).toMatchObject({ name: "FB MUD 1" });
+  });
+  it("a factless legacy slim keeps the stored verdict (no facts to re-derive from)", () => {
+    const slim = bainSlim();
+    slim.authority.jurisdiction = { city: [], county: [], etj: [] };
+    const h = hydrateDrainageContext(slim);
+    expect(h.authority.primaryReviewer.authorityId).toBe("coh");
+  });
+  it("a stored straddle re-derives from the facts (stored ambiguous is stale)", () => {
+    const slim = bainSlim();
+    slim.authority.jurisdiction = { city: [], county: ["Harris", "Fort Bend"], etj: [] };
+    slim.authority.ambiguous = [];
+    const h = hydrateDrainageContext(slim);
+    expect(h.authority.primaryReviewer).toBeNull();
+    expect(h.authority.ambiguous[0]?.kind).toBe("straddle");
+  });
+});
+
+describe("B789 — the COH >20-ac branch county-gates its HCFCD compare", () => {
+  const base = { acres: 109, impPct: 20, authorityId: "coh", inCityLimits: true, drainsToHcfcdChannel: true };
+  it("hcfcdApplicable:false prices COH's own impervious rate — no HCFCD candidate, no PCPM deferral", () => {
+    const r = computeRequiredDetention({ ...base, hcfcdApplicable: false });
+    expect(r.kind).toBe("point");
+    expect(r.governing).toBeNull();
+    expect(r.flags).toContain("hcfcd-not-applicable");
+    expect(r.basis).toMatch(/outside Harris County/);
+    expect(r.requiredAcFt).toBeCloseTo(0.75 * 109 * 0.2, 1); // COH impervious rate only
+  });
+  it("hcfcdApplicable omitted (default true) keeps the greater-of compare", () => {
+    const r = computeRequiredDetention(base);
+    expect(r.governing?.candidates?.length).toBe(2);
+  });
+  it("hcfcdApplicable:false with impervious unknown falls back to the conservative full tract, flagged", () => {
+    const r = computeRequiredDetention({ ...base, impPct: null, hcfcdApplicable: false });
+    expect(r.flags).toContain("hcfcd-not-applicable");
+    expect(r.flags).toContain("impervious-unknown");
+    expect(r.requiredAcFt).toBeCloseTo(0.75 * 109, 1);
+  });
+});
