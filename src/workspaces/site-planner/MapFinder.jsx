@@ -901,11 +901,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // filled shape — not as a hole punched out of the first (Leaflet's 2-level form).
       hilitesRef.current[key] = L.polygon(latlngsList.map((ll) => [ll]), { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
       setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: findAttr(attrs, ADDR_RE), acct: findAttr(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
-      // B36(a): the statewide TxGIO layer (configured under `chambers`) can answer
-      // for a Harris/FB lot — relabel via a true point-in-county lookup (non-blocking).
-      if (county === "chambers" && at) {
+      // B36(a): the statewide TxGIO layer can answer for a Harris/FB lot — relabel via a
+      // true point-in-county lookup (non-blocking). Keyed off STATEWIDE_KEYS, not a
+      // hardcoded "chambers": B784 moved the statewide role from the `chambers` key to the
+      // dedicated `txgio_statewide` key, so a statewide-backup hit now carries
+      // `county === "txgio_statewide"`. Guarding on the statewide set keeps the relabel
+      // firing (and skips the wasted lookup for a real CCAD Chambers hit, which is already
+      // correctly its own county).
+      if (STATEWIDE_KEYS.includes(county) && at) {
         countyAtPoint(at.lng, at.lat)
-          .then(({ key: ckey }) => { if (ckey && ckey !== "chambers") setSelected((s) => s.map((x) => (x.key === key ? { ...x, county: ckey } : x))); })
+          .then(({ key: ckey }) => { if (ckey && ckey !== county) setSelected((s) => s.map((x) => (x.key === key ? { ...x, county: ckey } : x))); })
           .catch(() => {});
       }
     }
