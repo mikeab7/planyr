@@ -225,14 +225,20 @@ export function keepaliveFlushReview(record) {
 }
 
 // The full serialized review (the `data` jsonb), or null. RLS scopes to the user.
-export async function loadReview(id) {
+// A soft-deleted review (NEW-F3) reads as null unless the caller opts in — so the boot-resume
+// pointers, refile, and place-on-map can never silently reopen a review sitting in the
+// Recently-deleted bin; only the restore/purge paths pass includeDeleted.
+export async function loadReview(id, { includeDeleted = false } = {}) {
   if (!supabase || !id) return null;
-  let { data, error } = await supabase.from("doc_reviews").select("data, version, team_id").eq("id", id).maybeSingle();
+  let { data, error } = await supabase.from("doc_reviews").select("data, version, team_id, deleted_at").eq("id", id).maybeSingle();
+  if (error && isMissingColumn(error, "deleted_at")) // soft-delete migration not run → drop deleted_at
+    ({ data, error } = await supabase.from("doc_reviews").select("data, version, team_id").eq("id", id).maybeSingle());
   if (error && isMissingColumn(error, "team_id")) // team-sharing migration not run → drop team_id
     ({ data, error } = await supabase.from("doc_reviews").select("data, version").eq("id", id).maybeSingle());
   if (error && isMissingVersionColumn(error)) // pre-migration → re-select without version
     ({ data, error } = await supabase.from("doc_reviews").select("data").eq("id", id).maybeSingle());
   if (error || !data) return null;
+  if (data.deleted_at && !includeDeleted) return null; // in the Recently-deleted bin — not openable
   if (data.version != null) reviewVersions[id] = data.version; // remember it for the next save's CAS guard (B314)
   const rec = data.data || null;
   // Overlay the authoritative team_id column so a subsequent save preserves the share (the
@@ -243,22 +249,45 @@ export async function loadReview(id) {
 
 // Lightweight list for the picker / library (no heavy `data` payload). Falls back to
 // the core columns if the library migration hasn't run yet (so the picker still works).
-export async function listReviews() {
-  if (!supabase || !(await currentUid())) return [];
+// fetchReviews is the honest read (NEW-F5, the pinStore.fetchPinsCloud pattern): a FAILED read
+// returns { ok:false } — DISTINGUISHABLE from a truly empty account — so the Library keeps
+// showing the last loaded list instead of a terrifying (and wrong) "no files". Only when every
+// fallback tier errors is the read a failure. listReviews stays as the graceful [] wrapper for
+// callers where empty-on-error is acceptable (pickers).
+export async function fetchReviews() {
+  if (!supabase) return { ok: false, rows: [], error: "Cloud not configured." };
+  if (!(await currentUid())) return { ok: true, rows: [] }; // signed out — genuinely empty, the UI gates on sign-in
   // `placed:data->placed` pulls just the on-map flag out of the data jsonb (NOT the whole
   // heavy payload) so the drawer's Filed/On-map badge can reflect it (NEW-3). `sfile`/`folderId`
   // (B685/B686) likewise pull the authoritative source filename + explicit folder pick out of
   // `data` so the Library classifies type + places the file without re-reading the record. On any
   // error we fall back to the core columns — those extras degrade to absent, never a regression.
-  let res = await supabase.from("doc_reviews")
-    .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed,sfile:data->>sourceFile,folderId:data->>folderId")
-    .order("updated_at", { ascending: false });
+  const FULL = "id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed,sfile:data->>sourceFile,folderId:data->>folderId";
+  // Newest tier adds the NEW-F3 soft-delete filter: a review in Recently-deleted leaves every list.
+  let res = await supabase.from("doc_reviews").select(FULL).is("deleted_at", null).order("updated_at", { ascending: false });
+  if (res.error) res = await supabase.from("doc_reviews").select(FULL).order("updated_at", { ascending: false }); // deleted_at un-migrated
   // team_id/user_id may be un-migrated → drop to the prior column set; then the older core set.
   if (res.error) res = await supabase.from("doc_reviews")
     .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at,placed:data->placed")
     .order("updated_at", { ascending: false });
   if (res.error) res = await supabase.from("doc_reviews").select("id,title,kind,project,discipline,updated_at").order("updated_at", { ascending: false });
-  return res.error || !res.data ? [] : res.data;
+  if (res.error || !res.data) return { ok: false, rows: [], error: (res.error && res.error.message) || "Couldn't load your files." };
+  return { ok: true, rows: res.data };
+}
+export async function listReviews() {
+  const r = await fetchReviews();
+  return r.ok ? r.rows : [];
+}
+
+// The Recently-deleted bin (NEW-F3): light rows for soft-deleted reviews, newest delete first.
+// Empty (never an error) on a pre-migration DB — there's nothing soft-deleted to show.
+export async function listDeletedReviews() {
+  if (!supabase || !(await currentUid())) return [];
+  const { data, error } = await supabase.from("doc_reviews")
+    .select("id,title,kind,project,project_id,discipline,item,updated_at,deleted_at,sfile:data->>sourceFile")
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false });
+  return error || !data ? [] : data;
 }
 
 // Mark a review as placed on the map at least once (NEW-3) — the write half of the
@@ -272,36 +301,99 @@ export async function markReviewPlaced(id) {
   return upsertReview({ ...rec, placed: true, placedAt: Date.now(), updatedAt: Date.now() });
 }
 
+/* Delete = SOFT delete (NEW-F3): stamp deleted_at and keep everything — the row (the markup
+ * work layer), the stored bytes, and the local draft — so a mistaken two-click delete is
+ * restorable from the Library's "Recently deleted" view for ~30 days (purgeExpiredDeleted
+ * hard-purges after that, and purged bytes then get Drive's own ~30-day trash via NEW-F2).
+ * B757's `.select("id")` no-op detection carries over unchanged: an UPDATE returns the rows it
+ * touched the same way, so a 0-row RLS/ownership no-op stays DISTINGUISHABLE from a real delete.
+ * On a pre-migration DB (no deleted_at column) this degrades to the old immediate hard delete
+ * (purgeReview) so deleting never regresses. The local draft mirror IS cleared (B579 ordering:
+ * only after the cloud write succeeds) — restore needs nothing from it (the soft-deleted row
+ * keeps the full data jsonb), and a lingering draft would let the boot-resume path
+ * (reconcile(cloud, draft)) reopen a deleted review from its stale local copy. */
 export async function deleteReview(id) {
+  if (!supabase || !id) return { ok: false };
+  delete reviewVersions[id]; // the row advances server-side; drop the stale CAS token (B314)
+  const { data, error } = await supabase.from("doc_reviews")
+    .update({ deleted_at: new Date().toISOString() }).eq("id", id).select("id");
+  if (error && isMissingColumn(error, "deleted_at")) return purgeReview(id); // un-migrated DB → old behavior
+  const removed = Array.isArray(data) ? data.length : 0;
+  if (!error && removed > 0) { const uid = await currentUid(); if (uid) clearDraft(uid, id); }
+  return { ok: !error, removed, soft: true, error: error ? error.message : null };
+}
+
+// Bring a soft-deleted review back (NEW-F3) — the "Restore" / undo-toast action.
+export async function restoreReview(id) {
+  if (!supabase || !id) return { ok: false };
+  delete reviewVersions[id]; // force a fresh CAS token on the next load (B314)
+  const { data, error } = await supabase.from("doc_reviews")
+    .update({ deleted_at: null }).eq("id", id).select("id");
+  const restored = Array.isArray(data) ? data.length : 0;
+  return { ok: !error && restored > 0, restored, error: error ? error.message : null };
+}
+
+/* NEW-F1 shared-key guard — is this Drive key still referenced by ANOTHER review row?
+ * jsonb containment (`data @> {"sources":[{"driveKey":k}]}`). RLS scopes the check to rows this
+ * user can see, which is sufficient: Drive keys are uid-prefixed server-side, so another USER's
+ * identical-looking key names a different physical file. Soft-deleted rows count as references
+ * by design — a review in Recently-deleted still owns its bytes until purged. */
+async function driveKeyReferencedElsewhere(id, driveKey) {
+  try {
+    const { data, error } = await supabase.from("doc_reviews")
+      .select("id").neq("id", id).contains("data", { sources: [{ driveKey }] }).limit(1);
+    if (error) return { guardOk: false, sharedByOther: false };
+    return { guardOk: true, sharedByOther: (data || []).length > 0 };
+  } catch (_) { return { guardOk: false, sharedByOther: false }; }
+}
+// Pure decision (exported for tests): bytes may be deleted ONLY on a CONFIRMED not-shared
+// answer. A failed guard query fails SAFE — skip the byte delete and report it as possibly
+// orphaned; never delete bytes another review might still need (legacy name-shared keys, B?F1).
+export const shouldDeleteBytes = ({ guardOk, sharedByOther }) => guardOk === true && !sharedByOther;
+
+/* HARD delete (was deleteReview's body): remove the bytes, the facts row, the doc_reviews row,
+ * and the local mirror. Reached only via "Delete forever" in Recently-deleted, the 30-day lazy
+ * purge, or the pre-migration degrade above. RLS scopes every store to the owner (or a
+ * team-admin on a shared review). Cleanup failures surface via orphaned/cleanupFailed (NEW-4). */
+export async function purgeReview(id) {
   if (!supabase || !id) return { ok: false };
   delete reviewVersions[id]; // stop tracking a removed review's version (B314)
   const uid = await currentUid();
-  // Remove the source files (by their stored keys, so any path scheme is covered),
-  // then the row. RLS scopes both stores to the owner. Track cleanup failures so the caller
-  // can surface "some bytes may be orphaned" (NEW-4) — the row delete stays authoritative, so
-  // this is a non-blocking notice, not data loss.
-  let orphaned = 0;      // # source files whose byte-cleanup didn't confirm
+  let orphaned = 0;       // # source files whose byte-cleanup didn't confirm
+  let sharedKept = 0;     // # Drive files kept because another review still references the key (NEW-F1)
   let cleanupErr = false; // an unexpected throw during cleanup
   try {
     // Prefer the cloud record; if the network read misses, fall back to the local mirror so
     // we can still clean up Storage + Drive instead of orphaning bytes (B321/NEW-1).
-    let rec = await loadReview(id);
+    let rec = await loadReview(id, { includeDeleted: true });
     if (!rec && uid) rec = readDraft(uid, id);
     const srcs = (rec && rec.sources) || [];
+    // Supabase Storage keys are srcId-named (unique per source) — no sharing possible there.
     const keys = srcs.map((s) => s.storageKey).filter(Boolean);
     if (keys.length) { const { error: rmErr } = await supabase.storage.from(BUCKET).remove(keys); if (rmErr) orphaned += keys.length; }
-    // Also remove the Google Drive copy (B207) so a Drive-only file doesn't orphan bytes
-    // in Drive when its review is deleted. Best-effort, in parallel; never blocks the row.
-    const driveKeys = srcs.map((s) => s.driveKey).filter(Boolean);
-    if (driveKeys.length) {
-      const results = await Promise.allSettled(driveKeys.map((k) => deleteFromDrive(k)));
-      orphaned += results.filter((rr) => rr.status !== "fulfilled" || rr.value !== true).length;
+    // Drive copies (B207): deduped (a stitched review can repeat a key), and each byte-delete
+    // gated by the NEW-F1 shared-key guard — legacy name-based keys can be shared by two
+    // reviews, and deleting one review must never blank the other's backdrop.
+    const driveKeys = [...new Set(srcs.map((s) => s.driveKey).filter(Boolean))];
+    for (const k of driveKeys) {
+      const ref = await driveKeyReferencedElsewhere(id, k);
+      if (!shouldDeleteBytes(ref)) { if (ref.sharedByOther) sharedKept += 1; else orphaned += 1; continue; }
+      if ((await deleteFromDrive(k)) !== true) orphaned += 1;
     }
     if (uid) { // back-compat: also clear any legacy <uid>/<reviewId>/ folder
       const { data: files } = await supabase.storage.from(BUCKET).list(`${uid}/${id}`);
       if (files && files.length) { const { error: legErr } = await supabase.storage.from(BUCKET).remove(files.map((f) => `${uid}/${id}/${f.name}`)); if (legErr) orphaned += files.length; }
     }
   } catch (_) { cleanupErr = true; }
+  // NEW-F7 — the facts index row is part of this review's cascade set (TOMBSTONE-DELETES:
+  // the FULL set, not just the obvious row). Facts are keyed id = review id for singles and
+  // review_id for linked rows — cover both. A missing table/column (un-migrated DB) is fine;
+  // any other failure surfaces via cleanupFailed.
+  let factsFailed = false;
+  try {
+    const { error: fErr } = await supabase.from("file_facts").delete().or(`id.eq.${id},review_id.eq.${id}`);
+    if (fErr && !isMissingColumn(fErr) && !/relation|does not exist|schema cache/i.test(fErr.message || "")) factsFailed = true;
+  } catch (_) { factsFailed = true; }
   // Scope by id only; RLS decides (own review OR team-admin on a shared one). A user_id filter
   // would block an admin from deleting a teammate's shared review, which the policy permits.
   // B757 — `.select("id")` returns the rows actually removed, so a 0-row no-op (RLS/ownership
@@ -314,8 +406,26 @@ export async function deleteReview(id) {
   // mirror gone → the row stayed in the library yet could no longer auto-resume; keep them in
   // step so a failed delete leaves a fully consistent, retry-able state.
   if (!error && uid) clearDraft(uid, id);
-  const cleanupFailed = orphaned > 0 || cleanupErr;
-  return { ok: !error, removed, error: error ? error.message : null, orphaned: orphaned || undefined, cleanupFailed: cleanupFailed || undefined };
+  const cleanupFailed = orphaned > 0 || cleanupErr || factsFailed;
+  return { ok: !error, removed, error: error ? error.message : null, orphaned: orphaned || undefined, sharedKept: sharedKept || undefined, cleanupFailed: cleanupFailed || undefined };
+}
+
+/* Lazy 30-day purge (NEW-F3): hard-purge anything that's sat in Recently-deleted past the
+ * window. Called best-effort from the Library's refresh — symmetric with Drive's own ~30-day
+ * trash, so "deleted" data has two sequential recovery windows before it's truly gone.
+ * Returns { ok, purged, failed } — the caller surfaces failures via its notice rail. */
+export async function purgeExpiredDeleted({ days = 30 } = {}) {
+  if (!supabase || !(await currentUid())) return { ok: true, purged: 0, failed: 0 };
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const { data, error } = await supabase.from("doc_reviews").select("id").not("deleted_at", "is", null).lt("deleted_at", cutoff);
+  if (error) // un-migrated DB (no deleted_at) has nothing soft-deleted to purge — that's fine
+    return isMissingColumn(error, "deleted_at") ? { ok: true, purged: 0, failed: 0 } : { ok: false, purged: 0, failed: 0, error: error.message };
+  let purged = 0, failed = 0;
+  for (const row of data || []) {
+    const r = await purgeReview(row.id);
+    if (r.ok && r.removed > 0) purged += 1; else if (!r.ok) failed += 1;
+  }
+  return { ok: failed === 0, purged, failed };
 }
 
 // Re-file an existing review under a (different) project/discipline — the one-click
@@ -337,14 +447,17 @@ export async function refileReview(id, { projectId = null, project = "", discipl
 
 // A "project" = a Site Planner site group. One entry per group_id with its display
 // name + lifecycle status (read straight from the Site Model jsonb).
-export async function listProjects() {
-  if (!supabase || !(await currentUid())) return [];
+export async function fetchProjects() {
+  if (!supabase) return { ok: false, rows: [], error: "Cloud not configured." };
+  if (!(await currentUid())) return { ok: true, rows: [] };
   // Prefer the richest select (status + team_id); degrade if either column isn't migrated in.
   let res = await supabase.from("sites").select("group_id,site,updated_at,team_id,status:data->>status").order("updated_at", { ascending: false });
   if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at,status:data->>status").order("updated_at", { ascending: false });
   if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at").order("updated_at", { ascending: false }); // tolerate older PostgREST
-  const { data } = res;
-  if (!data) return [];
+  // NEW-F5: only a failure of EVERY tier is an honest read failure — the caller keeps its
+  // prior list instead of rendering "no projects" off a network blip.
+  if (res.error || !res.data) return { ok: false, rows: [], error: (res.error && res.error.message) || "Couldn't load projects." };
+  const data = res.data;
   const byId = new Map();
   for (const r of data) {
     const id = r.group_id;
@@ -353,7 +466,11 @@ export async function listProjects() {
       byId.set(id, { id, name: r.site || "Untitled site", status: STATUSES.includes(r.status) ? r.status : "unknown", teamId: r.team_id || null });
     else if (r.team_id && !byId.get(id).teamId) byId.get(id).teamId = r.team_id; // any shared plan ⇒ project is shared
   }
-  return [...byId.values()];
+  return { ok: true, rows: [...byId.values()] };
+}
+export async function listProjects() {
+  const r = await fetchProjects();
+  return r.ok ? r.rows : [];
 }
 
 // Set a project's lifecycle status across its whole site group, reusing the Site
@@ -402,14 +519,42 @@ export async function upsertFileFacts(row) {
 }
 
 const FILE_FACTS_CORE = "id,review_id,project_id,discipline,item,sheet_number,sheet_title,revision,doc_date,source_file,match_confidence,needs_filing,placement,updated_at";
-export async function listFileFacts() {
-  if (!supabase || !(await currentUid())) return [];
+export async function fetchFileFacts() {
+  if (!supabase) return { ok: false, rows: [], error: "Cloud not configured." };
+  if (!(await currentUid())) return { ok: true, rows: [] };
   let { data, error } = await supabase.from("file_facts")
     .select(FILE_FACTS_CORE + ",team_id,category,state")
     .order("updated_at", { ascending: false });
   if (error) // an optional column (team_id / category / state) isn't migrated in → read the core set
     ({ data, error } = await supabase.from("file_facts").select(FILE_FACTS_CORE).order("updated_at", { ascending: false }));
-  return error || !data ? [] : data;
+  // NEW-F5: a failed read is { ok:false }, never a fake-empty [] — but a MISSING TABLE
+  // (pre-migration DB) genuinely has no facts, which is an honest empty, not a failure.
+  if (error) return /relation|does not exist|schema cache/i.test(error.message || "")
+    ? { ok: true, rows: [] }
+    : { ok: false, rows: [], error: error.message };
+  return { ok: true, rows: data || [] };
+}
+export async function listFileFacts() {
+  const r = await fetchFileFacts();
+  return r.ok ? r.rows : [];
+}
+
+/* Build the stable Drive key for one stored source (NEW-F1). The key embeds the SOURCE id in
+ * its last segment — `project-<pid>/<discipline>/<srcId>__<fileName>` — so two uploads of the
+ * same-named file (a revised C-101.pdf is the norm in construction sets) mint DIFFERENT keys.
+ * The old name-only key made them collide: the `drive_files` mapping upsert rebound the shared
+ * key to the newest Drive file, silently swapping the older review's backdrop, and deleting
+ * either review deleted the one mapped file out from under the other. srcId rides in the LAST
+ * segment (never the folder part) so the server's flat-folder derivation (uploads/start.js drops
+ * the last segment) and the B663 prefix scans see exactly the folder shape they always did.
+ * Legacy name-only keys stay valid forever: every read/share/move/delete resolves the key STORED
+ * on the source record, and new keys (containing `__` after an srcId) can't collide with them.
+ * srcId charset is [a-z0-9] (newSourceId), so the key stays URL- and pattern-safe. Pure; exported
+ * for tests. */
+export function buildDriveKey({ projectId = null, discipline = "Other", fileName, srcId = null } = {}) {
+  const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
+  const name = fileName || "document.pdf";
+  return `${folder}/${srcId ? `${srcId}__${name}` : name}`;
 }
 
 /* Push a file's bytes to Google Drive through the CHUNKED same-origin upload (B409 rework).
@@ -423,7 +568,7 @@ export async function listFileFacts() {
  * tray's per-file progress bar. Returns { ok, driveKey } on success (driveKey = the stable
  * key to read it back with), { ok:false, skipped:true } when Drive isn't enabled yet, or
  * { ok:false, error }. Best-effort — never throws. */
-export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName, folderId = null, onProgress = null } = {}) {
+export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName, srcId = null, folderId = null, onProgress = null } = {}) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   // Token as a GETTER, not a snapshot: a multi-GB upload outlives a Supabase access token
   // (~1 h), so every request re-reads the current (auto-refreshed) session token.
@@ -432,9 +577,8 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
     catch (_) { return ""; }
   };
   if (!(await getToken())) return { ok: false, skipped: true, error: "Not signed in." };
-  const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
   const name = fileName || "document.pdf";
-  const driveKey = `${folder}/${name}`; // the key the read-back GET uses (server prefixes the uid)
+  const driveKey = buildDriveKey({ projectId, discipline, fileName, srcId }); // unique per source (NEW-F1); server prefixes the uid
   return uploadFileInChunks({
     file, token: getToken, planyrKey: driveKey, name, contentType: guessContentType(name, file.type),
     // Tree targeting (B650 follow-on): the server files the bytes into the project's standard
@@ -547,14 +691,13 @@ export const isStoredSource = (s) => !!(s && (s.storageKey || s.driveKey || s.ov
  * "oversize" dead end, and a fallback that stores some files and rejects others is worse
  * than an honest failure. A failed Drive upload now surfaces loudly and retryably
  * (LOUD-FAILURE); files stored in Supabase before the cutover still read back via
- * downloadSource. `srcId` no longer names the stored object (the driveKey does) but stays
- * in the signature for its callers. Returns
+ * downloadSource. `srcId` rides into the driveKey's last segment (NEW-F1) so every stored
+ * source gets its own key — two same-named uploads can never collide. Returns
  * { ok, storageKey:null, driveKey, oversize:false, large, driveError, driveSkipped }. Never throws. */
 export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName, folderId = null, onProgress = null } = {}) {
-  void srcId;
   const isLarge = !!(blob && blob.size > MAX_BYTES);
   const drive = blob
-    ? await pushFileToDrive(blob, { projectId, discipline, fileName, folderId, onProgress })
+    ? await pushFileToDrive(blob, { projectId, discipline, fileName, srcId, folderId, onProgress })
     : { ok: false, skipped: true, error: "No file bytes." };
   if (drive.ok) return { ok: true, storageKey: null, driveKey: drive.driveKey, oversize: false, large: isLarge, driveError: null, driveSkipped: false };
   return { ok: false, storageKey: null, driveKey: null, oversize: false, large: isLarge,

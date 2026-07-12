@@ -25,6 +25,7 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
   const [rows, setRows] = useState(null);     // saved reviews (null = not loaded)
   const [projects, setProjects] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [pendingDel, setPendingDel] = useState(null); // inline two-step delete arm (NEW-F3 — no window.confirm)
   const ref = useRef(null);
   const reqRef = useRef(0); // in-flight token: a newer refresh supersedes an older slow one (B44)
 
@@ -51,9 +52,14 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
   const lbl = { fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" };
 
   const onProject = (id) => { const p = projects.find((x) => x.id === id); onMeta?.("projectId", id || null); onMeta?.("project", p ? p.name : ""); };
+  // Inline two-step delete (NEW-F3): first click arms the row, second confirms — the
+  // window.confirm dialog is gone (owner rule: no dialog-box edits/confirms). The delete
+  // itself is SOFT (Recently deleted, ~30-day restore in the Library), so the light inline
+  // confirm matches the stakes.
   const del = async (e, id) => {
     e.stopPropagation();
-    if (!window.confirm("Delete this review and its stored PDFs? This can't be undone.")) return;
+    if (pendingDel !== id) { setPendingDel(id); return; }
+    setPendingDel(null);
     await deleteReview(id);
     refresh();
   };
@@ -109,7 +115,16 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
                     {r.kind === "stitch" ? "Stitched set" : "Single sheet"}{r.project ? ` · ${r.project}` : ""}{r.discipline ? ` · ${r.discipline}` : ""} · {fmtWhen(r.updated_at)}
                   </div>
                 </div>
-                <button onClick={(e) => del(e, r.id)} title="Delete review" style={{ flex: "none", border: "none", background: "transparent", color: "var(--danger)", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 4 }}>×</button>
+                {pendingDel === r.id ? (
+                  <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: PAL.muted, fontWeight: 700, whiteSpace: "nowrap" }}
+                    onClick={(e) => e.stopPropagation()}>
+                    Move to Recently deleted?
+                    <button onClick={(e) => del(e, r.id)} title="Yes — restorable ~30 days from the Library" style={{ border: "none", background: "transparent", color: "var(--danger)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✓</button>
+                    <button onClick={(e) => { e.stopPropagation(); setPendingDel(null); }} title="Cancel" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, padding: 2 }}>✕</button>
+                  </span>
+                ) : (
+                  <button onClick={(e) => { e.stopPropagation(); setPendingDel(r.id); }} title="Delete (moves to Recently deleted)" style={{ flex: "none", border: "none", background: "transparent", color: "var(--danger)", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 4 }}>×</button>
+                )}
               </div>
             ))}
           </div>
