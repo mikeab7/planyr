@@ -56,6 +56,13 @@ export const GIS_SOURCES = {
     layerId: 28, // Flood Hazard Zones (S_Fld_Haz_Ar) — the canonical queryable SFHA polygons
     geometryType: "polygon",
     fields: { zone: "FLD_ZONE", subtype: "ZONE_SUBTY", elev: "STATIC_BFE", vdatum: "V_DATUM", depth: "DEPTH" },
+    // NEW-2/B789: a per-source screening-fetch timeout that OVERRIDES the 9 s default
+    // (GIS_FETCH_TIMEOUT_MS). FEMA's NFHL answered flood /query in ~9.5 s during the
+    // 2026-07-11 slowdown, so all three 9 s attempts lost the same race by ~0.5 s. ~20 s
+    // rescues the marginal-slow case (flood data changes slowly, so a longer wait is cheap).
+    // Live evidence: FEMA's own gateway still dropped some responses at ~10 s, so pair this
+    // with the SWR cache proxy (B445) — it is not the whole fix on its own.
+    timeoutMs: 20000,
     coverage: "national",
     tier: "production",
     lastVerified: "2026-06-21",
