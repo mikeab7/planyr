@@ -85,23 +85,27 @@ export function pfdsDepthFor(parsed, durationLabel, returnPeriodYr) {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-/* WSE(0.2% / 500-yr) provider research notes (B763). This is a DOCUMENTED constant, not a
- * live registry row: the primary Fort Bend GIS endpoints were WAF-blocked this session, so
- * the layer id / field name are UNCONFIRMED. Deliberately NOT added to GIS_SOURCES /
- * VECTOR_SOURCES — wiring an unverified endpoint would fail the gisSources audit and be
- * dishonest. A browser-equipped teammate uses these pointers to lock the real endpoint,
- * then adds the registry row. Each entry states its status plainly (candidate vs. pointer). */
+/* WSE(0.2% / 500-yr) provider research notes (B763; FBCDD resolved by the V279 live
+ * discovery, 2026-07-11, and wired 2026-07-12). The FBCDD entry is now a LIVE, WIRED
+ * source — its registry row is GIS_SOURCES.fbcddWse02 (shared/gis/sources.js) and its
+ * sampler is site-planner/lib/fbcdWse.js; the entry here keeps the discovery facts for
+ * provenance. The remaining entries are still pointers, each stating its status plainly. */
 export const WSE02_PROVIDER_NOTES = {
   fbcdd: {
     name: "Fort Bend County Drainage District (FBCDD)",
-    status: "candidate — UNCONFIRMED (WAF-blocked this session; needs a live browser check)",
-    restBase: "https://gisportal.fortbendcountytx.gov/arcgis/rest/services",
-    candidateFolders: ["Drainage_Base_Data", "FEMA", "FLOODZONE"],
-    portalItem: "b1882e732fa042aeaa6e2fc7447f0377", // watershed-study portal item
-    layerId: null, // UNCONFIRMED — do NOT add a registry row until a live browser locks it
-    field: null, // UNCONFIRMED — the pre-Atlas-14 500-yr WSE field name is unknown
+    status: "LIVE — wired (registry row GIS_SOURCES.fbcddWse02; sampler lib/fbcdWse.js)",
+    // The V279 discovery corrected the old assumption: the Atlas-14 watershed-study
+    // results are NOT a FeatureServer layer/field — they are WSE RASTERS on the portal's
+    // Image Server (per-watershed services + county-wide 500YR mosaics).
+    restBase: "https://gisportal.fortbendcountytx.gov/image/rest/services",
+    endpoint: "https://gisportal.fortbendcountytx.gov/image/rest/services/500YR_WSE/ImageServer",
+    // Source-of-truth portal item (the old b1882e732fa042aeaa6e2fc7447f0377 pointer no
+    // longer resolves on the county portal OR arcgis.com — replaced 2026-07-12):
+    portalItem: "0d4791f2c9d143eeb62696850ce27e45", // "Fort Bend County Watershed Study Inundation Map All - 100YR and 500YR (Draft Results)"
+    layerId: null, // raster mosaic — consumed via getSamples (no layer id / no field)
+    field: null,
     note:
-      "FBCDD publishes an ArcGIS portal; the pre-Atlas-14 500-yr (0.2% annual chance) WSE layer id and field are WAF-blocked and UNVERIFIED this session. Live-verify the folder/layer/field before adding a GIS_SOURCES row.",
+      "County-wide 0.2% (500-yr) WSE mosaic: F32 pixels in FEET (ft-NAVD88 by study convention), SR 2278, value range ~24–167. Consumed point-wise via getSamples (the 3DEP pattern); CORS-clean from planyr.io (no proxy needed). ⚠ DRAFT study results — derived values carry the draft-study screening label, never an effective/published elevation. The 100-yr rasters have NO county-wide mosaic (44 per-watershed services, e.g. Willow_Creek/Willow_100YR_Existing_WSE, plus _100YR_LOS_WSE variants) — an atlas14Wse100Ft feed would need per-watershed multiplexing.",
   },
   maapnext: {
     name: "MAAPnext (HCFCD Modeling, Assessment and Awareness Project)",

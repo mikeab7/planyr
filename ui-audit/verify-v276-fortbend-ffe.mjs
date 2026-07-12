@@ -4,23 +4,29 @@
  * Drives the REAL built app (GIS mocked at the network layer — same discipline as
  * verify-b629-detention.mjs; this sandbox's egress proxy resets Chromium's tunneled
  * TLS so live GIS can't run here) on a Fort Bend site and asserts:
- *   1. PASS  — FloodMitigationCard shows "Required FFE 96.5′ (FEMA FIRM BFE (18 in)
- *              + 1.5′) — pad PASSES" (governing basis named), AND the pending-bases
- *              copy lists every un-computed basis (Atlas-14 / pre-Atlas-14 / 500-yr /
- *              Zone-A / outside-SFHA) — never dropped.
- *              PDF-PARITY: the composed print sheet (captured via a Blob hook on the
- *              real exportPDF path) carries "Required FFE 96.5 ft (max-of — more
- *              bases pending)".
- *   2. SHORT — pad 95 vs required 96.5 → the ⚠ "Pad FFE is 1.5′ SHORT of the
- *              required 96.5′ (…)" line; sheet shows "(pad 1.5 ft short)".
+ *   1. PASS  — FloodMitigationCard shows "Required FFE 97′ (FEMA FIRM BFE + 2′) —
+ *              pad PASSES" (governing basis named; +2.0 per §5.02(c)(1), signed
+ *              10-08-2024), AND the pending-bases copy lists every un-computed basis
+ *              (Atlas-14 / pre-Atlas-14 / 500-yr / Zone-A / outside-SFHA) — never
+ *              dropped. PDF-PARITY: the composed print sheet (captured via a Blob
+ *              hook on the real exportPDF path) carries "Required FFE 97 ft (max-of
+ *              — more bases pending)".
+ *   2. SHORT — pad 95 vs required 97 → the ⚠ "Pad FFE is 2′ SHORT of the
+ *              required 97′ (…)" line; sheet shows "(pad 2 ft short)".
  *   3. no_rule — a Montgomery site (no FFE rule modeled) → the card's honest
  *              "Required FFE unknown — no FFE rule modeled …" AND the sheet's
  *              "Required FFE  no rule modeled" pair (PDF-PARITY for the fallback).
+ *   4. DRAFT raster wire (B770/V279) — the FBCDD 500YR_WSE getSamples mock returns
+ *              96.5 → the 0.2% basis computes (96.5 + 2 = 98.5) and GOVERNS over the
+ *              FIRM basis (97): card reads "Required FFE 98.5′ (pre-Atlas-14 500-yr
+ *              WSE + 2′) — pad PASSES" with the ⚑ DRAFT-study caveat; the sheet
+ *              carries "(0.2% WSE — DRAFT study)" (PDF-PARITY for the draft label).
  *
  * Scenario: 40-ac square Fort Bend parcel (Rosenberg-ish origin), one building,
  * FEMA AE zone with STATIC_BFE 95 (NAVD88), ground 100 (3DEP mock 30.48 m).
- * Only the wse1pct (FIRM BFE) basis is computable → governing = 95 + 1.5 = 96.5;
- * the other five bases surface as pending.
+ * Contexts 1–3 mock the FBCDD raster as out-of-coverage (empty value) so only the
+ * wse1pct (FIRM BFE) basis computes → governing = 95 + 2 = 97; the other five
+ * bases surface as pending. Context 4 supplies the raster value.
  *
  * Run:  npm run build && npx vite preview --port 4173  (background), then
  *       BASE_URL=http://localhost:4173/ node ui-audit/verify-v276-fortbend-ffe.mjs
@@ -71,7 +77,7 @@ const BLOB_HOOK = `(() => {
 // empty and the FFE's governing BFE can't compute (fmGoverningBfe reads zone rings).
 const AE_RING = (lon, lat) => [[[lon - 0.02, lat - 0.02], [lon + 0.02, lat - 0.02], [lon + 0.02, lat + 0.02], [lon - 0.02, lat + 0.02], [lon - 0.02, lat - 0.02]]];
 
-const mocksFor = (countyName, fips, origin) => [
+const mocksFor = (countyName, fips, origin, { fbcddWse = "" } = {}) => [
   ["Texas_County_Boundaries", { features: [{ attributes: { CNTY_NM: countyName, FIPS_ST_CNTY_CD: fips } }] }],
   ["Texas_City_Boundaries", { features: [] }],
   ["HGAC_City_ETJ", { features: [] }],
@@ -80,20 +86,36 @@ const mocksFor = (countyName, fips, origin) => [
   ["HCFCD/Channels", { features: [] }],
   ["HCFCD/Watershed", { features: [] }],
   ["3DEPElevation/ImageServer/getSamples", { samples: Array.from({ length: 9 }, () => ({ value: "30.48" })) }],
+  // B770 — the FBCDD Atlas-14 DRAFT 0.2% WSE raster (Fort Bend-gated in checkDrainage).
+  // Empty value = out of coverage (contexts 1–3); a number wires the wse02pct basis (ctx 4).
+  ["500YR_WSE/ImageServer/getSamples", { samples: [{ value: fbcddWse, resolution: 12 }] }],
 ];
 
 let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${cond ? "PASS" : "FAIL"}] ${label}${extra ? ` — ${extra}` : ""}`); };
 
-async function openAndCheck(browser, { county, fips, countyName, padFfeFt }) {
+async function openAndCheck(browser, { county, fips, countyName, padFfeFt, fbcddWse }) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 860 }, deviceScaleFactor: 2 });
   const siteObj = mkSite({ county, padFfeFt });
   await ctx.addInitScript(seedFor(siteObj));
   await ctx.addInitScript(BLOB_HOOK);
-  for (const [needle, payload] of mocksFor(countyName, fips, siteObj.s_v276.origin)) {
+  for (const [needle, payload] of mocksFor(countyName, fips, siteObj.s_v276.origin, { fbcddWse })) {
     await ctx.route(`**${needle}**`, (route) =>
       route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(payload) }));
   }
+  // Catch-all for every OTHER off-localhost request (basemap tiles, esri assets, …):
+  // fulfil instantly with an empty body. Playwright matches routes newest-first, so
+  // this handler (registered after the mocks) sees every request first and defers to
+  // the specific mocks via route.fallback() when a mock needle matches the URL.
+  // Why: some sandboxes' egress proxies HANG unmatched requests (rather than reset),
+  // which stalls exportPDF's aerial capture past any fixed wait — the sheet blob then
+  // never appears and PDF-parity reads as a false failure (seen 2026-07-12).
+  const needles = mocksFor(countyName, fips, siteObj.s_v276.origin, { fbcddWse }).map(([n]) => n);
+  await ctx.route("**", (route) => {
+    const u = route.request().url();
+    if (u.startsWith(BASE) || u.startsWith("data:") || needles.some((n) => u.includes(n))) return route.fallback();
+    return route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: "{}" });
+  });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror — ${e.message}`); });
   await page.goto(BASE, { waitUntil: "load" });
@@ -121,7 +143,13 @@ async function captureSheet(page) {
   await page.locator('button:has-text("Download PDF / pick frame")').first().click({ timeout: 8000 });
   await page.waitForTimeout(900);
   await page.getByRole("button", { name: "Download PDF", exact: true }).click({ timeout: 8000 });
-  await page.waitForTimeout(3500);
+  // Poll rather than a fixed wait — exportPDF's aerial/raster capture time varies by
+  // sandbox; the blob usually lands in ~1s but a slow container needs headroom.
+  for (let i = 0; i < 15; i++) {
+    await page.waitForTimeout(1000);
+    const n = await page.evaluate(() => (window.__sheetSvgs || []).length);
+    if (n) break;
+  }
   return page.evaluate(() => (window.__sheetSvgs && window.__sheetSvgs.length ? window.__sheetSvgs[window.__sheetSvgs.length - 1] : null));
 }
 
@@ -132,8 +160,8 @@ async function run() {
   console.log("· Fort Bend / pad FFE 98 (PASS + pending bases + PDF parity)");
   {
     const { ctx, page, text: t } = await openAndCheck(browser, { county: "fortbend", fips: "48157", countyName: "Fort Bend", padFfeFt: 98 });
-    expect("card names the governing basis: Required FFE 96.5′ (FEMA FIRM BFE (18 in) + 1.5′)",
-      /Required FFE/.test(t) && /96\.5′ \(FEMA FIRM BFE \(18 in\) \+ 1\.5′\)/.test(t), t.match(/Required FFE[^—]*—?[^.]{0,40}/)?.[0]);
+    expect("card names the governing basis: Required FFE 97′ (FEMA FIRM BFE + 2′) — §5.02(c)(1) +2.0",
+      /Required FFE/.test(t) && /97′ \(FEMA FIRM BFE \+ 2′\)/.test(t), t.match(/Required FFE[^—]*—?[^.]{0,40}/)?.[0]);
     expect("pad PASSES verdict renders", /pad PASSES/.test(t));
     expect("pending-bases copy: 'must clear the HIGHEST of several bases'", /must clear the HIGHEST of several bases/.test(t));
     expect("pending list names Atlas-14 100-yr WSE +2′", /Atlas-14 100-yr WSE \+2′/.test(t));
@@ -145,25 +173,25 @@ async function run() {
     const sheet = await captureSheet(page);
     expect("print sheet captured off the real exportPDF path", !!sheet, sheet ? `${sheet.length} chars` : "no svg blob seen");
     if (sheet) {
-      expect("PDF-PARITY: sheet carries 'Required FFE' = '96.5 ft (max-of — more bases pending)'",
-        /Required FFE/.test(sheet) && /96\.50? ft \(max-of — more bases pending\)/.test(sheet),
-        (sheet.match(/Required FFE[^<]{0,80}/) || sheet.match(/96\.5[^<]{0,60}/) || []).toString().slice(0, 100));
+      expect("PDF-PARITY: sheet carries 'Required FFE' = '97.00 ft (max-of — more bases pending)'",
+        /Required FFE/.test(sheet) && /97(\.0{1,2})? ft \(max-of — more bases pending\)/.test(sheet),
+        (sheet.match(/Required FFE.{0,120}/) || []).toString().slice(0, 140));
     }
     await ctx.close();
   }
 
-  // ── 2. Fort Bend, pad 95 → SHORT by 1.5 ────────────────────────────────────
+  // ── 2. Fort Bend, pad 95 → SHORT by 2 ──────────────────────────────────────
   console.log("· Fort Bend / pad FFE 95 (SHORT)");
   {
     const { ctx, page, text: t } = await openAndCheck(browser, { county: "fortbend", fips: "48157", countyName: "Fort Bend", padFfeFt: 95 });
-    expect("SHORT warning: 'Pad FFE is 1.5′ SHORT of the required 96.5′ (FEMA FIRM BFE (18 in) + 1.5′)'",
-      /Pad FFE is 1\.5′ SHORT of the required 96\.5′ \(FEMA FIRM BFE \(18 in\) \+ 1\.5′\)/.test(t), t.match(/Pad FFE[^.]{0,90}/)?.[0]);
+    expect("SHORT warning: 'Pad FFE is 2′ SHORT of the required 97′ (FEMA FIRM BFE + 2′)'",
+      /Pad FFE is 2′ SHORT of the required 97′ \(FEMA FIRM BFE \+ 2′\)/.test(t), t.match(/Pad FFE[^.]{0,90}/)?.[0]);
     expect("pending-bases copy still renders alongside the SHORT verdict", /must clear the HIGHEST of several bases/.test(t));
     const sheet = await captureSheet(page);
     if (sheet) {
-      expect("PDF-PARITY: sheet shows '96.5 ft (pad 1.5 ft short) (max-of — more bases pending)'",
-        /96\.50? ft \(pad 1\.50? ft short\) \(max-of — more bases pending\)/.test(sheet),
-        (sheet.match(/Required FFE[^<]{0,90}/) || []).toString().slice(0, 110));
+      expect("PDF-PARITY: sheet shows '97.00 ft (pad 2.00 ft short) (max-of — more bases pending)'",
+        /97(\.0{1,2})? ft \(pad 2(\.0{1,2})? ft short\) \(max-of — more bases pending\)/.test(sheet),
+        (sheet.match(/Required FFE.{0,140}/) || []).toString().slice(0, 160));
     } else expect("print sheet captured (SHORT pass)", false);
     await ctx.close();
   }
@@ -180,6 +208,27 @@ async function run() {
         /Required FFE/.test(sheet) && /no rule modeled/.test(sheet),
         (sheet.match(/Required FFE[^<]{0,60}/) || []).toString().slice(0, 80));
     } else expect("print sheet captured (no_rule pass)", false);
+    await ctx.close();
+  }
+
+  // ── 4. Fort Bend + FBCDD raster value → the DRAFT 0.2% basis computes & governs ──
+  console.log("· Fort Bend / pad FFE 99 + FBCDD raster 96.5 (B770 DRAFT wire: 96.5+2 = 98.5 governs over FIRM 97)");
+  {
+    const { ctx, page, text: t } = await openAndCheck(browser, { county: "fortbend", fips: "48157", countyName: "Fort Bend", padFfeFt: 99, fbcddWse: "96.5" });
+    expect("card: Required FFE 98.5′ (pre-Atlas-14 500-yr WSE + 2′) — the raster-fed basis GOVERNS",
+      /Required FFE/.test(t) && /98\.5′ \(pre-Atlas-14 500-yr WSE \+ 2′\)/.test(t), t.match(/Required FFE[^—]*—?[^.]{0,40}/)?.[0]);
+    expect("pad PASSES verdict renders (99 ≥ 98.5)", /pad PASSES/.test(t));
+    expect("the ⚑ DRAFT-study caveat rides the FFE verdict",
+      /DRAFT Fort Bend watershed-study value/.test(t), t.match(/DRAFT[^.]{0,80}/)?.[0]);
+    expect("the footer carries the draft-study screening note",
+      /DRAFT study results, a screening value only/.test(t));
+    expect("the 500-yr basis is NOT in the pending list any more", !/pre-Atlas-14 500-yr WSE \+2′[^)]*\./.test(t.match(/enter or confirm:[^.]*/)?.[0] || ""));
+    const sheet = await captureSheet(page);
+    if (sheet) {
+      expect("PDF-PARITY: sheet carries '98.50 ft (max-of — more bases pending) (0.2% WSE — DRAFT study)'",
+        /98\.50? ft \(max-of — more bases pending\) \(0\.2% WSE — DRAFT study\)/.test(sheet),
+        (sheet.match(/Required FFE.{0,160}/) || []).toString().slice(0, 180));
+    } else expect("print sheet captured (DRAFT-wire pass)", false);
     await ctx.close();
   }
 

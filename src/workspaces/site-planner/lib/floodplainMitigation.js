@@ -458,9 +458,11 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
       else if (derivedBfe != null) { wse = derivedBfe; wseSrc = "bfe-line-interp"; }
     } else if (z.cls === "02pct") {
       // 0.2% band: a manually-entered WSE wins; else a derived 0.2% WSE (B763 engine
-      // seam — a named hook for an HCFCD/MAAPnext or S_XS 500-yr model later).
+      // seam). The caller names the derived source via elev.derivedWse02Src (e.g. the
+      // FBCDD Atlas-14 DRAFT raster, "fbcdd-wse02-draft") so the provenance label is
+      // never lost; absent, the seam keeps its original "xs-wsel-02" tag (back-compat).
       if (wse02 != null) { wse = wse02; wseSrc = "manual"; }
-      else if (derived02 != null) { wse = derived02; wseSrc = "xs-wsel-02"; }
+      else if (derived02 != null) { wse = derived02; wseSrc = elev.derivedWse02Src || "xs-wsel-02"; }
     }
 
     for (const fp of footprints) {
@@ -550,10 +552,11 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
         : wseProviders.has("manual") ? "manual"
         : wseProviders.has("xs-wsel") ? "xs-wsel"
         : wseProviders.has("bfe-line-interp") ? "bfe-line-interp" : null,
-      // 0.2% provider is mixed-aware but its own tier ("xs-wsel-02"), tracked apart from
-      // the 1% chain so a priced 0.2% zone never reads as a 1% "manual".
+      // 0.2% provider is mixed-aware but its own tier, tracked apart from the 1% chain
+      // so a priced 0.2% zone never reads as a 1% "manual". Manual wins the label; else
+      // surface whichever derived source priced it (xs-wsel-02 / fbcdd-wse02-draft).
       wse02pct: wse02Providers.has("manual") ? "manual"
-        : wse02Providers.has("xs-wsel-02") ? "xs-wsel-02" : null,
+        : [...wse02Providers].find((s) => s !== "manual") || null,
       expert: expert ? "avg-fill-depth" : null,
     },
   };
@@ -652,3 +655,5 @@ export const DERIVED_XS_WSEL_NOTE =
   "This 1% water surface was DERIVED from FEMA's published S_XS cross-section regulatory water-surface elevation (WSEL_REG) on the nearest modeled stream reach — a screening estimate, not a surveyed value, and never a cross-creek pick. Confirm before design; type a BFE to override.";
 export const DERIVED_WSE02_NOTE =
   "This 0.2% (500-yr) water surface was DERIVED from a cross-section / regional model at your fill — a screening estimate, not a published or surveyed value. Confirm before design; type a 0.2% WSE to override.";
+export const DERIVED_WSE02_DRAFT_NOTE =
+  "This 0.2% (500-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Confirm before design; type a 0.2% WSE to override.";

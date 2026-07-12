@@ -18,6 +18,11 @@ _Last updated: 2026-07-12._
       rewind-to-any-minute safety net). Just confirm the page shows backups running and tell a Claude session
       what it says — this is the final backstop under all the in-app delete protections that shipped today.
 
+## 🧹 Optional 10-second cleanup — delete the "GREENHOUSE" test plan
+- [ ] The live testing on 2026-07-11 used a throwaway plan called **"GREENHOUSE / Concept A"** in your
+      account (a 14.66-acre Cypress-area parcel with a test pad elevation typed in). It's safe to delete
+      whenever you notice it — or leave it; it hurts nothing. Nothing else was changed in your projects.
+
 ## 🧩 Turn on DWG uploads (deploy the converter — needs one cloud account)
 - [ ] **Decide the host + do the account setup, then a Cowork session deploys it with you.** DWG files
       can't be read in the browser — a tiny converter has to run on a server. It's built and tested; what's

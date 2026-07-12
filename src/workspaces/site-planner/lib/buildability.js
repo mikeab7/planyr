@@ -18,10 +18,12 @@
  * Plus the wetlands cross-flag (floodplain ∩ NWI wetlands → Section 404 note),
  * sourced from the EXISTING wetlands finding — no new fetch.
  *
- * Provenance caveat (B759/B760): the Fort Bend & Harris values below were
- * triangulated from verbatim search-indexed official text + owner verification —
- * the primary regulation PDFs were egress-blocked this session, so subsection
- * lettering is "confirm vs the primary PDF" and we do NOT claim we rendered one.
+ * Provenance (B759/B760, closed 2026-07-12): the Fort Bend & Harris subsection
+ * lettering below was CONFIRMED against the primary regulation PDFs (Harris
+ * fpmregs-effect190709.pdf; FBC-Flood-Damage-Prevention-Regulations_10-08-24_signed.pdf),
+ * owner-read 2026-07-12 (PR #594). That read also surfaced the one value fix:
+ * Fort Bend's FIRM-BFE FFE basis is +2.0 ft per §5.02(c)(1) of the signed
+ * 10-08-2024 regs (the old +1.5 came from the superseded 2023-09 18-in rule).
  *
  * Editable/verified pattern (easementRules.js); keys match floodplainRules.js. */
 const LS = "planarfit:buildabilityRules:v1";
@@ -43,17 +45,18 @@ export const DEFAULT_BUILDABILITY_RULES = {
     ffeRule: { basis: "wse02pct", plusFt: 2 },
     fillToElevate: "restricted",
     pathwayNote:
-      "Harris County §4.07(b)(9): “No fill may be used to elevate structures in the 1 percent floodplain” — a slab-on-grade pad is restricted; elevate on open foundations / piers or vented walls, and the LOMR pathway is commonly required to exit the SFHA. (Confirm subsection lettering vs the primary fpmregs-effect190709.pdf.)",
+      "Harris County §4.07(b)(9): “No fill may be used to elevate structures in the 1 percent floodplain” — a slab-on-grade pad is restricted; elevate on open foundations / piers or vented walls, and the LOMR pathway is commonly required to exit the SFHA.",
     verified: true,
     source: "Harris County Regulations for Floodplain Management, eff. 7/9/2019 (Atlas-14 ed.) §4.07(b)(1) / (b)(9).",
     sourceDate: "2019-07-09",
     note:
-      "§4.07(b)(1): FFE = 24 in above the 0.2% (500-yr) WSE, OR 12 in above the nearest street crown, whichever is higher (crown alternate is copy, not modeled). Zone specials (copy, not modeled): floodway / Zone V lowest member = 500-yr WSE + 36 in; Zone AO = slab at depth number + 36 in; Zone A = slab at highest-adjacent-grade + 6 ft; critical facilities + 36 in. NFIP non-residential dry-floodproofing alternatives exist; noted, not modeled. Values triangulated from verbatim official text + owner verification — primary PDF egress-blocked this session; confirm subsection lettering vs the primary fpmregs-effect190709.pdf.",
+      "§4.07(b)(1): FFE = 24 in above the 0.2% (500-yr) WSE, OR 12 in above the nearest street crown, whichever is higher (crown alternate is copy, not modeled). Zone specials (copy, not modeled): floodway / Zone V lowest member = 500-yr WSE + 36 in; Zone AO = slab at depth number + 36 in; Zone A = slab at highest-adjacent-grade + 6 ft; critical facilities + 36 in. NFIP non-residential dry-floodproofing alternatives exist; noted, not modeled. Subsection lettering confirmed against the primary fpmregs-effect190709.pdf (owner-read 2026-07-12).",
   },
   // Fort Bend takes the MOST RESTRICTIVE (highest) FFE across six bases per Regs
-  // §3.02(b) ("more restrictive controls" = take the MAX) — B759. Only the 500-yr
-  // (wse02pct) and FIRM-BFE (wse1pct) bases are computable today; the rest surface
-  // as pending copy until their WSE is supplied (B763 / user entry).
+  // §3.02(b) ("more restrictive controls" = take the MAX) — B759. The 500-yr
+  // (wse02pct) basis is provider-fed (manual entry or the FBCDD Atlas-14 DRAFT
+  // watershed-study raster) and the FIRM-BFE (wse1pct) basis computes from NFHL;
+  // the rest surface as pending copy until their WSE is supplied (B763 / user entry).
   fortbend: {
     label: "Fort Bend County",
     ffeRule: {
@@ -61,7 +64,11 @@ export const DEFAULT_BUILDABILITY_RULES = {
         { basis: "atlas14_100yr", plusFt: 2, label: "Atlas-14 100-yr WSE" },
         { basis: "pre_atlas14_100yr", plusFt: 2.5, label: "pre-Atlas-14 100-yr WSE / legacy pond" },
         { basis: "wse02pct", plusFt: 2, label: "pre-Atlas-14 500-yr WSE" },
-        { basis: "wse1pct", plusFt: 1.5, label: "FEMA FIRM BFE (18 in)" },
+        // §5.02(c)(1) (signed 10-08-2024): "Two (2) feet above the Base Flood Elevation
+        // as determined in the effective FIS and FIRM data". Was +1.5 from the superseded
+        // 2023-09 18-in rule — under max-of that understated required FFE by 0.5 ft
+        // whenever the FIRM basis governed.
+        { basis: "wse1pct", plusFt: 2, label: "FEMA FIRM BFE" },
         { basis: "zone_a_est_bfe", plusFt: 4, label: "Zone A estimated BFE (no data)" },
         { basis: "site", plusFt: 2, label: "outside SFHA: pond 100-yr WSE / top of curb / natural ground" },
       ],
@@ -71,10 +78,10 @@ export const DEFAULT_BUILDABILITY_RULES = {
       "Fort Bend County: fill-to-elevate is allowed with mitigation — the pad elevates on fill, but fill that reduces floodplain storage or conveyance needs a 1:1 hydraulically-equivalent offset in the same watershed, full H&H modeling, and a County-Engineer floodplain-development permit ($150 fee). The fill + CLOMR-F/LOMR-F pathway to exit the SFHA is unchanged.",
     verified: true,
     source:
-      "FBC Flood Damage Prevention Regs (signed 10-08-2024) §3.02(b) & §5.01; FBCDD Interim Atlas-14 Criteria §2 (eff. 2020-01-01, rev. 9/2021); FBC Regs for Floodplain Management (2023-09) 18-in-above-BFE mapped-SFHA rule.",
+      "FBC Flood Damage Prevention Regs (signed 10-08-2024) §3.02(b), §5.01 & §5.02(c); FBCDD Interim Atlas-14 Criteria §2 (eff. 2020-01-01, rev. 9/2021).",
     sourceDate: "2024-10-08",
     note:
-      "FFE = the HIGHEST of six bases (§3.02(b) more-restrictive-controls): Atlas-14 100-yr WSE +2.0; pre-Atlas-14 100-yr WSE / legacy-pond max ponding +2.5; pre-Atlas-14 500-yr WSE +2.0; FEMA FIRM BFE +1.5 (18 in); Zone-A estimated BFE +4.0; outside-SFHA §5.01 +2.0 over the highest of {detention-pond 100-yr WSE, top of curb, natural ground}. Only the 500-yr (wse02pct) and 1% FIRM (wse1pct) bases compute today; the Atlas-14 / pre-Atlas-14 / Zone-A / site bases surface as pending until their WSE is supplied. NFIP non-residential dry-floodproofing alternatives exist; noted, not modeled. Values triangulated from verbatim official text + owner verification — primary PDF egress-blocked this session; confirm subsection lettering vs the primary PDF.",
+      "FFE = the HIGHEST of six bases (§3.02(b) more-restrictive-controls): Atlas-14 100-yr WSE +2.0 (§5.02(c)(2)); pre-Atlas-14 100-yr WSE / legacy-pond max ponding +2.5; pre-Atlas-14 500-yr WSE +2.0; FEMA FIRM BFE +2.0 (§5.02(c)(1)); Zone-A estimated BFE +4.0; outside-SFHA §5.01 +2.0 over the highest of {detention-pond 100-yr WSE, top of curb, natural ground}. §5.01(c)(3) additionally requires the lowest floor 1.0 ft above any down-gradient roadway or down-gradient drainage restraint (copy, not modeled — needs the roadway profile). The 500-yr (wse02pct) and 1% FIRM (wse1pct) bases compute today; the Atlas-14 / pre-Atlas-14 / Zone-A / site bases surface as pending until their WSE is supplied. NFIP non-residential dry-floodproofing alternatives exist; noted, not modeled. Subsection lettering confirmed against the primary FBC-Flood-Damage-Prevention-Regulations_10-08-24_signed.pdf (owner-read 2026-07-12).",
   },
   montgomery: { label: "Montgomery County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
   chambers: { label: "Chambers County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },

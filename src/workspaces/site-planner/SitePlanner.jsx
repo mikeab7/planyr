@@ -37,6 +37,7 @@ import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMil
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
+import { sampleWse02Point } from "./lib/fbcdWse.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import ViewMenu from "./components/ViewMenu.jsx";
@@ -6190,6 +6191,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // matched by WTR_NM). Ranks BELOW a manual BFE, ABOVE the interpolated BFE-line value.
       floodGeo.derivedXsWsel = xs.sections.length ? governingCrossSectionWsel({ point: bfePt, sections: xs.sections }) : null;
       floodGeo.xsFlags = { datumExcluded: xs.excludedDatum, total: xs.total, usable: xs.sections.length, state: xs.state };
+      // B770/V279 wiring — the DRAFT 0.2% (500-yr) WSE from FBCDD's Atlas-14 watershed-
+      // study raster mosaic, sampled at the same representative point the derived BFE
+      // uses. Fort Bend sites only (the mosaic covers that county; elsewhere the call is
+      // a guaranteed no-data). Failure isolation: an outage reads state "failed" (an
+      // honest UNKNOWN downstream — surfaced on the card), never a fabricated value; an
+      // out-of-coverage point reads "empty". The value NEVER overwrites a manual 0.2%
+      // WSE (precedence in computeMitigation) and always carries the DRAFT label.
+      floodGeo.derivedWse02 = null;
+      floodGeo.wse02Flags = { state: "not-applicable" };
+      if ((ctx?.authority?.jurisdiction?.county || []).some((c) => /fort\s*bend/i.test(String(c)))) {
+        try {
+          const [wLat, wLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+          const wseFt = await sampleWse02Point(wLat, wLng);
+          floodGeo.derivedWse02 = wseFt != null ? { wseFt, source: "fbcdd-wse02-draft" } : null;
+          floodGeo.wse02Flags = { state: wseFt != null ? "loaded" : "empty" };
+        } catch (_) {
+          floodGeo.wse02Flags = { state: "failed" };
+        }
+        if (tok !== drainTok.current) return; // superseded while sampling
+      }
       const checkedAt = Date.now();
       setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt });
       // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
@@ -6283,17 +6304,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     derivedBfeFt: fmDerivedBfe && Number.isFinite(fmDerivedBfe.bfeFt) ? fmDerivedBfe.bfeFt : null,
     derivedXsWselFt: fmDerivedXsWsel && Number.isFinite(fmDerivedXsWsel.wselFt) ? fmDerivedXsWsel.wselFt : null,
     wse02Ft: Number.isFinite(fmSettings.wse02Ft) ? fmSettings.wse02Ft : null,
-    // B763 — the wse02pct provider seam. No live 0.2% WSE source is wired yet (the FBCDD
-    // Atlas-14 watershed-studies endpoint needs a live browser check to lock its layer id —
-    // see WSE02_PROVIDER_NOTES / VERIFICATION V###), so this stays null and manual entry is
-    // the path; the engine's 02pct precedence (manual → xs-wsel-02) already consumes it.
-    derivedWse02Ft: null,
+    // B770 — the wse02pct provider seam, now fed by the FBCDD Atlas-14 watershed-study
+    // raster on Fort Bend sites (sampled at check time, above). DRAFT screening values:
+    // the source tag keeps the provenance visible everywhere the number surfaces, and a
+    // manual wse02Ft always wins (engine precedence).
+    derivedWse02Ft: floodGeo?.derivedWse02 && Number.isFinite(floodGeo.derivedWse02.wseFt) ? floodGeo.derivedWse02.wseFt : null,
+    derivedWse02Src: floodGeo?.derivedWse02 ? floodGeo.derivedWse02.source : null,
     avgFillDepthFt: Number.isFinite(fmSettings.avgFillDepthFt) ? fmSettings.avgFillDepthFt : null,
     sources: {
       existGrade: Number.isFinite(fmSettings.existGradeFt) ? "manual" : (drainCtxData?.groundElevFt != null ? "3dep" : null),
       padElev: Number.isFinite(fmSettings.padFfeFt) ? "manual" : null,
       derivedBfe: fmDerivedBfe ? "bfe-line-interp" : null,
       derivedXsWsel: fmDerivedXsWsel ? "xs-wsel" : null,
+      derivedWse02: floodGeo?.derivedWse02 ? floodGeo.derivedWse02.source : null,
     },
   };
   const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
@@ -6401,7 +6424,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pondFullyInundated,
     unanchoredInTrigger,
     pondExcavationCf,
-    floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length, derivedBfe: floodGeo.derivedBfe || null, bfeLineFlags: floodGeo.bfeLineFlags || null, derivedXsWsel: floodGeo.derivedXsWsel || null, xsFlags: floodGeo.xsFlags || null } : null,
+    floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length, derivedBfe: floodGeo.derivedBfe || null, bfeLineFlags: floodGeo.bfeLineFlags || null, derivedXsWsel: floodGeo.derivedXsWsel || null, xsFlags: floodGeo.xsFlags || null, derivedWse02: floodGeo.derivedWse02 || null, wse02Flags: floodGeo.wse02Flags || null } : null,
+    // B770 — where the 0.2% WSE feeding buildability came from (manual beats the DRAFT
+    // raster); card + print sheet both read this so the DRAFT label can't drift (PDF-PARITY).
+    wse02Src: fmElev.wse02Ft != null ? "manual" : fmElev.derivedWse02Ft != null ? fmElev.derivedWse02Src : null,
     buildability: fmBuild,
     floodMit: {
       settings: fmSettings,
@@ -7469,6 +7495,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } else if (mit && mit.intersectAcres > 0) {
       let v = mit.volumeCf != null ? `${f2(mit.volumeAcFt)} ac-ft` : "UNKNOWN";
       if (mit.volumeCf != null && mit.providers?.wse1pct === "bfe-line-interp") v += " (derived BFE — screening est.)";
+      if (mit.volumeCf != null && mit.providers?.wse02pct === "fbcdd-wse02-draft") v += " (0.2% from DRAFT study)";
       if (mit.volumeCf != null && d.floodGeo && d.floodGeo.truncated) v += " (floor — capped pull)";
       if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
       pairs.push(["Floodplain mitigation", v]);
@@ -7483,6 +7510,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let v = `${f2(b.ffe.requiredFfeFt)} ft`;
       if (b.ffe.status === "short") v += ` (pad ${f2(b.ffe.shortByFt)} ft short)`;
       if (b.ffe.pendingBases && b.ffe.pendingBases.length) v += " (max-of — more bases pending)";
+      // B770 (PDF-PARITY with the card's ⚑ note): an FFE governed by the 0.2% basis whose
+      // WSE came from the FBCDD DRAFT raster must carry the draft label on the sheet too.
+      if (b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft") v += " (0.2% WSE — DRAFT study)";
       pairs.push(["Required FFE", v]);
     } else if (b && b.ffe && (b.ffe.status === "unknown" || b.ffe.status === "no_rule")) {
       // Mirror the on-screen card's no_rule/unknown advisory so the sheet doesn't drop it
@@ -14417,7 +14447,10 @@ function YieldPanel({
             } else if (req && req.kind === "band") {
               // Band authorities NEVER render a single number.
               out.push(row("Detention required", `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`, "screening band"));
-              out.push(keyedNote(ruleBadge(req.rule), "badge"));
+              // The badge shows the GOVERNING per-acre band (e.g. "0.75–1.0 ac-ft/ac by
+              // outfall"), never the rule record's base rate — an unset-outfall Harris band
+              // read "0.65 ac-ft/ac" directly under the 0.75–1.0 figure (contradictory).
+              out.push(keyedNote(ruleBadge(req.rule, req.rateBandAcFtPerAc, req.rateBandLabel), "badge"));
               if (req.overlayRule) {
                 out.push(keyedNote(ruleBadge(req.overlayRule), "overlay-badge"));
                 if (req.overlayRule.params?.runoffReductionPct) out.push(warnNote(`${req.overlayRule.authorityLabel} also requires a ${req.overlayRule.params.runoffReductionPct}% runoff reduction on top of detention.`, "runoff"));
@@ -14434,7 +14467,7 @@ function YieldPanel({
               if (req.governing?.candidates?.length) {
                 for (const c of req.governing.candidates) {
                   out.push(row(`· if ${c.rule?.authorityLabel || c.authorityId}`, c.result?.kind === "band" ? `${f2(c.result.bandAcFt[0])}–${f2(c.result.bandAcFt[1])} ac-ft` : `${f2(c.acFt)} ac-ft`, "", true));
-                  if (c.rule) out.push(keyedNote(ruleBadge(c.rule), `cand-badge-${c.authorityId}`));
+                  if (c.rule) out.push(keyedNote(ruleBadge(c.rule, c.result?.rateAcFtPerAc ?? c.result?.rateBandAcFtPerAc, c.result?.rateBandLabel), `cand-badge-${c.authorityId}`));
                 }
               }
             } else if (d.reqCandidates) {
@@ -14442,7 +14475,7 @@ function YieldPanel({
               out.push(row("Detention required", "straddle"));
               for (const { aid, r } of d.reqCandidates) {
                 out.push(row(`· if ${r.rule?.authorityLabel || aid}`, r.kind === "band" ? `${f2(r.bandAcFt[0])}–${f2(r.bandAcFt[1])} ac-ft` : r.kind === "point" ? `${f2(r.requiredAcFt)} ac-ft` : "unknown", "", true));
-                if (r.rule) out.push(keyedNote(ruleBadge(r.rule, r.rateAcFtPerAc), `straddle-badge-${aid}`));
+                if (r.rule) out.push(keyedNote(ruleBadge(r.rule, r.rateAcFtPerAc ?? r.rateBandAcFtPerAc, r.rateBandLabel), `straddle-badge-${aid}`));
               }
               if (d.ambiguous[0]) out.push(warnNote(d.ambiguous[0].detail, "straddle"));
             } else if (d.authorityFlags.includes("jurisdiction-unavailable")) {

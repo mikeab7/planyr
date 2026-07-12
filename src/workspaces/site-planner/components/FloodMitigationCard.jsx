@@ -1,12 +1,13 @@
 import React from "react";
 import { formatAge } from "../lib/gisCache.js";
-import { NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, DERIVED_BFE_NOTE, DERIVED_XS_WSEL_NOTE } from "../lib/floodplainMitigation.js";
+import { NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, DERIVED_BFE_NOTE, DERIVED_XS_WSEL_NOTE, DERIVED_WSE02_DRAFT_NOTE } from "../lib/floodplainMitigation.js";
 
 // Human-readable label for a WSE provider tag (the engine emits terse strings).
 const WSE_PROVIDER_LABEL = {
   "static-bfe": "published BFE", "ao-depth": "AO depth + grade", "manual": "manual",
   "bfe-line-interp": "derived (BFE lines)", "xs-wsel": "derived (cross-sections)",
-  "xs-wsel-02": "derived (cross-sections)", "mixed": "mixed",
+  "xs-wsel-02": "derived (cross-sections)", "fbcdd-wse02-draft": "derived (FBCDD study — DRAFT)",
+  "mixed": "mixed",
 };
 const wseProvLabel = (p) => WSE_PROVIDER_LABEL[p] || p || "—";
 // Human-readable label for an FFE basis (single or multi-basis / governing).
@@ -84,6 +85,9 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
       {geo && geo.state === "failed" && (
         <div style={dangerStyle}>⚠ The flood-zone geometry source is unavailable — mitigation reads UNKNOWN, never a clear. Re-check shortly.</div>
       )}
+      {geo && geo.wse02Flags && geo.wse02Flags.state === "failed" && (
+        <div style={warnStyle}>⚠ Fort Bend's watershed-study server didn't answer — the DRAFT 0.2% WSE couldn't be read this check (an outage is never a value). Re-check shortly or enter a 0.2% WSE.</div>
+      )}
       {geo && geo.state === "loaded" && geo.zoneCount === 0 && (
         <div style={noteStyle}>No mapped flood zones intersect the site envelope (FEMA NFHL, verified source) — no mitigation trigger on this screening pull.</div>
       )}
@@ -126,6 +130,13 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
               ⚑ 1% WSE ≈ {f2(geo.derivedXsWsel.wselFt)}′ read from FEMA's regulatory cross-sections
               {geo.derivedXsWsel.detail && geo.derivedXsWsel.detail.wtrNm ? ` on ${geo.derivedXsWsel.detail.wtrNm}` : ""}
               {" "}— the effective-model regulatory water surface at the nearest reach; a jurisdiction may enforce a newer model. Enter a BFE to override.
+            </div>
+          )}
+          {/* B770 — the 0.2% band was priced off FBCDD's Atlas-14 watershed-study raster:
+              DRAFT results, so the number must never read as an effective value. */}
+          {geo && geo.derivedWse02 && mit.providers.wse02pct === "fbcdd-wse02-draft" && (
+            <div style={warnStyle}>
+              ⚑ 0.2% WSE ≈ {f2(geo.derivedWse02.wseFt)}′ read from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results, screening only. Enter a 0.2% WSE to override.
             </div>
           )}
           {/* BFE lines are mapped but publish a datum we can't safely compare — say why
@@ -175,6 +186,11 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
           {b.ffe.pendingBases && b.ffe.pendingBases.length > 0 && (
             <div style={noteStyle}>The finished floor must clear the HIGHEST of several bases (more-restrictive controls governs). Not computed here yet — enter or confirm: {b.ffe.pendingBases.map((pb) => `${pb.label || pb.basis} +${pb.plusFt}′`).join(" · ")}.</div>
           )}
+          {/* B770 — the governing FFE basis is the 0.2% WSE and that WSE came from the
+              FBCDD DRAFT raster: the verdict itself must carry the draft caveat. */}
+          {(b.ffe.status === "pass" || b.ffe.status === "short") && b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft" && (
+            <div style={warnStyle}>⚑ The 0.2% WSE behind this required FFE is a DRAFT Fort Bend watershed-study value — screening only; confirm before design.</div>
+          )}
           {b.pathway && (
             <div style={b.pathway.fillToElevate === "restricted" ? warnStyle : noteStyle}>
               {b.pathway.fillToElevate === "restricted" ? "⚠ " : ""}{b.pathway.note}
@@ -190,6 +206,7 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
         {NAVD88_NOTE} {NEWER_MODEL_NOTE}
         {geo && geo.derivedBfe && <><br />{DERIVED_BFE_NOTE}</>}
         {geo && geo.derivedXsWsel && <><br />{DERIVED_XS_WSEL_NOTE}</>}
+        {geo && geo.derivedWse02 && <><br />{DERIVED_WSE02_DRAFT_NOTE}</>}
         <br />{EXCLUSIONS_NOTE}
         <br />{OFFSITE_NOTE} Screening only — confirm with your engineer and the reviewing authority.
       </div>

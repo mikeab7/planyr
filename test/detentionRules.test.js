@@ -120,6 +120,19 @@ describe("computeRequiredDetention — HCFCD outfall-type minimum (B761, unincor
     expect(r.bandAcFt[1]).toBeCloseTo(10, 4);  // 1.0 × 10
     expect(r.flags).toContain("outfall-type-unknown");
     expect(r.flags).toContain("hced-infra-outfall-min");
+    // The governing per-acre band rides the result so the UI badge can show it
+    // (V277 live-check nit: the badge under the band read the 0.65 PCPM baseline).
+    expect(r.rateBandAcFtPerAc).toEqual([0.75, 1]);
+    expect(r.rateBandLabel).toBe("by outfall");
+  });
+  it("the rule badge for an unset-outfall band shows the governing band, never the 0.65 baseline", () => {
+    const r = computeRequiredDetention({ acres: 10, authorityId: "hcfcd", outfallType: "unknown" });
+    const b = ruleBadge(r.rule, r.rateBandAcFtPerAc, r.rateBandLabel);
+    expect(b).toMatch(/0\.75–1\.0 ac-ft\/ac by outfall/);
+    expect(b).not.toMatch(/0\.65/);
+    // a point result's badge is unchanged (explicit rate still wins)
+    const pt = computeRequiredDetention({ acres: 10, authorityId: "hcfcd", outfallType: "stormSewer" });
+    expect(ruleBadge(pt.rule, pt.rateAcFtPerAc)).toMatch(/0\.75 ac-ft\/ac/);
   });
   it("no outfallType at all (default) → the SAME honest band, not a quiet 0.65", () => {
     const r = computeRequiredDetention({ acres: 10, authorityId: "hcfcd" });
