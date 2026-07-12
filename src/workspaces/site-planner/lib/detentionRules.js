@@ -443,12 +443,18 @@ function pointResult(acFt, rate, basis, rule, flags = [], governing = null) {
     caveat: SCREENING_CAVEAT,
   };
 }
-function bandResult(loHi, basis, rule, flags = []) {
+function bandResult(loHi, basis, rule, flags = [], rateBandAcFtPerAc = null, rateBandLabel = null) {
   return {
     kind: "band",
     requiredAcFt: null,
     bandAcFt: [round4(loHi[0]), round4(loHi[1])],
     rateAcFtPerAc: null,
+    // The GOVERNING per-acre rate band + how to caption it ("by outfall" vs "screening
+    // band") — carried so the UI's rule badge can show the band that actually governs,
+    // never the rule record's base rate (the B768 follow-up: an unset-outfall Harris
+    // band showed the 0.65 PCPM baseline directly under the 0.75–1.0 band).
+    rateBandAcFtPerAc: rateBandAcFtPerAc ? [rateBandAcFtPerAc[0], rateBandAcFtPerAc[1]] : null,
+    rateBandLabel,
     basis,
     rule,
     governing: null,
@@ -539,7 +545,7 @@ export function computeRequiredDetention({
         : `Planyr screening band — no published flat rate${p.table && !p.table.transcribed ? `; exact figures ${p.table.figures} pending transcription` : ""}`;
     }
     const basis = `${lo}–${hi} ac-ft/ac (${why}) × ${acres.toFixed(2)} ac`;
-    return bandResult([lo * acres, hi * acres], basis, rule, flags);
+    return bandResult([lo * acres, hi * acres], basis, rule, flags, [lo, hi], "screening band");
   }
 
   // ---- municipal overlays: dispatch through the parent -------------------
@@ -602,6 +608,8 @@ export function computeRequiredDetention({
       `${lo}–${hi} ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer ${lo} vs roadside-ditch ${hi}; set the outfall type for the exact point) × ${acres.toFixed(2)} ac`,
       rule,
       [...baseFlags, "outfall-type-unknown"],
+      [lo, hi],
+      "by outfall",
     );
   }
 
@@ -696,10 +704,16 @@ const fmtYm = (iso) => {
   const [y, m] = iso.split("-").map(Number);
   return `${MONTHS[(m || 1) - 1]} ${y}`;
 };
-export function ruleBadge(rule, rateAcFtPerAc = null) {
+export function ruleBadge(rule, rateAcFtPerAc = null, rateBandLabel = null) {
   if (!rule) return "no rule record";
   const label = rule.authorityLabel || rule.authority;
+  // A band result passes its governing per-acre band as an ARRAY (+ its caption) so the
+  // badge shows the rate that actually governs — the rule record's base rateAcFtPerAc is
+  // only a fallback for point results (the hcfcd record's 0.65 is the PCPM methods
+  // baseline, NOT the unset-outfall 0.75–1.0 minimum shown above the badge).
+  const bandNum = (n) => (Number.isInteger(n) ? n.toFixed(1) : String(n)); // 1 → "1.0" so a band reads 0.75–1.0
   const rate =
+    Array.isArray(rateAcFtPerAc) ? `${bandNum(rateAcFtPerAc[0])}–${bandNum(rateAcFtPerAc[1])} ac-ft/ac ${rateBandLabel || "screening band"}` :
     rateAcFtPerAc != null ? `${rateAcFtPerAc} ac-ft/ac` :
     rule.params?.rateAcFtPerAc != null ? `${rule.params.rateAcFtPerAc} ac-ft/ac` :
     rule.params?.bandAcFtPerAc ? `${rule.params.bandAcFtPerAc[0]}–${rule.params.bandAcFtPerAc[1]} ac-ft/ac screening band` :

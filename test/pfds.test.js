@@ -70,16 +70,18 @@ describe("parsePfdsText — LOUD-FAILURE on out-of-coverage / short body", () =>
   });
 });
 
-describe("WSE02_PROVIDER_NOTES — documented (not a live registry row)", () => {
-  it("documents MAAPnext and M3 as pointers, and FBCDD as an UNCONFIRMED candidate", () => {
+describe("WSE02_PROVIDER_NOTES — provenance notes (FBCDD now LIVE-wired, V279)", () => {
+  it("documents MAAPnext and M3 as pointers, and FBCDD as the wired raster source", () => {
     expect(WSE02_PROVIDER_NOTES.maapnext.status).toMatch(/pointer/i);
     expect(WSE02_PROVIDER_NOTES.m3.status).toMatch(/pointer/i);
-    expect(WSE02_PROVIDER_NOTES.fbcdd.status).toMatch(/candidate|unconfirmed/i);
-    // FBCDD layer id / field stay honestly null until a live browser locks them.
+    expect(WSE02_PROVIDER_NOTES.fbcdd.status).toMatch(/live.*wired/i);
+    expect(WSE02_PROVIDER_NOTES.fbcdd.endpoint).toBe("https://gisportal.fortbendcountytx.gov/image/rest/services/500YR_WSE/ImageServer");
+    // Raster mosaic — consumed via getSamples; there is no layer id / field to name.
     expect(WSE02_PROVIDER_NOTES.fbcdd.layerId).toBeNull();
     expect(WSE02_PROVIDER_NOTES.fbcdd.field).toBeNull();
-    expect(WSE02_PROVIDER_NOTES.fbcdd.candidateFolders).toEqual(["Drainage_Base_Data", "FEMA", "FLOODZONE"]);
-    expect(WSE02_PROVIDER_NOTES.fbcdd.portalItem).toBe("b1882e732fa042aeaa6e2fc7447f0377");
+    // The dead b1882e… pointer was replaced with the resolving Draft-Results web map.
+    expect(WSE02_PROVIDER_NOTES.fbcdd.portalItem).toBe("0d4791f2c9d143eeb62696850ce27e45");
+    expect(WSE02_PROVIDER_NOTES.fbcdd.note).toMatch(/DRAFT/);
     // NOAA endpoint carried for the production same-origin proxy (no browser fetch).
     expect(WSE02_PROVIDER_NOTES.noaaPfds.endpoint).toContain("fe_text_mean.csv");
   });

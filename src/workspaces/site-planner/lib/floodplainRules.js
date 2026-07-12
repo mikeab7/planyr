@@ -6,11 +6,10 @@
  * (easementRules.js pattern). Stored in localStorage so edits persist per device.
  *
  * EXCEPTION — the Fort Bend (B758) and Harris (B760) records ship `verified:true`:
- * their values are HIGH-confidence triangulated from verbatim search-indexed official
- * text (FDPR / Interim Atlas-14 Criteria / county floodplain regs) + owner
- * verification. The primary regulation PDFs were egress-blocked this session, so each
- * note keeps the exact subsection lettering honest ("confirm vs the primary PDF") and
- * does NOT claim we rendered the PDF.
+ * their values were triangulated from verbatim search-indexed official text (FDPR /
+ * Interim Atlas-14 Criteria / county floodplain regs) + owner verification, and the
+ * exact subsection lettering was then CONFIRMED against the primary regulation PDFs
+ * (owner-read 2026-07-12, PR #594): Harris §4.07(e); Fort Bend §5.02(h)(1)/(h)(2).
  *
  * Never flip `verified` to true without pulling the CURRENT ordinance text (or
  * triangulating verbatim official text) and recording `source` + `sourceDate` alongside it.
@@ -55,7 +54,7 @@ export const DEFAULT_FLOODPLAIN_RULES = {
     source: "Harris County Regulations for Floodplain Management & Infrastructure Regulations, eff. 7/9/2019 (Atlas-14 ed.); §4.07(e) 1:1 offset.",
     sourceDate: "2019-07-09",
     verified: true,
-    note: "§4.07(e): 1:1 hydraulically-equivalent offset for a storage/conveyance reduction from fill in the 1% (100-yr) SFHA AND the 0.2% (500-yr) floodplain incl. shaded Zone X, within the same watershed. Coastal-area exemption: tidally-influenced reaches inside the mapped coastal boundary are exempt from the 500-yr offset. The county offsets CONVEYANCE reductions too: large contiguous fringe fill can require a hydraulic / no-rise analysis beyond this volume screen. Subsection lettering per secondary reading; confirm §4.07(e) vs the primary fpmregs-effect190709.pdf (not rendered this session).",
+    note: "§4.07(e): 1:1 hydraulically-equivalent offset for a storage/conveyance reduction from fill in the 1% (100-yr) SFHA AND the 0.2% (500-yr) floodplain incl. shaded Zone X, within the same watershed. Coastal-area exemption: tidally-influenced reaches inside the mapped coastal boundary are exempt from the 500-yr offset. The county offsets CONVEYANCE reductions too: large contiguous fringe fill can require a hydraulic / no-rise analysis beyond this volume screen. Subsection lettering confirmed against the primary fpmregs-effect190709.pdf (owner-read 2026-07-12).",
   },
   fortbend: {
     label: "Fort Bend County",
@@ -67,7 +66,7 @@ export const DEFAULT_FLOODPLAIN_RULES = {
     source: "FBC Flood Damage Prevention Regs §5.02(h)(1) (adopted 3/4/2014, am. 10/8/2024) + FBCDD Interim Atlas-14 Criteria §9 (eff. 2020-01-01, rev. 9/2021).",
     sourceDate: "2024-10-08",
     verified: true,
-    note: "Trigger is a storage/conveyance REDUCTION from SFHA fill (not literally any fill): a 1:1 hydraulically-equivalent offset, volume-total method (no HCFCD elevation-increment table). Pre-FIRM single-family-lot exemption per §5.02(h)(2). FBCDD Interim Atlas-14 Criteria §9 extends the offset to any storage reduction in the pre-Atlas-14 500-yr (0.2%) floodplain. Subsection lettering per secondary reading of search-indexed text; confirm §5.02(h)(1)/(h)(2) vs the primary regulation PDF (not rendered this session).",
+    note: "Trigger is a storage/conveyance REDUCTION from SFHA fill (not literally any fill): a 1:1 hydraulically-equivalent offset, volume-total method (no HCFCD elevation-increment table). Pre-FIRM single-family-lot exemption per §5.02(h)(2). FBCDD Interim Atlas-14 Criteria §9 extends the offset to any storage reduction in the pre-Atlas-14 500-yr (0.2%) floodplain. Subsection lettering confirmed against the primary FBC-Flood-Damage-Prevention-Regulations_10-08-24_signed.pdf (owner-read 2026-07-12).",
   },
   montgomery: {
     label: "Montgomery County",

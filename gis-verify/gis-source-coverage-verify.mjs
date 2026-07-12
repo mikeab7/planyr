@@ -52,7 +52,50 @@ function envelopeParam(fixture) {
   return [lng - d, lat - d, lng + d, lat + d].join(",");
 }
 
+// Raster (ImageServer) rows: no /query catalog — reachability reads the mosaic metadata
+// (bandCount/pixelType) and the fixtures are point getSamples with an expected value
+// range (in coverage) or an expected no-data empty value (out of coverage).
+async function checkRasterSource(key, s) {
+  const problems = [];
+  const notes = [];
+  let meta;
+  try {
+    meta = await getJson(`${s.serviceUrl}?f=json`);
+  } catch (e) {
+    return { problems: [`${key}: UNREACHABLE — ${e.message}`], notes };
+  }
+  if (meta.error || !meta.bandCount) {
+    problems.push(`${key}: not an image service any more? (no bandCount in metadata)`);
+  } else {
+    notes.push(`${key}: reachable, ${meta.bandCount} band(s), ${meta.pixelType}.`);
+  }
+  for (const fx of s.sampleFixtures || []) {
+    const geometry = JSON.stringify({ x: fx.point[0], y: fx.point[1], spatialReference: { wkid: 4326 } });
+    const u = `${s.serviceUrl}/getSamples?geometry=${encodeURIComponent(geometry)}&geometryType=esriGeometryPoint` +
+      `&interpolation=RSP_BilinearInterpolation&returnFirstValueOnly=true&f=json`;
+    try {
+      const j = await getJson(u);
+      const raw = j.samples && j.samples[0] ? j.samples[0].value : undefined;
+      const v = parseFloat(raw);
+      if (fx.expectNoData) {
+        if (isFinite(v)) problems.push(`${key} fixture "${fx.label}": expected no-data, got ${v} — coverage extent changed?`);
+        else notes.push(`${key} fixture "${fx.label}": no-data as expected ✓`);
+      } else if (!isFinite(v)) {
+        problems.push(`${key} fixture "${fx.label}": no sample value returned (service moved / extent shrank?).`);
+      } else if (fx.expectValueRange && (v < fx.expectValueRange[0] || v > fx.expectValueRange[1])) {
+        problems.push(`${key} fixture "${fx.label}": ${v} outside expected ${fx.expectValueRange.join("–")} — datum/units/model change?`);
+      } else {
+        notes.push(`${key} fixture "${fx.label}": ${v} ✓`);
+      }
+    } catch (e) {
+      problems.push(`${key} fixture "${fx.label}": getSamples failed — ${e.message}`);
+    }
+  }
+  return { problems, notes };
+}
+
 async function checkSource(key, s) {
+  if (s.kind === "raster") return checkRasterSource(key, s);
   const problems = [];
   const notes = [];
   const eps = layerEndpoints(s);

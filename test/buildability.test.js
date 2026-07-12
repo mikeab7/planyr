@@ -101,15 +101,24 @@ describe("Fort Bend multi-basis FFE — MAX over computable bases (B759/B760)", 
     expect(byBasis.atlas14_100yr).toBe(2);        // RESOLVED +2.0 (not +2.5)
     expect(byBasis.pre_atlas14_100yr).toBe(2.5);  // the +2.5 lives HERE
     expect(byBasis.wse02pct).toBe(2);             // pre-Atlas-14 500-yr +2.0
-    expect(byBasis.wse1pct).toBe(1.5);            // FEMA FIRM BFE 18 in (corrected)
+    expect(byBasis.wse1pct).toBe(2);              // FEMA FIRM BFE +2.0 — §5.02(c)(1), signed 10-08-2024 (was +1.5 per the superseded 2023-09 18-in rule)
     expect(byBasis.zone_a_est_bfe).toBe(4);       // Zone-A no-data +4.0
     expect(byBasis.site).toBe(2);                 // outside-SFHA §5.01 +2.0
   });
 
+  it("the §5.02(c)(1)/§5.01(c)(3) provenance rides the record (owner-confirmed 2026-07-12)", () => {
+    expect(fortbend.source).toMatch(/§5\.02\(c\)/);
+    expect(fortbend.note).toMatch(/§5\.02\(c\)\(1\)/);                 // FIRM BFE +2.0 pinned to its subsection
+    expect(fortbend.note).toMatch(/down-gradient roadway/i);           // §5.01(c)(3) +1 ft basis (copy, not modeled)
+    expect(fortbend.note).toMatch(/confirmed against the primary/i);   // lettering caveat resolved, not dropped silently
+    expect(fortbend.note).not.toMatch(/confirm subsection lettering/i);
+    expect(harris.note).not.toMatch(/confirm subsection lettering/i);
+  });
+
   it("MAX governs: the larger of two computable bases wins, with the correct governingBasis", () => {
-    // wse1pct 110 + 1.5 = 111.5 ; wse02pct 100 + 2 = 102 → 111.5 governs (wse1pct)
+    // wse1pct 110 + 2 = 112 ; wse02pct 100 + 2 = 102 → 112 governs (wse1pct)
     const r = requiredFfe(fortbend, { wse02Ft: 100, wse1pctFt: 110 });
-    expect(r.requiredFfeFt).toBeCloseTo(111.5, 6);
+    expect(r.requiredFfeFt).toBeCloseTo(112, 6);
     expect(r.governingBasis.basis).toBe("wse1pct");
     expect(r.unknownReason).toBeNull();
     // and the other direction: bump wse02pct so IT governs
