@@ -12,6 +12,20 @@ _Last updated: 2026-07-12._
       account (a 14.66-acre Cypress-area parcel with a test pad elevation typed in). It's safe to delete
       whenever you notice it — or leave it; it hurts nothing. Nothing else was changed in your projects.
 
+## 🧩 Turn on DWG uploads (deploy the converter — needs one cloud account)
+- [ ] **Decide the host + do the account setup, then a Cowork session deploys it with you.** DWG files
+      can't be read in the browser — a tiny converter has to run on a server. It's built and tested; what's
+      left needs one of your cloud accounts (the converter runs under your billing, so I can't stand it up
+      from here). **The design is cost-safe on purpose:** the converter is NOT put on the open internet —
+      it hides behind planyr.io and only answers signed-in you, behind a secret, with a hard cap on how much
+      it can ever run. So the "someone hacks it and runs up my bill" case can't happen, and real use is free.
+      The full plan (what to build, the exact deploy commands, and your part) is written up for a Claude
+      Cowork session in **`docs/DWG-DEPLOY-BRIEF.md`** (Claude handed you this file in chat 2026-07-12).
+      **Your part:** pick the host (Google Cloud = cheapest but needs a card; or a no-card free host that's
+      slightly slower on the first file of the day), then create the account/project and paste ~2 settings —
+      Cowork drives the rest. Until this is done, dropping a DWG just says "export a DXF instead" (which works
+      today), so nothing is broken by waiting.
+
 ## 🌐 Open your environment's network so I can load real Houston road data (thoroughfare epic)
 - [x] ~~**Allow the GIS servers, then start a fresh session.**~~ **DONE — you opened `mycity2.houstontx.gov` +
       `www.houstontx.gov`, and this session loaded the real data (2026-07-11).** All **26,697** City of Houston major
