@@ -13,6 +13,10 @@ export default function JurisdictionBadge({ badge }) {
     "Jurisdiction of the active parcel — screening only; verify with the jurisdiction.",
     badge.sourceName ? `Source: ${badge.sourceName}` : "",
     age ? `As of ${age}` : "",
+    // B793 — "edge only" = the city's limits touch only the parcel edge (the centroid is
+    // outside), so that city's rules are unlikely to govern the site as a whole.
+    badge.edgeOnlyCities?.length ? `"Edge only": ${badge.edgeOnlyCities.map((c) => `City of ${c}`).join(", ")} touches only the parcel edge — unlikely to govern the site as a whole.` : "",
+    badge.etjNote || "",
     badge.straddle ? "⚑ Straddles a boundary — touches multiple jurisdictions." : "",
   ].filter(Boolean).join("\n");
   return (

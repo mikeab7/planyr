@@ -502,6 +502,7 @@ export function computeRequiredDetention({
   removedImperviousAcres = 0,
   outfallType = null, // null | "stormSewer" | "roadsideDitch" | "unknown" — HCED outfall-type minimum (unincorporated Harris)
   hcfcdMethod = null, // null (default → outfall-type minimum) | "pcpm" (→ 0.65 HCFCD PCPM methods baseline)
+  hcfcdApplicable = true, // B789 — false when the identify county excludes Harris: HCFCD ends at the Harris line, so neither the greater-of candidate nor the PCPM deferral may price
   onDate = null,
 } = {}) {
   if (!(acres > 0)) return { kind: "none", requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null, basis: "no site area", rule: null, governing: null, flags: [], caveat: SCREENING_CAVEAT };
@@ -648,6 +649,17 @@ export function computeRequiredDetention({
       const hRate = hcfcdRule.params.rateAcFtPerAc;
       const hcfcdCand = { authorityId: "hcfcd", acFt: round2(hRate * acres), basis: `${hRate} ac-ft/ac × ${acres.toFixed(2)} ac (entire tract)`, rule: hcfcdRule };
       const cRate = p.largeTract?.conflictRateAcFtPerAc ?? 0.75; // COH impervious rate — data-driven
+      if (hcfcdApplicable === false) {
+        // B789 — outside Harris County there is no HCFCD candidate and no PCPM deferral.
+        // Reachable only via an explicit COH override off-Harris (post-B754/B788 detection
+        // can't resolve coh there) — price COH's own impervious rate, loudly flagged.
+        const baseAc = imperviousAcres != null ? imperviousAcres : acres;
+        const flags = ["hcfcd-not-applicable"];
+        if (imperviousAcres == null) flags.push("impervious-unknown");
+        if (rule.secondarySource) flags.push("secondary-source");
+        const baseLabel = imperviousAcres != null ? `${baseAc.toFixed(2)} ac impervious` : `${baseAc.toFixed(2)} ac (full tract — impervious % unknown, conservative upper bound)`;
+        return pointResult(cRate * baseAc, cRate, `${cRate} ac-ft/ac × ${baseLabel} (City of Houston large-tract rate; the HCFCD compare does not apply — site is outside Harris County)`, rule, flags);
+      }
       if (inCityLimits && imperviousAcres != null && drainsToHcfcdChannel !== false) {
         const cohCand = { authorityId: "coh", acFt: round2(cRate * imperviousAcres), basis: `${cRate} ac-ft/ac × ${imperviousAcres.toFixed(2)} ac impervious`, rule };
         const gov = governingRequirement([hcfcdCand, cohCand]);
@@ -1484,28 +1496,65 @@ export function slimDrainageContext(ctx) {
   };
 }
 
+/* The flag / overlay vocabulary authorityForJurisdiction itself produces. Hydrate uses
+ * this to split a stored check's derived facts (replaced by a fresh re-derivation) from
+ * its query-outcome facts (mud overlays, jurisdiction-partial, …), which describe the
+ * check-time fetches and can't be re-derived from the raw jurisdiction names. */
+const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "no-criteria-modeled", "city-criteria-unverified"]);
+const AUTHORITY_DERIVED_OVERLAY_KINDS = new Set(["etj", "municipal"]);
+
 /* Rebuild a read-context-shaped object from a slim summary: re-derive the rule record
  * (ruleFor) and the watershed overlays (from the module constant) so a reloaded readout
  * matches a fresh check for everything that doesn't need geometry. Geometry-dependent
  * extras (floodplain-mitigation footprints, the cross-section-crosses-channel test) stay
  * absent (channel.geometry/floodGeo null) — the render path null-guards both. Marks
- * `restored:true`. Pure. */
+ * `restored:true`. Pure.
+ *
+ * B788 — the AUTHORITY VERDICT is re-derived, never trusted. A remembered check stores
+ * both the derived primaryReviewerId and the raw jurisdiction facts; replaying the stored
+ * verdict froze it at check time, so an authority-rule fix (the B754 Houston-ETJ class)
+ * never self-healed remembered checks. When the raw facts are present we re-run
+ * authorityForJurisdiction on them and rebuild primary/channelAuthority/overlays/
+ * ambiguous/flags from ITS output, keeping only the stored query-outcome entries the
+ * derivation can't reproduce. Factless slims (legacy checks) keep the stored id. */
 export function hydrateDrainageContext(slim) {
   if (!slim) return null;
   const a = slim.authority || {};
-  const primaryReviewer = a.primaryReviewerId ? { authorityId: a.primaryReviewerId, rule: ruleFor(a.primaryReviewerId) } : null;
+  const jur = {
+    city: a.jurisdiction?.city || [],
+    county: a.jurisdiction?.county || [],
+    etj: a.jurisdiction?.etj || [],
+  };
+  const hasFacts = jur.city.length > 0 || jur.county.length > 0 || jur.etj.length > 0;
+  const storedFlags = a.flags || [];
+  const storedOverlays = a.overlays || [];
+  let primaryReviewer, channelAuthority, overlays, ambiguous, flags;
+  if (hasFacts) {
+    const rd = authorityForJurisdiction(jur);
+    primaryReviewer = rd.primary ? { authorityId: rd.primary, rule: ruleFor(rd.primary) } : null;
+    channelAuthority = rd.channelAuthority;
+    overlays = [...rd.overlays, ...storedOverlays.filter((ov) => !AUTHORITY_DERIVED_OVERLAY_KINDS.has(ov?.kind))];
+    ambiguous = rd.ambiguous; // straddles derive purely from the facts — stored copies are stale
+    flags = [...rd.flags, ...storedFlags.filter((f) => !AUTHORITY_DERIVED_FLAGS.has(f))];
+  } else {
+    primaryReviewer = a.primaryReviewerId ? { authorityId: a.primaryReviewerId, rule: ruleFor(a.primaryReviewerId) } : null;
+    channelAuthority = a.channelAuthority ?? null;
+    overlays = storedOverlays;
+    ambiguous = a.ambiguous || [];
+    flags = storedFlags;
+  }
   const watershedNames = slim.watershed?.names || [];
   const watershedOverlays = WATERSHED_OVERLAYS.filter((ov) => watershedNames.some((n) => ov.match.test(n)));
   return {
     restored: true,
     authority: {
       primaryReviewer,
-      channelAuthority: a.channelAuthority ?? null,
-      overlays: a.overlays || [],
-      ambiguous: a.ambiguous || [],
-      flags: a.flags || [],
+      channelAuthority,
+      overlays,
+      ambiguous,
+      flags,
       mud: { state: a.mudState ?? null, districts: [] },
-      jurisdiction: { city: a.jurisdiction?.city || [], county: a.jurisdiction?.county || [], etj: a.jurisdiction?.etj || [] },
+      jurisdiction: jur,
       sources: [],
       note: SCREENING_CAVEAT,
     },

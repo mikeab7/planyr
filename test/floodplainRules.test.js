@@ -8,6 +8,7 @@ import {
   saveFloodplainRules,
   defaultFloodJurForAuthority,
   defaultFloodJurForCounty,
+  floodJurCounty,
   triggerClasses,
 } from "../src/workspaces/site-planner/lib/floodplainRules.js";
 
@@ -126,5 +127,16 @@ describe("jurisdiction defaulting", () => {
     expect(triggerClasses(DEFAULT_FLOODPLAIN_RULES.coh)).toEqual(["1pct", "02pct"]);
     expect(triggerClasses(DEFAULT_FLOODPLAIN_RULES.harris)).toEqual(["1pct", "02pct"]); // B760 now spans the 500-yr band
     expect(triggerClasses(null)).toEqual(["1pct"]);
+  });
+  it("B790 — floodJurCounty maps a rules key to its implied county (generic → none)", () => {
+    expect(floodJurCounty("coh")).toBe("harris"); // COH sits inside Harris
+    expect(floodJurCounty("harris")).toBe("harris");
+    expect(floodJurCounty("fortbend")).toBe("fort bend"); // matches the identify county's display name
+    expect(floodJurCounty("Waller")).toBe("waller");
+    expect(floodJurCounty("generic")).toBeNull(); // implies no county — never mismatches
+    expect(floodJurCounty(null)).toBeNull();
+    // the mismatch predicate the picker uses: identify "Fort Bend" vs a picked harris rule
+    expect("Fort Bend".toLowerCase().includes(floodJurCounty("harris"))).toBe(false);
+    expect("Fort Bend".toLowerCase().includes(floodJurCounty("fortbend"))).toBe(true);
   });
 });

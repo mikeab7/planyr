@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  candidateCountiesForPoint, COUNTIES_MAP, STATEWIDE_KEYS,
+  candidateCountiesForPoint, COUNTIES_MAP, countyKeyForName, STATEWIDE_KEYS,
   STATEWIDE_PARCEL_LAYER, statewideFallbackFor,
 } from "../src/workspaces/site-planner/lib/counties.js";
 
@@ -98,5 +98,21 @@ describe("statewideFallbackFor — county-scoped TxGIO backup (B244/B787)", () =
 
   it("an unknown county → null", () => {
     expect(statewideFallbackFor("nowhere")).toBeNull();
+  });
+});
+
+describe("countyKeyForName (B792) — display name → configured routing key, never a guess", () => {
+  it("maps the TxDOT boundary names onto configured keys", () => {
+    expect(countyKeyForName("Fort Bend")).toBe("fortbend");
+    expect(countyKeyForName("Harris")).toBe("harris");
+    expect(countyKeyForName("Waller County")).toBe("waller"); // 'County' suffix stripped
+    expect(countyKeyForName("CHAMBERS")).toBe("chambers");
+  });
+  it("unconfigured counties and the statewide pseudo-key → null (can never corrupt the stored row)", () => {
+    expect(countyKeyForName("Galveston")).toBeNull();   // real county, no configured CAD entry
+    expect(countyKeyForName("Montgomery")).toBeNull();  // ditto — a heal must keep the stored key
+    expect(countyKeyForName("txgio_statewide")).toBeNull(); // statewide pseudo-key is excluded
+    expect(countyKeyForName("")).toBeNull();
+    expect(countyKeyForName(null)).toBeNull();
   });
 });

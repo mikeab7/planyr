@@ -153,3 +153,12 @@ export const defaultFloodJurForCounty = (county) =>
 /* The zone classes a rule's trigger obligates (feeds computeMitigation). */
 export const triggerClasses = (rule) =>
   rule && rule.trigger === "1pct_plus_02pct" ? ["1pct", "02pct"] : ["1pct"];
+
+/* B790 — the county a rules key IMPLIES (lowercase display name), for the picker's
+ * county-mismatch warning: a hand-picked "harris" rule on a site whose identify county
+ * reads Fort Bend contradicts the map and should say so. `generic` implies no county
+ * (never mismatches). Pure. */
+export const floodJurCounty = (jurKey) =>
+  ({ coh: "harris", harris: "harris", fortbend: "fort bend", montgomery: "montgomery", chambers: "chambers", waller: "waller" }[
+    String(jurKey || "").toLowerCase()
+  ] || null);

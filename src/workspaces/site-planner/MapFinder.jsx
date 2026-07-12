@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
@@ -1121,12 +1121,27 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // Always capture the planner underlay from Esri: it supports image `export`
   // (USGS tiles render on the map but its export op returns no image). The
   // boundary aligns to either source, so the planner aerial stays reliable.
-  const planSelected = () => {
+  const planSelected = async () => {
     const asm = computeAssembly(selected, BASEMAPS.esri.export);
+    if (!asm) return;
     // County now comes from the parcels themselves (auto-resolved at click), not a
     // pre-pick — use the last-selected parcel's county.
-    const county = selected[selected.length - 1]?.county || selected.find((s) => s.county)?.county || null;
-    if (asm) onUseParcels({ ...asm, name: selected[selected.length - 1]?.addr || "Untitled site", county });
+    let county = selected[selected.length - 1]?.county || selected.find((s) => s.county)?.county || null;
+    // B792 — the answering-candidate key can be WRONG and it persists to the site row
+    // forever: overlapping county bboxes + a spatially-unscoped statewide source let e.g.
+    // "waller" answer for a Fort Bend parcel (scopeWhere applies only to text search).
+    // Confirm against the TxDOT county-boundary layer before handing off (SWR-cached,
+    // ≤3s); on timeout/outage/unrecognized county keep the click-time key — the planner's
+    // load-time self-heal (B792) corrects it later.
+    try {
+      const ans = await Promise.race([
+        countyAtPoint(asm.origin.lon, asm.origin.lat),
+        new Promise((res) => setTimeout(() => res(null), 3000)),
+      ]);
+      const key = ans?.name ? countyKeyForName(ans.name) : null;
+      if (key && key !== county) county = key;
+    } catch (_) { /* keep the click-time key */ }
+    onUseParcels({ ...asm, name: selected[selected.length - 1]?.addr || "Untitled site", county });
   };
 
   const asm = selected.length ? computeAssembly(selected, BASEMAPS.esri.export) : null;

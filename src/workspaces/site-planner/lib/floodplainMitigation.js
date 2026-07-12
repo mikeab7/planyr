@@ -501,7 +501,7 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
         bucket.unknown =
           wse == null
             ? (z.cls === "02pct"
-                ? "0.2% water-surface elevation not entered (not an NFHL attribute — FEMA FIS profile / HCFCD model data)"
+                ? "no 0.2% (500-yr) WSE — enter it from the EFFECTIVE FIS profile (not an NFHL attribute; no derived value was available this check)"
                 : z.unstudiedA
                   ? "unstudied Zone A — BFE undetermined from the map"
                   : "no published BFE on this reach — enter the BFE (the common case on AE polygons)")
@@ -510,6 +510,18 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
               : "existing-grade elevation unavailable";
       }
     }
+  }
+
+  // B794 — sanity guard: a 0.2% (500-yr) water surface can never sit BELOW the 1% (100-yr)
+  // surface on the same reach. A DERIVED 0.2% reading lower than the best-known 1% WSE is a
+  // study/vintage mismatch (e.g. an Atlas-14 draft grid against an older effective profile) —
+  // FLAG it loudly, never clamp: the value still shows, labeled, and the user decides.
+  if (derived02 != null) {
+    const ref1 = Math.max(
+      ...zones.filter((z) => z.cls === "1pct" && z.staticBfeFt != null).map((z) => z.staticBfeFt),
+      manualBfe ?? -Infinity, derivedXsWsel ?? -Infinity, derivedBfe ?? -Infinity,
+    );
+    if (Number.isFinite(ref1) && derived02 < ref1 - 0.05) flags.add("wse02-below-1pct");
   }
 
   // Apply the mitigation ratio to the priced classes; roll up totals honestly:
@@ -656,4 +668,4 @@ export const DERIVED_XS_WSEL_NOTE =
 export const DERIVED_WSE02_NOTE =
   "This 0.2% (500-yr) water surface was DERIVED from a cross-section / regional model at your fill — a screening estimate, not a published or surveyed value. Confirm before design; type a 0.2% WSE to override.";
 export const DERIVED_WSE02_DRAFT_NOTE =
-  "This 0.2% (500-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Confirm before design; type a 0.2% WSE to override.";
+  "This 0.2% (500-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: FBCDD's Interim §9 mitigation trigger references the PRE-Atlas-14 0.2% (the effective 2014 FIS profile) — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a 0.2% WSE from the effective FIS to override.";

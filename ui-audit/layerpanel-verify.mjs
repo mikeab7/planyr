@@ -90,6 +90,16 @@ try {
   ok("badge tooltip carries source + screening note", (await page.locator('#badge-city [data-testid="jurisdiction-badge"]').getAttribute("title") || "").includes("Source: TxDOT / TxGIO / H-GAC"));
   ok("null badge renders nothing", (await page.locator('#badge-null [data-testid="jurisdiction-badge"]').count()) === 0);
 
+  // ── B793: frontage-sliver qualification + the ETJ vintage / SB 2038 caveat ──
+  ok("badge (sliver) leads with the ETJ and trails 'City of Katy — edge only', no ⚑",
+    /City of Houston — ETJ \/ City of Katy — edge only · Fort Bend County · Katy ISD/.test(await text("#badge-sliver"))
+    && !(await text("#badge-sliver")).includes("⚑"));
+  {
+    const sliverTitle = (await page.locator('#badge-sliver [data-testid="jurisdiction-badge"]').getAttribute("title")) || "";
+    ok("badge (sliver) tooltip explains edge-only membership", sliverTitle.includes("touches only the parcel edge"));
+    ok("badge (sliver) tooltip carries the ETJ vintage + SB 2038 caveat", sliverTitle.includes("SB 2038") && sliverTitle.includes("H-GAC ETJ"));
+  }
+
   // ── B764: ISD panel row + ⓘ (the live endpoint itself is curl-verified via the proxy) ──
   ok("Jurisdictions group lists 'School districts (ISD)'", harris.includes("School districts (ISD)"));
   const isdInfo = page.locator('#panel-harris button[aria-label="About School districts (ISD)"]');

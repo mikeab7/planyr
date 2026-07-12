@@ -30,7 +30,7 @@ import { uploadOverlayFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloa
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, gisProxyEnabled } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, gisProxyEnabled, layerVintage } from "./lib/layers.js";
 import { overlayExportRequest } from "./lib/layerRequest.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -54,7 +54,7 @@ import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
-import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates } from "./lib/counties.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./lib/kmzExport.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
@@ -80,7 +80,7 @@ import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
-import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge } from "./lib/jurisdiction.js";
+import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
 import { representativeRing, ringCentroid, ringsSignature } from "./lib/siteAnalysis.js";
 import JurisdictionBadge from "./components/JurisdictionBadge.jsx";
 import { formatAge } from "./lib/gisCache.js";
@@ -106,7 +106,7 @@ import {
   crossSectionWselFromFeatureCollection, governingCrossSectionWsel,
   NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
 } from "./lib/floodplainMitigation.js";
-import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, triggerClasses } from "./lib/floodplainRules.js";
+import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
 import { loadBuildabilityRules, assessBuildability } from "./lib/buildability.js";
 import {
@@ -6295,9 +6295,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B750 overrides: the user's own answer (settings.drainage.*) wins over GIS detection
   // when set — so a channel they can see, or a jurisdiction the county maps can't resolve,
   // is never stuck at "unknown".
-  const chanOverride = settings.drainage?.drainsToHcfcdChannel;
+  const chanOverrideStored = settings.drainage?.drainsToHcfcdChannel;
   const authOverride = settings.drainage?.authorityId || null;
   const { authorityId: drainAuthorityId, source: reviewerSource } = effectiveReviewer(authOverride, detectedAuthorityId);
+  // B789 — the HCFCD-channel question (and the HCFCD greater-of candidate) only exists where
+  // HCFCD has jurisdiction: the identify county must include Harris (channelAuthority is set
+  // to "hcfcd" ONLY for Harris, so it's sufficient evidence on its own). An effective coh/hcfcd
+  // authority outside Harris — e.g. a user override on a Fort Bend site — must NOT surface the
+  // control, and a STORED channel answer is ignored (not cleared) there, with a visible note.
+  const drainCountyHarris = (drainCtxData?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
+  const drainChannelRelevant = drainCtxData?.authority?.channelAuthority === "hcfcd"
+    || (drainCountyHarris && (drainAuthorityId === "coh" || drainAuthorityId === "hcfcd"));
+  const chanOverride = drainChannelRelevant ? chanOverrideStored : undefined;
+  const chanOverrideIgnored = !drainChannelRelevant && (chanOverrideStored === true || chanOverrideStored === false);
   const { value: drainsToChanEff, source: channelSource } = effectiveChannelDischarge(chanOverride, drainCtxData?.channel?.near ?? null);
   // B761 — unincorporated Harris sets the detention minimum by outfall type (HCED Infra
   // Regs): storm-sewer 0.75 · roadside-ditch 1.0 ac-ft/ac. Unset → the engine returns the
@@ -6307,9 +6317,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const acresActive = siteSqft / SQFT_PER_ACRE;
   const drainCityCount = drainCtxData?.authority?.jurisdiction?.city?.length ?? 0;
   // Overriding the reviewer to City of Houston asserts city-limits jurisdiction (so the
-  // >20 ac greater-of branch fires); otherwise use the detected city membership.
-  const drainInCity = authOverride === "coh" ? true : drainCityCount > 0;
-  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff, outfallType: outfallTypeEff };
+  // >20 ac greater-of branch fires); otherwise use the detected HOUSTON membership
+  // specifically (B789 — any-city membership let a Katy frontage sliver read as "in city
+  // limits" and priced Houston's large-tract branch on a Fort Bend site).
+  const drainCityHouston = (drainCtxData?.authority?.jurisdiction?.city || []).some((c) => /houston/i.test(String(c)));
+  const drainInCity = authOverride === "coh" ? true : drainCityHouston;
+  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff, outfallType: outfallTypeEff, hcfcdApplicable: drainCountyHarris };
   const detReq = drainCtxData && siteSqft > 0 && drainAuthorityId
     ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
     : null;
@@ -6346,8 +6359,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmSettings = settings.floodMitigation || {};
   const floodGeo = drainCtxData?.floodGeo || null;
   const fmZones = (floodGeo && floodGeo.zones) || [];
-  const floodJurKey = fmSettings.jurKey
-    || (drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(restored?.county));
+  // B790 — keep the DETECTED key distinct from the override so the picker can offer
+  // "Auto — detected: <X>" and a hand-picked rule can be compared against the map.
+  const floodJurDetected = drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(restored?.county);
+  const floodJurKey = fmSettings.jurKey || floodJurDetected;
   const fmRule = floodRules[floodJurKey] || floodRules.generic;
   // Derived BFE (B755): the FEMA-BFE-line estimate computed at check time. It NEVER
   // overwrites the manual bfeFt (which would masquerade as user entry) — it rides its
@@ -6463,9 +6478,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     : null;
   // B750 — plain-English authority label from the shared choice list (never a raw id).
   const authLabelFor = (id) => (DETENTION_AUTHORITY_CHOICES.find((c) => c.id === id) || {}).label || id || null;
-  // The channel Yes/No/Auto control is only consequential where HCFCD channels are the
-  // question — Harris-County authorities (City of Houston or HCFCD itself).
-  const drainChannelRelevant = drainAuthorityId === "coh" || drainAuthorityId === "hcfcd" || drainCtxData?.authority?.channelAuthority === "hcfcd";
+  // (B789: drainChannelRelevant now computed up with the drainage inputs — it county-gates
+  // the stored channel override too, not just this control's visibility.)
   const drainage = siteSqft > 0 && origin ? {
     status: drainCtx?.busy ? "busy" : drainCtx?.error ? "error" : drainViewCtx ? "ready" : "idle",
     error: drainCtx?.error || null,
@@ -6491,6 +6505,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     floodMit: {
       settings: fmSettings,
       jurKey: floodJurKey,
+      // B790 — the picker distinguishes the user's override from the detected key so
+      // "Auto — detected: <X>" is a real, reachable state (jurKey null → auto re-engages).
+      jurKeyOverride: fmSettings.jurKey || null,
+      detectedJurKey: floodJurDetected,
+      // B790 — a hand-picked rule is compared against the identify county for the
+      // mismatch warning (floodJurCounty maps a rules key to its implied county).
+      identifyCounties: drainCtxData?.authority?.jurisdiction?.county || [],
+      siteCounty: restored?.county || null, // B794 — county-specific FIS pointer on the 0.2% input
       rules: floodRules,
       derivedBfe: fmDerivedBfe, // B755 — the FEMA-BFE-line estimate, for the input placeholder
       onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
@@ -6525,6 +6547,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B750 — the "drains to an HCFCD channel" Auto/Yes/No control + what detection found.
     channelDischarge: {
       relevant: drainChannelRelevant,
+      overrideIgnored: chanOverrideIgnored, // B789(c) — a stored answer where HCFCD doesn't govern
       override: chanOverride === true || chanOverride === false ? chanOverride : null,
       effective: drainsToChanEff,
       source: channelSource,
@@ -6699,7 +6722,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .then((j) => {
         const b = formatJurisdictionBadge(j);
         if (!b) return; // failed / empty identify → no badge (display-only screening info)
-        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC" };
+        // B793 — an ETJ chip carries its layer vintage + the SB 2038 volatility caveat in
+        // the tooltip: ETJ answers are only as fresh as the H-GAC layer, and cities' ETJs
+        // are actively shrinking as landowners opt out.
+        const etjNote = (j.etj || []).length
+          ? `ETJ boundaries: ${layerVintage("jur_etj") || "vintage unknown"}. ETJs shrink as landowners opt out (SB 2038) — screening only, verify before relying on an ETJ answer.`
+          : null;
+        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC", etjNote };
         jurBadgeCache.current.set(jurBadgeSig, badge);
         if (!cancelled) setJurBadge(badge);
       })
@@ -6805,6 +6834,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
+  // B792 — the county stored at CREATION can be wrong (overlapping county bboxes + a
+  // spatially-unscoped statewide parcel source let "waller" persist on a Fort Bend site),
+  // and every consumer — the identify CAD, tax rates, the flood/easement jurisdiction
+  // defaults — reads the row as truth. On load, confirm it once against the TxDOT
+  // county-boundary layer (SWR-cached, non-blocking); a confirmed DIFFERENT configured
+  // key heals the record through the normal save path. Unrecognized/failed answers
+  // change nothing (countyKeyForName never returns an unconfigured key).
+  const [, setCountyHealTick] = useState(0);
+  useEffect(() => {
+    const o = restored?.origin;
+    if (!siteId || !o || !Number.isFinite(o.lat) || !Number.isFinite(o.lon)) return;
+    let live = true;
+    countyAtPoint(o.lon, o.lat).then((ans) => {
+      if (!live || !ans?.name) return;
+      const key = countyKeyForName(ans.name);
+      if (!key || key === (restored?.county || null)) return;
+      const wrong = restored?.county ?? null;
+      if (restored) restored.county = key; // metaRef re-reads restored.county every render
+      metaRef.current = { ...metaRef.current, county: key }; // flush below must not save the stale meta
+      setCountyHealTick((n) => n + 1);     // re-render the consumers (siteCounty & friends)
+      flushSite();                          // persist the healed row to the device mirror
+      try { cloudPushWithWatchdog(siteId); } catch (_) {}
+      console.warn(`[B792] Site county healed: "${wrong}" → "${key}" (TxDOT county boundary${ans.fips ? `, FIPS ${ans.fips}` : ""}).`);
+      reportClientEvent("county-healed", `site county corrected ${wrong} → ${key}`, { id: siteId, from: wrong, to: key, fips: ans.fips || null });
+    }).catch(() => {});
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteId]);
   // B466/B471 — ONE "Take over editing here" that resumes saving no matter WHY it stalled:
   //   • Same browser, another TAB holds the editor lock → steal the Web Lock (instant, in place) and
   //     push the pent-up work. The thin-clobber + CAS guards (B459/B314) still protect the cloud.
@@ -7554,7 +7611,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } else if (mit && mit.intersectAcres > 0) {
       let v = mit.volumeCf != null ? `${f2(mit.volumeAcFt)} ac-ft` : "UNKNOWN";
       if (mit.volumeCf != null && mit.providers?.wse1pct === "bfe-line-interp") v += " (derived BFE — screening est.)";
-      if (mit.volumeCf != null && mit.providers?.wse02pct === "fbcdd-wse02-draft") v += " (0.2% from DRAFT study)";
+      // B794 (PDF-PARITY with the card's basis note): the DRAFT label carries the §9-basis
+      // qualifier — the Atlas-14 read stands in for the pre-Atlas-14 FIS basis, not equals it.
+      if (mit.volumeCf != null && mit.providers?.wse02pct === "fbcdd-wse02-draft") v += " (0.2% from DRAFT Atlas-14 study — §9 basis is the 2014 FIS)";
+      if (mit.flags && mit.flags.includes("wse02-below-1pct")) v += " (⚠ derived 0.2% reads below the 1% — mismatched studies)";
       if (mit.volumeCf != null && d.floodGeo && d.floodGeo.truncated) v += " (floor — capped pull)";
       if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
       pairs.push(["Floodplain mitigation", v]);
@@ -14472,9 +14532,12 @@ function YieldPanel({
                   </div>
                 );
               }
+              // B791 — a stale check's assumptions are historical, not current assertions:
+              // dashed border + a "saved before the boundary changed" heading (weight/wording
+              // demotion, never contrast fading — theming rule).
               return (
-                <div key="assumptions" style={{ marginTop: 7, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4 }}>Assumptions — correct if needed</div>
+                <div key="assumptions" style={{ marginTop: 7, border: `1px ${d.stale ? "dashed" : "solid"} ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4 }}>{d.stale ? "Assumptions — saved before the boundary changed" : "Assumptions — correct if needed"}</div>
                   {rows}
                 </div>
               );
@@ -14498,6 +14561,22 @@ function YieldPanel({
             const providedAcFt = d.providedCf / 43560;
             const usableAcFt = d.providedUsableCf / 43560; // Regime B: minus permanent-pool dead storage
             const out = [];
+            // B788/B791 — a remembered or stale check must read PAST tense with its date;
+            // only a live check this session may claim present-tense "detected".
+            const checkedOnDate = d.lastCheckedAt ? new Date(d.lastCheckedAt).toLocaleDateString() : null;
+            const detectedPhrase = (d.restored || d.stale) && checkedOnDate
+              ? `(from city-limits GIS, checked ${checkedOnDate})`
+              : "(detected from city-limits GIS)";
+            // B791 — a stale check LEADS with the demotion: banner + Re-check at the very top,
+            // so the old reviewer/pricing below can't read as current-boundary truth.
+            if (d.stale) out.push(
+              <div key="stale-banner" style={{ display: "flex", alignItems: "center", gap: 8, border: `1px solid ${Y.warnText}`, borderRadius: 8, padding: "7px 9px", margin: "7px 0 2px", background: Y.cardBg }}>
+                <div style={{ flex: 1, fontSize: 11, color: Y.warnText, fontWeight: 700, lineHeight: 1.45 }}>
+                  ⚠ Site boundary changed since this check{checkedOnDate ? ` (checked ${checkedOnDate})` : ""} — the numbers below reflect the old boundary.
+                </div>
+                <button onClick={d.onCheck} disabled={d.status === "busy"} style={{ padding: "5px 9px", border: `1px solid ${Y.border}`, borderRadius: 7, background: Y.cardBg, color: Y.text, fontWeight: 700, fontSize: 10.5, whiteSpace: "nowrap", cursor: d.status === "busy" ? "default" : "pointer" }}>↻ Re-check</button>
+              </div>
+            );
             // A re-check that's still running or failed, over a preserved prior answer:
             // keep showing the old numbers under an honest hint.
             if (d.showingPrior) out.push(d.status === "busy"
@@ -14518,7 +14597,7 @@ function YieldPanel({
                 const cands = req.governing.candidates.map((c) => `${c.rule?.authorityLabel || c.authorityId} ${f2(c.acFt)} ac-ft`);
                 const govLabel = req.rule?.authorityLabel || req.governing.picked;
                 if (d.reviewer?.authorityId === "coh" && req.governing.picked === "hcfcd") {
-                  out.push(keyedNote(`Reviewing authority: ${d.reviewer.label} ${d.reviewer.source === "override" ? "(you set this)" : "(detected from city-limits GIS)"}. For a tract over 20 acres, City of Houston applies the larger of its own rate and HCFCD's — ${cands.join(" vs ")} — so ${govLabel}'s ${f2(req.requiredAcFt ?? 0)} ac-ft governs.`, "gov"));
+                  out.push(keyedNote(`Reviewing authority: ${d.reviewer.label} ${d.reviewer.source === "override" ? "(you set this)" : detectedPhrase}. For a tract over 20 acres, City of Houston applies the larger of its own rate and HCFCD's — ${cands.join(" vs ")} — so ${govLabel}'s ${f2(req.requiredAcFt ?? 0)} ac-ft governs.`, "gov"));
                 } else {
                   out.push(keyedNote(`Greater-of: ${cands.join(" vs ")} — more restrictive governs${d.reviewer?.label ? ` (${d.reviewer.label} review)` : ""}.`, "gov"));
                 }
@@ -14526,6 +14605,7 @@ function YieldPanel({
               if (req.flags.includes("curve-approximate")) out.push(warnNote("Rate read from an approximate Fig. 9.2 curve — exact breakpoints pending transcription.", "curve"));
               if (req.flags.includes("secondary-source")) out.push(warnNote("June-2026 Houston rate verified against secondary coverage — manual PDF confirmation pending.", "sec-src"));
               if (req.flags.includes("added-impervious-unknown")) out.push(warnNote("This rate applies to ADDED impervious on redevelopment — full site impervious was used here; enter the added-impervious area to refine.", "added-imp"));
+              if (req.flags.includes("hcfcd-not-applicable")) out.push(warnNote("You set City of Houston as the reviewer, but this site is outside Harris County — HCFCD's rate can't apply, so Houston's own impervious rate is shown alone. Double-check the reviewing agency.", "hcfcd-na"));
             } else if (req && req.kind === "band") {
               // Band authorities NEVER render a single number.
               out.push(row("Detention required", `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`, "screening band"));
@@ -14578,6 +14658,9 @@ function YieldPanel({
             for (const e of d.etjNotes) out.push(warnNote(e.note, "etj-" + String(e.city || "").toLowerCase()));
             // B750 — the two overridable assumptions (reviewing agency + channel discharge).
             { const ab = assumptionsBlock(); if (ab) out.push(ab); }
+            // B789(c) — a stored channel answer where HCFCD doesn't govern is IGNORED, visibly
+            // (never silently applied, never silently dropped).
+            if (d.channelDischarge?.overrideIgnored) out.push(warnNote("Your saved “drains to HCFCD channel” answer doesn't apply here — HCFCD only governs in Harris County, so it's being ignored for this site.", "chan-ignored"));
             out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
             if (d.deadCf > 0) out.push(keyedNote(`Usable ${f2(usableAcFt)} ac-ft after ${f2(d.deadCf / 43560)} ac-ft below the flood WSE / permanent pool (anchored ponds split at their real water surfaces; the rest use the Regime-B estimate — dead storage earns no credit).`, "usable"));
             {
@@ -14661,8 +14744,9 @@ function YieldPanel({
             if (d.channelFailed) out.push(warnNote("HCFCD channel data is unavailable — channel adjacency unknown.", "chanfail"));
             if (d.multiParcel) out.push(keyedNote("Checked against the largest active parcel.", "multi"));
             // B750 — restored from a saved check (no live lookup this session): show its age.
+            // (When STALE the B791 banner at the top of the card already carries the date and
+            // the re-check affordance — no trailing italic line.)
             if (d.restored && d.lastCheckedAt && !d.stale) out.push(keyedNote(`Remembered from your last check on ${new Date(d.lastCheckedAt).toLocaleDateString()} — re-check to refresh.`, "restored"));
-            if (d.stale) out.push(warnNote("Site boundary changed since this check — re-check drainage criteria.", "stale"));
             // B712 — the mitigation inputs: jurisdiction defaulted from the resolved
             // drainage authority (stored only on override — the B74 pattern) + the
             // elevation set. ALL blank by default (the road-cost unit-price pattern);
@@ -14695,16 +14779,34 @@ function YieldPanel({
                   <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4 }}>Floodplain mitigation inputs (ft NAVD88)</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
                     <span style={{ fontSize: 11, color: Y.muted }}>Jurisdiction</span>
-                    <select value={fm.jurKey} onChange={(e) => fm.onChange({ jurKey: e.target.value })} style={{ ...fmInputStyle, width: 168, textAlign: "left", cursor: "pointer" }}>
+                    {/* B790 — Auto is a real, reachable state (the B750 agency-picker pattern):
+                        selecting it writes jurKey:null so detection re-engages; a hand-pick
+                        sticks until the user returns to Auto. */}
+                    <select value={fm.jurKeyOverride || ""} onChange={(e) => fm.onChange({ jurKey: e.target.value || null })} style={{ ...fmInputStyle, width: 168, textAlign: "left", cursor: "pointer" }}>
+                      <option value="">Auto — detected: {(fm.rules[fm.detectedJurKey] || fm.rules.generic).label}</option>
                       {Object.entries(fm.rules).map(([k, r2]) => <option key={k} value={k}>{r2.label}</option>)}
                     </select>
                   </div>
+                  {(() => {
+                    // B790 — a hand-picked rule whose implied county contradicts the identify
+                    // county gets a loud mismatch row (the sticky-"harris"-on-Fort-Bend class).
+                    const impliedCounty = fm.jurKeyOverride ? floodJurCounty(fm.jurKeyOverride) : null;
+                    const ids = fm.identifyCounties || [];
+                    if (!impliedCounty || !ids.length || ids.some((c) => String(c).toLowerCase().includes(impliedCounty))) return null;
+                    const detectedLabel = (fm.rules[fm.detectedJurKey] || fm.rules.generic).label;
+                    return warnNote(`⚠ You picked ${fmRuleRow.label}, but the county map reads ${ids.join(" + ")} — the ${detectedLabel} rule likely applies. Switch the Jurisdiction to Auto to use it.`, "fm-jur-mismatch");
+                  })()}
                   {fmRow("Pad / finished floor (FFE)", "padFfeFt", "—", "The plan-level pad elevation; a selected element's own padElevFt overrides it")}
                   {fmRow("Existing grade", "existGradeFt", "3DEP auto", "Blank = the 3DEP bare-earth median sampled by this drainage check")}
                   {fmRow("BFE (1% WSE)", "bfeFt",
                     fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) && !Number.isFinite(fm.settings.bfeFt) ? `~${f1(fm.derivedBfe.bfeFt)} derived` : "often needed",
                     "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (shown greyed as ‘~x derived’); anything you type here overrides it (FIRM panel / effective model)")}
-                  {fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIS / HCFCD", "Not an NFHL attribute — from the FEMA FIS profile or HCFCD model data; hook for MAAPnext grids later")}
+                  {/* B794 — the placeholder names WHERE the number comes from, county-specific:
+                      Fort Bend's mitigation basis is the effective FIRM 48157C FIS (2014-04-02,
+                      pre-Atlas-14 — exactly what Interim §9 references). */}
+                  {(fm.siteCounty === "fortbend" || (fm.identifyCounties || []).some((c) => /fort\s*bend/i.test(String(c))))
+                    ? fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIRM 48157C FIS", "From the EFFECTIVE FIS profile — Fort Bend: countywide FIRM 48157C, eff. 2014-04-02 (pre-Atlas-14, the basis FBCDD Interim §9 references). The Atlas-14 DRAFT raster auto-fills a labeled stand-in when it can; your entry overrides it.")
+                    : fmRow("0.2% (500-yr) WSE", "wse02Ft", "FIS / HCFCD", "Not an NFHL attribute — from the effective FEMA FIS profile or HCFCD model data; hook for MAAPnext grids later")}
                   {fmRow("Dock-high drop: court below slab FF (ft)", "dockDropFt", "4", "Industrial dock-high: building-attached truck courts + their trailer strips auto-price at slab FF minus this drop (typ. 48\u2033 docks); blank = 4")}
                   {fmRow("Expert: average depth of fill below the flood elevation (ft)", "avgFillDepthFt", "bypass", "Expert bypass: volume = intersect area × this constant depth")}
                   <label style={{ display: "flex", gap: 7, alignItems: "center", fontSize: 11, color: Y.text, cursor: "pointer", padding: "3px 0" }}>
