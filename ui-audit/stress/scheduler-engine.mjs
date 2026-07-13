@@ -129,6 +129,13 @@ export const nextEligibleMeeting = (body, readyDate, afterDate) => {
   }
   return null;
 };
+// B817 — the two decision numbers (VERBATIM copy of public/sequence/index.html).
+export const meetingFloatBD = (task, todayIso) => (task && task.meetingBound && task.meetingDeadline) ? difBD(todayIso, task.meetingDeadline) : null;
+export const meetingCostDays = (task, body) => {
+  if (!body || !task || !task.start) return null;
+  const next = meetingDatesInRange(body, addD(task.start, 1), addD(task.start, 366 * 2))[0];
+  return next ? dif(task.start, next) : null;
+};
 export const normPreds = arr => {
   if (!Array.isArray(arr)) return [];
   return arr.map(x => {
@@ -296,6 +303,13 @@ export const computeDisplayHealth = (task, settings) => {
   if (!task) return task?.health;
   // Rule order matters: more specific overrides general
   if (cf.completeGreen && (task.percentComplete||0) >= 100) return "green";
+  // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
+  // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
+  // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
+  if (task.meetingBound && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
+    if (task.meetingInfeasible) return "red";
+    if (task.meetingDeadline && difBD(NOW, task.meetingDeadline) <= 2) return "yellow";
+  }
   if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
   if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
     // Within 7 calendar days

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as E from "../ui-audit/stress/scheduler-engine.mjs";
@@ -1328,5 +1328,69 @@ describe("B624 rollForwardToWorkday — the input-guard primitive", () => {
     expect(E.rollForwardToWorkday("2026-06-23")).toBe("2026-06-23"); // Tue (working) unchanged
     const wkHol = [...E.HOLIDAY_SET].find(h => h.startsWith("2026-") && ![0,6].includes(new Date(h + "T12:00:00").getDay()));
     if (wkHol) expect(E.rollForwardToWorkday(wkHol) > wkHol).toBe(true);
+  });
+});
+
+// ── B817 (NEW-3) — float-to-deadline, cost-of-miss, and the health rollup ───────
+describe("B817 meetingFloatBD / meetingCostDays — the two decision numbers", () => {
+  const council = { id: "mb_bt", recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+    agendaLead: { type: "offset", n: 10, unit: "business" } };
+  it("meetingFloatBD — working days from today to the agenda deadline", () => {
+    const t = { meetingBound: true, meetingDeadline: "2026-08-25" };
+    expect(E.meetingFloatBD(t, "2026-08-20")).toBe(3);   // Thu 8/20 → Tue 8/25 = Fri,Mon,Tue
+    expect(E.meetingFloatBD(t, "2026-08-25")).toBe(0);   // same day = no float
+  });
+  it("meetingFloatBD — null on an unbound task or one without a deadline", () => {
+    expect(E.meetingFloatBD({ meetingBound: false, meetingDeadline: "2026-08-25" }, "2026-08-20")).toBeNull();
+    expect(E.meetingFloatBD({ meetingBound: true }, "2026-08-20")).toBeNull();
+  });
+  it("meetingCostDays — calendar days to the next eligible meeting", () => {
+    const t = { meetingBound: true, meetingBodyId: "mb_bt", start: "2026-08-11" };  // a 2nd-Tuesday meeting
+    expect(E.meetingCostDays(t, council)).toBe(14);      // → the 4th Tuesday 8/25 is 14 calendar days out
+  });
+  it("meetingCostDays — null without a body or a start", () => {
+    expect(E.meetingCostDays({ meetingBound: true, start: "2026-08-11" }, null)).toBeNull();
+    expect(E.meetingCostDays({ meetingBound: true, start: "" }, council)).toBeNull();
+  });
+});
+
+describe("B817 computeDisplayHealth — a bound task surfaces risk before it slips", () => {
+  const orig = E.NOW;
+  afterEach(() => E.setNOW(orig));
+  const cf = { cfRules: { completeGreen: true, overdueRed: true, dueSoonYellow: true } };
+  it("infeasible bound task → red (a genuine alert)", () => {
+    E.setNOW("2026-08-01");
+    expect(E.computeDisplayHealth({ meetingBound: true, meetingInfeasible: true, health: "gray", percentComplete: 0, meetingDeadline: "2026-09-30" }, cf)).toBe("red");
+  });
+  it("≤2 working days of float → at-risk yellow", () => {
+    E.setNOW("2026-08-24");   // Mon; deadline Tue 8/25 = 1 working day
+    expect(E.computeDisplayHealth({ meetingBound: true, meetingDeadline: "2026-08-25", health: "gray", percentComplete: 0 }, cf)).toBe("yellow");
+  });
+  it("healthy float (>2 working days) → passes through to the stored health", () => {
+    E.setNOW("2026-08-01");
+    expect(E.computeDisplayHealth({ meetingBound: true, meetingDeadline: "2026-09-15", health: "gray", percentComplete: 0 }, cf)).toBe("gray");
+  });
+  it("a COMPLETE bound task is green, never at-risk", () => {
+    E.setNOW("2026-08-24");
+    expect(E.computeDisplayHealth({ meetingBound: true, meetingInfeasible: true, meetingDeadline: "2026-08-25", health: "gray", percentComplete: 100 }, cf)).toBe("green");
+  });
+  it("an UNBOUND task is unaffected by the meeting-risk rule", () => {
+    E.setNOW("2026-08-24");
+    expect(E.computeDisplayHealth({ meetingBound: false, meetingInfeasible: true, meetingDeadline: "2026-08-25", health: "gray", percentComplete: 0, end: "2026-12-01" }, cf)).toBe("gray");
+  });
+});
+
+describe("anti-drift: the B817 float/cost + health wiring exists in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("meetingFloatBD + meetingCostDays present in both", () => {
+    expect(src).toMatch(/const meetingFloatBD = \(task, todayIso\) =>/);
+    expect(mjs).toMatch(/export const meetingFloatBD = \(task, todayIso\) =>/);
+    expect(src).toMatch(/const meetingCostDays = \(task, body\) =>/);
+    expect(mjs).toMatch(/export const meetingCostDays = \(task, body\) =>/);
+  });
+  it("computeDisplayHealth wires bound-task infeasible→red / ≤2 float→yellow in both", () => {
+    expect(src).toMatch(/if \(task\.meetingDeadline && difBD\(NOW, task\.meetingDeadline\) <= 2\) return "yellow";/);
+    expect(mjs).toMatch(/if \(task\.meetingDeadline && difBD\(NOW, task\.meetingDeadline\) <= 2\) return "yellow";/);
   });
 });

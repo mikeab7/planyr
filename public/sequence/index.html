@@ -1678,6 +1678,16 @@ const nextEligibleMeeting = (body, readyDate, afterDate) => {
   }
   return null;
 };
+// B817 — the two decision numbers (PURE; mirrored + unit-tested). meetingFloatBD: working days from
+// `todayIso` to the agenda deadline (slack before the packet MUST be filed). meetingCostDays: calendar
+// days from the current meeting to the NEXT eligible one — what one missed deadline actually costs
+// (routinely a month in an entitlement schedule).
+const meetingFloatBD = (task, todayIso) => (task && task.meetingBound && task.meetingDeadline) ? difBD(todayIso, task.meetingDeadline) : null;
+const meetingCostDays = (task, body) => {
+  if (!body || !task || !task.start) return null;
+  const next = meetingDatesInRange(body, addD(task.start, 1), addD(task.start, 366 * 2))[0];
+  return next ? dif(task.start, next) : null;
+};
 // Global id→body index (B816). Like HOLIDAY_SET, cascadeDates reads it implicitly so callers need
 // not thread proj.meetingBodies. Body ids are globally unique (mb_<time><rand>) so a task only ever
 // resolves to its OWN project's body — no cross-project contamination. Rebuilt whenever bodies change.
@@ -2160,6 +2170,13 @@ const computeDisplayHealth = (task, settings) => {
   if (!task) return task?.health;
   // Rule order matters: more specific overrides general
   if (cf.completeGreen && (task.percentComplete||0) >= 100) return "green";
+  // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
+  // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
+  // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
+  if (task.meetingBound && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
+    if (task.meetingInfeasible) return "red";
+    if (task.meetingDeadline && difBD(NOW, task.meetingDeadline) <= 2) return "yellow";
+  }
   if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
   if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
     // Within 7 calendar days
@@ -2526,6 +2543,8 @@ const COLS = [
   {k:"budget",          l:"Budget",  w:92,  e:true, t:"cost"  },
   {k:"actualCost",      l:"Actual",  w:92,  e:true, t:"cost"  },
   {k:"meetingBody",     l:"Meeting", w:130, e:false,t:"meeting"},   // B816 — bind a task to a meeting body (hidden by default)
+  {k:"floatToDeadline", l:"Float",   w:64,  e:false,t:"meeting"},   // B817 — working days to the agenda deadline
+  {k:"costIfMissed",    l:"Cost/miss",w:74, e:false,t:"meeting"},   // B817 — calendar days the hearing slips if missed
 ];
 const TOTAL_W = COLS.reduce((s,c) => s+c.w, 0);
 // B212 — column-config plumbing. COLS is the master AVAILABLE-field registry; the left
@@ -2548,6 +2567,11 @@ const readGridCfg = (proj, data) => {
   else if (data && Array.isArray(data.gridColOrder) && data.gridColOrder.length) visible = data.gridColOrder.filter(k => COL_BY_K[k] && DEFAULT_GRID_COLS.includes(k)); // migrate legacy global order
   else visible = [...DEFAULT_GRID_COLS];
   if (!visible.includes("name")) visible = ["name", ...visible];   // the Task name column can't be hidden
+  // B817 — the Float / Cost columns default ON once any task in the project is bound (unless the user set
+  // an explicit column config); they render blank on unbound rows.
+  if (!(cfg && Array.isArray(cfg.visible) && cfg.visible.length) && Array.isArray(proj?.tasks) && proj.tasks.some(t => t.meetingBound)) {
+    ["floatToDeadline","costIfMissed"].forEach(k => { if (!visible.includes(k)) visible.push(k); });
+  }
   const saved = (cfg && cfg.widths) || (data && data.gridColWidths) || {};
   const widths = {};
   COLS.forEach(c => { widths[c.k] = saved[c.k] ?? c.w; });
@@ -2560,7 +2584,8 @@ const writeGridCfg = (setData, pid, next) => setData(d =>
 const COL_LABELS = {id:"ID", name:"Task name", start:"Start", end:"Finish", duration:"Duration",
   predecessors:"Predecessors", successors:"Successors", health:"Health", status:"Status",
   responsibleParty:"Owner", cost:"Cost", notes:"Notes", percentComplete:"% Complete",
-  budget:"Budget", actualCost:"Actual / Spend", meetingBody:"Meeting body"};
+  budget:"Budget", actualCost:"Actual / Spend", meetingBody:"Meeting body",
+  floatToDeadline:"Float to deadline", costIfMissed:"Cost if missed"};
 const colLabel = c => COL_LABELS[c.k] || c.l || c.k;
 
 // ── B583 — Formula columns: effective per-project column registry ─────────────
@@ -9193,6 +9218,21 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
           </select>
         </span>
       );
+    }
+    case "floatToDeadline": {
+      // B817 — working days from today to the agenda deadline. Blank on unbound rows.
+      const fb = task.hasChildren ? null : meetingFloatBD(task, fdLocal(new Date()));
+      if (fb == null) return <span style={{...s,...mono,justifyContent:"center",color:"var(--mut)"}} />;
+      const c = fb < 0 ? "var(--danger,#d83a3a)" : fb <= 2 ? "var(--warn-text,#b45309)" : "var(--mut)";
+      return <span style={{...s,...mono,justifyContent:"center",color:c,fontWeight: fb <= 2 ? 700 : undefined}}
+        title="Float to deadline — working days from today until the agenda-submittal deadline (≤2 reads at-risk)">{fb}d</span>;
+    }
+    case "costIfMissed": {
+      // B817 — calendar days the hearing slips if this deadline is missed (gap to the next eligible meeting).
+      const cost = task.hasChildren ? null : meetingCostDays(task, MEETING_BODY_INDEX[task.meetingBodyId]);
+      if (cost == null) return <span style={{...s,...mono,justifyContent:"center",color:"var(--mut)"}} />;
+      return <span style={{...s,...mono,justifyContent:"center",color:"var(--mut)"}}
+        title="Cost if missed — calendar days the hearing slips to the next eligible meeting (one day of slip is routinely a month)">+{cost}d</span>;
     }
     case "duration":
       return <span style={{...s,...mono,color: task.hasChildren ? "#94a3b8" : "var(--mut)"}}
