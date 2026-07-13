@@ -852,6 +852,118 @@ describe("anti-drift: the B815 meeting-body engine exists VERBATIM in src + mirr
   });
 });
 
+// ── B816 (NEW-2) — meeting-bound tasks in cascadeDates ──────────────────────────
+describe("B816 cascadeDates — meeting-bound snap + the interaction matrix", () => {
+  const council = { id: "mb_bt", name: "Baytown council",
+    recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+    agendaLead: { type: "offset", n: 10, unit: "business" } };
+  const bodies = [council];
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
+  const run = (tasks, b = bodies) => { const r = E.cascadeDates(tasks, b); const by = {}; r.forEach(t => by[t.id] = t); return by; };
+
+  it("a bound task snaps to the earliest meeting whose agenda is still OPEN (deadline≥packetReady, not meeting≥ready)", () => {
+    // A finishes 8/3 → packet ready 8/4; the 8/11 agenda closed 7/28, so it snaps to 8/25.
+    const r = run([mk(1, { start: "2026-07-27", pinnedStart: true, duration: 6, durValue: 6 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] })]);
+    expect(r[2].start).toBe("2026-08-25");
+    expect(r[2].end).toBe("2026-08-25");        // milestone
+    expect(r[2].duration).toBe(0);              // duration forced 0
+    expect(r[2].meetingDeadline).toBe("2026-08-11");
+    expect(r[2].meetingInfeasible).toBe(false);
+    expect(r[2].start).not.toBe("2026-08-11");  // NOT the next meeting after packet-ready
+  });
+  it("an earlier packet makes the earlier meeting", () => {
+    const r = run([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] })]);
+    expect(r[2].start).toBe("2026-08-11");
+    expect(r[2].meetingDeadline).toBe("2026-07-28");
+  });
+  it("matrix — bound + blank/unscheduled predecessor stays BLANK (must not snap to next Tuesday from today)", () => {
+    const r = run([mk(1, { start: "", end: "", duration: 0 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] })]);
+    expect(r[2].start).toBe("");
+    expect(r[2].duration).toBe(0);
+  });
+  it("matrix — bound + pinnedStart: the pin wins (meeting fixed, never rolled)", () => {
+    const r = run([mk(2, { meetingBound: true, meetingBodyId: "mb_bt", pinnedStart: true, start: "2026-08-11" })]);
+    expect(r[2].start).toBe("2026-08-11");
+    expect(r[2].meetingDeadline).toBe("2026-07-28");
+  });
+  it("matrix — bound + pinnedStart goes INFEASIBLE when the predecessor packet can't make the pinned agenda", () => {
+    // Predecessor forced to finish 8/10 → packet ready 8/11, but the pinned 8/11 meeting's agenda closed 7/28.
+    const r = run([mk(1, { start: "2026-08-10", pinnedStart: true, duration: 1, durValue: 1 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", pinnedStart: true, start: "2026-08-11",
+                           predecessors: [{ id: 1, type: "FS" }] })]);
+    expect(r[2].start).toBe("2026-08-11");        // pin holds
+    expect(r[2].meetingInfeasible).toBe(true);    // but it's flagged infeasible (red glyph / row)
+  });
+  it("★ two readings can never be consecutive — the strict tie-break skips the meeting whose agenda already closed", () => {
+    // 1st reading lands 8/11; the 2nd reading's agenda for 8/25 closed 8/11 (same day) → it must skip to 9/8.
+    const r = run([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] }),
+                   mk(3, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 2, type: "FS" }] })]);
+    expect(r[2].start).toBe("2026-08-11");
+    expect(r[3].start).toBe("2026-09-08");        // NOT 8/25 — the schedule "loses a month" correctly
+  });
+  it("sameDayFilingAllowed relaxes the tie-break (a same-day-ready 2nd reading CAN make the consecutive meeting)", () => {
+    // SS link → the 2nd reading's packet is ready the SAME day the 1st reading meets (8/11).
+    const build = bodyArr => run([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                                  mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] }),
+                                  mk(3, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 2, type: "SS" }] })], bodyArr);
+    const strict = build(bodies);
+    expect(strict[2].start).toBe("2026-08-11");
+    expect(strict[3].start).toBe("2026-09-08");   // strict: the 8/25 agenda closed on the 1st-reading day → loses a month
+    const relaxed = build([{ ...council, sameDayFilingAllowed: true }]);
+    expect(relaxed[3].start).toBe("2026-08-25");   // same-day filing → the consecutive meeting is reachable
+  });
+  it("minMeetingsAfter forces at least N meetings after a referenced task's meeting", () => {
+    const r = run([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] }),
+                   mk(3, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }],
+                           minMeetingsAfter: { taskId: 2, n: 2 } })]);
+    expect(r[2].start).toBe("2026-08-11");
+    expect(r[3].start >= "2026-09-08").toBe(true);  // at least the 2nd meeting after 8/11
+  });
+  it("matrix — bound as a summary/parent is NOT snapped (parents come from rollup)", () => {
+    const r = run([mk(10, { meetingBound: true, meetingBodyId: "mb_bt" }),        // parent (has a child)
+                   mk(11, { parentId: 10, start: "2026-08-03", pinnedStart: true, duration: 2, durValue: 2 })]);
+    expect(r[10].duration).not.toBe(0);   // the bound flag is ignored for a parent — no milestone snap
+  });
+  it("no meetingBodyId match → behaves as a normal task (unknown body id)", () => {
+    const r = run([mk(1, { start: "2026-08-03", pinnedStart: true, duration: 5, durValue: 5 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_missing", predecessors: [{ id: 1, type: "FS" }], duration: 3, durValue: 3 })]);
+    expect(r[2].duration).toBe(3);        // normal FS cascade, not a milestone
+    expect(r[2].start).toBe("2026-08-10"); // A ends 8/07 (Fri) → +1 BD = Mon 8/10
+  });
+  it("REGRESSION — unbound tasks (no bodies) cascade exactly as before", () => {
+    const r = run([mk(1, { start: "2026-08-03", pinnedStart: true, duration: 5, durValue: 5 }),
+                   mk(2, { predecessors: [{ id: 1, type: "FS" }], duration: 3, durValue: 3 })], []);
+    expect(r[1].start).toBe("2026-08-03"); expect(r[1].end).toBe("2026-08-07");
+    expect(r[2].start).toBe("2026-08-10"); expect(r[2].end).toBe("2026-08-12");
+  });
+});
+
+describe("anti-drift: the B816 meeting-bound snap exists VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("cascadeDates takes (tasks, bodies) and merges the MEETING_BODY_INDEX in both", () => {
+    expect(src).toMatch(/const cascadeDates = \(tasks, bodies = \[\]\) => \{/);
+    expect(src).toMatch(/const bodyMap = \{\.\.\.MEETING_BODY_INDEX\};/);
+    expect(mjs).toMatch(/export const cascadeDates = \(tasks, bodies = \[\]\) => \{/);
+    expect(mjs).toMatch(/const bodyMap = \{\.\.\.MEETING_BODY_INDEX\};/);
+  });
+  it("applyMeetingBinding forces duration 0 and pins win in both", () => {
+    expect(src).toMatch(/const applyMeetingBinding = \(t, body, predEarly, drivingMeetingDate, minAfterDate\) => \{/);
+    expect(mjs).toMatch(/export const applyMeetingBinding = \(t, body, predEarly, drivingMeetingDate, minAfterDate\) => \{/);
+    expect(src).toMatch(/if \(pinnedDate\) \{[\s\S]*?t\.start = t\.end = pinnedDate;/);
+    expect(mjs).toMatch(/if \(pinnedDate\) \{[\s\S]*?t\.start = t\.end = pinnedDate;/);
+  });
+  it("the strict two-reading tie-break (addD driving+1 when not sameDayFilingAllowed) is present in both", () => {
+    expect(src).toMatch(/if \(!body\.sameDayFilingAllowed\) \{ const nd = addD\(drivingMeetingDate, 1\); if \(nd > readyDate\) readyDate = nd; \}/);
+    expect(mjs).toMatch(/if \(!body\.sameDayFilingAllowed\) \{ const nd = addD\(drivingMeetingDate, 1\); if \(nd > readyDate\) readyDate = nd; \}/);
+  });
+});
+
 // ── Round-2 scheduler bug-batch (2026-06-30) — anti-drift guards for the App-level fixes ──
 describe("anti-drift: the round-2 scheduler fixes still exist in the real source", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
