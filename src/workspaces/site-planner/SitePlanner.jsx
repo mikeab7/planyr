@@ -72,7 +72,9 @@ import {
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, toHex6, byZ, zOrder } from "./lib/planStyle.js";
+import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
+import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid as deedCentroid, describeRotation } from "./lib/deedAlign.js";
@@ -2426,6 +2428,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
   const pushHistory = () => { histRef.current.push(stateRef.current); touchHist(); };
+  // B820 — give each freshly-created markup a z that stacks it on TOP of the collection (nextZ), so a
+  // newly drawn markup paints above the existing ones now that the markup layer renders in z order
+  // (see the [...markups].sort(byZAsc) passes below). Ascending so a multi-markup add (paste, a deed +
+  // its exception courses) keeps its given order. New els already get their z from the sync engine /
+  // ensureZ; markups needed this once their render stopped keying off array position.
+  const withStackZ = (existing, news) => { let z = nextZ(existing); return (news || []).map((m) => { const out = { ...m, z }; z += Z_GAP; return out; }); };
+  // B820 — Arrange (z-order) for the selected element or markup: Bring to Front / Forward / Send
+  // Backward / to Back (Bluebeam-/Review-consistent). An element reorders WITHIN its type-layer band
+  // (zOrder from planStyle) so the guardrail holds — a building can never drop under a road/parking;
+  // a markup reorders within the markup layer. reorderByZ returns a minimal {id->z} patch (or null on
+  // a no-op / end-of-stack); undo rides pushHistory + the setter like every other edit.
+  const arrangeSel = (mode, target) => {
+    const s = target || selRef.current;
+    if (s?.kind === "el") {
+      const target = els.find((e) => e.id === s.id);
+      if (!target) return;
+      const band = zOrder(target);
+      const patch = reorderByZ(els.filter((e) => zOrder(e) === band), s.id, mode);
+      if (!patch) return;
+      pushHistory();
+      setEls((a) => a.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e)));
+    } else if (s?.kind === "markup") {
+      const patch = reorderByZ(markups, s.id, mode);
+      if (!patch) return;
+      pushHistory();
+      setMarkups((a) => a.map((m) => (patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
+    }
+  };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
     // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard itself — an
@@ -2733,6 +2763,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } else if (overlayClip.current) { e.preventDefault(); pasteOverlay(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { const gid = selectedGroupId(); if (gid) { e.preventDefault(); duplicateGroup(gid); } else if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } else if (selOverlay) { e.preventDefault(); duplicateOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B261: Group / Ungroup
+      // B820 — Arrange (z-order) chords, matching Document Review / Bluebeam. e.code (not e.key)
+      // because Shift rewrites "]"→"}" / "["→"{". Acts on the single selected element or markup;
+      // ⌘/Ctrl+] = Bring Forward (⇧ = to Front), ⌘/Ctrl+[ = Send Backward (⇧ = to Back).
+      if ((e.ctrlKey || e.metaKey) && (e.code === "BracketRight" || e.code === "BracketLeft")) {
+        if (sel?.kind === "el" || sel?.kind === "markup") {
+          e.preventDefault();
+          const fwd = e.code === "BracketRight";
+          arrangeSel(e.shiftKey ? (fwd ? "front" : "back") : (fwd ? "forward" : "backward"));
+        }
+        return;
+      }
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
       if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
       if ((e.key === "m" || e.key === "M") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("marquee"); return; } // B570 box-select tool
@@ -2960,7 +3001,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const newMks = memMk.map((m) => ({ ...translateMarkup(m, off, off), id: uid(), groupId: ng }));
     pushHistory();
     setEls((a) => [...a, ...newEls]);
-    setMarkups((a) => [...a, ...newMks]);
+    setMarkups((a) => [...a, ...withStackZ(a, newMks)]);
     const refs = [...newEls.filter((e) => e.groupId === ng).map((e) => ({ kind: "el", id: e.id })), ...newMks.map((m) => ({ kind: "markup", id: m.id }))];
     setMulti(refs); setSel(refs[0] || null); setDrillId(null);
   };
@@ -3398,7 +3439,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const min = mkPoly.kind === "mpolygon" ? 3 : 2;
       if (pts.length >= min) {
         const mk = { id: uid(), kind: mkPoly.kind === "mpolygon" ? "polygon" : "polyline", pts, ...mkStyle };
-        pushHistory(); setMarkups((a) => [...a, mk]); setSel({ kind: "markup", id: mk.id });
+        pushHistory(); setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
       }
     }
     setMkPoly(null); setTool("select");
@@ -3414,7 +3455,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
       if (w >= minFt && h >= minFt) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle };
     }
-    if (mk) { pushHistory(); setMarkups((arr) => [...arr, mk]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
+    if (mk) { pushHistory(); setMarkups((arr) => [...arr, ...withStackZ(arr, [mk])]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
     return !!mk;
   };
   // Move a measurement by (dx,dy) — pts form (line/polyline/area/count) or the legacy {a,b}. (B569)
@@ -3529,7 +3570,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const commitEasement = (mk) => {
     if (!mk) { flashWarn("Couldn't build that easement — check the points / width.", 5000); return; }
     pushHistory();
-    setMarkups((a) => [...a, mk]);
+    setMarkups((a) => [...a, ...withStackZ(a, [mk])]);
     setSel({ kind: "markup", id: mk.id }); setTool("select"); // B656: selection alone surfaces the companion
     const ringOfEl = (e) => (e.points ? e.points : elCorners(e));
     const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(mk.pts, ringOfEl(e)));
@@ -8945,7 +8986,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (eb) exMarks.push(eb.mk);
     }
     pushHistory();
-    setMarkups((a) => [...a, built.mk, ...exMarks]);
+    setMarkups((a) => [...a, ...withStackZ(a, [built.mk, ...exMarks])]);
     setSel({ kind: "markup", id: built.mk.id });
     // overlap check against buildings + paving (main ring only)
     const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(built.ring, elRingOf(e)));
@@ -9076,7 +9117,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tracePts.length >= 2) {
       pushHistory();
       const mk = { id: uid(), kind: "traced", pts: tracePts, label: "Overhead electric (traced)", stroke: "#b45309", weight: 2.6, dash: "solid" };
-      setMarkups((a) => [...a, mk]); setSel({ kind: "markup", id: mk.id });
+      setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
     }
     setTracePts([]); setTraceMode(false);
   };
@@ -9107,7 +9148,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       pushHistory();
       const mk = { id: uid(), kind: "infwater", pts: ordered, label: "Inferred water main (screening only)", stroke: "#0891b2", weight: 2, dash: "dashed" };
-      setMarkups((a) => [...a, mk]); setSel({ kind: "markup", id: mk.id });
+      setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
       flashWarn(`Inferred a main through ${ordered.length} hydrants — screening only, verify with the utility.`, 8000);
     } catch (_) {
       flashWarn("Couldn't reach the hydrant source (OSM Overpass). Try again in a moment.", 6000);
@@ -9128,7 +9169,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? { util: "elec", width: 10, color: "#b45309", padSize: 10, fitting: "XFMR", label: "Electric service · 10′ easement" }
       : { util: "water", width: mode.width || 15, color: "#0891b2", padSize: 6, fitting: "TAP", label: `Water service · ${mode.width || 15}′ easement${mode.ruleNote ? ` — ${mode.ruleNote}` : ""}` };
     const mk = buildUtilRoute(mode.source, b, opts, uid);
-    pushHistory(); setMarkups((a) => [...a, mk]); setSel({ kind: "markup", id: mk.id });
+    pushHistory(); setMarkups((a) => [...a, ...withStackZ(a, [mk])]); setSel({ kind: "markup", id: mk.id });
     setRouteMode(null);
     const hits = els.filter((e) => e.id !== b.id && ["building", "paving", "parking", "trailer", "pond"].includes(e.type) && ringsOverlap(mk.corridor, ringOf(e)));
     const what = mode.util === "elec" ? "Electric" : "Water";
@@ -10418,6 +10459,165 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </>)}
   </>);
 
+  // B820 — markups sorted for z-order render (byZAsc): every markup shares one type-layer band, so
+  // this degenerates to z-then-id. Rendered in TWO passes below — markups flagged `behindEls` paint
+  // BEFORE the elements (sent behind the buildings), the rest after. Hit-testing is native SVG DOM
+  // order, so reordering the DOM reorders clicks too — what looks on top is what you grab.
+  const markupsZ = [...markups].sort(byZAsc);
+  // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
+  // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
+  const renderMarkupNode = (m) => {
+                const isSel = sel?.kind === "markup" && sel.id === m.id;
+                const zk = view.ppf / 0.35; // B617 zoom multiplier (matches the callout scale)
+                const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
+                // B619: NEVER recolor a markup on select — every markup keeps its own authored stroke
+                // (so a live color-picker change shows instantly instead of hiding under an accent tint);
+                // selection is cued by the blue grips / halo, plus a faint width bump. (Generalizes the
+                // B567 neutral-markup choice to the semantic markups too — utilRoute/traced/encumbrance.)
+                const stroke = m.stroke;
+                const nStroke = m.stroke;
+                const nsw = sw + (isSel ? 1 : 0);
+                const vsw = strokeZoom(nsw, zk); // B617: on-screen weight held constant relative to the drawing
+                const common = { stroke: nStroke, strokeWidth: vsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id), onContextMenu: (e) => onMarkupContext(e, m.id) };
+                // Closed shapes (rect/ellipse/polygon) get an always-on pointer target so the WHOLE
+                // body selects + drags, not just the painted border. pointerEvents:"all" makes the
+                // interior a hit target even when the shape is UNFILLED (fill:"none" is otherwise dead
+                // to clicks, so you'd have to land exactly on the 2px stroke). Mirrors Doc Review's
+                // B33 hit-test and Bluebeam/Figma behaviour (B155). Open paths (line/polyline) don't
+                // get fillProps, so their hit area is unchanged — see B155 for their forgiving buffer.
+                const fillProps = (m.fillOpacity > 0)
+                  ? { fill: m.fill, fillOpacity: m.fillOpacity, pointerEvents: "all" }
+                  : { pointerEvents: "all" };
+                // B156: render the markup exactly as before, then wrap the whole subtree so it
+                // carries its own pointer enter/leave. Because that rides the markup's OWN hit
+                // geometry (the browser decides what the pointer is over — the same pointerEvents
+                // that decide a click), the pre-click hover glow always matches what a click grabs;
+                // there is no second, separate hit-test that could disagree with the selection.
+                const node = (() => {
+                if (m.kind === "utilRoute") {
+                  const col = m.stroke; // B619: keep the route's own color when selected
+                  const cor = m.corridor.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  const pad = m.pad.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  const cl = m.pts.map((p) => f2p(p));
+                  const clStr = cl.map((q) => `${q.x},${q.y}`).join(" ");
+                  const clW = strokeZoom(2.2, zk); // B617
+                  const padC = f2p(centroid(m.pad)), mid = { x: (cl[0].x + cl[cl.length - 1].x) / 2, y: (cl[0].y + cl[cl.length - 1].y) / 2 };
+                  return (
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
+                      {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
+                      {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
+                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? "5 4" : undefined} />
+                      <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
+                      <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
+                      <text x={padC.x} y={padC.y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
+                      <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
+                    </g>
+                  );
+                }
+                if (m.kind === "traced" || m.kind === "infwater") {
+                  const pp = m.pts.map((p) => f2p(p));
+                  const s = pp.map((q) => `${q.x},${q.y}`).join(" ");
+                  const mid = pp[Math.floor((pp.length - 1) / 2)];
+                  const col = m.stroke; // B619: keep the traced line's own color when selected
+                  const tw = strokeZoom(m.weight ?? 2.4, zk); // B617
+                  return (
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
+                      {isSel && <polyline points={s} fill="none" stroke={SEL_BLUE} strokeWidth={tw + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
+                      <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
+                      {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
+                      {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2} y={q.y - 2} width={4} height={4} fill={col} stroke="#fff" strokeWidth={0.8} />)}
+                      {mid && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>}
+                    </g>
+                  );
+                }
+                if (m.kind === "encumbrance") {
+                  const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  const cen = (m.centerline || []).map(f2p);
+                  const ctr = centroid(m.pts), cp = f2p(ctr);
+                  return (
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
+                      {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
+                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
+                      {/* centerline + per-call bearing/distance labels */}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {view.ppf > 0.12 && (m.calls || []).map((c, i) => {
+                        const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
+                        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+                        return <text key={i} x={mx} y={my - 3} textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
+                      })}
+                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="11" fontWeight="700" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
+                    </g>
+                  );
+                }
+                if (m.kind === "easement") {
+                  if (m.parcelId && inactiveParcelIds.has(m.parcelId)) return null; // B213: anchored easement hides with its parcel
+                  const tcol = easementColor(m);
+                  const ecol = tcol; // B619: keep the easement's own type color when selected (blue vertex handles cue the selection)
+                  const proposed = m.status === "proposed";
+                  const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  const cen = (m.centerline && m.mode !== "boundary") ? m.centerline.map(f2p) : [];
+                  const cp = f2p(centroid(m.pts));
+                  const area = easementArea(m);
+                  // B620 — inline label rides the easement's centerline (strip) or its CLOSED ring (boundary — append
+                  // the first point so the label walks the closing edge too, not just 3 of 4 sides).
+                  const easePathFeet = (m.centerline && m.mode !== "boundary" && m.centerline.length >= 2)
+                    ? m.centerline
+                    : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
+                  return (
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
+                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? "7 5" : undefined} />
+                      {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
+                      {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
+                      {editInline?.id !== m.id && inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                    </g>
+                  );
+                }
+                // Open paths (line/polyline) carry a transparent FAT hit-stroke (~6px each side at
+                // any zoom — f2p already projects feet→screen px) so they grab as forgivingly as a
+                // closed shape's interior, instead of forcing a pixel-perfect landing on the 2px
+                // visible line. Without this a Line was far harder to select than a Polyline. The
+                // visible stroke is pointer-inert; the fat companion carries the select/drag handler.
+                // Reuses the B420 technique; closes the open-path tranche of B155.
+                if (m.kind === "line") {
+                  const a = f2p(m.a), b = f2p(m.b);
+                  return (
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
+                      {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
+                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                    </g>
+                  );
+                }
+                if (m.kind === "polyline") {
+                  const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  return (
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
+                      <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
+                      <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
+                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                    </g>
+                  );
+                }
+                if (m.kind === "polygon") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polygon key={m.id} points={s} {...common} {...fillProps} />; }
+                const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
+                if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
+                return <rect key={m.id} x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
+                })();
+                if (!node) return null; // e.g. an easement hidden with its inactive parcel (B213)
+                const isHov = hoverMkId === m.id && !isSel && tool === "select"; // never glow the already-selected markup, and Select mode only
+                return (
+                  <g key={m.id}
+                     className={isHov ? "mk-hover" : undefined} data-hover={isHov ? "1" : undefined}
+                     onPointerEnter={() => { if (tool === "select") setHoverMkId(m.id); }}
+                     onPointerLeave={() => setHoverMkId((h) => (h === m.id ? null : h))}>
+                    {node}
+                  </g>
+                );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--planner-panel)",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
@@ -10803,159 +11003,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
+              {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
+                  the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
+              {markupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
               {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext, dimSuppressed, editInline && editInline.kind === "el" ? editInline.id : null))}
-              {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) */}
-              {markups.map((m) => {
-                const isSel = sel?.kind === "markup" && sel.id === m.id;
-                const zk = view.ppf / 0.35; // B617 zoom multiplier (matches the callout scale)
-                const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
-                // B619: NEVER recolor a markup on select — every markup keeps its own authored stroke
-                // (so a live color-picker change shows instantly instead of hiding under an accent tint);
-                // selection is cued by the blue grips / halo, plus a faint width bump. (Generalizes the
-                // B567 neutral-markup choice to the semantic markups too — utilRoute/traced/encumbrance.)
-                const stroke = m.stroke;
-                const nStroke = m.stroke;
-                const nsw = sw + (isSel ? 1 : 0);
-                const vsw = strokeZoom(nsw, zk); // B617: on-screen weight held constant relative to the drawing
-                const common = { stroke: nStroke, strokeWidth: vsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id), onContextMenu: (e) => onMarkupContext(e, m.id) };
-                // Closed shapes (rect/ellipse/polygon) get an always-on pointer target so the WHOLE
-                // body selects + drags, not just the painted border. pointerEvents:"all" makes the
-                // interior a hit target even when the shape is UNFILLED (fill:"none" is otherwise dead
-                // to clicks, so you'd have to land exactly on the 2px stroke). Mirrors Doc Review's
-                // B33 hit-test and Bluebeam/Figma behaviour (B155). Open paths (line/polyline) don't
-                // get fillProps, so their hit area is unchanged — see B155 for their forgiving buffer.
-                const fillProps = (m.fillOpacity > 0)
-                  ? { fill: m.fill, fillOpacity: m.fillOpacity, pointerEvents: "all" }
-                  : { pointerEvents: "all" };
-                // B156: render the markup exactly as before, then wrap the whole subtree so it
-                // carries its own pointer enter/leave. Because that rides the markup's OWN hit
-                // geometry (the browser decides what the pointer is over — the same pointerEvents
-                // that decide a click), the pre-click hover glow always matches what a click grabs;
-                // there is no second, separate hit-test that could disagree with the selection.
-                const node = (() => {
-                if (m.kind === "utilRoute") {
-                  const col = m.stroke; // B619: keep the route's own color when selected
-                  const cor = m.corridor.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                  const pad = m.pad.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                  const cl = m.pts.map((p) => f2p(p));
-                  const clStr = cl.map((q) => `${q.x},${q.y}`).join(" ");
-                  const clW = strokeZoom(2.2, zk); // B617
-                  const padC = f2p(centroid(m.pad)), mid = { x: (cl[0].x + cl[cl.length - 1].x) / 2, y: (cl[0].y + cl[cl.length - 1].y) / 2 };
-                  return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
-                      {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
-                      {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
-                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? "5 4" : undefined} />
-                      <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
-                      <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
-                      <text x={padC.x} y={padC.y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
-                      <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
-                    </g>
-                  );
-                }
-                if (m.kind === "traced" || m.kind === "infwater") {
-                  const pp = m.pts.map((p) => f2p(p));
-                  const s = pp.map((q) => `${q.x},${q.y}`).join(" ");
-                  const mid = pp[Math.floor((pp.length - 1) / 2)];
-                  const col = m.stroke; // B619: keep the traced line's own color when selected
-                  const tw = strokeZoom(m.weight ?? 2.4, zk); // B617
-                  return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
-                      {isSel && <polyline points={s} fill="none" stroke={SEL_BLUE} strokeWidth={tw + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
-                      <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
-                      {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
-                      {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2} y={q.y - 2} width={4} height={4} fill={col} stroke="#fff" strokeWidth={0.8} />)}
-                      {mid && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>}
-                    </g>
-                  );
-                }
-                if (m.kind === "encumbrance") {
-                  const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                  const cen = (m.centerline || []).map(f2p);
-                  const ctr = centroid(m.pts), cp = f2p(ctr);
-                  return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
-                      {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
-                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
-                      {/* centerline + per-call bearing/distance labels */}
-                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
-                      {view.ppf > 0.12 && (m.calls || []).map((c, i) => {
-                        const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
-                        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-                        return <text key={i} x={mx} y={my - 3} textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
-                      })}
-                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="11" fontWeight="700" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
-                    </g>
-                  );
-                }
-                if (m.kind === "easement") {
-                  if (m.parcelId && inactiveParcelIds.has(m.parcelId)) return null; // B213: anchored easement hides with its parcel
-                  const tcol = easementColor(m);
-                  const ecol = tcol; // B619: keep the easement's own type color when selected (blue vertex handles cue the selection)
-                  const proposed = m.status === "proposed";
-                  const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                  const cen = (m.centerline && m.mode !== "boundary") ? m.centerline.map(f2p) : [];
-                  const cp = f2p(centroid(m.pts));
-                  const area = easementArea(m);
-                  // B620 — inline label rides the easement's centerline (strip) or its CLOSED ring (boundary — append
-                  // the first point so the label walks the closing edge too, not just 3 of 4 sides).
-                  const easePathFeet = (m.centerline && m.mode !== "boundary" && m.centerline.length >= 2)
-                    ? m.centerline
-                    : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
-                  return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
-                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? "7 5" : undefined} />
-                      {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
-                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
-                      {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
-                      {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
-                      {editInline?.id !== m.id && inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
-                    </g>
-                  );
-                }
-                // Open paths (line/polyline) carry a transparent FAT hit-stroke (~6px each side at
-                // any zoom — f2p already projects feet→screen px) so they grab as forgivingly as a
-                // closed shape's interior, instead of forcing a pixel-perfect landing on the 2px
-                // visible line. Without this a Line was far harder to select than a Polyline. The
-                // visible stroke is pointer-inert; the fat companion carries the select/drag handler.
-                // Reuses the B420 technique; closes the open-path tranche of B155.
-                if (m.kind === "line") {
-                  const a = f2p(m.a), b = f2p(m.b);
-                  return (
-                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
-                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
-                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
-                      {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
-                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
-                    </g>
-                  );
-                }
-                if (m.kind === "polyline") {
-                  const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-                  return (
-                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
-                      <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
-                      <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
-                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
-                    </g>
-                  );
-                }
-                if (m.kind === "polygon") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polygon key={m.id} points={s} {...common} {...fillProps} />; }
-                const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
-                if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
-                return <rect key={m.id} x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
-                })();
-                if (!node) return null; // e.g. an easement hidden with its inactive parcel (B213)
-                const isHov = hoverMkId === m.id && !isSel && tool === "select"; // never glow the already-selected markup, and Select mode only
-                return (
-                  <g key={m.id}
-                     className={isHov ? "mk-hover" : undefined} data-hover={isHov ? "1" : undefined}
-                     onPointerEnter={() => { if (tool === "select") setHoverMkId(m.id); }}
-                     onPointerLeave={() => setHoverMkId((h) => (h === m.id ? null : h))}>
-                    {node}
-                  </g>
-                );
-              })}
+              {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
+              {markupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
               {(xsecMode && xsecPts.length === 1 && cursor) && (() => { const a = f2p(xsecPts[0]), b = f2p(cursor); return <line data-export="skip" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />; })()}
               {xsec && (() => { const a = f2p(xsec.p0), b = f2p(xsec.p1); return <g data-export="skip" pointerEvents="none"><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2.4} /><circle cx={a.x} cy={a.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /><circle cx={b.x} cy={b.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /></g>; })()}
@@ -13644,9 +13697,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const groupN = m.deedGroup ? markups.filter((x) => x.deedGroup === m.deedGroup).length : 1;
           header = isDeed ? "Deed (metes & bounds)" : m.kind === "easement" ? "Easement" : "Markup";
           const delText = isDeed ? `Delete deed${groupN > 1 ? " + exceptions" : ""}` : `Delete ${m.kind === "easement" ? "easement" : "markup"}`;
+          // B820 — Arrange (z-order) among the markups, plus "Send behind buildings" (a markup normally
+          // floats over the elements; this drops it — the whole deed group, if it's a deed — beneath them).
+          const af = arrangeFlags(markups, m.id);
+          const setBehind = () => { pushHistory(); const nextBehind = !m.behindEls; const grp = m.deedGroup; setMarkups((a) => a.map((x) => (x.id === m.id || (grp && x.deedGroup === grp)) ? { ...x, behindEls: nextBehind } : x)); close(); };
           body = <>
             {isDeed && row({ text: hasParcel ? "Align to county parcel" : "Rotate to grid north", dis: !!m.locked, title: m.locked ? "Unlock this deed first" : "", on: () => { alignDeedToParcel(dm.id); close(); } })}
             {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMarkupLock(m.id); close(); } })}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+            {af && af.count > 1 && <>
+              {row({ text: "Bring to Front", hint: `${MOD}⇧]`, dis: af.atTop, on: () => { arrangeSel("front", { kind: "markup", id: m.id }); close(); } })}
+              {row({ text: "Bring Forward", hint: `${MOD}]`, dis: af.atTop, on: () => { arrangeSel("forward", { kind: "markup", id: m.id }); close(); } })}
+              {row({ text: "Send Backward", hint: `${MOD}[`, dis: af.atBottom, on: () => { arrangeSel("backward", { kind: "markup", id: m.id }); close(); } })}
+              {row({ text: "Send to Back", hint: `${MOD}⇧[`, dis: af.atBottom, on: () => { arrangeSel("back", { kind: "markup", id: m.id }); close(); } })}
+            </>}
+            {row({ text: m.behindEls ? "Bring in front of buildings" : "Send behind buildings", on: setBehind })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: delText, hint: "Del", danger: true, on: () => { deleteMarkupById(m.id); } })}
           </>;
@@ -13689,6 +13754,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               const isBuildingRect = t.type === "building" && !t.points;
               const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
               const dock = t.dock || "single";
+              // B820 — Arrange (z-order) within the element's TYPE-LAYER band, so the guardrail holds
+              // (a building can never drop under a road/parking). Hidden when the element is alone in
+              // its band (nothing to reorder against).
+              const band = zOrder(t);
+              const af = arrangeFlags(els.filter((e) => zOrder(e) === band), t.id);
+              const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
+              const arrRow = (text, mode, dis, hint) => (
+                <button disabled={dis} style={{ ...menuItem(false), opacity: dis ? 0.45 : 1, cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                  onClick={dis ? undefined : () => { arrangeSel(mode, { kind: "el", id: t.id }); setTypeMenu(null); }}>
+                  <span>{text}</span><span style={{ fontSize: 11, color: PAL.muted, fontWeight: 400 }}>{hint}</span>
+                </button>
+              );
               return (
                 <>
                   {(t.type === "sidewalk" || t.type === "landscape") && (
@@ -13724,6 +13801,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {multi.length > 1 && <button style={menuItem(false)} onClick={() => { groupSel(); setTypeMenu(null); }}>⊞ Group selection ({multi.length})</button>}
                       {t.groupId && <button style={menuItem(false)} onClick={() => { duplicateGroup(t.groupId); setTypeMenu(null); }}>Duplicate group</button>}
                       {t.groupId && <button style={menuItem(false)} onClick={() => { ungroupGroup(t.groupId); setTypeMenu(null); }}>⊟ Ungroup</button>}
+                    </>
+                  )}
+                  {af && af.count > 1 && (
+                    <>
+                      <div style={hdr(true)}>Arrange</div>
+                      {arrRow("Bring to Front", "front", af.atTop, `${MOD}⇧]`)}
+                      {arrRow("Bring Forward", "forward", af.atTop, `${MOD}]`)}
+                      {arrRow("Send Backward", "backward", af.atBottom, `${MOD}[`)}
+                      {arrRow("Send to Back", "back", af.atBottom, `${MOD}⇧[`)}
                     </>
                   )}
                   <div style={hdr(true)}>Edit</div>
