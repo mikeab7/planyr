@@ -193,3 +193,40 @@ export function foldJournal(next, journal, rows, { isHusk = () => false, onDisca
   }
   return out;
 }
+
+// B759 (×2) — guard the refetch-replace re-seed against a STALE fetch. refetchReplace re-seeds the
+// engine shadow + rebuilds the canvas from a fresh fetch of site_elements, and runs on every socket
+// (re)join / tab-wake. That fetch is issued at trigger time and can land with a snapshot OLDER than a
+// batch THIS tab just committed (the fetch was in flight when the commit landed). Re-seeding from the
+// stale rows rolls the shadow's revs BACKWARD and reverts the just-committed elements on the canvas —
+// e.g. a building's bonded sidewalk / paving snapping back to its pre-resize spot, which reads as the
+// pieces "separating" from the resized building (the canvas-revert twin of the false-conflict toast:
+// foldNeverSyncedLocal only covers ZERO-row elements and foldJournal is cleared once a commit
+// succeeds, so a committed-then-echoed element is protected by neither).
+//
+// Fix: before seeding, replace any fetched row THIS tab's shadow holds a STRICTLY NEWER rev for with
+// our committed version (data + rev + z from the shadow) — feeding the SAME reconciled rows to both
+// seed (shadow) and rowsToModel (canvas) so they stay consistent. Everything else passes through
+// untouched:
+//   • row current/newer than our shadow → rows canonical. A genuinely stale RECONNECTING tab holds
+//     LOWER shadow revs than the server (a foreign writer advanced them), so `s.rev > r.rev` is false
+//     → it adopts the server rows, never re-imposing old local geometry (V229 #5 stale-tab guard).
+//   • tombstone rows are NEVER overridden — a live shadow entry must not resurrect a remote delete
+//     (TOMBSTONE-DELETES); the edit-vs-delete race still resolves through the normal conflict matrix.
+//   • a row absent from the shadow, or a shadow entry with no fetched row, is left to
+//     foldNeverSyncedLocal / the delete paths.
+// The shadow always carries the latest data it has SEEN at its rev (applyRemoteRow/processResults keep
+// json+rev in lockstep), so substituting shadow data at the shadow rev is always the newer truth.
+// Pure: returns a NEW rows array; inputs untouched. `shadow` is the engine's shadowSnapshot() Map.
+export function reconcileSeedRows(rows, shadow) {
+  const shad = shadow instanceof Map ? shadow : new Map();
+  return arr(rows).map((r) => {
+    if (!r || r.id == null || r.deleted_at) return r;               // tombstone / malformed → untouched
+    const s = shad.get(r.kind + ":" + r.id);
+    if (!s || !((Number(s.rev) || 0) > (Number(r.rev) || 0))) return r; // fetch current/newer → canonical
+    let data;
+    try { data = JSON.parse(s.json); } catch { return r; }          // never let a bad shadow json throw
+    if (!data) return r;
+    return { ...r, data, rev: s.rev, z_index: typeof s.z === "number" ? s.z : r.z_index };
+  });
+}

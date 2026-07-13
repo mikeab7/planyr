@@ -8,7 +8,7 @@ import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
-import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal } from "./lib/elementRows.js";
+import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement } from "./lib/editorNames.js";
@@ -2173,8 +2173,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     pendingRemoteRef.current = []; // the refetch supersedes any buffered per-row events
-    eng.seed(r.rows);
-    const model = rowsToModel({}, r.rows);
+    // B759 (×2) — guard against a STALE fetch: this fetch may have been issued before a batch THIS tab
+    // just committed landed, so re-seeding straight from it would roll the shadow's revs BACKWARD and
+    // revert the just-committed elements (a resized building's bonded sidewalk/paving snapping back to
+    // its old spot = the "separating" report). Keep any element our shadow holds a NEWER rev for; a
+    // foreign-advanced or caught-up row stays canonical (V229 #5). Read the shadow BEFORE seed clears it,
+    // and feed the SAME reconciled rows to seed + rowsToModel so shadow and canvas stay in lockstep.
+    const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot());
+    eng.seed(rows);
+    const model = rowsToModel({}, rows);
     // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that
     // edit on the canvas too (it re-trues from its own RPC result, not from pre-commit rows).
     const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
@@ -2204,7 +2211,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // not a tombstone) so they survive AND get committed by the reconcile at the end. SAFE vs the V229 #5
     // stale-tab clobber and delete-resurrection: any (kind,id) that already has a row is left untouched —
     // rows stay canonical (see foldNeverSyncedLocal). rowKeys covers LIVE + TOMBSTONE rows on purpose.
-    const rowKeys = new Set((r.rows || []).map((row) => row && (row.kind + ":" + row.id)));
+    const rowKeys = new Set((rows || []).map((row) => row && (row.kind + ":" + row.id)));
     const foldedNew = foldNeverSyncedLocal(next, stateRef.current, rowKeys, isHuskParcel);
     // NEW-F4 — fold the persisted pending-edit JOURNAL over the rebuild: an edit to an ALREADY-
     // synced element whose commit failed before a reload lives only in the journal (the B756 fold
@@ -2214,7 +2221,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // is discarded LOUDLY (telemetry; the version ring stays the manual recovery). The journal is
     // cleared after folding — if the re-commit fails again, onStatus re-persists fresh entries
     // (self-healing loop, no double-apply).
-    const merged = foldJournal(foldedNew, readJournal(siteId, Date.now()), r.rows, {
+    const merged = foldJournal(foldedNew, readJournal(siteId, Date.now()), rows, {
       isHusk: isHuskParcel,
       // The engine's LIVE pending edits (already substituted via `sub` above) always beat the
       // journal — a stale journal snapshot must never fold older geometry over them.
@@ -2228,7 +2235,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
     // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
-    const liveIds = new Set(r.rows.filter((row) => row && !row.deleted_at).map((row) => row.id));
+    const liveIds = new Set(rows.filter((row) => row && !row.deleted_at).map((row) => row.id));
     setDeletedIds((prev) => (prev.some((id) => liveIds.has(id)) ? prev.filter((id) => !liveIds.has(id)) : prev));
     // One reconcile pass — against EXACTLY the collections just placed on the canvas (rows ∪ pending
     // local edits ∪ the B756 never-synced local-only fold), NEVER a blind stateRef diff: stateRef still

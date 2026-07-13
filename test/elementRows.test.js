@@ -324,3 +324,69 @@ describe("foldJournal (NEW-F4 pending-edit journal)", () => {
     expect(out).not.toBe(next);
   });
 });
+
+/* B759 (×2) — reconcileSeedRows: guard the refetch-replace re-seed against a STALE fetch that predates
+ * a batch THIS tab just committed. A row our shadow holds a NEWER rev for is replaced by our committed
+ * version (so a resized building's bonded sidewalk/paving can't be reverted = "separating"); everything
+ * else — foreign-advanced rows, tombstones, rows we never touched — passes through (V229 #5 preserved). */
+import { reconcileSeedRows } from "../src/workspaces/site-planner/lib/elementRows.js";
+
+describe("reconcileSeedRows (B759 ×2 — stale-refetch revert guard)", () => {
+  const shadowOf = (entries) => new Map(entries.map((e) => [e.kind + ":" + e.id, e]));
+  const jstr = (o) => JSON.stringify({ ...o }); // shadow stores stableStringify; JSON.parse round-trips either way
+  const row = (kind, id, rev, data, extra = {}) => ({ kind, id, rev, z_index: 0, deleted_at: null, data, ...extra });
+
+  it("replaces a STALE fetched row (shadow rev > row rev) with our committed data + rev", () => {
+    const shadow = shadowOf([{ kind: "el", id: "sw1", json: jstr({ id: "sw1", cx: 140 }), rev: 5, z: 7 }]);
+    const out = reconcileSeedRows([row("el", "sw1", 4, { id: "sw1", cx: 100 })], shadow);
+    expect(out[0].data).toEqual({ id: "sw1", cx: 140 }); // our just-committed move, not the stale cx:100
+    expect(out[0].rev).toBe(5);
+    expect(out[0].z_index).toBe(7);
+  });
+
+  it("keeps the fetched row when the shadow rev EQUALS the row rev (fetch already current)", () => {
+    const shadow = shadowOf([{ kind: "el", id: "e1", json: jstr({ id: "e1", cx: 9 }), rev: 5, z: 0 }]);
+    const out = reconcileSeedRows([row("el", "e1", 5, { id: "e1", cx: 100 })], shadow);
+    expect(out[0].data).toEqual({ id: "e1", cx: 100 }); // rows canonical — no override
+  });
+
+  it("keeps a FOREIGN-advanced row (row rev > shadow rev) — V229 #5 stale-tab clobber guard", () => {
+    const shadow = shadowOf([{ kind: "el", id: "e1", json: jstr({ id: "e1", cx: 140 }), rev: 5, z: 0 }]);
+    const out = reconcileSeedRows([row("el", "e1", 9, { id: "e1", cx: 999 })], shadow);
+    expect(out[0].data).toEqual({ id: "e1", cx: 999 }); // a later foreign write wins, never clobbered
+    expect(out[0].rev).toBe(9);
+  });
+
+  it("never overrides a TOMBSTONE row, even if the shadow holds a live newer rev (no resurrection)", () => {
+    const shadow = shadowOf([{ kind: "el", id: "e1", json: jstr({ id: "e1", cx: 140 }), rev: 9, z: 0 }]);
+    const out = reconcileSeedRows([row("el", "e1", 4, null, { deleted_at: "2026-07-13T00:00:00Z" })], shadow);
+    expect(out[0].deleted_at).toBe("2026-07-13T00:00:00Z"); // TOMBSTONE-DELETES — the delete stands
+    expect(out[0].data).toBeNull();
+  });
+
+  it("leaves a row absent from the shadow untouched (foldNeverSyncedLocal / delete paths own it)", () => {
+    const out = reconcileSeedRows([row("el", "new1", 1, { id: "new1", cx: 1 })], new Map());
+    expect(out[0].data).toEqual({ id: "new1", cx: 1 });
+  });
+
+  it("tolerates a malformed shadow json (keeps the fetched row, never throws)", () => {
+    const shadow = new Map([["el:e1", { kind: "el", id: "e1", json: "{not json", rev: 9, z: 0 }]]);
+    const out = reconcileSeedRows([row("el", "e1", 4, { id: "e1", cx: 100 })], shadow);
+    expect(out[0].data).toEqual({ id: "e1", cx: 100 });
+  });
+
+  it("empty / non-Map inputs pass through harmlessly", () => {
+    expect(reconcileSeedRows([], new Map())).toEqual([]);
+    expect(reconcileSeedRows(null, null)).toEqual([]);
+    const r = [row("el", "e1", 4, { id: "e1" })];
+    expect(reconcileSeedRows(r, undefined)).toEqual(r); // no shadow → nothing to reconcile
+  });
+
+  it("does not mutate the input rows", () => {
+    const shadow = shadowOf([{ kind: "el", id: "e1", json: jstr({ id: "e1", cx: 140 }), rev: 5, z: 0 }]);
+    const rows = [row("el", "e1", 4, { id: "e1", cx: 100 })];
+    const out = reconcileSeedRows(rows, shadow);
+    expect(rows[0].data).toEqual({ id: "e1", cx: 100 }); // original untouched
+    expect(out[0]).not.toBe(rows[0]);
+  });
+});
