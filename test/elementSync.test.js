@@ -792,4 +792,30 @@ describe("stableStringify", () => {
   it("is key-order-insensitive and recurses", () => {
     expect(stableStringify({ b: 1, a: { d: 4, c: 3 } })).toBe(stableStringify({ a: { c: 3, d: 4 }, b: 1 }));
   });
+
+  // B812 red-team (Angle 2): stableStringify MUST equal the value's post-wire form (JSON.stringify →
+  // jsonb → back), because every self-echo/self-dup guard byte-compares a LOCAL object against a SERVER
+  // row. JSON drops undefined-valued keys / functions / symbols and renders holes+undefined as null; the
+  // old code emitted an `undefined` token, so an element with an undefined property looked foreign.
+  const wireThenSorted = (v) => {
+    const round = JSON.parse(JSON.stringify(v) ?? "null");
+    const sortRec = (x) => Array.isArray(x) ? x.map(sortRec)
+      : (x && typeof x === "object") ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, sortRec(x[k])])) : x;
+    return JSON.stringify(sortRec(round));
+  };
+  it("matches the wire (JSON) form exactly — drops undefined keys, holes/undefined → null", () => {
+    for (const v of [
+      { id: "e1", w: 110, hatch: undefined },
+      { id: "e2", pts: [1, undefined, 3] },
+      { b: 1, a: undefined, c: { z: undefined, y: 2 } },
+      { id: "e3", cx: 228.4999999997, cy: -0, big: 1e21, arr: [] },
+      { fn: function () {}, ok: 5 },
+      { nested: [{ a: undefined, b: [undefined, 1] }] },
+    ]) {
+      expect(stableStringify(v)).toBe(wireThenSorted(v));
+    }
+  });
+  it("an element differing only by an undefined-valued key serializes IDENTICALLY (no phantom diff)", () => {
+    expect(stableStringify({ id: "pv", w: 10, z: 0, hatch: undefined })).toBe(stableStringify({ id: "pv", w: 10, z: 0 }));
+  });
 });

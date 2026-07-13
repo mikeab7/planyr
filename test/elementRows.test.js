@@ -344,6 +344,26 @@ describe("reconcileSeedRows (B759 ×2 — stale-refetch revert guard)", () => {
     expect(out[0].z_index).toBe(7);
   });
 
+  // B812 red-team (Angle 1): a delete clears the shadow entry, so a stale fetch that still shows the
+  // element ALIVE (predating the delete) would be adopted verbatim → RESURRECTION + a later false
+  // "was deleted by you (another window)". reconcileSeedRows now honours the engine's delete floor.
+  const tombOf = (entries) => new Map(entries.map((t) => [t.kind + ":" + t.id, { rev: t.rev, at: 0 }]));
+  it("keeps a fetched-ALIVE row DELETED when this tab tombstoned it at a rev no older than the fetch (no resurrection)", () => {
+    const out = reconcileSeedRows([row("el", "pv", 5, { id: "pv", w: 10 })], new Map(), tombOf([{ kind: "el", id: "pv", rev: 6 }]));
+    expect(out[0].deleted_at).toBeTruthy(); // rewritten to a tombstone
+    expect(out[0].data).toBeNull();
+  });
+  it("a GENUINE re-create ABOVE our delete's rev passes through ALIVE (delete floor doesn't over-suppress)", () => {
+    const out = reconcileSeedRows([row("el", "pv", 9, { id: "pv", w: 77 })], new Map(), tombOf([{ kind: "el", id: "pv", rev: 6 }]));
+    expect(out[0].deleted_at).toBeNull();          // higher rev than our delete → a real re-add
+    expect(out[0].data).toEqual({ id: "pv", w: 77 });
+  });
+  it("no tombstone for the key → alive row untouched (back-compat when no tombstones passed)", () => {
+    const out = reconcileSeedRows([row("el", "pv", 5, { id: "pv", w: 10 })], new Map());
+    expect(out[0].deleted_at).toBeNull();
+    expect(out[0].data).toEqual({ id: "pv", w: 10 });
+  });
+
   it("keeps the fetched row when the shadow rev EQUALS the row rev (fetch already current)", () => {
     const shadow = shadowOf([{ kind: "el", id: "e1", json: jstr({ id: "e1", cx: 9 }), rev: 5, z: 0 }]);
     const out = reconcileSeedRows([row("el", "e1", 5, { id: "e1", cx: 100 })], shadow);

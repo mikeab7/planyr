@@ -29,11 +29,35 @@ const FIELDS = Object.entries(KIND_TO_FIELD); // [ [kind, field], ... ]
 
 // Stable JSON (recursively key-sorted) so a diff compares VALUE, not key order — the shadow is
 // seeded from Postgres jsonb (which reorders keys) yet the local element keeps insertion order.
+//
+// It must produce EXACTLY what the value looks like AFTER a wire round-trip (JS object → JSON.stringify
+// in the RPC → Postgres jsonb → back), because every self-echo / self-dup guard byte-compares a LOCAL
+// object's serialization against a SERVER row's. JSON.stringify OMITS undefined-valued object keys and
+// functions/symbols, and renders undefined / holes inside arrays as `null`; the old code instead emitted
+// a literal `undefined` token for them, so any element carrying an `undefined` property (or a sparse
+// array) serialized DIFFERENTLY on the two sides — a permanent mismatch that made a tab's own write look
+// foreign (B812 red-team, Angle 2) AND produced spurious no-op diffs/commits. Mirror JSON semantics
+// exactly (undefined/function/symbol → dropped in objects, `null` in arrays) so both sides agree.
 export function stableStringify(v) {
+  if (v === undefined || typeof v === "function" || typeof v === "symbol") return undefined; // JSON drops these
   if (v === null || typeof v !== "object") return JSON.stringify(v);
-  if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
-  const keys = Object.keys(v).sort();
-  return "{" + keys.map((k) => JSON.stringify(k) + ":" + stableStringify(v[k])).join(",") + "}";
+  if (typeof v.toJSON === "function") return stableStringify(v.toJSON()); // match JSON (e.g. Date → ISO string)
+  if (Array.isArray(v)) {
+    let out = "[";
+    for (let i = 0; i < v.length; i++) {
+      if (i) out += ",";
+      const s = stableStringify(v[i]);           // a hole/undefined/function element → `null`, like JSON
+      out += s === undefined ? "null" : s;
+    }
+    return out + "]";
+  }
+  const parts = [];
+  for (const k of Object.keys(v).sort()) {
+    const s = stableStringify(v[k]);
+    if (s === undefined) continue;               // JSON omits undefined-valued keys
+    parts.push(JSON.stringify(k) + ":" + s);
+  }
+  return "{" + parts.join(",") + "}";
 }
 
 const skey = (kind, id) => kind + ":" + id;
@@ -165,6 +189,14 @@ export function createElementSync(opts = {}) {
     ready = true;
   }
   const shadowSnapshot = () => new Map(shadow);
+  // B812 red-team — the delete floor, exposed for reconcileSeedRows so a stale refetch can't RESURRECT an
+  // element THIS tab just deleted (the delete cleared its shadow entry, so reconcileSeedRows' rev check has
+  // nothing to compare a fetched-alive row against). Only entries still inside the recent window.
+  const tombstonedSnapshot = () => {
+    const out = new Map(); const t = now();
+    for (const [k, v] of tombstoned) if (t - v.at <= recentWindowMs) out.set(k, { rev: v.rev, at: v.at });
+    return out;
+  };
   const isRecent = (kind, id) => {
     const r = recent.get(skey(kind, id));
     return !!r && now() - r.at <= recentWindowMs;
@@ -543,7 +575,7 @@ export function createElementSync(opts = {}) {
     pendingOps, pendingCount, dirtyEntries, applyRemoteRow,
     isSeeded: () => ready,
     // introspection for tests / B672-B673
-    shadowSnapshot, isRecent,
+    shadowSnapshot, tombstonedSnapshot, isRecent,
     get state() { return state; },
     get recent() { return recent; },
   };
