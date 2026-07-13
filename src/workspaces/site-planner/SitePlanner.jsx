@@ -2179,7 +2179,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // its old spot = the "separating" report). Keep any element our shadow holds a NEWER rev for; a
     // foreign-advanced or caught-up row stays canonical (V229 #5). Read the shadow BEFORE seed clears it,
     // and feed the SAME reconciled rows to seed + rowsToModel so shadow and canvas stay in lockstep.
-    const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot());
+    const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot(), eng.tombstonedSnapshot());
     eng.seed(rows);
     const model = rowsToModel({}, rows);
     // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that

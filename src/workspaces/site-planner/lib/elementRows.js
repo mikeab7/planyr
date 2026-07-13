@@ -217,12 +217,31 @@ export function foldJournal(next, journal, rows, { isHusk = () => false, onDisca
 //     foldNeverSyncedLocal / the delete paths.
 // The shadow always carries the latest data it has SEEN at its rev (applyRemoteRow/processResults keep
 // json+rev in lockstep), so substituting shadow data at the shadow rev is always the newer truth.
-// Pure: returns a NEW rows array; inputs untouched. `shadow` is the engine's shadowSnapshot() Map.
-export function reconcileSeedRows(rows, shadow) {
+// B812 red-team — also honour the engine's DELETE floor (`tombstones` = tombstonedSnapshot()). A delete
+// clears the element's shadow entry, so the rev check below has nothing to protect it with; a stale fetch
+// that still shows the element ALIVE (its snapshot predated the delete, and the delete's realtime echo was
+// the very gap that triggered this refetch) would otherwise be adopted VERBATIM — RESURRECTING a
+// just-deleted element (a TOMBSTONE-DELETES violation) and later mis-firing "was deleted by you (another
+// window)". So a fetched-alive row whose (kind,id) THIS tab tombstoned within the window, at a rev no newer
+// than our delete, is kept DELETED (rewritten to a tombstone row → seed skips it, rowsToModel drops it,
+// rowKeys still counts it so foldNeverSyncedLocal won't re-add it). A genuine re-create by another session
+// arrives ABOVE our delete's rev and passes through live.
+//
+// Pure: returns a NEW rows array; inputs untouched. `shadow`/`tombstones` are the engine's
+// shadowSnapshot()/tombstonedSnapshot() Maps.
+export function reconcileSeedRows(rows, shadow, tombstones) {
   const shad = shadow instanceof Map ? shadow : new Map();
+  const tomb = tombstones instanceof Map ? tombstones : new Map();
   return arr(rows).map((r) => {
-    if (!r || r.id == null || r.deleted_at) return r;               // tombstone / malformed → untouched
-    const s = shad.get(r.kind + ":" + r.id);
+    if (!r || r.id == null) return r;                               // malformed → untouched
+    const key = r.kind + ":" + r.id;
+    if (!r.deleted_at) {
+      const t = tomb.get(key);
+      if (t && (Number(r.rev) || 0) <= (Number(t.rev) || 0))       // stale pre-delete snapshot → keep it deleted
+        return { ...r, deleted_at: "local-tombstone", data: null };
+    }
+    if (r.deleted_at) return r;                                     // tombstone / malformed → untouched
+    const s = shad.get(key);
     if (!s || !((Number(s.rev) || 0) > (Number(r.rev) || 0))) return r; // fetch current/newer → canonical
     let data;
     try { data = JSON.parse(s.json); } catch { return r; }          // never let a bad shadow json throw
