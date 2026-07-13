@@ -143,6 +143,16 @@ export function createElementSync(opts = {}) {
   // genuine foreign write always carries a rev we never produced, so it still falls through to the
   // conflict matrix. Pruned per entry to the recent window so it stays tiny.
   const ownRevs = new Map();
+  // key -> highest rev THIS tab ever committed for the element (a monotonic HIGH-WATER MARK, NOT time-
+  // pruned). ownRevs above is pruned to the 15s window, but a self-echo can land LATER than that: an
+  // element created during a burst, edited again >15s on, whose stale-refetch DROPPED its shadow entry —
+  // by echo time both the create-rev (ownRevs) and its data (recentSent) have aged out, yet it's still
+  // authoredRecently and shadow-less, so a replayed echo of the old create slipped into the pending
+  // branch as a false remote-while-dirty (B812 red-team round-2, Angle 4). Because server revs are
+  // monotonic per element, ANY non-tombstone row at a rev <= our high-water is our own write (or a
+  // foreign write we already superseded with a higher own commit) — never a live foreign change, which
+  // always lands ABOVE the current max. One int per key (bounded like the shadow), so no time-pruning.
+  const maxOwnRev = new Map();
   function recordOwnRev(kind, id, rev) {
     if (typeof rev !== "number") return;
     const t = now();
@@ -150,7 +160,9 @@ export function createElementSync(opts = {}) {
     let m = ownRevs.get(k);
     if (!m) { m = new Map(); ownRevs.set(k, m); }
     m.set(rev, t);
-    for (const [key, rm] of ownRevs) { // bound memory
+    const cur = maxOwnRev.get(k);
+    if (cur == null || rev > cur) maxOwnRev.set(k, rev); // high-water, never rolls back / times out
+    for (const [key, rm] of ownRevs) { // bound memory (the time-pruned exact set only)
       for (const [rv, at] of rm) if (t - at > recentWindowMs) rm.delete(rv);
       if (rm.size === 0) ownRevs.delete(key);
     }
@@ -161,6 +173,9 @@ export function createElementSync(opts = {}) {
     const at = m.get(rev);
     return at != null && now() - at <= recentWindowMs;
   };
+  // rev <= the highest rev we ever committed → definitively ours or already superseded by our own later
+  // commit (monotonic revs); a live foreign edit always arrives strictly above it.
+  const atOrBelowOwnHighWater = (kind, id, rev) => rev <= (maxOwnRev.get(skey(kind, id)) ?? 0);
 
   let debounceHandle = null;
   let backoffHandle = null;
@@ -480,8 +495,10 @@ export function createElementSync(opts = {}) {
     // rev, then ignore with NO event and NO canvas change: our canvas already holds this element's data
     // at least as fresh (the refetch-replace fold re-placed our latest local copy), and an INTERMEDIATE
     // own-echo carries OLDER data than our current state, so upserting it would flicker the canvas back.
-    // A foreign write carries an unrecorded rev → falls through to the conflict matrix unchanged.
-    if (!row.deleted_at && isOwnRev(row.kind, row.id, rev)) {
+    // A foreign write carries an unrecorded rev ABOVE our high-water → falls through to the conflict
+    // matrix unchanged. (isOwnRev is the exact-rev, in-window match; the high-water floor also catches a
+    // self-echo that outlived the 15s window — Angle-4 — since anything at/below our max is ours.)
+    if (!row.deleted_at && (isOwnRev(row.kind, row.id, rev) || atOrBelowOwnHighWater(row.kind, row.id, rev))) {
       const cur = shadow.get(key);
       if (!cur || rev > cur.rev)
         shadow.set(key, { kind: row.kind, id: row.id, json: cur ? cur.json : (row.data ? stableStringify(row.data) : ""), rev, z: cur ? cur.z : row.z_index });

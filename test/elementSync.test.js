@@ -727,7 +727,10 @@ describe("B812 — own-echo-by-rev kills the single-tab resize burst", () => {
     expect(events.filter((e) => e.type === "remote-upsert" && e.id === "sw")).toHaveLength(1);
   });
 
-  it("aged out: an own-rev older than the ~15s window is no longer treated as ours (memory is bounded)", async () => {
+  // Round-2 Angle 4: an own-echo that outlives the 15s ownRevs/recentSent windows is STILL recognized by
+  // the never-pruned HIGH-WATER floor (any rev <= our highest committed rev is ours), so no false toast —
+  // even when the element is still authoredRecently and a stale refetch dropped its shadow entry.
+  it("high-water floor: a self-echo older than the ~15s ownRevs window is still recognized as ours", async () => {
     const events = [];
     let clock = 0;
     const s = createElementSync({
@@ -736,15 +739,32 @@ describe("B812 — own-echo-by-rev kills the single-tab resize burst", () => {
       commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
     });
     s.seed([{ kind: "el", id: "pv", data: { id: "pv", area: 1 }, rev: 1, z_index: 0 }]);
-    s.reconcile({ els: [{ id: "pv", area: 2, z: 0 }] }, {}); s.flushGesture(); await tick(); // rev 2 recorded at t=0
-    clock = 20000; // 20s later — past the 15s window
-    s.seed([]);
-    // a very-late echo of rev 2 is no longer inside the own-rev window; but isRecent is also false now,
-    // so even though it flows to the emit path the toast copy (authoredRecently) is suppressed downstream.
+    s.reconcile({ els: [{ id: "pv", area: 2, z: 0 }] }, {}); s.flushGesture(); await tick(); // rev 2 (high-water) at t=0
+    clock = 20000; // 20s later — past the 15s ownRevs/recentSent window
+    s.seed([]); // stale refetch drops the shadow entry
     const instr = s.applyRemoteRow({ kind: "el", id: "pv", data: { id: "pv", area: 2, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
-    expect(instr.action).toBe("upsert");
-    const t = events.filter((e) => e.type === "remote-upsert");
-    if (t.length) expect(t[0].authoredRecently).toBe(false); // aged past the window → not flagged as "just edited"
+    expect(instr.action).toBe("ignore"); // rev 2 <= high-water 2 → ours → suppressed
+    expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(0);
+  });
+
+  it("Angle 4: an element edited >15s after its create, shadow dropped, old-create echo mid re-create → NO toast", async () => {
+    const events = [];
+    let clock = 0;
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => clock, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([]);
+    s.reconcile({ els: [{ id: "cc", v: 1, z: 0 }] }, {}); s.flushGesture(); await tick(); // CREATE → rev 1 (high-water) at t=0
+    clock = 20000;
+    s.reconcile({ els: [{ id: "cc", v: 2, z: 0 }] }, {}); s.flushGesture(); await tick(); // edit >15s later → rev 2 (high-water now 2), isRecent refreshed
+    s.seed([]); // stale refetch omits cc → shadow dropped
+    s.reconcile({ els: [{ id: "cc", v: 2, z: 0 }] }, {}); // fold re-adds → pending create in-flight (no shadow)
+    // a replayed echo of the OLD create (rev 1) lands during the in-flight window
+    const instr = s.applyRemoteRow({ kind: "el", id: "cc", data: { id: "cc", v: 1, z: 0 }, rev: 1, z_index: 0, updated_by: "me" });
+    expect(instr.action).toBe("ignore");                    // rev 1 <= high-water 2 → ours
+    expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // ← the round-2 fix
   });
 });
 
