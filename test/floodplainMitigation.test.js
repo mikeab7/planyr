@@ -753,3 +753,53 @@ describe("B794 — 0.2% (500-yr) missing-input copy + the below-1% sanity guard"
     expect(r.flags).toContain("wse02-below-1pct");
   });
 });
+
+describe("B807 — the derived 1% WSE seam (FBCDD Atlas-14 DRAFT rasters), LAST in precedence", () => {
+  const fp = { id: "b1", ring: rect(0, 0, 100, 100) };
+  const zoneA = () => mkZone("1pct", [rect(0, 0, 100, 100)], { zone: "A", unstudiedA: true }); // no staticBfeFt — nothing to price from
+  it("an unstudied Zone A that read UNKNOWN now prices from the derived 1% WSE, tag preserved", () => {
+    const without = computeMitigation({ footprints: [fp], zones: [zoneA()], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } });
+    expect(without.volumeCf).toBeNull();
+    expect(without.unknownReason).toMatch(/unstudied Zone A/);
+    const r = computeMitigation({ footprints: [fp], zones: [zoneA()], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, derivedWse1pctFt: 96, derivedWse1pctSrc: "fbcdd-wse100-draft" } });
+    expect(r.volumeCf).toBeCloseTo(10000 * 6, -2); // min(96,100) − 90
+    expect(r.providers.wse1pct).toBe("fbcdd-wse100-draft"); // provenance label preserved
+  });
+  it("an unnamed caller gets the generic tag — never FBCDD provenance it didn't claim", () => {
+    const r = computeMitigation({ footprints: [fp], zones: [zoneA()], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, derivedWse1pctFt: 96 } });
+    expect(r.providers.wse1pct).toBe("derived-wse100");
+  });
+  it("EVERY effective-model provider outranks the draft raster (precedence LAST)", () => {
+    const elevBase = { padElevFt: 100, existGradeFt: 90, derivedWse1pctFt: 96, derivedWse1pctSrc: "fbcdd-wse100-draft" };
+    const manual = computeMitigation({ footprints: [fp], zones: [zoneA()], rule: harris, elev: { ...elevBase, bfeFt: 93 } });
+    expect(manual.providers.wse1pct).toBe("manual");
+    expect(manual.volumeCf).toBeCloseTo(10000 * 3, -2); // 93 governs, not 96
+    const xs = computeMitigation({ footprints: [fp], zones: [zoneA()], rule: harris, elev: { ...elevBase, derivedXsWselFt: 94 } });
+    expect(xs.providers.wse1pct).toBe("xs-wsel");
+    const bfeLine = computeMitigation({ footprints: [fp], zones: [zoneA()], rule: harris, elev: { ...elevBase, derivedBfeFt: 95 } });
+    expect(bfeLine.providers.wse1pct).toBe("bfe-line-interp");
+    const published = computeMitigation({ footprints: [fp], zones: [mkZone("1pct", [rect(0, 0, 100, 100)], { staticBfeFt: 92 })], rule: harris, elev: elevBase });
+    expect(published.providers.wse1pct).toBe("static-bfe");
+    expect(published.volumeCf).toBeCloseTo(10000 * 2, -2); // the zone's own 92, never the draft 96
+  });
+  it("wse1pctForRing gains the same last rung, gated on the ring actually touching a 1% zone", () => {
+    const ring = rect(0, 0, 100, 100);
+    const zone = zoneA();
+    expect(wse1pctForRing(ring, [zone], { derivedWse1pctFt: 96, derivedWse1pctSrc: "fbcdd-wse100-draft" })).toEqual({ wseFt: 96, provider: "fbcdd-wse100-draft" });
+    expect(wse1pctForRing(ring, [zone], { derivedWse1pctFt: 96 })).toEqual({ wseFt: 96, provider: "derived-wse100" });
+    // manual + the other derived rungs still win
+    expect(wse1pctForRing(ring, [zone], { bfeFt: 93, derivedWse1pctFt: 96 })).toEqual({ wseFt: 93, provider: "manual" });
+    expect(wse1pctForRing(ring, [zone], { derivedBfeFt: 95, derivedWse1pctFt: 96 })).toEqual({ wseFt: 95, provider: "bfe-line-interp" });
+    // a ring that touches NO 1% zone never prices off the draft value
+    const farRing = rect(5000, 5000, 100, 100);
+    expect(wse1pctForRing(farRing, [zone], { derivedWse1pctFt: 96 })).toEqual({ wseFt: null, provider: null });
+  });
+  it("B802 sanity: the derived 1% joins the reference, so a draft 0.2% below it flags on a PURE Zone-A site", () => {
+    const zones = [zoneA(), mkZone("02pct", [rect(200, 0, 100, 100)])];
+    const fps = [{ id: "a", ring: rect(0, 0, 100, 100) }, { id: "b", ring: rect(200, 0, 100, 100) }];
+    const below = computeMitigation({ footprints: fps, zones, rule: coh, elev: { padElevFt: 100, existGradeFt: 90, derivedWse1pctFt: 97, derivedWse1pctSrc: "fbcdd-wse100-draft", derivedWse02Ft: 96, derivedWse02Src: "fbcdd-wse02-draft" } });
+    expect(below.flags).toContain("wse02-below-1pct"); // pre-B807, ref1 was -Infinity here and this could NEVER fire
+    const above = computeMitigation({ footprints: fps, zones, rule: coh, elev: { padElevFt: 100, existGradeFt: 90, derivedWse1pctFt: 97, derivedWse1pctSrc: "fbcdd-wse100-draft", derivedWse02Ft: 98, derivedWse02Src: "fbcdd-wse02-draft" } });
+    expect(above.flags).not.toContain("wse02-below-1pct");
+  });
+});

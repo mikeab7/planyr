@@ -1,12 +1,13 @@
 import React from "react";
 import { formatAge } from "../lib/gisCache.js";
-import { NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, DERIVED_BFE_NOTE, DERIVED_XS_WSEL_NOTE, DERIVED_WSE02_DRAFT_NOTE } from "../lib/floodplainMitigation.js";
+import { NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, DERIVED_BFE_NOTE, DERIVED_XS_WSEL_NOTE, DERIVED_WSE02_DRAFT_NOTE, DERIVED_WSE100_DRAFT_NOTE } from "../lib/floodplainMitigation.js";
 
 // Human-readable label for a WSE provider tag (the engine emits terse strings).
 const WSE_PROVIDER_LABEL = {
   "static-bfe": "published BFE", "ao-depth": "AO depth + grade", "manual": "manual",
   "bfe-line-interp": "derived (BFE lines)", "xs-wsel": "derived (cross-sections)",
   "xs-wsel-02": "derived (cross-sections)", "fbcdd-wse02-draft": "derived (FBCDD study — DRAFT)",
+  "fbcdd-wse100-draft": "derived (FBCDD study — DRAFT)", "derived-wse100": "derived (100-yr raster)",
   "mixed": "mixed",
 };
 const wseProvLabel = (p) => WSE_PROVIDER_LABEL[p] || p || "—";
@@ -88,6 +89,9 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
       {geo && geo.wse02Flags && geo.wse02Flags.state === "failed" && (
         <div style={warnStyle}>⚠ Fort Bend's watershed-study server didn't answer — the DRAFT 0.2% WSE couldn't be read this check (an outage is never a value). Re-check shortly or enter a 0.2% WSE.</div>
       )}
+      {geo && geo.wse100Flags && geo.wse100Flags.state === "failed" && (
+        <div style={warnStyle}>⚠ Fort Bend's watershed-study server didn't answer — the DRAFT 1% (100-yr) WSE couldn't be read this check (an outage is never a value). Re-check shortly or enter a BFE.</div>
+      )}
       {geo && geo.state === "loaded" && geo.zoneCount === 0 && (
         <div style={noteStyle}>No mapped flood zones intersect the site envelope (FEMA NFHL, verified source) — no mitigation trigger on this screening pull.</div>
       )}
@@ -139,6 +143,15 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
           {geo && geo.derivedWse02 && mit.providers.wse02pct === "fbcdd-wse02-draft" && (
             <div style={warnStyle}>
               ⚑ 0.2% WSE ≈ {f2(geo.derivedWse02.wseFt)}′ read from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results, screening only. Basis note: FBCDD Interim §9 references the PRE-Atlas-14 0.2% (effective 2014 FIS profile) — this Atlas-14 value stands in for it, labeled, not equal to it. Enter the FIS 0.2% WSE to override.
+            </div>
+          )}
+          {/* B807 — the 1% band was priced off FBCDD's Atlas-14 per-watershed DRAFT raster
+              (the unstudied-Zone-A path: NFHL publishes nothing to price from). LAST in
+              precedence — any effective-model value above it wins — and the number must
+              never read as an effective elevation. */}
+          {geo && geo.derivedWse100 && mit.providers.wse1pct === "fbcdd-wse100-draft" && (
+            <div style={warnStyle}>
+              ⚑ 1% WSE ≈ {f2(geo.derivedWse100.wseFt)}′ read from Fort Bend's Atlas-14 watershed-study rasters{geo.derivedWse100.watershed ? ` (${geo.derivedWse100.watershed.replace(/_/g, " ")} watershed)` : ""} — DRAFT study results, screening only. Basis note: the county's mitigation rules reference the EFFECTIVE (pre-Atlas-14) floodplain — this Atlas-14 value stands in for it, labeled, not equal to it. Enter a BFE to override.
             </div>
           )}
           {/* B794 — sanity guard: a 0.2% surface can never sit below the 1% surface; a
@@ -208,6 +221,11 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
           {(b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft" && (
             <div style={warnStyle}>⚑ The 0.2% WSE behind this required FFE is a DRAFT Fort Bend watershed-study value — screening only; confirm before design.</div>
           )}
+          {/* B807 variant-(b) — the governing FFE basis is the Atlas-14 100-yr and that
+              value came from the FBCDD DRAFT raster: the verdict carries the caveat. */}
+          {(b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "atlas14_100yr" && d.wse100Src === "fbcdd-wse100-draft" && (
+            <div style={warnStyle}>⚑ The Atlas-14 100-yr WSE behind this required FFE is a DRAFT Fort Bend watershed-study value — screening only; confirm before design.</div>
+          )}
           {b.pathway && (
             <div style={b.pathway.fillToElevate === "restricted" ? warnStyle : noteStyle}>
               {b.pathway.fillToElevate === "restricted" ? "⚠ " : ""}{b.pathway.note}
@@ -224,6 +242,7 @@ export default function FloodMitigationCard({ drainage, PAL, onCheck }) {
         {geo && geo.derivedBfe && <><br />{DERIVED_BFE_NOTE}</>}
         {geo && geo.derivedXsWsel && <><br />{DERIVED_XS_WSEL_NOTE}</>}
         {geo && geo.derivedWse02 && <><br />{DERIVED_WSE02_DRAFT_NOTE}</>}
+        {geo && geo.derivedWse100 && <><br />{DERIVED_WSE100_DRAFT_NOTE}</>}
         <br />{EXCLUSIONS_NOTE}
         <br />{OFFSITE_NOTE} Screening only — confirm with your engineer and the reviewing authority.
       </div>

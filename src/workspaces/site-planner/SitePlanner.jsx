@@ -37,7 +37,7 @@ import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMil
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
-import { sampleWse02Point } from "./lib/fbcdWse.js";
+import { sampleWse02Point, sampleWse100Point } from "./lib/fbcdWse.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import ViewMenu from "./components/ViewMenu.jsx";
@@ -675,6 +675,9 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
     fp.id, fp.ring.length, ringHash(fp.ring), polyArea(fp.ring).toFixed(0),
     fp.padElevFt ?? "", zonesSig, rule ? `${rule.trigger}|${rule.ratio}|${rule.verified}` : "",
     elev.padElevFt ?? "", elev.existGradeFt ?? "", elev.bfeFt ?? "", elev.derivedBfeFt ?? "", elev.derivedXsWselFt ?? "", elev.derivedWse02Ft ?? "", elev.wse02Ft ?? "", elev.avgFillDepthFt ?? "",
+    // B807 — the async-arriving derived 1% MUST be in the sig, or a value that lands
+    // after the first compute silently never re-prices (the stale-memo trap).
+    elev.derivedWse1pctFt ?? "", elev.derivedWse1pctSrc ?? "",
   ].join("~");
   if (_mitMemo.has(sig)) {
     const hit = _mitMemo.get(sig);
@@ -692,15 +695,15 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
  * grid tests would otherwise jank drags on exactly the in-floodplain sites this
  * feature targets. */
 const _pondFactsMemo = new Map();
-function pondFloodFacts(ring, zones, rule, { bfeFt, existGradeFt, derivedBfeFt, derivedXsWselFt }, zonesSig) {
-  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", existGradeFt ?? "", derivedBfeFt ?? "", derivedXsWselFt ?? ""].join("~");
+function pondFloodFacts(ring, zones, rule, { bfeFt, existGradeFt, derivedBfeFt, derivedXsWselFt, derivedWse1pctFt, derivedWse1pctSrc }, zonesSig) {
+  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", existGradeFt ?? "", derivedBfeFt ?? "", derivedXsWselFt ?? "", derivedWse1pctFt ?? ""].join("~");
   if (_pondFactsMemo.has(sig)) {
     const hit = _pondFactsMemo.get(sig);
     _pondFactsMemo.delete(sig); _pondFactsMemo.set(sig, hit);
     return hit;
   }
   const val = {
-    wseFt: wse1pctForRing(ring, zones, { bfeFt, existGradeFt, derivedBfeFt, derivedXsWselFt }).wseFt,
+    wseFt: wse1pctForRing(ring, zones, { bfeFt, existGradeFt, derivedBfeFt, derivedXsWselFt, derivedWse1pctFt, derivedWse1pctSrc }).wseFt,
     inTrigger: ringInTrigger(ring, zones, rule),
   };
   _pondFactsMemo.set(sig, val);
@@ -6250,23 +6253,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // matched by WTR_NM). Ranks BELOW a manual BFE, ABOVE the interpolated BFE-line value.
       floodGeo.derivedXsWsel = xs.sections.length ? governingCrossSectionWsel({ point: bfePt, sections: xs.sections }) : null;
       floodGeo.xsFlags = { datumExcluded: xs.excludedDatum, total: xs.total, usable: xs.sections.length, state: xs.state };
-      // B770/V279 wiring — the DRAFT 0.2% (500-yr) WSE from FBCDD's Atlas-14 watershed-
-      // study raster mosaic, sampled at the same representative point the derived BFE
-      // uses. Fort Bend sites only (the mosaic covers that county; elsewhere the call is
-      // a guaranteed no-data). Failure isolation: an outage reads state "failed" (an
-      // honest UNKNOWN downstream — surfaced on the card), never a fabricated value; an
-      // out-of-coverage point reads "empty". The value NEVER overwrites a manual 0.2%
-      // WSE (precedence in computeMitigation) and always carries the DRAFT label.
+      // B770/V279 + B807 wiring — the DRAFT WSEs from FBCDD's Atlas-14 watershed-study
+      // rasters (0.2% county-wide mosaic; 1% per-watershed multiplex), sampled at the
+      // same representative point the derived BFE uses. Fort Bend sites only (the study
+      // covers that county; elsewhere the call is a guaranteed no-data). Failure
+      // isolation PER VALUE: an outage reads that value's state "failed" (an honest
+      // UNKNOWN downstream — surfaced on the card), never a fabricated value and never
+      // poisoning the sibling sample; an out-of-coverage point reads "empty". Neither
+      // value ever overwrites a manual entry (precedence in computeMitigation — the 1%
+      // is the LAST rung) and both always carry the DRAFT label.
       floodGeo.derivedWse02 = null;
       floodGeo.wse02Flags = { state: "not-applicable" };
+      floodGeo.derivedWse100 = null;
+      floodGeo.wse100Flags = { state: "not-applicable" };
       if ((ctx?.authority?.jurisdiction?.county || []).some((c) => /fort\s*bend/i.test(String(c)))) {
-        try {
-          const [wLat, wLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
-          const wseFt = await sampleWse02Point(wLat, wLng);
-          floodGeo.derivedWse02 = wseFt != null ? { wseFt, source: "fbcdd-wse02-draft" } : null;
-          floodGeo.wse02Flags = { state: wseFt != null ? "loaded" : "empty" };
-        } catch (_) {
+        const [wLat, wLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+        const [r02, r100] = await Promise.allSettled([sampleWse02Point(wLat, wLng), sampleWse100Point(wLat, wLng)]);
+        if (r02.status === "fulfilled") {
+          floodGeo.derivedWse02 = r02.value != null ? { wseFt: r02.value, source: "fbcdd-wse02-draft" } : null;
+          floodGeo.wse02Flags = { state: r02.value != null ? "loaded" : "empty" };
+        } else {
           floodGeo.wse02Flags = { state: "failed" };
+        }
+        if (r100.status === "fulfilled") {
+          floodGeo.derivedWse100 = r100.value != null ? { wseFt: r100.value.wseFt, source: "fbcdd-wse100-draft", watershed: r100.value.watershed } : null;
+          floodGeo.wse100Flags = { state: r100.value != null ? "loaded" : "empty" };
+        } else {
+          floodGeo.wse100Flags = { state: "failed" };
         }
         if (tok !== drainTok.current) return; // superseded while sampling
       }
@@ -6379,8 +6392,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmDerivedXsWselFt = fmDerivedXsWsel && Number.isFinite(fmDerivedXsWsel.wselFt) ? fmDerivedXsWsel.wselFt : null;
   const fmManualWse02Ft = Number.isFinite(fmSettings.wse02Ft) ? fmSettings.wse02Ft : null;
   const fmDerivedWse02Ft = floodGeo?.derivedWse02 && Number.isFinite(floodGeo.derivedWse02.wseFt) ? floodGeo.derivedWse02.wseFt : null;
+  // B807 — the DRAFT Atlas-14 1% WSE from the per-watershed rasters (Fort Bend only).
+  const fmDerivedWse100Ft = floodGeo?.derivedWse100 && Number.isFinite(floodGeo.derivedWse100.wseFt) ? floodGeo.derivedWse100.wseFt : null;
   // Governing 1% WSE for buildability/FFE: highest published static BFE → manual → the
   // derived XS WSEL → the derived BFE-line estimate (same precedence the engine uses).
+  // Deliberately EXCLUDES the DRAFT Atlas-14 100-yr (fmDerivedWse100Ft) — a draft study
+  // value must never masquerade as the FIRM-BFE basis; it enters FFE only through its
+  // own labeled atlas14_100yr basis (below) and the mitigation chain's last rung.
   const fmGoverningBfe = fmZones.reduce((best, z) => (z.staticBfeFt != null && (best == null || z.staticBfeFt > best) ? z.staticBfeFt : best), null) ?? fmManualBfeFt ?? fmDerivedXsWselFt ?? fmDerivedBfeFt;
   // NEW-3 — the AUTO pad: the code-minimum required FFE from the buildability rule. The
   // owner shouldn't have to type a pad on a floodplain fill — the code (FBC: 2′ above the
@@ -6388,7 +6406,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the site builds to this floor, so mitigation prices WSE-governed (pad ≥ WSE by
   // construction) instead of blocking on a missing FFE. A typed pad still overrides.
   const fmBuildRule = buildRules[floodJurKey] || buildRules.generic;
-  const fmAutoFfe = requiredFfe(fmBuildRule, { wse1pctFt: fmGoverningBfe, wse02Ft: fmManualWse02Ft ?? fmDerivedWse02Ft });
+  // B807 variant-(b) (owner 2026-07-13): the DRAFT Atlas-14 100-yr also seeds the FFE
+  // recommendation via its OWN labeled basis (atlas14_100yr) — never via wse1pctFt.
+  const fmAutoFfe = requiredFfe(fmBuildRule, { wse1pctFt: fmGoverningBfe, wse02Ft: fmManualWse02Ft ?? fmDerivedWse02Ft, atlas14Wse100Ft: fmDerivedWse100Ft });
   const fmAutoFfeFt = fmAutoFfe && Number.isFinite(fmAutoFfe.requiredFfeFt) ? fmAutoFfe.requiredFfeFt : null;
   // Plan-level pad precedence: manual padFfeFt → AUTO code-min FFE (per-element padElevFt
   // still overrides in effectivePadElev). padIsAuto drives the "assumed" buildability verdict
@@ -6408,6 +6428,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // manual wse02Ft always wins (engine precedence).
     derivedWse02Ft: fmDerivedWse02Ft,
     derivedWse02Src: floodGeo?.derivedWse02 ? floodGeo.derivedWse02.source : null,
+    // B807 — the derived 1% seam (LAST in engine precedence): the FBCDD Atlas-14
+    // per-watershed DRAFT rasters on Fort Bend sites. Same provenance discipline as
+    // the 0.2%: the source tag rides everywhere the number surfaces.
+    derivedWse1pctFt: fmDerivedWse100Ft,
+    derivedWse1pctSrc: floodGeo?.derivedWse100 ? floodGeo.derivedWse100.source : null,
     avgFillDepthFt: Number.isFinite(fmSettings.avgFillDepthFt) ? fmSettings.avgFillDepthFt : null,
     sources: {
       existGrade: Number.isFinite(fmSettings.existGradeFt) ? "manual" : (drainCtxData?.groundElevFt != null ? "3dep" : null),
@@ -6416,6 +6441,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       derivedBfe: fmDerivedBfe ? "bfe-line-interp" : null,
       derivedXsWsel: fmDerivedXsWsel ? "xs-wsel" : null,
       derivedWse02: floodGeo?.derivedWse02 ? floodGeo.derivedWse02.source : null,
+      derivedWse100: floodGeo?.derivedWse100 ? floodGeo.derivedWse100.source : null,
     },
   };
   const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
@@ -6423,7 +6449,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const det = e.det || {};
     const pring = ringOf(e);
     const facts = fmZones.length
-      ? pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt }, fmZonesSig)
+      ? pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt, derivedWse1pctFt: fmElev.derivedWse1pctFt, derivedWse1pctSrc: fmElev.derivedWse1pctSrc }, fmZonesSig)
       : { wseFt: null, inTrigger: false };
     const estPool = detRegime && detRegime.regime === "B"
       ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: det.depth ?? 8, freeboardFt: det.freeboard ?? 1 })
@@ -6529,6 +6555,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         padIsAuto: fmPadIsAuto,
         wse1pctFt: fmGoverningBfe,
         wse02Ft: fmElev.wse02Ft ?? fmElev.derivedWse02Ft,
+        // B807 variant-(b): the DRAFT Atlas-14 100-yr seeds its own labeled FFE basis.
+        atlas14Wse100Ft: fmDerivedWse100Ft,
         buildingIn1pct: fmBuildingIn1pct,
         floodplainPresent: fmFloodplainPresent,
         wetlandsPresent: analysisWetlands === "present",
@@ -6557,10 +6585,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pondFullyInundated,
     unanchoredInTrigger,
     pondExcavationCf,
-    floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length, derivedBfe: floodGeo.derivedBfe || null, bfeLineFlags: floodGeo.bfeLineFlags || null, derivedXsWsel: floodGeo.derivedXsWsel || null, xsFlags: floodGeo.xsFlags || null, derivedWse02: floodGeo.derivedWse02 || null, wse02Flags: floodGeo.wse02Flags || null } : null,
+    floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length, derivedBfe: floodGeo.derivedBfe || null, bfeLineFlags: floodGeo.bfeLineFlags || null, derivedXsWsel: floodGeo.derivedXsWsel || null, xsFlags: floodGeo.xsFlags || null, derivedWse02: floodGeo.derivedWse02 || null, wse02Flags: floodGeo.wse02Flags || null, derivedWse100: floodGeo.derivedWse100 || null, wse100Flags: floodGeo.wse100Flags || null } : null,
     // B770 — where the 0.2% WSE feeding buildability came from (manual beats the DRAFT
     // raster); card + print sheet both read this so the DRAFT label can't drift (PDF-PARITY).
     wse02Src: fmElev.wse02Ft != null ? "manual" : fmElev.derivedWse02Ft != null ? fmElev.derivedWse02Src : null,
+    // B807 — ditto for the DRAFT Atlas-14 100-yr feeding the FFE's atlas14_100yr basis.
+    wse100Src: fmDerivedWse100Ft != null ? fmElev.derivedWse1pctSrc : null,
     buildability: fmBuild,
     floodMit: {
       settings: fmSettings,
@@ -6580,6 +6610,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 — auto-resolved values shown as grey "value · source" text until tapped to edit.
       autoGradeFt: drainCtxData?.groundElevFt ?? null, // 3DEP bare-earth median
       derivedWse02: floodGeo?.derivedWse02 || null, // FBCDD Atlas-14 DRAFT 0.2% WSE (Fort Bend)
+      derivedWse100: floodGeo?.derivedWse100 || null, // B807 — FBCDD Atlas-14 DRAFT 1% WSE (Fort Bend, per-watershed)
       hasDockElements: els.some((e) => e && (e.truckCourt || e.forCourt)), // NEW-1(c) — gate the dock-drop row
       onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
       onRuleChange: (jk, patch) => setFloodRules((r) => { const next = { ...r, [jk]: { ...r[jk], ...patch } }; saveFloodplainRules(next); return next; }),
@@ -7680,6 +7711,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B794 (PDF-PARITY with the card's basis note): the DRAFT label carries the §9-basis
       // qualifier — the Atlas-14 read stands in for the pre-Atlas-14 FIS basis, not equals it.
       if (mit.volumeCf != null && mit.providers?.wse02pct === "fbcdd-wse02-draft") v += " (0.2% from DRAFT Atlas-14 study — §9 basis is the 2014 FIS)";
+      // B807 (PDF-PARITY): a 1% volume priced off the FBCDD DRAFT raster carries the same
+      // stand-in qualifier on the sheet — the effective floodplain is the rule's basis.
+      if (mit.volumeCf != null && mit.providers?.wse1pct === "fbcdd-wse100-draft") v += " (1% from DRAFT Atlas-14 study — basis is the effective floodplain)";
       if (mit.flags && mit.flags.includes("wse02-below-1pct")) v += " (⚠ derived 0.2% reads below the 1% — mismatched studies)";
       if (mit.volumeCf != null && d.floodGeo && d.floodGeo.truncated) v += " (floor — capped pull)";
       if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
@@ -7701,6 +7735,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B770 (PDF-PARITY with the card's ⚑ note): an FFE governed by the 0.2% basis whose
       // WSE came from the FBCDD DRAFT raster must carry the draft label on the sheet too.
       if (b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft") v += " (0.2% WSE — DRAFT study)";
+      // B807 variant-(b) (PDF-PARITY): same rule for the Atlas-14 100-yr basis.
+      if (b.ffe.basis === "atlas14_100yr" && d.wse100Src === "fbcdd-wse100-draft") v += " (Atlas-14 100-yr WSE — DRAFT study)";
       pairs.push(["Required FFE", v]);
     } else if (b && b.ffe && (b.ffe.status === "unknown" || b.ffe.status === "no_rule")) {
       // Mirror the on-screen card's no_rule/unknown advisory so the sheet doesn't drop it
@@ -14778,6 +14814,7 @@ function YieldPanel({
                   const mitTag = mit.expertBypass ? "expert avg-depth"
                     : d.mitigationStraddle ? "straddle worst-case"
                     : mit.providers?.wse1pct === "bfe-line-interp" ? "BFE derived"
+                    : mit.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr"
                     : "";
                   // NEW-1(a) — "volumes are additive" teaching copy → ⓘ on the row.
                   out.push(infoRow("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`,
@@ -14792,6 +14829,11 @@ function YieldPanel({
                       ? ` (between FEMA's ${f1(dt.loElev)}′ and ${f1(dt.hiElev)}′ lines; conservative bound ${f1(dt.hiElev)}′)`
                       : (db.method === "nearest-line" ? " (nearest single BFE line — ±~0.5′)" : "");
                     out.push(warnNote(`BFE ≈ ${f1(db.bfeFt)}′ DERIVED from FEMA's Base Flood Elevation lines${bracket} — a screening estimate, not a published BFE. Type a BFE below to override.`, "mit-derived"));
+                  }
+                  // B807 — the volume was priced off the FBCDD DRAFT Atlas-14 100-yr raster
+                  // (the unstudied-Zone-A path): loud, labeled, never an effective value.
+                  if (mit.providers?.wse1pct === "fbcdd-wse100-draft" && d.floodGeo?.derivedWse100) {
+                    out.push(warnNote(`1% WSE ≈ ${f1(d.floodGeo.derivedWse100.wseFt)}′ read from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results, screening only. Type a BFE below to override.`, "mit-derived-100"));
                   }
                   if (d.mitigationStraddle && d.mitigationStraddle.anyUnknown) out.push(warnNote("Jurisdiction straddle with an UNKNOWN candidate — the worst PRICED case is shown; the unknown candidate could govern. Enter its elevations.", "mit-straddle-unk"));
                   if (req && req.kind === "point" && req.requiredAcFt > 0) {
@@ -14855,6 +14897,11 @@ function YieldPanel({
                 d.regime.consequence,
                 d.regime.wetBottomWarning ? "Wet-bottom note: permanent pool below the static water surface does not count toward detention." : "",
                 d.outfall ? `${d.outfall.headline} ${d.outfall.detail}` : "",
+                // B807 — the regime verdict itself keys published FEMA BFEs only (screening
+                // honesty, unchanged); this one line discloses the DRAFT stand-in pricing.
+                d.mitigation?.providers?.wse1pct === "fbcdd-wse100-draft"
+                  ? "A DRAFT Atlas-14 watershed-study 1% WSE is pricing the floodplain mitigation — the regime verdict itself still keys published FEMA BFEs only."
+                  : "",
               ].filter(Boolean).join("\n");
               out.push(
                 <div key="regime" title={regimeInfo} style={{ display: "flex", alignItems: "baseline", gap: 4, padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "help" }}>
@@ -14982,10 +15029,15 @@ function YieldPanel({
                     "Blank = the code-minimum required FFE is ASSUMED (the rule dictates the floor on a floodplain fill). The plan-level pad elevation; a selected element's own padElevFt overrides it. Tap edit to check a real design.")}
                   {autoField("Existing grade", "existGradeFt", fm.autoGradeFt, "3DEP",
                     "Auto = the 3DEP bare-earth median sampled by this drainage check. Tap edit to enter a surveyed grade.")}
+                  {/* B807 — on unstudied Zone A (no FEMA lines to derive from) the greyed
+                      placeholder falls back to the FBCDD DRAFT Atlas-14 100-yr read, labeled
+                      DRAFT; the FEMA-lines derivation still wins when it exists (engine
+                      precedence: the draft raster is the LAST rung). */}
                   {autoField("BFE (1% WSE)", "bfeFt",
-                    fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? fm.derivedBfe.bfeFt : null,
-                    "derived (FEMA lines)",
-                    "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (a screening estimate). Tap edit to override with the FIRM panel / effective model.")}
+                    fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? fm.derivedBfe.bfeFt
+                      : fm.derivedWse100 && Number.isFinite(fm.derivedWse100.wseFt) ? fm.derivedWse100.wseFt : null,
+                    fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? "derived (FEMA lines)" : "DRAFT (FBCDD 100-yr)",
+                    "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (a screening estimate); on unstudied Zone A in Fort Bend it falls back to the county's DRAFT Atlas-14 100-yr raster. Tap edit to override with the FIRM panel / effective model.")}
                   {/* B794 — the ⓘ names WHERE the number comes from, county-specific: Fort Bend's
                       mitigation basis is the effective FIRM 48157C FIS (2014-04-02, pre-Atlas-14). */}
                   {autoField("0.2% (500-yr) WSE", "wse02Ft",
