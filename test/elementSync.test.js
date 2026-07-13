@@ -591,7 +591,7 @@ describe("B757 — a single tab never sees a false 'another window' conflict on 
     s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
     // the realtime echo of OUR OWN edit now arrives (rev 2) ABOVE the stale shadow, no pending entry
     const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 50, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
-    expect(instr.action).toBe("upsert");                       // canvas still re-trues from our own row
+    expect(instr.action).toBe("ignore");                       // B812: own-rev echo → ignore (canvas already fresh)
     expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(0); // ← the fix: no false toast
   });
 
@@ -650,6 +650,124 @@ describe("B757 — a single tab never sees a false 'another window' conflict on 
   });
 });
 
+// B812 — the single-tab BURST that survived B759(×2)+B811: a resized building's bonded children
+// (sidewalk/paving/parking) get REFITTED and re-committed several times (once per debounced flush),
+// so each accrues MANY revs fast. Then a socket reconnect fires refetch-replace whose fetch snapshot
+// is OLDER than — or omits entirely — those just-committed children, and the realtime echoes of the
+// tab's OWN writes arrive. B811 (reconcileSeedRows) only protects children the fetch still CONTAINS;
+// a child DROPPED by the stale fetch loses its shadow entry, and an INTERMEDIATE-rev echo then passes
+// the rev guard with no pending entry and no data-match in the single-slot cache → a false toast per
+// pre-final commit = the reported burst. OWN-ECHO-BY-REV closes it: every rev THIS tab produced is
+// remembered, so any self-echo is recognized regardless of shadow/data state.
+describe("B812 — own-echo-by-rev kills the single-tab resize burst", () => {
+  const mkSync = (events) => createElementSync({
+    siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+    onEvent: (e) => events.push(e),
+    commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+  });
+
+  it("a child DROPPED by a stale refetch: intermediate-rev self-echoes fire NO toast (the burst)", async () => {
+    const events = [];
+    const s = mkSync(events);
+    s.seed([{ kind: "el", id: "pv", data: { id: "pv", area: 1 }, rev: 1, z_index: 0 }]);
+    // bonded child refit + re-committed twice during the drag → rev 2 (area 2), then rev 3 (area 3)
+    s.reconcile({ els: [{ id: "pv", area: 2, z: 0 }] }, {}); s.flushGesture(); await tick();
+    s.reconcile({ els: [{ id: "pv", area: 3, z: 0 }] }, {}); s.flushGesture(); await tick();
+    // reconnect refetch-replace whose snapshot OMITS the just-committed child → shadow entry dropped
+    s.seed([]); // reconcileSeedRows can't re-insert a row the fetch lacks → child is gone from the shadow
+    expect(s.shadowSnapshot().has("el:pv")).toBe(false);
+    // the tab's OWN echoes of the intermediate (rev 2) and final (rev 3) commits now arrive
+    const i2 = s.applyRemoteRow({ kind: "el", id: "pv", data: { id: "pv", area: 2, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
+    const i3 = s.applyRemoteRow({ kind: "el", id: "pv", data: { id: "pv", area: 3, z: 0 }, rev: 3, z_index: 0, updated_by: "me" });
+    expect(i2.action).toBe("ignore");
+    expect(i3.action).toBe("ignore");
+    expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(0); // ← NO burst
+    expect(s.shadowSnapshot().get("el:pv").rev).toBe(3); // shadow re-advanced monotonically to our top rev
+  });
+
+  it("a re-created child (fold → pending) mid-flight: old self-echoes fire NO remote-while-dirty", async () => {
+    const events = [];
+    const s = mkSync(events);
+    s.seed([{ kind: "el", id: "pv", data: { id: "pv", area: 1 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "pv", area: 2, z: 0 }] }, {}); s.flushGesture(); await tick(); // rev 2
+    s.reconcile({ els: [{ id: "pv", area: 3, z: 0 }] }, {}); s.flushGesture(); await tick(); // rev 3
+    s.seed([]); // stale refetch drops the child from the shadow
+    // the fold re-adds it to canvas → reconcile enqueues a CREATE that is now pending/in-flight...
+    s.reconcile({ els: [{ id: "pv", area: 3, z: 0 }] }, {}); // pending create (no shadow)
+    // ...and while it is pending, a buffered echo of the OLDER rev-2 commit replays
+    const i = s.applyRemoteRow({ kind: "el", id: "pv", data: { id: "pv", area: 2, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
+    expect(i.action).toBe("ignore");
+    expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // ← no false pending-conflict toast
+  });
+
+  it("GUARD: a GENUINE foreign write at an UNRECORDED rev still fires remote-upsert(authoredRecently)", async () => {
+    const events = [];
+    const s = mkSync(events);
+    s.seed([{ kind: "el", id: "pv", data: { id: "pv", area: 1 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "pv", area: 2, z: 0 }] }, {}); s.flushGesture(); await tick(); // our rev 2
+    s.reconcile({ els: [{ id: "pv", area: 3, z: 0 }] }, {}); s.flushGesture(); await tick(); // our rev 3
+    s.seed([]); // shadow dropped, same stale-refetch setup as the burst case
+    // a real other-window write lands at rev 4 (a rev WE never produced), different data
+    const instr = s.applyRemoteRow({ kind: "el", id: "pv", data: { id: "pv", area: 99, z: 0 }, rev: 4, z_index: 0, updated_by: "someone-else" });
+    expect(instr.action).toBe("upsert");
+    const t = events.filter((e) => e.type === "remote-upsert");
+    expect(t).toHaveLength(1);
+    expect(t[0].authoredRecently).toBe(true); // we touched pv within 15s → real overwrite is surfaced loudly
+  });
+
+  it("GUARD: a foreign write at a rev NUMERICALLY EQUAL to one we produced but for a DIFFERENT element still toasts", async () => {
+    const events = [];
+    const s = mkSync(events);
+    s.seed([{ kind: "el", id: "pv", data: { id: "pv", area: 1, z: 0 }, rev: 1, z_index: 0 },
+            { kind: "el", id: "sw", data: { id: "sw", area: 1, z: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "pv", area: 2, z: 0 }, { id: "sw", area: 1, z: 0 }] }, {}); s.flushGesture(); await tick(); // pv → our rev 2 (sw unchanged, never committed)
+    // ownRevs are keyed PER element: a foreign write to sw at rev 2 must NOT be masked by pv's rev 2
+    const instr = s.applyRemoteRow({ kind: "el", id: "sw", data: { id: "sw", area: 88, z: 0 }, rev: 2, z_index: 0, updated_by: "someone-else" });
+    expect(instr.action).toBe("upsert");
+    expect(events.filter((e) => e.type === "remote-upsert" && e.id === "sw")).toHaveLength(1);
+  });
+
+  // Round-2 Angle 4: an own-echo that outlives the 15s ownRevs/recentSent windows is STILL recognized by
+  // the never-pruned HIGH-WATER floor (any rev <= our highest committed rev is ours), so no false toast —
+  // even when the element is still authoredRecently and a stale refetch dropped its shadow entry.
+  it("high-water floor: a self-echo older than the ~15s ownRevs window is still recognized as ours", async () => {
+    const events = [];
+    let clock = 0;
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => clock, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "pv", data: { id: "pv", area: 1 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "pv", area: 2, z: 0 }] }, {}); s.flushGesture(); await tick(); // rev 2 (high-water) at t=0
+    clock = 20000; // 20s later — past the 15s ownRevs/recentSent window
+    s.seed([]); // stale refetch drops the shadow entry
+    const instr = s.applyRemoteRow({ kind: "el", id: "pv", data: { id: "pv", area: 2, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
+    expect(instr.action).toBe("ignore"); // rev 2 <= high-water 2 → ours → suppressed
+    expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(0);
+  });
+
+  it("Angle 4: an element edited >15s after its create, shadow dropped, old-create echo mid re-create → NO toast", async () => {
+    const events = [];
+    let clock = 0;
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => clock, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([]);
+    s.reconcile({ els: [{ id: "cc", v: 1, z: 0 }] }, {}); s.flushGesture(); await tick(); // CREATE → rev 1 (high-water) at t=0
+    clock = 20000;
+    s.reconcile({ els: [{ id: "cc", v: 2, z: 0 }] }, {}); s.flushGesture(); await tick(); // edit >15s later → rev 2 (high-water now 2), isRecent refreshed
+    s.seed([]); // stale refetch omits cc → shadow dropped
+    s.reconcile({ els: [{ id: "cc", v: 2, z: 0 }] }, {}); // fold re-adds → pending create in-flight (no shadow)
+    // a replayed echo of the OLD create (rev 1) lands during the in-flight window
+    const instr = s.applyRemoteRow({ kind: "el", id: "cc", data: { id: "cc", v: 1, z: 0 }, rev: 1, z_index: 0, updated_by: "me" });
+    expect(instr.action).toBe("ignore");                    // rev 1 <= high-water 2 → ours
+    expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // ← the round-2 fix
+  });
+});
+
 // B756 — the refetch-replace integration the data-loss fix restores: a brand-new signed-in site's
 // parcels live only in local state (rows are empty on the first fetch). foldNeverSyncedLocal folds them
 // back into `next`, and the post-substitution reconcile must COMMIT them as creates (they used to be
@@ -693,5 +811,31 @@ describe("B756 — never-synced local parcels commit through refetch-replace", (
 describe("stableStringify", () => {
   it("is key-order-insensitive and recurses", () => {
     expect(stableStringify({ b: 1, a: { d: 4, c: 3 } })).toBe(stableStringify({ a: { c: 3, d: 4 }, b: 1 }));
+  });
+
+  // B812 red-team (Angle 2): stableStringify MUST equal the value's post-wire form (JSON.stringify →
+  // jsonb → back), because every self-echo/self-dup guard byte-compares a LOCAL object against a SERVER
+  // row. JSON drops undefined-valued keys / functions / symbols and renders holes+undefined as null; the
+  // old code emitted an `undefined` token, so an element with an undefined property looked foreign.
+  const wireThenSorted = (v) => {
+    const round = JSON.parse(JSON.stringify(v) ?? "null");
+    const sortRec = (x) => Array.isArray(x) ? x.map(sortRec)
+      : (x && typeof x === "object") ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, sortRec(x[k])])) : x;
+    return JSON.stringify(sortRec(round));
+  };
+  it("matches the wire (JSON) form exactly — drops undefined keys, holes/undefined → null", () => {
+    for (const v of [
+      { id: "e1", w: 110, hatch: undefined },
+      { id: "e2", pts: [1, undefined, 3] },
+      { b: 1, a: undefined, c: { z: undefined, y: 2 } },
+      { id: "e3", cx: 228.4999999997, cy: -0, big: 1e21, arr: [] },
+      { fn: function () {}, ok: 5 },
+      { nested: [{ a: undefined, b: [undefined, 1] }] },
+    ]) {
+      expect(stableStringify(v)).toBe(wireThenSorted(v));
+    }
+  });
+  it("an element differing only by an undefined-valued key serializes IDENTICALLY (no phantom diff)", () => {
+    expect(stableStringify({ id: "pv", w: 10, z: 0, hatch: undefined })).toBe(stableStringify({ id: "pv", w: 10, z: 0 }));
   });
 });

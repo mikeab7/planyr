@@ -29,11 +29,35 @@ const FIELDS = Object.entries(KIND_TO_FIELD); // [ [kind, field], ... ]
 
 // Stable JSON (recursively key-sorted) so a diff compares VALUE, not key order — the shadow is
 // seeded from Postgres jsonb (which reorders keys) yet the local element keeps insertion order.
+//
+// It must produce EXACTLY what the value looks like AFTER a wire round-trip (JS object → JSON.stringify
+// in the RPC → Postgres jsonb → back), because every self-echo / self-dup guard byte-compares a LOCAL
+// object's serialization against a SERVER row's. JSON.stringify OMITS undefined-valued object keys and
+// functions/symbols, and renders undefined / holes inside arrays as `null`; the old code instead emitted
+// a literal `undefined` token for them, so any element carrying an `undefined` property (or a sparse
+// array) serialized DIFFERENTLY on the two sides — a permanent mismatch that made a tab's own write look
+// foreign (B812 red-team, Angle 2) AND produced spurious no-op diffs/commits. Mirror JSON semantics
+// exactly (undefined/function/symbol → dropped in objects, `null` in arrays) so both sides agree.
 export function stableStringify(v) {
+  if (v === undefined || typeof v === "function" || typeof v === "symbol") return undefined; // JSON drops these
   if (v === null || typeof v !== "object") return JSON.stringify(v);
-  if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
-  const keys = Object.keys(v).sort();
-  return "{" + keys.map((k) => JSON.stringify(k) + ":" + stableStringify(v[k])).join(",") + "}";
+  if (typeof v.toJSON === "function") return stableStringify(v.toJSON()); // match JSON (e.g. Date → ISO string)
+  if (Array.isArray(v)) {
+    let out = "[";
+    for (let i = 0; i < v.length; i++) {
+      if (i) out += ",";
+      const s = stableStringify(v[i]);           // a hole/undefined/function element → `null`, like JSON
+      out += s === undefined ? "null" : s;
+    }
+    return out + "]";
+  }
+  const parts = [];
+  for (const k of Object.keys(v).sort()) {
+    const s = stableStringify(v[k]);
+    if (s === undefined) continue;               // JSON omits undefined-valued keys
+    parts.push(JSON.stringify(k) + ":" + s);
+  }
+  return "{" + parts.join(",") + "}";
 }
 
 const skey = (kind, id) => kind + ":" + id;
@@ -81,23 +105,77 @@ export function createElementSync(opts = {}) {
     tombstoned.set(skey(kind, id), { at: t, rev: typeof rev === "number" ? rev : 0 });
     for (const [k, v] of tombstoned) if (t - v.at > recentWindowMs) tombstoned.delete(k); // bound memory
   }
-  // key -> { json, at }  (the last data serialization THIS tab put ON THE WIRE for the key). Unlike
-  // inflightKeys — cleared the instant an RPC settles — this SURVIVES a transport failure, so a
-  // committed-but-unacked write's realtime echo is still recognized as ours even after onTransportFailure
-  // clears inflight and a newer edit has queued into dirty (the B757 transport-failure echo variant).
-  // On the SUCCESS path the rev guard / inflight match already suppress the echo; this only backstops
-  // the ok:false-but-actually-committed case. Pruned to the recent window so it stays tiny.
+  // key -> Map(json -> at)  (EVERY data serialization THIS tab put ON THE WIRE for the key within the
+  // window — not just the latest). Unlike inflightKeys — cleared the instant an RPC settles — this
+  // SURVIVES a transport failure, so a committed-but-unacked write's realtime echo is still recognized
+  // as ours even after onTransportFailure clears inflight and a newer edit has queued into dirty (the
+  // B757 transport-failure echo variant). It is a SET per key (B812): a burst that re-commits one
+  // element several times (a resized building's bonded child refit once per debounced flush) puts
+  // DISTINCT jsons on the wire in quick succession; a single-slot cache remembered only the last, so an
+  // echo of an INTERMEDIATE version read as foreign. On the SUCCESS path the rev guard / inflight match /
+  // ownRevs already suppress the echo; this backstops the ok:false-but-actually-committed case where no
+  // rev was ever learned. Pruned per entry to the recent window so it stays tiny.
   const recentSent = new Map();
   function recordSent(kind, id, el) {
     if (!el) return; // deletes carry no data to match an echo against
     const t = now();
-    recentSent.set(skey(kind, id), { json: stableStringify(el), at: t });
-    for (const [k, v] of recentSent) if (t - v.at > recentWindowMs) recentSent.delete(k); // bound memory
+    const k = skey(kind, id);
+    let m = recentSent.get(k);
+    if (!m) { m = new Map(); recentSent.set(k, m); }
+    m.set(stableStringify(el), t);
+    for (const [key, jm] of recentSent) { // bound memory: drop aged serializations, then empty keys
+      for (const [j, at] of jm) if (t - at > recentWindowMs) jm.delete(j);
+      if (jm.size === 0) recentSent.delete(key);
+    }
   }
   const sentMatches = (kind, id, json) => {
-    const s = recentSent.get(skey(kind, id));
-    return !!s && now() - s.at <= recentWindowMs && s.json === json;
+    const m = recentSent.get(skey(kind, id));
+    if (!m) return false;
+    const at = m.get(json);
+    return at != null && now() - at <= recentWindowMs;
   };
+
+  // key -> Map(rev -> at)  (EVERY server rev THIS tab's OWN commits produced within the window). Revs
+  // are globally unique + monotonic per element (server-assigned), so an incoming realtime row whose
+  // rev is one WE produced is DEFINITIVELY our own echo (B812). This is the one self-echo signal that
+  // survives a stale refetch rolling the shadow's rev BACKWARD or DROPPING the entry entirely — the
+  // cases the rev guard + shadow can't catch and the data caches missed for intermediate versions. A
+  // genuine foreign write always carries a rev we never produced, so it still falls through to the
+  // conflict matrix. Pruned per entry to the recent window so it stays tiny.
+  const ownRevs = new Map();
+  // key -> highest rev THIS tab ever committed for the element (a monotonic HIGH-WATER MARK, NOT time-
+  // pruned). ownRevs above is pruned to the 15s window, but a self-echo can land LATER than that: an
+  // element created during a burst, edited again >15s on, whose stale-refetch DROPPED its shadow entry —
+  // by echo time both the create-rev (ownRevs) and its data (recentSent) have aged out, yet it's still
+  // authoredRecently and shadow-less, so a replayed echo of the old create slipped into the pending
+  // branch as a false remote-while-dirty (B812 red-team round-2, Angle 4). Because server revs are
+  // monotonic per element, ANY non-tombstone row at a rev <= our high-water is our own write (or a
+  // foreign write we already superseded with a higher own commit) — never a live foreign change, which
+  // always lands ABOVE the current max. One int per key (bounded like the shadow), so no time-pruning.
+  const maxOwnRev = new Map();
+  function recordOwnRev(kind, id, rev) {
+    if (typeof rev !== "number") return;
+    const t = now();
+    const k = skey(kind, id);
+    let m = ownRevs.get(k);
+    if (!m) { m = new Map(); ownRevs.set(k, m); }
+    m.set(rev, t);
+    const cur = maxOwnRev.get(k);
+    if (cur == null || rev > cur) maxOwnRev.set(k, rev); // high-water, never rolls back / times out
+    for (const [key, rm] of ownRevs) { // bound memory (the time-pruned exact set only)
+      for (const [rv, at] of rm) if (t - at > recentWindowMs) rm.delete(rv);
+      if (rm.size === 0) ownRevs.delete(key);
+    }
+  }
+  const isOwnRev = (kind, id, rev) => {
+    const m = ownRevs.get(skey(kind, id));
+    if (!m) return false;
+    const at = m.get(rev);
+    return at != null && now() - at <= recentWindowMs;
+  };
+  // rev <= the highest rev we ever committed → definitively ours or already superseded by our own later
+  // commit (monotonic revs); a live foreign edit always arrives strictly above it.
+  const atOrBelowOwnHighWater = (kind, id, rev) => rev <= (maxOwnRev.get(skey(kind, id)) ?? 0);
 
   let debounceHandle = null;
   let backoffHandle = null;
@@ -126,6 +204,14 @@ export function createElementSync(opts = {}) {
     ready = true;
   }
   const shadowSnapshot = () => new Map(shadow);
+  // B812 red-team — the delete floor, exposed for reconcileSeedRows so a stale refetch can't RESURRECT an
+  // element THIS tab just deleted (the delete cleared its shadow entry, so reconcileSeedRows' rev check has
+  // nothing to compare a fetched-alive row against). Only entries still inside the recent window.
+  const tombstonedSnapshot = () => {
+    const out = new Map(); const t = now();
+    for (const [k, v] of tombstoned) if (t - v.at <= recentWindowMs) out.set(k, { rev: v.rev, at: v.at });
+    return out;
+  };
   const isRecent = (kind, id) => {
     const r = recent.get(skey(kind, id));
     return !!r && now() - r.at <= recentWindowMs;
@@ -284,6 +370,7 @@ export function createElementSync(opts = {}) {
           tombstoned.delete(key); // element is live again → drop any stale-delete floor
         }
         recent.set(key, { at: now(), rev: r.rev });
+        recordOwnRev(e.kind, e.id, r.rev); // B812 — this rev is one OUR commit produced; its echo is ours
       } else if (r.status === "conflict") {
         const row = r.row || {};
         if (e.cls === "restore") {
@@ -297,6 +384,7 @@ export function createElementSync(opts = {}) {
           tombstoned.delete(key);
           if (selfDup) {
             recent.set(key, { at: now(), rev: row.rev });
+            recordOwnRev(e.kind, e.id, row.rev); // B812 — our own restore landed at this rev; its echo is ours
             report("element-restore-self-dup", "restore conflict row IS our own committed data — silent", { siteId, id: e.id, kind: e.kind });
           } else {
             report("element-restore-conflict", "restore raced a live row", { siteId, id: e.id, kind: e.kind });
@@ -318,6 +406,7 @@ export function createElementSync(opts = {}) {
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(row.data), rev: row.rev, z: e.z });
           tombstoned.delete(key);
           recent.set(key, { at: now(), rev: row.rev });
+          recordOwnRev(e.kind, e.id, row.rev); // B812 — the "conflict" row IS our data at this rev; its echo is ours
           report("element-conflict-self-dup", "conflict row IS our own committed data — silent", { siteId, id: e.id, kind: e.kind });
         } else {
           // edit-vs-edit: second writer wins — adopt the remote rev and re-commit local on top (LWW)
@@ -398,6 +487,23 @@ export function createElementSync(opts = {}) {
     const shad = shadow.get(key);
     const rev = typeof row.rev === "number" ? row.rev : 0;
     if (shad && rev <= shad.rev) return { action: "ignore" }; // own echo or stale replay
+    // OWN-ECHO-BY-REV (B812) — the definitive single-tab self-echo guard. An incoming NON-tombstone row
+    // whose rev is one THIS tab's own commit produced within the window is unambiguously our realtime
+    // echo, EVEN when a stale refetch rolled the shadow's rev BACKWARD or DROPPED the entry (so the rev
+    // guard above can't catch it) or a re-create is pending (which would otherwise mis-fire
+    // remote-while-dirty). Keep the shadow rev MONOTONIC so the next local commit targets the freshest
+    // rev, then ignore with NO event and NO canvas change: our canvas already holds this element's data
+    // at least as fresh (the refetch-replace fold re-placed our latest local copy), and an INTERMEDIATE
+    // own-echo carries OLDER data than our current state, so upserting it would flicker the canvas back.
+    // A foreign write carries an unrecorded rev ABOVE our high-water → falls through to the conflict
+    // matrix unchanged. (isOwnRev is the exact-rev, in-window match; the high-water floor also catches a
+    // self-echo that outlived the 15s window — Angle-4 — since anything at/below our max is ours.)
+    if (!row.deleted_at && (isOwnRev(row.kind, row.id, rev) || atOrBelowOwnHighWater(row.kind, row.id, rev))) {
+      const cur = shadow.get(key);
+      if (!cur || rev > cur.rev)
+        shadow.set(key, { kind: row.kind, id: row.id, json: cur ? cur.json : (row.data ? stableStringify(row.data) : ""), rev, z: cur ? cur.z : row.z_index });
+      return { action: "ignore" };
+    }
     // A non-tombstone row for an element THIS tab already deleted, at a rev no newer than our delete,
     // is a stale pre-delete self-echo racing in late — the delete cleared the shadow's rev ceiling, so
     // without this it would resurrect the element + raise a false "another window" toast (B757). A
@@ -486,7 +592,7 @@ export function createElementSync(opts = {}) {
     pendingOps, pendingCount, dirtyEntries, applyRemoteRow,
     isSeeded: () => ready,
     // introspection for tests / B672-B673
-    shadowSnapshot, isRecent,
+    shadowSnapshot, tombstonedSnapshot, isRecent,
     get state() { return state; },
     get recent() { return recent; },
   };
