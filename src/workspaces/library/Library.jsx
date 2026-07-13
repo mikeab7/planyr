@@ -265,6 +265,11 @@ export default function Library({
         onNewProject={onNewProject}
         authControl={authControl}
         accountActive={accountActive}
+        // The Library is a file browser with per-file / per-row operations and NO single-active-
+        // editor read-only lock — two tabs can both use it safely — so the B313 "only one tab can
+        // edit; the others are read-only until you take over editing there" banner is FALSE here and
+        // must not show. (multiEditOk = the caller supports concurrent editing; see AppHeader.)
+        multiEditOk
       />
 
       {migrate.status !== "idle" && (

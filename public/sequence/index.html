@@ -1589,6 +1589,140 @@ const difBD = (a, b) => {
   while ((dir === 1 ? cur < e : cur > e) && steps-- > 0) { cur.setDate(cur.getDate() + dir); if (cur.getDay() !== 0 && cur.getDay() !== 6 && !HOLIDAY_SET.has(fd(cur))) count++; }
   return count * dir;
 };
+// ── B815 (NEW-1) — Meeting-body cadence engine ────────────────────────────────
+// A "meeting body" is an external decision authority (city council, P&Z, commissioners
+// court) whose approvals only happen on a fixed cadence. Meetings resolve from recurrence
+// rules; the agenda-submittal deadline closes a fixed lead before each meeting on the SAME
+// working-day calendar the cascade uses. PURE (no React/DOM) — mirrored VERBATIM into
+// ui-audit/stress/scheduler-engine.mjs (anti-drift guard in test/schedulerEngine.test.js).
+// subBD: subtract N business days — the exact inverse of addBD (skips Sat/Sun + HOLIDAY_SET).
+const subBD = (s, n) => addBD(s, -n);
+// nthWeekdayOfMonth: the setpos-th `weekday` (0=Sun..6=Sat) of month m (1-12) of year y as an
+// ISO date; setpos 1..4 = nth, -1 = last. Reuses nthWeekday + fdLocal (no UTC one-day slip —
+// B584 #19). Returns null when the nth occurrence overflows the month (a 5th in a 4-week month).
+const nthWeekdayOfMonth = (y, m, weekday, setpos) => {
+  if (setpos === -1) return fdLocal(nthWeekday(y, m, -1, weekday));
+  const d = nthWeekday(y, m, setpos, weekday);
+  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
+};
+// meetingDatesInRange: sorted unique ISO meeting dates for `body` within [from,to] inclusive.
+// Applies each recurrence rule over its effective window, then removes blackoutDates and adds
+// extraDates — EXPLICIT DATES ALWAYS BEAT THE RULE. Interval>1 (bi-weekly / every-N-months)
+// anchors its phase to effectiveFrom; without one it degrades to interval 1 (deterministic).
+const meetingDatesInRange = (body, from, to) => {
+  if (!body || !from || !to || from > to) return [];
+  const set = new Set();
+  const inWin = (iso, r) => (!r.effectiveFrom || iso >= r.effectiveFrom) && (!r.effectiveTo || iso <= r.effectiveTo);
+  const fromY = pd(from).getFullYear(), toY = pd(to).getFullYear();
+  (Array.isArray(body.recurrence) ? body.recurrence : []).forEach(r => {
+    if (!r || r.weekday == null) return;
+    if (r.freq === "weekly") {
+      const hasAnchor = !!r.effectiveFrom;
+      const interval = (r.interval > 1 && hasAnchor) ? Math.trunc(r.interval) : 1;
+      const cur = pd(hasAnchor ? r.effectiveFrom : from);
+      while (cur.getDay() !== r.weekday) cur.setDate(cur.getDate() + 1);
+      const end = pd(to);
+      let wk = 0;
+      while (cur <= end) {
+        const iso = fdLocal(cur);
+        if (iso >= from && (wk % interval === 0) && inWin(iso, r)) set.add(iso);
+        cur.setDate(cur.getDate() + 7); wk++;
+      }
+    } else {   // monthly (default)
+      const setpos = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
+      const months = (Array.isArray(r.months) && r.months.length) ? r.months : null;
+      const anchorYM = r.effectiveFrom ? (pd(r.effectiveFrom).getFullYear() * 12 + pd(r.effectiveFrom).getMonth()) : null;
+      const interval = (r.interval > 1 && anchorYM != null) ? Math.trunc(r.interval) : 1;
+      for (let y = fromY; y <= toY; y++) for (let m = 1; m <= 12; m++) {
+        if (months && !months.includes(m)) continue;
+        if (interval > 1 && ((((y * 12 + (m - 1) - anchorYM) % interval) + interval) % interval) !== 0) continue;
+        setpos.forEach(sp => {
+          const iso = nthWeekdayOfMonth(y, m, r.weekday, sp);
+          if (iso && iso >= from && iso <= to && inWin(iso, r)) set.add(iso);
+        });
+      }
+    }
+  });
+  (Array.isArray(body.blackoutDates) ? body.blackoutDates : []).forEach(d => set.delete(d));
+  (Array.isArray(body.extraDates) ? body.extraDates : []).forEach(d => { if (d >= from && d <= to) set.add(d); });
+  return [...set].sort();
+};
+// agendaDeadline: the ISO agenda-submittal deadline for a meeting on `meetingDate`. agendaLead
+// union: {type:'offset',n,unit:'business'|'calendar'} (n days before; business = subBD) ·
+// {type:'weekdayAnchor',weeksBefore,weekday} (the `weekday` of the week `weeksBefore` weeks
+// before the meeting's week — how many TX cities publish it).
+const agendaDeadline = (body, meetingDate) => {
+  if (!body || !meetingDate) return meetingDate || null;
+  const lead = body.agendaLead;
+  if (!lead) return meetingDate;
+  if (lead.type === "weekdayAnchor") {
+    const wb = Math.max(0, Math.trunc(Number(lead.weeksBefore) || 0));
+    const wd = ((Math.trunc(Number(lead.weekday) || 0) % 7) + 7) % 7;
+    const d = pd(meetingDate);
+    d.setDate(d.getDate() - d.getDay() - wb * 7 + wd);   // Sunday of meeting week → back wb weeks → +weekday
+    return fdLocal(d);
+  }
+  const n = Math.max(0, Math.trunc(Number(lead.n) || 0));
+  return lead.unit === "calendar" ? addD(meetingDate, -n) : subBD(meetingDate, n);
+};
+// nextEligibleMeeting: earliest meeting m of `body` on/after readyDate whose agenda deadline
+// >= readyDate (the first meeting this item can actually be filed for), strictly after
+// `afterDate` when given. Returns {meetingDate, deadline} or null within a ~3-year horizon.
+const nextEligibleMeeting = (body, readyDate, afterDate) => {
+  if (!body || !readyDate) return null;
+  const dates = meetingDatesInRange(body, readyDate, addD(readyDate, 366 * 3));
+  for (const m of dates) {
+    if (afterDate && m <= afterDate) continue;
+    const dl = agendaDeadline(body, m);
+    if (dl >= readyDate) return { meetingDate: m, deadline: dl };
+  }
+  return null;
+};
+// B817 — the two decision numbers (PURE; mirrored + unit-tested). meetingFloatBD: working days from
+// `todayIso` to the agenda deadline (slack before the packet MUST be filed). meetingCostDays: calendar
+// days from the current meeting to the NEXT eligible one — what one missed deadline actually costs
+// (routinely a month in an entitlement schedule).
+const meetingFloatBD = (task, todayIso) => (task && task.meetingBound && task.meetingDeadline) ? difBD(todayIso, task.meetingDeadline) : null;
+const meetingCostDays = (task, body) => {
+  if (!body || !task || !task.start) return null;
+  const next = meetingDatesInRange(body, addD(task.start, 1), addD(task.start, 366 * 2))[0];
+  return next ? dif(task.start, next) : null;
+};
+// Global id→body index (B816). Like HOLIDAY_SET, cascadeDates reads it implicitly so callers need
+// not thread proj.meetingBodies. Body ids are globally unique (mb_<time><rand>) so a task only ever
+// resolves to its OWN project's body — no cross-project contamination. Rebuilt whenever bodies change.
+let MEETING_BODY_INDEX = {};
+const rebuildMeetingBodyIndex = d => {
+  const idx = {};
+  Object.values((d && d.projects) || {}).forEach(p => (p && Array.isArray(p.meetingBodies) ? p.meetingBodies : []).forEach(b => { if (b && b.id) idx[b.id] = b; }));
+  MEETING_BODY_INDEX = idx;
+  return idx;
+};
+// B816 — plain-English descriptors for the civic-mark explainer (never render a hearing date without why).
+const MB_WD_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const MB_SETPOS_LABEL = {"1":"1st","2":"2nd","3":"3rd","4":"4th","-1":"last"};
+const cadenceSummary = body => {
+  const r = body && Array.isArray(body.recurrence) && body.recurrence[0];
+  if (!r || r.weekday == null) return "no cadence set";
+  const wd = MB_WD_NAMES[r.weekday] || "?";
+  if (r.freq === "weekly") return `every ${wd}`;
+  const sp = (Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : [])).map(x => MB_SETPOS_LABEL[String(x)] || x).join(" & ");
+  return `${sp || "?"} ${wd} monthly`;
+};
+const agendaLeadSummary = body => {
+  const l = body && body.agendaLead; if (!l) return "no agenda lead";
+  if (l.type === "weekdayAnchor") return `agenda due the ${MB_WD_NAMES[l.weekday] || "?"} ~${l.weeksBefore || 0} week(s) before`;
+  return `agenda due ${l.n || 0} ${l.unit === "calendar" ? "calendar" : "business"} days before`;
+};
+// meetingBoundInfo — resolves the body + derived deadline + float + severity state for a bound task.
+const meetingBoundInfo = task => {
+  const body = task && task.meetingBound ? MEETING_BODY_INDEX[task.meetingBodyId] : null;
+  if (!body) return null;
+  const deadline = task.meetingDeadline || (task.start ? agendaDeadline(body, task.start) : "");
+  const floatBD = deadline ? difBD(fdLocal(new Date()), deadline) : null;   // working days from today to the agenda deadline
+  const state = task.meetingInfeasible ? "danger" : (floatBD != null && floatBD <= 2) ? "warning" : "secondary";
+  return { body, deadline, floatBD, state };
+};
 // ── MS-Project predecessor helpers ────────────────────────
 // Normalise: plain int or {id,type,lag} → always {id,type,lag}
 const normPreds = arr => {
@@ -1857,8 +1991,48 @@ const durTooltip = t => {
   return `${n} ${u === "y" ? "year" : "month"}${n === 1 ? "" : "s"} ≈ ${t.duration} working day${t.duration === 1 ? "" : "s"} (calendar-based)`;
 };
 
-// Topological cascade: recompute start/end for all tasks driven by predecessors
-const cascadeDates = tasks => {
+// ── B816 (NEW-2) — snap a meeting-bound task to its body's cadence ──────────────
+// A bound task is a MILESTONE on the chosen meeting day (duration forced 0). The chosen meeting
+// is the EARLIEST whose agenda deadline the packet can still make — agendaDeadline(m) >= packetReady,
+// NOT simply the next meeting after packetReady (that silently puts items on agendas they can't be
+// filed for). `meetingDeadline`/`meetingInfeasible` are DERIVED-for-display: recomputed every cascade,
+// never read back as input, never a task row (precedent B583). PURE — mirrored into scheduler-engine.mjs.
+const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDate) => {
+  t.duration = 0;
+  const pinnedDate = t.pinnedMeetingDate || (t.pinnedStart ? t.start : "");
+  const packetReady = predEarly || (pinnedDate ? "" : t.start) || "";
+  if (pinnedDate) {                                   // a person fixed this hearing — pin wins, never roll
+    t.start = t.end = pinnedDate;
+    t.meetingDeadline = agendaDeadline(body, pinnedDate) || "";
+    // Infeasible: the predecessor chain can't deliver the packet by the pinned meeting's agenda deadline.
+    t.meetingInfeasible = !!(packetReady && t.meetingDeadline && packetReady > t.meetingDeadline);
+    return;
+  }
+  if (!packetReady) {                                 // nothing schedules it yet — stays blank (B386)
+    t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false;
+    return;
+  }
+  let readyDate = packetReady, afterDate = "";
+  if (drivingMeetingDate) {                           // the driving predecessor is itself a meeting (1st→2nd reading)
+    afterDate = drivingMeetingDate;
+    // sameDayFilingAllowed=false: the next agenda closed before this evening's meeting → strict.
+    if (!body.sameDayFilingAllowed) { const nd = addD(drivingMeetingDate, 1); if (nd > readyDate) readyDate = nd; }
+  }
+  if (t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate) {   // "must be the n-th subsequent meeting"
+    const seq = meetingDatesInRange(body, addD(minAfterDate, 1), addD(minAfterDate, 366 * 3));
+    const nth = seq[t.minMeetingsAfter.n - 1];
+    if (nth) { const before = addD(nth, -1); if (!afterDate || before > afterDate) afterDate = before; }
+  }
+  const elig = nextEligibleMeeting(body, readyDate, afterDate);
+  if (elig) { t.start = t.end = elig.meetingDate; t.meetingDeadline = elig.deadline; t.meetingInfeasible = false; }
+  else { t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; }
+};
+// Topological cascade: recompute start/end for all tasks driven by predecessors.
+// `bodies` (B816) = the project's meetingBodies[]; a bound task snaps to its body's cadence.
+const cascadeDates = (tasks, bodies = []) => {
+  const bodyMap = {...MEETING_BODY_INDEX};
+  (Array.isArray(bodies) ? bodies : []).forEach(b => { if (b && b.id) bodyMap[b.id] = b; });
+  const parentIds = new Set(tasks.filter(t => t.parentId !== null && t.parentId !== undefined).map(t => t.parentId));
   const map = {};
   tasks.forEach(t => { map[t.id] = {...t, predecessors: normPreds(t.predecessors)}; });
   const adj = {}; const inDeg = {};
@@ -1881,6 +2055,9 @@ const cascadeDates = tasks => {
   queue.forEach(id => {
     const t = map[id];
     const preds = t.predecessors.filter(p => map[p.id]);
+    // A meeting-bound task (B816): a real body, not a summary/parent (parents come from rollup), not a
+    // locked finish (bound+pinnedEnd is rejected on entry — if both are set the lock wins as a safe fallback).
+    const bound = !!(t.meetingBound && bodyMap[t.meetingBodyId] && !parentIds.has(t.id) && !(t.pinnedEnd && t.end));
     // Locked FINISH (B616): the end is a FIXED POINT — successors cascade from it, the start
     // back-calcs to preserve the working-day duration, and the end never moves/exceeds the lock.
     // If the predecessor chain can't fit the duration before the locked finish, flag a LOUD
@@ -1902,13 +2079,28 @@ const cascadeDates = tasks => {
       return;
     }
     t.finishConflict = false;
-    // pinnedStart preserves a manually set/dragged start; duration edits still re-derive the end.
-    if (!preds.length || t.pinnedStart) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
-    const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
-    if (!starts.length) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
-    const latest = starts.reduce((a,b) => a>b?a:b, starts[0] || t.start);
-    t.start = latest;
-    const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
+    // The predecessor-derived earliest start ("packet ready"), computed even for pinned tasks so a
+    // bound task can test feasibility against it.
+    const predEarly = preds.length
+      ? preds.map(p => constrainedStartFrom(map[p.id], p, Math.max(1, t.duration || 1))).filter(Boolean).reduce((a,b)=>a>b?a:b, "")
+      : "";
+    // Normal (unbound) derivation — also produces the packet-ready start for a bound task.
+    if (!preds.length || t.pinnedStart) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; }
+    else {
+      const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
+      if (starts.length) t.start = starts.reduce((a,b) => a>b?a:b, starts[0]);
+      const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
+    }
+    // ── B816 (NEW-2) — meeting-bound snap (a fifth orthogonal branch after the normal derivation) ──
+    if (bound) {
+      const drivingMeetingDate = preds
+        .filter(p => map[p.id] && map[p.id].meetingBound && map[p.id].start).map(p => map[p.id].start)
+        .reduce((a,b) => a>b?a:b, "");
+      const minAfterDate = (t.minMeetingsAfter && map[t.minMeetingsAfter.taskId]) ? map[t.minMeetingsAfter.taskId].start : "";
+      applyMeetingBinding(t, bodyMap[t.meetingBodyId], predEarly, drivingMeetingDate, minAfterDate);
+    } else if (t.meetingDeadline || t.meetingInfeasible) {
+      t.meetingDeadline = ""; t.meetingInfeasible = false;             // stale derived fields on a now-unbound task
+    }
   });
   return tasks.map(t => { const {_pinStart, __wasDirectEdit, ...rest} = map[t.id] || t; return rest; });
 };
@@ -1978,6 +2170,13 @@ const computeDisplayHealth = (task, settings) => {
   if (!task) return task?.health;
   // Rule order matters: more specific overrides general
   if (cf.completeGreen && (task.percentComplete||0) >= 100) return "green";
+  // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
+  // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
+  // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
+  if (task.meetingBound && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
+    if (task.meetingInfeasible) return "red";
+    if (task.meetingDeadline && difBD(NOW, task.meetingDeadline) <= 2) return "yellow";
+  }
   if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
   if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
     // Within 7 calendar days
@@ -2078,6 +2277,7 @@ const mkt = (id, name, start, dur, parentId=null, health="gray", predecessors=[]
     id, name, start: safeStart, end: calcEnd(safeStart, safeDur), duration: safeDur, durUnit: "d", durValue: safeDur, predecessors, health,
     percentComplete: health==="green" ? 100 : health==="yellow" ? 40 : 0,
     parentId, responsibleParty: "", cost: "", notes: [], isExpanded: true,
+    meetingBound: false,   // B816 — new tasks are unbound by default; a task binds to a body via its Meeting cell
   };
 };
 
@@ -2342,6 +2542,9 @@ const COLS = [
   {k:"percentComplete", l:"% Comp",  w:78,  e:true, t:"num"   },
   {k:"budget",          l:"Budget",  w:92,  e:true, t:"cost"  },
   {k:"actualCost",      l:"Actual",  w:92,  e:true, t:"cost"  },
+  {k:"meetingBody",     l:"Meeting", w:130, e:false,t:"meeting"},   // B816 — bind a task to a meeting body (hidden by default)
+  {k:"floatToDeadline", l:"Float",   w:64,  e:false,t:"meeting"},   // B817 — working days to the agenda deadline
+  {k:"costIfMissed",    l:"Cost/miss",w:74, e:false,t:"meeting"},   // B817 — calendar days the hearing slips if missed
 ];
 const TOTAL_W = COLS.reduce((s,c) => s+c.w, 0);
 // B212 — column-config plumbing. COLS is the master AVAILABLE-field registry; the left
@@ -2364,6 +2567,11 @@ const readGridCfg = (proj, data) => {
   else if (data && Array.isArray(data.gridColOrder) && data.gridColOrder.length) visible = data.gridColOrder.filter(k => COL_BY_K[k] && DEFAULT_GRID_COLS.includes(k)); // migrate legacy global order
   else visible = [...DEFAULT_GRID_COLS];
   if (!visible.includes("name")) visible = ["name", ...visible];   // the Task name column can't be hidden
+  // B817 — the Float / Cost columns default ON once any task in the project is bound (unless the user set
+  // an explicit column config); they render blank on unbound rows.
+  if (!(cfg && Array.isArray(cfg.visible) && cfg.visible.length) && Array.isArray(proj?.tasks) && proj.tasks.some(t => t.meetingBound)) {
+    ["floatToDeadline","costIfMissed"].forEach(k => { if (!visible.includes(k)) visible.push(k); });
+  }
   const saved = (cfg && cfg.widths) || (data && data.gridColWidths) || {};
   const widths = {};
   COLS.forEach(c => { widths[c.k] = saved[c.k] ?? c.w; });
@@ -2376,7 +2584,8 @@ const writeGridCfg = (setData, pid, next) => setData(d =>
 const COL_LABELS = {id:"ID", name:"Task name", start:"Start", end:"Finish", duration:"Duration",
   predecessors:"Predecessors", successors:"Successors", health:"Health", status:"Status",
   responsibleParty:"Owner", cost:"Cost", notes:"Notes", percentComplete:"% Complete",
-  budget:"Budget", actualCost:"Actual / Spend"};
+  budget:"Budget", actualCost:"Actual / Spend", meetingBody:"Meeting body",
+  floatToDeadline:"Float to deadline", costIfMissed:"Cost if missed"};
 const colLabel = c => COL_LABELS[c.k] || c.l || c.k;
 
 // ── B583 — Formula columns: effective per-project column registry ─────────────
@@ -3751,7 +3960,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
       const ids = new Set(desc(tId, ts));
       if (ids.size) { const extra = patch.health === 'green' ? { percentComplete: 100 } : {}; ts = ts.map(t => ids.has(t.id) ? { ...t, health: patch.health, ...extra } : t); }
     }
-    if ('duration' in patch || 'start' in patch || 'end' in patch || 'predecessors' in patch) {
+    if ('duration' in patch || 'start' in patch || 'end' in patch || 'predecessors' in patch || 'meetingBound' in patch || 'meetingBodyId' in patch || 'pinnedMeetingDate' in patch || 'minMeetingsAfter' in patch) {
       ts = cascadeDates(ts); ts = rollupParentDates(ts);
     }
     return ts;
@@ -4579,6 +4788,17 @@ function App() {
     return {...d, projects, _v7: true};
   };
 
+  // B816 (NEW-2) — v8: the meeting-bound fields (meetingBodyId · meetingBound · pinnedMeetingDate) are
+  // OPTIONAL and read with falsy defaults, so this is a NO-OP version stamp — zero date shift by
+  // construction. It also refreshes the global MEETING_BODY_INDEX (unconditionally, even for an already-v8
+  // load) so the first cascade after load can resolve bound tasks. Idempotent via _v8.
+  const normalizeToV8 = d => {
+    rebuildMeetingBodyIndex(d);
+    if (!d || typeof d !== "object") return d;
+    if (d._v8) return d;
+    return {...d, _v8: true};
+  };
+
   // Ensure any new DEFAULT_HOLIDAYS keys (added in future versions) are merged in
   const ensureHolidays = d => {
     if (!d?.settings) return d;
@@ -4646,7 +4866,7 @@ function App() {
       // can't call normalizeIds/ensureContacts directly — those are scoped to this effect). Set
       // synchronously on mount, before the first await, so it's ready before any user import/restore.
       applyLoadedDataRef.current = (parsed) => {
-        let d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed)))));
+        let d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed))))));
         d._pinnedClean = true;
         HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
         Object.keys(d.projects).forEach(pid => {
@@ -4663,7 +4883,7 @@ function App() {
         // __PLANAR_DATA__ is the seed used only when Supabase has no record yet.
         const r = await window.storage.get("hs-v1");
         if (r) {
-          const d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(JSON.parse(r.value))))));
+          const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(JSON.parse(r.value)))))));
           // NOTE: a narrow viewport forces the GRID layout at RENDER time (see the body switch),
           // never by mutating the persisted `view` — baking "grid" into saved data let one phone
           // session overwrite the desktop's saved split/gantt preference across every device.
@@ -4686,7 +4906,7 @@ function App() {
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
         const seed = window.__PLANAR_DATA__ || SEED;
-        const d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(seed)))));
+        const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(seed))))));
           // Enforce predecessor relationships on load (seed data — no stale pins)
           HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
           d._pinnedClean = true;
@@ -4699,7 +4919,7 @@ function App() {
         if (window.__planarCloudError) setOfflineFallback(true);
         setData(d);
       } catch {
-        const d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED)))));
+        const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED))))));
         setOfflineFallback(true);
         setData(d);
       }
@@ -5155,8 +5375,11 @@ function App() {
   }, []);
 
   const updateTask = useCallback((taskId, updates, projId=null) => {
+    let _rollToast = null;   // B816 — announce a bound task that rolled to a new meeting (reuses B624's toast voice)
     setData(d => {
       const pid = projId ?? d.aPid;
+      const _prevBoundStart = {};   // B816 — capture bound-task meeting dates BEFORE the edit, to detect rolls
+      (d.projects[pid]?.tasks || []).forEach(t => { if (t.meetingBound && t.start) _prevBoundStart[t.id] = t.start; });
       let tasks = d.projects[pid].tasks.map(t => {
         if (t.id !== taskId) return t;
         const u = {...t, ...updates};
@@ -5206,12 +5429,21 @@ function App() {
           tasks = tasks.map(t => descIds.has(t.id) ? {...t, health: updates.health, ...extra} : t);
         }
       }
-      if ('duration' in updates || 'start' in updates || 'end' in updates || 'predecessors' in updates) {
+      if ('duration' in updates || 'start' in updates || 'end' in updates || 'predecessors' in updates || 'meetingBound' in updates || 'meetingBodyId' in updates || 'pinnedMeetingDate' in updates || 'minMeetingsAfter' in updates) {
         tasks = cascadeDates(tasks);
         tasks = rollupParentDates(tasks);
+        // B816 — a bound task whose meeting moved from a prior meeting rolled a cycle; announce it (once).
+        for (const t of tasks) {
+          const prev = _prevBoundStart[t.id];
+          if (!_rollToast && t.meetingBound && prev && t.start && t.start !== prev) {
+            const body = MEETING_BODY_INDEX[t.meetingBodyId];
+            _rollToast = `${t.name || "Task"} moved to ${fmtD(t.start)} — the ${fmtD(prev)} agenda closed ${fmtD(body ? agendaDeadline(body, prev) : "")}.`;
+          }
+        }
       }
       return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks}}};
     });
+    if (_rollToast) showToast(_rollToast);
     // ── Successor prompt: fire when task transitions to complete ──
     if (updates.health === 'green') {
       const snap = dataRef.current;
@@ -5936,9 +6168,21 @@ function App() {
     setData(d => {
       const src = d.projects[id];
       const newId = d.nPid;
-      const newTasks = src.tasks.map(t => ({...t, notes: t.notes.map(n => ({...n}))}));
+      // B816 — RE-ID the copied meeting bodies so the copy's bodies are globally unique. Same-id bodies
+      // in two projects would collapse in MEETING_BODY_INDEX → editing one would move the other's hearings.
+      const bodyIdMap = {};
+      const copiedBodies = Array.isArray(src.meetingBodies) ? src.meetingBodies.map((mb, i) => {
+        const nid = "mb_" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6);
+        if (mb && mb.id) bodyIdMap[mb.id] = nid;
+        return {...mb, id: nid,
+          recurrence: (mb.recurrence||[]).map(r => ({...r, setpos: Array.isArray(r.setpos)?[...r.setpos]:r.setpos, months: Array.isArray(r.months)?[...r.months]:r.months})),
+          agendaLead: mb.agendaLead ? {...mb.agendaLead} : mb.agendaLead,
+          blackoutDates: [...(mb.blackoutDates||[])], extraDates: [...(mb.extraDates||[])]};
+      }) : undefined;
+      const newTasks = src.tasks.map(t => ({...t, notes: t.notes.map(n => ({...n})),
+        ...(t.meetingBodyId && bodyIdMap[t.meetingBodyId] ? {meetingBodyId: bodyIdMap[t.meetingBodyId]} : {})}));
       const maxTid = newTasks.length ? Math.max(...newTasks.map(t => t.id)) + 1 : 1;
-      return {
+      const nd = {
         ...d,
         nPid: newId + 1,
         nTid: {...d.nTid, [newId]: maxTid},
@@ -5948,8 +6192,11 @@ function App() {
         // editing the copy can't mutate the original; a duplicate must NOT inherit the original's site link.
         projects: {...d.projects, [newId]: {...src, id: newId, name: src.name + " (Copy)", tasks: newTasks,
           formulaCols: Array.isArray(src.formulaCols) ? src.formulaCols.map(fc => ({...fc})) : undefined,
+          meetingBodies: copiedBodies,               // B815/B816 — deep-copied AND re-ided (see above)
           linkedSiteId: undefined, linkedSiteName: undefined}},
       };
+      rebuildMeetingBodyIndex(nd);
+      return nd;
     });
   }, []);
 
@@ -8926,9 +9173,66 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
               </svg>
             </span>
           )}
+          {isStart && !task.hasChildren && task.meetingBound && MEETING_BODY_INDEX[task.meetingBodyId] && (() => {
+            // B816 — the civic mark: a meeting calendar fixes this date (distinct from the padlock — a person
+            // fixed this date). Three states track severity; clicking/hovering explains the row in plain English.
+            const info = meetingBoundInfo(task);
+            const color = info?.state === "danger" ? "var(--danger,#d83a3a)" : info?.state === "warning" ? "var(--warn-text,#b45309)" : "var(--mut)";
+            const b = info?.body || {};
+            const title = [
+              `${b.name || "Meeting body"}${b.jurisdiction ? " · " + b.jurisdiction : ""}`,
+              `Meets ${cadenceSummary(b)}; ${agendaLeadSummary(b)}.`,
+              task.start ? `Hearing ${fmtD(task.start)} — file the agenda by ${fmtD(info?.deadline)}${b.cutoffTime ? " (" + b.cutoffTime + ")" : ""}.` : "No eligible meeting yet — waiting on a predecessor date.",
+              info?.state === "danger" ? "⚠ INFEASIBLE: this date is pinned but the agenda has already closed — roll to the next meeting or unpin." :
+                info?.state === "warning" ? `⚠ Only ${info.floatBD} working day(s) of float before the agenda deadline.` :
+                "This is a meeting-calendar date: it can't be freely typed, has no duration, and slips by a full cycle if the deadline is missed.",
+              b.verifiedOn ? `Calendar verified ${fmtD(b.verifiedOn)}.` : "Calendar is rule-derived (unverified).",
+            ].join("\n");
+            return (
+              <span title={title} style={{display:"inline-flex",alignItems:"center",marginRight:3,color,flexShrink:0,cursor:"help"}}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 21h18"/><path d="M5 21V10M9 21V10M15 21V10M19 21V10"/><path d="M4 10h16"/><path d="M12 3 3 8h18L12 3Z"/>
+                </svg>
+              </span>
+            );
+          })()}
           {dateStr}
         </span>
       );
+    }
+    case "meetingBody": {
+      // B816 — bind a task to a meeting body (native select = robust, no popover positioning). Setting a
+      // body makes the task a milestone that snaps to the body's cadence; clearing it returns it to normal.
+      if (task.hasChildren) return <span style={{...s,justifyContent:"center",color:"#94a3b8"}} title="A summary/parent can't be meeting-bound">—</span>;
+      const bodies = Array.isArray(proj?.meetingBodies) ? proj.meetingBodies : [];
+      const cur = task.meetingBound ? (task.meetingBodyId || "") : "";
+      if (!bodies.length) return <span style={{...s,justifyContent:"center",color:"var(--mut)",fontSize:10}} title="Define meeting bodies first: Settings ⚙ → Meeting calendars">—</span>;
+      return (
+        <span style={{...s,padding:0}} data-picker-cell={`meeting-${task.id}`}>
+          <select value={cur}
+            onClick={e => e.stopPropagation()}
+            onChange={e => { const v = e.target.value; updateTask(task.id, v ? {meetingBound:true, meetingBodyId:v} : {meetingBound:false, meetingBodyId:null, pinnedMeetingDate:undefined}, projId); }}
+            style={{width:"100%",fontSize:11,border:"none",background:"transparent",color: cur ? "var(--txt)" : "var(--mut)",cursor:"pointer",padding:"0 4px"}}>
+            <option value="">— none —</option>
+            {bodies.map(b => <option key={b.id} value={b.id}>{b.name || "Meeting body"}</option>)}
+          </select>
+        </span>
+      );
+    }
+    case "floatToDeadline": {
+      // B817 — working days from today to the agenda deadline. Blank on unbound rows.
+      const fb = task.hasChildren ? null : meetingFloatBD(task, fdLocal(new Date()));
+      if (fb == null) return <span style={{...s,...mono,justifyContent:"center",color:"var(--mut)"}} />;
+      const c = fb < 0 ? "var(--danger,#d83a3a)" : fb <= 2 ? "var(--warn-text,#b45309)" : "var(--mut)";
+      return <span style={{...s,...mono,justifyContent:"center",color:c,fontWeight: fb <= 2 ? 700 : undefined}}
+        title="Float to deadline — working days from today until the agenda-submittal deadline (≤2 reads at-risk)">{fb}d</span>;
+    }
+    case "costIfMissed": {
+      // B817 — calendar days the hearing slips if this deadline is missed (gap to the next eligible meeting).
+      const cost = task.hasChildren ? null : meetingCostDays(task, MEETING_BODY_INDEX[task.meetingBodyId]);
+      if (cost == null) return <span style={{...s,...mono,justifyContent:"center",color:"var(--mut)"}} />;
+      return <span style={{...s,...mono,justifyContent:"center",color:"var(--mut)"}}
+        title="Cost if missed — calendar days the hearing slips to the next eligible meeting (one day of slip is routinely a month)">+{cost}d</span>;
     }
     case "duration":
       return <span style={{...s,...mono,color: task.hasChildren ? "#94a3b8" : "var(--mut)"}}
@@ -9659,6 +9963,143 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
 }
 
 // ── SettingsPanel ────────────────────────────────────────
+// ── B815 (NEW-1) — Meeting-calendars editor (per-project proj.meetingBodies) ─────────────
+// Module-scope (MODULE-SCOPE-COMPONENTS): defining this inside SettingsPanel would make it a new
+// component type every render → React remounts it → its text inputs lose focus mid-keystroke.
+// Inline editing only (no modal — owner rule). Live-previews the next 6 resolved meeting dates +
+// agenda deadlines so a wrong recurrence rule is visible immediately, not three tasks downstream.
+const MB_WD = [{v:0,l:"Sun"},{v:1,l:"Mon"},{v:2,l:"Tue"},{v:3,l:"Wed"},{v:4,l:"Thu"},{v:5,l:"Fri"},{v:6,l:"Sat"}];
+const MB_SETPOS = [{v:1,l:"1st"},{v:2,l:"2nd"},{v:3,l:"3rd"},{v:4,l:"4th"},{v:-1,l:"Last"}];
+const newMeetingBody = () => ({
+  id: "mb_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+  name: "", jurisdiction: "",
+  recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+  agendaLead: { type: "offset", n: 10, unit: "business" },
+  cutoffTime: "12:00 PM", sameDayFilingAllowed: false,
+  blackoutDates: [], extraDates: [], sourceUrl: "", verifiedOn: "",
+});
+const mbFmt = iso => { if(!iso) return ""; const d=new Date(iso+"T12:00:00"); return isNaN(d)?"":d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); };
+function MeetingCalendarsEditor({ bodies, onChange }) {
+  const [openId, setOpenId] = useState(null);
+  const list = Array.isArray(bodies) ? bodies : [];
+  const patch = (id, fields) => onChange(list.map(b => b.id === id ? { ...b, ...fields } : b));
+  const patchRule = (id, rf) => onChange(list.map(b => {
+    if (b.id !== id) return b;
+    const rules = (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ freq:"monthly", weekday:2, setpos:[2,4] }];
+    return { ...b, recurrence: [{ ...rules[0], ...rf }, ...rules.slice(1)] };
+  }));
+  const patchLead = (id, lf) => onChange(list.map(b => b.id === id ? { ...b, agendaLead: { ...(b.agendaLead||{}), ...lf } } : b));
+  const add = () => { const b = newMeetingBody(); onChange([...list, b]); setOpenId(b.id); };
+  const remove = id => { if(openId===id) setOpenId(null); onChange(list.filter(b => b.id !== id)); };
+  const inp = { fontSize:11, padding:"3px 6px", border:"1px solid var(--bd2)", borderRadius:4, background:"#fff", color:"var(--txt)", width:"100%", boxSizing:"border-box", fontFamily:"'Inter',system-ui,sans-serif" };
+  const lbl = { fontSize:10, fontWeight:600, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".05em", margin:"7px 0 3px", display:"block" };
+  const seg = (opts, val, on) => (
+    <div style={{display:"flex",border:"1px solid var(--bd2)",borderRadius:4,overflow:"hidden",flexShrink:0}}>
+      {opts.map(o => <span key={String(o.v)} onClick={()=>on(o.v)} style={{padding:"3px 8px",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",background:val===o.v?"var(--amber)":"transparent",color:val===o.v?"#fff":"var(--mut)"}}>{o.l}</span>)}
+    </div>
+  );
+  const today = fdLocal(new Date());
+  const preview = b => meetingDatesInRange(b, today, addD(today, 366*2)).slice(0, 6);
+  return (
+    <div style={{paddingBottom:6}}>
+      <div style={{fontSize:10,color:"var(--mut)",lineHeight:1.45,margin:"0 0 8px"}}>
+        External decision bodies (city council, P&amp;Z, commissioners court) whose approvals only happen on a cadence — stored per project. Bind a task to one and its hearing date snaps to the calendar.
+      </div>
+      {list.length === 0 && <div style={{fontSize:11,color:"var(--mut)",fontStyle:"italic",padding:"2px 0 8px"}}>No meeting bodies yet.</div>}
+      {list.map(b => {
+        const rule = (Array.isArray(b.recurrence) && b.recurrence[0]) || { freq:"monthly", weekday:2, setpos:[2,4] };
+        const lead = b.agendaLead || { type:"offset", n:10, unit:"business" };
+        const setpos = Array.isArray(rule.setpos) ? rule.setpos : (rule.setpos!=null ? [rule.setpos] : []);
+        const isOpen = openId === b.id;
+        const dates = isOpen ? preview(b) : [];
+        return (
+          <div key={b.id} style={{border:"1px solid var(--bd)",borderRadius:6,marginBottom:6,overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 8px",background:"var(--surf)"}}>
+              <span onClick={()=>setOpenId(isOpen?null:b.id)} style={{cursor:"pointer",fontSize:10,color:"var(--mut)",transform:isOpen?"rotate(90deg)":"none",transition:"transform .15s",flexShrink:0}}>&#9656;</span>
+              <input value={b.name||""} placeholder="Body name (e.g. Baytown city council)" onChange={e=>patch(b.id,{name:e.target.value})} style={{...inp,flex:1,fontWeight:600}} />
+              <span onClick={()=>remove(b.id)} title="Remove" style={{cursor:"pointer",color:"var(--mut)",fontSize:14,padding:"0 2px",flexShrink:0}}>&#x2715;</span>
+            </div>
+            {isOpen && (
+              <div style={{padding:"4px 10px 10px"}}>
+                <label style={lbl}>Jurisdiction</label>
+                <input value={b.jurisdiction||""} placeholder="e.g. Baytown, TX" onChange={e=>patch(b.id,{jurisdiction:e.target.value})} style={inp} />
+
+                <label style={lbl}>Meets</label>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                  {seg([{v:"monthly",l:"Monthly"},{v:"weekly",l:"Weekly"}], rule.freq, v=>patchRule(b.id,{freq:v}))}
+                  <select value={rule.weekday} onChange={e=>patchRule(b.id,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
+                    {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+                  </select>
+                </div>
+                {rule.freq==="monthly" && (
+                  <div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
+                    {MB_SETPOS.map(sp=>{
+                      const on = setpos.includes(sp.v);
+                      return <span key={sp.v} onClick={()=>{ const ns = on ? setpos.filter(x=>x!==sp.v) : [...setpos,sp.v].sort((a,z)=>(a<0?99:a)-(z<0?99:z)); patchRule(b.id,{setpos:ns.length?ns:[sp.v]}); }}
+                        style={{padding:"3px 8px",fontSize:11,borderRadius:4,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"transparent",color:on?"#fff":"var(--mut)"}}>{sp.l}</span>;
+                    })}
+                  </div>
+                )}
+
+                <label style={lbl}>Agenda deadline</label>
+                {seg([{v:"offset",l:"Days before"},{v:"weekdayAnchor",l:"Weekday anchor"}], lead.type||"offset", v=>patchLead(b.id,{type:v}))}
+                {(lead.type||"offset")==="offset" ? (
+                  <div style={{display:"flex",gap:6,alignItems:"center",marginTop:6,flexWrap:"wrap"}}>
+                    <input type="number" min={0} value={lead.n??10} onChange={e=>patchLead(b.id,{n:+e.target.value})} style={{...inp,width:56}} />
+                    {seg([{v:"business",l:"business"},{v:"calendar",l:"calendar"}], lead.unit||"business", v=>patchLead(b.id,{unit:v}))}
+                    <span style={{fontSize:11,color:"var(--mut)"}}>days before</span>
+                  </div>
+                ) : (
+                  <div style={{display:"flex",gap:6,alignItems:"center",marginTop:6,flexWrap:"wrap"}}>
+                    <input type="number" min={0} value={lead.weeksBefore??2} onChange={e=>patchLead(b.id,{weeksBefore:+e.target.value})} style={{...inp,width:46}} />
+                    <span style={{fontSize:11,color:"var(--mut)"}}>weeks before, on</span>
+                    <select value={lead.weekday??3} onChange={e=>patchLead(b.id,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
+                      {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                <div style={{display:"flex",gap:12,marginTop:8,alignItems:"flex-end",flexWrap:"wrap"}}>
+                  <div><label style={{...lbl,margin:"0 0 3px"}}>Cutoff time</label>
+                    <input value={b.cutoffTime||""} placeholder="12:00 PM" onChange={e=>patch(b.id,{cutoffTime:e.target.value})} style={{...inp,width:90}} /></div>
+                  <label style={{fontSize:11,color:"var(--txt)",display:"flex",alignItems:"center",gap:5,cursor:"pointer",paddingBottom:4}}>
+                    <input type="checkbox" checked={!!b.sameDayFilingAllowed} onChange={e=>patch(b.id,{sameDayFilingAllowed:e.target.checked})} /> Same-day filing OK
+                  </label>
+                </div>
+
+                <label style={lbl}>Cancelled / blackout dates (comma-separated YYYY-MM-DD)</label>
+                <input value={(b.blackoutDates||[]).join(", ")} placeholder="2026-12-22" onChange={e=>patch(b.id,{blackoutDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
+                <label style={lbl}>Special-called / extra dates</label>
+                <input value={(b.extraDates||[]).join(", ")} placeholder="2026-08-18" onChange={e=>patch(b.id,{extraDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
+
+                <label style={lbl}>Source URL</label>
+                <input value={b.sourceUrl||""} placeholder="https://…/agenda-calendar" onChange={e=>patch(b.id,{sourceUrl:e.target.value})} style={inp} />
+                <label style={lbl}>Verified on</label>
+                <input type="date" value={b.verifiedOn||""} onChange={e=>patch(b.id,{verifiedOn:e.target.value})} style={{...inp,width:"auto"}} />
+
+                <div style={{marginTop:10,paddingTop:8,borderTop:"1px dashed var(--bd)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".05em"}}>Next 6 meetings → file by</span>
+                    <span style={{fontSize:9,color: b.verifiedOn ? "var(--mut)" : "var(--warn-text)"}}>{b.verifiedOn ? `verified ${mbFmt(b.verifiedOn)}` : "rule-derived, unverified"}</span>
+                  </div>
+                  {dates.length===0 && <div style={{fontSize:11,color:"var(--mut)",fontStyle:"italic",marginTop:4}}>No dates resolve — check the recurrence rule.</div>}
+                  {dates.map(m=>(
+                    <div key={m} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--txt)",gap:8}}>
+                      <span style={{fontWeight:500}}>{mbFmt(m)}</span>
+                      <span style={{color:"var(--mut)"}}>file by {mbFmt(agendaDeadline(b,m))}{b.cutoffTime?` · ${b.cutoffTime}`:""}</span>
+                    </div>
+                  ))}
+                  {b.sourceUrl && <div style={{marginTop:5}}><a href={b.sourceUrl} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--amber)"}}>published calendar ↗</a></div>}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <button className="btn" onClick={add} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,padding:"5px 11px",marginTop:2}}>+ Add meeting body</button>
+    </div>
+  );
+}
 function SettingsPanel({data, setData, onClose, openFile, fileLinked}) {
   const s = data.settings || DEFAULT_SETTINGS;
   const upd = patch => setData(d => ({...d, settings:{...d.settings,...patch}}));
@@ -9793,6 +10234,19 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked}) {
             })}
           </div>
         </>)}
+
+        <SectionHdr id="meetings" title="Meeting calendars" />
+        {open.meetings && (
+          <MeetingCalendarsEditor
+            bodies={(data.projects && data.projects[data.aPid] && data.projects[data.aPid].meetingBodies) || []}
+            onChange={next => setData(d => {
+              const p = d.projects && d.projects[d.aPid];
+              if (!p) return d;
+              const nd = {...d, projects:{...d.projects, [d.aPid]:{...p, meetingBodies: next}}};
+              rebuildMeetingBodyIndex(nd);   // B816 — keep the global index fresh so the next cascade uses the edited cadence
+              return nd;
+            })} />
+        )}
 
         <SectionHdr id="schedule" title="Schedule" />
         {open.schedule && (

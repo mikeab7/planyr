@@ -60,6 +60,82 @@ export const difBD = (a, b) => {
   while ((dir === 1 ? cur < e : cur > e) && steps-- > 0) { cur.setDate(cur.getDate() + dir); if (cur.getDay() !== 0 && cur.getDay() !== 6 && !HOLIDAY_SET.has(fd(cur))) count++; }
   return count * dir;
 };
+// ── B815 (NEW-1) — Meeting-body cadence engine (VERBATIM copy of public/sequence/index.html) ──
+export const subBD = (s, n) => addBD(s, -n);
+export const nthWeekdayOfMonth = (y, m, weekday, setpos) => {
+  if (setpos === -1) return fdLocal(nthWeekday(y, m, -1, weekday));
+  const d = nthWeekday(y, m, setpos, weekday);
+  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
+};
+export const meetingDatesInRange = (body, from, to) => {
+  if (!body || !from || !to || from > to) return [];
+  const set = new Set();
+  const inWin = (iso, r) => (!r.effectiveFrom || iso >= r.effectiveFrom) && (!r.effectiveTo || iso <= r.effectiveTo);
+  const fromY = pd(from).getFullYear(), toY = pd(to).getFullYear();
+  (Array.isArray(body.recurrence) ? body.recurrence : []).forEach(r => {
+    if (!r || r.weekday == null) return;
+    if (r.freq === "weekly") {
+      const hasAnchor = !!r.effectiveFrom;
+      const interval = (r.interval > 1 && hasAnchor) ? Math.trunc(r.interval) : 1;
+      const cur = pd(hasAnchor ? r.effectiveFrom : from);
+      while (cur.getDay() !== r.weekday) cur.setDate(cur.getDate() + 1);
+      const end = pd(to);
+      let wk = 0;
+      while (cur <= end) {
+        const iso = fdLocal(cur);
+        if (iso >= from && (wk % interval === 0) && inWin(iso, r)) set.add(iso);
+        cur.setDate(cur.getDate() + 7); wk++;
+      }
+    } else {   // monthly (default)
+      const setpos = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
+      const months = (Array.isArray(r.months) && r.months.length) ? r.months : null;
+      const anchorYM = r.effectiveFrom ? (pd(r.effectiveFrom).getFullYear() * 12 + pd(r.effectiveFrom).getMonth()) : null;
+      const interval = (r.interval > 1 && anchorYM != null) ? Math.trunc(r.interval) : 1;
+      for (let y = fromY; y <= toY; y++) for (let m = 1; m <= 12; m++) {
+        if (months && !months.includes(m)) continue;
+        if (interval > 1 && ((((y * 12 + (m - 1) - anchorYM) % interval) + interval) % interval) !== 0) continue;
+        setpos.forEach(sp => {
+          const iso = nthWeekdayOfMonth(y, m, r.weekday, sp);
+          if (iso && iso >= from && iso <= to && inWin(iso, r)) set.add(iso);
+        });
+      }
+    }
+  });
+  (Array.isArray(body.blackoutDates) ? body.blackoutDates : []).forEach(d => set.delete(d));
+  (Array.isArray(body.extraDates) ? body.extraDates : []).forEach(d => { if (d >= from && d <= to) set.add(d); });
+  return [...set].sort();
+};
+export const agendaDeadline = (body, meetingDate) => {
+  if (!body || !meetingDate) return meetingDate || null;
+  const lead = body.agendaLead;
+  if (!lead) return meetingDate;
+  if (lead.type === "weekdayAnchor") {
+    const wb = Math.max(0, Math.trunc(Number(lead.weeksBefore) || 0));
+    const wd = ((Math.trunc(Number(lead.weekday) || 0) % 7) + 7) % 7;
+    const d = pd(meetingDate);
+    d.setDate(d.getDate() - d.getDay() - wb * 7 + wd);
+    return fdLocal(d);
+  }
+  const n = Math.max(0, Math.trunc(Number(lead.n) || 0));
+  return lead.unit === "calendar" ? addD(meetingDate, -n) : subBD(meetingDate, n);
+};
+export const nextEligibleMeeting = (body, readyDate, afterDate) => {
+  if (!body || !readyDate) return null;
+  const dates = meetingDatesInRange(body, readyDate, addD(readyDate, 366 * 3));
+  for (const m of dates) {
+    if (afterDate && m <= afterDate) continue;
+    const dl = agendaDeadline(body, m);
+    if (dl >= readyDate) return { meetingDate: m, deadline: dl };
+  }
+  return null;
+};
+// B817 — the two decision numbers (VERBATIM copy of public/sequence/index.html).
+export const meetingFloatBD = (task, todayIso) => (task && task.meetingBound && task.meetingDeadline) ? difBD(todayIso, task.meetingDeadline) : null;
+export const meetingCostDays = (task, body) => {
+  if (!body || !task || !task.start) return null;
+  const next = meetingDatesInRange(body, addD(task.start, 1), addD(task.start, 366 * 2))[0];
+  return next ? dif(task.start, next) : null;
+};
 export const normPreds = arr => {
   if (!Array.isArray(arr)) return [];
   return arr.map(x => {
@@ -227,6 +303,13 @@ export const computeDisplayHealth = (task, settings) => {
   if (!task) return task?.health;
   // Rule order matters: more specific overrides general
   if (cf.completeGreen && (task.percentComplete||0) >= 100) return "green";
+  // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
+  // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
+  // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
+  if (task.meetingBound && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
+    if (task.meetingInfeasible) return "red";
+    if (task.meetingDeadline && difBD(NOW, task.meetingDeadline) <= 2) return "yellow";
+  }
   if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
   if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
     // Within 7 calendar days
@@ -247,7 +330,40 @@ export const rolledStatusLeaf = (task, settings) => leafFocusStatus(computeDispl
 // A leaf/sub-group is hideable by Focus unless it's "active" (index.html ~L6228).
 export const hideStatusOf = status => status === "active" ? null : status;
 
-export const cascadeDates = tasks => {
+// ── B816 (NEW-2) — meeting-bound snap (VERBATIM copy of public/sequence/index.html) ──
+export let MEETING_BODY_INDEX = {};
+export const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDate) => {
+  t.duration = 0;
+  const pinnedDate = t.pinnedMeetingDate || (t.pinnedStart ? t.start : "");
+  const packetReady = predEarly || (pinnedDate ? "" : t.start) || "";
+  if (pinnedDate) {                                   // a person fixed this hearing — pin wins, never roll
+    t.start = t.end = pinnedDate;
+    t.meetingDeadline = agendaDeadline(body, pinnedDate) || "";
+    t.meetingInfeasible = !!(packetReady && t.meetingDeadline && packetReady > t.meetingDeadline);
+    return;
+  }
+  if (!packetReady) {                                 // nothing schedules it yet — stays blank (B386)
+    t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false;
+    return;
+  }
+  let readyDate = packetReady, afterDate = "";
+  if (drivingMeetingDate) {                           // the driving predecessor is itself a meeting (1st→2nd reading)
+    afterDate = drivingMeetingDate;
+    if (!body.sameDayFilingAllowed) { const nd = addD(drivingMeetingDate, 1); if (nd > readyDate) readyDate = nd; }
+  }
+  if (t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate) {
+    const seq = meetingDatesInRange(body, addD(minAfterDate, 1), addD(minAfterDate, 366 * 3));
+    const nth = seq[t.minMeetingsAfter.n - 1];
+    if (nth) { const before = addD(nth, -1); if (!afterDate || before > afterDate) afterDate = before; }
+  }
+  const elig = nextEligibleMeeting(body, readyDate, afterDate);
+  if (elig) { t.start = t.end = elig.meetingDate; t.meetingDeadline = elig.deadline; t.meetingInfeasible = false; }
+  else { t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; }
+};
+export const cascadeDates = (tasks, bodies = []) => {
+  const bodyMap = {...MEETING_BODY_INDEX};
+  (Array.isArray(bodies) ? bodies : []).forEach(b => { if (b && b.id) bodyMap[b.id] = b; });
+  const parentIds = new Set(tasks.filter(t => t.parentId !== null && t.parentId !== undefined).map(t => t.parentId));
   const map = {};
   tasks.forEach(t => { map[t.id] = {...t, predecessors: normPreds(t.predecessors)}; });
   const adj = {}; const inDeg = {};
@@ -270,6 +386,7 @@ export const cascadeDates = tasks => {
   queue.forEach(id => {
     const t = map[id];
     const preds = t.predecessors.filter(p => map[p.id]);
+    const bound = !!(t.meetingBound && bodyMap[t.meetingBodyId] && !parentIds.has(t.id) && !(t.pinnedEnd && t.end));
     // Locked FINISH (B616): the end is a FIXED POINT; the start back-calcs; the end never moves.
     if (t.pinnedEnd && t.end) {
       if (t.pinnedStart && t.start) {
@@ -288,12 +405,24 @@ export const cascadeDates = tasks => {
       return;
     }
     t.finishConflict = false;
-    if (!preds.length || t.pinnedStart) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
-    const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
-    if (!starts.length) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
-    const latest = starts.reduce((a,b) => a>b?a:b, starts[0] || t.start);
-    t.start = latest;
-    const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
+    const predEarly = preds.length
+      ? preds.map(p => constrainedStartFrom(map[p.id], p, Math.max(1, t.duration || 1))).filter(Boolean).reduce((a,b)=>a>b?a:b, "")
+      : "";
+    if (!preds.length || t.pinnedStart) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; }
+    else {
+      const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
+      if (starts.length) t.start = starts.reduce((a,b) => a>b?a:b, starts[0]);
+      const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
+    }
+    if (bound) {
+      const drivingMeetingDate = preds
+        .filter(p => map[p.id] && map[p.id].meetingBound && map[p.id].start).map(p => map[p.id].start)
+        .reduce((a,b) => a>b?a:b, "");
+      const minAfterDate = (t.minMeetingsAfter && map[t.minMeetingsAfter.taskId]) ? map[t.minMeetingsAfter.taskId].start : "";
+      applyMeetingBinding(t, bodyMap[t.meetingBodyId], predEarly, drivingMeetingDate, minAfterDate);
+    } else if (t.meetingDeadline || t.meetingInfeasible) {
+      t.meetingDeadline = ""; t.meetingInfeasible = false;
+    }
   });
   return tasks.map(t => { const {_pinStart, __wasDirectEdit, ...rest} = map[t.id] || t; return rest; });
 };
