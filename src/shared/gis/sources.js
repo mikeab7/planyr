@@ -346,8 +346,8 @@ export const GIS_SOURCES = {
     // Watershed Study Inundation Map All - 100YR and 500YR (Draft Results)").
     // ⚠ The study results are DRAFT — every derived value must carry the draft-study
     // screening label, never read as an effective/published elevation.
-    // (The 100-yr rasters have NO county-wide mosaic — 44 per-watershed services only, e.g.
-    // Willow_Creek/Willow_100YR_Existing_WSE — so atlas14Wse100Ft is not wired from here yet.)
+    // (The 100-yr rasters have NO county-wide mosaic — per-watershed services only; they are
+    // wired via the `fbcddWse100` row below and its `multiplex` routing table, B807.)
     serviceUrl: "https://gisportal.fortbendcountytx.gov/image/rest/services/500YR_WSE/ImageServer",
     layerId: null,
     kind: "raster", // getSamples, not /query — the drift verifier branches on this
@@ -366,6 +366,80 @@ export const GIS_SOURCES = {
     notes:
       "Feeds the drainage check's derivedWse02Ft (0.2% WSE engine seam, B763) for Fort Bend " +
       "sites — screening only, DRAFT watershed-study values. Sampler: site-planner/lib/fbcdWse.js.",
+  },
+
+  fbcddWse100: {
+    key: "fbcddWse100",
+    label: "FBCDD Atlas-14 watershed-study 1% (100-yr) WSE — DRAFT",
+    provider: "Fort Bend County Drainage District (FBCDD) watershed studies",
+    // Unlike the 0.2% row above there is NO county-wide 100-yr mosaic — the study publishes
+    // per-watershed ImageServers (19 WSE rasters live 2026-07-13, several naming shapes:
+    // *_100YR_Existing_WSE, *_100Yr_WSE, *_100YR_WSEL; 100YR/100Yr/100yr case varies). The
+    // `multiplex` table below is the routing index: service name + published fullExtent in
+    // SR 2278 ftUS (Willow_Creek publishes SR 6588 = NAD83(2011) South Central ftUS — the
+    // same grid to screening precision). The sampler bbox-tests the site point against each
+    // extent2278 (padded for watershed seams), samples every candidate in parallel, and takes
+    // the MAX finite value (governing WSE). LOS variants (*_100YR_LOS_WSE — a level-of-service
+    // product, different study basis) and Depth/DxV products are EXCLUDED — they are not the
+    // existing-conditions 1% water surface.
+    // serviceUrl = the Oyster watershed raster as the REPRESENTATIVE endpoint (the drift
+    // verifier's metadata probe needs one concrete ImageServer; per-fixture serviceUrl
+    // overrides exercise other watersheds, and the catalog parity check walks the live
+    // directory against `multiplex.services`). Same source-of-truth portal item as the 0.2%
+    // row (web map 0d4791f2c9d143eeb62696850ce27e45); same DRAFT caveat: screening only,
+    // never an effective/published elevation. CORS-clean from planyr.io (same host as 0.2%).
+    serviceUrl: "https://gisportal.fortbendcountytx.gov/image/rest/services/Oyster/Oyster_100YR_Existing_WSE/ImageServer",
+    layerId: null,
+    kind: "raster", // getSamples, not /query — the drift verifier branches on this
+    geometryType: "raster",
+    fields: {},
+    coverage: "Fort Bend County, per-watershed (19 rasters; value range ~24–191 ft NAVD88)",
+    tier: "production",
+    lastVerified: "2026-07-13",
+    sampleFixtures: [
+      { label: "Oyster Creek reach (in coverage)", point: [-95.6895, 29.648], expectValueRange: [70, 95] }, // live 2026-07-13: 82.08
+      {
+        label: "Willow Fork reach (in coverage, the SR-6588 service)",
+        point: [-95.8776, 29.7971],
+        expectValueRange: [145, 170], // live 2026-07-13: 156.48
+        serviceUrl: "https://gisportal.fortbendcountytx.gov/image/rest/services/Willow_Creek/Willow_100YR_Existing_WSE/ImageServer",
+      },
+      { label: "NE of the county (out of coverage)", point: [-95.0, 30.2], expectNoData: true },
+    ],
+    fixtures: [], // no /query fixtures — raster (see sampleFixtures above)
+    // Routing index for the per-watershed multiplex (read by lib/fbcdWse.js AND the drift
+    // verifier's catalog parity check). A live catalog leaf name belongs to this source iff
+    // it matches `include` and not `exclude`. Extents captured live 2026-07-13.
+    multiplex: {
+      restBase: "https://gisportal.fortbendcountytx.gov/image/rest/services",
+      include: /100yr.*_wsel?$/i,
+      exclude: /_LOS_/i,
+      services: [
+        { name: "Bessies_Creek/BessiesCreek_100YR_Existing_WSE", extent2278: [2900325, 13785724, 2961165, 13833208] },
+        { name: "BigCreek/BigCreek_100YR_Existing_WSE", extent2278: [2922657, 13676513, 3083955, 13791101] },
+        { name: "Brays_Bayou/BraysBayou_100YR_Existing_WSE", extent2278: [3018306, 13810128, 3026721, 13820820] },
+        { name: "BriscoeDitch/BriscoeDitch_100YR_Existing_WSE", extent2278: [2972910, 13775454, 2998209, 13796907] },
+        { name: "BZ_River_Mapping/100YR_WSE", extent2278: [2811449, 13628028, 3106805, 13990068] },
+        { name: "Cedar_Buffalo/Cedar_Buffalo_100Yr_Existing_WSE", extent2278: [2949303, 13644821, 2995140, 13711538] },
+        { name: "Clear_Creek/Clear_Creek_100YR_Existing_WSE", extent2278: [3077664, 13757940, 3106314, 13781595] },
+        { name: "Cow_Turkey_Bee/Cow_Turkey_Bee_100Yr_WSE", extent2278: [3001878, 13656785, 3057012, 13698527] },
+        { name: "Dry_Turkey_Snake/Dry_Turkey_Snake_100Yr_WSE", extent2278: [2901780, 13673934, 2983545, 13787550] },
+        { name: "Guy_Mound/Guy_Mound_100Yr_Existing_WSE", extent2278: [2976626, 13635910, 3019160, 13705570] },
+        { name: "Jones_Creek/Jones_Creek_100yr_WSE", extent2278: [2945100, 13777617, 3011160, 13834350] },
+        { name: "Keegans_Bayou/Keegans_Bayou_100YR_Existing_WSE", extent2278: [3017944, 13798276, 3044404, 13814166] },
+        { name: "Oyster/Oyster_100YR_Existing_WSE", extent2278: [2989565, 13722515, 3110777, 13823219] },
+        { name: "Pleasant_Gully/Pleasant_Gully_100YR_Existing_WSE", extent2278: [2979071, 13759941, 2998301, 13774593] },
+        { name: "Rabbs_Bayou/Rabbs_Bayou_100YR_WSEL", extent2278: [2986543, 13752209, 3041275, 13784684] },
+        { name: "Robinowitz_Ditch/Robinowitz_Ditch_100YR_Existing_WSE", extent2278: [2946678, 13761732, 2982096, 13771473] },
+        { name: "San_Bernard/San_Bernard_River_100yr_WSE", extent2278: [2750599, 13507280, 3147823, 13897106] },
+        { name: "Sims_Bayou/Sims_Bayou_100YR_Existing_WSE", extent2278: [3069807, 13773798, 3096387, 13789260] },
+        { name: "Willow_Creek/Willow_100YR_Existing_WSE", extent2278: [2933472, 13810320, 3034389, 13890879] }, // SR 6588 (NAD83(2011) ftUS — same grid)
+      ],
+    },
+    notes:
+      "Feeds the drainage check's derivedWse1pctFt (1% WSE engine seam, B807) for Fort Bend " +
+      "sites — the unstudied-Zone-A pricing path. Screening only, DRAFT watershed-study values, " +
+      "precedence LAST (never outranks effective-model data). Sampler: site-planner/lib/fbcdWse.js.",
   },
 };
 

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-12 @ `1b410f5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-13 @ `f3a70d3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -309,10 +309,10 @@ _244 source files mapped._
   - _exports_: `fetchOverpass`, `mapillaryLayer`, `mapillaryToken`, `overpassLayer`, `setMapillaryToken`, `subscribeMapillaryToken`
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export
   - _exports_: `PRINT_WEIGHTS`, `printStrokeWidth`, `PT_PER_CENTI_INCH`, `sheetFitScale`
-- **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT 0.2% (500-yr) WSE point sampler (getSamples off the county 500YR_WSE ImageServer mosaic, feet, honest-null out of coverage) — feeds derivedWse02Ft on Fort Bend drainage checks
-  - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`
+- **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
+  - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse100CandidatesForPoint`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
-  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wse1pctForRing`, `zonesFromFeatureCollection`
+  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wse1pctForRing`, `zonesFromFeatureCollection`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
   - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed

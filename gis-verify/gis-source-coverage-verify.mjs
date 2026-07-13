@@ -71,7 +71,9 @@ async function checkRasterSource(key, s) {
   }
   for (const fx of s.sampleFixtures || []) {
     const geometry = JSON.stringify({ x: fx.point[0], y: fx.point[1], spatialReference: { wkid: 4326 } });
-    const u = `${s.serviceUrl}/getSamples?geometry=${encodeURIComponent(geometry)}&geometryType=esriGeometryPoint` +
+    // A fixture may name its own service (B807 multiplex rows: in-coverage probes span
+    // watersheds, while s.serviceUrl is just the representative endpoint).
+    const u = `${fx.serviceUrl || s.serviceUrl}/getSamples?geometry=${encodeURIComponent(geometry)}&geometryType=esriGeometryPoint` +
       `&interpolation=RSP_BilinearInterpolation&returnFirstValueOnly=true&f=json`;
     try {
       const j = await getJson(u);
@@ -91,6 +93,67 @@ async function checkRasterSource(key, s) {
       problems.push(`${key} fixture "${fx.label}": getSamples failed — ${e.message}`);
     }
   }
+  if (s.multiplex) {
+    const mx = await checkMultiplexCatalog(key, s);
+    problems.push(...mx.problems);
+    notes.push(...mx.notes);
+  }
+  return { problems, notes };
+}
+
+/* B807 — parity check for a multiplexed raster row (per-watershed services routed by a
+ * baked table): walk the LIVE services directory, filter leaf names by the row's
+ * include/exclude patterns, and diff BOTH ways against multiplex.services — a live
+ * service missing from the table means lost coverage; a table service missing live means
+ * the app will sample a dead endpoint. Then compare each live fullExtent to the baked
+ * extent2278 (±1 ft) so a re-published raster can't silently shift the routing. Folders
+ * that require a token are skipped (the public study folders don't). */
+async function checkMultiplexCatalog(key, s) {
+  const problems = [];
+  const notes = [];
+  const { restBase, include, exclude, services } = s.multiplex;
+  let root;
+  try {
+    root = await getJson(`${restBase}?f=json`);
+  } catch (e) {
+    return { problems: [`${key} multiplex: catalog UNREACHABLE — ${e.message}`], notes };
+  }
+  const liveNames = (root.services || []).filter((x) => x.type === "ImageServer").map((x) => x.name);
+  for (const folder of root.folders || []) {
+    try {
+      const j = await getJson(`${restBase}/${encodeURIComponent(folder)}?f=json`);
+      for (const x of j.services || []) if (x.type === "ImageServer") liveNames.push(x.name);
+    } catch {
+      // Token-gated / private folder — not part of the public study catalog.
+    }
+  }
+  const liveMatch = liveNames.filter((n) => {
+    const leaf = n.split("/").pop();
+    return include.test(leaf) && !(exclude && exclude.test(leaf));
+  });
+  const tableNames = new Set(services.map((x) => x.name));
+  const liveSet = new Set(liveMatch);
+  for (const n of liveMatch) {
+    if (!tableNames.has(n)) problems.push(`${key} multiplex: LIVE service "${n}" missing from the registry table — coverage the app can't route to.`);
+  }
+  for (const x of services) {
+    if (!liveSet.has(x.name)) {
+      problems.push(`${key} multiplex: table service "${x.name}" not in the live catalog — the app would sample a dead endpoint.`);
+      continue;
+    }
+    try {
+      const meta = await getJson(`${restBase}/${x.name}/ImageServer?f=json`);
+      const ext = meta.fullExtent || meta.extent;
+      const live = [ext?.xmin, ext?.ymin, ext?.xmax, ext?.ymax];
+      const drift = live.map((v, i) => Math.abs((v ?? NaN) - x.extent2278[i]));
+      if (!drift.every((d) => isFinite(d) && d <= 1)) {
+        problems.push(`${key} multiplex: "${x.name}" extent drifted — live [${live.map((v) => Math.round(v))}] vs table [${x.extent2278}] (re-bake extent2278).`);
+      }
+    } catch (e) {
+      problems.push(`${key} multiplex: "${x.name}" metadata failed — ${e.message}`);
+    }
+  }
+  if (!problems.length) notes.push(`${key} multiplex: ${services.length} services match the live catalog, extents within ±1 ft ✓`);
   return { problems, notes };
 }
 

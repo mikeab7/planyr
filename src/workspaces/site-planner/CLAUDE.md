@@ -31,7 +31,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   worker-safe) + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
   + `terrainLayers.js` (Leaflet glue, grid LRU for the hover elevation readout);
   `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft);
-  `fbcdWse.js` — FBCDD Atlas-14 DRAFT 0.2% WSE point sampler (Fort Bend; feeds `derivedWse02Ft`).
+  `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
+  per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807).
 - `detentionRules.js` — Houston-MSA detention criteria as versioned rule records + the
   drainage-authority resolver, tier/regime assessors, pond auto-size solvers (B636–B642,
   code-labeled B629–B635; pure, injectable fetch/cache — mirror of `jurisdiction.js`). `pondGeom.js` holds

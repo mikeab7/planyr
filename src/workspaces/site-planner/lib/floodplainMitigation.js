@@ -344,10 +344,11 @@ export function governingCrossSectionWsel({ point, sections, maxDistFt = 2500 } 
 }
 
 /* The governing (highest) 1% water surface across the zones that touch a ring —
- * static BFE where published, else the manual BFE, else the derived BFE-line estimate.
+ * static BFE where published, else the manual BFE, else the derived estimates.
  * B708's pond split consumes this. Returns { wseFt, provider } — provider
- * "static-bfe" | "ao-depth" | "manual" | "bfe-line-interp" | null. Pure. */
-export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null, derivedXsWselFt = null, derivedBfeFt = null } = {}) {
+ * "static-bfe" | "ao-depth" | "manual" | "xs-wsel" | "bfe-line-interp" |
+ * the caller-named derivedWse1pctSrc (default "derived-wse100", B807) | null. Pure. */
+export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null, derivedXsWselFt = null, derivedBfeFt = null, derivedWse1pctFt = null, derivedWse1pctSrc = null } = {}) {
   const fb = ringBBox(ring);
   let best = null, provider = null;
   for (const z of zones) {
@@ -369,6 +370,9 @@ export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null,
     const fallback = (bfeFt != null && isFinite(bfeFt)) ? { v: bfeFt, p: "manual" }
       : (derivedXsWselFt != null && isFinite(derivedXsWselFt)) ? { v: derivedXsWselFt, p: "xs-wsel" }
       : (derivedBfeFt != null && isFinite(derivedBfeFt)) ? { v: derivedBfeFt, p: "bfe-line-interp" }
+      // LAST in precedence (B807): a DRAFT study raster never outranks effective-model
+      // data — FBC Interim §9's mitigation basis is the PRE-Atlas-14 effective floodplain.
+      : (derivedWse1pctFt != null && isFinite(derivedWse1pctFt)) ? { v: derivedWse1pctFt, p: derivedWse1pctSrc || "derived-wse100" }
       : null;
     if (fallback) {
       const touches = zones.some((z) => (z.cls === "1pct" || z.cls === "floodway") && bboxOverlap(fb, z.bbox) && gridIntersect(ring, z, null, { maxCells: 400 }).areaSf > 0);
@@ -405,6 +409,9 @@ export function ringInTrigger(ring, zones, rule) {
  *   zones      — zonesFromFeatureCollection output
  *   rule       — one floodplainRules record
  *   elev       — { padElevFt, existGradeFt, bfeFt, wse02Ft, avgFillDepthFt,
+ *                  derivedBfeFt, derivedXsWselFt,                    (B755/B763 derived 1%)
+ *                  derivedWse02Ft, derivedWse02Src,                  (B763/B770 derived 0.2%)
+ *                  derivedWse1pctFt, derivedWse1pctSrc,              (B807 derived 1%, LAST rung)
  *                  sources: { padElev?, existGrade? } }  (all optional; sources are
  *                  plain provenance labels the caller sets, e.g. "manual" | "3dep")
  * Pure. */
@@ -429,6 +436,7 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   const derivedBfe = realElev(elev.derivedBfeFt); // DERIVED from FEMA BFE lines (B755)
   const derivedXsWsel = realElev(elev.derivedXsWselFt); // DERIVED 1% WSE from FEMA S_XS WSEL_REG (B763)
   const derived02 = realElev(elev.derivedWse02Ft); // DERIVED 0.2% WSE — engine seam (B763)
+  const derived1pct = realElev(elev.derivedWse1pctFt); // DERIVED 1% WSE — engine seam (B807, e.g. the FBCDD Atlas-14 DRAFT rasters)
   const wseProviders = new Set();
   const wse02Providers = new Set(); // tracked SEPARATELY so the 0.2% "manual" never collides with the 1% "manual"
 
@@ -456,6 +464,13 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
       // (B755). Manual entry above still wins; a zone's own published data (static BFE,
       // AO depth) always wins — the derived value only fills a genuine gap.
       else if (derivedBfe != null) { wse = derivedBfe; wseSrc = "bfe-line-interp"; }
+      // ABSOLUTE last (B807): a derived 1% WSE from a DRAFT study raster (the FBCDD
+      // Atlas-14 grids — the unstudied-Zone-A pricing path). Every effective-model
+      // provider above outranks it: FBC Interim §9's mitigation basis is the
+      // PRE-Atlas-14 effective floodplain, so this is a labeled stand-in, never a peer.
+      // The caller names the source via elev.derivedWse1pctSrc (e.g. "fbcdd-wse100-draft")
+      // so provenance is never lost; the generic default can't claim FBCDD provenance.
+      else if (derived1pct != null) { wse = derived1pct; wseSrc = elev.derivedWse1pctSrc || "derived-wse100"; }
     } else if (z.cls === "02pct") {
       // 0.2% band: a manually-entered WSE wins; else a derived 0.2% WSE (B763 engine
       // seam). The caller names the derived source via elev.derivedWse02Src (e.g. the
@@ -520,6 +535,9 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
     const ref1 = Math.max(
       ...zones.filter((z) => z.cls === "1pct" && z.staticBfeFt != null).map((z) => z.staticBfeFt),
       manualBfe ?? -Infinity, derivedXsWsel ?? -Infinity, derivedBfe ?? -Infinity,
+      // B807: the derived 1% joins the reference — on a pure Zone-A site it is the ONLY
+      // 1% surface, and without it this guard could never fire there.
+      derived1pct ?? -Infinity,
     );
     if (Number.isFinite(ref1) && derived02 < ref1 - 0.05) flags.add("wse02-below-1pct");
   }
@@ -563,7 +581,10 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
         : wseProviders.has("ao-depth") ? "ao-depth"
         : wseProviders.has("manual") ? "manual"
         : wseProviders.has("xs-wsel") ? "xs-wsel"
-        : wseProviders.has("bfe-line-interp") ? "bfe-line-interp" : null,
+        : wseProviders.has("bfe-line-interp") ? "bfe-line-interp"
+        // B807: the derived-1% rung is caller-named (fbcdd-wse100-draft / derived-wse100)
+        // — surface whatever tag actually priced it so the DRAFT label is never lost.
+        : [...wseProviders][0] || null,
       // 0.2% provider is mixed-aware but its own tier, tracked apart from the 1% chain
       // so a priced 0.2% zone never reads as a 1% "manual". Manual wins the label; else
       // surface whichever derived source priced it (xs-wsel-02 / fbcdd-wse02-draft).
@@ -669,3 +690,5 @@ export const DERIVED_WSE02_NOTE =
   "This 0.2% (500-yr) water surface was DERIVED from a cross-section / regional model at your fill — a screening estimate, not a published or surveyed value. Confirm before design; type a 0.2% WSE to override.";
 export const DERIVED_WSE02_DRAFT_NOTE =
   "This 0.2% (500-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: FBCDD's Interim §9 mitigation trigger references the PRE-Atlas-14 0.2% (the effective 2014 FIS profile) — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a 0.2% WSE from the effective FIS to override.";
+export const DERIVED_WSE100_DRAFT_NOTE =
+  "This 1% (100-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: Fort Bend's mitigation and FFE rules reference the EFFECTIVE (pre-Atlas-14) floodplain — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a BFE to override.";
