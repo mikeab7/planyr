@@ -45,13 +45,15 @@ describe("pruneStale — drop peers that stopped heart-beating", () => {
 });
 
 describe("createMultiTabPresence — two tabs over a real BroadcastChannel", () => {
+  // Two REAL tabs = two documents = two distinct identities. In one test realm we simulate that by
+  // passing explicit distinct tabIds (a real second tab is a fresh realm with its own auto id).
   it("sees a peer that opens the SAME project, and clears it when that peer leaves", async () => {
     if (typeof BroadcastChannel === "undefined") return; // environment without BroadcastChannel: pure helpers above cover the logic
     const channel = "planyr-presence-test-" + Math.random().toString(36).slice(2);
     const settle = () => new Promise((r) => setTimeout(r, 40));
     let aState = { conflictRisk: false };
-    const A = createMultiTabPresence({ channel, project: "P1", heartbeat: 1e7 });
-    const B = createMultiTabPresence({ channel, project: "P1", heartbeat: 1e7 });
+    const A = createMultiTabPresence({ channel, project: "P1", heartbeat: 1e7, tabId: "tab-A" });
+    const B = createMultiTabPresence({ channel, project: "P1", heartbeat: 1e7, tabId: "tab-B" });
     try {
       A.onChange((s) => { aState = s; });
       A.start();
@@ -73,14 +75,38 @@ describe("createMultiTabPresence — two tabs over a real BroadcastChannel", () 
     const channel = "planyr-presence-test-" + Math.random().toString(36).slice(2);
     const settle = () => new Promise((r) => setTimeout(r, 40));
     let aState = { conflictRisk: false, otherCount: 0 };
-    const A = createMultiTabPresence({ channel, project: "P1", heartbeat: 1e7 });
-    const B = createMultiTabPresence({ channel, project: "P2", heartbeat: 1e7 });
+    const A = createMultiTabPresence({ channel, project: "P1", heartbeat: 1e7, tabId: "tab-A" });
+    const B = createMultiTabPresence({ channel, project: "P2", heartbeat: 1e7, tabId: "tab-B" });
     try {
       A.onChange((s) => { aState = s; });
       A.start(); B.start();
       await settle();
       expect(aState.otherCount).toBe(1);     // B is present
       expect(aState.conflictRisk).toBe(false); // but a different project → no conflict
+    } finally {
+      A.stop(); try { B.stop(); } catch (_) {}
+    }
+  });
+
+  // Regression (owner report 2026-07-13): the Shell keeps every visited workspace mounted, so a
+  // SINGLE tab can have several AppHeaders each running their own presence instance. Those same-tab
+  // instances share one per-document identity (no explicit tabId → auto-assigned singleton), so they
+  // must NOT see each other as a second tab — otherwise a false "open in another tab" banner fires
+  // with only one tab open.
+  it("two instances in the SAME document (no explicit tabId) never mistake each other for a second tab", async () => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = "planyr-presence-test-" + Math.random().toString(36).slice(2);
+    const settle = () => new Promise((r) => setTimeout(r, 40));
+    let aState = { conflictRisk: false, otherCount: 0 };
+    // Same document/realm, same project — like the Library header + a kept-alive Review header.
+    const A = createMultiTabPresence({ channel, project: "P1", heartbeat: 1e7 });
+    const B = createMultiTabPresence({ channel, project: "P1", heartbeat: 1e7 });
+    try {
+      A.onChange((s) => { aState = s; });
+      A.start(); B.start();
+      await settle();
+      expect(aState.otherCount).toBe(0);       // same-tab sibling, not another tab
+      expect(aState.conflictRisk).toBe(false); // → no false banner
     } finally {
       A.stop(); try { B.stop(); } catch (_) {}
     }
