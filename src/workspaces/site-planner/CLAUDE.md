@@ -26,6 +26,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
   a failed commit survives a reload instead of being reverted by the rows-canonical refetch).
+- `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
+  `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
+  over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
+  a markup can also be sent behind the elements). Wired via `arrangeSel` + the right-click menus + the
+  ⌘/Ctrl+]/[ chords in `SitePlanner.jsx`.
 - `labelLayout.js` — LOD label tiering. `roadGeometry.js` — centerline road curves (pure).
 - Terrain pipeline (B703–B706): `demGrid.js` / `contours.js` / `flowField.js` (pure math,
   worker-safe) + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
