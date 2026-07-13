@@ -100,11 +100,25 @@ export function createElementSync(opts = {}) {
   // is a stale self-echo → ignored; a genuine re-create by another session arrives at a HIGHER rev and
   // passes. Pruned to the recent window so it stays tiny.
   const tombstoned = new Map();
+  // key -> highest delete rev THIS tab committed for the element, NEVER time-pruned (dropped only when the
+  // element is genuinely re-created / restored — a monotonic rev above the delete). The `tombstoned` map
+  // above ages out at 15s (it feeds the B757 realtime-echo resurrect guard, which only needs the brief
+  // in-flight window). But the REFETCH resurrect guard (reconcileSeedRows) needs the floor to outlive that:
+  // a reconnect refetch can land LONG after a delete, and if its snapshot still shows the element alive it
+  // would re-adopt it. A never-pruned high-water (session-long, mirrors maxOwnRev) keeps a just-deleted
+  // element deleted across any in-session reconnect. (Cross-RELOAD is out of scope for this in-memory floor —
+  // that needs a durable tombstone.) A genuine re-create always lands ABOVE this rev, so it isn't over-held.
+  const maxDeleteRev = new Map();
   function recordTombstone(kind, id, rev) {
     const t = now();
-    tombstoned.set(skey(kind, id), { at: t, rev: typeof rev === "number" ? rev : 0 });
-    for (const [k, v] of tombstoned) if (t - v.at > recentWindowMs) tombstoned.delete(k); // bound memory
+    const k = skey(kind, id);
+    const r = typeof rev === "number" ? rev : 0;
+    tombstoned.set(k, { at: t, rev: r });
+    const cur = maxDeleteRev.get(k);
+    if (cur == null || r > cur) maxDeleteRev.set(k, r); // high-water, never time-pruned
+    for (const [kk, v] of tombstoned) if (t - v.at > recentWindowMs) tombstoned.delete(kk); // bound the 15s map
   }
+  const clearDeleteFloor = (key) => { tombstoned.delete(key); maxDeleteRev.delete(key); }; // element is live again
   // key -> Map(json -> at)  (EVERY data serialization THIS tab put ON THE WIRE for the key within the
   // window — not just the latest). Unlike inflightKeys — cleared the instant an RPC settles — this
   // SURVIVES a transport failure, so a committed-but-unacked write's realtime echo is still recognized
@@ -206,10 +220,12 @@ export function createElementSync(opts = {}) {
   const shadowSnapshot = () => new Map(shadow);
   // B812 red-team — the delete floor, exposed for reconcileSeedRows so a stale refetch can't RESURRECT an
   // element THIS tab just deleted (the delete cleared its shadow entry, so reconcileSeedRows' rev check has
-  // nothing to compare a fetched-alive row against). Only entries still inside the recent window.
+  // nothing to compare a fetched-alive row against). Sourced from the never-pruned high-water (B812 round-4)
+  // so an in-session reconnect ARBITRARILY LATER than the delete still keeps it deleted; a genuine re-create
+  // clears the floor and lands above the rev.
   const tombstonedSnapshot = () => {
-    const out = new Map(); const t = now();
-    for (const [k, v] of tombstoned) if (t - v.at <= recentWindowMs) out.set(k, { rev: v.rev, at: v.at });
+    const out = new Map();
+    for (const [k, rev] of maxDeleteRev) out.set(k, { rev });
     return out;
   };
   const isRecent = (kind, id) => {
@@ -367,7 +383,7 @@ export function createElementSync(opts = {}) {
           // the older r.rev back would make the next commit a guaranteed spurious conflict.
           const cur = shadow.get(key);
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(e.el), rev: cur && cur.rev > r.rev ? cur.rev : r.rev, z: e.z });
-          tombstoned.delete(key); // element is live again → drop any stale-delete floor
+          clearDeleteFloor(key); // element is live again → drop the stale-delete floor (incl. the never-pruned refetch high-water)
         }
         recent.set(key, { at: now(), rev: r.rev });
         recordOwnRev(e.kind, e.id, r.rev); // B812 — this rev is one OUR commit produced; its echo is ours
@@ -381,7 +397,7 @@ export function createElementSync(opts = {}) {
           // DIFFERENT data still surfaces per the B673 matrix.
           const selfDup = row.data && stableStringify(row.data) === stableStringify(e.el);
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(row.data), rev: row.rev, z: row.z_index });
-          tombstoned.delete(key);
+          clearDeleteFloor(key);
           if (selfDup) {
             recent.set(key, { at: now(), rev: row.rev });
             recordOwnRev(e.kind, e.id, row.rev); // B812 — our own restore landed at this rev; its echo is ours
@@ -404,7 +420,7 @@ export function createElementSync(opts = {}) {
           // equality (not updated_by alone) so a genuine same-account two-window conflict carrying
           // DIFFERENT data still surfaces per the B673 matrix.
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(row.data), rev: row.rev, z: e.z });
-          tombstoned.delete(key);
+          clearDeleteFloor(key);
           recent.set(key, { at: now(), rev: row.rev });
           recordOwnRev(e.kind, e.id, row.rev); // B812 — the "conflict" row IS our data at this rev; its echo is ours
           report("element-conflict-self-dup", "conflict row IS our own committed data — silent", { siteId, id: e.id, kind: e.kind });
@@ -562,7 +578,7 @@ export function createElementSync(opts = {}) {
       return { action: "remove", kind: row.kind, id: row.id, row };
     }
     if (!row.data) return { action: "ignore" }; // malformed live row (CHECK should prevent this)
-    tombstoned.delete(key); // a genuine higher-rev row (another session re-created it) → element is live again
+    clearDeleteFloor(key); // a genuine higher-rev row (another session re-created it) → element is live again
     const upJson = stableStringify(row.data);
     shadow.set(key, { kind: row.kind, id: row.id, json: upJson, rev, z: row.z_index });
     // Our OWN just-committed edit can echo back at a rev ABOVE the shadow when a refetch-replace

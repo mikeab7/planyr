@@ -766,6 +766,25 @@ describe("B812 — own-echo-by-rev kills the single-tab resize burst", () => {
     expect(instr.action).toBe("ignore");                    // rev 1 <= high-water 2 → ours
     expect(events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // ← the round-2 fix
   });
+
+  // Round-4 (owner "close all loose ends"): the delete floor exposed to reconcileSeedRows is now a
+  // NEVER-pruned high-water, so an in-session reconnect ARBITRARILY LATER than a delete still keeps the
+  // element deleted; a genuine re-create clears it.
+  it("the delete floor for reconcileSeedRows survives >15s (never-pruned) and clears on re-create", async () => {
+    let clock = 0;
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => clock, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: () => {},
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "pv", data: { id: "pv", w: 10 }, rev: 5, z_index: 0 }]);
+    s.reconcile({ els: [] }, {}); await tick();             // delete → floor rev 6
+    clock = 20000;                                          // 20s later — past the 15s in-flight window
+    expect(s.tombstonedSnapshot().get("el:pv")?.rev).toBe(6); // floor retained (never pruned)
+    // re-create pv (restore / new element at the same id) → the floor is dropped
+    s.reconcile({ els: [{ id: "pv", w: 99, z: 0 }] }, {}); s.flushGesture(); await tick();
+    expect(s.tombstonedSnapshot().has("el:pv")).toBe(false); // cleared → won't hide the re-create
+  });
 });
 
 // B756 — the refetch-replace integration the data-loss fix restores: a brand-new signed-in site's
