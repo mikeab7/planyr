@@ -60,6 +60,75 @@ export const difBD = (a, b) => {
   while ((dir === 1 ? cur < e : cur > e) && steps-- > 0) { cur.setDate(cur.getDate() + dir); if (cur.getDay() !== 0 && cur.getDay() !== 6 && !HOLIDAY_SET.has(fd(cur))) count++; }
   return count * dir;
 };
+// ── B815 (NEW-1) — Meeting-body cadence engine (VERBATIM copy of public/sequence/index.html) ──
+export const subBD = (s, n) => addBD(s, -n);
+export const nthWeekdayOfMonth = (y, m, weekday, setpos) => {
+  if (setpos === -1) return fdLocal(nthWeekday(y, m, -1, weekday));
+  const d = nthWeekday(y, m, setpos, weekday);
+  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
+};
+export const meetingDatesInRange = (body, from, to) => {
+  if (!body || !from || !to || from > to) return [];
+  const set = new Set();
+  const inWin = (iso, r) => (!r.effectiveFrom || iso >= r.effectiveFrom) && (!r.effectiveTo || iso <= r.effectiveTo);
+  const fromY = pd(from).getFullYear(), toY = pd(to).getFullYear();
+  (Array.isArray(body.recurrence) ? body.recurrence : []).forEach(r => {
+    if (!r || r.weekday == null) return;
+    if (r.freq === "weekly") {
+      const hasAnchor = !!r.effectiveFrom;
+      const interval = (r.interval > 1 && hasAnchor) ? Math.trunc(r.interval) : 1;
+      const cur = pd(hasAnchor ? r.effectiveFrom : from);
+      while (cur.getDay() !== r.weekday) cur.setDate(cur.getDate() + 1);
+      const end = pd(to);
+      let wk = 0;
+      while (cur <= end) {
+        const iso = fdLocal(cur);
+        if (iso >= from && (wk % interval === 0) && inWin(iso, r)) set.add(iso);
+        cur.setDate(cur.getDate() + 7); wk++;
+      }
+    } else {   // monthly (default)
+      const setpos = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
+      const months = (Array.isArray(r.months) && r.months.length) ? r.months : null;
+      const anchorYM = r.effectiveFrom ? (pd(r.effectiveFrom).getFullYear() * 12 + pd(r.effectiveFrom).getMonth()) : null;
+      const interval = (r.interval > 1 && anchorYM != null) ? Math.trunc(r.interval) : 1;
+      for (let y = fromY; y <= toY; y++) for (let m = 1; m <= 12; m++) {
+        if (months && !months.includes(m)) continue;
+        if (interval > 1 && ((((y * 12 + (m - 1) - anchorYM) % interval) + interval) % interval) !== 0) continue;
+        setpos.forEach(sp => {
+          const iso = nthWeekdayOfMonth(y, m, r.weekday, sp);
+          if (iso && iso >= from && iso <= to && inWin(iso, r)) set.add(iso);
+        });
+      }
+    }
+  });
+  (Array.isArray(body.blackoutDates) ? body.blackoutDates : []).forEach(d => set.delete(d));
+  (Array.isArray(body.extraDates) ? body.extraDates : []).forEach(d => { if (d >= from && d <= to) set.add(d); });
+  return [...set].sort();
+};
+export const agendaDeadline = (body, meetingDate) => {
+  if (!body || !meetingDate) return meetingDate || null;
+  const lead = body.agendaLead;
+  if (!lead) return meetingDate;
+  if (lead.type === "weekdayAnchor") {
+    const wb = Math.max(0, Math.trunc(Number(lead.weeksBefore) || 0));
+    const wd = ((Math.trunc(Number(lead.weekday) || 0) % 7) + 7) % 7;
+    const d = pd(meetingDate);
+    d.setDate(d.getDate() - d.getDay() - wb * 7 + wd);
+    return fdLocal(d);
+  }
+  const n = Math.max(0, Math.trunc(Number(lead.n) || 0));
+  return lead.unit === "calendar" ? addD(meetingDate, -n) : subBD(meetingDate, n);
+};
+export const nextEligibleMeeting = (body, readyDate, afterDate) => {
+  if (!body || !readyDate) return null;
+  const dates = meetingDatesInRange(body, readyDate, addD(readyDate, 366 * 3));
+  for (const m of dates) {
+    if (afterDate && m <= afterDate) continue;
+    const dl = agendaDeadline(body, m);
+    if (dl >= readyDate) return { meetingDate: m, deadline: dl };
+  }
+  return null;
+};
 export const normPreds = arr => {
   if (!Array.isArray(arr)) return [];
   return arr.map(x => {
