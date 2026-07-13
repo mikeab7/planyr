@@ -21,6 +21,23 @@ const randomId = () =>
   (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID()
     : "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
+// ONE presence identity per browsing context (tab / document). The app shell keeps every
+// VISITED workspace mounted-but-hidden for instant switching (Shell.jsx keep-alive, 2026-07-05),
+// so a SINGLE tab can have several AppHeaders alive at once — each creating its own presence
+// instance. BroadcastChannel delivers messages between instances in the SAME document too (not
+// only across real tabs), so without a shared identity those same-tab headers would announce the
+// same project and mistake EACH OTHER for a second tab — firing a false "open in another tab"
+// banner with only one tab open (owner report 2026-07-13, seen on the Library). A module-scoped
+// id is per-realm = per-tab: every instance in one tab shares it (line-71 self-echo guard then
+// makes them ignore one another), while a genuinely separate tab is a fresh realm with its own
+// id, so the real cross-tab warning still fires. Tests pass an explicit opts.tabId to simulate
+// distinct tabs inside one realm.
+let documentTabId = null;
+function getDocumentTabId() {
+  if (!documentTabId) documentTabId = randomId();
+  return documentTabId;
+}
+
 // Pure: summarize the known peers (a Map of tabId → { project, at }) into the banner state,
 // from THIS tab's point of view. Stale peers (older than TTL) are ignored.
 export function summarizePresence(peers, selfTabId, selfProject, nowMs, ttl = PRESENCE_TTL) {
@@ -51,7 +68,7 @@ export function pruneStale(peers, nowMs, ttl = PRESENCE_TTL) {
  * Message protocol: {type:'hello'|'here'|'update'|'bye', tabId, project, at}. A new tab says
  * 'hello'; every existing tab replies 'here' so the newcomer learns who's already open. */
 export function createMultiTabPresence(opts = {}) {
-  const tabId = opts.tabId || randomId();
+  const tabId = opts.tabId || getDocumentTabId(); // per-tab identity: same-tab siblings share it (kept-alive headers), so they never count each other
   const now = opts.now || (() => Date.now());
   const ttl = opts.ttl || PRESENCE_TTL;
   const heartbeatMs = opts.heartbeat || PRESENCE_HEARTBEAT;

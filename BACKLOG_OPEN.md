@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _63 open · 80 awaiting live verification._
+> _63 open · 81 awaiting live verification._
 
 ## 🔲 Open
 
@@ -78,6 +78,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B818 | False "open in another tab" banner on the Library with only ONE tab open | [App Shell / Library] | #ui #infra #persistence | ⏳ live — awaiting |
 | B815 | Meeting calendars: recurrence + agenda-deadline rules for external decision bodies | [Scheduler] | #scheduler #entitlements #testing | ⏳ live — awaiting |
 | B807 | Fort Bend Zone A finally prices: FBCDD Atlas-14 100-yr WSE raster provider (`derivedWse1pctFt`, DRAFT-labeled) | [Site Planner / GIS · yield] | #site-planner #gis #yield #floodplain | ⏳ live — awaiting |
 | B796 | Rehydrated drainage check must re-derive authority, not trust the stored verdict | [Site Planner / GIS · yield] | #site-planner #gis #yield #persistence | ⏳ live — awaiting |
@@ -173,11 +174,11 @@
 - **#floodplain** — B808, B809, B807, B798, B802, B790, B789, B788, B782, B755
 - **#gantt** — B816, B817
 - **#gis** — B808, B810, B776, B777, B752, B753, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B807, B796, B797, B800, B801, B790, B789, B788, B787, B782, B775, B774, B761, B625, B755, B751, B754, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
-- **#infra** — B778, B735, B726, B406, B179, B63, B788, B786, B812, B811, B759, B758, B756, B748, B734, B675, B669
+- **#infra** — B778, B735, B726, B406, B179, B63, B818, B788, B786, B812, B811, B759, B758, B756, B748, B734, B675, B669
 - **#library** — B663, B662, B792, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B750, B746, B740, B737
 - **#perf** — B816, B495, B484, B479, B749, B704, B694, B669
-- **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B796, B799, B800, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
+- **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B818, B796, B799, B800, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
 - **#pond** — B707
 - **#road** — B742, B719
 - **#scheduler** — B816, B817, B778, B495, B255, B815, B644
@@ -186,5 +187,5 @@
 - **#stitching** — B413
 - **#testing** — B269, B63, B815, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B809, B810, B741, B735, B723, B115, B798, B799, B801, B802, B790, B761, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
+- **#ui** — B809, B810, B741, B735, B723, B115, B818, B798, B799, B801, B802, B790, B761, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
 - **#yield** — B808, B809, B724, B553, B807, B796, B797, B798, B799, B802, B782, B755, B751, B754, B715, B712, B651
