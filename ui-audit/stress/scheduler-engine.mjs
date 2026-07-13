@@ -129,6 +129,13 @@ export const nextEligibleMeeting = (body, readyDate, afterDate) => {
   }
   return null;
 };
+// B817 — the two decision numbers (VERBATIM copy of public/sequence/index.html).
+export const meetingFloatBD = (task, todayIso) => (task && task.meetingBound && task.meetingDeadline) ? difBD(todayIso, task.meetingDeadline) : null;
+export const meetingCostDays = (task, body) => {
+  if (!body || !task || !task.start) return null;
+  const next = meetingDatesInRange(body, addD(task.start, 1), addD(task.start, 366 * 2))[0];
+  return next ? dif(task.start, next) : null;
+};
 export const normPreds = arr => {
   if (!Array.isArray(arr)) return [];
   return arr.map(x => {
@@ -296,6 +303,13 @@ export const computeDisplayHealth = (task, settings) => {
   if (!task) return task?.health;
   // Rule order matters: more specific overrides general
   if (cf.completeGreen && (task.percentComplete||0) >= 100) return "green";
+  // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
+  // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
+  // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
+  if (task.meetingBound && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
+    if (task.meetingInfeasible) return "red";
+    if (task.meetingDeadline && difBD(NOW, task.meetingDeadline) <= 2) return "yellow";
+  }
   if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
   if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
     // Within 7 calendar days
@@ -316,7 +330,40 @@ export const rolledStatusLeaf = (task, settings) => leafFocusStatus(computeDispl
 // A leaf/sub-group is hideable by Focus unless it's "active" (index.html ~L6228).
 export const hideStatusOf = status => status === "active" ? null : status;
 
-export const cascadeDates = tasks => {
+// ── B816 (NEW-2) — meeting-bound snap (VERBATIM copy of public/sequence/index.html) ──
+export let MEETING_BODY_INDEX = {};
+export const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDate) => {
+  t.duration = 0;
+  const pinnedDate = t.pinnedMeetingDate || (t.pinnedStart ? t.start : "");
+  const packetReady = predEarly || (pinnedDate ? "" : t.start) || "";
+  if (pinnedDate) {                                   // a person fixed this hearing — pin wins, never roll
+    t.start = t.end = pinnedDate;
+    t.meetingDeadline = agendaDeadline(body, pinnedDate) || "";
+    t.meetingInfeasible = !!(packetReady && t.meetingDeadline && packetReady > t.meetingDeadline);
+    return;
+  }
+  if (!packetReady) {                                 // nothing schedules it yet — stays blank (B386)
+    t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false;
+    return;
+  }
+  let readyDate = packetReady, afterDate = "";
+  if (drivingMeetingDate) {                           // the driving predecessor is itself a meeting (1st→2nd reading)
+    afterDate = drivingMeetingDate;
+    if (!body.sameDayFilingAllowed) { const nd = addD(drivingMeetingDate, 1); if (nd > readyDate) readyDate = nd; }
+  }
+  if (t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate) {
+    const seq = meetingDatesInRange(body, addD(minAfterDate, 1), addD(minAfterDate, 366 * 3));
+    const nth = seq[t.minMeetingsAfter.n - 1];
+    if (nth) { const before = addD(nth, -1); if (!afterDate || before > afterDate) afterDate = before; }
+  }
+  const elig = nextEligibleMeeting(body, readyDate, afterDate);
+  if (elig) { t.start = t.end = elig.meetingDate; t.meetingDeadline = elig.deadline; t.meetingInfeasible = false; }
+  else { t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; }
+};
+export const cascadeDates = (tasks, bodies = []) => {
+  const bodyMap = {...MEETING_BODY_INDEX};
+  (Array.isArray(bodies) ? bodies : []).forEach(b => { if (b && b.id) bodyMap[b.id] = b; });
+  const parentIds = new Set(tasks.filter(t => t.parentId !== null && t.parentId !== undefined).map(t => t.parentId));
   const map = {};
   tasks.forEach(t => { map[t.id] = {...t, predecessors: normPreds(t.predecessors)}; });
   const adj = {}; const inDeg = {};
@@ -339,6 +386,7 @@ export const cascadeDates = tasks => {
   queue.forEach(id => {
     const t = map[id];
     const preds = t.predecessors.filter(p => map[p.id]);
+    const bound = !!(t.meetingBound && bodyMap[t.meetingBodyId] && !parentIds.has(t.id) && !(t.pinnedEnd && t.end));
     // Locked FINISH (B616): the end is a FIXED POINT; the start back-calcs; the end never moves.
     if (t.pinnedEnd && t.end) {
       if (t.pinnedStart && t.start) {
@@ -357,12 +405,24 @@ export const cascadeDates = tasks => {
       return;
     }
     t.finishConflict = false;
-    if (!preds.length || t.pinnedStart) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
-    const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
-    if (!starts.length) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; return; }
-    const latest = starts.reduce((a,b) => a>b?a:b, starts[0] || t.start);
-    t.start = latest;
-    const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
+    const predEarly = preds.length
+      ? preds.map(p => constrainedStartFrom(map[p.id], p, Math.max(1, t.duration || 1))).filter(Boolean).reduce((a,b)=>a>b?a:b, "")
+      : "";
+    if (!preds.length || t.pinnedStart) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; }
+    else {
+      const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
+      if (starts.length) t.start = starts.reduce((a,b) => a>b?a:b, starts[0]);
+      const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
+    }
+    if (bound) {
+      const drivingMeetingDate = preds
+        .filter(p => map[p.id] && map[p.id].meetingBound && map[p.id].start).map(p => map[p.id].start)
+        .reduce((a,b) => a>b?a:b, "");
+      const minAfterDate = (t.minMeetingsAfter && map[t.minMeetingsAfter.taskId]) ? map[t.minMeetingsAfter.taskId].start : "";
+      applyMeetingBinding(t, bodyMap[t.meetingBodyId], predEarly, drivingMeetingDate, minAfterDate);
+    } else if (t.meetingDeadline || t.meetingInfeasible) {
+      t.meetingDeadline = ""; t.meetingInfeasible = false;
+    }
   });
   return tasks.map(t => { const {_pinStart, __wasDirectEdit, ...rest} = map[t.id] || t; return rest; });
 };
