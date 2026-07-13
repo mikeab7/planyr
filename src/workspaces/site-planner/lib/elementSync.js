@@ -443,14 +443,35 @@ export function createElementSync(opts = {}) {
     }
     if (row.deleted_at) {
       if (!shad) return { action: "ignore" }; // tombstone for something we never showed
+      // Our OWN delete echoing back after a refetch re-seeded the shadow from a snapshot that still
+      // showed the element ALIVE (the refetch's fetch predated our delete; its seed ran after) — with
+      // no pending entry left, the tombstone passes the rev guard and mis-fires "…was deleted by you
+      // (another window)". The delete floor remembers our delete's rev, so a tombstone at a rev no
+      // newer than ours is our own echo: drop it from the canvas but never toast (B757 recurrence,
+      // the delete variant of the no-pending read path below).
+      const ownDeleteEcho = tomb != null && now() - tomb.at <= recentWindowMs && rev <= tomb.rev;
       shadow.delete(key);
-      onEvent({ type: "remote-delete", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
+      if (!ownDeleteEcho)
+        onEvent({ type: "remote-delete", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
       return { action: "remove", kind: row.kind, id: row.id, row };
     }
     if (!row.data) return { action: "ignore" }; // malformed live row (CHECK should prevent this)
     tombstoned.delete(key); // a genuine higher-rev row (another session re-created it) → element is live again
-    shadow.set(key, { kind: row.kind, id: row.id, json: stableStringify(row.data), rev, z: row.z_index });
-    onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
+    const upJson = stableStringify(row.data);
+    shadow.set(key, { kind: row.kind, id: row.id, json: upJson, rev, z: row.z_index });
+    // Our OWN just-committed edit can echo back at a rev ABOVE the shadow when a refetch-replace
+    // re-seeded the shadow from a snapshot OLDER than that commit (the refetch's fetch was issued
+    // before the commit landed; its seed ran after). With no pending entry left, the echo passes the
+    // rev guard and — because we authored the element within the ~15s window — mis-fires "⟨you (another
+    // window)⟩ changed ⟨element⟩ you just edited — their version is showing" for the WHOLE just-committed
+    // batch (the reported single-tab burst). B757 hardened only the PENDING branch; this is the
+    // no-pending read path it left open. Recognize the echo by DATA IDENTITY against what this tab put
+    // on the wire in the last ~15s (recentSent) and apply it to the canvas WITHOUT a conflict event —
+    // the upsert still runs so a stale-seed canvas re-trues. A genuine foreign write carries DIFFERENT
+    // data (→ still toasts per the B673 matrix); a byte-identical write is not a conflict anyway (same
+    // LWW result, nothing lost).
+    if (!sentMatches(row.kind, row.id, upJson))
+      onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
     return { action: "upsert", kind: row.kind, id: row.id, el: row.data, row };
   }
 

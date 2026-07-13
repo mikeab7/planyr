@@ -94,7 +94,7 @@
 | B775 | School district (ISD) boundaries layer + identify | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B774 | Passive jurisdiction badge on the active parcel/site | [Site Planner] | #site-planner #gis | ⏳ live — awaiting |
 | B761 | One "City limits & ETJ" toggle (solid limits / dashed ETJ) | [Site Planner] | #site-planner #ui #gis | ⏳ live — awaiting |
-| B759 | False "someone else edited this in another tab" pop-up while actively editing in ONE tab | [Site Planner / persistence] | #site-planner #persistence #infra | ⏳ live — awaiting |
+| B759 | False "someone else edited this in another tab" pop-up while actively editing in ONE tab (×2) | [Site Planner / persistence] | #site-planner #persistence #infra | ⏳ live — awaiting |
 | B758 | App white-screens when the MAIN bundle 404s during a deploy (no recovery exists for the entry chunk) | [App shell / infra] | #infra #ui | ⏳ live — awaiting |
 | B757 | Deliberately-deleted PLAN can resurrect on reload/sign-in when its cloud delete never landed (offline / transient) — no DURABLE record-delete tombstone | [Site Planner / Persistence] | #site-planner #persistence | ⏳ live — awaiting |
 | B756 | DATA LOSS: a new signed-in site created from the map ("Plan N parcels →") silently loses ALL its parcels | [Site Planner / persistence] | #site-planner #persistence #infra | ⏳ live — awaiting |
