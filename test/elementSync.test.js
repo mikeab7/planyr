@@ -571,6 +571,83 @@ describe("B757 — a single tab never sees a false 'another window' conflict on 
     expect(instr.action).toBe("ignore");
     expect(h.events.filter((e) => e.type === "remote-while-dirty")).toHaveLength(0); // recognized as ours via recentSent
   });
+
+  // ── RECURRENCE (owner 2026-07-13): the burst of "you (another window) changed X you just edited"
+  // while editing in ONE tab. Root cause: a refetch-replace (fires on every socket reconnect / tab-
+  // wake) re-seeds the shadow from a fetch snapshot OLDER than a batch this tab just committed — the
+  // seed rolls the shadow revs BACKWARD, and the just-committed batch's realtime echoes then arrive
+  // at a higher rev with NO pending entry left, so each element mis-fires the conflict toast. B757
+  // hardened only the pending branch; these pin the no-pending READ path (edit + delete twins).
+  it("a stale-seed edit echo (refetch predated the commit) → upsert with NO false 'another window' toast", async () => {
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // edit → committed rev 2 (recentSent = cx:50)
+    // a refetch-replace lands whose fetch snapshot PREDATES the edit → shadow rolled BACK to rev 1
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    // the realtime echo of OUR OWN edit now arrives (rev 2) ABOVE the stale shadow, no pending entry
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 50, z: 0 }, rev: 2, z_index: 0, updated_by: "me" });
+    expect(instr.action).toBe("upsert");                       // canvas still re-trues from our own row
+    expect(events.filter((e) => e.type === "remote-upsert")).toHaveLength(0); // ← the fix: no false toast
+  });
+
+  // GUARD: after we commit an edit (authoredRecently), a GENUINE foreign overwrite of the SAME element
+  // arriving with no pending entry still surfaces "changed X you just edited" — must not be silenced.
+  it("a genuine foreign upsert of an element we just edited still fires remote-upsert(authoredRecently)", async () => {
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // we edit → rev 2, recentSent = cx:50
+    // another window overwrites it to cx:99 (rev 3) — different data, no pending local entry
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 99, z: 0 }, rev: 3, z_index: 0, updated_by: "someone-else" });
+    expect(instr.action).toBe("upsert");
+    const t = events.filter((e) => e.type === "remote-upsert");
+    expect(t).toHaveLength(1);
+    expect(t[0].authoredRecently).toBe(true);                  // real overwrite of what we just touched → surfaced loudly
+  });
+
+  it("a stale-seed tombstone echo of our OWN delete → remove with NO false 'deleted by another window' toast", async () => {
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 3, z_index: 0 }]);
+    s.reconcile({ els: [] }, {}); await tick();                // delete → committed rev 4 (delete floor = 4)
+    // a refetch-replace whose fetch predated the delete re-seeds the element ALIVE again
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 3, z_index: 0 }]);
+    // our own delete's tombstone echo now lands (rev 4), no pending entry
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 4, z_index: 0, deleted_at: "2026-07-13T00:00:00Z", deleted_by: "me" });
+    expect(instr.action).toBe("remove");                       // canvas drops the re-seeded ghost
+    expect(events.filter((e) => e.type === "remote-delete")).toHaveLength(0); // ← the fix: no false toast
+  });
+
+  // GUARD: a GENUINE delete by another window (we hold no delete floor for it) still surfaces removal.
+  it("a genuine foreign delete of an element we just edited still fires remote-delete", async () => {
+    const events = [];
+    const s = createElementSync({
+      siteId: "s", selfUid: "me", now: () => 0, setTimer: (fn) => { fn(); return 1; }, clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      commit: async (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+    });
+    s.seed([{ kind: "el", id: "e1", data: { id: "e1", cx: 0 }, rev: 1, z_index: 0 }]);
+    s.reconcile({ els: [{ id: "e1", cx: 50, z: 0 }] }, {}); s.flushGesture(); await tick(); // we edit → rev 2 (no delete floor)
+    // another window deletes it (rev 3) — no tombstone floor of ours to suppress it
+    const instr = s.applyRemoteRow({ kind: "el", id: "e1", data: { id: "e1", cx: 50, z: 0 }, rev: 3, z_index: 0, deleted_at: "2026-07-13T00:00:00Z", deleted_by: "u2" });
+    expect(instr.action).toBe("remove");
+    const t = events.filter((e) => e.type === "remote-delete");
+    expect(t).toHaveLength(1);
+    expect(t[0].authoredRecently).toBe(true);                  // "X you just edited was deleted by ⟨name⟩"
+  });
 });
 
 // B756 — the refetch-replace integration the data-loss fix restores: a brand-new signed-in site's
