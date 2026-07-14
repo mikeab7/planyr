@@ -79,7 +79,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
   /* ---- undo / redo (B303) — measures + the composite calibration ---- */
   const editRef = useRef({ measures: [], ftPerUnit: 0 });
-  useEffect(() => { editRef.current = { measures, ftPerUnit }; });
+  // Assign during render (NOT a passive effect) so pushHistory/undo/redo read the TRUE current state —
+  // a passive-effect mirror lags a paint behind, so an undo fired right after an edit compares/snapshots
+  // a stale state and appears to do nothing (the B315 class; mirrors SitePlanner's stateRef + DocReview).
+  editRef.current = { measures, ftPerUnit };
   const pastRef = useRef([]);
   const futureRef = useRef([]);
   const [, bumpHist] = useState(0);
@@ -357,9 +360,12 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         const add = newSheets.filter((s) => !have.has(s.srcId + " " + s.pageNum));
         return add.length ? [...arr, ...add] : arr;
       });
-      // Auto-calibrate the composite from the group's stated scale, once (B339).
+      // Auto-calibrate the composite from the group's stated scale, once (B339). ftPerUnit IS in the
+      // undo snapshot, so checkpoint BEFORE the auto-set — otherwise the next Undo has no frame to stop
+      // on for the 0→scale change and skips back to a pre-measure checkpoint, silently deleting a
+      // measurement the user drew before adding the group ("added sheets, hit undo, my measure vanished").
       let calMsg = "";
-      if (!ftPerUnit && crop) { const cal = groupCalibration(group.pages); if (cal) { setFtPerUnit(cal.ftPerUnit); calMsg = ` · scale ${cal.label || "set"} from sheet`; } }
+      if (!ftPerUnit && crop) { const cal = groupCalibration(group.pages); if (cal) { pushHistory(); setFtPerUnit(cal.ftPerUnit); calMsg = ` · scale ${cal.label || "set"} from sheet`; } }
       const failMsg = renderFailed.length ? ` · ${renderFailed.length} page${renderFailed.length > 1 ? "s" : ""} couldn’t render (re-drop to retry)` : ""; // B536
       setNotice(unplaced.length
         ? `Auto-stitched ${placedSheets.length} of ${built.length} sheets${calMsg} — ${unplaced.length} need a quick manual Align.${failMsg}`

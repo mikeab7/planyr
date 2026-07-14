@@ -68,6 +68,14 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V319 — B828: undo reliability sweep — the three paths not driven headless (overlay Width, Stitcher auto-calibrate, rapid edit-then-undo timing) ⏳ **LIVE APP (planyr.io), logged-out is fine** (timing/race + overlay/stitch-setup classes)  *(V319; B828; branch `claude/undo-button-bug-rjs1ph`; `Cadence: once`)*
+- **Verified here (sandbox, 2026-07-14):** the HEADLINE case end-to-end — `ui-audit/verify-b828-undo.mjs` 8/8 (logged-out): draw a parcel → enable fill → drag Translucence 0.12→0.24 → the toolbar Undo BUTTON reverts it in ONE step (parcel + fill survive, no overshoot) → Redo restores. Plus the core undo button on markups (draw → Undo → Redo, e2e), all four wiring guards (`test/undoHistoryWiring.test.js`), the pure history stack (`test/history.test.js`), full suite 3920 green, lint 0, build green.
+- **Pending live steps:**
+  1. **Overlay Width undo:** References panel → drop a PNG/JPG site-plan overlay → type a new value in its "Width (ft)" box to rescale → click Undo → the overlay returns to its previous size in one step (before B828 this did nothing, or jumped back and removed the whole overlay). Redo re-applies.
+  2. **Stitcher auto-calibrate undo:** Review → Stitcher, while still uncalibrated (no scale set), draw a Distance/Area measure on the first sheet → add a grouped multi-sheet set (auto-stitches + auto-sets the scale) → click Undo → the auto-scale un-sets but the earlier MEASUREMENT survives (before B828 that one Undo deleted the measurement).
+  3. **Rapid edit-then-undo (Review canvas + Stitcher):** draw or move a markup and IMMEDIATELY (fast) press Ctrl-Z / click the ↶ button, repeated ~20×  → it reverts every time, never a dead no-op with the button still lit (the intermittent render-mirror race the fix removes).
+- On pass: move B828 from ⏳ Verify → BACKLOG-DONE, and this entry → VERIFICATION-DONE.
+
 ### V316 — B808: per-cell 3DEP grade — the real grid fetch + sloped-site pricing ≠ the flat median ⏳ **LIVE APP (planyr.io), SIGNED IN (Bain)** (🌐 GIS endpoint + real-project-data classes — elevation.nationalmap.gov is sandbox-blocked)  *(V316; B808; branch `claude/backlog-dedup-assign-j09385`; `Cadence: once`)*
 - **Verified here (sandbox, 2026-07-14):** the engine's tilted-plane closed form (±1%), AO per-cell capping, void exclusion + the >5% LOUD flag, the >15% grid-vs-median delta flag, provider labels, and the memo-sig bust — 12 unit tests; headless: the DEM-404 path names the "Flat-grade estimate" fallback on a mocked live check. Full suite 3,887 green.
 - **Pending live steps:** Bain (signed in) → ⛆ Re-check: the providers line reads "grade 3DEP per-cell grid"; on the sloped corridor toward the creek the volume shifts vs the old median figure (the >15% delta note may fire — that is the honest signal, not a bug); no "Flat-grade estimate" note once the grid loads.

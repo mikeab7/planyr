@@ -369,7 +369,12 @@ export default function DocReview({
    * skips frames identical to the current state via histKey so a stray push can't make Ctrl-Z
    * look like a no-op (B32/B105). The background auto-scale scan (B267) never pushes. */
   const docStateRef = useRef({ markups: [], calByPage: {}, calInfo: {} });
-  useEffect(() => { docStateRef.current = { markups, calByPage, calInfo }; });
+  // Assign during render (NOT a passive effect) so pushHistory/undo/redo always read the TRUE current
+  // state. A passive-effect mirror lagged a paint behind, so an undo fired right after an edit compared
+  // its baseline against a STALE snapshot: undo()'s no-op dedup saw the top frame as equal to "current"
+  // and dropped it, so Ctrl-Z / the ↶ button did nothing (and corrupted the redo baseline). This is the
+  // exact B315 class the Site Planner fixed the same way (see SitePlanner.jsx stateRef).
+  docStateRef.current = { markups, calByPage, calInfo };
   const pastRef = useRef([]);
   const futureRef = useRef([]);
   const colorSessionRef = useRef(null); // active live color-pick key, so the burst is one undo frame (B567)
