@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-14 @ `b67d18e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-14 @ `d052533` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -316,7 +316,7 @@ _251 source files mapped._
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
-  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`
+  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
   - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed
@@ -398,7 +398,7 @@ _251 source files mapped._
 - **`src/workspaces/site-planner/lib/pondCriteriaRules.js`** — B709 editable per-jurisdiction pond design criteria (max side slope, min freeboard, maintenance-berm width; all verified:false) + drawn-input conformance checks
   - _exports_: `checkPondCriteria`, `DEFAULT_POND_CRITERIA`, `loadPondCriteria`, `savePondCriteria`
 - **`src/workspaces/site-planner/lib/pondGeom.js`** — Pond expansion label placement (deepest added-ground point) and stage contour rings with elevation/depth labels
-  - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `bandedStorage`, `bermAsFillHeight`, `contourLabelPoint`, `detentionStorage`, `drawdownWarning`, `excavationVolume`, `pointInRing`, `pondContours`, `usablePondVolume`, `volumeBetween`
+  - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `bandedStorage`, `bermAsFillHeight`, `bermFillVolume`, `contourLabelPoint`, `detentionStorage`, `drawdownWarning`, `excavationVolume`, `pointInRing`, `pondContours`, `usablePondVolume`, `volumeBetween`
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
   - _exports_: `accumulatePondLedger`, `effectivePondRole`, `POND_ROLE_LABEL`, `POND_ROLES`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
@@ -410,7 +410,7 @@ _251 source files mapped._
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
-  - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
+  - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
 - **`src/workspaces/site-planner/lib/registerGisSw.js`** — Boot-time unregister of the retired browser GIS imagery service worker (superseded by server-side Drive cache), fail-safe
   - _exports_: `retireGisSw`
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)

@@ -400,6 +400,21 @@ export function drawdownWarning(det = {}) {
 /* Berm-as-fill screen (B708): a top of bank ABOVE existing grade means the basin is
  * bermed — the berm itself is fill (requires mitigation in the floodplain and can
  * block conveyance). 0.25 ft tolerance shrugs off survey noise. Pure. */
+/* B833(e) — screening berm-as-fill volume: an embankment ring lifting the bank from
+ * existing grade to the top of bank. Cross-section = a triangle hFt high with the
+ * OUTER face at ratio:1 (the inner face is the basin's own cut — already priced by
+ * excavationVolume; counting it here would double-price the wall). volume ≈
+ * perimeter × h²·ratio/2. The toe sits ≈ h·ratio outside the drawn bank line. Pure. */
+export function bermFillVolume(ring, hFt, ratio = 3) {
+  if (!Array.isArray(ring) || ring.length < 3 || !(hFt > 0) || !(ratio > 0)) return null;
+  let perim = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    perim += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  return perim * hFt * hFt * ratio / 2;
+}
+
 export function bermAsFillHeight(det = {}, existGradeFt = null) {
   const tob = det.tobElev;
   if (tob == null || existGradeFt == null || !isFinite(tob) || !isFinite(existGradeFt)) return null;

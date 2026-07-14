@@ -33,7 +33,8 @@ const site = {
       { id: "p1", type: "paving", cx: 250, cy: 0, w: 200, h: 200, rot: 0 },
     ],
     measures: [], callouts: [], markups: [], deletedIds: [],
-    settings: { showSetback: false }, underlay: null, updatedAt: Date.now(),
+    // B832: autoFacts off — this script drives the ⛆ button itself against mocked routes.
+    settings: { showSetback: false, drainage: { autoFacts: false } }, underlay: null, updatedAt: Date.now(),
   },
 };
 // Idempotent seed — only writes if absent, so a page RELOAD preserves what the live check
@@ -148,6 +149,26 @@ async function run() {
   expect("B826: the cut/fill tie-out line reads 'Σ cells … = earthwork rows'", (await page.getByText("= earthwork rows", { exact: false }).count()) > 0);
   expect("B826: the fill-depth legend yields while cut/fill is on (one exhibit at a time)", (await page.getByText("Fill depth (priced cells)", { exact: false }).count()) === 0);
   await page.screenshot({ path: "ui-audit/verify-b826-cutfill.png" }).catch(() => {});
+
+  // B833 — transition wedges: the fringe joins the earthwork rows, the daylight line
+  // rides the exhibit, the toggles render, and the mitigation floor caveat is GONE
+  // (wedges price now — the old "treat as a floor" copy only shows without a surface).
+  const tW = await railText(page);
+  expect("B833: '· incl. transition wedges' breakdown row renders", /incl\. transition wedges/.test(tW), tW.match(/transition wedges[^A-Z]{0,30}/)?.[0]);
+  expect("B833: the Daylight-ASAP toggle renders", /Daylight ASAP \(steepest legal field\)/.test(tW));
+  expect("B833: the 4:1 mowable toggle renders", /4:1 transition slopes \(mowable\)/.test(tW));
+  expect("B833: the daylight line rides the exhibit ([data-daylight] paths)", (await page.locator("[data-daylight] path").count()) > 0);
+  expect("B833: the footprint-only FLOOR caveat is gone once wedges price", !/aren't counted here; treat as a floor/.test(tW));
+  expect("B833: the '+N ac-ft from transition slopes' delta renders in the mit group", /ac-ft of the requirement comes from transition slopes/.test(tW), tW.match(/transition slopes past pad edges[^A-Z]{0,20}/)?.[0]);
+  // Flip 4:1 on: the wedge share must GROW (a gentler face takes more room + fill).
+  const wedgeCyOf = (txt) => { const m = txt.match(/incl\. transition wedges\s*([\d,]+)\s*CY/); return m ? +m[1].replace(/,/g, "") : null; };
+  const cy3 = wedgeCyOf(tW);
+  await page.getByText("4:1 transition slopes (mowable)").first().click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(600);
+  const tW4 = await railText(page);
+  const cy4 = wedgeCyOf(tW4);
+  expect("B833: 4:1 grows the wedge share vs 3:1", cy3 != null && cy4 != null && cy4 > cy3, `3:1=${cy3} CY → 4:1=${cy4} CY`);
+  await page.screenshot({ path: "ui-audit/verify-b833-wedges.png" }).catch(() => {});
   await page.getByText("Cut/fill map on the plan").first().click({ timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(300);
   // One-click balance: on this all-fill site the honest answer is the band cap (still

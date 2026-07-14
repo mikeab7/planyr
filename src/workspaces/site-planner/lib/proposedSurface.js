@@ -116,7 +116,7 @@ export function slopeBand(classId, rule) {
  * Returns { planes: Map(id → plane), skipped: [ids with no derivable elevation] }.
  * plane: { elId, classId, label, baseElevFt, anchor, dir, slopePct, floating,
  *          check (validateSlopeAgainstRule vs the BASE rule), zAt(pt) }. Pure. */
-export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null } = {}) {
+export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false } = {}) {
   const planes = new Map();
   const skipped = [];
   const t = clamp01(fieldT);
@@ -161,7 +161,12 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
       dir = drainTarget && isFinite(drainTarget.x)
         ? norm(drainTarget.x - anchor.x, drainTarget.y - anchor.y)
         : b ? norm(c.x - b.x, c.y - b.y) : { x: 1, y: 0 };
-      slopePct = hasOverride ? el.slopeOverridePct : band.min + t * (band.max - band.min);
+      // B833(b) — "daylight ASAP": the field falls toward the drainage target at its
+      // class CEILING (the steepest maintainable rate), so the surface gets down to
+      // existing ground sooner and the transition wedge past the edge starts lower
+      // and daylights earlier. An explicit slope override still wins; the balance
+      // sweep (fieldT) has nothing left to vary while this is on.
+      slopePct = hasOverride ? el.slopeOverridePct : daylightAsap ? band.max : band.min + t * (band.max - band.min);
     }
     if (baseElevFt == null || !isFinite(baseElevFt)) { skipped.push(el.id); continue; }
     const ax = anchor.x, ay = anchor.y, dx = dir.x, dy = dir.y, s = slopePct / 100, z0 = baseElevFt;
@@ -186,7 +191,7 @@ export function buildPlanes({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt 
  * and NEVER priced as zero. cutCy/fillCy are null (honest UNKNOWN) when nothing
  * priced. Retained cells: { x, y, wFt, hFt, dzFt (+fill/−cut | null), elId, cls }.
  * Also accumulates the PL fill checks and the dock-approach break scan. Pure. */
-export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = [], pondRings = [], opts = {} } = {}) {
+export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {} } = {}) {
   const maxCells = opts.maxCells || 3000;
   const minCellFt = opts.minCellFt || 2;
   const prec = (el) => (el.type === "building" ? 0 : el.dockStack ? 1 : 2);
@@ -195,10 +200,35 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
     .map((e) => ({ el: e, plane: planes.get(e.id), bbox: ringBBox(e.ring) }))
     .sort((a, b) => prec(a.el) - prec(b.el));
   if (!graded.length) return null;
+  // B833(a) — transition aprons: past every graded edge the ground doesn't teleport
+  // to existing grade — fill (or cut) continues as a daylight wedge at the tie ratio
+  // (landscapeTieDown: 3:1 max, 4:1 preferred/mowable via opts.apronRatio). Each
+  // element's apron REACH = its worst edge |Δz| × ratio (sampled at ring vertices +
+  // edge midpoints; DEM voids skipped). No ground sampler → no aprons (nothing to
+  // daylight against — the grid prices nothing anyway).
+  const apronRatio = Number.isFinite(opts.apronRatio) && opts.apronRatio > 0 ? opts.apronRatio : GRADING_RULES.landscapeTieDown.maxSlopeRatio;
+  const apronsOn = opts.aprons !== false && typeof existAt === "function";
+  const APRON_MAX_FT = 200; // sanity clamp — a >66 ft drop is not a screening wedge
+  for (const g of graded) {
+    let reach = 0;
+    if (apronsOn) {
+      const ring = g.el.ring;
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], b = ring[(i + 1) % ring.length];
+        for (const p of [a, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }]) {
+          const gz = existAt(p);
+          if (gz == null || !isFinite(gz)) continue;
+          const r = Math.abs(g.plane.zAt(p) - gz) * apronRatio;
+          if (r > reach) reach = r;
+        }
+      }
+    }
+    g.apron = Math.min(APRON_MAX_FT, reach);
+  }
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const g of graded) {
-    if (g.bbox[0] < x0) x0 = g.bbox[0]; if (g.bbox[1] < y0) y0 = g.bbox[1];
-    if (g.bbox[2] > x1) x1 = g.bbox[2]; if (g.bbox[3] > y1) y1 = g.bbox[3];
+    if (g.bbox[0] - g.apron < x0) x0 = g.bbox[0] - g.apron; if (g.bbox[1] - g.apron < y0) y0 = g.bbox[1] - g.apron;
+    if (g.bbox[2] + g.apron > x1) x1 = g.bbox[2] + g.apron; if (g.bbox[3] + g.apron > y1) y1 = g.bbox[3] + g.apron;
   }
   const w = x1 - x0, h = y1 - y0;
   if (!(w > 0) || !(h > 0)) return null;
@@ -211,7 +241,9 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
   let cutCf = 0, fillCf = 0, gradedSf = 0, pricedCells = 0, voidCells = 0;
   let floatAreaSf = 0, floatPropSum = 0;
   let plFillSf = 0, tieShortSf = 0;
+  let wedgeFillCf = 0, wedgeCutCf = 0, wedgeSf = 0, wedgeEasementSf = 0;
   const perEl = {};
+  const inAnyRing = (pt, rings) => { for (const r of rings) if (pointInRing(pt, r)) return true; return false; };
   for (let i = 0; i < nx; i++) {
     for (let j = 0; j < ny; j++) {
       const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
@@ -220,7 +252,48 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
         if (pt.x < g.bbox[0] || pt.x > g.bbox[2] || pt.y < g.bbox[1] || pt.y > g.bbox[3]) continue;
         if (pointInRing(pt, g.el.ring)) { hit = g; break; }
       }
-      if (!hit) continue;
+      if (!hit) {
+        if (!apronsOn) continue;
+        // B833(a) — a cell outside every footprint may sit in a transition wedge: the
+        // nearest graded edge within its apron reach owns it; the edge-vs-ground delta
+        // tapers toward zero at the tie ratio and DAYLIGHTS where they meet (dz → 0).
+        // Fill and cut transitions both taper (the fill fringe is the mitigable one).
+        let own = null, od = Infinity, oq = null;
+        for (const g of graded) {
+          if (!(g.apron > 0)) continue;
+          if (pt.x < g.bbox[0] - g.apron || pt.x > g.bbox[2] + g.apron || pt.y < g.bbox[1] - g.apron || pt.y > g.bbox[3] + g.apron) continue;
+          const q = nearestOnRing(pt, g.el.ring);
+          if (!q) continue;
+          const d = Math.hypot(pt.x - q.x, pt.y - q.y);
+          if (d <= g.apron && d < od) { od = d; own = g; oq = q; }
+        }
+        if (!own) continue;
+        if (inAnyRing(pt, pondRings)) continue; // pond dirt is the excavation ledger's
+        const g0 = existAt(pt);
+        if (g0 == null || !isFinite(g0)) {
+          // DEM void inside a possible wedge: honest unknown fringe — retained, never priced.
+          voidCells++;
+          cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: null, elId: own.el.id, cls: "transition", wedge: true });
+          continue;
+        }
+        const delta = own.plane.zAt(oq) - g0;
+        const taper = od / apronRatio;
+        const dz = Math.abs(delta) <= taper ? 0 : delta > 0 ? delta - taper : delta + taper;
+        if (Math.abs(dz) < PL_FILL_EPS_FT) continue; // at/past the daylight line
+        wedgeSf += A;
+        pricedCells++;
+        cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, dzFt: dz, propFt: g0 + dz, gFt: g0, elId: own.el.id, cls: "transition", wedge: true });
+        const pw = perEl[own.el.id] || (perEl[own.el.id] = { cutCf: 0, fillCf: 0 });
+        if (dz > 0) { fillCf += A * dz; wedgeFillCf += A * dz; pw.fillCf += A * dz; }
+        else { cutCf += A * -dz; wedgeCutCf += A * -dz; pw.cutCf += A * -dz; }
+        if (dz > PL_FILL_EPS_FT) {
+          // The wedge is real fill: the same no-fill-past-the-PL rule applies, and a
+          // wedge reaching into a drawn easement gets its own violation (B833 d).
+          if (parcelRings.length && !inAnyRing(pt, parcelRings)) plFillSf += A;
+          if (easementRings.length && inAnyRing(pt, easementRings)) wedgeEasementSf += A;
+        }
+        continue;
+      }
       let inPond = false;
       for (const pr of pondRings) if (pointInRing(pt, pr)) { inPond = true; break; }
       if (inPond) continue;
@@ -273,8 +346,45 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
     perEl,
     floatAreaSf, floatPropSum,
     plFillSf, tieShortSf,
+    // B833 — the transition-wedge share of the totals (already INSIDE cutCf/fillCf;
+    // broken out so the rows and the mitigation delta can name it).
+    wedgeFillCf, wedgeCutCf, wedgeSf, wedgeEasementSf,
+    wedgeFillCy: wedgeFillCf / CF_PER_CY, wedgeCutCy: wedgeCutCf / CF_PER_CY,
+    apronRatio,
     dockBreaks: { count: breakCount, maxFt: maxBreakFt },
   };
+}
+
+/* B833(c) — the daylight line: where each element's transition taper meets existing
+ * ground. Sampled along the ring (vertices + perEdge interpolants); each sample is
+ * offset outward along its edge normal by |proposed − existing| × ratio — the same
+ * taper model the wedge cells price, so the line and the fringe agree by
+ * construction. Screening polyline (a DEM void samples as zero offset). Pure. */
+export function daylightRings({ planes, els = [], existAt = null, apronRatio = GRADING_RULES.landscapeTieDown.maxSlopeRatio, perEdge = 3 } = {}) {
+  if (typeof existAt !== "function" || !planes) return [];
+  const out = [];
+  for (const el of els) {
+    const plane = planes.get ? planes.get(el.id) : null;
+    if (!plane || !Array.isArray(el.ring) || el.ring.length < 3) continue;
+    const c = ringCentroid(el.ring);
+    const pts = [];
+    const ring = el.ring;
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length];
+      for (let k = 0; k < perEdge; k++) {
+        const t = k / perEdge;
+        const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+        const gz = existAt(p);
+        const dz = gz == null || !isFinite(gz) ? 0 : Math.abs(plane.zAt(p) - gz);
+        let n = norm(-(b.y - a.y), b.x - a.x); // edge normal…
+        if (n.x * (c.x - p.x) + n.y * (c.y - p.y) > 0) n = { x: -n.x, y: -n.y }; // …pointing away from the centroid
+        const d = dz * apronRatio;
+        pts.push({ x: p.x + n.x * d, y: p.y + n.y * d });
+      }
+    }
+    if (pts.length >= 3) out.push({ elId: el.id, ring: pts });
+  }
+  return out;
 }
 
 /* ---- violations — data WITH copy (short ≤ the B823 one-line cap, detail = the ⓘ) ---- */
@@ -309,7 +419,12 @@ export function surfaceViolations({ planes, grid } = {}) {
   if (grid && grid.plFillSf > 200) out.push({
     kind: "pl-fill", legal: false,
     short: `${f2(grid.plFillSf / SQFT_PER_ACRE)} ac of graded fill lies OUTSIDE the parcel — no fill across the property line.`,
-    detail: "The proposed planes extend past the parcel boundary — offsite fill needs the neighbor's land. Pull the element back inside the line or re-grade.",
+    detail: "The proposed planes OR their daylight transition wedges extend past the parcel boundary — offsite fill needs the neighbor's land. Pull the element back, steepen the tie (3:1 max), or plan a retaining wall at the line so grade daylights inside it.",
+  });
+  if (grid && grid.wedgeEasementSf > 200) out.push({
+    kind: "wedge-easement", legal: false,
+    short: `Transition-slope fill reaches into a drawn easement (${f2(grid.wedgeEasementSf / SQFT_PER_ACRE)} ac) — daylight runs out of room.`,
+    detail: "The daylight wedge off a graded edge crosses an easement — fill there usually needs the easement holder's consent. Pull the element back, steepen the tie (3:1 max), or plan a retaining wall so grade daylights before the easement line.",
   });
   if (grid && grid.tieShortSf > 200) out.push({
     kind: "tie-short", legal: false,
@@ -329,19 +444,24 @@ export function surfaceViolations({ planes, grid } = {}) {
  * identity key (memo/persist signatures — the B807 stale-memo discipline: the key must
  * change whenever any input that changes the surface changes). Returns null when no
  * element yields a plane (no FFE anywhere / nothing graded). Pure. */
-export function buildProposedSurface({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, existAt = null, parcelRings = [], pondRings = [], opts = {} } = {}) {
-  const { planes, skipped } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget });
+export function buildProposedSurface({ els = [], ffeFt = null, dockDropFt = 4, tieDropFt = TIE_DROP_FT, fieldT = 0, drainTarget = null, daylightAsap = false, existAt = null, parcelRings = [], pondRings = [], easementRings = [], opts = {} } = {}) {
+  const { planes, skipped } = buildPlanes({ els, ffeFt, dockDropFt, tieDropFt, fieldT, drainTarget, daylightAsap });
   if (!planes.size) return null;
-  const grid = surfaceGrid({ planes, els, existAt, parcelRings, pondRings, opts });
+  const grid = surfaceGrid({ planes, els, existAt, parcelRings, pondRings, easementRings, opts });
   if (!grid) return null;
   const violations = surfaceViolations({ planes, grid });
+  // B833(c) — the daylight boundary, per graded element (rendered as a subtle contour).
+  const daylight = daylightRings({ planes, els, existAt, apronRatio: grid.apronRatio });
   const surfaceKey = [
     "b826", ffeFt, dockDropFt, tieDropFt, clamp01(fieldT).toFixed(3),
     drainTarget ? `${Math.round(drainTarget.x)},${Math.round(drainTarget.y)}` : "",
     opts.existKey || "",
+    // B833 — apron + daylight inputs join the identity (the B807 stale-memo discipline).
+    `ar:${grid.apronRatio}`, `dl:${daylightAsap ? 1 : 0}`,
+    easementRings.length ? `es:${easementRings.map((r) => ringHash(r)).join(",")}` : "",
     els.filter((e) => planes.has(e.id)).map((e) => `${e.id}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}`).join("|"),
   ].join("~");
-  return { planes, grid, violations, skipped, fieldT: clamp01(fieldT), surfaceKey };
+  return { planes, grid, violations, skipped, daylight, fieldT: clamp01(fieldT), surfaceKey };
 }
 
 /* Net dirt in CY: + = import (buy dirt), − = export (haul off). shrinkFactor converts

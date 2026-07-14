@@ -94,7 +94,9 @@ describe("composite grid — engine truth", () => {
   it("flat pad over flat ground: fill = depth × area within lattice tolerance", () => {
     const s = buildProposedSurface({
       els: [{ id: "b", type: "building", ring: rect(0, 0, 100, 100) }],
-      ffeFt: FFE, existAt: flatExist(96),
+      // B833: aprons off — this fixture asserts the FOOTPRINT closed form (the wedge
+      // fringe has its own closed-form suite in test/transitionWedges.test.js).
+      ffeFt: FFE, existAt: flatExist(96), opts: { aprons: false },
     });
     expect(s.grid.fillCf).toBeGreaterThan(40000 * 0.98);
     expect(s.grid.fillCf).toBeLessThan(40000 * 1.02);
@@ -226,7 +228,8 @@ describe("balance assist + net dirt", () => {
   const mk = (existFt, borrowCy = 0, shrinkFactor = 1) => balanceAssist({
     buildAtT: (t) => buildProposedSurface({
       els, ffeFt: FFE, drainTarget: { x: 400, y: 50 }, fieldT: t,
-      existAt: (pt) => (pt.x < 0 ? 99.85 : existFt), opts: { maxCells: 4000 },
+      // B833: aprons off — the bisection closed form is the footprint field's alone.
+      existAt: (pt) => (pt.x < 0 ? 99.85 : existFt), opts: { maxCells: 4000, aprons: false },
     }).grid,
     shrinkFactor, borrowCy,
   });
