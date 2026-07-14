@@ -10124,7 +10124,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               and this stays its one direct numeric size + ±10% nudge control. */}
                           {!o.sheet && (
                             <label style={ovRow}><span style={{ width: 48 }}>Width</span>
-                              <input style={numInput} value={Math.round(o.imgW * o.ftPerPx)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
+                              {/* onFocus pushes ONE history frame per width-edit session (patchOverlay runs
+                                  with hist=false so live typing doesn't flood the stack) — same coalescing as
+                                  the opacity number input above. Without it, retyping the width to rescale a
+                                  raster overlay recorded no undo frame even though ftPerPx IS in the snapshot. */}
+                              <input style={numInput} value={Math.round(o.imgW * o.ftPerPx)} onFocus={() => pushHistory()} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
                               <span>ft</span>
                               <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
                               <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
@@ -10566,8 +10570,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {selParcel.fill && (
                 <>
                   <Field label="Translucence">
+                    {/* RC-5/RC-7: an opacity slider must coalesce one drag into ONE undo frame via
+                        sliderHistory — setSelParcel never pushes, so a bare onChange left the parcel
+                        translucence un-undoable (and misdirected the next Ctrl-Z, since fillOpacity IS
+                        in the history snapshot). Matches every other opacity slider in this file. */}
                     <input type="range" min={0} max={0.6} step={0.02} value={selParcel.fillOpacity ?? 0.12}
-                      onChange={(e) => setSelParcel({ fillOpacity: +e.target.value })} />
+                      {...sliderHistory((e) => setSelParcel({ fillOpacity: +e.target.value }))} />
                   </Field>
                   <Field label="Fill color">
                     <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
