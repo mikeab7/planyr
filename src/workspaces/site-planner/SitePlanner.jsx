@@ -100,7 +100,9 @@ import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached, styleFor } from "./lib/vectorLayers.js";
 import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./lib/overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./lib/boundaryLabels.js";
-import { gridRequest } from "./lib/demGrid.js";
+import { gridRequest, sampleAtLatLng } from "./lib/demGrid.js";
+import { fetchSiteGrid } from "./lib/terrainLayers.js";
+import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt } from "./lib/mitigationHeatmap.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger,
   floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines,
@@ -682,13 +684,16 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
     // B807 — the async-arriving derived 1% MUST be in the sig, or a value that lands
     // after the first compute silently never re-prices (the stale-memo trap).
     elev.derivedWse1pctFt ?? "", elev.derivedWse1pctSrc ?? "",
+    // B808 — same trap for the async-arriving DEM grid.
+    elev.gradeAtKey ?? "",
   ].join("~");
   if (_mitMemo.has(sig)) {
     const hit = _mitMemo.get(sig);
     _mitMemo.delete(sig); _mitMemo.set(sig, hit);
     return hit;
   }
-  const val = computeMitigation({ footprints: [fp], zones, rule, elev });
+  // B809 — retain the priced cells: the heat map renders the SAME array that summed.
+  const val = computeMitigation({ footprints: [fp], zones, rule, elev, opts: { retainCells: true } });
   _mitMemo.set(sig, val);
   if (_mitMemo.size > MIT_MEMO_MAX) _mitMemo.delete(_mitMemo.keys().next().value);
   return val;
@@ -6283,11 +6288,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             .then((r) => ({ ...crossSectionWselFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }), ts: r.ts ?? null, state: "loaded" }))
             .catch(() => ({ sections: [], excludedDatum: 0, total: 0, ts: null, state: "failed" }))
         : Promise.resolve({ sections: [], excludedDatum: 0, total: 0, ts: null, state: "empty" });
-      const [ctx, floodGeo, bfeLines, xs] = await Promise.all([
+      // B808 — the site-extent bare-earth DEM grid (one small LERC decode) rides the same
+      // explicit click. Failure isolation: an outage reads state "failed" and the engine
+      // falls back to the labeled flat median — never a silent flat price.
+      const siteGridP = fmBbox
+        ? fetchSiteGrid({ west: fmBbox.w, south: fmBbox.s, east: fmBbox.e, north: fmBbox.n })
+            .then((r) => ({ grid: r.grid, req: r.req, state: "loaded" }))
+            .catch(() => ({ grid: null, req: null, state: "failed" }))
+        : Promise.resolve({ grid: null, req: null, state: "empty" });
+      const [ctx, floodGeo, bfeLines, xs, siteGrid] = await Promise.all([
         resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
         floodGeoP,
         bfeLinesP,
         crossSectionsP,
+        siteGridP,
       ]);
       if (tok !== drainTok.current) return;
       // Representative point for the derived BFE: the centroid of the fill footprints
@@ -6300,6 +6314,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       const bfePtSrc = bfeFillPts.length ? bfeFillPts : largest.points;
       const bfePt = bfePtSrc.reduce((s, p) => ({ x: s.x + p.x / bfePtSrc.length, y: s.y + p.y / bfePtSrc.length }), { x: 0, y: 0 });
+      floodGeo.demGrid = siteGrid; // B808 — { grid, req, state }; stays in-memory only (never slimmed)
       floodGeo.derivedBfe = bfeLines.lines.length ? deriveBfeFromLines({ point: bfePt, lines: bfeLines.lines }) : null;
       floodGeo.bfeLineFlags = { datumExcluded: bfeLines.excludedDatum, unitExcluded: bfeLines.excludedUnit, total: bfeLines.total, usable: bfeLines.lines.length, state: bfeLines.state };
       // B762 — governing 1% WSEL from the nearest stream reach's cross-sections (stream-
@@ -6468,9 +6483,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // + the greyed input placeholder + the DRAFT/assumed tags on card and print (PDF-PARITY).
   const fmPadIsAuto = fmManualPadFt == null && fmAutoFfeFt != null;
   const fmEffectivePadFt = fmManualPadFt ?? fmAutoFfeFt;
+  // B808 — the per-cell existing-grade sampler off the site-extent DEM grid (a manual
+  // grade wins — the engine gates on sources.existGrade "manual" as well; the 3DEP
+  // median stays the labeled fallback whenever the grid didn't load).
+  const fmDemGrid = floodGeo?.demGrid && floodGeo.demGrid.state === "loaded" && floodGeo.demGrid.grid ? floodGeo.demGrid : null;
+  const fmGradeAt = fmDemGrid && !Number.isFinite(fmSettings.existGradeFt)
+    ? (pt) => { const gll = feetToLatLng(pt, origin.lat, origin.lon); return sampleAtLatLng(fmDemGrid.grid, fmDemGrid.req, gll[0], gll[1]); }
+    : null;
   const fmElev = {
     padElevFt: fmEffectivePadFt,
     existGradeFt: Number.isFinite(fmSettings.existGradeFt) ? fmSettings.existGradeFt : (drainCtxData?.groundElevFt ?? null),
+    gradeAt: fmGradeAt,
+    gradeAtKey: fmGradeAt ? fmDemGrid.req.key : "", // memo identity — a grid that lands later must re-price (the B807 stale-memo class)
     bfeFt: fmManualBfeFt,
     derivedBfeFt: fmDerivedBfeFt,
     derivedXsWselFt: fmDerivedXsWselFt,
@@ -6600,12 +6624,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drainLastMitRecord ? drainLastMitRecord.screened === false
       : (drainCtxData?.flood?.zones?.length > 0)
   );
+  // B809 — the fill-depth heat map: painted from the SAME retained cells that summed to
+  // the ledger (engine truth — picture and number cannot diverge). Live results only:
+  // the remembered slim deliberately drops cells (numbers survive a reload; the exhibit
+  // re-renders on the next live check). Default ON while the Yield mitigation group is
+  // open (mirrored up from YieldPanel); the user toggle overrides either way.
+  const [fmHeatUser, setFmHeatUser] = useState(null); // null = auto
+  const [fmMitOpen, setFmMitOpen] = useState(false);  // YieldPanel mirrors its mit group here
+  const fmHeatCells = fmResultView && Array.isArray(fmResultView.cells) && fmResultView.cells.length ? fmResultView.cells : null;
+  const fmHeat = useMemo(() => (fmHeatCells ? paintHeatmap(fmHeatCells) : null), [fmHeatCells]);
+  const fmHeatRatio = fmResultView && isFinite(fmResultView.ratio) ? fmResultView.ratio : 1;
+  const fmHeatTotals = useMemo(() => (fmHeatCells ? heatmapTotals(fmHeatCells, fmHeatRatio) : null), [fmHeatCells, fmHeatRatio]);
+  const fmHeatOn = !!fmHeat && (fmHeatUser ?? (leftPanel === "yield" && fmMitOpen));
   // (a) Mirror the LIVE mitigation ledger into the remembered check record so a reload shows
   // last-known mitigation. Only a live (this-session), non-stale check writes; a restored view
   // never overwrites the record it hydrated from. Rides the existing settings autosave — no
   // schema/version bump (the B750 pattern).
   const drainMitToPersist = drainCtx?.ctx && !drainIsRestored && settings.drainage?.lastCheck?.sig === drainSigNow
-    ? { screened: !!(floodGeo && floodGeo.state === "loaded"), summary: fmResult || null }
+    ? { screened: !!(floodGeo && floodGeo.state === "loaded"), summary: fmResult ? (({ cells, ...rest }) => rest)(fmResult) : null }
     : null;
   const drainMitPersistSig = drainMitToPersist ? JSON.stringify(drainMitToPersist) : "";
   useEffect(() => {
@@ -10297,6 +10333,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             inactiveCount={parcels.filter((p) => p.active === false).length}
             easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
             drainage={drainage} parcelOverlaps={parcelOverlaps}
+            heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
+            onMitOpenChange={setFmMitOpen}
           />
           {(() => {
             // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
@@ -11210,6 +11248,52 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (!strip) return null;
                 const tcol = easementType(easeType).color;
                 return <polygon data-export="skip" pointerEvents="none" points={strip.ring.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill={tcol} fillOpacity={0.14} stroke={tcol} strokeWidth={1.6} strokeDasharray="5 4" />;
+              })()}
+              {/* B809 — the fill-depth heat map exhibit: ONE image painted from the SAME
+                  retained cells the ledger summed (engine truth), plus its legend + tie-out.
+                  Rides the live SVG, so the print/PDF export clone carries it (PDF-PARITY);
+                  only the hover chip is export-skipped. pointerEvents none — the canvas
+                  gestures pass straight through. */}
+              {fmHeatOn && fmHeat && (() => {
+                const b = fmHeat.bboxFt;
+                const tl = f2p({ x: b.x, y: b.y });
+                const wPx = b.w * view.ppf, hPx = b.h * view.ppf;
+                const legend = heatmapLegend(fmHeatCells);
+                const lx = tl.x, ly = tl.y + hPx + 10;
+                const hovCell = cursor ? heatCellAt(fmHeatCells, cursor) : null;
+                const hovPt = hovCell ? f2p(cursor) : null;
+                return (
+                  <g>
+                    <image href={fmHeat.dataUrl} x={tl.x} y={tl.y} width={wPx} height={hPx} opacity={0.68} preserveAspectRatio="none" pointerEvents="none" />
+                    <g pointerEvents="none">
+                      <rect x={lx - 6} y={ly - 14} width={236} height={legend.length * 14 + 40} rx={6} fill="#ffffff" opacity={0.88} />
+                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">Fill depth (priced cells)</text>
+                      {legend.map((r, i) => (
+                        <g key={r.label}>
+                          <rect x={lx} y={ly + 6 + i * 14} width={10} height={10} fill={r.color} opacity={r.kind === "depth" ? 0.9 : 0.45} />
+                          {r.kind !== "depth" && <line x1={lx} y1={ly + 16 + i * 14} x2={lx + 10} y2={ly + 6 + i * 14} stroke={r.color} strokeWidth={1.4} />}
+                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily="ui-monospace, monospace">{r.label}</text>
+                        </g>
+                      ))}
+                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">
+                        {`Σ cells ${fmHeatTotals ? fmHeatTotals.volumeAcFt.toFixed(2) : "—"} ac-ft = ledger ${fmResultView && fmResultView.volumeAcFt != null ? fmResultView.volumeAcFt.toFixed(2) : "—"} ac-ft`}
+                      </text>
+                    </g>
+                    {hovCell && hovPt && (
+                      <g data-export="skip" pointerEvents="none" transform={`translate(${hovPt.x + 14}, ${hovPt.y - 10})`}>
+                        <rect x={0} y={-26} width={190} height={hovCell.depthFt != null ? 40 : 28} rx={5} fill="#1B1E26" opacity={0.86} />
+                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily="ui-monospace, monospace">
+                          {hovCell.cls === "floodway" ? "FLOODWAY — fill prohibited" : hovCell.depthFt != null ? `${hovCell.depthFt.toFixed(2)}′ fill · ${hovCell.cls === "02pct" ? "0.2% band" : "1% floodplain"}` : `not priced (${hovCell.cls === "02pct" ? "0.2% band" : "1%"} — see ledger)`}
+                        </text>
+                        {hovCell.depthFt != null && (
+                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily="ui-monospace, monospace">
+                            {`grade ${fmResultView && fmResultView.gradeBasis === "grid" ? "3DEP grid" : fmResultView && fmResultView.gradeBasis === "manual" ? "manual" : "median"} · cell ${Math.round(hovCell.wFt * hovCell.hFt)} sf · fp ${fmHeatTotals && fmHeatTotals.perFpAcFt[hovCell.fpId] != null ? fmHeatTotals.perFpAcFt[hovCell.fpId].toFixed(2) : "—"} ac-ft`}
+                          </text>
+                        )}
+                      </g>
+                    )}
+                  </g>
+                );
               })()}
               {/* callouts & text boxes — sized in the drawing's frame (scale with
                   zoom) so they don't balloon when you zoom out. */}
@@ -14619,6 +14703,8 @@ function YieldPanel({
   bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
   drainage, // B630–B632: required-vs-provided detention + tier + regime (null until a site exists)
   parcelOverlaps, // B652: {count,names,overlapAcres} when active parcels overlap, else null
+  heat, // B809: { available, on, user, onToggle, totals, ledgerAcFt } — the fill-depth heat map
+  onMitOpenChange, // B809: mirrors the mit group's expansion up (heat map defaults ON while open)
 }) {
   const [openPanel, setOpenPanel] = useState(!collapsed);
   // NEW-1 — the drainage/mitigation readout redesign: an "Advanced" fold for the expert
@@ -14952,7 +15038,7 @@ function YieldPanel({
               const vColor = tone === "danger" ? Y.dangerText : tone === "warn" ? Y.warnText : tone === "good" ? Y.green : Y.text;
               return (
                 <div key={"grp-" + gKey}>
-                  <button type="button" aria-expanded={open} onClick={() => setDrainGroupOpen((s2) => ({ ...s2, [gKey]: !s2[gKey] }))}
+                  <button type="button" aria-expanded={open} onClick={() => setDrainGroupOpen((s2) => { const next = { ...s2, [gKey]: !s2[gKey] }; if (gKey === "mit" && onMitOpenChange) onMitOpenChange(!!next.mit); return next; })}
                     style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, background: "transparent", border: "none", padding: "6px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                     <span style={{ fontSize: 11.5, fontWeight: 800, color: Y.rowLabel, letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{open ? "▾" : "▸"} {label}</span>
                     <span style={{ fontFamily: YMONO, fontSize: 12.5, fontWeight: 750, fontVariantNumeric: "tabular-nums", color: vColor, textAlign: "right" }}>
@@ -15068,6 +15154,22 @@ function YieldPanel({
                   mitR.push(row(clsLbl, `${f2(bucket.acres)} ac`, cls === "floodway" ? "" : bucket.volumeCf != null ? `· ${f2(bucket.volumeCf / 43560)} ac-ft` : "· UNKNOWN"));
                 }
                 if (mit.volumeCf != null) mitR.push(row("Required compensating storage", `${f2(mit.volumeAcFt)} ac-ft`, `· ${f2(mit.cutCy)} cy`));
+                // B809 — the heat-map affordance rides the group: Auto follows this group's
+                // expansion; the tie-out line makes the overlay-equals-ledger fact VISIBLE
+                // (identical by construction — same retained cells; seeing it is the point).
+                if (heat && heat.available) {
+                  mitR.push(
+                    <div key="mit-heat" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: `1px solid ${Y.hairline}` }}>
+                      <span style={{ fontSize: 11, color: Y.rowLabel }} title="Paints the exact cells the engine priced onto the plan — floodway renders as prohibition hatch, unpriced bands as grey hatch. Auto shows it while this group is open.">Fill-depth heat map<span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span></span>
+                      <span style={{ display: "flex", gap: 4, width: 156 }}>
+                        {seg("Auto", heat.user == null, () => heat.onToggle(null), "h-a", "Fill-depth heat map")}
+                        {seg("On", heat.user === true, () => heat.onToggle(true), "h-on", "Fill-depth heat map")}
+                        {seg("Off", heat.user === false, () => heat.onToggle(false), "h-off", "Fill-depth heat map")}
+                      </span>
+                    </div>
+                  );
+                  if (heat.on && heat.totals) mitR.push(keyedNote(`Overlay Σ ${f2(heat.totals.volumeAcFt)} ac-ft = ledger ${heat.ledgerAcFt != null ? f2(heat.ledgerAcFt) : "—"} ac-ft — same cells, by construction.`, "mit-heat-tie"));
+                }
                 if (mit.volumeCf != null) {
                   const mitTag = mit.expertBypass ? "expert avg-depth"
                     : d.mitigationStraddle ? "straddle worst-case"
@@ -15124,7 +15226,12 @@ function YieldPanel({
                 if (d.mitigationStraddle) mitR.push(warnNote(`Jurisdiction straddle — every candidate priced, worst case shown${d.mitigationStraddle.anyUnknown ? " (one UNKNOWN)" : ""}.`, "mit-straddle-detail", `Candidates: ${d.mitigationStraddle.candidates.map((c) => `${c.rule.label} ${c.result.volumeCf != null ? f2(c.result.volumeCf / 43560) + " ac-ft" : "unknown"}`).join(" · ")}.`));
                 if (mit.expertBypass) mitR.push(keyedNote("Expert bypass in use — volume = intersect area × the entered average fill depth.", "mit-bypass"));
                 mitR.push(keyedNote(`Rule: ${d.mitigationRule?.label} — ${mit.trigger === "1pct_plus_02pct" ? "1% + 0.2% trigger" : "1% trigger"} @ ${mit.ratio}:1${d.mitigationRule?.offsetScope === "storage_and_conveyance" ? " (offsets storage AND conveyance — large contiguous fringe fill can trigger a no-rise/hydraulic analysis beyond this volume screen)" : ""}.`, "mit-rule"));
-                mitR.push(keyedNote(`Providers: pad FFE ${mit.providers.padElev || "—"} · grade ${mit.providers.existGrade || "—"} · 1% WSE ${wseProvLabel(mit.providers.wse1pct)} · 0.2% WSE ${wseProvLabel(mit.providers.wse02pct)}${d.floodGeo && d.floodGeo.ts != null ? ` · flood data ${formatAge(Date.now() - d.floodGeo.ts)}` : ""}`, "mit-providers"));
+                mitR.push(keyedNote(`Providers: pad FFE ${mit.providers.padElev || "—"} · grade ${{ "3dep-grid": "3DEP per-cell grid", "3dep": "3DEP median" }[mit.providers.existGrade] || mit.providers.existGrade || "—"} · 1% WSE ${wseProvLabel(mit.providers.wse1pct)} · 0.2% WSE ${wseProvLabel(mit.providers.wse02pct)}${d.floodGeo && d.floodGeo.ts != null ? ` · flood data ${formatAge(Date.now() - d.floodGeo.ts)}` : ""}`, "mit-providers"));
+                // B808 — grade-basis honesty: the median fallback is named (never silently
+                // flat), and the grid's own flags surface one line each (the B823 cap).
+                if (mit.gradeBasis === "median") mitR.push(keyedNote("Flat-grade estimate — one median grade priced every cell.", "mit-flat", "The per-cell 3DEP grid was unavailable this check (or the check predates it) — every cell priced at the site-median grade. ↻ Re-check to fetch the grid; a typed grade always overrides."));
+                if (mit.flags.includes("grid-voids")) mitR.push(warnNote("Over 5% of the priced footprint sits on DEM voids — those cells priced nothing.", "mit-voids", "The 3DEP grid has no ground return under part of the footprint (water, structures, data gaps). Void cells are EXCLUDED from the volume — treat the number as a floor there and confirm grades before design."));
+                if (mit.flags.includes("grid-median-delta") && mit.volumeFlatCf != null) mitR.push(warnNote(`Terrain relief moved this volume >15% vs the flat-grade estimate.`, "mit-delta", `Per-cell grid: ${f2(mit.volumeAcFt)} ac-ft vs flat median: ${f2(mit.volumeFlatCf / 43560)} ac-ft. The old single-grade number was silently wrong on this site — the per-cell figure stands (screening).`));
                 if (d.mitCandidateCf > 0) mitR.push(keyedNote(`Candidate compensating storage in drawn ponds (below the flood WSE): ${f2(d.mitCandidateCf / 43560)} ac-ft — hydraulic connection + stage distribution: engineer confirms.`, "mit-cand"));
               } else if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) {
                 // B824 — card-migrated honest state: a verified NONE is said out loud.

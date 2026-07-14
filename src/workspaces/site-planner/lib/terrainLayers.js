@@ -29,7 +29,7 @@ import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { DEP_URL } from "./elevation.js";
 import {
   gridRequest, exportUrl, looksLikeLerc, sampleAtLatLng, mercToPixel,
-  lngToMercX, latToMercY,
+  lngToMercX, latToMercY, decodeGrid, groundScale, mercPerPx,
 } from "./demGrid.js";
 
 export const TERRAIN_MIN_ZOOM = 16; // ~3 m ground cells at Houston; z15 would be 1-ft-contour mush
@@ -126,6 +126,43 @@ function computeTile(req, { fetchImpl } = {}) {
   const clean = () => { if (inflight.get(req.key) === job) inflight.delete(req.key); };
   job.then(clean, clean);
   inflight.set(req.key, job);
+  return job;
+}
+
+// ---------------------------------------------------------------------------
+// B808 — ONE bare-earth grid over a SITE's WGS84 envelope, for the mitigation engine's
+// per-cell existing grade (and B826's proposed-surface lattice later). Reuses the exact
+// tile plumbing above — gridRequest's deterministic snap/coarsen, fetchGridBytes'
+// proxy-first + LERC-sniff path — but decodes on the caller's thread (one small decode
+// per explicit drainage check; no worker round-trip, no Leaflet). The zoom is chosen so
+// a cell is ≤ ~3 m of GROUND at the site latitude (fine enough for screening relief;
+// gridRequest self-coarsens if the envelope would exceed MAX_GRID). Cached by req.key
+// (the request is deterministic, so the same site re-checks are pure hits). LOUD:
+// failure REJECTS — the caller records grid-unavailable and falls back to the labeled
+// median, never a silent flat price.
+const SITE_GRID_TARGET_GROUND_M = 3;
+const _siteGrids = new Map(); // req.key -> Promise<{grid, req}>
+export function siteGridZoom(lat) {
+  // smallest integer zoom whose cell (CELL_PX px) is ≤ the ground-meter target
+  for (let z = 12; z <= 19; z++) {
+    if (mercPerPx(z) * 2 * groundScale(lat) <= SITE_GRID_TARGET_GROUND_M) return z;
+  }
+  return 19;
+}
+export function fetchSiteGrid(bounds, { fetchImpl, zoom } = {}) {
+  const lat = (bounds.south + bounds.north) / 2;
+  const req = gridRequest(bounds, zoom ?? siteGridZoom(lat));
+  const cur = _siteGrids.get(req.key);
+  if (cur) return cur;
+  const job = (async () => {
+    const buf = await fetchGridBytes(req, fetchImpl);
+    const grid = decodeGrid(buf, req);
+    return { grid, req };
+  })();
+  // a failed fetch must not poison the cache — the next check retries
+  job.catch(() => { if (_siteGrids.get(req.key) === job) _siteGrids.delete(req.key); });
+  _siteGrids.set(req.key, job);
+  if (_siteGrids.size > GRID_LRU_MAX) _siteGrids.delete(_siteGrids.keys().next().value);
   return job;
 }
 
