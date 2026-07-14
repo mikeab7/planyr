@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-14 @ `cf44eae` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-14 @ `e37e03b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_249 source files mapped._
+_250 source files mapped._
 
 ## infra
 
@@ -259,6 +259,8 @@ _249 source files mapped._
   - _exports_: `buildContours`, `dilateVoids`, `pickInterval`, `stripRing`
 - **`src/workspaces/site-planner/lib/convertClient.js`** — B748 client for the B238 DWG→DXF convert service (VITE_CONVERT_URL); round-trips DWG bytes → DXF with a visible, distinct state for every failure (unset URL / 422 / 413 / unreachable).
   - _exports_: `CONVERT_URL`, `convertConfigured`, `convertDwgToDxf`, `isDwgFile`
+- **`src/workspaces/site-planner/lib/corridorConflicts.js`** — Pond/basin vs easement + pipeline-corridor overlap screen (B831): bbox-prefiltered polyIntersectArea over rings in planner feet; ring-only API is the B826 cut/fill-cells seam. Exports `pondEncumbranceConflicts`.
+  - _exports_: `pondEncumbranceConflicts`
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver

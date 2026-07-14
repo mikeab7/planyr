@@ -205,6 +205,30 @@ async function run() {
   await pageE.screenshot({ path: "ui-audit/verify-ledger-balancer.png" }).catch(() => {});
   await ctxE2.close();
 
+  // ── Case F: NEW-11/B831 — a drawn easement over the pond flags it (no network:
+  // the corridor layer stays OFF; drawn easements always screen) ────────────────
+  const siteF = siteWith("s_enc", "Encumbered Pond Site", null);
+  siteF.markups = [{ id: "es1", kind: "easement", mode: "boundary", easeType: "pipeline", status: "existing", restrictsBuildings: true, restrictsPaving: false, pts: [{ x: -550, y: -350 }, { x: 150, y: -350 }, { x: 150, y: -250 }, { x: -550, y: -250 }] }];
+  const ctxF = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctxF.addInitScript(`(() => { try {
+    localStorage.setItem('planarfit:sites:v1', JSON.stringify({ s_enc: ${JSON.stringify(siteF)} }));
+    localStorage.setItem('planarfit:currentSite:v1', 's_enc');
+  } catch (e) {} })();`);
+  const pageF = await ctxF.newPage();
+  pageF.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(F) — ${e.message}`); });
+  const tF = await openYield(pageF);
+
+  console.log("Case F — pond ∩ drawn easement flags with acreage (NEW-11):");
+  // The 700×100 strip crosses the 600-ft pond → 600×100 = 60 000 sf ≈ 1.38 ac.
+  expect("(f) the Yield detention group carries the one-line corridor flag with acreage", /1 pond in pipeline\/easement corridors \(~1\.3\d ac\) — operator approval risk/.test(tF), tF.match(/pond in pipeline[^A-Z]{0,60}/)?.[0]);
+  const clickedF = await clickPond(pageF);
+  const tF2 = clickedF ? (await pageF.locator("body").innerText()).replace(/\s+/g, " ") : "";
+  expect("(f) the pond inspector shows the overlap warnLine + the assumed-band caveat", clickedF && /Pond overlaps a pipeline\/easement corridor by ~1\.3\d ac — operator approval \/ relocation risk/.test(tF2) && /ASSUMED screening band/.test(tF2), clickedF ? tF2.match(/Pond overlaps[^.]{0,60}/)?.[0] : "pond click missed");
+  await ctxF.close();
+
+  // A clear site shows nothing: Case A/B/E had no easement and never rendered the flag.
+  expect("(f) no corridor flag on the easement-free sites (A/B/E)", !/pipeline\/easement corridors/.test(tA) && !/pipeline\/easement corridors/.test(tB) && !/pipeline\/easement corridors/.test(tE));
+
   await browser.close();
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL PASS");
   process.exit(failures ? 1 : 0);

@@ -97,6 +97,8 @@ import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNu
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
 import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
+import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
+import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached, styleFor } from "./lib/vectorLayers.js";
@@ -6822,6 +6824,62 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         wetlandsPresent: analysisWetlands === "present",
       })
     : null;
+  // ---- NEW-11/B831 — ponds/basins vs easement + pipeline corridors. Drawn easements
+  // always screen (pure geometry, no network); the ASSUMED pipeline corridor leg joins
+  // only while its layer is ON (an explicit user act — the render layer already pulls
+  // this source through the same SWR cache, so this is normally a cache hit). Keyed on
+  // a COARSE quantised envelope so element drags inside it never refetch.
+  const corridorOverlaySt = overlays ? overlays.txrrc_pipe_easement : null;
+  const corridorOn = !!(corridorOverlaySt && corridorOverlaySt.on);
+  const corridorWidthFt = (corridorOverlaySt && corridorOverlaySt.widthFt) || DEFAULT_CORRIDOR_WIDTH_FT;
+  const [pondCorridor, setPondCorridor] = useState(null); // { state, rings (site feet), widthFt, ts } | null
+  const pondCorridorTok = useRef(0);
+  const corridorBboxSig = (() => {
+    if (!corridorOn || !origin || !pondCount) return "";
+    let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
+    const eat = (pt) => { if (pt.x < mnX) mnX = pt.x; if (pt.x > mxX) mxX = pt.x; if (pt.y < mnY) mnY = pt.y; if (pt.y > mxY) mxY = pt.y; };
+    for (const p of drainActive) for (const pt of p.points) eat(pt);
+    for (const e of els) { if (e.type !== "pond") continue; const r = ringOf(e); if (r) for (const pt of r) eat(pt); }
+    if (!isFinite(mnX)) return "";
+    const q = (v) => Math.round(v / 500) * 500; // 500-ft quantise: in-envelope drags never refetch
+    return [q(mnX - 400), q(mnY - 400), q(mxX + 400), q(mxY + 400), Math.round(corridorWidthFt), origin.lat, origin.lon].join(",");
+  })();
+  useEffect(() => {
+    if (!corridorBboxSig) { setPondCorridor(null); return; }
+    const tok = ++pondCorridorTok.current;
+    const [ax, ay, bx, by, w] = corridorBboxSig.split(",").map(Number);
+    const llA = feetToLatLng({ x: ax, y: ay }, origin.lat, origin.lon);
+    const llB = feetToLatLng({ x: bx, y: by }, origin.lat, origin.lon);
+    const bbox = floodGeoBbox([[[llA[1], llA[0]], [llB[1], llB[0]]]]);
+    fetchCached(VECTOR_SOURCES.txrrc_pipe, bbox, { cache: gisCache })
+      .then((r) => {
+        if (tok !== pondCorridorTok.current) return;
+        const rings = [];
+        for (const f of (r.data && r.data.features) || []) {
+          const g = f && f.geometry;
+          const parts = !g ? [] : g.type === "MultiLineString" ? g.coordinates || [] : g.type === "LineString" ? [g.coordinates] : [];
+          for (const part of parts) {
+            const band = corridorRingLngLat(part, w);
+            if (band && band.length >= 3) rings.push(lngLatRingToFeet(band, origin.lon, origin.lat));
+          }
+        }
+        setPondCorridor({ state: "loaded", rings, widthFt: w, ts: r.ts ?? 0 });
+      })
+      // LOUD-FAILURE: an outage reads "failed" and the panel says "not screened" —
+      // never a silent all-clear (drawn easements still screen either way).
+      .catch(() => { if (tok === pondCorridorTok.current) setPondCorridor({ state: "failed", rings: [], widthFt: w, ts: null }); });
+  }, [corridorBboxSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pondConflictsSig = [
+    pondLedgerEntries.map((p) => `${p.id}:${p.ring && p.ring.length >= 3 ? ringHash(p.ring) : 0}`).join("|"),
+    easeAll.map((m) => `${m.id}:${(m.pts && m.pts.length) || 0}:${m.width || 0}:${m.easeType || ""}`).join("|"),
+    pondCorridor ? `${pondCorridor.state}:${pondCorridor.ts}:${pondCorridor.rings.length}` : "off",
+  ].join("~");
+  const pondEncumbrances = useMemo(() => pondEncumbranceConflicts({
+    ponds: pondLedgerEntries.map((p) => ({ id: p.id, ring: p.ring })),
+    easements: easeAll.map((m) => { try { return { id: m.id, ring: deriveEasementRing(m), label: easementLabel(m) }; } catch (_) { return null; } }).filter(Boolean),
+    corridorRings: pondCorridor && pondCorridor.state === "loaded" ? pondCorridor.rings : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [pondConflictsSig]);
   // ---- NEW-10/B830 — the ledger balancer (pure lib): ranked screening moves that
   // close detention + mitigation together. Gated on an HONEST ledger: a point
   // requirement AND a known usable split — a NEW-9 demoted restore ranks nothing
@@ -6913,6 +6971,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // honest enough to rank against); the berm move's apply rides NEW-13's click.
     balancer: drainBalancer,
     onApplyBerm: applyBermMove,
+    // NEW-11/B831 — ponds/basins overlapping drawn easements or the assumed pipeline
+    // corridor (state "off" = corridor layer not enabled; easements screen regardless).
+    corridorConflicts: {
+      state: corridorOn ? (pondCorridor ? pondCorridor.state : "loading") : "off",
+      count: pondEncumbrances.length,
+      totalSf: pondEncumbrances.reduce((s, c) => s + c.totalSf, 0),
+    },
     pondFullyInundated,
     unanchoredInTrigger,
     anchoredNoWseInTrigger, // B822 — anchored (manual or auto TOB) but the reach WSE is unknown
@@ -13602,6 +13667,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       if ((crit.slope || crit.freeboard || landTakeSf != null) && critRule && critRule.verified === false) {
                         out.push(noteLine("Criteria values are unverified placeholders — edit & confirm in settings against the PCPM / county DCM.", "crit-unv"));
                       }
+                      // NEW-11/B831 — this pond vs drawn easements + the assumed pipeline corridor.
+                      {
+                        const enc = pondEncumbrances.find((c) => c.pondId === selEl.id);
+                        if (enc) {
+                          out.push(warnLine(`⚠ Pond overlaps a pipeline/easement corridor by ~${f2(enc.totalSf / SQFT_PER_ACRE)} ac — operator approval / relocation risk.`, "pond-enc", false));
+                          out.push(noteLine("Verify the recorded easement width — the pipeline corridor is an ASSUMED screening band off a schematic centerline (not a surveyed easement). Applies to detention and mitigation basins alike.", "pond-enc-note"));
+                        }
+                      }
                       if (dd) out.push(warnLine(`⚠ Gravity drawdown unlikely below ${f1(dd.flowlineElev)}′ — the pond bottom sits ${f1(dd.belowByFt)}′ below the receiving flowline. Pump station or a shallower basin (≤ ${f1(dd.suggestedMaxDepthFt)}′ deep).`, "drawdown", false));
                       if (berm != null) {
                         out.push(warnLine(`⚠ Bermed basin — the top of bank sits ${f1(berm)}′ above existing grade. The berm itself is fill${split.inTrigger ? " requiring mitigation" : ""} and may block conveyance.`, "berm-fill", false));
@@ -15596,6 +15669,18 @@ function YieldPanel({
                 { key: "provided", sub: d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""} · usable ${f2(usableAcFt)}` : `· usable ${f2(usableAcFt)}` }));
             } else {
               detR.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
+            }
+            // NEW-11/B831 — ponds sitting in easement / pipeline corridors: one loud line
+            // with the acreage; a corridor-source outage says "not screened", never a
+            // silent all-clear (drawn easements screen regardless).
+            if (d.corridorConflicts && d.corridorConflicts.count > 0) {
+              const cc = d.corridorConflicts;
+              detR.push(warnNote(`${cc.count} pond${cc.count > 1 ? "s" : ""} in pipeline/easement corridors (~${f2(cc.totalSf / SQFT_PER_ACRE)} ac) — operator approval risk.`, "pond-corridor",
+                "Excavating a basin over a pipeline or inside a recorded easement usually needs the operator's / easement holder's approval and can force relocation. The pipeline corridor is an ASSUMED screening band off a schematic centerline — verify the recorded easement width. Applies to detention and mitigation basins alike; each pond's inspector shows its own overlap."));
+            }
+            if (d.corridorConflicts && d.corridorConflicts.state === "failed") {
+              detR.push(warnNote("Pipeline corridor source didn't answer — corridor conflicts not screened this session.", "pond-corridor-fail",
+                "An outage is never an all-clear: drawn easements were still screened, but the assumed pipeline corridor bands couldn't be fetched. Toggle the layer or re-check later to retry."));
             }
             {
               // B712 — the mitigation ledger joins the readout. ADDITIVE with detention:
