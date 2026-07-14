@@ -1726,8 +1726,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
     const prev = geoCommitRef.current;
     const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
-    // First paint / resize → plain commit (no prior view worth ghosting).
-    if (sizeChanged) { clearTimeout(geoCommitTimer.current); commit(center, z, false); return; }
+    // First paint (no prior tiles on screen to clone) → plain commit. But a RESIZE while a
+    // prior view IS on screen — e.g. a docked panel opening on select shrinks the in-flow
+    // canvas — still fires setView→viewreset→tile-wipe, so ghost-buffer it to hide the flash.
+    // (NEW-1: reuses B65's spawnGhost; `!!prev` is true only on resize, false on first paint.)
+    if (sizeChanged) { clearTimeout(geoCommitTimer.current); commit(center, z, !!prev); return; }
 
     // A new gesture is happening: drop any lingering snapshot immediately. It's a
     // FROZEN copy that doesn't track this pan/zoom, so leaving it up would let the

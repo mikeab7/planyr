@@ -68,6 +68,16 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V310 — B821: single- & double-clicking a Site Planner feature (parcel / element / overlay) no longer flashes/blanks the aerial basemap — only the selection highlight changes ⏳ **LIVE APP (planyr.io) — a site WITH the geo aerial ON** (zoom-/data-density render class — a one-FRAME tile-wipe flash isn't headless-observable, and the aerial needs a real site location + map tiles the sandbox egress-blocks; the fix logic + no-regression are proven by build + 3796 sandbox tests + a logged-out render smoke)  *(minted V310 via `npm run next-id -- --against-main`; references **B821**; `Cadence: once`)*
+- **Verified here (sandbox, 2026-07-14):** `npm run build` green; full suite **3796** tests green; `eslint` 0 errors on `SitePlanner.jsx`; headless smoke (logged-out `vite preview`) entered the planner via "Start blank", single-clicked + double-clicked the canvas → the app stays mounted with zero JS/page errors. The change is a one-flag extension of B65's proven ghost-buffer (`commit(center, z, !!prev)` at `SitePlanner.jsx:1730`), so first-paint and pan/zoom-gesture behavior are unchanged by construction.
+- **Pending live steps (planyr.io):**
+  1. Open a real site that has the aerial basemap **ON** (so the Leaflet backdrop is showing tiles).
+  2. Single-click a parcel → the Parcel panel opens; watch the aerial — it must **NOT** blank/flash, only the selection highlight appears.
+  3. Double-click an element / markup / callout → the Properties companion opens; the aerial must stay put (no flash).
+  4. Click empty canvas to deselect (panel closes) → again no flash.
+  5. Select an overlay (References panel opens) → no flash. Then pan/zoom normally → confirm the existing anti-flash on gestures still works (no regression).
+- On pass: move B821 from ⏳ Verify → BACKLOG-DONE, and this entry → VERIFICATION-DONE.
+
 ### V309 — B820: Site Planner "Arrange" (z-order) — the signed-in cloud `z_index` round-trip + the PDF/print export of the new stacking ⏳ **LIVE APP (planyr.io), SIGNED IN** (concurrency/multi-writer persistence + PDF/export-parity classes — the `site_elements.z_index` cloud round-trip and a real exported sheet can only be confirmed live)  *(V309; B820; `Cadence: once`)*
 - **Verified here (sandbox, 2026-07-13):** 16 unit tests `test/sitePlannerArrange.test.js` (front/forward/backward/back, end-of-stack no-ops, band isolation, minimal 1–2 element patch, ambiguous-z self-heal, no input mutation). Headless `ui-audit/verify-b820-arrange.mjs` (12 checks, ALL PASS): three buildings paint in z order; ⌘/Ctrl+⇧+] brings a building to front and ⌘/Ctrl+⇧+[ sends one to back; the right-click element menu shows the Arrange section and "Send to Back" works; band isolation — a parking field is never reordered by a building arrange; a markup's "Send behind buildings" moves it below the elements in the DOM, writes `behindEls:true` to localStorage, and survives a reload. Full suite + build green, lint 0 errors. The PDF/print export path clones the live SVG (`buildExportSvg` strips `data-export="skip"`), so the on-screen z-order verified here carries into exports by construction.
 - **Pending live steps (planyr.io — SIGNED IN):**
