@@ -94,10 +94,11 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
-import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight } from "./lib/pondGeom.js";
+import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight, bermFillVolume } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
 import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
+import { envelopeOf, revalidationNeed } from "./lib/factRevalidation.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { gisCache } from "./lib/gisCache.js";
@@ -110,6 +111,7 @@ import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFi
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger,
+  wedgeMitigation, pointInZone,
   floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines,
   crossSectionWselFromFeatureCollection, governingCrossSectionWsel,
   NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
@@ -6226,7 +6228,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const drainSigNow = drainActive.length + ":" + Math.round(siteSqft) + ":" +
     Math.round(drainCentroid[0] / 50) + "," + Math.round(drainCentroid[1] / 50) + ":" +
     (origin ? `${origin.lat.toFixed(4)},${origin.lon.toFixed(4)}` : "nogeo") + ":" + drainElsSig;
-  const checkDrainage = async () => {
+  const checkDrainage = async (opts = {}) => {
+    const isAuto = opts && opts.auto === true; // B832 — auto-revalidation runs tag themselves (status line + the remembered record)
     if (!origin) { setDrainCtx((prev) => ({ error: "This plan isn't georeferenced — bring the parcel in from the map first.", prev: prev?.ctx ? prev : prev?.prev })); return; }
     const act = parcels.filter((p) => p.active !== false && p.points && p.points.length >= 3);
     if (!act.length) { setDrainCtx((prev) => ({ error: "No parcel boundary on the plan yet.", prev: prev?.ctx ? prev : prev?.prev })); return; }
@@ -6359,11 +6362,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (tok !== drainTok.current) return; // superseded while sampling
       }
       const checkedAt = Date.now();
-      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt });
+      // B832 — an AUTO run that came back materially DEGRADED (the authority lookup
+      // was unavailable, or the flood pull failed where the remembered check had it
+      // loaded) shows its honest live state but must NOT overwrite the good remembered
+      // snapshot — degraded sources fall to last-good. A manual ↻ keeps today's
+      // replace-always behavior (the user explicitly asked for a fresh pull).
+      const prevLC = settings.drainage?.lastCheck || null;
+      const autoDegraded = isAuto && (
+        (ctx?.authority?.flags || []).includes("jurisdiction-unavailable")
+        || (ctx?.flood?.state === "failed" && prevLC?.flood?.state === "loaded")
+      );
+      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt, auto: isAuto, degraded: autoDegraded });
+      // B832 — remember WHAT this check fetched (the raw feet envelope + the two
+      // point-sample anchors) so auto-revalidation can tell "moved inside the fetched
+      // area" (numbers recompute live, no fetch) from "outgrew it" (refetch). JSON-safe.
+      const groundPt = largest.points.reduce((s, p) => ({ x: s.x + p.x / largest.points.length, y: s.y + p.y / largest.points.length }), { x: 0, y: 0 });
+      const fetchRec = {
+        env: isFinite(mnX) ? { mnX: Math.round(mnX), mnY: Math.round(mnY), mxX: Math.round(mxX), mxY: Math.round(mxY) } : null,
+        anchorPt: { x: Math.round(bfePt.x), y: Math.round(bfePt.y) },
+        groundPt: { x: Math.round(groundPt.x), y: Math.round(groundPt.y) },
+        mode: isAuto ? "auto" : "manual",
+      };
       // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
       // survives a reload without re-hitting the (flaky) county GIS. Rides the existing
-      // settings autosave — no schema change.
-      setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctx), sig, checkedAt } } }));
+      // settings autosave — no schema change. (B832: skipped for a degraded AUTO run.)
+      if (!autoDegraded) setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctx), sig, checkedAt, fetch: fetchRec } } }));
     } catch (e) {
       if (tok === drainTok.current) setDrainCtx((prev) => ({ error: String((e && e.message) || e), prev: prev?.prev }));
     }
@@ -6580,14 +6603,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
   const gsPondRings = els.filter((e) => e.type === "pond").map((e) => ringOf(e)).filter((r) => r && r.length >= 3);
   const gsParcelRings = drainActive.map((p) => p.points).filter((r) => r && r.length >= 3);
+  // B833 — apron/daylight inputs: the tie ratio (3:1 max default; the 4:1 mowable
+  // preference via the toggle), the daylight-ASAP grading preference, and the drawn
+  // easements the wedges must not cross.
+  const gsApronRatio = gsSettings.apron41 ? 4 : 3;
+  const gsDaylightAsap = !!gsSettings.daylightAsap;
+  const gsEasementRings = easeAll.map((m) => { try { return deriveEasementRing(m); } catch (_) { return null; } }).filter((r) => r && r.length >= 3);
   const gsInputs = {
     els: gsEls, ffeFt: fmEffectivePadFt, dockDropFt: gsDockDrop,
-    fieldT: gsFieldT, drainTarget: gsTarget, existAt: gsExistAt,
-    parcelRings: gsParcelRings, pondRings: gsPondRings,
-    opts: { existKey: gsExistKey },
+    fieldT: gsFieldT, drainTarget: gsTarget, daylightAsap: gsDaylightAsap, existAt: gsExistAt,
+    parcelRings: gsParcelRings, pondRings: gsPondRings, easementRings: gsEasementRings,
+    opts: { existKey: gsExistKey, apronRatio: gsApronRatio },
   };
   const gsSig = [
     fmEffectivePadFt ?? "", gsDockDrop, gsFieldT, gsExistKey,
+    gsApronRatio, gsDaylightAsap ? 1 : 0, gsEasementRings.map((r) => ringHash(r)).join(","),
     gsTarget ? `${Math.round(gsTarget.x)},${Math.round(gsTarget.y)}` : "",
     gsEls.map((e) => `${e.id}:${e.ring.length}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}:${e.dockStack ? Math.round(e.dockStack.x * 7 + e.dockStack.y * 3) : ""}`).join("|"),
     gsPondRings.map((r) => ringHash(r)).join(","), gsParcelRings.map((r) => ringHash(r)).join(","),
@@ -6727,6 +6757,91 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmWorst = fmCandidates && fmCandidates.length ? pickWorstCase(fmCandidates) : null;
   const fmResult = fmWorst ? fmWorst.result : fmCompute(fmRule);
 
+  // ---- B833 — transition wedges + pond berms are REAL fill in the mitigation ledger.
+  // (a) The surface engine's wedge cells price against the same zones/WSE chain as the
+  // footprints (wedgeMitigation) — the old footprint-only figure was a FLOOR.
+  // (e) A bermed pond's above-grade embankment: upland berms are earthwork only (not
+  // mitigable), but the below-WSE share of a berm whose toe crosses the mapped
+  // floodplain displaces storage and joins the requirement — flagged loudly.
+  const wedgeMitRule = fmWorst ? fmWorst.rule : fmRule;
+  const wedgeCellsIn = gradeSurface && gradeSurface.grid ? gradeSurface.grid.cells : null;
+  const wedgeMitSig = [gradeSurface ? gradeSurface.surfaceKey : "", fmZonesSig, wedgeMitRule ? `${wedgeMitRule.label}:${wedgeMitRule.ratio}:${wedgeMitRule.trigger}` : "",
+    fmElev.bfeFt ?? "", fmElev.existGradeFt ?? "", fmElev.wse02Ft ?? "", fmElev.derivedBfeFt ?? "", fmElev.derivedXsWselFt ?? "", fmElev.derivedWse02Ft ?? "", fmElev.derivedWse1pctFt ?? ""].join("~");
+  const wedgeMit = useMemo(() => (
+    wedgeCellsIn && fmZones.length
+      ? wedgeMitigation({ cells: wedgeCellsIn, zones: fmZones, rule: wedgeMitRule, elev: fmElev })
+      : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [wedgeMitSig, fmZones.length > 0]);
+  const pondBerms = (() => {
+    const list = [];
+    if (fmElev.existGradeFt == null) return list;
+    for (const e of els) {
+      if (e.type !== "pond") continue;
+      const det = detWithAuto(e.det);
+      const h = bermAsFillHeight(det, fmElev.existGradeFt);
+      if (h == null) continue;
+      const ring = ringOf(e);
+      if (!ring || ring.length < 3) continue;
+      const volCf = bermFillVolume(ring, h, gsApronRatio);
+      if (!(volCf > 0)) continue;
+      // Toe test: sample the toe ring (bank line pushed out h×ratio) against the
+      // trigger zones — ANY crossing flags; the priced share is the below-WSE slice
+      // of the embankment × the sampled in-floodplain fraction (screening).
+      let floodFrac = 0, toeSamples = 0;
+      if (fmZones.length) {
+        const toe = (offsetOutward(ring, h * gsApronRatio) || [])[0];
+        const classes = wedgeMitRule && wedgeMitRule.trigger === "1pct_plus_02pct" ? ["1pct", "02pct", "floodway"] : ["1pct", "floodway"];
+        const zonesIn = fmZones.filter((z) => classes.includes(z.cls));
+        if (toe && zonesIn.length) {
+          for (const p of toe) {
+            toeSamples++;
+            if (zonesIn.some((z) => pointInZone(p, z))) floodFrac++;
+          }
+          floodFrac = toeSamples ? floodFrac / toeSamples : 0;
+        }
+      }
+      const wse = fmGoverningBfe;
+      const belowWseH = wse != null && Number.isFinite(fmElev.existGradeFt) ? Math.max(0, Math.min(h, wse - fmElev.existGradeFt)) : null;
+      const floodCf = floodFrac > 0 && belowWseH != null && belowWseH > 0
+        ? (bermFillVolume(ring, belowWseH, gsApronRatio) || 0) * floodFrac
+        : 0;
+      list.push({ id: e.id, hFt: h, volCf, floodFrac, floodCf });
+    }
+    return list;
+  })();
+  const pondBermFillCf = pondBerms.reduce((s, b) => s + b.volCf, 0);
+  const pondBermFloodCf = pondBerms.reduce((s, b) => s + b.floodCf, 0) * (wedgeMitRule && isFinite(wedgeMitRule.ratio) ? wedgeMitRule.ratio : 1);
+  const pondBermFloodCount = pondBerms.filter((b) => b.floodFrac > 0).length;
+  // Fold the wedge + in-floodplain-berm volumes into the LIVE mitigation result so
+  // every consumer (verdict, Balance, combined basin, print, the remembered slim)
+  // stays consistent by construction. An UNKNOWN footprint volume stays unknown —
+  // wedges never turn an unknown into a number.
+  const fmResultWedged = fmResult && (wedgeMit || pondBermFloodCf > 0)
+    ? (() => {
+        const addCf = (wedgeMit ? wedgeMit.volumeCf : 0) + pondBermFloodCf;
+        const known = fmResult.volumeCf != null;
+        return {
+          ...fmResult,
+          wedgePriced: !!wedgeMit,
+          wedgeAcFt: wedgeMit ? wedgeMit.volumeAcFt : 0,
+          wedgeUnknownSf: wedgeMit ? wedgeMit.unknownSf : 0,
+          bermAcFt: pondBermFloodCf / 43560,
+          ...(known && addCf > 0 ? {
+            volumeCf: fmResult.volumeCf + addCf,
+            volumeAcFt: (fmResult.volumeCf + addCf) / 43560,
+            cutCy: (fmResult.volumeCf + addCf) / 27,
+          } : {}),
+          ...(wedgeMit && wedgeMit.floodwaySf > 0 ? {
+            flags: [...new Set([...(fmResult.flags || []), "floodway_intersect"])],
+            floodwayAcres: (fmResult.floodwayAcres || 0) + wedgeMit.floodwaySf / SQFT_PER_ACRE,
+            intersectAcres: (fmResult.intersectAcres || 0) + wedgeMit.floodwaySf / SQFT_PER_ACRE,
+          } : {}),
+          ...(fmResult.cells && wedgeMit && wedgeMit.cells.length ? { cells: [...fmResult.cells, ...wedgeMit.cells] } : {}),
+        };
+      })()
+    : fmResult;
+
   // NEW-2 — remembered mitigation. B750's slimDrainageContext deliberately drops the flood
   // GEOMETRY, so on a restored (remembered) check fmZones is empty → fmResult is null → the
   // whole mitigation ledger would silently vanish (the "mitigation isn't calculating" report).
@@ -6735,8 +6850,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const drainLastMitRecord = settings.drainage?.lastCheck?.mitigation || null; // { screened, summary } | null
   // (drainIsRestored is computed up with the flood context — NEW-9 moved it ahead of pondSplitFor.)
   const restoredMitSummary = drainIsRestored && drainLastMitRecord ? (drainLastMitRecord.summary || null) : null;
-  // Display ledger: the live result, else the remembered summary.
-  const fmResultView = fmResult || restoredMitSummary;
+  // Display ledger: the live result (B833: with wedges/berms folded in), else the
+  // remembered summary.
+  const fmResultView = fmResultWedged || restoredMitSummary;
   // (b) A remembered check with NO restorable mitigation (a legacy check saved before this fix,
   // or one whose flood-geometry screen failed) says so explicitly + prompts a re-check, instead
   // of hiding the ledger with no row and no reason.
@@ -6774,9 +6890,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // autosave — no schema/version bump (the B750 pattern). JSON-safe: numbers/bools/
   // null only, `?? null` never undefined (JSON drops undefined and a modern record
   // would then misread as legacy).
-  const drainRememberToPersist = drainCtx?.ctx && !drainIsRestored && settings.drainage?.lastCheck?.sig === drainSigNow
+  const drainRememberToPersist = drainCtx?.ctx && !drainIsRestored && !drainViewCtx?.degraded && settings.drainage?.lastCheck?.sig === drainSigNow
     ? {
-        mitigation: { screened: !!(floodGeo && floodGeo.state === "loaded"), summary: fmResult ? (({ cells, ...rest }) => rest)(fmResult) : null },
+        mitigation: { screened: !!(floodGeo && floodGeo.state === "loaded"), summary: fmResultWedged ? (({ cells, ...rest }) => rest)(fmResultWedged) : null },
         detSplit: {
           screened: !!(floodGeo && floodGeo.state === "loaded"),
           fmZonesSig,
@@ -6797,6 +6913,62 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? { ...sx, drainage: { ...sx.drainage, lastCheck: { ...sx.drainage.lastCheck, mitigation: drainRememberToPersist.mitigation, detSplit: drainRememberToPersist.detSplit } } }
       : sx));
   }, [drainRememberSig]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- B832 (chat NEW-12) — drainage facts auto-revalidate: ↻ becomes an override,
+  // not a gate. Load-kind: no in-session check + a missing/stale/incomplete remembered
+  // snapshot → ONE auto refresh shortly after open. Edit-kind: the drawn geometry
+  // OUTGREW the fetched envelope (or a point-sample anchor drifted > ~100 ft) → one
+  // coalesced auto refresh ~2.5 s after the last edit — pure moves inside the envelope
+  // never fetch (the ledgers already recompute live off cached facts). Discipline (the
+  // B366 class): debounce via effect re-arm, a ≥20 s floor between auto fires, ONE
+  // attempt per target key (a failed source stays honest last-good/unavailable — never
+  // a retry loop, never blocks editing), and skipped while the tab is hidden
+  // (multi-writer care: a background tab must not fight the active one; the lastCheck
+  // writes stay sig-keyed + JSON-guarded, so a duplicate write is idempotent).
+  // settings.drainage.autoFacts === false opts out (the headless legacy seeds use it).
+  const drainAutoEnabled = (settings.drainage?.autoFacts !== false) && !!origin && drainActive.length > 0;
+  const drainAutoAttempts = useRef(new Set());
+  const drainAutoLastAt = useRef(0);
+  const drainFactsNow = (() => {
+    if (!drainAutoEnabled) return { bboxNow: null, anchorNow: null, groundNow: null };
+    const pts = [];
+    const fillPts = [];
+    for (const p of drainActive) for (const pt of p.points) pts.push(pt);
+    for (const e of els) {
+      if (!FM_FILL_TYPES.has(e.type) && e.type !== "pond") continue;
+      try {
+        const r = ringOf(e);
+        if (r && r.length >= 3) { for (const pt of r) { pts.push(pt); if (FM_FILL_TYPES.has(e.type)) fillPts.push(pt); } }
+      } catch (_) { /* mid-edit */ }
+    }
+    const largest = drainActive.reduce((b, p) => (polyArea(p.points) > polyArea(b.points) ? p : b), drainActive[0]);
+    const cOf = (arr) => arr.reduce((s, p) => ({ x: s.x + p.x / arr.length, y: s.y + p.y / arr.length }), { x: 0, y: 0 });
+    return { bboxNow: envelopeOf(pts), anchorNow: cOf(fillPts.length ? fillPts : largest.points), groundNow: cOf(largest.points) };
+  })();
+  const drainReval = drainAutoEnabled
+    ? revalidationNeed({
+        hasSessionCtx: !!drainReadCtx,
+        lastCheck: settings.drainage?.lastCheck || null,
+        sigNow: drainSigNow,
+        ...drainFactsNow,
+        incomplete: drainIsRestored && (drainMitRememberedMissing || pondLedger.unknownIds.length > 0),
+      })
+    : { need: false, kind: null, reason: null, key: "" };
+  useEffect(() => {
+    if (!drainReval.need || drainCtx?.busy) return;
+    if (drainAutoAttempts.current.has(drainReval.key)) return; // one attempt per target — a failure is honest, never a loop
+    const delay = drainReval.kind === "load" ? 1200 : 2500;
+    const t = setTimeout(() => {
+      if (typeof document !== "undefined" && document.hidden) return; // yield to the active tab
+      if (Date.now() - drainAutoLastAt.current < 20000) return; // rate floor — the next edit re-arms
+      if (drainAutoAttempts.current.has(drainReval.key)) return;
+      drainAutoAttempts.current.add(drainReval.key);
+      drainAutoLastAt.current = Date.now();
+      checkDrainage({ auto: true });
+    }, delay);
+    return () => clearTimeout(t); // any geometry change re-arms the timer — the coalescing debounce
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drainReval.need, drainReval.key, drainCtx?.busy]);
 
   // Buildability (B710): FFE / pathway / LOMR-F / §404 screens off the same zones +
   // WSE inputs. Wetlands presence comes from the Site Analysis screen's own finding
@@ -6949,6 +7121,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     error: drainCtx?.error || null,
     restored: !!drainViewCtx?.restored,
     lastCheckedAt: drainViewCtx?.checkedAt ?? null,
+    // B832 — how the facts on screen were produced: a live check carries its own auto
+    // flag; a restored view reads the mode the remembered check recorded.
+    checkMode: drainViewCtx?.auto != null ? (drainViewCtx.auto ? "auto" : "manual")
+      : drainViewCtx?.restored ? (settings.drainage?.lastCheck?.fetch?.mode ?? null) : null,
     acres: acresActive,
     providedCf: providedDetCf, providedUsableCf, deadCf: siteDeadCf, pondCount,
     req: detReq, reqCandidates: detReqCandidates,
@@ -7057,7 +7233,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       value: outfallTypeEff, // null | "stormSewer" | "roadsideDitch" | "unknown"
       onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), outfallType: v || null } })),
     },
-    onCheck: checkDrainage,
+    onCheck: () => checkDrainage({ auto: false }), // B832 — ↻ is the explicit "force refresh now" override
   } : null;
 
   // Building properties (B198): clear height + slab thickness, auto-assigned from each
@@ -10703,22 +10879,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const pricedCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0) + (gsPriced ? gsG.cutCy : 0);
             const shrinkFactor = 1 + (gsShrinkPct ?? 0) / 100;
             const borrowCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0);
-            const netCy = gsPriced ? netImportCy({ fillCy: gsG.fillCy, cutCy: gsG.cutCy, borrowCy, shrinkFactor }) : null;
+            // B833(e) — pond berms are PLACED FILL: they join the fill side of the net
+            // (an upland berm is earthwork only; its in-floodplain share already joined
+            // the mitigation requirement above).
+            const bermCy = pondBermFillCf / 27;
+            const netCy = gsPriced ? netImportCy({ fillCy: gsG.fillCy + bermCy, cutCy: gsG.cutCy, borrowCy, shrinkFactor }) : null;
             const setGrading = (patch) => setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), ...patch } }));
             return (
               <Section title="Earthwork cost (screening)" accent="#0e7490" collapsed>
                 {pondCy > 0 && metricRow("Pond excavation", `${f0(pondCy)} CY`, pEarth != null ? usd(pondCy * pEarth) : "set $/CY")}
+                {bermCy > 0 && metricRow("Pond berms — fill", `${f0(bermCy)} CY`, `placed embankment · ${gsApronRatio}:1 face`)}
                 {mitRelevant && (mitKnown
                   ? metricRow("Floodplain mitigation cut", `${f0(mitCy)} CY`, pEarth != null ? usd(mitCy * pEarth) : "set $/CY")
                   : metricRow("Floodplain mitigation cut", "UNKNOWN", fmGeoFailed ? "flood source unavailable" : "enter elevations"))}
                 {gsG && (gsPriced ? (<>
                   {metricRow("Graded surface — cut", `${f0(gsG.cutCy)} CY`, pEarth != null ? usd(gsG.cutCy * pEarth) : "set $/CY")}
                   {metricRow("Graded surface — fill", `${f0(gsG.fillCy)} CY`, "placed (compacted)")}
+                  {gsG.wedgeFillCy > 0.5 && metricRow("· incl. transition wedges", `${f0(gsG.wedgeFillCy)} CY`, `daylight fringe @ ${gsApronRatio}:1`)}
                   {metricRow("Net dirt (screening)", `${f0(Math.abs(netCy))} CY ${netCy > 0 ? "import" : "export"}`,
                     gsShrinkPct == null ? "no shrink applied" : `@ ${gsShrinkPct}% shrink`)}
                 </>) : (
                   metricRow("Graded surface cut / fill", "UNKNOWN", "no ground elevation — ↻ re-check drainage")
                 ))}
+                {pondBermFloodCount > 0 && (
+                  <div title="A berm's toe (the outer foot of its embankment) reaches into the mapped floodplain — that face displaces flood storage. Its below-WSE share already joined the mitigation requirement (screening: sampled toe share × the below-WSE slice); the crossing itself is the loud fact. Engineer confirms." style={{ fontSize: 10.5, fontWeight: 700, color: "var(--warn-text)", lineHeight: 1.45, margin: "4px 0 0", cursor: "help" }}>
+                    ⚠ {pondBermFloodCount} pond berm{pondBermFloodCount > 1 ? "s" : ""} toe{pondBermFloodCount > 1 ? "" : "s"} into the mapped floodplain — its fill is priced into mitigation.<span style={{ fontSize: 9.5, marginLeft: 4 }} aria-hidden="true">ⓘ</span>
+                  </div>
+                )}
                 {!drainageChecked && (
                   <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "4px 0 0", fontWeight: 700 }}>
                     Floodplain mitigation not screened yet — run ⛆ Check drainage criteria; this takeoff is INCOMPLETE until then, not zero.
@@ -10736,7 +10923,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <button style={chip} disabled={!gsPriced}
                       title="One click: finds the uniform paving-field lower/raise (sweeping every floating class between its band floor and cap — the threshold tie at the doors holds by construction) that nets the dirt closest to zero, and applies it."
                       onClick={() => {
-                        const res = balanceAssist({ buildAtT: gsBuildAtT, shrinkFactor, borrowCy });
+                        // B833 — berm fill rides the fill side of the balance target too.
+                        const res = balanceAssist({ buildAtT: gsBuildAtT, shrinkFactor, borrowCy: borrowCy - bermCy * shrinkFactor });
                         if (res) { pushHistory(); setGrading({ fieldT: res.t }); }
                       }}>⚖ Balance the dirt</button>
                     {gsFieldT > 0 && (
@@ -10748,8 +10936,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 )}
                 {gsG && (
                   <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer", marginTop: 8 }}
-                    title="Paints proposed − existing per cell over the plan — warm = fill, cool = cut, grey hatch = no ground data. Same cells these rows summed (engine truth). Turns the fill-depth heat map off while on — one exhibit at a time.">
+                    title="Paints proposed − existing per cell over the plan — warm = fill, cool = cut, grey hatch = no ground data. Same cells these rows summed (engine truth). Turns the fill-depth heat map off while on — one exhibit at a time. The dashed daylight line (where fill/cut tapers to existing ground) rides either exhibit.">
                     <input type="checkbox" checked={cfHeatUser} onChange={(e) => setCfHeatUser(e.target.checked)} /> Cut/fill map on the plan
+                  </label>
+                )}
+                {gsG && (
+                  <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer", marginTop: 6 }}
+                    title="B833 — grade each paving field toward the drainage target at its class slope CEILING (the steepest maintainable rate), so the surface gets down to existing ground sooner and the transition wedge past each edge starts lower and daylights earlier — less fill in the floodplain. While on, the ⚖ balance sweep has nothing left to vary (an explicit per-element slope override still wins).">
+                    <input type="checkbox" checked={gsDaylightAsap} onChange={(e) => { pushHistory(); setGrading({ daylightAsap: e.target.checked || null }); }} /> Daylight ASAP (steepest legal field)
+                  </label>
+                )}
+                {gsG && (
+                  <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer", marginTop: 6 }}
+                    title="B833 — the daylight wedges default to the 3:1 maximum tie-down (the steepest allowed, smallest fringe). Check for the 4:1 mowable preference — a gentler face that takes more room and more fill; the mitigation and earthwork numbers follow.">
+                    <input type="checkbox" checked={!!gsSettings.apron41} onChange={(e) => { pushHistory(); setGrading({ apron41: e.target.checked || null }); }} /> 4:1 transition slopes (mowable)
                   </label>
                 )}
                 <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
@@ -11664,6 +11864,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   truth — picture and rows cannot diverge). Warm = fill, cool = cut, grey
                   hatch = no ground data. Rides the live SVG → print/PDF (PDF-PARITY);
                   only the hover chip is export-skipped. */}
+              {/* B833(c) — the daylight line: where each graded element's fill/cut taper
+                  meets existing ground (the no-more-fill boundary). Rides EITHER exhibit
+                  as a subtle dashed contour; same taper model the wedge cells price, so
+                  the line and the painted fringe agree by construction. */}
+              {(cfHeatOn || fmHeatOn) && gradeSurface && gradeSurface.daylight && gradeSurface.daylight.length > 0 && (
+                <g pointerEvents="none" data-daylight="1">
+                  {gradeSurface.daylight.map((d) => (
+                    <path key={`dl-${d.elId}`}
+                      d={d.ring.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z"}
+                      fill="none" stroke={PAL.muted} strokeWidth={1.1} strokeDasharray="5 4" opacity={0.65} />
+                  ))}
+                </g>
+              )}
               {cfHeatOn && cfHeat && (() => {
                 const b = cfHeat.bboxFt;
                 const tl = f2p({ x: b.x, y: b.y });
@@ -15551,8 +15764,14 @@ function YieldPanel({
               if (d.stale) { statusText = `⚠ As of ${checkedOnDate || "your last check"} — site boundary changed since; numbers below reflect the old boundary`; statusWarn = true; }
               else if (d.showingPrior && !busy) { statusText = `Re-check failed (${d.error}) — showing the previous result`; statusWarn = true; }
               else if (busy) statusText = d.showingPrior ? "Re-checking… showing the previous result" : "Checking…";
-              else if (d.restored && checkedOnDate) statusText = `As of ${checkedOnDate} · remembered from your last check`;
-              else if (checkedOnDate) statusText = `Checked ${checkedOnDate}`;
+              // B832 — the facts line carries HOW they were produced (auto vs manual)
+              // and reads a same-day time instead of a bare date.
+              else if (d.restored && checkedOnDate) statusText = `As of ${checkedOnDate} · remembered from your last check${d.checkMode ? ` · ${d.checkMode}` : ""}`;
+              else if (d.lastCheckedAt) {
+                const w = new Date(d.lastCheckedAt);
+                const label = w.toDateString() === new Date().toDateString() ? w.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : checkedOnDate;
+                statusText = `Facts as of ${label}${d.checkMode ? ` · ${d.checkMode}` : ""}`;
+              }
               else statusText = "Checked this session";
               out.push(
                 <div key="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "7px 0 2px", ...(statusWarn ? { border: `1px solid ${Y.warnText}`, borderRadius: 8, padding: "6px 9px", background: Y.cardBg } : {}) }}>
@@ -15824,10 +16043,21 @@ function YieldPanel({
                 // Provided row above instead of being footnoted away.
                 if (d.mitProvided && d.mitProvided.uncreditedCf > 0.05 * 43560) mitR.push(warnNote(`Below-WSE cut in detention-role ponds: ${f2(d.mitProvided.uncreditedCf / 43560)} ac-ft — uncredited.`, "mit-cand",
                   "This volume sits below the flood WSE in ponds whose role is Detention, so it is credited to neither ledger (it earns no detention credit either). Set a pond's role to Mitigation or Dual in its inspector to credit its below-WSE cut here."));
-                // B833 (filed) — the flat-pad model prices element footprints only; daylight
-                // wedges past pad/court edges are real fill too. Say the floor out loud.
-                mitR.push(warnNote("Fill priced at element footprints — daylight/transition slopes aren't counted yet; treat as a floor.", "mit-wedge-floor",
-                  "Past a pad or court edge, fill continues as a graded wedge (3:1 default) down to existing grade; inside the mapped floodplain that wedge displaces storage too. Pricing those transition wedges is filed as B833 — until it lands, the required volume above is a FLOOR."));
+                // B833 — transition wedges + in-floodplain pond berms are REAL fill: when the
+                // proposed surface priced them, the required volume above already includes
+                // them and the delta is named; without the surface the footprint-only figure
+                // stays honestly labeled a FLOOR.
+                if (mit.wedgePriced) {
+                  if (mit.wedgeAcFt > 0) mitR.push(warnNote(`+${f2(mit.wedgeAcFt)} ac-ft of the requirement comes from transition slopes past pad edges.`, "mit-wedge",
+                    "Past every graded edge the fill continues as a daylight wedge (3:1 default, 4:1 with the mowable toggle) down to existing ground; inside the mapped floodplain that wedge displaces storage too, so it joins the required volume. Priced from the auto-graded surface's transition cells — screening; the wedge fringe renders on the cut/fill map."));
+                  if (mit.wedgeUnknownSf > 0.02 * SQFT_PER_ACRE) mitR.push(warnNote(`~${f2(mit.wedgeUnknownSf / SQFT_PER_ACRE)} ac of wedge sits on unpriceable cells — the wedge share is a floor.`, "mit-wedge-unk",
+                    "Part of the transition fringe crosses DEM voids or zones without a usable water surface — those cells price nothing (never zero-as-a-number). Enter a BFE or re-check to close the gap."));
+                  if (mit.bermAcFt > 0) mitR.push(warnNote(`+${f2(mit.bermAcFt)} ac-ft from pond berms whose toe crosses the mapped floodplain.`, "mit-berm",
+                    "A bermed pond's embankment is placed fill; the below-WSE share of a berm face inside the floodplain displaces storage, so it joins the requirement (sampled toe share × the below-WSE slice — screening; upland berms price as earthwork only, never here)."));
+                } else {
+                  mitR.push(warnNote("Fill priced at element footprints — daylight/transition slopes aren't counted here; treat as a floor.", "mit-wedge-floor",
+                    "Past a pad or court edge, fill continues as a graded wedge (3:1 default) down to existing grade; inside the mapped floodplain that wedge displaces storage too. Wedges price automatically once the auto-graded surface exists — enter an FFE (or let the code-minimum auto-pad engage) to generate it."));
+                }
               } else if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) {
                 // B824 — card-migrated honest state: a verified NONE is said out loud.
                 mitR.push(keyedNote("No mapped flood zones intersect the site envelope (FEMA NFHL, verified source) — no mitigation trigger on this screening pull.", "mit-nozones"));

@@ -430,6 +430,31 @@ export function ringInTrigger(ring, zones, rule) {
  *                  sources: { padElev?, existGrade? } }  (all optional; sources are
  *                  plain provenance labels the caller sets, e.g. "manual" | "3dep")
  * Pure. */
+/* A zone's water surface (feet NAVD88), by provider precedence — the ONE chain both
+ * computeMitigation and wedgeMitigation (B833) price against:
+ *   1% zones: published static BFE → (AO) grade + its published DEPTH → manual BFE →
+ *   derived XS WSEL (B763) → derived BFE-line interpolation (B755) → derived DRAFT
+ *   1% raster (B807, caller-named source) → unknown. An AO zone's own DEPTH is that
+ *   zone's published data — a manual BFE entered for a nearby AE reach must never
+ *   override it (sheet-flow ponding isn't riverine backwater).
+ *   0.2% band: manual WSE → derived 0.2% (B763 seam, caller-named source) → unknown.
+ * env values are already realElev()-cleaned by the caller. Pure. */
+export function zoneWaterSurface(z, { grade = null, wse02 = null, manualBfe = null, derivedXsWsel = null, derivedBfe = null, derived1pct = null, derived02 = null, derivedWse1pctSrc = null, derivedWse02Src = null } = {}) {
+  let wse = null, wseSrc = null;
+  if (z.cls === "1pct") {
+    if (z.staticBfeFt != null) { wse = z.staticBfeFt; wseSrc = "static-bfe"; }
+    else if (z.aoDepthFt != null && grade != null) { wse = grade + z.aoDepthFt; wseSrc = "ao-depth"; }
+    else if (manualBfe != null) { wse = manualBfe; wseSrc = "manual"; }
+    else if (derivedXsWsel != null) { wse = derivedXsWsel; wseSrc = "xs-wsel"; }
+    else if (derivedBfe != null) { wse = derivedBfe; wseSrc = "bfe-line-interp"; }
+    else if (derived1pct != null) { wse = derived1pct; wseSrc = derivedWse1pctSrc || "derived-wse100"; }
+  } else if (z.cls === "02pct") {
+    if (wse02 != null) { wse = wse02; wseSrc = "manual"; }
+    else if (derived02 != null) { wse = derived02; wseSrc = derivedWse02Src || "xs-wsel-02"; }
+  }
+  return { wse, wseSrc };
+}
+
 export function computeMitigation({ footprints = [], zones = [], rule = null, elev = {}, opts = {} } = {}) {
   const classes = rule ? triggerClasses(rule) : ["1pct"];
   const ratio = rule && isFinite(rule.ratio) ? rule.ratio : 1;
@@ -474,41 +499,9 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
     const bucket = perClass[z.cls];
     if (!bucket) continue; // a class outside this rule's trigger (e.g. 02pct under a 1pct-only rule)
 
-    // The zone's water surface (feet NAVD88), by provider precedence:
-    //   1% zones: published static BFE → (AO) grade + its published DEPTH → manual
-    //   BFE → unknown. An AO zone's own DEPTH is that zone's published data — a
-    //   manual BFE entered for a nearby AE reach must never override it (sheet-flow
-    //   ponding isn't riverine backwater; pricing it off the AE BFE mis-prices both
-    //   ways). 0.2% band: manual WSE only in v1 (not an NFHL attribute; named hook
-    //   for HCFCD/MAAPnext grids later).
-    let wse = null, wseSrc = null;
-    if (z.cls === "1pct") {
-      if (z.staticBfeFt != null) { wse = z.staticBfeFt; wseSrc = "static-bfe"; }
-      else if (z.aoDepthFt != null && grade != null) { wse = grade + z.aoDepthFt; wseSrc = "ao-depth"; }
-      else if (manualBfe != null) { wse = manualBfe; wseSrc = "manual"; }
-      // Derived screening 1% WSE from FEMA's S_XS cross-sections (WSEL_REG on the nearest
-      // reach, B763) — ranks below manual entry but ABOVE the S_BFE-line interpolation
-      // (a modeled regulatory WSE beats a read-between-contours estimate).
-      else if (derivedXsWsel != null) { wse = derivedXsWsel; wseSrc = "xs-wsel"; }
-      // Last resort before UNKNOWN: a BFE DERIVED by interpolating FEMA's S_BFE lines
-      // (B755). Manual entry above still wins; a zone's own published data (static BFE,
-      // AO depth) always wins — the derived value only fills a genuine gap.
-      else if (derivedBfe != null) { wse = derivedBfe; wseSrc = "bfe-line-interp"; }
-      // ABSOLUTE last (B807): a derived 1% WSE from a DRAFT study raster (the FBCDD
-      // Atlas-14 grids — the unstudied-Zone-A pricing path). Every effective-model
-      // provider above outranks it: FBC Interim §9's mitigation basis is the
-      // PRE-Atlas-14 effective floodplain, so this is a labeled stand-in, never a peer.
-      // The caller names the source via elev.derivedWse1pctSrc (e.g. "fbcdd-wse100-draft")
-      // so provenance is never lost; the generic default can't claim FBCDD provenance.
-      else if (derived1pct != null) { wse = derived1pct; wseSrc = elev.derivedWse1pctSrc || "derived-wse100"; }
-    } else if (z.cls === "02pct") {
-      // 0.2% band: a manually-entered WSE wins; else a derived 0.2% WSE (B763 engine
-      // seam). The caller names the derived source via elev.derivedWse02Src (e.g. the
-      // FBCDD Atlas-14 DRAFT raster, "fbcdd-wse02-draft") so the provenance label is
-      // never lost; absent, the seam keeps its original "xs-wsel-02" tag (back-compat).
-      if (wse02 != null) { wse = wse02; wseSrc = "manual"; }
-      else if (derived02 != null) { wse = derived02; wseSrc = elev.derivedWse02Src || "xs-wsel-02"; }
-    }
+    // The zone's water surface — the shared provider chain (extracted for B833's
+    // wedgeMitigation so the wedge cells price against the SAME precedence).
+    const { wse, wseSrc } = zoneWaterSurface(z, { grade, wse02, manualBfe, derivedXsWsel, derivedBfe, derived1pct, derived02, derivedWse1pctSrc: elev.derivedWse1pctSrc, derivedWse02Src: elev.derivedWse02Src });
 
     for (const fp of footprints) {
       const ring = fp.ring;
@@ -681,6 +674,74 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
         : [...wse02Providers].find((s) => s !== "manual") || null,
       expert: expert ? "avg-fill-depth" : null,
     },
+  };
+}
+
+/* B833 — price the proposed-surface TRANSITION WEDGES against the same trigger zones
+ * and WSE provider chain as computeMitigation. Wedge cells come from the surface
+ * engine's grid (cells with wedge:true carry their own proposed/existing elevations,
+ * propFt/gFt — no footprint ring or pad needed). Fill wedges only (dzFt > 0): the cut
+ * fringe stores nothing to displace. Floodway wedge fill is geometry + the hard flag
+ * (prohibited, not priced) — same discipline as footprint fill. Depth per cell =
+ * max(0, min(WSE, proposed) − existing); an AO zone prices its published depth riding
+ * the cell's own ground, capped by the proposed surface (the B808 close-out rule).
+ * Ratio applies at the end. Retained cells match the heat-map fill-depth shape
+ * ({ cls, fpId, x, y, wFt, hFt, depthFt|null }) so the exhibit paints the fringe.
+ * Pure. */
+export function wedgeMitigation({ cells = [], zones = [], rule = null, elev = {} } = {}) {
+  const classes = rule ? triggerClasses(rule) : ["1pct"];
+  const ratio = rule && isFinite(rule.ratio) ? rule.ratio : 1;
+  const env = {
+    grade: realElev(elev.existGradeFt),
+    wse02: realElev(elev.wse02Ft),
+    manualBfe: realElev(elev.bfeFt),
+    derivedXsWsel: realElev(elev.derivedXsWselFt),
+    derivedBfe: realElev(elev.derivedBfeFt),
+    derived1pct: realElev(elev.derivedWse1pctFt),
+    derived02: realElev(elev.derivedWse02Ft),
+    derivedWse1pctSrc: elev.derivedWse1pctSrc || null,
+    derivedWse02Src: elev.derivedWse02Src || null,
+  };
+  let volumeCf = 0, intersectSf = 0, unknownSf = 0, floodwaySf = 0;
+  const out = [];
+  for (const c of cells) {
+    if (!c || c.wedge !== true || !(c.dzFt > 0)) continue;
+    const pt = { x: c.x, y: c.y };
+    const A = (c.wFt || 0) * (c.hFt || 0);
+    if (!(A > 0)) continue;
+    const fw = zones.find((z) => z.cls === "floodway" && pointInZone(pt, z));
+    if (fw) {
+      floodwaySf += A;
+      out.push({ cls: "floodway", fpId: `${c.elId}:wedge`, x: c.x, y: c.y, wFt: c.wFt, hFt: c.hFt, depthFt: null });
+      continue;
+    }
+    const z = zones.find((zz) => classes.includes(zz.cls) && pointInZone(pt, zz));
+    if (!z) continue;
+    intersectSf += A;
+    const { wse, wseSrc } = zoneWaterSurface(z, env);
+    const g = Number.isFinite(c.gFt) ? c.gFt : null;
+    const top = Number.isFinite(c.propFt) ? c.propFt : null;
+    if (wse == null || g == null || top == null) {
+      unknownSf += A;
+      out.push({ cls: z.cls, fpId: `${c.elId}:wedge`, x: c.x, y: c.y, wFt: c.wFt, hFt: c.hFt, depthFt: null });
+      continue;
+    }
+    const depth = wseSrc === "ao-depth" && z.aoDepthFt != null
+      ? Math.max(0, Math.min(z.aoDepthFt, top - g))
+      : Math.max(0, Math.min(wse, top) - g);
+    volumeCf += A * depth;
+    out.push({ cls: z.cls, fpId: `${c.elId}:wedge`, x: c.x, y: c.y, wFt: c.wFt, hFt: c.hFt, depthFt: depth });
+  }
+  volumeCf *= ratio;
+  return {
+    volumeCf,
+    volumeAcFt: volumeCf / SQFT_PER_ACRE,
+    cutCy: volumeCf / CF_PER_CY,
+    intersectSf,
+    unknownSf,
+    floodwaySf,
+    ratio,
+    cells: out,
   };
 }
 
