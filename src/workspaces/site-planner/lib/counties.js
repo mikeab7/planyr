@@ -208,18 +208,22 @@ export const JURISDICTION_LAYERS = {
       // source (covers Fort Bend + Harris + everywhere), available regardless of which
       // county is in view. The old Fort-Bend-only layer was removed here to avoid a dupe.
       fb_contours: {
-        // B469/NEW-6 — explicit dynamic (server-rendered export-image) layer. Its host
-        // (arcgisweb.fortbendcountytx.gov) sends no CORS headers, so its ?f=json health probe is
-        // routed through the same-origin B445 cache proxy (see probeService); the f=image export
-        // already proxies and renders via a CORS-exempt <img>.
+        // B469/B691 — explicit dynamic (server-rendered export-image) layer. Its host
+        // (arcgisweb.fortbendcountytx.gov) sends no CORS headers: a direct ?f=json probe can never
+        // be read AND prints an uncatchable red console error per attempt, so `noCors: true` makes
+        // probeService health-check through the same-origin B445 cache proxy ONLY (see layers.js).
+        // Proxy disabled/undeployed/unreachable → the same optimistic add a direct CORS failure
+        // produced (never a hard dependency on the proxy); the f=image export already proxies and
+        // renders via a CORS-exempt <img>.
         kind: "dynamic",
+        noCors: true,
         // B762: folds into the Basemap group under the USGS contour row (Fort Bend is a
         // single-layer county, so it no longer gets its own dropdown). Label names the county
         // + authority since it sits next to the statewide USGS contours there.
         label: "1-ft contours (Fort Bend DD)",
         url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
         layers: null,
-        note: "Fort Bend Drainage District 1-foot contours. Exists ONLY in Fort Bend County — the statewide USGS contour layer above covers everywhere else.",
+        note: "Fort Bend Drainage District 1-foot contours. Exists ONLY in Fort Bend County — the statewide USGS contour layer above covers everywhere else. Health checked via the same-origin proxy (county host sends no CORS headers).",
         opacity: 0.7,
       },
     },

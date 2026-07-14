@@ -134,7 +134,14 @@ async function checkMultiplexCatalog(key, s) {
   const tableNames = new Set(services.map((x) => x.name));
   const liveSet = new Set(liveMatch);
   for (const n of liveMatch) {
-    if (!tableNames.has(n)) problems.push(`${key} multiplex: LIVE service "${n}" missing from the registry table — coverage the app can't route to.`);
+    if (!tableNames.has(n)) {
+      const msg = `${key} multiplex: LIVE service "${n}" missing from the registry table — coverage the app can't route to.`;
+      // B821 — a provisional table is a KNOWINGLY-incomplete seed (the live directory can't be
+      // enumerated from the build sandbox): live-not-in-table diffs are recon notes, not failures,
+      // so the weekly check isn't permanently red. Dead-endpoint + extent-drift stay problems.
+      if (s.multiplex.provisional) notes.push(`${msg} (provisional seed table, B821 — bake this service in.)`);
+      else problems.push(msg);
+    }
   }
   for (const x of services) {
     if (!liveSet.has(x.name)) {
@@ -153,7 +160,7 @@ async function checkMultiplexCatalog(key, s) {
       problems.push(`${key} multiplex: "${x.name}" metadata failed — ${e.message}`);
     }
   }
-  if (!problems.length) notes.push(`${key} multiplex: ${services.length} services match the live catalog, extents within ±1 ft ✓`);
+  if (!problems.length) notes.push(`${key} multiplex: ${services.length} services match the live catalog, extents within ±1 ft ✓${s.multiplex.provisional ? " (provisional seed table)" : ""}`);
   return { problems, notes };
 }
 

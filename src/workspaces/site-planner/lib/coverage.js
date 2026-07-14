@@ -197,7 +197,7 @@ export function setLayerExtent(id, bounds) { hydrate(); _extent.set(id, bounds |
 export function _resetCoverageCache() { _extent.clear(); _hydrated = false; } // tests only
 
 /* Ensure every REGIONAL layer in `layers` has had its extent read from its health
- * probe. `probe(url)` is layers.js probeService (cached + deduped), whose result now
+ * probe. `probe(url, cfg)` is layers.js probeService (cfg rides along for the B691 noCors flag) (cached + deduped), whose result now
  * carries `fullExtent`/`extent`. One tiny ?f=json per regional layer, ever (then it's
  * cached across reloads) — this is the "no extra request" the brief calls for: the
  * extent rides the same health probe, just captured. Returns a promise. */
@@ -208,7 +208,7 @@ export async function prefetchExtents(layers, probe) {
     .map(async ([id, cfg]) => {
       _extent.set(id, "pending"); // dedupe concurrent callers
       try {
-        const r = await probe(cfg.url);
+        const r = await probe(cfg.url, cfg);
         const raw = r && (r.fullExtent || r.extent);
         _extent.set(id, esriExtentToBounds(raw));
       } catch (_) {

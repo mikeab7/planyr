@@ -127,11 +127,16 @@ async function openAndCheck(browser, { county, fips, countyName, padFfeFt, fbcdd
   const checkBtn = page.getByRole("button", { name: /Check drainage criteria/ });
   await checkBtn.waitFor({ timeout: 8000 });
   await checkBtn.click();
-  await page.getByText("Detention required", { exact: false }).waitFor({ timeout: 30000 }).catch(() => {});
+  await page.locator('button:has-text("▸ Detention")').waitFor({ timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(800);
-  // Site Analysis → the FloodMitigationCard.
-  await page.getByRole("button", { name: "Analysis", exact: true }).first().click({ timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(1000);
+  // B824 — the Stormwater readout is grouped + COLLAPSED by default; expand all three
+  // verdict groups so the detail (formerly the Site Analysis card) is in the DOM.
+  for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
+    await page.locator(`button:has-text("${g}")`).first().click({ timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(400);
+  // B824 — the card merged into Yield → Stormwater: read the detail text here.
   const text = (await page.locator("body").innerText()).replace(/\s+/g, " ");
   return { ctx, page, text };
 }

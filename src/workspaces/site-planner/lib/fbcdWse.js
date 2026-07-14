@@ -5,7 +5,9 @@
  * on the county's ArcGIS Image Server. This module reads ONE elevation off a grid at
  * a point — the same getSamples pattern as the USGS 3DEP ground-elevation sampler
  * (elevation.js) — feeding the drainage check's derived WSE seams:
- *   • 0.2% (500-yr) → derivedWse02Ft, from the county-wide 500YR_WSE mosaic;
+ *   • 0.2% (500-yr) → derivedWse02Ft, from the county-wide 500YR_WSE mosaic — MOSAIC-FIRST,
+ *     with a per-watershed 500YR fallback where the mosaic has a HOLE (B821, live-proven at
+ *     Bain Ditch / Willow Fork; same multiplex router as the 1% path, provisional seed table);
  *   • 1% (100-yr)  → derivedWse1pctFt (B807), from the PER-WATERSHED 100YR rasters —
  *     there is no county-wide 100-yr mosaic, so the sampler routes the point to the
  *     watershed service(s) whose published extent contains it (the `multiplex` table in
@@ -64,7 +66,25 @@ async function getSampleValue(serviceUrl, lat, lng, { timeoutMs = 8000, fetchImp
  * request; `timeoutMs` (default 8s) bounds the call so a hung county server can't
  * stall the drainage check that awaits it. Throws on HTTP/service errors. */
 export async function sampleWse02Point(lat, lng, opts = {}) {
-  return getSampleValue(FBCDD_WSE02_URL, lat, lng, opts);
+  const { timeoutMs, fetchImpl, signal, services } = opts;
+  // 1) MOSAIC FIRST. A finite value wins outright; an ERROR throws (LOUD-FAILURE — an outage
+  //    must read "failed", never get masked by a narrower per-watershed answer).
+  const mosaic = await getSampleValue(FBCDD_WSE02_URL, lat, lng, { timeoutMs, fetchImpl, signal });
+  if (mosaic != null) return mosaic;
+  // 2) Mosaic EMPTY → could be a mosaic HOLE (B821, live-proven at Bain Ditch / Willow Fork):
+  //    route through the per-watershed 500YR rasters — the same bbox+seam router as B807's
+  //    100YR path (which stays candidates-only BY DESIGN: no county-wide 100-yr mosaic exists).
+  //    Zero candidates → honest null with zero fallback fetches. ANY candidate error rejects
+  //    the whole call (the B807 contract). Router rule, documented: mosaic-first, then MAX
+  //    finite across covering candidates (governing WSE).
+  const mux = gisSource("fbcddWse02").multiplex;
+  const candidates = wse02CandidatesForPoint(lat, lng, services || mux.services);
+  if (!candidates.length) return null;
+  const values = await Promise.all(candidates.map(({ name }) =>
+    getSampleValue(`${mux.restBase}/${name}/ImageServer`, lat, lng, { timeoutMs, fetchImpl, signal })));
+  let best = null;
+  for (const v of values) if (v != null && (best == null || v > best)) best = v;
+  return best; // plain number (the pre-B821 caller contract) — or honest null
 }
 
 /* Watershed seams: the extents are exact published rectangles, but a site straddling a
@@ -75,10 +95,20 @@ const SEAM_PAD_FT = 1000;
 /* Which per-watershed 100-yr rasters COULD cover a WGS84 point — pure bbox routing
  * against the registry's baked SR-2278 extents (padded for seams). `services` defaults
  * to the registry multiplex table; injectable for tests. Returns [{ name, extent2278 }]. */
-export function wse100CandidatesForPoint(lat, lng, services = gisSource("fbcddWse100").multiplex.services) {
+function candidatesForPoint(lat, lng, services) {
   const { x, y } = projectToGrid(lat, lng);
   return services.filter(({ extent2278: [xmin, ymin, xmax, ymax] }) =>
     x >= xmin - SEAM_PAD_FT && x <= xmax + SEAM_PAD_FT && y >= ymin - SEAM_PAD_FT && y <= ymax + SEAM_PAD_FT);
+}
+
+export function wse100CandidatesForPoint(lat, lng, services = gisSource("fbcddWse100").multiplex.services) {
+  return candidatesForPoint(lat, lng, services);
+}
+
+/* Which per-watershed 500YR rasters COULD cover a WGS84 point (B821) — the same pure bbox
+ * routing as the 100YR router, against the fbcddWse02 registry multiplex table. */
+export function wse02CandidatesForPoint(lat, lng, services = gisSource("fbcddWse02").multiplex.services) {
+  return candidatesForPoint(lat, lng, services);
 }
 
 /* Sample the DRAFT 1% (100-yr) WSE at ONE point (WGS84 lat/lng) across the per-watershed

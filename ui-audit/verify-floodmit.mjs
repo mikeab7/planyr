@@ -118,16 +118,17 @@ async function run() {
       if (!(await page.getByText(/Checking drainage criteria/i).count())) break;
     }
     const errState = (await page.getByText(/Couldn't resolve the drainage authority|unavailable/i).count()) > 0;
-    const okState = (await page.getByText(/Detention required/i).count()) > 0;
+    const okState = (await page.locator('button:has-text("▸ Detention")').count()) > 0;
     check("drainage check resolves to an HONEST state (error or result)", errState || okState, errState ? "error state (expected in sandbox)" : "result state");
     await page.screenshot({ path: OUT + "04-drainage-after-check.png" });
   } catch (e) { check("drainage check click", false, e.message); }
 
-  // ---- 3. Site Analysis: the mitigation & buildability card ----
+  // ---- 3. B824 — Site Analysis carries only the screening LINK row now; the mitigation
+  // detail lives in Yield → Stormwater's collapsed verdict groups. ----
   const saTab = page.getByText("Site Analysis", { exact: false }).first();
   try { await saTab.click({ timeout: 4000 }); await page.waitForTimeout(800); } catch (_) {}
-  check("Floodplain mitigation & buildability card", (await page.getByText("Floodplain mitigation", { exact: false }).count()) > 0);
-  await page.screenshot({ path: OUT + "05-analysis-card.png" });
+  check("Analysis link row → Yield · Stormwater", (await page.getByText("in Yield · Stormwater", { exact: false }).count()) > 0);
+  await page.screenshot({ path: OUT + "05-analysis-link.png" });
 
   await browser.close();
   const failed = results.filter((r) => !r.ok);

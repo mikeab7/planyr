@@ -42,7 +42,6 @@ import LayerPanel from "./components/LayerPanel.jsx";
 import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import ViewMenu from "./components/ViewMenu.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
-import FloodMitigationCard from "./components/FloodMitigationCard.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
 import FloatingPanel from "../../shared/ui/FloatingPanel.jsx";
@@ -107,6 +106,8 @@ import {
   floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines,
   crossSectionWselFromFeatureCollection, governingCrossSectionWsel,
   NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
+  DERIVED_BFE_NOTE, DERIVED_XS_WSEL_NOTE, DERIVED_WSE02_DRAFT_NOTE, DERIVED_WSE100_DRAFT_NOTE,
+  wseProvLabel, ffeBasisText,
 } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
@@ -9894,11 +9895,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
                       isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus}
                       onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
-                    {/* B712 — the floodplain mitigation & buildability card. A SIBLING card,
-                        deliberately NOT injected into the auto-refreshing flood finding above:
-                        this data is button-gated (the drainage check) with its own staleness
-                        clock — two freshness models in one card would lie about data age. */}
-                    <FloodMitigationCard drainage={drainage} PAL={PAL} onCheck={drainage?.onCheck} />
+                    {/* B824 — drainage & mitigation live in ONE home now: Yield → Stormwater
+                        (the B712 sibling card was merged there — split-brain fix). Analysis keeps
+                        exactly this screening link row, not a duplicate ledger; the auto-refreshing
+                        flood finding above stays SiteAnalysis's own. */}
+                    <button type="button" onClick={() => setLeftPanel("yield")}
+                      style={{ marginTop: 8, width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 10px", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                      <span>Floodplain drainage &amp; mitigation</span>
+                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Yield · Stormwater →</span>
+                    </button>
                   </>
                 );
               })()}
@@ -14500,6 +14505,9 @@ function YieldPanel({
   // inputs, and which auto-resolved elevation field (if any) the user has tapped to edit.
   const [drainAdvOpen, setDrainAdvOpen] = useState(false);
   const [drainEditField, setDrainEditField] = useState(null);
+  // B824 — which of the three Stormwater verdict groups (det/mit/ffe) are expanded.
+  // Collapsed by default: one verdict line per group is the whole closed face.
+  const [drainGroupOpen, setDrainGroupOpen] = useState({});
   const Y = YIELD_PAL;
   const acres = siteSqft / SQFT_PER_ACRE;
   const hasSite = siteSqft > 0;
@@ -14662,7 +14670,13 @@ function YieldPanel({
               rule record via ruleBadge — a bare number here is a defect. */}
           {drainage && (() => {
             const d = drainage;
-            const warnNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.warnText, lineHeight: 1.45, margin: "3px 0 0", fontStyle: "italic" }}>{text}</div>;
+            // B823 — warn notes are hard-capped at ONE line (≤110 chars, unit-guarded); the
+            // teaching/detail copy rides an optional ⓘ hover (native title — the infoRow pattern).
+            const warnNote = (text, key, info) => (
+              <div key={key} title={info || ""} style={{ fontSize: 10.5, color: Y.warnText, lineHeight: 1.45, margin: "3px 0 0", fontStyle: "italic", cursor: info ? "help" : undefined }}>
+                {text}{info ? <span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4, fontStyle: "normal" }} aria-hidden="true">ⓘ</span> : null}
+              </div>
+            );
             const keyedNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
             // NEW-1 — verdict-first density: ONE line per concept (value or honest state) with
             // the basis / source / caveats tucked into an ⓘ hover (native title — the Impervious-
@@ -14757,7 +14771,7 @@ function YieldPanel({
               // demotion, never contrast fading — theming rule).
               return (
                 <div key="assumptions" style={{ marginTop: 7, border: `1px ${d.stale ? "dashed" : "solid"} ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4 }}>{d.stale ? "Assumptions — saved before the boundary changed" : "Assumptions — correct if needed"}</div>
+                  <div title={d.channelDischarge?.overrideIgnored ? "HCFCD n/a outside Harris — saved channel answer ignored." : ""} style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: d.channelDischarge?.overrideIgnored ? "help" : undefined }}>{d.stale ? "Assumptions — saved before the boundary changed" : "Assumptions — correct if needed"}{d.channelDischarge?.overrideIgnored ? <span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span> : null}</div>
                   {rows}
                 </div>
               );
@@ -14807,13 +14821,35 @@ function YieldPanel({
                 </div>
               );
             }
+            // B824 — ONE drainage home. Below the status line the readout is organized as
+            // three COLLAPSED verdict groups (Detention · Floodplain mitigation · Buildability
+            // / FFE): one verdict line each when closed; the detail that used to live on the
+            // Site Analysis FloodMitigationCard (deleted — the split-brain fix) expands inside.
+            // detR / mitR / ffeR collect each group's rows; fold state is drainGroupOpen.
+            const detR = [], mitR = [], ffeR = [];
+            const groupFold = (gKey, label, verdict, tone, kids, sub) => {
+              const open = !!drainGroupOpen[gKey];
+              const vColor = tone === "danger" ? Y.dangerText : tone === "warn" ? Y.warnText : tone === "good" ? Y.green : Y.text;
+              return (
+                <div key={"grp-" + gKey}>
+                  <button type="button" aria-expanded={open} onClick={() => setDrainGroupOpen((s2) => ({ ...s2, [gKey]: !s2[gKey] }))}
+                    style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, background: "transparent", border: "none", padding: "6px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 800, color: Y.rowLabel, letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{open ? "▾" : "▸"} {label}</span>
+                    <span style={{ fontFamily: YMONO, fontSize: 12.5, fontWeight: 750, fontVariantNumeric: "tabular-nums", color: vColor, textAlign: "right" }}>
+                      {verdict}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
+                    </span>
+                  </button>
+                  {open && <div style={{ padding: "1px 0 3px 10px", borderLeft: `2px solid ${Y.hairline}` }}>{kids}</div>}
+                </div>
+              );
+            };
             if (req && (req.kind === "point" || req.kind === "none")) {
-              out.push(row("Detention required", `${f2(req.requiredAcFt ?? 0)} ac-ft`, req.governing ? "greater-of" : ""));
-              out.push(keyedNote(ruleBadge(req.rule, req.rateAcFtPerAc), "badge"));
+              detR.push(row("Detention required", `${f2(req.requiredAcFt ?? 0)} ac-ft`, req.governing ? "greater-of" : ""));
+              detR.push(keyedNote(ruleBadge(req.rule, req.rateAcFtPerAc), "badge"));
               // Municipal adopt-by-reference: show the overlay's own record + its extra rule.
               if (req.overlayRule) {
-                out.push(keyedNote(ruleBadge(req.overlayRule), "overlay-badge"));
-                if (req.overlayRule.params?.runoffReductionPct) out.push(warnNote(`${req.overlayRule.authorityLabel} also requires a ${req.overlayRule.params.runoffReductionPct}% runoff reduction on top of detention.`, "runoff"));
+                detR.push(keyedNote(ruleBadge(req.overlayRule), "overlay-badge"));
+                if (req.overlayRule.params?.runoffReductionPct) detR.push(warnNote(`${req.overlayRule.authorityLabel} also requires a ${req.overlayRule.params.runoffReductionPct}% runoff reduction on top of detention.`, "runoff"));
               }
               if (req.governing?.candidates?.length > 1) {
                 // B750 — name the reviewing authority (detected/overridden) DISTINCTLY from the
@@ -14822,78 +14858,79 @@ function YieldPanel({
                 const cands = req.governing.candidates.map((c) => `${c.rule?.authorityLabel || c.authorityId} ${f2(c.acFt)} ac-ft`);
                 const govLabel = req.rule?.authorityLabel || req.governing.picked;
                 if (d.reviewer?.authorityId === "coh" && req.governing.picked === "hcfcd") {
-                  out.push(keyedNote(`Reviewing authority: ${d.reviewer.label} ${d.reviewer.source === "override" ? "(you set this)" : detectedPhrase}. For a tract over 20 acres, City of Houston applies the larger of its own rate and HCFCD's — ${cands.join(" vs ")} — so ${govLabel}'s ${f2(req.requiredAcFt ?? 0)} ac-ft governs.`, "gov"));
+                  detR.push(keyedNote(`Reviewing authority: ${d.reviewer.label} ${d.reviewer.source === "override" ? "(you set this)" : detectedPhrase}. For a tract over 20 acres, City of Houston applies the larger of its own rate and HCFCD's — ${cands.join(" vs ")} — so ${govLabel}'s ${f2(req.requiredAcFt ?? 0)} ac-ft governs.`, "gov"));
                 } else {
-                  out.push(keyedNote(`Greater-of: ${cands.join(" vs ")} — more restrictive governs${d.reviewer?.label ? ` (${d.reviewer.label} review)` : ""}.`, "gov"));
+                  detR.push(keyedNote(`Greater-of: ${cands.join(" vs ")} — more restrictive governs${d.reviewer?.label ? ` (${d.reviewer.label} review)` : ""}.`, "gov"));
                 }
               }
-              if (req.flags.includes("curve-approximate")) out.push(warnNote("Rate read from an approximate Fig. 9.2 curve — exact breakpoints pending transcription.", "curve"));
-              if (req.flags.includes("secondary-source")) out.push(warnNote("June-2026 Houston rate verified against secondary coverage — manual PDF confirmation pending.", "sec-src"));
-              if (req.flags.includes("added-impervious-unknown")) out.push(warnNote("This rate applies to ADDED impervious on redevelopment — full site impervious was used here; enter the added-impervious area to refine.", "added-imp"));
-              if (req.flags.includes("hcfcd-not-applicable")) out.push(warnNote("You set City of Houston as the reviewer, but this site is outside Harris County — HCFCD's rate can't apply, so Houston's own impervious rate is shown alone. Double-check the reviewing agency.", "hcfcd-na"));
+              if (req.flags.includes("curve-approximate")) detR.push(warnNote("Rate read from an approximate Fig. 9.2 curve — exact breakpoints pending transcription.", "curve"));
+              if (req.flags.includes("secondary-source")) detR.push(warnNote("June-2026 Houston rate verified against secondary coverage — manual PDF confirmation pending.", "sec-src"));
+              if (req.flags.includes("added-impervious-unknown")) detR.push(warnNote("Rate applies to ADDED impervious — full-site impervious used here.", "added-imp", "On redevelopment this rate prices only the ADDED impervious area; the full site's impervious was used as a conservative stand-in. Enter the added-impervious area to refine."));
+              if (req.flags.includes("hcfcd-not-applicable")) detR.push(warnNote("Houston set as reviewer but the site is outside Harris — Houston's own rate shown alone.", "hcfcd-na", "You set City of Houston as the reviewing agency, but this site is outside Harris County, so HCFCD's rate can't apply. Double-check the reviewing agency under Assumptions."));
             } else if (req && req.kind === "band") {
               // Band authorities NEVER render a single number.
-              out.push(row("Detention required", `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`, "screening band"));
+              detR.push(row("Detention required", `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`, "screening band"));
               // The badge shows the GOVERNING per-acre band (e.g. "0.75–1.0 ac-ft/ac by
               // outfall"), never the rule record's base rate — an unset-outfall Harris band
               // read "0.65 ac-ft/ac" directly under the 0.75–1.0 figure (contradictory).
-              out.push(keyedNote(ruleBadge(req.rule, req.rateBandAcFtPerAc, req.rateBandLabel), "badge"));
+              detR.push(keyedNote(ruleBadge(req.rule, req.rateBandAcFtPerAc, req.rateBandLabel), "badge"));
               if (req.overlayRule) {
-                out.push(keyedNote(ruleBadge(req.overlayRule), "overlay-badge"));
-                if (req.overlayRule.params?.runoffReductionPct) out.push(warnNote(`${req.overlayRule.authorityLabel} also requires a ${req.overlayRule.params.runoffReductionPct}% runoff reduction on top of detention.`, "runoff"));
+                detR.push(keyedNote(ruleBadge(req.overlayRule), "overlay-badge"));
+                if (req.overlayRule.params?.runoffReductionPct) detR.push(warnNote(`${req.overlayRule.authorityLabel} also requires a ${req.overlayRule.params.runoffReductionPct}% runoff reduction on top of detention.`, "runoff"));
               }
-              out.push(warnNote(
+              detR.push(
                 req.flags.includes("hced-infra-outfall-min")
-                  ? "Unincorporated Harris County's minimum depends on the outfall type — 0.75 ac-ft/ac to a storm sewer, 1.0 to a roadside ditch. Set the outfall type under “Assumptions” below for a single number (a formal Method-2 analysis can lower it, but never below 0.75)."
+                  ? warnNote("Harris minimum depends on the outfall type — set it under Assumptions for one number.", "band",
+                      "Unincorporated Harris County's minimum detention: 0.75 ac-ft/ac to a storm sewer, 1.0 to a roadside ditch. A formal Method-2 analysis can lower it, but never below 0.75.")
                   : req.flags.includes("verify-with-county-engineer")
-                  ? "No published flat rate for this county — verify the requirement with the county engineer."
-                  : "Exact criteria tables pending transcription — treat as a screening band only.", "band"));
+                  ? warnNote("No published flat rate for this county — verify with the county engineer.", "band")
+                  : warnNote("Exact criteria tables pending transcription — treat as a screening band only.", "band"));
             } else if (req && req.kind === "unknown") {
-              out.push(row("Detention required", "unknown"));
-              out.push(warnNote(req.basis, "unk"));
+              detR.push(row("Detention required", "unknown"));
+              detR.push(warnNote(req.basis, "unk"));
               if (req.governing?.candidates?.length) {
                 for (const c of req.governing.candidates) {
-                  out.push(row(`· if ${c.rule?.authorityLabel || c.authorityId}`, c.result?.kind === "band" ? `${f2(c.result.bandAcFt[0])}–${f2(c.result.bandAcFt[1])} ac-ft` : `${f2(c.acFt)} ac-ft`, "", true));
-                  if (c.rule) out.push(keyedNote(ruleBadge(c.rule, c.result?.rateAcFtPerAc ?? c.result?.rateBandAcFtPerAc, c.result?.rateBandLabel), `cand-badge-${c.authorityId}`));
+                  detR.push(row(`· if ${c.rule?.authorityLabel || c.authorityId}`, c.result?.kind === "band" ? `${f2(c.result.bandAcFt[0])}–${f2(c.result.bandAcFt[1])} ac-ft` : `${f2(c.acFt)} ac-ft`, "", true));
+                  if (c.rule) detR.push(keyedNote(ruleBadge(c.rule, c.result?.rateAcFtPerAc ?? c.result?.rateBandAcFtPerAc, c.result?.rateBandLabel), `cand-badge-${c.authorityId}`));
                 }
               }
             } else if (d.reqCandidates) {
               // Boundary straddle: every candidate labeled + its rule record — never a silent default.
-              out.push(row("Detention required", "straddle"));
+              detR.push(row("Detention required", "straddle"));
               for (const { aid, r } of d.reqCandidates) {
-                out.push(row(`· if ${r.rule?.authorityLabel || aid}`, r.kind === "band" ? `${f2(r.bandAcFt[0])}–${f2(r.bandAcFt[1])} ac-ft` : r.kind === "point" ? `${f2(r.requiredAcFt)} ac-ft` : "unknown", "", true));
-                if (r.rule) out.push(keyedNote(ruleBadge(r.rule, r.rateAcFtPerAc ?? r.rateBandAcFtPerAc, r.rateBandLabel), `straddle-badge-${aid}`));
+                detR.push(row(`· if ${r.rule?.authorityLabel || aid}`, r.kind === "band" ? `${f2(r.bandAcFt[0])}–${f2(r.bandAcFt[1])} ac-ft` : r.kind === "point" ? `${f2(r.requiredAcFt)} ac-ft` : "unknown", "", true));
+                if (r.rule) detR.push(keyedNote(ruleBadge(r.rule, r.rateAcFtPerAc ?? r.rateBandAcFtPerAc, r.rateBandLabel), `straddle-badge-${aid}`));
               }
-              if (d.ambiguous[0]) out.push(warnNote(d.ambiguous[0].detail, "straddle"));
+              if (d.ambiguous[0]) detR.push(warnNote(d.ambiguous[0].detail, "straddle"));
             } else if (d.authorityFlags.includes("jurisdiction-unavailable")) {
               // County/city lookup failed — an outage is an unknown, never "no requirement".
-              out.push(row("Detention required", "unknown"));
-              out.push(warnNote("The county/city lookup is unavailable right now — the reviewing authority couldn't be resolved. Re-check in a moment.", "jurfail"));
+              detR.push(row("Detention required", "unknown"));
+              detR.push(warnNote("County/city lookup unavailable — reviewing authority unresolved; re-check shortly.", "jurfail"));
             } else if (d.authorityFlags.includes("no-criteria-modeled")) {
-              out.push(row("Detention required", "—"));
-              out.push(warnNote("No detention criteria modeled for this county yet — verify locally.", "nocrit"));
+              detR.push(row("Detention required", "—"));
+              detR.push(warnNote("No detention criteria modeled for this county yet — verify locally.", "nocrit"));
             }
             // An unmodeled city keeps the county number but MUST carry the caveat (coexists
             // with a truthy req, so it lives outside the req-shaped chain above).
-            if (d.authorityFlags.includes("city-criteria-unverified")) out.push(warnNote("This city's own detention criteria aren't modeled — the county requirement is shown as a screening floor. Verify with the city.", "city-unv"));
-            if (d.authorityFlags.includes("jurisdiction-partial")) out.push(warnNote("The city-limits lookup was incomplete (an outage) — if this parcel is inside Houston's city limits, the reviewing authority would be the City. Re-check.", "jur-partial"));
+            if (d.authorityFlags.includes("city-criteria-unverified")) detR.push(warnNote("This city's detention criteria aren't modeled — county floor shown; verify with the city.", "city-unv", "The county requirement is a screening floor, not the city's own rule — confirm the city's criteria before design. This note only appears when the parcel is materially INSIDE the city's limits (an edge sliver or ETJ-only overlap no longer triggers it — B823)."));
+            if (d.authorityFlags.includes("jurisdiction-partial")) detR.push(warnNote("City-limits lookup incomplete — re-check (Houston limits would change the reviewer).", "jur-partial", "The city-limits source didn't answer completely (an outage). If this parcel is actually inside Houston's city limits, the reviewing authority would be the City of Houston, not the county."));
             // ETJ context: being in a city's ETJ does NOT make that city the detention authority —
             // the county's criteria govern (owner rule 2026-07-10). Surfaced so it's never mistaken
             // for a city-limits detection.
-            for (const e of d.etjNotes) out.push(warnNote(e.note, "etj-" + String(e.city || "").toLowerCase()));
+            for (const e of d.etjNotes) detR.push(warnNote(e.short || e.note, "etj-" + String(e.city || "").toLowerCase(), e.detail || null));
             // B750 — the two overridable assumptions (reviewing agency + channel discharge).
-            { const ab = assumptionsBlock(); if (ab) out.push(ab); }
-            // B789(c) — a stored channel answer where HCFCD doesn't govern is IGNORED, visibly
-            // (never silently applied, never silently dropped).
-            if (d.channelDischarge?.overrideIgnored) out.push(warnNote("Your saved “drains to HCFCD channel” answer doesn't apply here — HCFCD only governs in Harris County, so it's being ignored for this site.", "chan-ignored"));
+            { const ab = assumptionsBlock(); if (ab) detR.push(ab); }
+            // B823 (amends B797(c)) — a stored channel answer where HCFCD doesn't govern renders
+            // NOTHING inline: the answer is silently ignored and the fact moves to one line
+            // inside the Assumptions header ⓘ (see assumptionsBlock) — the B806 gating pattern.
             // NEW-1(a) — the "dead storage earns no credit" teaching copy + the usable figure fold
             // into an ⓘ on the provided row (the pond count stays as the visible sub).
             if (d.deadCf > 0) {
-              out.push(infoRow("Detention provided", `${f2(providedAcFt)} ac-ft`,
+              detR.push(infoRow("Detention provided", `${f2(providedAcFt)} ac-ft`,
                 `Usable ${f2(usableAcFt)} ac-ft after ${f2(d.deadCf / 43560)} ac-ft sits below the flood WSE / permanent pool — dead storage earns no credit. Anchored ponds split at their real water surfaces; the rest use the Regime-B estimate.`,
                 { key: "provided", sub: d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""} · usable ${f2(usableAcFt)}` : `· usable ${f2(usableAcFt)}` }));
             } else {
-              out.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
+              detR.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
             }
             {
               // B712 — the mitigation ledger joins the readout. ADDITIVE with detention:
@@ -14903,6 +14940,14 @@ function YieldPanel({
               // in-floodplain pond forces the gross-volume caution.
               const mit = d.mitigation;
               if (mit && mit.intersectAcres > 0) {
+                // B824 — the per-class ledger (migrated from the deleted card): geometry
+                // always renders, even when volumes can't.
+                for (const [cls, bucket] of Object.entries(mit.perClass || {})) {
+                  if (!(bucket.acres > 0)) continue;
+                  const clsLbl = cls === "1pct" ? "1% (100-yr) floodplain fill" : cls === "02pct" ? "0.2% (500-yr) band fill" : "Regulatory FLOODWAY fill";
+                  mitR.push(row(clsLbl, `${f2(bucket.acres)} ac`, cls === "floodway" ? "" : bucket.volumeCf != null ? `· ${f2(bucket.volumeCf / 43560)} ac-ft` : "· UNKNOWN"));
+                }
+                if (mit.volumeCf != null) mitR.push(row("Required compensating storage", `${f2(mit.volumeAcFt)} ac-ft`, `· ${f2(mit.cutCy)} cy`));
                 if (mit.volumeCf != null) {
                   const mitTag = mit.expertBypass ? "expert avg-depth"
                     : d.mitigationStraddle ? "straddle worst-case"
@@ -14910,8 +14955,8 @@ function YieldPanel({
                     : mit.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr"
                     : "";
                   // NEW-1(a) — "volumes are additive" teaching copy → ⓘ on the row.
-                  out.push(infoRow("Floodplain mitigation", `+${f2(mit.volumeAcFt)} ac-ft`,
-                    "Additive with detention — the same acre-foot can't count twice. The mitigation cut must be hydraulically connected to the floodplain at flood stages; full detail in Site Analysis → Floodplain mitigation.",
+                  mitR.push(infoRow("Mitigation volume", `+${f2(mit.volumeAcFt)} ac-ft`,
+                    "Additive with detention — the same acre-foot can't count twice. The mitigation cut must be hydraulically connected to the floodplain at flood stages; the per-class ledger, providers and derivation notes are the rows of this group (B824 — one drainage home).",
                     { key: "mit", sub: mitTag }));
                   // B755 — when the volume is priced off a DERIVED BFE, say so loudly (an
                   // estimate to verify, never a published number) and show the conservative bound.
@@ -14921,42 +14966,67 @@ function YieldPanel({
                     const bracket = dt.hiElev != null && dt.hiElev !== dt.loElev
                       ? ` (between FEMA's ${f1(dt.loElev)}′ and ${f1(dt.hiElev)}′ lines; conservative bound ${f1(dt.hiElev)}′)`
                       : (db.method === "nearest-line" ? " (nearest single BFE line — ±~0.5′)" : "");
-                    out.push(warnNote(`BFE ≈ ${f1(db.bfeFt)}′ DERIVED from FEMA's Base Flood Elevation lines${bracket} — a screening estimate, not a published BFE. Type a BFE below to override.`, "mit-derived"));
+                    mitR.push(warnNote(`BFE ≈ ${f1(db.bfeFt)}′ DERIVED from FEMA's Base Flood Elevation lines.`, "mit-derived", `A screening estimate, not a published BFE${bracket} — confirm before design. Type a BFE below to override.`));
                   }
                   // B807 — the volume was priced off the FBCDD DRAFT Atlas-14 100-yr raster
                   // (the unstudied-Zone-A path): loud, labeled, never an effective value.
                   if (mit.providers?.wse1pct === "fbcdd-wse100-draft" && d.floodGeo?.derivedWse100) {
-                    out.push(warnNote(`1% WSE ≈ ${f1(d.floodGeo.derivedWse100.wseFt)}′ read from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results, screening only. Type a BFE below to override.`, "mit-derived-100"));
+                    mitR.push(warnNote(`1% WSE ≈ ${f1(d.floodGeo.derivedWse100.wseFt)}′ — FBCDD Atlas-14 DRAFT${d.floodGeo.derivedWse100.watershed ? ` (${d.floodGeo.derivedWse100.watershed.replace(/_/g, " ")} watershed)` : ""}.`, "mit-derived-100", "Read from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results, screening only. Basis note: the county's mitigation rules reference the EFFECTIVE (pre-Atlas-14) floodplain — this Atlas-14 value stands in for it, labeled, not equal to it. Type a BFE below to override."));
                   }
-                  if (d.mitigationStraddle && d.mitigationStraddle.anyUnknown) out.push(warnNote("Jurisdiction straddle with an UNKNOWN candidate — the worst PRICED case is shown; the unknown candidate could govern. Enter its elevations.", "mit-straddle-unk"));
+                  // B824 — the remaining derivation notes migrated from the card (xs-wsel +
+                  // the DRAFT 0.2% stand-in), so no shipped honesty copy was lost in the merge.
+                  if (mit.providers?.wse1pct === "xs-wsel" && d.floodGeo?.derivedXsWsel) {
+                    const dxs = d.floodGeo.derivedXsWsel;
+                    mitR.push(warnNote(`1% WSE ≈ ${f1(dxs.wselFt)}′ read from FEMA's regulatory cross-sections${dxs.detail && dxs.detail.wtrNm ? ` on ${dxs.detail.wtrNm}` : ""}.`, "mit-derived-xs", "The effective-model regulatory water surface (WSEL_REG) at the nearest reach; a jurisdiction may enforce a newer model. Type a BFE below to override."));
+                  }
+                  if (mit.providers?.wse02pct === "fbcdd-wse02-draft" && d.floodGeo?.derivedWse02) {
+                    mitR.push(warnNote(`0.2% WSE ≈ ${f1(d.floodGeo.derivedWse02.wseFt)}′ — FBCDD Atlas-14 DRAFT.`, "mit-derived-02", "Read from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results, screening only. FBCDD Interim §9 keys the PRE-Atlas-14 (2014 FIS) basis, so this value is a labeled stand-in for it. Enter the FIS 0.2% WSE to override."));
+                  }
+                  if (d.mitigationStraddle && d.mitigationStraddle.anyUnknown) mitR.push(warnNote("Straddle with an UNKNOWN candidate — worst PRICED case shown.", "mit-straddle-unk", "One straddle candidate couldn't be priced, so it could govern with a larger number than shown. Enter its elevations to price it."));
                   if (req && req.kind === "point" && req.requiredAcFt > 0) {
-                    out.push(row("Combined basin volume", `${f2(req.requiredAcFt + mit.volumeAcFt)} ac-ft`));
+                    mitR.push(row("Combined basin volume", `${f2(req.requiredAcFt + mit.volumeAcFt)} ac-ft`));
                   }
                 } else {
-                  out.push(row("Floodplain mitigation", "UNKNOWN"));
-                  out.push(warnNote(`Mitigation volume UNKNOWN — ${mit.unknownReason}. The floodplain geometry still stands (${f2(mit.intersectAcres)} ac of fill footprint intersects).`, "mit-unk"));
+                  mitR.push(row("Floodplain mitigation", "UNKNOWN"));
+                  mitR.push(warnNote(`Mitigation volume UNKNOWN — ${mit.unknownReason}.`, "mit-unk", `The floodplain geometry still stands: ${f2(mit.intersectAcres)} ac of fill footprint intersects mapped zones — only the VOLUME is unpriced.`));
                 }
-                if (mit.flags.includes("floodway_intersect")) out.push(
+                if (mit.flags.includes("floodway_intersect")) mitR.push(
                   <div key="mit-fw" style={{ fontSize: 11, color: Y.dangerText, lineHeight: 1.45, margin: "4px 0 0", fontWeight: 800 }}>
                     ⚑ FILL IN THE FLOODWAY IS PROHIBITED — {f2(mit.floodwayAcres)} ac of fill footprint sits in the regulatory floodway. Relocate it; no mitigation ratio prices floodway fill.
                   </div>
                 );
-                if (mit.flags.includes("rule_unverified")) out.push(warnNote("Mitigation rule unverified — edit & confirm in the inputs below.", "mit-unv"));
-                if (d.mitCandidateCf > 0) out.push(keyedNote(`Candidate compensating storage in drawn ponds (below the flood WSE): ${f2(d.mitCandidateCf / 43560)} ac-ft — hydraulic connection + stage distribution: engineer confirms.`, "mit-cand"));
+                if (mit.flags.includes("rule_unverified")) mitR.push(warnNote("Mitigation rule unverified — edit & confirm in the inputs below.", "mit-unv"));
+                // B824 — sanity/datum flags + the rule and providers lines, migrated from the card.
+                if (mit.flags.includes("wse02-below-1pct")) mitR.push(warnNote("The 0.2% WSE reads BELOW the 1% here — mismatched studies; don't rely on it.", "mit-02below", "A 0.2% (500-yr) surface can never sit below the 1% (100-yr) surface on one reach — the two values come from mismatched studies or vintages. Enter a 0.2% WSE from the effective FIS profile."));
+                if (mit.flags.includes("unstudied_a")) mitR.push(warnNote("Unstudied Zone A on the site — BFE undetermined from the map.", "mit-unstudied-a", "FEMA publishes no BFE for this zone; a flood study or the effective model sets the governing elevation."));
+                if (mit.flags.includes("datum_mismatch")) mitR.push(warnNote("A zone publishes a non-NAVD88 datum — convert before comparing.", "mit-datum", "Mixed datums are a multi-foot silent error in the Houston area (subsidence): convert NGVD29 values to NAVD88 before entering or comparing."));
+                if (d.floodGeo?.bfeLineFlags && d.floodGeo.bfeLineFlags.usable === 0 && d.floodGeo.bfeLineFlags.datumExcluded > 0) mitR.push(warnNote("FEMA BFE lines here publish a non-NAVD88 datum — no auto-derive; enter one manually.", "mit-bfe-datum", "Deriving from a mixed datum would be a multi-foot silent error, so the tool refuses. Convert the published lines to NAVD88 and enter a BFE below."));
+                if (d.mitigationStraddle) mitR.push(warnNote(`Jurisdiction straddle — every candidate priced, worst case shown${d.mitigationStraddle.anyUnknown ? " (one UNKNOWN)" : ""}.`, "mit-straddle-detail", `Candidates: ${d.mitigationStraddle.candidates.map((c) => `${c.rule.label} ${c.result.volumeCf != null ? f2(c.result.volumeCf / 43560) + " ac-ft" : "unknown"}`).join(" · ")}.`));
+                if (mit.expertBypass) mitR.push(keyedNote("Expert bypass in use — volume = intersect area × the entered average fill depth.", "mit-bypass"));
+                mitR.push(keyedNote(`Rule: ${d.mitigationRule?.label} — ${mit.trigger === "1pct_plus_02pct" ? "1% + 0.2% trigger" : "1% trigger"} @ ${mit.ratio}:1${d.mitigationRule?.offsetScope === "storage_and_conveyance" ? " (offsets storage AND conveyance — large contiguous fringe fill can trigger a no-rise/hydraulic analysis beyond this volume screen)" : ""}.`, "mit-rule"));
+                mitR.push(keyedNote(`Providers: pad FFE ${mit.providers.padElev || "—"} · grade ${mit.providers.existGrade || "—"} · 1% WSE ${wseProvLabel(mit.providers.wse1pct)} · 0.2% WSE ${wseProvLabel(mit.providers.wse02pct)}${d.floodGeo && d.floodGeo.ts != null ? ` · flood data ${formatAge(Date.now() - d.floodGeo.ts)}` : ""}`, "mit-providers"));
+                if (d.mitCandidateCf > 0) mitR.push(keyedNote(`Candidate compensating storage in drawn ponds (below the flood WSE): ${f2(d.mitCandidateCf / 43560)} ac-ft — hydraulic connection + stage distribution: engineer confirms.`, "mit-cand"));
+              } else if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) {
+                // B824 — card-migrated honest state: a verified NONE is said out loud.
+                mitR.push(keyedNote("No mapped flood zones intersect the site envelope (FEMA NFHL, verified source) — no mitigation trigger on this screening pull.", "mit-nozones"));
+              } else if (mit && mit.intersectAcres === 0 && d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount > 0) {
+                mitR.push(keyedNote("Mapped flood zones are near, but no drawn fill footprint intersects them — mitigation volume 0 on this layout.", "mit-nointersect"));
               } else if (d.mitRememberedMissing) {
                 // NEW-2(b) — a remembered check with no restorable mitigation: an explicit row +
                 // re-check prompt, never a silently-missing ledger (the "isn't calculating" report).
-                out.push(row("Floodplain mitigation", "not screened in this remembered view"));
-                out.push(warnNote("Mitigation wasn't saved with this remembered check — ↻ re-check drainage criteria to screen fill volume against the mapped floodplain.", "mit-remembered-missing"));
+                mitR.push(row("Floodplain mitigation", "not screened in this remembered view"));
+                mitR.push(warnNote("Mitigation wasn't saved with this remembered check — ↻ re-check to screen it.", "mit-remembered-missing", "The remembered result predates the mitigation ledger, so fill volume hasn't been screened against the mapped floodplain in this view. ↻ Re-check drainage criteria to price it."));
               }
-              if (d.unanchoredInTrigger > 0) out.push(warnNote(`${d.unanchoredInTrigger} pond${d.unanchoredInTrigger > 1 ? "s" : ""} in the mapped floodplain ${d.unanchoredInTrigger > 1 ? "are" : "is"} not elevation-anchored — the gross volume above OVERSTATES usable detention. Set each pond's top-of-bank elevation.`, "mit-unanch"));
-              if (d.pondFullyInundated) out.push(warnNote("A pond's top of bank sits at/below the flood WSE — fully inundated in the design flood; its usable detention is ZERO.", "mit-inund"));
-              if (d.floodGeo && d.floodGeo.state === "failed") out.push(warnNote("Flood-zone GEOMETRY is unavailable — mitigation can't be screened right now (an outage is never an all-clear). Re-check.", "fmgeo-fail"));
-              if (d.floodGeo && d.floodGeo.truncated) out.push(warnNote("The flood-zone pull hit the feature cap — mitigation figures may UNDERCOUNT; treat them as a floor.", "fmgeo-trunc"));
+              if (d.unanchoredInTrigger > 0) mitR.push(warnNote(`${d.unanchoredInTrigger} floodplain pond${d.unanchoredInTrigger > 1 ? "s" : ""} not elevation-anchored — gross volume OVERSTATES usable detention.`, "mit-unanch", "An unanchored pond can't split usable from dead storage at the flood water surface, so the gross volume above overstates usable detention. Set each pond's top-of-bank elevation in its panel."));
+              if (d.pondFullyInundated) mitR.push(warnNote("A pond's top of bank sits at/below the flood WSE — its usable detention is ZERO.", "mit-inund", "Fully inundated in the design flood: every acre-foot below the flood water surface is already water, so the pond credits nothing."));
+              if (d.floodGeo && d.floodGeo.state === "failed") mitR.push(warnNote("Flood-zone geometry unavailable — mitigation not screened; re-check.", "fmgeo-fail", "The flood-zone source didn't answer, so nothing could be screened this check. An outage is never an all-clear — re-check shortly."));
+              if (d.floodGeo && d.floodGeo.truncated) mitR.push(warnNote("The flood-zone pull hit the feature cap — mitigation figures may UNDERCOUNT; treat them as a floor.", "fmgeo-trunc"));
+              if (d.floodGeo?.wse02Flags && d.floodGeo.wse02Flags.state === "failed") mitR.push(warnNote("Fort Bend's study server didn't answer — the DRAFT 0.2% WSE couldn't be read.", "mit-wse02-fail", "An outage is never a value: the 0.2% band stays honest-unknown this check. Re-check shortly or enter a 0.2% WSE from the effective FIS profile."));
+              if (d.floodGeo?.wse100Flags && d.floodGeo.wse100Flags.state === "failed") mitR.push(warnNote("Fort Bend's study server didn't answer — the DRAFT 1% WSE couldn't be read.", "mit-wse100-fail", "An outage is never a value: the 1% band stays honest-unknown this check. Re-check shortly or enter a BFE."));
             }
             if (req && req.kind === "point" && req.requiredAcFt > 0) {
               const diff = usableAcFt - req.requiredAcFt; // compare USABLE volume (Regime B credits nothing below the pool)
-              out.push(
+              detR.push(
                 <div key="deficit" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: Y.rowLabel }}>{diff >= 0 ? "Surplus" : "Shortfall"}</span>
                   <span style={{ fontFamily: YMONO, fontSize: 13, fontWeight: 750, fontVariantNumeric: "tabular-nums", color: diff >= 0 ? Y.green : Y.dangerText }}>
@@ -14978,9 +15048,9 @@ function YieldPanel({
                   ? "A full drainage impact analysis (H&H study) is the likely bar at this size / with these triggers."
                   : "Rate-method detention is likely sufficient — no DIA trigger found on this screen.",
               ].filter(Boolean).join("\n");
-              out.push(infoRow("Analysis tier", d.tier.tier === "dia" ? "Full DIA" : "Rate method", tierInfo, { key: "tier" }));
+              detR.push(infoRow("Analysis tier", d.tier.tier === "dia" ? "Full DIA" : "Rate method", tierInfo, { key: "tier" }));
             }
-            if (d.floodFailed) out.push(warnNote("Flood-zone data is unavailable right now — analysis tier and hydraulic regime can't be assessed (an outage is never an all-clear).", "floodfail"));
+            if (d.floodFailed) detR.push(warnNote("Flood-zone data unavailable — tier and regime can't be assessed.", "floodfail", "An outage is never an all-clear: the analysis tier and hydraulic regime stay unassessed until the source answers. Re-check shortly."));
             if (d.regime) {
               // NEW-1(a) — the regime collapses to ONE verdict line ("Regime B — floodplain/
               // tailwater governed ⓘ"); reasons, consequence ("never assume a deep outfall helps
@@ -14996,15 +15066,15 @@ function YieldPanel({
                   ? "A DRAFT Atlas-14 watershed-study 1% WSE is pricing the floodplain mitigation — the regime verdict itself still keys published FEMA BFEs only."
                   : "",
               ].filter(Boolean).join("\n");
-              out.push(
+              detR.push(
                 <div key="regime" title={regimeInfo} style={{ display: "flex", alignItems: "baseline", gap: 4, padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "help" }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: d.regime.regime === "B" ? Y.warnText : Y.rowLabel }}>{d.regime.label}</span>
                   <span style={{ fontSize: 9.5, color: Y.muted }} aria-hidden="true">ⓘ</span>
                 </div>
               );
             }
-            for (const w of d.watersheds) out.push(warnNote(`${w.authorityLabel}: ${w.note}`, w.id));
-            if (d.watershedFailed) out.push(warnNote("HCFCD watershed data is unavailable — any Addicks/Barker or Upper-Cypress supplemental-retention requirement can't be screened.", "wsfail"));
+            for (const w of d.watersheds) detR.push(warnNote(`${w.authorityLabel}: ${w.note}`, w.id));
+            if (d.watershedFailed) detR.push(warnNote("HCFCD watershed data unavailable — supplemental-retention screening skipped.", "wsfail", "Any Addicks/Barker or Upper-Cypress Creek supplemental-retention requirement can't be screened while the watershed source is down."));
             // NEW-1(d) — suppress the "district criteria may ALSO apply" note for any district
             // that is already the applied reviewing jurisdiction above (it isn't an ALSO then).
             if (d.mudDistricts.length) {
@@ -15013,11 +15083,11 @@ function YieldPanel({
                 const nm = String(m.name || "").toLowerCase();
                 return !(reviewerLbl && nm && (reviewerLbl.includes(nm) || nm.includes(reviewerLbl)));
               });
-              if (shownMuds.length) out.push(keyedNote(`In ${shownMuds.map((m) => m.name).join(", ")} — district drainage criteria may also apply; verify with the district's engineer.`, "mud"));
+              if (shownMuds.length) detR.push(keyedNote(`In ${shownMuds.map((m) => m.name).join(", ")} — district drainage criteria may also apply; verify with the district's engineer.`, "mud"));
             }
-            if (d.mudFailed) out.push(warnNote("MUD / water-district data is unavailable — can't tell whether a district's own drainage criteria apply.", "mudfail"));
-            if (d.channelFailed) out.push(warnNote("HCFCD channel data is unavailable — channel adjacency unknown.", "chanfail"));
-            if (d.multiParcel) out.push(keyedNote("Checked against the largest active parcel.", "multi"));
+            if (d.mudFailed) detR.push(warnNote("MUD / water-district data unavailable — district criteria can't be screened.", "mudfail", "Can't tell whether a municipal utility / water district's own drainage criteria apply until the TCEQ source answers."));
+            if (d.channelFailed) detR.push(warnNote("HCFCD channel data is unavailable — channel adjacency unknown.", "chanfail"));
+            if (d.multiParcel) detR.push(keyedNote("Checked against the largest active parcel.", "multi"));
             // NEW-1(e) — the remembered/stale provenance + re-check now live in the single status
             // line at the TOP of the readout (no trailing "remembered" line, no bottom button).
             // B712 — the mitigation inputs: jurisdiction defaulted from the resolved
@@ -15084,7 +15154,7 @@ function YieldPanel({
               };
               // Fort Bend keys the 0.2% mitigation basis to the effective FIRM 48157C FIS (B794).
               const fmFortBend = fm.siteCounty === "fortbend" || (fm.identifyCounties || []).some((c) => /fort\s*bend/i.test(String(c)));
-              out.push(
+              mitR.push(
                 <div key="fm-inputs" style={{ marginTop: 8, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
                   {/* NEW-1(c) — the datum / blank-reads-UNKNOWN / newer-model footnote folds into
                       an ⓘ on the header instead of a paragraph at the bottom of the block. */}
@@ -15109,7 +15179,7 @@ function YieldPanel({
                     const ids = fm.identifyCounties || [];
                     if (!impliedCounty || !ids.length || ids.some((c) => String(c).toLowerCase().includes(impliedCounty))) return null;
                     const detectedLabel = (fm.rules[fm.detectedJurKey] || fm.rules.generic).label;
-                    return warnNote(`⚠ You picked ${fmRuleRow.label}, but the county map reads ${ids.join(" + ")} — the ${detectedLabel} rule likely applies. Switch the Jurisdiction to Auto to use it.`, "fm-jur-mismatch");
+                    return warnNote(`You picked ${fmRuleRow.label} but the county map reads ${ids.join(" + ")} — switch Jurisdiction to Auto.`, "fm-jur-mismatch", `The hand-picked rule's county contradicts the identify county, so the ${detectedLabel} rule likely applies here. Auto re-engages detection.`);
                   })()}
                   {/* NEW-3 — a blank pad defaults to the code-minimum required FFE (greyed
                       placeholder, the B755 derived-value pattern); typing overrides it. */}
@@ -15170,6 +15240,70 @@ function YieldPanel({
                 </div>
               );
             }
+            // B824 — Buildability / FFE detail, migrated from the deleted FloodMitigationCard.
+            // The "ASSUMED at this code minimum" copy is load-bearing (asserted by
+            // ui-audit/verify-auto-ffe.mjs); the standing datum/exclusion notes render once here.
+            {
+              const b = d.buildability;
+              if (b) {
+                if (b.ffe.status === "pass") ffeR.push(row("Required FFE", `${f2(b.ffe.requiredFfeFt)}′ (${ffeBasisText(b.ffe)})`, "— pad PASSES"));
+                if (b.ffe.status === "assumed") {
+                  ffeR.push(row("Required FFE", `${f2(b.ffe.requiredFfeFt)}′ (${ffeBasisText(b.ffe)})`, ""));
+                  ffeR.push(keyedNote("No pad entered — the pad is ASSUMED at this code minimum. Enter a finished-floor elevation to check a real design.", "ffe-assumed"));
+                }
+                if (b.ffe.status === "short") ffeR.push(
+                  <div key="ffe-short" style={{ fontSize: 11, color: Y.dangerText, lineHeight: 1.45, margin: "4px 0 0", fontWeight: 800 }}>
+                    ⚠ Pad FFE is {f2(b.ffe.shortByFt)}′ SHORT of the required {f2(b.ffe.requiredFfeFt)}′ ({ffeBasisText(b.ffe)}).
+                  </div>
+                );
+                if (b.ffe.status === "unknown" || b.ffe.status === "no_rule") ffeR.push(keyedNote(`Required FFE unknown — ${b.ffe.unknownReason}.`, "ffe-unk"));
+                if (b.ffe.pendingBases && b.ffe.pendingBases.length > 0) ffeR.push(keyedNote(`The finished floor must clear the HIGHEST of several bases (more-restrictive controls governs). Not computed here yet — enter or confirm: ${b.ffe.pendingBases.map((pb) => `${pb.label || pb.basis} +${pb.plusFt}′`).join(" · ")}.`, "ffe-pending"));
+                if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft")
+                  ffeR.push(warnNote("The 0.2% WSE behind this required FFE is a DRAFT Fort Bend watershed-study value.", "ffe-draft02", "Screening only — confirm before design; enter the effective FIS 0.2% WSE to override."));
+                if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "atlas14_100yr" && d.wse100Src === "fbcdd-wse100-draft")
+                  ffeR.push(warnNote("The Atlas-14 100-yr WSE behind this required FFE is a DRAFT Fort Bend watershed-study value.", "ffe-draft100", "Screening only — confirm before design; enter a BFE to override."));
+                if (b.pathway) ffeR.push((b.pathway.fillToElevate === "restricted" ? warnNote : keyedNote)(`${b.pathway.fillToElevate === "restricted" ? "⚠ " : ""}${b.pathway.note}`, "ffe-pathway"));
+                if (b.lomr) ffeR.push(warnNote(`⚑ ${b.lomr.note}`, "ffe-lomr"));
+                if (b.wetlands404) ffeR.push(warnNote(`⚑ ${b.wetlands404.note}`, "ffe-404"));
+                if (b.flags.includes("rule_unverified")) ffeR.push(keyedNote("Buildability rule unverified — edit & confirm in settings.", "ffe-unv"));
+                const g2 = d.floodGeo;
+                ffeR.push(keyedNote([NAVD88_NOTE, NEWER_MODEL_NOTE, g2 && g2.derivedBfe ? DERIVED_BFE_NOTE : "", g2 && g2.derivedXsWsel ? DERIVED_XS_WSEL_NOTE : "", g2 && g2.derivedWse02 ? DERIVED_WSE02_DRAFT_NOTE : "", g2 && g2.derivedWse100 ? DERIVED_WSE100_DRAFT_NOTE : "", EXCLUSIONS_NOTE, OFFSITE_NOTE].filter(Boolean).join(" "), "ffe-standing"));
+              }
+              if (!ffeR.length) ffeR.push(keyedNote("Not assessed on this check — ↻ Re-check to screen the required finished floor.", "ffe-none"));
+            }
+            // B824 — the one-line verdicts: the whole closed face of each group.
+            let detVerdict = "—", detTone = null, detSub = "";
+            if (req && req.kind === "point" && req.requiredAcFt > 0) {
+              const dv = usableAcFt - req.requiredAcFt;
+              detVerdict = `${dv >= 0 ? "+" : "−"}${f2(Math.abs(dv))} ac-ft ${dv >= 0 ? "surplus" : "SHORT"}`;
+              detTone = dv >= 0 ? "good" : "danger";
+              detSub = `req ${f2(req.requiredAcFt)}`;
+            } else if (req && req.kind === "point") { detVerdict = `${f2(req.requiredAcFt ?? 0)} ac-ft required`; }
+            else if (req && req.kind === "band") { detVerdict = `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`; detTone = "warn"; detSub = "screening band"; }
+            else if (req && req.kind === "unknown") { detVerdict = "required unknown"; detTone = "warn"; }
+            else if (d.reqCandidates) { detVerdict = "boundary straddle"; detTone = "warn"; }
+            else { detVerdict = "unresolved"; detTone = "warn"; }
+            const mitV = d.mitigation;
+            let mitVerdict = "—", mitTone = null, mitSub = "";
+            if (mitV && mitV.intersectAcres > 0) {
+              if (mitV.volumeCf != null) {
+                mitVerdict = `+${f2(mitV.volumeAcFt)} ac-ft`;
+                mitSub = mitV.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : mitV.providers?.wse1pct === "bfe-line-interp" ? "BFE derived" : mitV.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr" : "";
+              } else { mitVerdict = "UNKNOWN"; mitTone = "warn"; }
+              if (mitV.flags && mitV.flags.includes("floodway_intersect")) { mitVerdict = `FLOODWAY · ${mitVerdict}`; mitTone = "danger"; }
+            } else if (d.mitRememberedMissing) { mitVerdict = "not screened"; mitTone = "warn"; }
+            else if (d.floodGeo && d.floodGeo.state === "failed") { mitVerdict = "source down"; mitTone = "warn"; }
+            else if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) { mitVerdict = "none mapped"; }
+            else if (mitV && mitV.intersectAcres === 0) { mitVerdict = "0 — no fill in zones"; }
+            const bb = d.buildability;
+            let ffeVerdict = "—", ffeTone = null;
+            if (bb && bb.ffe.status === "pass") { ffeVerdict = `FFE ${f2(bb.ffe.requiredFfeFt)}′ — PASSES`; ffeTone = "good"; }
+            else if (bb && bb.ffe.status === "assumed") { ffeVerdict = `FFE ${f2(bb.ffe.requiredFfeFt)}′ assumed`; }
+            else if (bb && bb.ffe.status === "short") { ffeVerdict = `${f2(bb.ffe.shortByFt)}′ SHORT`; ffeTone = "danger"; }
+            else if (bb) { ffeVerdict = "unknown"; ffeTone = "warn"; }
+            out.push(groupFold("det", "Detention", detVerdict, detTone, detR, detSub));
+            out.push(groupFold("mit", "Floodplain mitigation", mitVerdict, mitTone, mitR, mitSub));
+            out.push(groupFold("ffe", "Buildability / FFE", ffeVerdict, ffeTone, ffeR, ""));
             // NEW-1(e) — the bottom "↻ Re-check" button folded into the top status line.
             out.push(keyedNote("Screening estimate — confirm with your engineer and the reviewing authority.", "caveat"));
             return out;

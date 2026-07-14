@@ -439,7 +439,7 @@ const _probeCache = new Map(); // url -> { ok, error, ts }
 async function probeOnce(probeUrl) {
   try {
     const r = await fetchWithRetry(probeUrl, {}, 3);
-    if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+    if (!r.ok) return { ok: false, error: `HTTP ${r.status}`, httpStatus: r.status };
     const j = await r.json().catch(() => ({}));
     return j && j.error
       ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
@@ -455,21 +455,42 @@ async function probeOnce(probeUrl) {
     return { ok: false, unreachable: true, error: /failed to fetch|networkerror|load failed/i.test(String(e?.message)) ? "network / CORS error" : (e?.message || "request failed") };
   }
 }
-export async function probeService(url) {
+export async function probeService(url, opts) {
   const key = trimUrl(url);
   const hit = _probeCache.get(key);
   if (hit && Date.now() - hit.ts < PROBE_TTL) return hit;
-  let result = await probeOnce(`${key}?f=json`);
-  // B469/NEW-6 — a county/agency host that omits CORS headers (e.g. Fort Bend FLOODZONE,
-  // arcgisweb.fortbendcountytx.gov) makes the DIRECT probe throw, so the layer's health + coverage
-  // extent could never be read. Retry through the same-origin B445 cache proxy, which fetches the
-  // service server-side (no CORS wall) and returns the JSON same-origin. Direct-FIRST so the many
-  // CORS-clean hosts take no extra hop and never depend on the proxy being deployed; the proxy
-  // retry fires ONLY on an actual unreachable/CORS failure (so dev, where the proxy 404s, safely
-  // keeps the direct unreachable result and the layer is still added optimistically).
-  if (gisProxyEnabled() && !result.ok && result.unreachable) {
-    const viaProxy = await probeOnce(`${proxyServiceUrl(key)}?f=json`);
-    if (viaProxy.ok) result = viaProxy;
+  const noCors = !!(opts && opts.noCors);
+  let result;
+  if (noCors) {
+    // B691 — a registry entry flagged noCors names a host that sends NO CORS headers: a direct
+    // probe can never be read AND Chrome prints an uncatchable red console error per attempt
+    // (×3 via fetchWithRetry) — the exact noise this flag exists to silence. Health-check through
+    // the same-origin B445 cache proxy ONLY; never touch the host directly from the page.
+    const viaProxy = gisProxyEnabled() ? await probeOnce(`${proxyServiceUrl(key)}?f=json`) : null;
+    if (viaProxy && (viaProxy.ok || (!viaProxy.unreachable && viaProxy.httpStatus == null))) {
+      // The service ANSWERED through the proxy — live health, or a real parsed ArcGIS error
+      // body (service stopped): keep the honest result either way.
+      result = viaProxy;
+    } else {
+      // Proxy disabled / not deployed (404/5xx) / unreachable — degrade to the SAME optimistic
+      // add the direct CORS failure produces today (B469's constraint): a noCors host's health
+      // must never hard-depend on the proxy being deployed; dev without the Function still works.
+      result = { ok: false, unreachable: true, error: "network / CORS error" };
+    }
+  } else {
+    result = await probeOnce(`${key}?f=json`);
+    // B469/NEW-6 — a county/agency host that omits CORS headers (e.g. Fort Bend FLOODZONE,
+    // arcgisweb.fortbendcountytx.gov) makes the DIRECT probe throw, so the layer's health + coverage
+    // extent could never be read. Retry through the same-origin B445 cache proxy, which fetches the
+    // service server-side (no CORS wall) and returns the JSON same-origin. Direct-FIRST so the many
+    // CORS-clean hosts take no extra hop and never depend on the proxy being deployed; the proxy
+    // retry fires ONLY on an actual unreachable/CORS failure (so dev, where the proxy 404s, safely
+    // keeps the direct unreachable result and the layer is still added optimistically). B691 adds
+    // the noCors branch above for hosts where even the ATTEMPT is unacceptable console noise.
+    if (gisProxyEnabled() && !result.ok && result.unreachable) {
+      const viaProxy = await probeOnce(`${proxyServiceUrl(key)}?f=json`);
+      if (viaProxy.ok) result = viaProxy;
+    }
   }
   result.ts = Date.now();
   _probeCache.set(key, result);
@@ -605,7 +626,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         else fail(k, cfg, `${cfg.label}: no pipeline source registered`);
       } else {
         // image / feature service — probe health first
-        probeService(cfg.url).then(({ ok, error, unreachable }) => {
+        probeService(cfg.url, cfg).then(({ ok, error, unreachable }) => {
           if (refs[k] !== "pending") return; // toggled off while probing
           // A service that RESPONDED with an error truly failed → drop it. But if we
           // merely couldn't reach it to check (CORS/network → `unreachable`), add the
