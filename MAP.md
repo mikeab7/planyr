@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-14 @ `eba64e2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-14 @ `6196cbc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_246 source files mapped._
+_247 source files mapped._
 
 ## infra
 
@@ -350,7 +350,7 @@ _246 source files mapped._
 - **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure metes-and-bounds engine: parses Texas deed bearing/distance calls (curves, SAVE-AND-EXCEPT tracts) to planner-feet paths, closure/misclosure, polyline offset/buffer, ring overlap
   - _exports_: `arcChordPoints`, `bufferPolyline`, `callsToPath`, `misclosure`, `offsetPolyline`, `parseCalls`, `parseTracts`, `pathCloses`, `ringsOverlap`, `VARA_FT`
 - **`src/workspaces/site-planner/lib/mitigationHeatmap.js`** — Fill-depth heat map (B809): bins/ramp/hatch classing, legend, tie-out totals, hover lookup, and the one-canvas painter over the engine-retained cells (engine truth — never re-derives)
-  - _exports_: `binIndex`, `cellAt`, `cellPaint`, `DEPTH_BIN_FT`, `FLOODWAY_FILL`, `HEAT_RAMP`, `heatmapBBox`, `heatmapLegend`, `heatmapTotals`, `paintHeatmap`, `UNKNOWN_FILL`
+  - _exports_: `binIndex`, `cellAt`, `cellPaint`, `CUT_RAMP`, `cutFillLegend`, `cutFillPaint`, `cutFillTotals`, `DEPTH_BIN_FT`, `FILL_RAMP`, `FLOODWAY_FILL`, `HEAT_RAMP`, `heatmapBBox`, `heatmapLegend`, `heatmapTotals`, `paintHeatmap`, `UNKNOWN_FILL`, `ZERO_BAND_FT`
 - **`src/workspaces/site-planner/lib/multiStyle.js`** — B740 multi-selection shared styling (pure): `styleCapsOf` (per-item editable props), `commonStyleState` (common set + uniform-or-mixed per property), `selectionRingFeet` (rotation-aware per-member outline).
   - _exports_: `commonStyleState`, `selectionRingFeet`, `styleCapsOf`
 - **`src/workspaces/site-planner/lib/multiwriter.js`** — the B674 multi-writer switch: default-ON code constant + the `planyr.multiwriter=off` localStorage escape hatch (no build-time env var)
@@ -401,6 +401,8 @@ _246 source files mapped._
   - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
+- **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
+  - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
 - **`src/workspaces/site-planner/lib/registerGisSw.js`** — Boot-time unregister of the retired browser GIS imagery service worker (superseded by server-side Drive cache), fail-safe
   - _exports_: `retireGisSw`
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)

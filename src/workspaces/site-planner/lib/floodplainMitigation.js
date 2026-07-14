@@ -457,6 +457,10 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   const retainCells = !!opts.retainCells;
   const allCells = retainCells ? [] : undefined;
   let voidCellsTotal = 0, pricedCellsTotal = 0, flatSumCf = 0, flatKnown = gradeAt != null && grade != null;
+  // B826 — did any footprint price off a PROPOSED SURFACE (fp.surfaceAt)? Drives the
+  // padBasis label + suppresses the grid-vs-flat delta flag (surface vs flat-pad is an
+  // EXPECTED difference — dock courts price at their real planes — not a data warning).
+  let surfacePriced = false;
   const wse02 = realElev(elev.wse02Ft);
   const manualBfe = realElev(elev.bfeFt);
   const derivedBfe = realElev(elev.derivedBfeFt); // DERIVED from FEMA BFE lines (B755)
@@ -534,7 +538,13 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
         continue;
       }
 
-      const priceable = wse != null && pad != null && (gradeAt != null || grade != null);
+      // B826 — a per-footprint PROPOSED SURFACE (the proposedSurface.js plane) replaces
+      // the flat pad in the depth math when present: fill = min(WSE, surface(pt)) −
+      // grade(pt) per cell, so a dock court 4′ below slab prices its REAL plane, not a
+      // scalar. The flat-pad path below stays intact as the labeled pre-grading fallback.
+      const surfAt = typeof fp.surfaceAt === "function" ? fp.surfaceAt : null;
+      const topAt = surfAt ? (pt) => { const s = surfAt(pt); return s != null && isFinite(s) ? s : pad; } : null;
+      const priceable = wse != null && (pad != null || surfAt != null) && (gradeAt != null || grade != null);
       // B808 — per-cell depth when the grid grade is active. AO zones (published sheet-
       // ponding DEPTH, wseSrc "ao-depth") price that depth riding the ground PER CELL,
       // capped by the pad — the close-out decision: AO's water surface is grade-relative
@@ -543,20 +553,25 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
       const depthAt = !priceable ? null
         : gradeAt != null
           ? (aoPerCell
-              ? (pt) => { const g = gradeAt(pt); return g == null ? null : Math.max(0, Math.min(z.aoDepthFt, pad - g)); }
-              : (pt) => { const g = gradeAt(pt); return g == null ? null : Math.max(0, Math.min(wse, pad) - g); })
-          : () => Math.max(0, Math.min(wse, pad) - grade);
+              ? (pt) => { const g = gradeAt(pt); if (g == null) return null; const p = topAt ? topAt(pt) : pad; return p == null ? null : Math.max(0, Math.min(z.aoDepthFt, p - g)); }
+              : (pt) => { const g = gradeAt(pt); if (g == null) return null; const p = topAt ? topAt(pt) : pad; return p == null ? null : Math.max(0, Math.min(wse, p) - g); })
+          : (topAt
+              ? (pt) => { const p = topAt(pt); return p == null ? null : Math.max(0, Math.min(wse, p) - grade); }
+              : () => Math.max(0, Math.min(wse, pad) - grade));
       const { areaSf, sumDepthArea, pricedCells, voidCells, cells } = gridIntersect(ring, z, depthAt, { ...opts, retainCells });
       if (!(areaSf > 0)) continue;
       bucket.acres += areaSf / SQFT_PER_ACRE;
       if (priceable) {
         bucket.volumeCf = (bucket.volumeCf || 0) + sumDepthArea;
+        if (surfAt) surfacePriced = true;
         if (wseSrc) (z.cls === "02pct" ? wse02Providers : wseProviders).add(wseSrc);
         voidCellsTotal += voidCells; pricedCellsTotal += pricedCells;
         // B808 — the flat-median comparison, accumulated in the SAME intersect (the flat
         // depth is constant per zone×footprint, so no second pass): surfaces the sites
         // where the old single-number grade was silently wrong (the >15% delta flag).
-        if (gradeAt != null && grade != null) flatSumCf += areaSf * Math.max(0, Math.min(wse, pad) - grade);
+        // B826: with a surface it reads "what the flat-pad estimate would have said" —
+        // still needs the scalar pad (a surface-only footprint drops the comparison).
+        if (gradeAt != null && grade != null && pad != null) flatSumCf += areaSf * Math.max(0, Math.min(wse, pad) - grade);
         else flatKnown = false;
         if (retainCells && cells) for (const c of cells) allCells.push({ cls: z.cls, fpId: fp.id, ...c });
       } else if (retainCells && cells) {
@@ -618,12 +633,15 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   const totalGridCells = voidCellsTotal + pricedCellsTotal;
   if (gradeAt != null && totalGridCells > 0 && voidCellsTotal > 0.05 * totalGridCells) flags.add("grid-voids");
   const volumeFlatCf = gradeAt != null && flatKnown && volumeKnown ? flatSumCf * ratio : null;
-  if (volumeKnown && volumeFlatCf != null && volumeFlatCf > 0 && Math.abs(totalVolumeCf - volumeFlatCf) / volumeFlatCf > 0.15) {
+  // B826 — no delta flag on a surface basis: surface-vs-flat-pad differing is the POINT
+  // (the courts price their real planes); the padBasis label carries that story instead.
+  if (volumeKnown && volumeFlatCf != null && volumeFlatCf > 0 && !surfacePriced && Math.abs(totalVolumeCf - volumeFlatCf) / volumeFlatCf > 0.15) {
     flags.add("grid-median-delta");
   }
 
   return {
     gradeBasis,
+    padBasis: surfacePriced ? "surface" : "flat", // B826 — what the fill's TOP was priced at
     volumeFlatCf,
     voidCells: voidCellsTotal,
     pricedCells: pricedCellsTotal,
@@ -641,7 +659,9 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
     expertBypass: expert,
     flags: [...flags],
     providers: {
-      padElev: (elev.sources && elev.sources.padElev) || (padDefault != null ? "manual" : null),
+      // B826 — a surface-priced result names its basis; the flat path keeps its labels.
+      padElev: surfacePriced ? "proposed-surface"
+        : (elev.sources && elev.sources.padElev) || (padDefault != null ? "manual" : null),
       // B808 — the grid basis names itself; the caller's label covers manual/median.
       existGrade: gradeBasis === "grid" ? "3dep-grid"
         : (elev.sources && elev.sources.existGrade) || (grade != null ? "manual" : null),
@@ -730,6 +750,9 @@ export function combineMitigation(results) {
     out.pricedCells = (out.pricedCells || 0) + (r.pricedCells || 0);
     out.volumeFlatCf = out.volumeFlatCf != null && r.volumeFlatCf != null ? out.volumeFlatCf + r.volumeFlatCf : null;
     if (r.gradeBasis && (!out.gradeBasis || (out.gradeBasis === "median" && r.gradeBasis === "grid"))) out.gradeBasis = r.gradeBasis;
+    // B826 — surface outranks flat in the combined label (any surface-priced part means
+    // the proposed-surface engine shaped the total).
+    if (r.padBasis === "surface") out.padBasis = "surface";
   }
   if (out.unknownReason) out.volumeCf = null;
   out.volumeAcFt = out.volumeCf != null ? out.volumeCf / SQFT_PER_ACRE : null;
@@ -739,7 +762,9 @@ export function combineMitigation(results) {
   const cellsTotal = (out.voidCells || 0) + (out.pricedCells || 0);
   out.flags = (out.flags || []).filter((f) => f !== "grid-voids" && f !== "grid-median-delta");
   if (out.gradeBasis === "grid" && cellsTotal > 0 && out.voidCells > 0.05 * cellsTotal) out.flags.push("grid-voids");
-  if (out.volumeCf != null && out.volumeFlatCf != null && out.volumeFlatCf > 0 && Math.abs(out.volumeCf - out.volumeFlatCf) / out.volumeFlatCf > 0.15) out.flags.push("grid-median-delta");
+  // B826 — same suppression as computeMitigation: a surface basis makes the flat-pad
+  // comparison an expected difference, not a data warning.
+  if (out.padBasis !== "surface" && out.volumeCf != null && out.volumeFlatCf != null && out.volumeFlatCf > 0 && Math.abs(out.volumeCf - out.volumeFlatCf) / out.volumeFlatCf > 0.15) out.flags.push("grid-median-delta");
   if (anyCells) out.cells = allCells;
   return out;
 }

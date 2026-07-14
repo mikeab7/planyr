@@ -35,6 +35,64 @@ export function cellPaint(cell) {
   return { kind: "depth", color: HEAT_RAMP[binIndex(cell.depthFt)] };
 }
 
+/* ---- B826: the cut/fill mode — same renderer, a diverging ramp ----
+ * Cells here are the proposed-surface grid's ({ dzFt: + fill / − cut / null void }).
+ * FILL reads WARM (dirt in), CUT reads COOL (dirt out — the B809 blues); the pair is a
+ * colorblind-safe diverging choice that stays readable over green aerial imagery (the
+ * same reason B809 avoided green). A DEM-void cell is grey hatch — "no ground data" is
+ * visible geography, never a silent skip. */
+export const FILL_RAMP = [
+  "#FEF3C7", "#FDE68A", "#FCD34D", "#FBBF24",
+  "#F59E0B", "#D97706", "#B45309", "#92400E",
+];
+export const CUT_RAMP = HEAT_RAMP;
+export const ZERO_BAND_FT = 0.05; // |dz| under this reads "on grade", not cut or fill
+
+export function cutFillPaint(cell) {
+  if (cell.dzFt == null) return { kind: "unknown", color: UNKNOWN_FILL };
+  if (Math.abs(cell.dzFt) < ZERO_BAND_FT) return { kind: "zero", color: "#D1D5DB" };
+  return cell.dzFt > 0
+    ? { kind: "fill", color: FILL_RAMP[binIndex(cell.dzFt)] }
+    : { kind: "cut", color: CUT_RAMP[binIndex(-cell.dzFt)] };
+}
+
+/* Legend rows for the PRESENT cut/fill bins (fill shallowest→deepest, then cut, then
+ * the hatch classes) — the heatmapLegend discipline: never rows for absent bins. Pure. */
+export function cutFillLegend(cells) {
+  const fillBins = new Set(), cutBins = new Set();
+  let zero = false, unknown = false;
+  for (const c of cells) {
+    if (c.dzFt == null) { unknown = true; continue; }
+    if (Math.abs(c.dzFt) < ZERO_BAND_FT) { zero = true; continue; }
+    (c.dzFt > 0 ? fillBins : cutBins).add(binIndex(Math.abs(c.dzFt)));
+  }
+  const binLabel = (i) => (i === HEAT_RAMP.length - 1
+    ? `≥${(i * DEPTH_BIN_FT).toFixed(1)}′`
+    : `${(i * DEPTH_BIN_FT).toFixed(1)}–${((i + 1) * DEPTH_BIN_FT).toFixed(1)}′`);
+  const rows = [];
+  for (const i of [...fillBins].sort((a, b) => a - b)) rows.push({ kind: "fill", color: FILL_RAMP[i], label: `fill ${binLabel(i)}` });
+  for (const i of [...cutBins].sort((a, b) => a - b)) rows.push({ kind: "cut", color: CUT_RAMP[i], label: `cut ${binLabel(i)}` });
+  if (zero) rows.push({ kind: "zero", color: "#D1D5DB", label: "on grade (±0.05′)" });
+  if (unknown) rows.push({ kind: "unknown", color: UNKNOWN_FILL, label: "no ground data" });
+  return rows;
+}
+
+/* Cut/fill tie-out summed from the SAME cells the exhibit paints (the heatmapTotals
+ * engine-truth rule — the overlay must equal the earthwork rows by construction). Pure. */
+export function cutFillTotals(cells) {
+  let cutCf = 0, fillCf = 0, gradedSf = 0, unknownSf = 0;
+  for (const c of cells) {
+    const a = c.wFt * c.hFt;
+    gradedSf += a;
+    if (c.dzFt == null) { unknownSf += a; continue; }
+    if (c.dzFt > 0) fillCf += a * c.dzFt; else cutCf += a * -c.dzFt;
+  }
+  return {
+    cutCf, fillCf, cutCy: cutCf / 27, fillCy: fillCf / 27,
+    gradedAcres: gradedSf / 43560, unknownAcres: unknownSf / 43560,
+  };
+}
+
 /* Bounding box of the cell rectangles, in site feet. Pure. */
 export function heatmapBBox(cells) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -112,8 +170,10 @@ export function cellAt(cells, pt) {
  * <image>, so tens of thousands of cells never become DOM nodes, and the live-SVG
  * export clone carries the exhibit into print/PDF by construction). Site-feet y grows
  * DOWN on the planner screen (worldToScreen has no flip), so canvas rows map directly.
+ * opts.paint swaps the classer (default cellPaint; cutFillPaint for the B826 mode) —
+ * solid kinds (depth/fill/cut/zero) fill, hatch kinds (floodway/unknown) stripe.
  * Returns { dataUrl, bboxFt, pxPerFt } or null with no DOM (tests / SSR). */
-export function paintHeatmap(cells, { maxPx = 1600 } = {}) {
+export function paintHeatmap(cells, { maxPx = 1600, paint = cellPaint } = {}) {
   if (typeof document === "undefined" || !cells || !cells.length) return null;
   const bboxFt = heatmapBBox(cells);
   if (!bboxFt || !(bboxFt.w > 0) || !(bboxFt.h > 0)) return null;
@@ -126,12 +186,17 @@ export function paintHeatmap(cells, { maxPx = 1600 } = {}) {
   if (!ctx) return null;
   const px = (v) => v * pxPerFt;
   for (const c of cells) {
-    const p = cellPaint(c);
+    const p = paint(c);
     const x = px(c.x - c.wFt / 2 - bboxFt.x), y = px(c.y - c.hFt / 2 - bboxFt.y);
     const w = Math.max(1, px(c.wFt)), h = Math.max(1, px(c.hFt));
-    if (p.kind === "depth") {
+    if (p.kind === "depth" || p.kind === "fill" || p.kind === "cut") {
       ctx.fillStyle = p.color;
       ctx.globalAlpha = 0.9;
+      ctx.fillRect(x, y, w, h);
+    } else if (p.kind === "zero") {
+      // on-grade cells read faint — present, but visually quiet next to real cut/fill
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = 0.3;
       ctx.fillRect(x, y, w, h);
     } else {
       // hatch classes: a light body + two diagonal strokes reads as "condition", not depth

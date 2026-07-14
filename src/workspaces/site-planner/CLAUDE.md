@@ -46,6 +46,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - Floodplain suite (B707–B712): `floodplainRules.js` / `floodplainMitigation.js` (compensating-storage
   engine, pure), `pondCriteriaRules.js` (berm/slope/freeboard criteria), `buildability.js` (FFE/LOMR-F),
   surfaced via the Yield → Stormwater collapsed verdict groups (B824 — ONE drainage home; the old Site Analysis sibling card was merged in and deleted; Analysis keeps a link row).
+- Grading/earthwork tier (B808/B809/B825/B826): `gradingRules.js` (per-surface-class slope registry
+  with provenance) + `proposedSurface.js` (pure auto-grade engine: per-element planes, composite
+  cut/fill lattice, balance assist, ADA-legal vs screening violations) + `mitigationHeatmap.js`
+  (engine-truth cell painter — B809 fill-depth mode AND the B826 cut/fill diverging mode); earthwork
+  rows live in Yield → "Earthwork cost (screening)"; mitigation prices fill at the proposed surface
+  when it exists (`fp.surfaceAt`, labeled), flat pad as the fallback.
 
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.
