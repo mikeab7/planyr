@@ -114,7 +114,7 @@ import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js"
 import { loadBuildabilityRules, assessBuildability, requiredFfe } from "./lib/buildability.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
-  solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt,
+  solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt, pondAutoValues,
   resolveDrainageContext, ruleBadge,
   computeRateBasedDetention, computePumpedCredit, DESIGN_STORM_PERIODS,
   effectiveChannelDischarge, effectiveReviewer, DETENTION_AUTHORITY_CHOICES,
@@ -6494,8 +6494,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     },
   };
   const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
+  // B822 — auto pond engineering, layer (a)+(b): criteria records drive freeboard/side
+  // slope (provenance-carrying — FBCDD's verified DCM §6.4.7 freeboard wins over the B709
+  // placeholder), the site 3DEP median drives top-of-bank (the labeled fallback until
+  // B808's per-ring grid ships). detWithAuto fills ONLY the missing det values, so a
+  // typed (manual) value always wins and × restores auto. Depth's auto is the per-pond
+  // B640 solver — an explicit one-click apply in the inspector (an implicit depth would
+  // feed back into the provided-volume accumulator it solves against).
+  const pondAuto = pondAutoValues({
+    authorityId: drainAuthorityId,
+    criteriaRule: pondCriteria[floodJurKey] || pondCriteria.generic,
+    groundElevFt: fmElev.existGradeFt,
+  });
+  const detWithAuto = (det) => {
+    const d0 = det || {};
+    return {
+      ...d0,
+      freeboard: d0.freeboard ?? pondAuto.freeboard.value,
+      slope: d0.slope ?? pondAuto.slope.value,
+      tobElev: d0.tobElev ?? (pondAuto.tobElev ? pondAuto.tobElev.value : null),
+    };
+  };
   const pondSplitFor = (e) => {
-    const det = e.det || {};
+    const det = detWithAuto(e.det);
     const pring = ringOf(e);
     const facts = fmZones.length
       ? pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt, derivedWse1pctFt: fmElev.derivedWse1pctFt, derivedWse1pctSrc: fmElev.derivedWse1pctSrc }, fmZonesSig)
@@ -6505,16 +6526,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : null;
     return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool }), wseFt: facts.wseFt, inTrigger: facts.inTrigger };
   };
-  let siteDeadCf = 0, siteMitCandidateCf = 0, pondFullyInundated = false, unanchoredInTrigger = 0, pondExcavationCf = 0;
+  let siteDeadCf = 0, siteMitCandidateCf = 0, pondFullyInundated = false, unanchoredInTrigger = 0, anchoredNoWseInTrigger = 0, pondExcavationCf = 0, pondAutoAnchored = 0;
   for (const e of els) {
     if (e.type !== "pond") continue;
     const ps = pondSplitFor(e);
     siteDeadCf += ps.deadCf;
-    pondExcavationCf += excavationVolume(ringOf(e), e.det || {});
+    pondExcavationCf += excavationVolume(ringOf(e), detWithAuto(e.det));
+    if ((e.det?.tobElev == null) && pondAuto.tobElev) pondAutoAnchored++; // B822 — riding the auto anchor
     if (ps.mode === "anchored" && ps.bands) {
       siteMitCandidateCf += ps.bands.mitigationCandidateCf;
       if (ps.bands.fullyInundated) pondFullyInundated = true;
-    } else if (ps.inTrigger) unanchoredInTrigger++;
+    } else if (ps.inTrigger) {
+      // B822 — two DIFFERENT honesty states: a pond with an anchor (manual or the 3DEP
+      // auto) whose reach WSE is unknown, vs a pond with no anchor at all. The old single
+      // counter told an auto-anchored pond to "set its top-of-bank" — wrong instruction.
+      if (detWithAuto(e.det).tobElev != null) anchoredNoWseInTrigger++;
+      else unanchoredInTrigger++;
+    }
   }
   const providedUsableCf = Math.max(0, providedDetCf - siteDeadCf);
 
@@ -6633,6 +6661,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     mitCandidateCf: siteMitCandidateCf,
     pondFullyInundated,
     unanchoredInTrigger,
+    anchoredNoWseInTrigger, // B822 — anchored (manual or auto TOB) but the reach WSE is unknown
+    pondAutoAnchored, // B822 — ponds anchored by the AUTO top-of-bank (3DEP site median)
     pondExcavationCf,
     floodGeo: floodGeo ? { state: floodGeo.state, ts: floodGeo.ts, truncated: !!floodGeo.truncated, zoneCount: fmZones.length, derivedBfe: floodGeo.derivedBfe || null, bfeLineFlags: floodGeo.bfeLineFlags || null, derivedXsWsel: floodGeo.derivedXsWsel || null, xsFlags: floodGeo.xsFlags || null, derivedWse02: floodGeo.derivedWse02 || null, wse02Flags: floodGeo.wse02Flags || null, derivedWse100: floodGeo.derivedWse100 || null, wse100Flags: floodGeo.wse100Flags || null } : null,
     // B770 — where the 0.2% WSE feeding buildability came from (manual beats the DRAFT
@@ -7747,7 +7777,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // marks mitigation as a floor, a failed pull prints UNKNOWN, a straddle with
     // an unknown candidate never prints as a clean definite number.
     if (reqAcFt != null) {
-      const caution = d.unanchoredInTrigger > 0 ? " ⚠ unanchored pond" : "";
+      // B822 (PDF-PARITY) — the same provenance the panel chips carry: auto-anchored
+      // ponds tag the figure with their TOB source instead of the old unanchored caution.
+      const caution = d.unanchoredInTrigger > 0 ? " ⚠ unanchored pond" : d.anchoredNoWseInTrigger > 0 ? " ⚠ pond WSE unknown" : d.pondAutoAnchored > 0 ? " · TOB auto (3DEP)" : "";
       pairs.push(["Det. req / prov (usable)", `${f2(reqAcFt)} / ${f2(d.providedUsableCf / 43560)} ac-ft${caution}`]);
     }
     const mit = d && d.mitigation;
@@ -12845,9 +12877,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
               {selEl.type === "pond" && (() => {
                 const det = selEl.det || {};
-                const depth = det.depth ?? 8, fb = det.freeboard ?? 1, slope = det.slope ?? 3;
+                // B822 — the effective values: manual wins, else the criteria/terrain autos
+                // (pondAuto — provenance-carrying), else the old screening defaults.
+                const depth = det.depth ?? 8, fb = det.freeboard ?? pondAuto.freeboard.value, slope = det.slope ?? pondAuto.slope.value;
+                const tobEff = det.tobElev ?? (pondAuto.tobElev ? pondAuto.tobElev.value : null);
                 const ring = selEl.points ? selEl.points : elCorners(selEl);
                 const r = detentionStorage(ring, depth, fb, slope);
+                // B822 layer (c) — the per-pond AUTO depth: the smallest depth closing the
+                // site's REMAINING deficit (B640 solver), offered as a one-click apply (an
+                // implicit depth would feed back into the provided volume it solves against).
+                const depthSolve = (() => {
+                  if (det.depth != null) return null; // manual depth — nothing to suggest
+                  if (!detReq || detReq.kind !== "point" || !(detReq.requiredAcFt > 0)) return null;
+                  const otherCf = Math.max(0, providedDetCf - r.vol);
+                  const targetCf = detReq.requiredAcFt * 43560 - otherCf;
+                  if (!(targetCf > 0)) return null;
+                  return solvePondDepth({
+                    requiredCf: targetCf,
+                    volumeAtDepth: (dft) => detentionStorage(ring, dft, fb, slope),
+                    startDepthFt: 2,
+                  });
+                })();
                 const setDet = (patch) => { pushHistory(); setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); };
                 const setDetLive = (patch) => setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); // B567: no-history sibling for live color picking
                 // --- Expand this pond (B139): baseline + steppers; both steppers and free
@@ -12897,9 +12947,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return (
                   <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Detention storage</div>
-                    <Field label="Total depth (ft)"><NumInput style={numInput} value={depth} min={1} onCommit={(n) => setDet({ depth: n })} /></Field>
-                    <Field label="Freeboard (ft)"><NumInput style={numInput} value={fb} min={0} onCommit={(n) => setDet({ freeboard: n })} /></Field>
-                    <Field label="Side slope (n:1 H:V)"><NumInput style={numInput} value={slope} min={1} onCommit={(n) => setDet({ slope: n })} /></Field>
+                    <Field label="Total depth (ft)">
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput style={numInput} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
+                        {det.depth != null
+                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>
+                          : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }}>· Planyr screening convention</span>}
+                      </span>
+                    </Field>
+                    {depthSolve && depthSolve.ok && Math.abs(depthSolve.depthFt - depth) > 0.05 && (
+                      <div style={{ fontSize: 10.5, color: PAL.info, lineHeight: 1.45, margin: "1px 0 3px" }}>
+                        Solver: ≈{f1(depthSolve.depthFt)}′ deep closes the site's remaining deficit.
+                        <button style={{ ...chip, marginLeft: 6, padding: "2px 8px", fontSize: 10.5 }} onClick={() => setDet({ depth: depthSolve.depthFt })}>Apply</button>
+                      </div>
+                    )}
+                    {depthSolve && !depthSolve.ok && depthSolve.reason === "slopes-collapse" && (
+                      <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "1px 0 3px", fontWeight: 700 }}>
+                        Solver clamped: this footprint maxes out at ≈{f1(depthSolve.maxUsableDepthFt)}′ ({slope}:1 slopes meet) — even that depth can't close the site deficit. Enlarge the footprint or add a pond.
+                      </div>
+                    )}
+                    <Field label="Freeboard (ft)">
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput style={numInput} value={det.freeboard ?? ""} placeholder={`~${f1(pondAuto.freeboard.value)}`} min={0} onCommit={(n) => setDet({ freeboard: Number.isFinite(n) ? n : null })} />
+                        {det.freeboard != null
+                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear — back to auto (${pondAuto.freeboard.source})`} onClick={() => setDet({ freeboard: null })}>×</button>
+                          : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.freeboard.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.freeboard.source}</span>}
+                      </span>
+                    </Field>
+                    <Field label="Side slope (n:1 H:V)">
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput style={numInput} value={det.slope ?? ""} placeholder={`~${f1(pondAuto.slope.value)}`} min={1} onCommit={(n) => setDet({ slope: Number.isFinite(n) ? n : null })} />
+                        {det.slope != null
+                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear — back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
+                          : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.slope.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.slope.source}</span>}
+                      </span>
+                    </Field>
                     {/* Stage contours on the plan — depth rings inside the basin. Default ON
                         (only `false` is ever stored to hide). Interval + top-of-bank elevation
                         only show when contours are on (progressive disclosure). */}
@@ -12922,10 +13004,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               </Field>
                               <Field label="Top-of-bank elev. (ft)">
                                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  <NumInput style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
-                                  {det.tobElev != null && (
-                                    <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — label rings by depth instead of elevation" onClick={() => setDet({ tobElev: null })}>Clear</button>
-                                  )}
+                                  <NumInput style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "optional"} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
+                                  {det.tobElev != null
+                                    ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={pondAuto.tobElev ? `Clear — back to auto (${pondAuto.tobElev.source})` : "Clear — label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>
+                                    : pondAuto.tobElev
+                                      ? <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title="Excavated-pond convention: top of bank ≈ existing grade (site 3DEP median — B808's per-ring grid will refine this). Type to override.">· {pondAuto.tobElev.source}</span>
+                                      : null}
                                 </span>
                               </Field>
                               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Set the top-of-bank elevation to label rings as real elevations (e.g. 96.0) instead of depths (−2′).</div>
@@ -12941,7 +13025,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         the det.availDepth precedent). null-discipline: never undefined. */}
                     {det.contours === false && (
                       <Field label="Top-of-bank elev. (ft)">
-                        <NumInput style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
+                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <NumInput style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "optional"} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
+                          {det.tobElev == null && pondAuto.tobElev && <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }}>· {pondAuto.tobElev.source}</span>}
+                        </span>
                       </Field>
                     )}
                     <Field label="Permanent pool elev. (ft)">
@@ -12965,6 +13052,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {pondRow("Bottom area", `${f0(r.aBottom)} sf`)}
                       {pondRow("Water depth", `${f1(r.dw)} ft`)}
                       <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
+                      {tobEff != null && pondRow("Pond floor", `${f1(tobEff - depth)}′ NAVD88`)}
                       {pondRow("Stored volume", `${f0(r.vol)} cf`)}
                       {pondRow("", `${f2(r.vol / 43560)} ac-ft`)}
                     </div>
@@ -13009,7 +13097,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       } else if (split.mode === "anchored" && split.bands && split.bands.poolDeadCf > 0) {
                         out.push(noteLine(`Permanent pool below ${f1(det.poolElev)}′ holds ${f2(split.bands.poolDeadCf / 43560)} ac-ft of dead storage (no detention credit). Groundwater can hold a wet bottom near mapped channels.`, "pool-note"));
                       } else if (split.inTrigger) {
-                        out.push(warnLine(det.tobElev != null
+                        // B822 — an auto-anchored pond (3DEP TOB) reaches here only when the reach's
+                        // flood elevation is unknown; the truly-unanchored copy fires only when there
+                        // is NO anchor at all (no manual, no 3DEP median).
+                        out.push(warnLine(tobEff != null
                           ? "⚠ This pond sits in the mapped floodplain and its top of bank is anchored, but the reach's flood elevation is unknown — enter the BFE (drainage inputs in Yield) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention."
                           : "⚠ This pond sits in the mapped floodplain but isn't anchored — set the pond's top-of-bank elevation (and the reach's flood elevation) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention.", "unanchored", false));
                       }
@@ -15018,6 +15109,9 @@ function YieldPanel({
                 mitR.push(warnNote("Mitigation wasn't saved with this remembered check — ↻ re-check to screen it.", "mit-remembered-missing", "The remembered result predates the mitigation ledger, so fill volume hasn't been screened against the mapped floodplain in this view. ↻ Re-check drainage criteria to price it."));
               }
               if (d.unanchoredInTrigger > 0) mitR.push(warnNote(`${d.unanchoredInTrigger} floodplain pond${d.unanchoredInTrigger > 1 ? "s" : ""} not elevation-anchored — gross volume OVERSTATES usable detention.`, "mit-unanch", "An unanchored pond can't split usable from dead storage at the flood water surface, so the gross volume above overstates usable detention. Set each pond's top-of-bank elevation in its panel."));
+              // B822 — the anchored-but-WSE-unknown half: the anchor exists (manual or the 3DEP
+              // auto), the reach's flood elevation doesn't — the BFE input is what's missing.
+              if (d.anchoredNoWseInTrigger > 0) mitR.push(warnNote(`${d.anchoredNoWseInTrigger} anchored floodplain pond${d.anchoredNoWseInTrigger > 1 ? "s" : ""} — flood WSE unknown; gross volume OVERSTATES.`, "mit-anch-nowse", "The pond has a top-of-bank anchor but the reach's flood elevation is unknown, so usable storage can't be split from flood-occupied volume. Enter a BFE (inputs below) — on Fort Bend Zone A the DRAFT Atlas-14 raster usually supplies it automatically."));
               if (d.pondFullyInundated) mitR.push(warnNote("A pond's top of bank sits at/below the flood WSE — its usable detention is ZERO.", "mit-inund", "Fully inundated in the design flood: every acre-foot below the flood water surface is already water, so the pond credits nothing."));
               if (d.floodGeo && d.floodGeo.state === "failed") mitR.push(warnNote("Flood-zone geometry unavailable — mitigation not screened; re-check.", "fmgeo-fail", "The flood-zone source didn't answer, so nothing could be screened this check. An outage is never an all-clear — re-check shortly."));
               if (d.floodGeo && d.floodGeo.truncated) mitR.push(warnNote("The flood-zone pull hit the feature cap — mitigation figures may UNDERCOUNT; treat them as a floor.", "fmgeo-trunc"));

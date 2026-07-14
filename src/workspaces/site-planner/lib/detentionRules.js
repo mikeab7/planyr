@@ -215,6 +215,9 @@ export const DETENTION_RULES = {
         maxReleaseCfsPerAc: 0.125,
         pondFreeboardFt: 1, // §6.4.7: minimum 1 ft of freeboard above the 100-yr pond WSE
         gravityDrainFraction: 0.5, // Interim §5: ≥50% of the detention volume must drain by gravity
+        // B822 — per-param short cites so auto-value chips can read "freeboard 1′ — FBCDD DCM §6.4.7"
+        // without guessing which section a number came from. Additive metadata only.
+        paramCites: { pondFreeboardFt: "DCM §6.4.7", maxReleaseCfsPerAc: "DCM §6.4.1", gravityDrainFraction: "Interim §5" },
         gravityDrainNote:
           "Interim §5: ≥50% of volume drains by gravity; assess ADDITIONAL storage if the pro-rata allowable release falls below the 0.125 cfs/ac max.",
         postLePreEvents: ["atlas14-10yr", "atlas14-100yr"], // Interim §4.a: post-dev peak ≤ pre-dev for BOTH events
@@ -992,6 +995,34 @@ export function solvePondDepth({
 export function pondDefaultsFor(authorityId, onDate) {
   const rule = ruleFor(authorityId, onDate);
   return rule?.params?.pond || { sideSlope: 3, freeboardFt: 1 };
+}
+
+/* B822 — the ONE auto-values seam for pond engineering. Criteria records drive
+ * freeboard + side slope (each value carries its provenance: a VERIFIED detention-rule
+ * param wins (e.g. FBCDD DCM §6.4.7), else the B709 pond-criteria record (seeded
+ * verified:false), else the Planyr screening convention); terrain drives top-of-bank
+ * (the site 3DEP median until B808's per-ring grid ships — labeled). Depth's auto is
+ * the B640 solver, computed by the caller where geometry is known. Manual det values
+ * always win; × restores auto (the autoField pattern). Pure. */
+export function pondAutoValues({ authorityId = null, onDate, criteriaRule = null, groundElevFt = null } = {}) {
+  const rule = authorityId ? ruleFor(authorityId, onDate) : null;
+  const p = rule?.params || {};
+  const cites = p.paramCites || {};
+  const shortAuth = rule ? (AUTHORITY_SHORT[rule.authority] || rule.authorityLabel) : null;
+  const fromCriteria = (field) =>
+    criteriaRule && criteriaRule[field] != null
+      ? { value: criteriaRule[field], source: `${criteriaRule.label} criteria${criteriaRule.verified ? "" : " (unverified)"}`, verified: criteriaRule.verified === true }
+      : null;
+  const freeboard = p.pondFreeboardFt != null
+    ? { value: p.pondFreeboardFt, source: `${shortAuth}${cites.pondFreeboardFt ? ` ${cites.pondFreeboardFt}` : ""}`, verified: rule.verifiedOn != null }
+    : fromCriteria("minFreeboardFt") || { value: 1, source: "Planyr screening convention", verified: false };
+  const slope = p.pond && p.pond.sideSlope != null
+    ? { value: p.pond.sideSlope, source: `${shortAuth}${cites.pondSideSlope ? ` ${cites.pondSideSlope}` : ""}`, verified: rule.verifiedOn != null }
+    : fromCriteria("maxSideSlope") || { value: 3, source: "Planyr screening convention", verified: false };
+  const tobElev = Number.isFinite(groundElevFt)
+    ? { value: groundElevFt, source: "3DEP site median", verified: false }
+    : null;
+  return { freeboard, slope, tobElev };
 }
 
 /* Regime-B dead storage: how deep the permanent pool sits in the basin. The pool

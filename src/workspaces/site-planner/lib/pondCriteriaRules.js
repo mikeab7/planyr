@@ -24,7 +24,17 @@ const seed = (label, source) => ({
 
 export const DEFAULT_POND_CRITERIA = {
   coh: seed("City of Houston", "COH IDM / HCFCD criteria (not yet transcribed)"),
-  harris: seed("Harris County (unincorporated)", "HCFCD PCPM (not yet transcribed)"),
+  harris: {
+    ...seed("Harris County (unincorporated)", "HCFCD PCPM (not yet transcribed)"),
+    // B822 — outlet-hydraulics screens seeded from the Harris County Infrastructure
+    // Regulations: drawdown of the design volume within 4 days (96 h) + a sharp-edged
+    // orifice coefficient C ≈ 0.8 for restrictor sizing. verified:false — placeholder
+    // magnitudes until transcribed from the primary text (the B709/B771 discipline);
+    // consumed by the future drawdown-time solver, recorded now so the value carries
+    // its provenance from day one.
+    drawdownMaxHr: 96,
+    orificeC: 0.8,
+  },
   fortbend: seed("Fort Bend County", "FBCDD criteria (not yet transcribed)"),
   montgomery: seed("Montgomery County", "Montgomery DCM (not yet transcribed)"),
   chambers: seed("Chambers County", "County criteria (not yet transcribed)"),
