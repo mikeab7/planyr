@@ -692,3 +692,24 @@ export const DERIVED_WSE02_DRAFT_NOTE =
   "This 0.2% (500-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: FBCDD's Interim §9 mitigation trigger references the PRE-Atlas-14 0.2% (the effective 2014 FIS profile) — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a 0.2% WSE from the effective FIS to override.";
 export const DERIVED_WSE100_DRAFT_NOTE =
   "This 1% (100-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: Fort Bend's mitigation and FFE rules reference the EFFECTIVE (pre-Atlas-14) floodplain — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a BFE to override.";
+
+/* B824 — presentation labels for the drainage readout (moved here from the deleted
+ * FloodMitigationCard so the Yield surface and print path share one source). */
+export const WSE_PROVIDER_LABEL = {
+  "static-bfe": "published BFE", "ao-depth": "AO depth + grade", "manual": "manual",
+  "bfe-line-interp": "derived (BFE lines)", "xs-wsel": "derived (cross-sections)",
+  "xs-wsel-02": "derived (cross-sections)", "fbcdd-wse02-draft": "derived (FBCDD study — DRAFT)",
+  "fbcdd-wse100-draft": "derived (FBCDD study — DRAFT)", "derived-wse100": "derived (100-yr raster)",
+  "mixed": "mixed",
+};
+export const wseProvLabel = (p) => WSE_PROVIDER_LABEL[p] || p || "—";
+export const FFE_BASIS_LABEL = {
+  "wse02pct": "0.2% (500-yr) WSE", "wse1pct": "FEMA BFE", "atlas14_100yr": "Atlas-14 100-yr WSE",
+  "pre_atlas14_100yr": "pre-Atlas-14 100-yr WSE", "zone_a_est_bfe": "Zone A estimated BFE",
+  "site": "outside-SFHA site basis",
+};
+export const ffeBasisText = (ffe) => {
+  const g = ffe.governingBasis;
+  if (g) return `${g.label || FFE_BASIS_LABEL[g.basis] || g.basis} + ${g.plusFt}′`;
+  return `${FFE_BASIS_LABEL[ffe.basis] || (ffe.basis === "wse02pct" ? "0.2% WSE" : "BFE")} + ${ffe.plusFt}′`;
+};

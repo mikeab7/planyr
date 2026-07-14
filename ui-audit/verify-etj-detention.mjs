@@ -64,16 +64,23 @@ async function run() {
   await cb.click();
   await page.getByText("Detention required", { exact: false }).waitFor({ timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(700);
+  // B824 — expand the collapsed Stormwater verdict groups before reading text.
+  for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
+    await page.locator(`button:has-text("${g}")`).first().click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(120);
+  }
   const t = (await page.locator("body").innerText()).replace(/\s+/g, " ");
 
   expect("Reviewer is Fort Bend County Drainage District (the county authority), not COH",
     /Fort Bend County Drainage District/.test(t), t.match(/(?:eff\.|verified)[^.]*/)?.[0]?.slice(0, 80) || "");
   expect("Reviewer is NOT reported as City of Houston",
     !/Reviewing authority: City of Houston/.test(t));
-  expect("ETJ note explains Houston reviews platting but county criteria govern detention",
-    /City of Houston ETJ .*not its city limits/.test(t) && /county drainage-district criteria govern detention/i.test(t));
-  expect("ETJ note states Houston's own detention rate does not apply",
-    /Houston's own detention rate does not apply/i.test(t));
+  // B823 — the ETJ note is a one-liner; the platting/rate teaching copy rides its ⓘ title.
+  expect("ETJ one-liner: 'Houston ETJ — county (FBCDD) criteria govern detention'",
+    /Houston ETJ — county \(FBCDD\) criteria govern detention/.test(t));
+  const etjDetailOk = await page.locator("div[title]").evaluateAll((els) =>
+    els.some((el) => { const v = el.getAttribute("title") || ""; return /not its city limits/.test(v) && /county drainage-district criteria govern detention/i.test(v) && /Houston's own detention rate does not apply/i.test(v) && /plat review/i.test(v); })).catch(() => false);
+  expect("ETJ ⓘ carries the platting + rate-does-not-apply + plat-review detail", etjDetailOk);
   expect("No stale 'detected from city-limits GIS → City of Houston' claim for this ETJ site",
     !/detected from city-limits GIS/.test(t));
 

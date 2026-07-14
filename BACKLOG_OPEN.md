@@ -4,12 +4,13 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _62 open · 85 awaiting live verification._
+> _62 open · 90 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B826 | Proposed-surface engine: auto-grade the concept from FFE + rules, then earthwork balance and mitigation priced off the real surface | [Site Planner / grading · yield] | #site-planner #grading #yield #floodplain | live |
 | B818 | Meeting-cadence Gantt view + loud row-state banners (the visual half of NEW-3) | [Scheduler] | #scheduler #entitlements #gantt #export | live |
 | B808 | Mitigation volumes integrate per-cell 3DEP grade (retire the single centroid-line median) | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #gis | live |
 | B809 | Fill-depth heat map overlay: render the exact cells the engine priced | [Site Planner / yield · ui] | #site-planner #yield #floodplain #ui #export | live |
@@ -26,7 +27,6 @@
 | B724 | Parcel analysis: frontage detection + ROW-dedication estimate | [Site Planner / analysis] | #thoroughfare #site-planner #yield #gis | live |
 | B725 | Auto-generated entitlement issues from thoroughfare-plan exposure | [Site Planner / entitlements] | #thoroughfare #entitlements #site-planner | live |
 | B726 | Thoroughfare-plan versioning + data-freshness tracking | [Site Planner / GIS · data ops] | #thoroughfare #entitlements #gis #infra | live |
-| B691 | Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy | [Site Planner / GIS] | #site-planner #gis | live |
 | B663 | ONE-TIME migration: every existing project gets the standard tree + existing files move into their tree folders in Drive | [Library / storage] | #library #drive | — |
 | B662 | Unified Library: the folder tree IS the view, and files live inside it (+ the live-502 chunked Drive sync fix) | [Library / Doc Review / storage] | #library #drive #persistence | — |
 | B650 | Per-project standard folder tree, user-editable in-app, with continuous one-way sync to Google Drive | [Doc Review / Library / storage · drive-integration / persistence] | — | — |
@@ -78,6 +78,11 @@
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
 | B821 | Map flashes/blanks on single- & double-click: docked-panel resize → un-ghosted `setView` tile-wipe | [Site Planner / Map] | #site-planner #ui #perf | ⏳ live — awaiting |
+| B824 | One home for drainage: merge the Analysis "Floodplain mitigation & buildability" card into Yield → Stormwater; Analysis keeps a one-line screening verdict | [Site Planner / yield · analysis] | #site-planner #yield #ui #export | ⏳ live — awaiting |
+| B823 | Left-panel verbiage, completion pass: one-line notes with logic gating (B803 structure shipped; the notes were left as paragraphs) | [Site Planner / yield · ui] | #site-planner #yield #ui | ⏳ live — awaiting |
+| B822 | Detention ponds engineered automatically: criteria records drive freeboard/slopes/constraints, terrain drives top-of-bank, the solver drives depth | [Site Planner / stormwater] | #site-planner #pond #yield #gis | ⏳ live — awaiting |
+| B827 | 0.2% (500-yr) WSE sampler rides the B807 per-watershed multiplex (county mosaic has holes — Willow Fork proven) | [Site Planner / GIS · yield] | #site-planner #gis #yield #floodplain | ⏳ live — awaiting |
+| B691 | Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy (×2) | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B820 | Site Planner element/markup z-order "Arrange": Bring to Front / Forward / Send Backward / to Back via right-click + ⌘/Ctrl+]/[ chords, plus "Send behind buildings" for markups | [Site Planner / markup] | #site-planner #markup #selection #ui | ⏳ live — awaiting |
 | B819 | False "open in another tab" banner on the Library with only ONE tab open | [App Shell / Library] | #ui #infra #persistence | ⏳ live — awaiting |
 | B817 | Float-to-deadline, cost-of-miss, and the cadence view | [Scheduler] | #scheduler #entitlements #gantt #export | ⏳ live — awaiting |
@@ -171,24 +176,25 @@
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B791, B792, B750, B746, B687, B685, B667, B659
 - **#drive** — B663, B662, B629, B791, B792, B699, B701, B687
 - **#entitlements** — B818, B725, B726, B817, B816, B815
-- **#export** — B818, B809, B810, B752, B817, B816, B745, B739, B738, B712, B684
+- **#export** — B818, B809, B810, B752, B824, B817, B816, B745, B739, B738, B712, B684
 - **#files** — B180, B181, B182, B183, B792, B784, B785, B786, B747, B748, B699, B687, B685, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
-- **#floodplain** — B808, B809, B807, B798, B802, B790, B789, B788, B782, B755
+- **#floodplain** — B826, B808, B809, B827, B807, B798, B802, B790, B789, B788, B782, B755
 - **#gantt** — B818, B817, B816
-- **#gis** — B808, B810, B776, B777, B752, B753, B722, B723, B724, B726, B691, B629, B370, B309, B178, B171, B147, B13, B95, B807, B796, B797, B800, B801, B790, B789, B788, B787, B782, B775, B774, B761, B625, B755, B751, B754, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
+- **#gis** — B808, B810, B776, B777, B752, B753, B722, B723, B724, B726, B629, B370, B309, B178, B171, B147, B13, B95, B822, B827, B691, B807, B796, B797, B800, B801, B790, B789, B788, B787, B782, B775, B774, B761, B625, B755, B751, B754, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
+- **#grading** — B826
 - **#infra** — B778, B735, B726, B406, B179, B63, B819, B788, B786, B812, B811, B759, B758, B756, B748, B734, B675, B669
 - **#library** — B663, B662, B792, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B820, B750, B746, B740, B737
 - **#perf** — B495, B484, B479, B821, B816, B749, B704, B694, B669
 - **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B819, B796, B799, B800, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
-- **#pond** — B707
+- **#pond** — B822, B707
 - **#road** — B742, B719
 - **#scheduler** — B818, B778, B495, B255, B817, B816, B815, B644
 - **#selection** — B741, B820, B750, B746, B742, B743, B740, B737, B682, B651
-- **#site-planner** — B808, B809, B810, B776, B777, B752, B753, B741, B723, B724, B725, B691, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B821, B820, B807, B796, B797, B798, B799, B800, B801, B802, B793, B790, B789, B788, B787, B784, B785, B786, B782, B812, B811, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B826, B808, B809, B810, B776, B777, B752, B753, B741, B723, B724, B725, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B821, B824, B823, B822, B827, B691, B820, B807, B796, B797, B798, B799, B800, B801, B802, B793, B790, B789, B788, B787, B784, B785, B786, B782, B812, B811, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413
 - **#testing** — B269, B63, B815, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B809, B810, B741, B735, B723, B115, B821, B820, B819, B798, B799, B801, B802, B790, B761, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
-- **#yield** — B808, B809, B724, B553, B807, B796, B797, B798, B799, B802, B782, B755, B751, B754, B715, B712, B651
+- **#ui** — B809, B810, B741, B735, B723, B115, B821, B824, B823, B820, B819, B798, B799, B801, B802, B790, B761, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
+- **#yield** — B826, B808, B809, B724, B553, B824, B823, B822, B827, B807, B796, B797, B798, B799, B802, B782, B755, B751, B754, B715, B712, B651

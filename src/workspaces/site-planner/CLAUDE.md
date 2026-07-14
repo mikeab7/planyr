@@ -45,7 +45,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   B708 anchored tier (`bandedStorage` / `usablePondVolume` — the ONE per-pond usable/dead split).
 - Floodplain suite (B707–B712): `floodplainRules.js` / `floodplainMitigation.js` (compensating-storage
   engine, pure), `pondCriteriaRules.js` (berm/slope/freeboard criteria), `buildability.js` (FFE/LOMR-F),
-  surfaced via `components/FloodMitigationCard.jsx` + the Yield drainage readout.
+  surfaced via the Yield → Stormwater collapsed verdict groups (B824 — ONE drainage home; the old Site Analysis sibling card was merged in and deleted; Analysis keeps a link row).
 
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.

@@ -78,8 +78,15 @@ async function run() {
   const cb = page.getByRole("button", { name: /Check drainage criteria/ });
   await cb.waitFor({ timeout: 8000 }).catch(() => {});
   await cb.click();
-  await page.getByText("Detention required", { exact: false }).waitFor({ timeout: 30000 }).catch(() => {});
+  await page.locator('button:has-text("▸ Detention")').waitFor({ timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(900);
+  // B824 — the Stormwater readout is grouped + COLLAPSED by default; expand all three
+  // verdict groups so the detail (formerly the Site Analysis card) is in the DOM.
+  for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
+    await page.locator(`button:has-text("${g}")`).first().click({ timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(300);
   const t = await railText(page);
 
   // NEW-3 — the pad defaults to the code-minimum FFE (95 + 2 = 97) and shows as grey text.
@@ -90,13 +97,20 @@ async function run() {
   expect("NEW-4: no 'Channel adjacency unknown' (tier ⓘ)", await page.locator('[title*="Channel adjacency unknown"]').count() === 0);
   await page.screenshot({ path: "ui-audit/verify-auto-ffe.png" }).catch(() => {});
 
-  // NEW-3 — the Site Analysis card's Required-FFE verdict reads ASSUMED (code minimum), not a pass.
-  await page.locator('button[title="Analysis"]').first().click({ timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(1000);
-  const t2 = await railText(page);
+  // NEW-3 (B824: the card merged into Yield → Stormwater) — the Required-FFE verdict now
+  // lives in the expanded Buildability / FFE group of THIS panel.
+  const t2 = t;
   expect("NEW-3: Required FFE renders the 97′ code minimum", /Required FFE/.test(t2) && /97(\.0+)?′/.test(t2), t2.match(/Required FFE[^A-Z]{0,40}/)?.[0]);
   expect("NEW-3: verdict reads 'ASSUMED at this code minimum' (not a verified pass)", /ASSUMED at this code minimum/i.test(t2));
   expect("NEW-3: NOT a false 'pad PASSES' verdict", !/pad PASSES/.test(t2));
+  // B824 — Site Analysis keeps only the screening LINK row (no duplicate ledger).
+  await page.locator('button[title="Analysis"]').first().click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(1000);
+  const tA2 = await railText(page);
+  expect("B824: Analysis shows the link row to Yield · Stormwater", /in Yield · Stormwater/.test(tA2));
+  expect("B824: Analysis no longer renders the Required-FFE ledger", !/Required FFE/.test(tA2));
+  await page.getByRole("button", { name: /Yield/ }).first().click().catch(() => {});
+  await page.waitForTimeout(600);
 
   // NEW-2 persist → restore round trip: the live check priced mitigation (the building sits in
   // the AE zone) and persisted a SLIM summary. Reloading (no fresh check) must re-render the

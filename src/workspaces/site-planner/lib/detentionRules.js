@@ -215,6 +215,9 @@ export const DETENTION_RULES = {
         maxReleaseCfsPerAc: 0.125,
         pondFreeboardFt: 1, // §6.4.7: minimum 1 ft of freeboard above the 100-yr pond WSE
         gravityDrainFraction: 0.5, // Interim §5: ≥50% of the detention volume must drain by gravity
+        // B822 — per-param short cites so auto-value chips can read "freeboard 1′ — FBCDD DCM §6.4.7"
+        // without guessing which section a number came from. Additive metadata only.
+        paramCites: { pondFreeboardFt: "DCM §6.4.7", maxReleaseCfsPerAc: "DCM §6.4.1", gravityDrainFraction: "Interim §5" },
         gravityDrainNote:
           "Interim §5: ≥50% of volume drains by gravity; assess ADDITIONAL storage if the pro-rata allowable release falls below the 0.125 cfs/ac max.",
         postLePreEvents: ["atlas14-10yr", "atlas14-100yr"], // Interim §4.a: post-dev peak ≤ pre-dev for BOTH events
@@ -994,6 +997,34 @@ export function pondDefaultsFor(authorityId, onDate) {
   return rule?.params?.pond || { sideSlope: 3, freeboardFt: 1 };
 }
 
+/* B822 — the ONE auto-values seam for pond engineering. Criteria records drive
+ * freeboard + side slope (each value carries its provenance: a VERIFIED detention-rule
+ * param wins (e.g. FBCDD DCM §6.4.7), else the B709 pond-criteria record (seeded
+ * verified:false), else the Planyr screening convention); terrain drives top-of-bank
+ * (the site 3DEP median until B808's per-ring grid ships — labeled). Depth's auto is
+ * the B640 solver, computed by the caller where geometry is known. Manual det values
+ * always win; × restores auto (the autoField pattern). Pure. */
+export function pondAutoValues({ authorityId = null, onDate, criteriaRule = null, groundElevFt = null } = {}) {
+  const rule = authorityId ? ruleFor(authorityId, onDate) : null;
+  const p = rule?.params || {};
+  const cites = p.paramCites || {};
+  const shortAuth = rule ? (AUTHORITY_SHORT[rule.authority] || rule.authorityLabel) : null;
+  const fromCriteria = (field) =>
+    criteriaRule && criteriaRule[field] != null
+      ? { value: criteriaRule[field], source: `${criteriaRule.label} criteria${criteriaRule.verified ? "" : " (unverified)"}`, verified: criteriaRule.verified === true }
+      : null;
+  const freeboard = p.pondFreeboardFt != null
+    ? { value: p.pondFreeboardFt, source: `${shortAuth}${cites.pondFreeboardFt ? ` ${cites.pondFreeboardFt}` : ""}`, verified: rule.verifiedOn != null }
+    : fromCriteria("minFreeboardFt") || { value: 1, source: "Planyr screening convention", verified: false };
+  const slope = p.pond && p.pond.sideSlope != null
+    ? { value: p.pond.sideSlope, source: `${shortAuth}${cites.pondSideSlope ? ` ${cites.pondSideSlope}` : ""}`, verified: rule.verifiedOn != null }
+    : fromCriteria("maxSideSlope") || { value: 3, source: "Planyr screening convention", verified: false };
+  const tobElev = Number.isFinite(groundElevFt)
+    ? { value: groundElevFt, source: "3DEP site median", verified: false }
+    : null;
+  return { freeboard, slope, tobElev };
+}
+
 /* Regime-B dead storage: how deep the permanent pool sits in the basin. The pool
  * surface is the static water level ≈ BFE-adjacent water table; below it the basin
  * stores nothing creditable. Returns feet of pool depth (0..depth-freeboard), or
@@ -1236,10 +1267,27 @@ export const COUNTY_AUTHORITY = {
 /* City (TxGIO city_name, lowercased) → municipal overlay id. */
 const CITY_OVERLAYS = { "missouri city": "missouricity", magnolia: "magnolia" };
 
+/* B823 — short authority labels for one-line badge copy (the ETJ overlay's `short`).
+ * Keyed by authority id; keep in sync with COUNTY_AUTHORITY / DETENTION_RULES ids. */
+export const AUTHORITY_SHORT = {
+  hcfcd: "HCFCD",
+  fortbend: "FBCDD",
+  coh: "City of Houston",
+  montgomery: "Montgomery Co.",
+  chambers: "Chambers Co.",
+  waller: "Waller Co.",
+};
+
 /* Pure mapping: jurisdiction facts → who reviews drainage. Straddles surface in
  * `ambiguous` (never silently defaulted); unmodeled cities keep the county
- * authority with an honest flag. */
-export function authorityForJurisdiction({ city = [], etj = [], county = [], unincorporated = true } = {}) {
+ * authority with an honest flag.
+ *
+ * `cityCentroid` (B823) is identifyJurisdiction's B793 fact: the ARRAY of city names
+ * whose polygon contains the parcel CENTROID (a ring query unions every touching
+ * city, so `city` alone can't tell membership from a frontage sliver), or null when
+ * the centroid wasn't tested / the lookup failed. A legacy stored check predating
+ * the field passes undefined. */
+export function authorityForJurisdiction({ city = [], etj = [], county = [], unincorporated = true, cityCentroid } = {}) {
   const out = { primary: null, channelAuthority: null, overlays: [], ambiguous: [], flags: [] };
   const counties = county.map((c) => String(c).toLowerCase());
   const cities = city.map((c) => String(c).toLowerCase());
@@ -1254,11 +1302,19 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
   // membership surfaces as an informational overlay + flag and NEVER sets the primary reviewer
   // to COH. Placed before every return so the note always rides along with the resolved county.
   if (etjs.includes("houston") && !cities.includes("houston")) {
+    // B823 — the overlay now carries BOTH densities: `short` is the ≤110-char one-line badge
+    // ("Houston ETJ — county (FBCDD) criteria govern detention"), `detail` the full teaching
+    // copy for the ⓘ. `note` stays byte-identical (print + older consumers). The county
+    // parenthetical resolves only on a single unambiguous county — a straddle says "county".
+    const shortAuth = counties.length === 1 ? AUTHORITY_SHORT[COUNTY_AUTHORITY[counties[0]]] : null;
+    const etjNote =
+      "This parcel is in the City of Houston ETJ (extraterritorial jurisdiction), not its city limits. Houston reviews the plat, but the COUNTY drainage-district criteria govern detention here — Houston's own detention rate does not apply. Verify with both the City and the county.";
     out.overlays.push({
       kind: "etj",
       city: "Houston",
-      note:
-        "This parcel is in the City of Houston ETJ (extraterritorial jurisdiction), not its city limits. Houston reviews the plat, but the COUNTY drainage-district criteria govern detention here — Houston's own detention rate does not apply. Verify with both the City and the county.",
+      note: etjNote,
+      short: `Houston ETJ — county${shortAuth ? ` (${shortAuth})` : ""} criteria govern detention`,
+      detail: etjNote + " Houston's plat review can still impose access/ROW conditions — separate from detention criteria.",
     });
     out.flags.push("houston-etj");
   }
@@ -1300,9 +1356,21 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
     return out;
   }
   if (cities.length) {
-    // A city we haven't modeled: the county criteria are the screening floor, flagged.
+    // A city we haven't modeled: the county criteria are the screening floor, flagged —
+    // B823: only when the parcel is MATERIALLY INSIDE that city. A ring query unions every
+    // city the boundary merely TOUCHES, so a Katy frontage sliver on a Houston-ETJ parcel
+    // used to fire "verify with the city" where the app itself says county criteria govern.
+    // The geometric signal is cityCentroid (B793/B801): an ARRAY means the centroid was
+    // tested — flag only if it actually sits in an unmodeled city; null/undefined (outage /
+    // point query / legacy stored check) FAILS OPEN and keeps the flag (an outage must never
+    // silently drop a caveat). Scope discipline: only this FLAG is gated — the Houston
+    // city-limits and overlay-city primary selection above keep their name-based semantics
+    // (qualifying THOSE is B801's live-verify scope).
     out.primary = countyAuth;
-    out.flags.push("city-criteria-unverified");
+    const centroidTested = Array.isArray(cityCentroid);
+    const centroidCities = centroidTested ? cityCentroid.map((c) => String(c).toLowerCase()) : null;
+    const materiallyInside = centroidTested ? cities.some((c) => centroidCities.includes(c)) : true;
+    if (materiallyInside) out.flags.push("city-criteria-unverified");
     return out;
   }
   out.primary = countyAuth; // unincorporated
@@ -1492,6 +1560,11 @@ export function slimDrainageContext(ctx) {
         city: a.jurisdiction?.city || [],
         county: a.jurisdiction?.county || [],
         etj: a.jurisdiction?.etj || [],
+        // B823 — the centroid-membership fact rides the slim so the rehydrated authority
+        // re-derivation (B788) can apply the materially-inside gate. Written as array-or-null
+        // when the check KNEW it; a legacy slim simply lacks the key (JSON drops undefined),
+        // which rehydrates as undefined → the gate fails open (the honest caveat returns).
+        ...(a.jurisdiction && "cityCentroid" in a.jurisdiction ? { cityCentroid: a.jurisdiction.cityCentroid ?? null } : {}),
       },
     },
     flood: ctx.flood ? { zones: ctx.flood.zones || [], state: ctx.flood.state, ageMs: ctx.flood.ageMs ?? null } : null,
@@ -1530,6 +1603,9 @@ export function hydrateDrainageContext(slim) {
     city: a.jurisdiction?.city || [],
     county: a.jurisdiction?.county || [],
     etj: a.jurisdiction?.etj || [],
+    // B823 — pass the stored centroid fact through (undefined on a legacy slim → the
+    // materially-inside gate fails open; see authorityForJurisdiction).
+    cityCentroid: a.jurisdiction?.cityCentroid,
   };
   const hasFacts = jur.city.length > 0 || jur.county.length > 0 || jur.etj.length > 0;
   const storedFlags = a.flags || [];

@@ -94,6 +94,12 @@ async function openYield(browser, drainage, clickCheck, floodMitigation = null, 
   }
   await page.getByText("Detention required", { exact: false }).waitFor({ timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(700);
+  // B824 — the Stormwater readout is grouped + COLLAPSED; expand all three verdict
+  // groups so the detail rows are in the DOM for the text assertions.
+  for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
+    await page.locator(`button:has-text("${g}")`).first().click({ timeout: 4000 }).catch(() => {});
+    await page.waitForTimeout(120);
+  }
   const t = (await page.locator("body").innerText()).replace(/\s+/g, " ");
   return { ctx, page, t };
 }
@@ -110,16 +116,23 @@ async function run() {
       !/Reviewing authority: City of Houston/.test(t));
     expect("B788/B791: no present-tense '(detected from city-limits GIS)' on a remembered check",
       !/\(detected from city-limits GIS\)/.test(t));
-    expect("B791: the stale banner leads — boundary-changed wording + old-boundary caveat",
-      /Site boundary changed since this check/.test(t) && /old boundary/.test(t));
-    expect("B791: banner carries the checked date (past tense)",
-      /checked 7\/10\/2026|checked 2026/.test(t));
+    // B803 (NEW-1(e)) merged the banner into the one status line: "⚠ As of <date> — site
+    // boundary changed since; numbers below reflect the old boundary".
+    expect("B791: the stale status line leads — boundary-changed wording + old-boundary caveat",
+      /site boundary changed since/i.test(t) && /old boundary/.test(t));
+    expect("B791: the status line carries the checked date (past tense)",
+      /As of 7\/10\/2026|As of \d/.test(t));
     const recheck = await page.getByRole("button", { name: /Re-check/ }).count();
     expect("B791: a ↻ Re-check button is present in the stale state", recheck >= 1);
     const chanControl = await page.getByRole("button", { name: /Drains to HCFCD channel: Auto/ }).count();
     expect("B789(a): the 'Drains to HCFCD channel' control is ABSENT off-Harris", chanControl === 0);
-    expect("B789(c): the stored channel answer is visibly IGNORED (note present)",
-      /HCFCD only governs in Harris County/.test(t));
+    // B823 (amends B797(c)) — outside Harris the ignored answer renders NOTHING inline;
+    // the fact moved to one line inside the Assumptions header ⓘ.
+    expect("B823: NO inline ignored-answer paragraph off-Harris",
+      !/HCFCD only governs in Harris County/.test(t));
+    const ignoredInfo = await page.locator("div[title]").evaluateAll((els) =>
+      els.some((el) => /HCFCD n\/a outside Harris — saved channel answer ignored/.test(el.getAttribute("title") || ""))).catch(() => false);
+    expect("B823: the Assumptions ⓘ carries 'HCFCD n/a outside Harris — saved channel answer ignored'", ignoredInfo);
     expect("B789: no HCFCD greater-of candidate prices on this Fort Bend site",
       !/greater-of/.test(t));
     if (failures) console.log(`\n  Readout excerpt: ${t.match(/Stormwater[\s\S]{0,500}/)?.[0]?.slice(0, 500) || "(not found)"}`);
@@ -129,8 +142,8 @@ async function run() {
   console.log("\nScenario 2 — explicit COH override on the Fort Bend site (>20 ac):");
   {
     const { ctx, t } = await openYield(browser, { authorityId: "coh", lastCheck }, false);
-    expect("B789 engine: COH-only pricing with the 'outside Harris County' caveat",
-      /outside Harris County/.test(t));
+    expect("B789 engine: COH-only pricing with the one-line off-Harris caveat (B823 copy)",
+      /outside Harris — Houston's own rate shown alone/.test(t));
     expect("B789 engine: no HCFCD greater-of compare under the off-Harris override",
       !/greater-of/.test(t));
     await ctx.close();
@@ -139,14 +152,20 @@ async function run() {
   console.log("\nScenario 3 — B790: sticky floodMitigation.jurKey:'harris' on the Fort Bend site:");
   {
     const { ctx, page, t } = await openYield(browser, { lastCheck }, false, { jurKey: "harris" });
-    expect("B790: the county-mismatch warning names the contradiction",
-      /county map reads Fort Bend/.test(t) && /Switch the Jurisdiction to Auto/.test(t));
+    expect("B790: the county-mismatch warning names the contradiction (B823 one-liner)",
+      /county map reads Fort Bend/.test(t) && /switch Jurisdiction to Auto/i.test(t));
     const autoOpt = await page.locator('option[value=""]').filter({ hasText: /Auto — detected/ }).count();
     expect("B790: an 'Auto — detected: …' option exists on the Jurisdiction picker", autoOpt >= 1);
     // Switch to Auto → the warning clears and the detected (Fort Bend) rule takes over.
     const fmSelect = page.locator("select").filter({ has: page.locator('option[value=""]', { hasText: /Auto — detected/ }) }).last();
     await fmSelect.selectOption("").catch(() => {});
     await page.waitForTimeout(400);
+    // B824 — the Stormwater readout is grouped + COLLAPSED; expand all three verdict
+    // groups so the detail rows are in the DOM for the text assertions.
+    for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
+      await page.locator(`button:has-text("${g}")`).first().click({ timeout: 4000 }).catch(() => {});
+      await page.waitForTimeout(120);
+    }
     const t2 = (await page.locator("body").innerText()).replace(/\s+/g, " ");
     expect("B790: switching to Auto clears the mismatch warning",
       !/county map reads Fort Bend —/.test(t2));

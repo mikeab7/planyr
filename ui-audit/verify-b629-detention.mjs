@@ -103,6 +103,15 @@ async function run() {
   await page.getByRole("button", { name: /Yield/ }).first().click().catch(() => {});
   await page.waitForTimeout(400);
 
+  const expandGroups = async (pg) => {
+    // B824 — expand the collapsed Stormwater verdict groups before reading text.
+    for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
+      await pg.locator(`button:has-text("${g}")`).first().click({ timeout: 3000 }).catch(() => {});
+      await pg.waitForTimeout(120);
+    }
+  };
+  const railText = async () => { await expandGroups(page); return (await page.locator("body").innerText()).replace(/\s+/g, " "); };
+
   // ── 1. the Stormwater group offers the explicit check ──────────────────────
   const checkBtn = page.getByRole("button", { name: /Check drainage criteria/ });
   await checkBtn.waitFor({ timeout: 8000 }).catch(() => {});
@@ -110,11 +119,12 @@ async function run() {
 
   // ── 2–5. click → required / provided / shortfall / tier / regime ────────────
   await checkBtn.click();
-  const requiredRow = page.getByText("Detention required", { exact: false });
-  await requiredRow.waitFor({ timeout: LIVE ? 90000 : 30000 }).catch(() => {});
-  expect("'Detention required' row renders after the check", await requiredRow.count() > 0);
+  // B824 — the resolved readout renders as collapsed verdict groups; wait for the
+  // Detention group header, expand (railText does), THEN assert the detail row.
+  await page.locator('button:has-text("▸ Detention")').waitFor({ timeout: LIVE ? 90000 : 30000 }).catch(() => {});
+  await railText();
+  expect("'Detention required' row renders after the check", await page.getByText("Detention required", { exact: false }).count() > 0);
 
-  const railText = async () => (await page.locator("body").innerText()).replace(/\s+/g, " ");
   let t = await railText();
   expect("required = 30.00 ac-ft (40 ac × HCED storm-sewer 0.75, B761)", /30\.00\s*ac-ft/.test(t), t.match(/Detention required[^A-Z]*/)?.[0]?.slice(0, 80));
   expect("rule badge carries the record (eff. Jul 2019 · verified Jul 2026)", /eff\. Jul 2019/.test(t) && /verified Jul 2026/.test(t));
@@ -174,8 +184,8 @@ async function run() {
   const pondPt = await screenAt(page, 380, 380).catch(() => null); // off-center in the pond
   expect("could compute the pond's screen position", !!pondPt);
   if (pondPt) {
-    await page.mouse.click(pondPt.x, pondPt.y);
-    await page.waitForTimeout(600);
+    await page.mouse.dblclick(pondPt.x, pondPt.y); // B750 — dblclick opens Properties
+    await page.waitForTimeout(700);
     const sizeBtn = page.getByRole("button", { name: /Size for required detention/ });
     await sizeBtn.waitFor({ timeout: 8000 }).catch(() => {});
     const haveBtn = await sizeBtn.count() > 0;
@@ -233,6 +243,7 @@ async function run() {
     await cb2.click();
     await page2.getByText("Detention required", { exact: false }).waitFor({ timeout: 30000 }).catch(() => {});
     await page2.waitForTimeout(700);
+    await expandGroups(page2);
     const t2a = (await page2.locator("body").innerText()).replace(/\s+/g, " ");
     expect("B750 COH: reviewer wording explains the >20-ac Houston→HCFCD greater-of (not indecision)",
       /For a tract over 20 acres, City of Houston applies the larger/.test(t2a), t2a.match(/Reviewing authority[^.]*\./)?.[0]?.slice(0, 90));
@@ -241,6 +252,7 @@ async function run() {
     const yes2 = page2.getByRole("button", { name: "Drains to HCFCD channel: Yes" });
     if (await yes2.count() > 0) {
       await yes2.click(); await page2.waitForTimeout(400);
+      await expandGroups(page2);
       const t2b = (await page2.locator("body").innerText()).replace(/\s+/g, " ");
       expect("B750 COH: confirming Yes clears the hedge (user's answer replaces the unknown)",
         /confirmed this site drains to an HCFCD channel/.test(t2b) && !/Couldn't confirm from HCFCD's map server/.test(t2b));

@@ -124,16 +124,23 @@ async function openAndCheck(browser, { county, fips, countyName, wse100, wse100S
   const checkBtn = page.getByRole("button", { name: /Check drainage criteria/ });
   await checkBtn.waitFor({ timeout: 8000 });
   await checkBtn.click();
-  await page.getByText("Detention required", { exact: false }).waitFor({ timeout: 30000 }).catch(() => {});
+  await page.locator('button:has-text("▸ Detention")').waitFor({ timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(800);
+  // B824 — the Stormwater readout is grouped + COLLAPSED by default; expand all three
+  // verdict groups so the detail (formerly the Site Analysis card) is in the DOM.
+  for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
+    await page.locator(`button:has-text("${g}")`).first().click({ timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(400);
   const yieldText = (await page.locator("body").innerText()).replace(/\s+/g, " ");
   // The regime row's disclosure lives in a title attribute (ⓘ hover) on the Yield
   // panel — read it here, before the view switches to Analysis.
   const regimeDraftDisclosed = await page.locator("div[title]").evaluateAll((els) =>
     els.some((el) => /A DRAFT Atlas-14 watershed-study 1% WSE is pricing the floodplain mitigation/.test(el.getAttribute("title") || ""))).catch(() => false);
-  await page.getByRole("button", { name: "Analysis", exact: true }).first().click({ timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(1000);
-  const text = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  // B824 — the card merged into Yield → Stormwater: the detail text now lives HERE
+  // (expanded above); Site Analysis carries only a screening link row.
+  const text = yieldText;
   return { ctx, page, text, yieldText, regimeDraftDisclosed, fbcddCalls };
 }
 
@@ -162,14 +169,18 @@ async function run() {
     expect("mitigation PRICED with zero manual inputs (a compensating-storage volume renders)",
       /Required compensating storage/.test(t) && !/Mitigation volume UNKNOWN/.test(t), t.match(/Required compensating storage[^a-z]{0,40}/)?.[0]);
     expect("providers line: 1% WSE derived (FBCDD study — DRAFT)", /1% WSE derived \(FBCDD study — DRAFT\)/.test(t), t.match(/Providers:[^·]*·[^·]*·[^·]*/)?.[0]);
-    expect("⚑ card note: value + watershed + DRAFT screening copy",
-      /1% WSE ≈ 96′ read from Fort Bend's Atlas-14 watershed-study rasters \(Oyster watershed\)/.test(t), t.match(/1% WSE ≈[^.]{0,110}/)?.[0]);
+    // B823 — the loud note is ONE line now; the "read from … rasters" teaching copy rides its ⓘ title.
+    expect("⚑ one-line note: value + watershed + DRAFT tag",
+      /1% WSE ≈ 96(\.0)?′ — FBCDD Atlas-14 DRAFT \(Oyster watershed\)/.test(t), t.match(/1% WSE ≈[^.]{0,110}/)?.[0]);
+    const mitNoteInfo = await page.locator("div[title]").evaluateAll((els) =>
+      els.some((el) => /[Rr]ead from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results.*Basis note: the county's mitigation rules reference the EFFECTIVE \(pre-Atlas-14\) floodplain/.test(el.getAttribute("title") || ""))).catch(() => false);
+    expect("the note's ⓘ carries the full DRAFT + basis + override copy", mitNoteInfo);
     expect("footer carries DERIVED_WSE100_DRAFT_NOTE", /This 1% \(100-yr\) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters/.test(t));
     expect("yield row tags 'DRAFT Atlas-14 100-yr'", /DRAFT Atlas-14 100-yr/.test(y), y.match(/Floodplain mitigation[^A-Z]{0,60}[A-Z]{0,30}/)?.[0]);
-    expect("yield loud note: '1% WSE ≈ 96.0′ read from …' + override prompt", /1% WSE ≈ 96(\.0)?′ read from Fort Bend's Atlas-14 watershed-study rasters — DRAFT study results, screening only\. Type a BFE below to override\./.test(y));
+    expect("yield note is the B823 one-liner (≤110 chars visible)", /1% WSE ≈ 96(\.0)?′ — FBCDD Atlas-14 DRAFT \(Oyster watershed\)/.test(y));
     // Variant (b): the FFE computes off the labeled atlas14_100yr basis (96 + 2 = 98).
     expect("FFE computes off the Atlas-14 100-yr basis: Required FFE 98′ (Atlas-14 100-yr WSE + 2′)",
-      /98′ \(Atlas-14 100-yr WSE \+ 2′\)/.test(t), t.match(/Required FFE[^—]*—?[^.]{0,40}/)?.[0]);
+      /98(\.00)?′ \(Atlas-14 100-yr WSE \+ 2′\)/.test(t), t.match(/Required FFE[^—]*—?[^.]{0,40}/)?.[0]);  // B824: the Yield f2 renders 98.00
     expect("⚑ FFE DRAFT caveat: 'The Atlas-14 100-yr WSE behind this required FFE is a DRAFT…'",
       /The Atlas-14 100-yr WSE behind this required FFE is a DRAFT Fort Bend watershed-study value/.test(t));
     expect("BFE input greyed placeholder shows the DRAFT read: ~96.0′ · DRAFT (FBCDD 100-yr)",
@@ -204,7 +215,7 @@ async function run() {
   {
     const { ctx, text: t } = await openAndCheck(browser, { county: "fortbend", fips: "48157", countyName: "Fort Bend", wse100Status: 503 });
     expect("the outage banner renders: 'the DRAFT 1% (100-yr) WSE couldn't be read this check'",
-      /the DRAFT 1% \(100-yr\) WSE couldn't be read this check/.test(t), t.match(/watershed-study server[^.]{0,90}/)?.[0]);
+      /the DRAFT 1% WSE couldn't be read/.test(t), t.match(/study server[^.]{0,90}/)?.[0]);  // B823 one-liner copy
     expect("mitigation reads UNKNOWN — an outage is never a value",
       /Mitigation volume UNKNOWN/.test(t) && !/Required compensating storage/.test(t));
     expect("no DRAFT provider label appears (nothing was read)", !/derived \(FBCDD study — DRAFT\)/.test(t));
