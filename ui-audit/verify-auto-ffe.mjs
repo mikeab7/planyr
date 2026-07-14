@@ -38,7 +38,7 @@ const seed = `(() => { try {
   if (!localStorage.getItem('planarfit:currentSite:v1')) localStorage.setItem('planarfit:currentSite:v1', 's_ffe');
 } catch (e) {} })();`;
 
-// Fort Bend, one AE zone (STATIC_BFE 95, NAVD88), ground 100 ft (30.48 m). No HCFCD (Fort
+// Fort Bend, one AE zone (STATIC_BFE 95, NAVD88), ground 93 ft (28.3464 m). No HCFCD (Fort
 // Bend), and the FBCDD 500-yr raster returns no-data so the FIRM-BFE basis governs the FFE.
 const MOCKS = [
   ["Texas_County_Boundaries", { features: [{ attributes: { CNTY_NM: "Fort Bend", FIPS_ST_CNTY_CD: "48157" } }] }],
@@ -49,7 +49,10 @@ const MOCKS = [
   // sits inside it — the zone needs geometry or zonesFromFeatureCollection drops it (no BFE).
   ["NFHL", { features: [{ attributes: { FLD_ZONE: "AE", ZONE_SUBTY: "", STATIC_BFE: 95, V_DATUM: "NAVD88" }, geometry: { rings: [[[-95.81, 29.54], [-95.79, 29.54], [-95.79, 29.56], [-95.81, 29.56], [-95.81, 29.54]]] } }] }],
   ["HCFCD/Watershed", { features: [] }],
-  ["3DEPElevation/ImageServer/getSamples", { samples: Array.from({ length: 9 }, () => ({ value: "30.48" })) }],
+  // B809 — ground 93 ft (28.3464 m): BFE 95 − grade 93 = 2 ft of real fill depth, so the
+  // mocked live check retains paintable cells (a 100-ft grade priced an honest 0.00 and
+  // the heat map correctly had nothing to show).
+  ["3DEPElevation/ImageServer/getSamples", { samples: Array.from({ length: 9 }, () => ({ value: "28.3464" })) }],
   ["500YR_WSE", { samples: [] }],
 ];
 
@@ -67,6 +70,10 @@ async function run() {
   }
   // Any HCFCD channel query (Fort Bend shouldn't gate on it) fails fast rather than hangs.
   await ctx.route(`**HCFCD/Channels**`, (route) => route.fulfill({ status: 500, contentType: "text/plain", headers: { "access-control-allow-origin": "*" }, body: "n/a" }));
+  // B808 — the site-extent 3DEP grid fetch fails FAST here (a hanging sandbox egress
+  // would add its 20 s timeout to the check): the engine then prices on the labeled
+  // flat-median fallback, which is exactly the state this script asserts.
+  await ctx.route(`**exportImage**`, (route) => route.fulfill({ status: 404, contentType: "text/plain", body: "no dem in sandbox" }));
   const page = await ctx.newPage();
   page.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror — ${e.message}`); });
   await page.goto(BASE, { waitUntil: "load" });
@@ -103,6 +110,14 @@ async function run() {
   expect("NEW-3: Required FFE renders the 97′ code minimum", /Required FFE/.test(t2) && /97(\.0+)?′/.test(t2), t2.match(/Required FFE[^A-Z]{0,40}/)?.[0]);
   expect("NEW-3: verdict reads 'ASSUMED at this code minimum' (not a verified pass)", /ASSUMED at this code minimum/i.test(t2));
   expect("NEW-3: NOT a false 'pad PASSES' verdict", !/pad PASSES/.test(t2));
+  // B808/B809 — per-cell grade honesty + the heat-map exhibit on the mocked live check:
+  // the DEM 404s above, so the ledger must NAME the flat-median fallback; the retained
+  // cells still paint (median depths), the tie-out reads, and the legend rides the SVG.
+  expect("B808: the median fallback is named ('Flat-grade estimate')", /Flat-grade estimate — one median grade priced every cell/.test(t));
+  expect("B809: the heat-map toggle row renders in the mit group", /Fill-depth heat map/.test(t));
+  expect("B809: the tie-out line reads overlay Σ = ledger (same cells, by construction)", /same cells, by construction/.test(t));
+  const legendOn = (await page.getByText("Fill depth (priced cells)", { exact: false }).count()) > 0;
+  expect("B809: the exhibit legend rides the plan SVG (auto-ON while the group is open)", legendOn);
   // B824 — Site Analysis keeps only the screening LINK row (no duplicate ledger).
   await page.locator('button[title="Analysis"]').first().click({ timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(1000);

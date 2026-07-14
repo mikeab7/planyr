@@ -111,22 +111,30 @@ const bboxOverlap = (a, b) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[
 
 /* Grid-sampled intersection of one footprint ring with one zone (pondGeom idiom):
  * adaptive cell size targeting ≤ maxCells over the OVERLAP bbox, floored at minCellFt
- * (screening tolerance), cell-center sampling. Returns { areaSf, sumDepthArea } where
- * sumDepthArea = Σ cellArea × depthAt(cell) (0 when depthAt is null — callers price
- * volume separately from area). Pure. */
+ * (screening tolerance), cell-center sampling. Returns
+ *   { areaSf, sumDepthArea, pricedCells, voidCells, cells? } where sumDepthArea =
+ * Σ cellArea × depthAt(cell). B808: a depthAt that returns null names a DEM VOID under
+ * that cell — the cell is excluded from the volume and COUNTED (the caller flags >5%
+ * loudly; a void priced as zero would silently under-price). B809: opts.retainCells
+ * keeps the priced cells ([{x, y, wFt, hFt, depthFt}]) — the SAME cells that summed,
+ * so the heat map can never diverge from the ledger; with no depthAt (floodway /
+ * unpriced buckets) retained cells carry depthFt: null (area-only geography). Pure. */
 export function gridIntersect(ring, zone, depthAt = null, opts = {}) {
   const maxCells = opts.maxCells || 1500;
   const minCellFt = opts.minCellFt || 2;
+  const retain = !!opts.retainCells;
+  const empty = { areaSf: 0, sumDepthArea: 0, pricedCells: 0, voidCells: 0, cells: retain ? [] : undefined };
   const fb = ringBBox(ring);
-  if (!bboxOverlap(fb, zone.bbox)) return { areaSf: 0, sumDepthArea: 0 };
+  if (!bboxOverlap(fb, zone.bbox)) return empty;
   const x0 = Math.max(fb[0], zone.bbox[0]), y0 = Math.max(fb[1], zone.bbox[1]);
   const x1 = Math.min(fb[2], zone.bbox[2]), y1 = Math.min(fb[3], zone.bbox[3]);
   const w = x1 - x0, h = y1 - y0;
-  if (!(w > 0) || !(h > 0)) return { areaSf: 0, sumDepthArea: 0 };
+  if (!(w > 0) || !(h > 0)) return empty;
   const cell = Math.max(minCellFt, Math.sqrt((w * h) / maxCells));
   const nx = Math.max(1, Math.ceil(w / cell)), ny = Math.max(1, Math.ceil(h / cell));
   const dx = w / nx, dy = h / ny, cellArea = dx * dy;
-  let areaSf = 0, sumDepthArea = 0;
+  const cells = retain ? [] : undefined;
+  let areaSf = 0, sumDepthArea = 0, pricedCells = 0, voidCells = 0;
   for (let i = 0; i < nx; i++) {
     for (let j = 0; j < ny; j++) {
       const pt = { x: x0 + (i + 0.5) * dx, y: y0 + (j + 0.5) * dy };
@@ -135,11 +143,18 @@ export function gridIntersect(ring, zone, depthAt = null, opts = {}) {
       areaSf += cellArea;
       if (depthAt) {
         const d = depthAt(pt);
-        if (d != null && isFinite(d) && d > 0) sumDepthArea += cellArea * d;
+        if (d == null || !isFinite(d)) { voidCells++; continue; }
+        pricedCells++;
+        if (d > 0) {
+          sumDepthArea += cellArea * d;
+          if (retain) cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, depthFt: d });
+        }
+      } else if (retain) {
+        cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, depthFt: null });
       }
     }
   }
-  return { areaSf, sumDepthArea };
+  return { areaSf, sumDepthArea, pricedCells, voidCells, cells };
 }
 
 /* ---------------------------------------------------------------------------------
@@ -431,6 +446,17 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
 
   const padDefault = realElev(elev.padElevFt);
   const grade = realElev(elev.existGradeFt);
+  // B808 — the per-cell existing-grade sampler (site-feet pt → ft NAVD88 | null on a DEM
+  // void). Precedence: a MANUAL grade always wins (flat mode, unchanged — the caller tags
+  // sources.existGrade "manual"); else the grid prices per cell; else the flat median.
+  const gradeAt = typeof elev.gradeAt === "function" && !(elev.sources && elev.sources.existGrade === "manual")
+    ? elev.gradeAt : null;
+  const gradeBasis = gradeAt ? "grid"
+    : grade != null ? ((elev.sources && elev.sources.existGrade === "manual") ? "manual" : "median")
+    : null;
+  const retainCells = !!opts.retainCells;
+  const allCells = retainCells ? [] : undefined;
+  let voidCellsTotal = 0, pricedCellsTotal = 0, flatSumCf = 0, flatKnown = gradeAt != null && grade != null;
   const wse02 = realElev(elev.wse02Ft);
   const manualBfe = realElev(elev.bfeFt);
   const derivedBfe = realElev(elev.derivedBfeFt); // DERIVED from FEMA BFE lines (B755)
@@ -486,8 +512,12 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
 
       if (z.cls === "floodway") {
         // Geometry + hard flag only — fill in the floodway is prohibited, not priced.
-        const { areaSf } = gridIntersect(ring, z, null, opts);
-        if (areaSf > 0) { bucket.acres += areaSf / SQFT_PER_ACRE; flags.add("floodway_intersect"); }
+        const fw = gridIntersect(ring, z, null, { ...opts, retainCells });
+        if (fw.areaSf > 0) {
+          bucket.acres += fw.areaSf / SQFT_PER_ACRE;
+          flags.add("floodway_intersect");
+          if (retainCells && fw.cells) for (const c of fw.cells) allCells.push({ cls: "floodway", fpId: fp.id, ...c });
+        }
         continue;
       }
 
@@ -504,15 +534,36 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
         continue;
       }
 
-      const priceable = wse != null && pad != null && grade != null;
-      const depthAt = priceable ? () => Math.max(0, Math.min(wse, pad) - grade) : null;
-      const { areaSf, sumDepthArea } = gridIntersect(ring, z, depthAt, opts);
+      const priceable = wse != null && pad != null && (gradeAt != null || grade != null);
+      // B808 — per-cell depth when the grid grade is active. AO zones (published sheet-
+      // ponding DEPTH, wseSrc "ao-depth") price that depth riding the ground PER CELL,
+      // capped by the pad — the close-out decision: AO's water surface is grade-relative
+      // by definition, so a per-cell grade means a per-cell surface, not the median plane.
+      const aoPerCell = gradeAt != null && wseSrc === "ao-depth" && z.aoDepthFt != null;
+      const depthAt = !priceable ? null
+        : gradeAt != null
+          ? (aoPerCell
+              ? (pt) => { const g = gradeAt(pt); return g == null ? null : Math.max(0, Math.min(z.aoDepthFt, pad - g)); }
+              : (pt) => { const g = gradeAt(pt); return g == null ? null : Math.max(0, Math.min(wse, pad) - g); })
+          : () => Math.max(0, Math.min(wse, pad) - grade);
+      const { areaSf, sumDepthArea, pricedCells, voidCells, cells } = gridIntersect(ring, z, depthAt, { ...opts, retainCells });
       if (!(areaSf > 0)) continue;
       bucket.acres += areaSf / SQFT_PER_ACRE;
       if (priceable) {
         bucket.volumeCf = (bucket.volumeCf || 0) + sumDepthArea;
         if (wseSrc) (z.cls === "02pct" ? wse02Providers : wseProviders).add(wseSrc);
-      } else if (!bucket.unknown) {
+        voidCellsTotal += voidCells; pricedCellsTotal += pricedCells;
+        // B808 — the flat-median comparison, accumulated in the SAME intersect (the flat
+        // depth is constant per zone×footprint, so no second pass): surfaces the sites
+        // where the old single-number grade was silently wrong (the >15% delta flag).
+        if (gradeAt != null && grade != null) flatSumCf += areaSf * Math.max(0, Math.min(wse, pad) - grade);
+        else flatKnown = false;
+        if (retainCells && cells) for (const c of cells) allCells.push({ cls: z.cls, fpId: fp.id, ...c });
+      } else if (retainCells && cells) {
+        // Unpriced bucket: the geography still renders (grey hatch + reason on the map).
+        for (const c of cells) allCells.push({ cls: z.cls, fpId: fp.id, ...c });
+      }
+      if (!priceable && !bucket.unknown) {
         bucket.unknown =
           wse == null
             ? (z.cls === "02pct"
@@ -560,7 +611,23 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   const totalAcres = triggerAcres + floodwayAcres;
   const volumeKnown = !anyUnknown; // zero trigger acres → a real 0, not UNKNOWN
 
+  // B808 — grid honesty rollups. Voids: cells the DEM couldn't price (excluded, counted);
+  // >5% of the intersect is LOUD — the volume still stands on the valid cells, but the
+  // reader must know a slice of the footprint priced blind. Delta: grid vs flat-median
+  // volume >15% apart names the sites the old single-number grade silently mis-priced.
+  const totalGridCells = voidCellsTotal + pricedCellsTotal;
+  if (gradeAt != null && totalGridCells > 0 && voidCellsTotal > 0.05 * totalGridCells) flags.add("grid-voids");
+  const volumeFlatCf = gradeAt != null && flatKnown && volumeKnown ? flatSumCf * ratio : null;
+  if (volumeKnown && volumeFlatCf != null && volumeFlatCf > 0 && Math.abs(totalVolumeCf - volumeFlatCf) / volumeFlatCf > 0.15) {
+    flags.add("grid-median-delta");
+  }
+
   return {
+    gradeBasis,
+    volumeFlatCf,
+    voidCells: voidCellsTotal,
+    pricedCells: pricedCellsTotal,
+    ...(retainCells ? { cells: allCells } : {}),
     trigger: rule ? rule.trigger : "1pct",
     ratio,
     perClass,
@@ -575,7 +642,9 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
     flags: [...flags],
     providers: {
       padElev: (elev.sources && elev.sources.padElev) || (padDefault != null ? "manual" : null),
-      existGrade: (elev.sources && elev.sources.existGrade) || (grade != null ? "manual" : null),
+      // B808 — the grid basis names itself; the caller's label covers manual/median.
+      existGrade: gradeBasis === "grid" ? "3dep-grid"
+        : (elev.sources && elev.sources.existGrade) || (grade != null ? "manual" : null),
       wse1pct: wseProviders.has("static-bfe") && wseProviders.size > 1 ? "mixed"
         : wseProviders.has("static-bfe") ? "static-bfe"
         : wseProviders.has("ao-depth") ? "ao-depth"
@@ -620,8 +689,22 @@ export function effectivePadElev(el, { padFfeFt = null, dockDropFt = 4 } = {}) {
 export function combineMitigation(results) {
   const list = (results || []).filter(Boolean);
   if (!list.length) return null;
-  const out = JSON.parse(JSON.stringify(list[0]));
-  for (const r of list.slice(1)) {
+  // B808/B809 — retained heat-map cells are big flat arrays: concat them OUTSIDE the
+  // JSON deep copy (stringifying tens of thousands of cells per render would jank;
+  // the copy only needs the scalars) and reattach at the end.
+  const allCells = [];
+  let anyCells = false;
+  const stripped = list.map((r) => {
+    if (r.cells) {
+      anyCells = true;
+      if (r.cells.length) allCells.push(...r.cells);
+      const { cells, ...rest } = r;
+      return rest;
+    }
+    return r;
+  });
+  const out = JSON.parse(JSON.stringify(stripped[0]));
+  for (const r of stripped.slice(1)) {
     for (const [cls, b] of Object.entries(r.perClass)) {
       const t = out.perClass[cls] || (out.perClass[cls] = { acres: 0, volumeCf: null, unknown: null });
       t.acres += b.acres;
@@ -640,10 +723,24 @@ export function combineMitigation(results) {
     for (const f of r.flags) if (!out.flags.includes(f)) out.flags.push(f);
     for (const [k, v] of Object.entries(r.providers)) if (v && !out.providers[k]) out.providers[k] = v;
     out.expertBypass = out.expertBypass || r.expertBypass;
+    // B808 — grid rollups across footprints: sum the counters, keep the flat comparison
+    // only while EVERY priced footprint carried one, and let "grid" outrank "median" in
+    // the basis label (a mixed set means the grid did price somewhere).
+    out.voidCells = (out.voidCells || 0) + (r.voidCells || 0);
+    out.pricedCells = (out.pricedCells || 0) + (r.pricedCells || 0);
+    out.volumeFlatCf = out.volumeFlatCf != null && r.volumeFlatCf != null ? out.volumeFlatCf + r.volumeFlatCf : null;
+    if (r.gradeBasis && (!out.gradeBasis || (out.gradeBasis === "median" && r.gradeBasis === "grid"))) out.gradeBasis = r.gradeBasis;
   }
   if (out.unknownReason) out.volumeCf = null;
   out.volumeAcFt = out.volumeCf != null ? out.volumeCf / SQFT_PER_ACRE : null;
   out.cutCy = out.volumeCf != null ? out.volumeCf / CF_PER_CY : null;
+  // B808 — re-judge the site-wide honesty flags on the SUMMED counters (a per-footprint
+  // 4% void rate can still be a 7% site rate, and vice versa).
+  const cellsTotal = (out.voidCells || 0) + (out.pricedCells || 0);
+  out.flags = (out.flags || []).filter((f) => f !== "grid-voids" && f !== "grid-median-delta");
+  if (out.gradeBasis === "grid" && cellsTotal > 0 && out.voidCells > 0.05 * cellsTotal) out.flags.push("grid-voids");
+  if (out.volumeCf != null && out.volumeFlatCf != null && out.volumeFlatCf > 0 && Math.abs(out.volumeCf - out.volumeFlatCf) / out.volumeFlatCf > 0.15) out.flags.push("grid-median-delta");
+  if (anyCells) out.cells = allCells;
   return out;
 }
 
