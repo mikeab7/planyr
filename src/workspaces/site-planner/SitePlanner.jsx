@@ -102,7 +102,8 @@ import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, cont
 import { labelAnchors, placeLabels } from "./lib/boundaryLabels.js";
 import { gridRequest, sampleAtLatLng } from "./lib/demGrid.js";
 import { fetchSiteGrid } from "./lib/terrainLayers.js";
-import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt } from "./lib/mitigationHeatmap.js";
+import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
+import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger,
   floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines,
@@ -686,6 +687,8 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
     elev.derivedWse1pctFt ?? "", elev.derivedWse1pctSrc ?? "",
     // B808 — same trap for the async-arriving DEM grid.
     elev.gradeAtKey ?? "",
+    // B826 — the proposed-surface identity: a re-graded plane must re-price.
+    fp.surfaceKey ?? "",
   ].join("~");
   if (_mitMemo.has(sig)) {
     const hit = _mitMemo.get(sig);
@@ -6522,6 +6525,74 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     },
   };
   const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
+  // ---- B826 — the proposed-surface engine: auto-grade the concept off the plan FFE +
+  // the B825 class records, on the B808 lattice idiom. The expensive grid build is
+  // memoized on a cheap signature (the mitigationForFootprint discipline) so canvas
+  // drags re-grade once per geometry change, never per frame. Existing ground: the
+  // B808 per-cell DEM grid when loaded, else the labeled flat median — and with NO
+  // ground elevation at all the grid prices NOTHING (honest UNKNOWN rows, never 0 CY).
+  const gsSettings = settings.grading || {};
+  const gsFieldT = Number.isFinite(gsSettings.fieldT) ? Math.max(0, Math.min(1, gsSettings.fieldT)) : 0;
+  const gsShrinkPct = Number.isFinite(gsSettings.shrinkPct) ? gsSettings.shrinkPct : null;
+  const gsDockDrop = Number.isFinite(fmSettings.dockDropFt) ? fmSettings.dockDropFt : 4;
+  const gsMedianGrade = fmElev.existGradeFt;
+  const gsExistAt = fmGradeAt || (gsMedianGrade != null ? () => gsMedianGrade : null);
+  const gsExistKey = fmGradeAt ? `grid:${fmElev.gradeAtKey}` : gsMedianGrade != null ? `median:${gsMedianGrade}` : "none";
+  const gsEls = els.filter((e) => FM_FILL_TYPES.has(e.type)).map((e) => {
+    const r = ringOf(e);
+    if (!r || r.length < 3) return null;
+    // Dock-stack members (court + its trailer strip) grade as ONE dockApron plane
+    // anchored at the dock face of their HOST building (the effectivePadElev grouping).
+    const host = (e.truckCourt || e.forCourt) && e.attachedTo ? els.find((x) => x.id === e.attachedTo) : null;
+    const hr = host ? ringOf(host) : null;
+    const g = e.grading || {};
+    return {
+      id: e.id, type: e.type, ring: r,
+      dockStack: hr && hr.length >= 3 ? centroid(hr) : null,
+      accessible: !!g.accessible,
+      slopeOverridePct: Number.isFinite(g.slopePct) ? g.slopePct : null,
+      padElevFt: Number.isFinite(e.padElevFt) ? e.padElevFt : null,
+    };
+  }).filter(Boolean);
+  // Drainage target: the largest pond's centroid (the outfall/low side when no pond is
+  // drawn falls back per element to "away from the building" inside the engine — the
+  // B705 flow field stays a hint only; there is no persisted site-wide flow field).
+  const gsTarget = (() => {
+    let best = null, bestA = 0;
+    for (const e of els) {
+      if (e.type !== "pond") continue;
+      const r = ringOf(e);
+      if (!r || r.length < 3) continue;
+      const a = polyArea(r);
+      if (a > bestA) { bestA = a; best = centroid(r); }
+    }
+    return best;
+  })();
+  const gsPondRings = els.filter((e) => e.type === "pond").map((e) => ringOf(e)).filter((r) => r && r.length >= 3);
+  const gsParcelRings = drainActive.map((p) => p.points).filter((r) => r && r.length >= 3);
+  const gsInputs = {
+    els: gsEls, ffeFt: fmEffectivePadFt, dockDropFt: gsDockDrop,
+    fieldT: gsFieldT, drainTarget: gsTarget, existAt: gsExistAt,
+    parcelRings: gsParcelRings, pondRings: gsPondRings,
+    opts: { existKey: gsExistKey },
+  };
+  const gsSig = [
+    fmEffectivePadFt ?? "", gsDockDrop, gsFieldT, gsExistKey,
+    gsTarget ? `${Math.round(gsTarget.x)},${Math.round(gsTarget.y)}` : "",
+    gsEls.map((e) => `${e.id}:${e.ring.length}:${ringHash(e.ring)}:${e.padElevFt ?? ""}:${e.slopeOverridePct ?? ""}:${e.accessible ? 1 : 0}:${e.dockStack ? Math.round(e.dockStack.x * 7 + e.dockStack.y * 3) : ""}`).join("|"),
+    gsPondRings.map((r) => ringHash(r)).join(","), gsParcelRings.map((r) => ringHash(r)).join(","),
+  ].join("~");
+  const gradeSurface = useMemo(() => {
+    if (fmEffectivePadFt == null || !gsEls.length) return null;
+    return buildProposedSurface(gsInputs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gsSig]);
+  // The balance assist re-builds the grid a couple dozen times at different fieldT —
+  // one CLICK, never per render (a per-frame bisection would jank drags).
+  const gsBuildAtT = (t) => {
+    const s = buildProposedSurface({ ...gsInputs, fieldT: t });
+    return s ? s.grid : null;
+  };
   // B822 — auto pond engineering, layer (a)+(b): criteria records drive freeboard/side
   // slope (provenance-carrying — FBCDD's verified DCM §6.4.7 freeboard wins over the B709
   // placeholder), the site 3DEP median drives top-of-bank (the labeled fallback until
@@ -6590,7 +6661,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     for (const e of els) {
       if (!FM_FILL_TYPES.has(e.type)) continue;
       const r = ringOf(e);
-      if (r && r.length >= 3) list.push({ id: e.id, ring: r, padElevFt: effectivePadElev(e, { padFfeFt: fmElev.padElevFt, dockDropFt: fmDockDrop }) });
+      if (!(r && r.length >= 3)) continue;
+      // B826 — when the proposed-surface engine graded this element, mitigation prices
+      // fill at its REAL plane (surfaceAt), not the flat effective pad; the flat pad
+      // stays both the fallback and the engine's own labeled comparison basis.
+      const plane = gradeSurface ? gradeSurface.planes.get(e.id) : null;
+      list.push({
+        id: e.id, ring: r,
+        padElevFt: effectivePadElev(e, { padFfeFt: fmElev.padElevFt, dockDropFt: fmDockDrop }),
+        ...(plane ? { surfaceAt: plane.zAt, surfaceKey: `${gradeSurface.surfaceKey}#${e.id}` } : {}),
+      });
     }
     return list;
   })();
@@ -6635,7 +6715,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmHeat = useMemo(() => (fmHeatCells ? paintHeatmap(fmHeatCells) : null), [fmHeatCells]);
   const fmHeatRatio = fmResultView && isFinite(fmResultView.ratio) ? fmResultView.ratio : 1;
   const fmHeatTotals = useMemo(() => (fmHeatCells ? heatmapTotals(fmHeatCells, fmHeatRatio) : null), [fmHeatCells, fmHeatRatio]);
-  const fmHeatOn = !!fmHeat && (fmHeatUser ?? (leftPanel === "yield" && fmMitOpen));
+  // B826 — the cut/fill exhibit (the B809 renderer's second mode): the SAME retained
+  // cells the earthwork rows summed, painted with the diverging ramp. Explicit toggle
+  // (the earthwork section's checkbox); one exhibit at a time — cut/fill ON suppresses
+  // the fill-depth heat map so two images never overprint into an unreadable blend.
+  const [cfHeatUser, setCfHeatUser] = useState(false);
+  const gsCells = gradeSurface && gradeSurface.grid && gradeSurface.grid.cells.length ? gradeSurface.grid.cells : null;
+  const cfHeat = useMemo(() => (gsCells && cfHeatUser ? paintHeatmap(gsCells, { paint: cutFillPaint }) : null), [gsCells, cfHeatUser]);
+  const cfHeatOn = !!cfHeat && cfHeatUser;
+  const fmHeatOn = !!fmHeat && !cfHeatOn && (fmHeatUser ?? (leftPanel === "yield" && fmMitOpen));
   // (a) Mirror the LIVE mitigation ledger into the remembered check record so a reload shows
   // last-known mitigation. Only a live (this-session), non-stale check writes; a restored view
   // never overwrites the record it hydrated from. Rides the existing settings autosave — no
@@ -10385,22 +10473,67 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const mitCy = mitKnown ? fmResultView.cutCy : null;
             const fmGeoFailed = drainageChecked && drainCtxData?.floodGeo?.state === "failed";
             const mitRelevant = drainageChecked && ((fmResultView && fmResultView.intersectAcres > 0) || fmGeoFailed);
-            if (!(pondCy > 0) && !mitRelevant) return null;
+            // B826 — the graded-surface earthwork (cut/fill off the auto-graded planes)
+            // joins this section: rows render whenever the surface engine could build
+            // (elements + an FFE), UNKNOWN — never 0 CY — when no ground elevation exists.
+            const gsG = gradeSurface ? gradeSurface.grid : null;
+            const gsPriced = gsG && gsG.fillCy != null;
+            if (!(pondCy > 0) && !mitRelevant && !gsG) return null;
             const usd = (n) => `$${Math.round(n).toLocaleString()}`;
             const pEarthRaw = prices.earthworkCy;
             const pEarth = pEarthRaw == null || pEarthRaw === "" ? null : Number.isFinite(+pEarthRaw) && +pEarthRaw >= 0 ? +pEarthRaw : null;
             const setPrice = (k, v) => setSettings((sx) => ({ ...sx, prices: { ...(sx.prices || {}), [k]: v } }));
-            const pricedCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0);
+            const pricedCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0) + (gsPriced ? gsG.cutCy : 0);
+            const shrinkFactor = 1 + (gsShrinkPct ?? 0) / 100;
+            const borrowCy = (pondCy > 0 ? pondCy : 0) + (mitCy || 0);
+            const netCy = gsPriced ? netImportCy({ fillCy: gsG.fillCy, cutCy: gsG.cutCy, borrowCy, shrinkFactor }) : null;
+            const setGrading = (patch) => setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), ...patch } }));
             return (
               <Section title="Earthwork cost (screening)" accent="#0e7490" collapsed>
                 {pondCy > 0 && metricRow("Pond excavation", `${f0(pondCy)} CY`, pEarth != null ? usd(pondCy * pEarth) : "set $/CY")}
                 {mitRelevant && (mitKnown
                   ? metricRow("Floodplain mitigation cut", `${f0(mitCy)} CY`, pEarth != null ? usd(mitCy * pEarth) : "set $/CY")
                   : metricRow("Floodplain mitigation cut", "UNKNOWN", fmGeoFailed ? "flood source unavailable" : "enter elevations"))}
+                {gsG && (gsPriced ? (<>
+                  {metricRow("Graded surface — cut", `${f0(gsG.cutCy)} CY`, pEarth != null ? usd(gsG.cutCy * pEarth) : "set $/CY")}
+                  {metricRow("Graded surface — fill", `${f0(gsG.fillCy)} CY`, "placed (compacted)")}
+                  {metricRow("Net dirt (screening)", `${f0(Math.abs(netCy))} CY ${netCy > 0 ? "import" : "export"}`,
+                    gsShrinkPct == null ? "no shrink applied" : `@ ${gsShrinkPct}% shrink`)}
+                </>) : (
+                  metricRow("Graded surface cut / fill", "UNKNOWN", "no ground elevation — ↻ re-check drainage")
+                ))}
                 {!drainageChecked && (
                   <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "4px 0 0", fontWeight: 700 }}>
                     Floodplain mitigation not screened yet — run ⛆ Check drainage criteria; this takeoff is INCOMPLETE until then, not zero.
                   </div>
+                )}
+                {/* B826 — violation flags off the auto-graded surface: one line + ⓘ each
+                    (the B823 cap); ADA/TAS is LEGAL (danger token), the rest screening. */}
+                {gradeSurface && gradeSurface.violations.map((v) => (
+                  <div key={v.kind} title={v.detail} style={{ fontSize: 10.5, fontWeight: 700, color: v.legal ? PAL.danger : "var(--warn-text)", lineHeight: 1.45, margin: "4px 0 0", cursor: "help" }}>
+                    {v.legal ? "⚑ " : ""}{v.short}<span style={{ fontSize: 9.5, marginLeft: 4 }} aria-hidden="true">ⓘ</span>
+                  </div>
+                ))}
+                {gsG && (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                    <button style={chip} disabled={!gsPriced}
+                      title="One click: finds the uniform paving-field lower/raise (sweeping every floating class between its band floor and cap — the threshold tie at the doors holds by construction) that nets the dirt closest to zero, and applies it."
+                      onClick={() => {
+                        const res = balanceAssist({ buildAtT: gsBuildAtT, shrinkFactor, borrowCy });
+                        if (res) { pushHistory(); setGrading({ fieldT: res.t }); }
+                      }}>⚖ Balance the dirt</button>
+                    {gsFieldT > 0 && (
+                      <button style={chip} title="Back to the flattest class-band slopes (highest paving field)"
+                        onClick={() => { pushHistory(); setGrading({ fieldT: null }); }}>× Reset field</button>
+                    )}
+                    {gsFieldT > 0 && <span style={{ fontSize: 10.5, color: PAL.muted }}>field slopes at {Math.round(gsFieldT * 100)}% of class band</span>}
+                  </div>
+                )}
+                {gsG && (
+                  <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer", marginTop: 8 }}
+                    title="Paints proposed − existing per cell over the plan — warm = fill, cool = cut, grey hatch = no ground data. Same cells these rows summed (engine truth). Turns the fill-depth heat map off while on — one exhibit at a time.">
+                    <input type="checkbox" checked={cfHeatUser} onChange={(e) => setCfHeatUser(e.target.checked)} /> Cut/fill map on the plan
+                  </label>
                 )}
                 <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
                 <Field label="Excavation / cut">
@@ -10410,9 +10543,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <span style={{ fontSize: 11, color: PAL.muted }}>/CY</span>
                   </span>
                 </Field>
-                {pEarth != null && pricedCy > 0 && metricRow("Subtotal", usd(pricedCy * pEarth), "priced lines")}
+                {gsG && (
+                  <Field label="Fill shrink/swell (%)">
+                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <NumInput style={{ ...numInput, width: 70 }} value={gsShrinkPct ?? null} min={0} placeholder="0"
+                        onCommit={(n) => setGrading({ shrinkPct: Number.isFinite(n) ? n : null })} />
+                      <span style={{ fontSize: 11, color: PAL.muted }} title="Compacted fill needs MORE bank dirt than its placed volume (clay placed at 95% Proctor commonly shrinks 10–25%). Blank = none applied — enter your geotech's number.">bank→placed ⓘ</span>
+                    </span>
+                  </Field>
+                )}
+                {pEarth != null && pricedCy > 0 && metricRow("Subtotal", usd(pricedCy * pEarth), "priced cut lines")}
+                {gsG && (
+                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, margin: "6px 0 0" }}>
+                    Auto-graded planes (B826 screening): pads flat at FFE{fmEffectivePadFt != null ? ` ${f1(fmEffectivePadFt)}′` : ""}; dock courts −{f1(gsDockDrop)}′ falling away; paving ties at FFE − {TIE_DROP_FT}′ and falls toward {gsTarget ? "the detention pond" : "the low side"}; existing ground from {fmGradeAt ? "the 3DEP per-cell grid" : "the flat site median (screening)"}. Confirm with your civil engineer.
+                  </div>
+                )}
                 <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
-                  Pond excavation is the full basin cut (top of bank → achievable floor). The mitigation cut usually serves as pad borrow — the same dirt raises the pad. Screening quantities; volumes stay separate ledgers.
+                  Pond excavation is the full basin cut (top of bank → achievable floor). Pond + mitigation cut count as on-site borrow in the net-dirt line — the same dirt raises the pad. Screening quantities; volumes stay separate ledgers.
                 </div>
               </Section>
             );
@@ -11288,6 +11435,54 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         {hovCell.depthFt != null && (
                           <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily="ui-monospace, monospace">
                             {`grade ${fmResultView && fmResultView.gradeBasis === "grid" ? "3DEP grid" : fmResultView && fmResultView.gradeBasis === "manual" ? "manual" : "median"} · cell ${Math.round(hovCell.wFt * hovCell.hFt)} sf · fp ${fmHeatTotals && fmHeatTotals.perFpAcFt[hovCell.fpId] != null ? fmHeatTotals.perFpAcFt[hovCell.fpId].toFixed(2) : "—"} ac-ft`}
+                          </text>
+                        )}
+                      </g>
+                    )}
+                  </g>
+                );
+              })()}
+              {/* B826 — the cut/fill exhibit (the B809 renderer's second mode): ONE image
+                  painted from the SAME retained cells the earthwork rows summed (engine
+                  truth — picture and rows cannot diverge). Warm = fill, cool = cut, grey
+                  hatch = no ground data. Rides the live SVG → print/PDF (PDF-PARITY);
+                  only the hover chip is export-skipped. */}
+              {cfHeatOn && cfHeat && (() => {
+                const b = cfHeat.bboxFt;
+                const tl = f2p({ x: b.x, y: b.y });
+                const wPx = b.w * view.ppf, hPx = b.h * view.ppf;
+                const legend = cutFillLegend(gsCells);
+                const tot = cutFillTotals(gsCells);
+                const lx = tl.x, ly = tl.y + hPx + 10;
+                const hovCell = cursor ? heatCellAt(gsCells, cursor) : null;
+                const hovPt = hovCell ? f2p(cursor) : null;
+                const hovPlane = hovCell && gradeSurface ? gradeSurface.planes.get(hovCell.elId) : null;
+                return (
+                  <g>
+                    <image href={cfHeat.dataUrl} x={tl.x} y={tl.y} width={wPx} height={hPx} opacity={0.68} preserveAspectRatio="none" pointerEvents="none" />
+                    <g pointerEvents="none">
+                      <rect x={lx - 6} y={ly - 14} width={252} height={legend.length * 14 + 40} rx={6} fill="#ffffff" opacity={0.88} />
+                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">Cut / fill (proposed − existing)</text>
+                      {legend.map((r, i) => (
+                        <g key={r.label}>
+                          <rect x={lx} y={ly + 6 + i * 14} width={10} height={10} fill={r.color} opacity={r.kind === "unknown" ? 0.45 : r.kind === "zero" ? 0.5 : 0.9} />
+                          {r.kind === "unknown" && <line x1={lx} y1={ly + 16 + i * 14} x2={lx + 10} y2={ly + 6 + i * 14} stroke={r.color} strokeWidth={1.4} />}
+                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily="ui-monospace, monospace">{r.label}</text>
+                        </g>
+                      ))}
+                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">
+                        {`Σ cells cut ${f0(tot.cutCy)} · fill ${f0(tot.fillCy)} CY = earthwork rows`}
+                      </text>
+                    </g>
+                    {hovCell && hovPt && (
+                      <g data-export="skip" pointerEvents="none" transform={`translate(${hovPt.x + 14}, ${hovPt.y - 10})`}>
+                        <rect x={0} y={-26} width={210} height={hovCell.dzFt != null ? 40 : 28} rx={5} fill="#1B1E26" opacity={0.86} />
+                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily="ui-monospace, monospace">
+                          {hovCell.dzFt == null ? "no ground data (DEM void)" : `${Math.abs(hovCell.dzFt).toFixed(2)}′ ${hovCell.dzFt > 0 ? "fill" : "cut"} · ${hovPlane ? hovPlane.label : hovCell.cls}`}
+                        </text>
+                        {hovCell.dzFt != null && hovPlane && (
+                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily="ui-monospace, monospace">
+                            {`plane ${hovPlane.slopePct.toFixed(2)}% · proposed ${(hovPlane.zAt({ x: hovCell.x, y: hovCell.y })).toFixed(1)}′ · cell ${Math.round(hovCell.wFt * hovCell.hFt)} sf`}
                           </text>
                         )}
                       </g>
@@ -12980,6 +13175,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {isDock
                         ? `Dock zone: auto prices this surface at the slab FF − ${f1(drop)}′ dock drop (floodplain-mitigation screen only).`
                         : "Feeds the floodplain-mitigation fill screen; blank = the plan's pad FFE (dock-zone courts auto-drop)."}
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* B826 — per-element grading: the accessible (ADA) tag on parking + the
+                  slope override (gradeOverride) the proposed-surface engine consumes.
+                  Buildings are pinned flat at FFE — no slope control there. */}
+              {FM_FILL_TYPES.has(selEl.type) && selEl.type !== "building" && (() => {
+                const g = selEl.grading || {};
+                const clsId = classifyGradeElement({ type: selEl.type, dockStack: (selEl.truckCourt || selEl.forCourt) ? {} : null, accessible: !!g.accessible });
+                const rule = clsId ? GRADING_RULES[clsId] : null;
+                const setGradingEl = (patch) => { pushHistory(); setSelEl({ grading: { ...g, ...patch } }); };
+                return (
+                  <div style={{ marginTop: 8 }}>
+                    {selEl.type === "parking" && (
+                      <label style={{ display: "flex", gap: 6, fontSize: 11.5, color: PAL.ink, cursor: "pointer", marginBottom: 4 }}
+                        title="ADA/TAS §502.4 caps accessible stalls AND their access aisles at 2.0% (1:48) in every direction — a LEGAL requirement. Tagging this field grades and checks it at that cap.">
+                        <input type="checkbox" checked={!!g.accessible} onChange={(ev) => setGradingEl({ accessible: ev.target.checked })} /> Accessible (ADA) parking
+                      </label>
+                    )}
+                    <Field label="Grading slope (%)">
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput style={{ ...numInput, width: 64 }} value={g.slopePct ?? ""} min={0}
+                          placeholder={rule ? `auto ${gradingChipLabel(rule).split(" — ")[0]}` : "auto"}
+                          onCommit={(n) => setGradingEl({ slopePct: Number.isFinite(n) ? n : null })} />
+                        {g.slopePct != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to automatic (the class band)" onClick={() => setGradingEl({ slopePct: null })}>Auto</button>}
+                      </span>
+                    </Field>
+                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
+                      {rule ? `${rule.label}: ${gradingChipLabel(rule)}. ` : ""}Feeds the auto-graded surface (Yield → Earthwork). Blank = the class band; an override outside it flags loudly, never silently passes.
                     </div>
                   </div>
                 );
@@ -15226,7 +15451,11 @@ function YieldPanel({
                 if (d.mitigationStraddle) mitR.push(warnNote(`Jurisdiction straddle — every candidate priced, worst case shown${d.mitigationStraddle.anyUnknown ? " (one UNKNOWN)" : ""}.`, "mit-straddle-detail", `Candidates: ${d.mitigationStraddle.candidates.map((c) => `${c.rule.label} ${c.result.volumeCf != null ? f2(c.result.volumeCf / 43560) + " ac-ft" : "unknown"}`).join(" · ")}.`));
                 if (mit.expertBypass) mitR.push(keyedNote("Expert bypass in use — volume = intersect area × the entered average fill depth.", "mit-bypass"));
                 mitR.push(keyedNote(`Rule: ${d.mitigationRule?.label} — ${mit.trigger === "1pct_plus_02pct" ? "1% + 0.2% trigger" : "1% trigger"} @ ${mit.ratio}:1${d.mitigationRule?.offsetScope === "storage_and_conveyance" ? " (offsets storage AND conveyance — large contiguous fringe fill can trigger a no-rise/hydraulic analysis beyond this volume screen)" : ""}.`, "mit-rule"));
-                mitR.push(keyedNote(`Providers: pad FFE ${mit.providers.padElev || "—"} · grade ${{ "3dep-grid": "3DEP per-cell grid", "3dep": "3DEP median" }[mit.providers.existGrade] || mit.providers.existGrade || "—"} · 1% WSE ${wseProvLabel(mit.providers.wse1pct)} · 0.2% WSE ${wseProvLabel(mit.providers.wse02pct)}${d.floodGeo && d.floodGeo.ts != null ? ` · flood data ${formatAge(Date.now() - d.floodGeo.ts)}` : ""}`, "mit-providers"));
+                mitR.push(keyedNote(`Providers: pad FFE ${{ "proposed-surface": "proposed surface (auto-grade)" }[mit.providers.padElev] || mit.providers.padElev || "—"} · grade ${{ "3dep-grid": "3DEP per-cell grid", "3dep": "3DEP median" }[mit.providers.existGrade] || mit.providers.existGrade || "—"} · 1% WSE ${wseProvLabel(mit.providers.wse1pct)} · 0.2% WSE ${wseProvLabel(mit.providers.wse02pct)}${d.floodGeo && d.floodGeo.ts != null ? ` · flood data ${formatAge(Date.now() - d.floodGeo.ts)}` : ""}`, "mit-providers"));
+                // B826 — surface-basis honesty: when the proposed-surface engine priced the
+                // fill, say so (the flat-pad figure would differ BY DESIGN — courts price
+                // at their real planes); the flat path keeps its own labels below.
+                if (mit.padBasis === "surface") mitR.push(keyedNote("Fill priced off the auto-graded proposed surface — courts and paving price at their real planes, not one flat pad.", "mit-surface", "The proposed-surface engine grades each element (pad flat at FFE, dock courts dropped and falling away, paving tied at the doors and falling to the drainage target) and mitigation prices fill as surface − ground per cell. The flat-pad screening comparison lives in Yield → Earthwork cost."));
                 // B808 — grade-basis honesty: the median fallback is named (never silently
                 // flat), and the grid's own flags surface one line each (the B823 cap).
                 if (mit.gradeBasis === "median") mitR.push(keyedNote("Flat-grade estimate — one median grade priced every cell.", "mit-flat", "The per-cell 3DEP grid was unavailable this check (or the check predates it) — every cell priced at the site-median grade. ↻ Re-check to fetch the grid; a typed grade always overrides."));

@@ -26,7 +26,12 @@ const site = {
     id: "s_ffe", groupId: "s_ffe", site: "Auto FFE Test", name: "Plan 1", status: "active",
     origin: { lat: 29.55, lon: -95.80 }, county: "fortbend",
     parcels: [{ id: "pA", points: PARCEL, locked: true }],
-    els: [{ id: "b1", type: "building", cx: 0, cy: 0, w: 300, h: 200, rot: 0 }],
+    // B826 — a paving field beside the building so the proposed-surface engine grades a
+    // real sloped plane (tie at FFE − 0.15′), not just the flat pad.
+    els: [
+      { id: "b1", type: "building", cx: 0, cy: 0, w: 300, h: 200, rot: 0 },
+      { id: "p1", type: "paving", cx: 250, cy: 0, w: 200, h: 200, rot: 0 },
+    ],
     measures: [], callouts: [], markups: [], deletedIds: [],
     settings: { showSetback: false }, underlay: null, updatedAt: Date.now(),
   },
@@ -118,6 +123,42 @@ async function run() {
   expect("B809: the tie-out line reads overlay Σ = ledger (same cells, by construction)", /same cells, by construction/.test(t));
   const legendOn = (await page.getByText("Fill depth (priced cells)", { exact: false }).count()) > 0;
   expect("B809: the exhibit legend rides the plan SVG (auto-ON while the group is open)", legendOn);
+  // B826 — the mitigation ledger names its SURFACE basis (the proposed-surface engine
+  // priced the fill at each element's real plane, not one flat pad).
+  expect("B826: mitigation names the proposed-surface basis", /auto-graded proposed surface/.test(t));
+  expect("B826: providers line reads 'proposed surface (auto-grade)'", /proposed surface \(auto-grade\)/.test(t));
+
+  // B826 — the earthwork section extends B712's rows: graded-surface cut/fill + net
+  // dirt + the balance chip + the cut/fill exhibit toggle. Expand the collapsed section.
+  await page.getByRole("button", { name: "Earthwork cost (screening)" }).first().click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const tE = await railText(page);
+  expect("B826: 'Graded surface — cut' row renders", /Graded surface — cut/.test(tE));
+  expect("B826: 'Graded surface — fill' row renders", /Graded surface — fill/.test(tE));
+  expect("B826: net-dirt row renders with an import/export direction", /Net dirt \(screening\)/.test(tE) && /CY (import|export)/.test(tE));
+  expect("B826: the balance chip renders", /⚖ Balance the dirt/.test(tE));
+  expect("B826: the auto-graded-planes basis copy renders (median ground named)", /Auto-graded planes/.test(tE) && /flat site median/.test(tE));
+  expect("B826: shrink/swell input present", /Fill shrink\/swell/.test(tE));
+  // Toggle the cut/fill exhibit on: its legend joins the SVG and the fill-depth legend
+  // yields (one exhibit at a time).
+  await page.getByText("Cut/fill map on the plan").first().click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  const cfLegend = (await page.getByText("Cut / fill (proposed − existing)", { exact: false }).count()) > 0;
+  expect("B826: the cut/fill exhibit legend rides the plan SVG", cfLegend);
+  expect("B826: the cut/fill tie-out line reads 'Σ cells … = earthwork rows'", (await page.getByText("= earthwork rows", { exact: false }).count()) > 0);
+  expect("B826: the fill-depth legend yields while cut/fill is on (one exhibit at a time)", (await page.getByText("Fill depth (priced cells)", { exact: false }).count()) === 0);
+  await page.screenshot({ path: "ui-audit/verify-b826-cutfill.png" }).catch(() => {});
+  await page.getByText("Cut/fill map on the plan").first().click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  // One-click balance: on this all-fill site the honest answer is the band cap (still
+  // importing) — the click must APPLY it (fieldT persisted, the state chip renders).
+  await page.locator('button:has-text("⚖ Balance the dirt")').first().click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(400);
+  const tB = await railText(page);
+  expect("B826: balance click applies and reports the field state", /field slopes at \d+% of class band/.test(tB));
+  expect("B826: reset chip appears after balancing", /× Reset field/.test(tB));
+  await page.locator('button:has-text("× Reset field")').first().click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
   // B824 — Site Analysis keeps only the screening LINK row (no duplicate ledger).
   await page.locator('button[title="Analysis"]').first().click({ timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(1000);

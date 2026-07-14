@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import {
   DEPTH_BIN_FT, HEAT_RAMP, FLOODWAY_FILL, UNKNOWN_FILL,
   binIndex, cellPaint, heatmapBBox, heatmapLegend, heatmapTotals, cellAt, paintHeatmap,
+  FILL_RAMP, CUT_RAMP, ZERO_BAND_FT, cutFillPaint, cutFillLegend, cutFillTotals,
 } from "../src/workspaces/site-planner/lib/mitigationHeatmap.js";
 import { computeMitigation } from "../src/workspaces/site-planner/lib/floodplainMitigation.js";
 import { DEFAULT_FLOODPLAIN_RULES } from "../src/workspaces/site-planner/lib/floodplainRules.js";
@@ -62,6 +63,32 @@ describe("tie-out totals — engine truth", () => {
     expect(t.volumeCf).toBeCloseTo(4 * 1, 9);
     expect(t.unknownAcres).toBeGreaterThan(0);
     expect(t.floodwayAcres).toBeGreaterThan(0);
+  });
+});
+
+describe("B826 — the cut/fill mode (diverging ramp, same renderer)", () => {
+  const cf = (x, dzFt, elId = "p") => ({ x, y: 0, wFt: 2, hFt: 2, dzFt, elId, cls: "driveAisles" });
+  it("fill paints warm, cut paints cool, on-grade is the quiet zero band, void is unknown hatch", () => {
+    expect(cutFillPaint(cf(0, 1.2))).toEqual({ kind: "fill", color: FILL_RAMP[2] });
+    expect(cutFillPaint(cf(0, -1.2))).toEqual({ kind: "cut", color: CUT_RAMP[2] });
+    expect(cutFillPaint(cf(0, ZERO_BAND_FT / 2)).kind).toBe("zero");
+    expect(cutFillPaint(cf(0, null))).toEqual({ kind: "unknown", color: UNKNOWN_FILL });
+  });
+  it("legend lists only the PRESENT bins — fill first, then cut, then zero/unknown", () => {
+    const rows = cutFillLegend([cf(0, 0.2), cf(4, 2.6), cf(8, -0.7), cf(12, 0.01), cf(16, null)]);
+    expect(rows.map((r) => r.kind)).toEqual(["fill", "fill", "cut", "zero", "unknown"]);
+    expect(rows[0].label).toBe("fill 0.0–0.5′");
+    expect(rows[2].label).toBe("cut 0.5–1.0′");
+  });
+  it("tie-out totals sum the SAME cells the exhibit paints (sign-split)", () => {
+    const t = cutFillTotals([cf(0, 1), cf(4, -2), cf(8, null)]);
+    expect(t.fillCf).toBeCloseTo(4, 9);
+    expect(t.cutCf).toBeCloseTo(8, 9);
+    expect(t.fillCy).toBeCloseTo(4 / 27, 9);
+    expect(t.unknownAcres).toBeGreaterThan(0);
+  });
+  it("paintHeatmap delegates to the cut/fill classer and stays honestly null without a DOM", () => {
+    expect(paintHeatmap([cf(0, 1)], { paint: cutFillPaint })).toBeNull();
   });
 });
 
