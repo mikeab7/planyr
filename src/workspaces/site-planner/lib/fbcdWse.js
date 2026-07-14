@@ -6,7 +6,7 @@
  * a point — the same getSamples pattern as the USGS 3DEP ground-elevation sampler
  * (elevation.js) — feeding the drainage check's derived WSE seams:
  *   • 0.2% (500-yr) → derivedWse02Ft, from the county-wide 500YR_WSE mosaic — MOSAIC-FIRST,
- *     with a per-watershed 500YR fallback where the mosaic has a HOLE (B821, live-proven at
+ *     with a per-watershed 500YR fallback where the mosaic has a HOLE (B827, live-proven at
  *     Bain Ditch / Willow Fork; same multiplex router as the 1% path, provisional seed table);
  *   • 1% (100-yr)  → derivedWse1pctFt (B807), from the PER-WATERSHED 100YR rasters —
  *     there is no county-wide 100-yr mosaic, so the sampler routes the point to the
@@ -71,7 +71,7 @@ export async function sampleWse02Point(lat, lng, opts = {}) {
   //    must read "failed", never get masked by a narrower per-watershed answer).
   const mosaic = await getSampleValue(FBCDD_WSE02_URL, lat, lng, { timeoutMs, fetchImpl, signal });
   if (mosaic != null) return mosaic;
-  // 2) Mosaic EMPTY → could be a mosaic HOLE (B821, live-proven at Bain Ditch / Willow Fork):
+  // 2) Mosaic EMPTY → could be a mosaic HOLE (B827, live-proven at Bain Ditch / Willow Fork):
   //    route through the per-watershed 500YR rasters — the same bbox+seam router as B807's
   //    100YR path (which stays candidates-only BY DESIGN: no county-wide 100-yr mosaic exists).
   //    Zero candidates → honest null with zero fallback fetches. ANY candidate error rejects
@@ -84,7 +84,7 @@ export async function sampleWse02Point(lat, lng, opts = {}) {
     getSampleValue(`${mux.restBase}/${name}/ImageServer`, lat, lng, { timeoutMs, fetchImpl, signal })));
   let best = null;
   for (const v of values) if (v != null && (best == null || v > best)) best = v;
-  return best; // plain number (the pre-B821 caller contract) — or honest null
+  return best; // plain number (the pre-B827 caller contract) — or honest null
 }
 
 /* Watershed seams: the extents are exact published rectangles, but a site straddling a
@@ -105,7 +105,7 @@ export function wse100CandidatesForPoint(lat, lng, services = gisSource("fbcddWs
   return candidatesForPoint(lat, lng, services);
 }
 
-/* Which per-watershed 500YR rasters COULD cover a WGS84 point (B821) — the same pure bbox
+/* Which per-watershed 500YR rasters COULD cover a WGS84 point (B827) — the same pure bbox
  * routing as the 100YR router, against the fbcddWse02 registry multiplex table. */
 export function wse02CandidatesForPoint(lat, lng, services = gisSource("fbcddWse02").multiplex.services) {
   return candidatesForPoint(lat, lng, services);

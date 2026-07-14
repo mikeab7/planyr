@@ -136,10 +136,10 @@ async function checkMultiplexCatalog(key, s) {
   for (const n of liveMatch) {
     if (!tableNames.has(n)) {
       const msg = `${key} multiplex: LIVE service "${n}" missing from the registry table — coverage the app can't route to.`;
-      // B821 — a provisional table is a KNOWINGLY-incomplete seed (the live directory can't be
+      // B827 — a provisional table is a KNOWINGLY-incomplete seed (the live directory can't be
       // enumerated from the build sandbox): live-not-in-table diffs are recon notes, not failures,
       // so the weekly check isn't permanently red. Dead-endpoint + extent-drift stay problems.
-      if (s.multiplex.provisional) notes.push(`${msg} (provisional seed table, B821 — bake this service in.)`);
+      if (s.multiplex.provisional) notes.push(`${msg} (provisional seed table, B827 — bake this service in.)`);
       else problems.push(msg);
     }
   }

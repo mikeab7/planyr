@@ -348,7 +348,7 @@ export const GIS_SOURCES = {
     // screening label, never read as an effective/published elevation.
     // (The 100-yr rasters have NO county-wide mosaic — per-watershed services only; they are
     // wired via the `fbcddWse100` row below and its `multiplex` routing table, B807.)
-    // ⚠ B821 — this mosaic has HOLES (live-proven at Bain Ditch / Willow Fork): the sampler is
+    // ⚠ B827 — this mosaic has HOLES (live-proven at Bain Ditch / Willow Fork): the sampler is
     // mosaic-FIRST, and an EMPTY mosaic answer falls back to the per-watershed 500YR rasters via
     // the `multiplex` table below (provisional seed — see its comment).
     serviceUrl: "https://gisportal.fortbendcountytx.gov/image/rest/services/500YR_WSE/ImageServer",
@@ -365,18 +365,18 @@ export const GIS_SOURCES = {
       { label: "Oyster Creek reach (in coverage)", point: [-95.62, 29.55], expectValueRange: [60, 90] }, // live 2026-07-11/12: 72.6968
       { label: "NE of the county (out of coverage)", point: [-95.0, 30.2], expectNoData: true },
       {
-        label: "Bain Ditch reach — mosaic HOLE, per-watershed 500YR fallback (B821)",
+        label: "Bain Ditch reach — mosaic HOLE, per-watershed 500YR fallback (B827)",
         point: [-95.850035, 29.769820],
         expectValueRange: [130, 150], // live 2026-07-13 (owner's browser): 139.514 (Willow_500YR_Existing_WSE)
         serviceUrl: "https://gisportal.fortbendcountytx.gov/image/rest/services/Willow_Creek/Willow_500YR_Existing_WSE/ImageServer",
       },
-      // Pins the county mosaic's EMPTY answer at the same point (the B821 hole). If the county
+      // Pins the county mosaic's EMPTY answer at the same point (the B827 hole). If the county
       // ever fills the hole this flips to a value → the weekly verifier flags it — the signal
       // to re-check whether the per-watershed fallback is still needed. No serviceUrl: mosaic.
-      { label: "Bain Ditch reach — the 500YR_WSE mosaic hole itself (B821)", point: [-95.850035, 29.769820], expectNoData: true },
+      { label: "Bain Ditch reach — the 500YR_WSE mosaic hole itself (B827)", point: [-95.850035, 29.769820], expectNoData: true },
     ],
     fixtures: [], // no /query fixtures — raster (see sampleFixtures above)
-    // B821 — per-watershed 500YR fallback routing for mosaic HOLES. The county-wide 500YR_WSE
+    // B827 — per-watershed 500YR fallback routing for mosaic HOLES. The county-wide 500YR_WSE
     // mosaic (serviceUrl above) has gaps where a studied watershed's raster never made it into
     // the mosaic (live-proven: Bain Ditch / Willow Fork area — mosaic EMPTY, the per-watershed
     // Willow_500YR_Existing_WSE answers 139.514 ft). The sampler goes MOSAIC-FIRST, then routes
@@ -400,7 +400,7 @@ export const GIS_SOURCES = {
     },
     notes:
       "Feeds the drainage check's derivedWse02Ft (0.2% WSE engine seam, B770; code label B763) for " +
-      "Fort Bend sites — screening only, DRAFT watershed-study values. B821: mosaic-first, " +
+      "Fort Bend sites — screening only, DRAFT watershed-study values. B827: mosaic-first, " +
       "per-watershed fallback where the mosaic has a hole. Sampler: site-planner/lib/fbcdWse.js.",
   },
 

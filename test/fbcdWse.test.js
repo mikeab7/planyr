@@ -137,7 +137,7 @@ describe("the fbcddWse100 registry row — multiplex table shape (B807)", () => 
 });
 
 // ---------------------------------------------------------------------------
-// B821 — the 0.2% mosaic-first + per-watershed 500YR fallback (mosaic holes).
+// B827 — the 0.2% mosaic-first + per-watershed 500YR fallback (mosaic holes).
 // ---------------------------------------------------------------------------
 
 const BAIN = { lat: 29.769820, lng: -95.850035 }; // live-proven mosaic hole (Willow Fork)
@@ -147,7 +147,7 @@ const SVC02_HOME = { name: "Home_Creek/Home_500YR_Existing_WSE", extent2278: aro
 const SVC02_SEAM = { name: "Seam_Ditch/Seam_500YR_WSEL", extent2278: [gB.x + 500, gB.y - 5000, gB.x + 20000, gB.y + 5000] };
 const SVC02_FAR = { name: "Far_River/Far_500YR_Existing_WSE", extent2278: [gB.x + 100000, gB.y + 100000, gB.x + 200000, gB.y + 200000] };
 
-describe("wse02CandidatesForPoint — pure bbox routing (B821)", () => {
+describe("wse02CandidatesForPoint — pure bbox routing (B827)", () => {
   it("routes with the same in-extent + seam-pad geometry as the 100YR router", () => {
     const c = wse02CandidatesForPoint(BAIN.lat, BAIN.lng, [SVC02_HOME, SVC02_SEAM, SVC02_FAR]);
     expect(c.map((s2) => s2.name)).toEqual([SVC02_HOME.name, SVC02_SEAM.name]);
@@ -158,7 +158,7 @@ describe("wse02CandidatesForPoint — pure bbox routing (B821)", () => {
   });
 });
 
-describe("sampleWse02Point — mosaic-first with the per-watershed fallback (B821)", () => {
+describe("sampleWse02Point — mosaic-first with the per-watershed fallback (B827)", () => {
   const MOSAIC = FBCDD_WSE02_URL;
   const routed = (mosaicVal, perWatershed) => async (u) => {
     if (u.startsWith(MOSAIC)) {
@@ -202,7 +202,7 @@ describe("sampleWse02Point — mosaic-first with the per-watershed fallback (B82
   });
 });
 
-describe("the fbcddWse02 registry row — provisional multiplex table (B821)", () => {
+describe("the fbcddWse02 registry row — provisional multiplex table (B827)", () => {
   const s2 = gisSource("fbcddWse02");
   it("is provisional (knowingly-incomplete seed — the live directory is sandbox-blocked)", () => {
     expect(s2.multiplex.provisional).toBe(true);
