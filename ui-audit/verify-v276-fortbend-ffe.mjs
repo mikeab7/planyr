@@ -166,7 +166,7 @@ async function run() {
   {
     const { ctx, page, text: t } = await openAndCheck(browser, { county: "fortbend", fips: "48157", countyName: "Fort Bend", padFfeFt: 98 });
     expect("card names the governing basis: Required FFE 97′ (FEMA FIRM BFE + 2′) — §5.02(c)(1) +2.0",
-      /Required FFE/.test(t) && /97′ \(FEMA FIRM BFE \+ 2′\)/.test(t), t.match(/Required FFE[^—]*—?[^.]{0,40}/)?.[0]);
+      /Required FFE/.test(t) && /97(\.00)?′ \(FEMA FIRM BFE \+ 2′\)/.test(t), t.match(/Required FFE[^—]*—?[^.]{0,40}/)?.[0]);  // B824: the Yield f2 renders 97.00
     expect("pad PASSES verdict renders", /pad PASSES/.test(t));
     expect("pending-bases copy: 'must clear the HIGHEST of several bases'", /must clear the HIGHEST of several bases/.test(t));
     expect("pending list names Atlas-14 100-yr WSE +2′", /Atlas-14 100-yr WSE \+2′/.test(t));
@@ -190,7 +190,7 @@ async function run() {
   {
     const { ctx, page, text: t } = await openAndCheck(browser, { county: "fortbend", fips: "48157", countyName: "Fort Bend", padFfeFt: 95 });
     expect("SHORT warning: 'Pad FFE is 2′ SHORT of the required 97′ (FEMA FIRM BFE + 2′)'",
-      /Pad FFE is 2′ SHORT of the required 97′ \(FEMA FIRM BFE \+ 2′\)/.test(t), t.match(/Pad FFE[^.]{0,90}/)?.[0]);
+      /Pad FFE is 2(\.00)?′ SHORT of the required 97(\.00)?′ \(FEMA FIRM BFE \+ 2′\)/.test(t), t.match(/Pad FFE[^.]{0,90}/)?.[0]);  // B824: Yield f2 formatting
     expect("pending-bases copy still renders alongside the SHORT verdict", /must clear the HIGHEST of several bases/.test(t));
     const sheet = await captureSheet(page);
     if (sheet) {
@@ -221,7 +221,7 @@ async function run() {
   {
     const { ctx, page, text: t } = await openAndCheck(browser, { county: "fortbend", fips: "48157", countyName: "Fort Bend", padFfeFt: 99, fbcddWse: "96.5" });
     expect("card: Required FFE 98.5′ (pre-Atlas-14 500-yr WSE + 2′) — the raster-fed basis GOVERNS",
-      /Required FFE/.test(t) && /98\.5′ \(pre-Atlas-14 500-yr WSE \+ 2′\)/.test(t), t.match(/Required FFE[^—]*—?[^.]{0,40}/)?.[0]);
+      /Required FFE/.test(t) && /98\.50?′ \(pre-Atlas-14 500-yr WSE \+ 2′\)/.test(t), t.match(/Required FFE[^—]*—?[^.]{0,40}/)?.[0]);  // B824: Yield f2 renders 98.50
     expect("pad PASSES verdict renders (99 ≥ 98.5)", /pad PASSES/.test(t));
     expect("the ⚑ DRAFT-study caveat rides the FFE verdict",
       /DRAFT Fort Bend watershed-study value/.test(t), t.match(/DRAFT[^.]{0,80}/)?.[0]);

@@ -56,6 +56,10 @@ async function run() {
   // the site card / plan list may need a second click to enter the plan
   const openPlan = page.getByText(/Open plan|Plan 1/i).first();
   if (await openPlan.count()) { try { await openPlan.click({ timeout: 2500 }); await page.waitForTimeout(2500); } catch (_) {} }
+  // the breadcrumb "Plan 1 ▾" match can open the plan POPOVER, which then swallows the
+  // canvas clicks below — close any open menu before driving the canvas.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
   await page.screenshot({ path: OUT + "01-planner.png" });
 
   const canvas = page.locator("svg").first();
@@ -64,11 +68,13 @@ async function run() {
   // ---- 1. select the pond (centered in the seeded view) → inspector fields ----
   const box = await page.locator("main, body").first().boundingBox();
   // click the canvas center a few px around until the Detention storage section appears
+  // B750 made single-click SELECT-only — the Properties inspector opens on DOUBLE-click.
   let pondSelected = false;
   for (const [dx, dy] of [[0, 0], [20, 10], [-25, -12], [0, 30]]) {
-    await page.mouse.click(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy);
-    await page.waitForTimeout(400);
-    if (await page.getByText("Detention storage", { exact: false }).count()) { pondSelected = true; break; }
+    await page.mouse.dblclick(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy);
+    await page.waitForTimeout(500);
+    if (await page.getByText("Detention storage", { exact: false }).count()) { pondSelected = true; break;
+    }
   }
   check("pond selected (Detention storage section)", pondSelected);
   if (pondSelected) {
@@ -85,8 +91,8 @@ async function run() {
   // the building sits above canvas center in the seeded layout
   let bldgSelected = false;
   for (const dy of [-320, -300, -340]) {
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2 + dy * 0.5);
-    await page.waitForTimeout(350);
+    await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2 + dy * 0.5);
+    await page.waitForTimeout(400);
     if (await page.getByText("Pad elev.", { exact: false }).count()) { bldgSelected = true; break; }
   }
   check("fill element shows the Pad elev. field (B713)", bldgSelected);
@@ -125,8 +131,9 @@ async function run() {
 
   // ---- 3. B824 — Site Analysis carries only the screening LINK row now; the mitigation
   // detail lives in Yield → Stormwater's collapsed verdict groups. ----
-  const saTab = page.getByText("Site Analysis", { exact: false }).first();
-  try { await saTab.click({ timeout: 4000 }); await page.waitForTimeout(800); } catch (_) {}
+  // the left rail's tab is labeled "Analysis" (button[title]) — the old "Site Analysis"
+  // text match silently missed and the pre-B824 check false-passed on Yield's own text.
+  try { await page.locator('button[title="Analysis"]').first().click({ timeout: 4000 }); await page.waitForTimeout(800); } catch (_) {}
   check("Analysis link row → Yield · Stormwater", (await page.getByText("in Yield · Stormwater", { exact: false }).count()) > 0);
   await page.screenshot({ path: OUT + "05-analysis-link.png" });
 

@@ -55,6 +55,13 @@ async function openYield(page) {
   await page.locator('svg[aria-label="Site plan canvas"]').waitFor({ timeout: 12000 }).catch(() => {});
   await page.getByRole("button", { name: /Yield/ }).first().click().catch(() => {});
   await page.waitForTimeout(500);
+  // B824 — the readout is grouped + COLLAPSED (verdict lines only); expand all three
+  // groups so the remembered-view detail rows are in the DOM for the assertions below.
+  for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
+    await page.locator(`button:has-text("${g}")`).first().click({ timeout: 4000 }).catch(() => {});
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(300);
   return (await page.locator("body").innerText()).replace(/\s+/g, " ");
 }
 
@@ -93,7 +100,9 @@ async function run() {
 
   console.log("Case B — LEGACY remembered check with NO mitigation summary:");
   expect("NEW-2(b): explicit 'not screened in this remembered view' row (never a silent gap)", /not screened in this remembered view/.test(tB));
-  expect("NEW-2(b): the row prompts a re-check", /re-check drainage criteria/i.test(tB));
+  // B823 — the prompt is a one-liner; the "re-check drainage criteria" teaching copy rides its ⓘ.
+  expect("NEW-2(b): the row prompts a re-check (one-liner + ⓘ)", /↻ re-check to screen it/i.test(tB)
+    && await pageB.locator('[title*="Re-check drainage criteria"]').count() > 0);
   await ctxB.close();
 
   await browser.close();

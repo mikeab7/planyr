@@ -111,6 +111,7 @@ import {
 } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
+import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe } from "./lib/buildability.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
@@ -10434,6 +10435,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Trailer parking (ft)"><NumInput style={numInput} value={settings.trailerParkD ?? 50} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerParkD: n }))} /></Field>
             <Field label="Buffer (ft)"><NumInput style={numInput} value={settings.bufferD ?? 15} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bufferD: n }))} /></Field>
             <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Outward from the dock face: truck court → trailer parking → buffer. New zones use these depths; each is still editable per building.</div>
+          </Section>
+          </div>
+
+          {/* B825 — the grading-standards registry, read-only reference: per-surface-class
+              slope limits with their cites (lib/gradingRules.js). The ADA/TAS cap is a LEGAL
+              requirement and renders with the danger token — never a stylistic note. Values
+              are consumed by the future B826 proposed-surface engine; per-element overrides
+              ride each element's gradeOverride when that engine lands. */}
+          <div data-std-sec="grading">
+          <Section key={`std-grading:${standardsFocus === "grading"}`} title="Grading standards" collapsed={standardsFocus !== "grading"}>
+            {Object.values(GRADING_RULES).map((gr) => (
+              <div key={gr.id}
+                title={`${gr.appliesTo}. ${gr.basis === "published" ? `${gr.source?.name || "Published"} — ${gr.source?.section || ""}${gr.sourceDate ? ` (checked ${gr.sourceDate})` : ""}` : "Planyr screening convention — not a published standard; verify with your civil engineer."} ${gr.note}`}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "3px 0", borderBottom: `1px solid ${PAL.panelLine}`, cursor: "help" }}>
+                <span style={{ fontSize: 11.5, color: PAL.ink }}>
+                  {gr.label}
+                  {gr.legalClass && <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 800, letterSpacing: "0.05em", color: PAL.danger, border: `1px solid ${PAL.danger}`, borderRadius: 4, padding: "0 4px" }} title="Legal requirement (ADA/TAS) — violations are legal, not stylistic">LEGAL</span>}
+                  <span style={{ fontSize: 9.5, color: PAL.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span>
+                </span>
+                <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, color: gr.legalClass ? PAL.danger : PAL.ink, fontWeight: 650, whiteSpace: "nowrap" }}>{gradingChipLabel(gr)}</span>
+              </div>
+            ))}
+            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
+              Reference values for the grading concept (screening). Published rows carry their cite in the ⓘ; convention rows are Planyr screening conventions, never implied-published. The proposed-surface engine (B826) will grade to these.
+            </div>
           </Section>
           </div>
 
