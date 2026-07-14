@@ -51,6 +51,40 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+### B828 — Pond roles + a real mitigation-provided ledger (detention vs mitigation vs dual, credited not footnoted) `[Site Planner / stormwater · yield]` (feature) #site-planner #pond #yield #floodplain #ui #export  *(owner-dropped 2026-07-14 as "NEW-8"; minted **B828**)*
+`[ ]` Owner: "that pond might not count for detention but does it count for mitigation" — yes, hydraulically, but the app only surfaces it as the `mitCandidateCf` "candidate" note. Give each pond a ROLE and the Floodplain-mitigation group a real Required / Provided / Balance ledger.
+- Verify: live (real-project-data — Bain creek ponds read mitigation-primary with credited volumes, Provided/Balance rows render, detention usable unchanged).
+- Origin: filed 2026-07-14 from chat ("NEW-8").
+- **(a) Role** — detention / mitigation / dual, auto-suggested from elevation (share of volume below the governing WSE ≥ ~80% → mitigation-primary; ≥ ~80% above → detention; else dual), owner-overridable chip on the pond inspector card. Stored as `e.det.role` (absent/null = auto — never store "auto").
+- **(b) Ledger rows** — the Floodplain-mitigation group gains Required / Provided (credited below-WSE cut, from ponds with role ∈ {mitigation, dual}, by pond) / Balance rows. Provided keeps the hydraulic-connection + same-watershed engineer-confirm caveat (one line + ⓘ per the B823 copy cap). An over-dug state renders LOUD: "Provided 90.3 vs required 23.2 — ~67 ac-ft over" — wasted excavation as visible as a shortfall (warn tone, not danger — money, not a violation).
+- **(c)** Detention group's usable split (B708) UNCHANGED — roles never double-count an acre-foot (the additive rule stands; B708's exclusive bands already partition each pond's gross exactly once; role only gates which ponds' candidate band is CREDITED to mitigation).
+- **(d)** Print sheet parity (PDF-PARITY): new "Mit. req / prov (credited)" metric pair in `printMetricPairs`.
+- Cross-links (DEDUPE-FIRST, not dups): B708 (the band math consumed — `mitigationCandidateCf` becomes creditable), B637 (the required-vs-provided idiom precedent, extended from detention to mitigation), B712/B824 (the surfaces it renders into).
+
+### B829 — Remembered check credits GROSS pond volume as detention (surplus/short verdict flips on reload) `[Site Planner / yield · persistence]` (bug) #site-planner #pond #yield #persistence  *(owner-dropped 2026-07-14 as "NEW-9"; minted **B829**)*
+`[ ]` Live repro 2026-07-14, Bain: the owner's live check reads Detention −54.73 ac-ft SHORT (req 76.54); a fresh tab restoring the remembered snapshot reads +42.78 ac-ft surplus = exactly gross 119.32 − 76.54 — the restored path loses the per-pond dead-storage split (WSE/pool inputs absent) and falls back to gross-as-usable: an optimistic fabrication, the B804 class but for detention, and worse (it flips the verdict, not hides a row).
+- Verify: live (real-project-data repro — reload Bain → the same −54.73 SHORT verdict as live, or an honest unknown; never a surplus).
+- Origin: filed 2026-07-14 from chat ("NEW-9").
+- Root cause (AUDIT-FIRST, confirmed in code): `slimDrainageContext` drops flood polygons by design → hydrate returns `floodGeo:null` → `fmZones` empty → `pondSplitFor` gets `wseFt:null` → `usablePondVolume` falls through anchored/estimate to its `gross` branch → `deadCf` 0 → `providedUsableCf` = gross.
+- Fix: persist the split INPUTS (per-pond `{wseFt, inTrigger}` + the check-time `estPoolDepthFt`, provenance-stamped) as `settings.drainage.lastCheck.detSplit` — the B804 slim-mirror pattern — and restore them inside `pondSplitFor` (the ONE split seam); where absent (legacy snapshots that carry flood zones), demote to "usable unknown — ↻ re-check", NEVER gross (LOUD-FAILURE).
+- Regression test: a restored context must never report usable > live-computed usable for the same plan.
+- Recurrence weighed (DEDUPE-FIRST): NOT re-opened as a B708 recurrence — B708's "never present gross as usable" invariant governed the live-compute path it shipped; the split's persistence layer was never built (unbuilt scope, not a non-sticking fix). Sibling of B804 (slim-snapshot honesty family).
+
+### B830 — Ledger-balancer: rank the moves that close detention + mitigation together (the adversarial pass as a feature) `[Site Planner / stormwater · yield]` (feature) #site-planner #pond #yield #floodplain  *(owner-dropped 2026-07-14 as "NEW-10"; minted **B830**)*
+`[ ]` With both ledgers honest (B828/B829), suggest ranked reallocation moves with their deltas, screening-labeled. One card, each move one line + ⓘ; applying any move is still the owner drawing — the tool proposes, never auto-edits the plan.
+- Verify: live (real-project-data — Bain surfaces the shrink/parcel/berm moves with arithmetic consistent with the ledgers).
+- Origin: filed 2026-07-14 from chat ("NEW-10").
+- Move kinds: shrink over-dug mitigation ponds to required+margin (dirt-cost saved) · berm-raise upland TOBs (+ac-ft per ft per pond, criteria clamps from the pond records) · deactivate/phase a listed parcel (req delta at the current rate — e.g. Bain's 29.71 ac ≈ −20.9 ac-ft) · convert a named building+court to a bermed basin (usable gained, sf lost, impervious-rate feedback) · pumped-system what-if (FBCDD ≥50% gravity rule, flagged engineer-confirm).
+- Cross-links (DEDUPE-FIRST, not dups): B640/B822 (the single-pond auto-size solver — a building block, not a recommender); DISTINCT from B826's earthwork (cut/fill) "balance assist" — this balances the DRAINAGE ledgers.
+
+### B831 — Flag ponds and basins inside pipeline easement corridors `[Site Planner / GIS · stormwater]` (feature) #site-planner #gis #pond  *(owner-dropped 2026-07-14 as "NEW-11"; minted **B831**)*
+`[ ]` Easements currently restrict buildings/paving; ponds get no check. Live case: Bain's creek ponds overlap the TxRRC gas corridor (assumed easement layer). Excavating basins over pipelines needs operator approval and can force relocation.
+- Verify: live (GIS endpoint class — Bain creek ponds flag with the overlap acreage; a clear site shows nothing).
+- Origin: filed 2026-07-14 from chat ("NEW-11").
+- Design: pond ∩ (drawn easements + the assumed pipeline corridor layer when enabled) → one-line flag with acreage + ⓘ ("operator approval / relocation risk — verify the recorded easement width"); the B826 proposed-surface cut/fill cells get the same check later (keep the API ring-only as the seam — not built now).
+- LOUD-FAILURE: a corridor-source outage renders an honest "not screened this session" note — never a silent all-clear. Drawn easements always screen (no network); the corridor leg only when the layer is on (explicit user act — not an auto-fetch).
+- Cross-links (DEDUPE-FIRST, not dups): B753 (draws the corridor band — this consumes the shipped `pipelineCorridor.js` buffer + `txrrc_pipe` source), B752 (centerline source), B150–B153/B606 (the drawn-easement family it extends to ponds).
+
 ### B818 — Meeting-cadence Gantt view + loud row-state banners (the visual half of NEW-3) `[Scheduler]` (feature) #scheduler #entitlements #gantt #export  *(split out of B817/NEW-3 on ship, 2026-07-13 — B817 shipped the decision-value columns + at-risk health; this is the timeline visualization + banner resolutions, which need live verification; minted **B818**)*
 `[ ]` The visual half of the meeting-cadence epic's NEW-3, deferred from B817 so the tested column/health core could ship now. Depends on B816 (bound tasks) + B817 (float/cost). All live-only (the scheduler's CDN React/Babel is egress-blocked in the sandbox).
 - Verify: live — Gantt ticks/flags + the banner resolutions can only be confirmed in the live app, via Cowork on planyr.io.
