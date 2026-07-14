@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-14 @ `6196cbc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-14 @ `e37e03b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_247 source files mapped._
+_250 source files mapped._
 
 ## infra
 
@@ -259,6 +259,8 @@ _247 source files mapped._
   - _exports_: `buildContours`, `dilateVoids`, `pickInterval`, `stripRing`
 - **`src/workspaces/site-planner/lib/convertClient.js`** — B748 client for the B238 DWG→DXF convert service (VITE_CONVERT_URL); round-trips DWG bytes → DXF with a visible, distinct state for every failure (unset URL / 422 / 413 / unreachable).
   - _exports_: `CONVERT_URL`, `convertConfigured`, `convertDwgToDxf`, `isDwgFile`
+- **`src/workspaces/site-planner/lib/corridorConflicts.js`** — Pond/basin vs easement + pipeline-corridor overlap screen (B831): bbox-prefiltered polyIntersectArea over rings in planner feet; ring-only API is the B826 cut/fill-cells seam. Exports `pondEncumbranceConflicts`.
+  - _exports_: `pondEncumbranceConflicts`
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver
@@ -343,6 +345,8 @@ _247 source files mapped._
   - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
   - _exports_: `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `gisProxyEnabled`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_VINTAGE`, `layerVintage`, `probeService`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
+- **`src/workspaces/site-planner/lib/ledgerBalancer.js`** — Ledger balancer (B830): ranks screening moves that close detention + mitigation together (shrink over-dug, joint berm solve with apply payload, parcel phase-out, building-to-basin, pumped what-if). Exports `rankLedgerMoves`, `solveBermRaise`.
+  - _exports_: `BERM_MAX_RAISE_FT`, `overdugAcFt`, `rankLedgerMoves`, `solveBermRaise`
 - **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; durable home for the version-history ring and cached rasters
   - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbGet`, `idbPersist`, `idbPut`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
@@ -393,6 +397,8 @@ _247 source files mapped._
   - _exports_: `checkPondCriteria`, `DEFAULT_POND_CRITERIA`, `loadPondCriteria`, `savePondCriteria`
 - **`src/workspaces/site-planner/lib/pondGeom.js`** — Pond expansion label placement (deepest added-ground point) and stage contour rings with elevation/depth labels
   - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `bandedStorage`, `bermAsFillHeight`, `contourLabelPoint`, `detentionStorage`, `drawdownWarning`, `excavationVolume`, `pointInRing`, `pondContours`, `usablePondVolume`, `volumeBetween`
+- **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
+  - _exports_: `accumulatePondLedger`, `effectivePondRole`, `POND_ROLE_LABEL`, `POND_ROLES`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
