@@ -98,6 +98,7 @@ import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterv
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
 import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
+import { envelopeOf, revalidationNeed } from "./lib/factRevalidation.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { gisCache } from "./lib/gisCache.js";
@@ -6226,7 +6227,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const drainSigNow = drainActive.length + ":" + Math.round(siteSqft) + ":" +
     Math.round(drainCentroid[0] / 50) + "," + Math.round(drainCentroid[1] / 50) + ":" +
     (origin ? `${origin.lat.toFixed(4)},${origin.lon.toFixed(4)}` : "nogeo") + ":" + drainElsSig;
-  const checkDrainage = async () => {
+  const checkDrainage = async (opts = {}) => {
+    const isAuto = opts && opts.auto === true; // B832 — auto-revalidation runs tag themselves (status line + the remembered record)
     if (!origin) { setDrainCtx((prev) => ({ error: "This plan isn't georeferenced — bring the parcel in from the map first.", prev: prev?.ctx ? prev : prev?.prev })); return; }
     const act = parcels.filter((p) => p.active !== false && p.points && p.points.length >= 3);
     if (!act.length) { setDrainCtx((prev) => ({ error: "No parcel boundary on the plan yet.", prev: prev?.ctx ? prev : prev?.prev })); return; }
@@ -6359,11 +6361,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (tok !== drainTok.current) return; // superseded while sampling
       }
       const checkedAt = Date.now();
-      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt });
+      // B832 — an AUTO run that came back materially DEGRADED (the authority lookup
+      // was unavailable, or the flood pull failed where the remembered check had it
+      // loaded) shows its honest live state but must NOT overwrite the good remembered
+      // snapshot — degraded sources fall to last-good. A manual ↻ keeps today's
+      // replace-always behavior (the user explicitly asked for a fresh pull).
+      const prevLC = settings.drainage?.lastCheck || null;
+      const autoDegraded = isAuto && (
+        (ctx?.authority?.flags || []).includes("jurisdiction-unavailable")
+        || (ctx?.flood?.state === "failed" && prevLC?.flood?.state === "loaded")
+      );
+      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt, auto: isAuto, degraded: autoDegraded });
+      // B832 — remember WHAT this check fetched (the raw feet envelope + the two
+      // point-sample anchors) so auto-revalidation can tell "moved inside the fetched
+      // area" (numbers recompute live, no fetch) from "outgrew it" (refetch). JSON-safe.
+      const groundPt = largest.points.reduce((s, p) => ({ x: s.x + p.x / largest.points.length, y: s.y + p.y / largest.points.length }), { x: 0, y: 0 });
+      const fetchRec = {
+        env: isFinite(mnX) ? { mnX: Math.round(mnX), mnY: Math.round(mnY), mxX: Math.round(mxX), mxY: Math.round(mxY) } : null,
+        anchorPt: { x: Math.round(bfePt.x), y: Math.round(bfePt.y) },
+        groundPt: { x: Math.round(groundPt.x), y: Math.round(groundPt.y) },
+        mode: isAuto ? "auto" : "manual",
+      };
       // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
       // survives a reload without re-hitting the (flaky) county GIS. Rides the existing
-      // settings autosave — no schema change.
-      setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctx), sig, checkedAt } } }));
+      // settings autosave — no schema change. (B832: skipped for a degraded AUTO run.)
+      if (!autoDegraded) setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctx), sig, checkedAt, fetch: fetchRec } } }));
     } catch (e) {
       if (tok === drainTok.current) setDrainCtx((prev) => ({ error: String((e && e.message) || e), prev: prev?.prev }));
     }
@@ -6774,7 +6796,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // autosave — no schema/version bump (the B750 pattern). JSON-safe: numbers/bools/
   // null only, `?? null` never undefined (JSON drops undefined and a modern record
   // would then misread as legacy).
-  const drainRememberToPersist = drainCtx?.ctx && !drainIsRestored && settings.drainage?.lastCheck?.sig === drainSigNow
+  const drainRememberToPersist = drainCtx?.ctx && !drainIsRestored && !drainViewCtx?.degraded && settings.drainage?.lastCheck?.sig === drainSigNow
     ? {
         mitigation: { screened: !!(floodGeo && floodGeo.state === "loaded"), summary: fmResult ? (({ cells, ...rest }) => rest)(fmResult) : null },
         detSplit: {
@@ -6797,6 +6819,62 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? { ...sx, drainage: { ...sx.drainage, lastCheck: { ...sx.drainage.lastCheck, mitigation: drainRememberToPersist.mitigation, detSplit: drainRememberToPersist.detSplit } } }
       : sx));
   }, [drainRememberSig]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- B832 (chat NEW-12) — drainage facts auto-revalidate: ↻ becomes an override,
+  // not a gate. Load-kind: no in-session check + a missing/stale/incomplete remembered
+  // snapshot → ONE auto refresh shortly after open. Edit-kind: the drawn geometry
+  // OUTGREW the fetched envelope (or a point-sample anchor drifted > ~100 ft) → one
+  // coalesced auto refresh ~2.5 s after the last edit — pure moves inside the envelope
+  // never fetch (the ledgers already recompute live off cached facts). Discipline (the
+  // B366 class): debounce via effect re-arm, a ≥20 s floor between auto fires, ONE
+  // attempt per target key (a failed source stays honest last-good/unavailable — never
+  // a retry loop, never blocks editing), and skipped while the tab is hidden
+  // (multi-writer care: a background tab must not fight the active one; the lastCheck
+  // writes stay sig-keyed + JSON-guarded, so a duplicate write is idempotent).
+  // settings.drainage.autoFacts === false opts out (the headless legacy seeds use it).
+  const drainAutoEnabled = (settings.drainage?.autoFacts !== false) && !!origin && drainActive.length > 0;
+  const drainAutoAttempts = useRef(new Set());
+  const drainAutoLastAt = useRef(0);
+  const drainFactsNow = (() => {
+    if (!drainAutoEnabled) return { bboxNow: null, anchorNow: null, groundNow: null };
+    const pts = [];
+    const fillPts = [];
+    for (const p of drainActive) for (const pt of p.points) pts.push(pt);
+    for (const e of els) {
+      if (!FM_FILL_TYPES.has(e.type) && e.type !== "pond") continue;
+      try {
+        const r = ringOf(e);
+        if (r && r.length >= 3) { for (const pt of r) { pts.push(pt); if (FM_FILL_TYPES.has(e.type)) fillPts.push(pt); } }
+      } catch (_) { /* mid-edit */ }
+    }
+    const largest = drainActive.reduce((b, p) => (polyArea(p.points) > polyArea(b.points) ? p : b), drainActive[0]);
+    const cOf = (arr) => arr.reduce((s, p) => ({ x: s.x + p.x / arr.length, y: s.y + p.y / arr.length }), { x: 0, y: 0 });
+    return { bboxNow: envelopeOf(pts), anchorNow: cOf(fillPts.length ? fillPts : largest.points), groundNow: cOf(largest.points) };
+  })();
+  const drainReval = drainAutoEnabled
+    ? revalidationNeed({
+        hasSessionCtx: !!drainReadCtx,
+        lastCheck: settings.drainage?.lastCheck || null,
+        sigNow: drainSigNow,
+        ...drainFactsNow,
+        incomplete: drainIsRestored && (drainMitRememberedMissing || pondLedger.unknownIds.length > 0),
+      })
+    : { need: false, kind: null, reason: null, key: "" };
+  useEffect(() => {
+    if (!drainReval.need || drainCtx?.busy) return;
+    if (drainAutoAttempts.current.has(drainReval.key)) return; // one attempt per target — a failure is honest, never a loop
+    const delay = drainReval.kind === "load" ? 1200 : 2500;
+    const t = setTimeout(() => {
+      if (typeof document !== "undefined" && document.hidden) return; // yield to the active tab
+      if (Date.now() - drainAutoLastAt.current < 20000) return; // rate floor — the next edit re-arms
+      if (drainAutoAttempts.current.has(drainReval.key)) return;
+      drainAutoAttempts.current.add(drainReval.key);
+      drainAutoLastAt.current = Date.now();
+      checkDrainage({ auto: true });
+    }, delay);
+    return () => clearTimeout(t); // any geometry change re-arms the timer — the coalescing debounce
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drainReval.need, drainReval.key, drainCtx?.busy]);
 
   // Buildability (B710): FFE / pathway / LOMR-F / §404 screens off the same zones +
   // WSE inputs. Wetlands presence comes from the Site Analysis screen's own finding
@@ -6949,6 +7027,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     error: drainCtx?.error || null,
     restored: !!drainViewCtx?.restored,
     lastCheckedAt: drainViewCtx?.checkedAt ?? null,
+    // B832 — how the facts on screen were produced: a live check carries its own auto
+    // flag; a restored view reads the mode the remembered check recorded.
+    checkMode: drainViewCtx?.auto != null ? (drainViewCtx.auto ? "auto" : "manual")
+      : drainViewCtx?.restored ? (settings.drainage?.lastCheck?.fetch?.mode ?? null) : null,
     acres: acresActive,
     providedCf: providedDetCf, providedUsableCf, deadCf: siteDeadCf, pondCount,
     req: detReq, reqCandidates: detReqCandidates,
@@ -7057,7 +7139,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       value: outfallTypeEff, // null | "stormSewer" | "roadsideDitch" | "unknown"
       onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), outfallType: v || null } })),
     },
-    onCheck: checkDrainage,
+    onCheck: () => checkDrainage({ auto: false }), // B832 — ↻ is the explicit "force refresh now" override
   } : null;
 
   // Building properties (B198): clear height + slab thickness, auto-assigned from each
@@ -15551,8 +15633,14 @@ function YieldPanel({
               if (d.stale) { statusText = `⚠ As of ${checkedOnDate || "your last check"} — site boundary changed since; numbers below reflect the old boundary`; statusWarn = true; }
               else if (d.showingPrior && !busy) { statusText = `Re-check failed (${d.error}) — showing the previous result`; statusWarn = true; }
               else if (busy) statusText = d.showingPrior ? "Re-checking… showing the previous result" : "Checking…";
-              else if (d.restored && checkedOnDate) statusText = `As of ${checkedOnDate} · remembered from your last check`;
-              else if (checkedOnDate) statusText = `Checked ${checkedOnDate}`;
+              // B832 — the facts line carries HOW they were produced (auto vs manual)
+              // and reads a same-day time instead of a bare date.
+              else if (d.restored && checkedOnDate) statusText = `As of ${checkedOnDate} · remembered from your last check${d.checkMode ? ` · ${d.checkMode}` : ""}`;
+              else if (d.lastCheckedAt) {
+                const w = new Date(d.lastCheckedAt);
+                const label = w.toDateString() === new Date().toDateString() ? w.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : checkedOnDate;
+                statusText = `Facts as of ${label}${d.checkMode ? ` · ${d.checkMode}` : ""}`;
+              }
               else statusText = "Checked this session";
               out.push(
                 <div key="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "7px 0 2px", ...(statusWarn ? { border: `1px solid ${Y.warnText}`, borderRadius: 8, padding: "6px 9px", background: Y.cardBg } : {}) }}>

@@ -48,7 +48,9 @@ const siteWith = (id, mitigation, extra = {}) => ({
   parcels: [{ id: "pA", points: PARCEL, locked: true }],
   els: extra.els || [{ id: "b1", type: "building", cx: 0, cy: 0, w: 300, h: 200, rot: 0 }],
   measures: [], callouts: [], markups: [], deletedIds: [],
-  settings: { showSetback: false, drainage: { lastCheck: { ...slimBase(), sig: "seed-sig", checkedAt: Date.now() - 3 * 86400000, ...(mitigation ? { mitigation } : {}), ...(extra.detSplit ? { detSplit: extra.detSplit } : {}) } } },
+  // B832: legacy cases seed autoFacts:false so the deterministic remembered-view
+  // assertions aren't raced by the auto-revalidation fetch (Case G covers auto ON).
+  settings: { showSetback: false, drainage: { ...(extra.autoFacts === true ? {} : { autoFacts: false }), lastCheck: { ...slimBase(), sig: "seed-sig", checkedAt: Date.now() - 3 * 86400000, ...(mitigation ? { mitigation } : {}), ...(extra.detSplit ? { detSplit: extra.detSplit } : {}) } } },
   underlay: null, updatedAt: Date.now(),
 });
 
@@ -160,6 +162,35 @@ async function run() {
   expect("NEW-9(D): NO fabricated SHORT verdict either (unknown is unknown)", !/ac-ft SHORT/.test(tD));
   expect("NEW-9(D): gross is labeled AS gross", /Detention provided \(gross\)/.test(tD));
   await ctxD.close();
+
+  // ── Case G: B832 — auto-revalidation fires once on load for a STALE remembered
+  // snapshot, fails HONESTLY in the sandbox (GIS egress-blocked), never loops, never
+  // blocks editing, and never clobbers the good remembered snapshot ────────────────
+  const ctxG = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctxG.addInitScript(`(() => { try {
+    localStorage.setItem('planarfit:sites:v1', JSON.stringify({ s_auto: ${JSON.stringify(siteWith("s_auto", { screened: true, summary: MIT_SUMMARY }, { siteName: "Auto Reval Site", autoFacts: true }))} }));
+    localStorage.setItem('planarfit:currentSite:v1', 's_auto');
+  } catch (e) {} })();`);
+  const pageG = await ctxG.newPage();
+  pageG.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(G) — ${e.message}`); });
+  await pageG.goto(BASE, { waitUntil: "load" });
+  await pageG.waitForTimeout(6500); // load debounce (1.2 s) + the auto attempt settling
+  await pageG.getByRole("button", { name: /Yield/ }).first().click().catch(() => {});
+  await pageG.waitForTimeout(600);
+  const tG = (await pageG.locator("body").innerText()).replace(/\s+/g, " ");
+
+  console.log("Case G — B832 auto-revalidation on a stale remembered snapshot:");
+  expect("(g) not stuck busy after the auto attempt (an outage never blocks editing)", !/Re-checking…|^Checking…$/.test(tG) && await pageG.getByRole("button", { name: /Re-check|Check drainage/ }).count() > 0);
+  expect("(g) an honest state renders (stale banner / failed-auto / degraded rows) — never a silent gap",
+    /boundary changed|Re-check failed|showing the previous result|unavailable|unknown/i.test(tG), tG.match(/As of[^A-Z]{0,60}|Re-check failed[^.]{0,40}/)?.[0]);
+  const lcG = await pageG.evaluate(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      return s.s_auto?.settings?.drainage?.lastCheck?.authority?.primaryReviewerId ?? null;
+    } catch (e) { return "parse-error"; }
+  });
+  expect("(g) the good remembered snapshot survives a degraded auto run (last-good kept)", lcG === "fortbend", `primaryReviewerId=${lcG}`);
+  await ctxG.close();
 
   await browser.close();
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL PASS");

@@ -47,7 +47,8 @@ const siteWith = (id, name, role) => ({
     { id: "p1", type: "pond", points: POND.map((p) => ({ ...p })), det: { depth: 8, freeboard: 1, slope: 3, tobElev: 94, ...(role ? { role } : {}) } },
   ],
   measures: [], callouts: [], markups: [], deletedIds: [],
-  settings: { showSetback: false, drainage: { lastCheck: {
+  // B832: autoFacts off — these cases assert the deterministic remembered view.
+  settings: { showSetback: false, drainage: { autoFacts: false, lastCheck: {
     ...slimBase(), sig: "seed-sig", checkedAt: Date.now() - 86400000,
     mitigation: { screened: true, summary: MIT_SUMMARY },
     detSplit: { screened: true, fmZonesSig: "seed:1", byId: { p1: { wseFt: 95, inTrigger: true, estPoolDepthFt: null } } },
