@@ -95,7 +95,7 @@ import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDep
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight } from "./lib/pondGeom.js";
-import { accumulatePondLedger } from "./lib/pondLedger.js";
+import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached, styleFor } from "./lib/vectorLayers.js";
@@ -6839,6 +6839,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     mitigationRule: fmRule,
     mitigationStraddle: fmWorst ? { candidates: fmCandidates, anyUnknown: fmWorst.anyUnknown } : null,
     mitCandidateCf: siteMitCandidateCf,
+    // NEW-8 — the mitigation-provided ledger: candidate (below-WSE) cut CREDITED from
+    // ponds whose effective role is mitigation/dual; detention-role ponds' candidate
+    // volume stays visible as uncredited. Null when the split is unknown (NEW-9).
+    mitProvided: { creditedCf: pondLedger.creditedMitCf, uncreditedCf: pondLedger.uncreditedMitCf, pondCount: pondLedger.creditedPondCount },
     pondFullyInundated,
     unanchoredInTrigger,
     anchoredNoWseInTrigger, // B822 — anchored (manual or auto TOB) but the reach WSE is unknown
@@ -7983,6 +7987,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (mit.volumeCf != null && d.floodGeo && d.floodGeo.truncated) v += " (floor — capped pull)";
       if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
       pairs.push(["Floodplain mitigation", v]);
+      // NEW-8 (PDF-PARITY): the credited Provided/Balance ledger mirrors the panel —
+      // over-dug prints as loud as a shortfall; an unknown provided prints UNKNOWN.
+      if (mit.volumeCf != null && d.mitProvided) {
+        const provCf = d.mitProvided.creditedCf;
+        if (provCf == null) {
+          pairs.push(["Mit. req / prov (credited)", `${f2(mit.volumeAcFt)} / UNKNOWN — re-check`]);
+        } else {
+          const provAcFt = provCf / 43560;
+          const bal = provAcFt - mit.volumeAcFt;
+          const overBy = bal - Math.max(1, mit.volumeAcFt * 0.1);
+          const balTag = bal < 0 ? ` — ${f2(Math.abs(bal))} SHORT` : overBy > 0 ? ` — ~${f0(bal)} over` : " — covered";
+          pairs.push(["Mit. req / prov (credited)", `${f2(mit.volumeAcFt)} / ${f2(provAcFt)} ac-ft${balTag} · engineer confirms connection`]);
+        }
+      }
       if (reqAcFt != null && mit.volumeCf != null) pairs.push(["Combined basin", `${f2(reqAcFt + mit.volumeAcFt)} ac-ft`]);
     }
     // B759/B760 (PDF-PARITY): the required finished-floor elevation is a screening output
@@ -13523,6 +13541,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       }
                       return out.length ? <>{out}</> : null;
                     })()}
+                    {/* NEW-8 — pond role: which ledger this pond's volume serves. Auto-suggested
+                        from the elevation split (share below the flood WSE); the owner's pick
+                        wins and × (Auto) restores. Role only gates which ponds' below-WSE cut
+                        is CREDITED to the mitigation Provided ledger — the detention usable
+                        split (B708) is untouched, so no acre-foot ever counts twice. */}
+                    {(() => {
+                      const split = pondSplitFor(selEl);
+                      const { role: effRole, source: roleSource, suggested } = effectivePondRole(det, split);
+                      const pct = suggested.belowShare != null ? Math.round(suggested.belowShare * 100) : null;
+                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.4, margin: "3px 0 0" };
+                      const roleBtn = (v, label) => {
+                        const active = v === null ? roleSource === "auto" : roleSource === "owner" && det.role === v;
+                        return (
+                          <button key={String(v)} style={{ ...chip, flex: "0 0 auto", padding: "5px 9px", fontSize: 10.5, ...(active ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }}
+                            onClick={() => setDet({ role: v })}>{label}</button>
+                        );
+                      };
+                      return (
+                        <div style={{ marginTop: 10 }}>
+                          <Field label="Pond role">
+                            <span style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              {roleBtn(null, `Auto (${POND_ROLE_LABEL[suggested.role]})`)}
+                              {roleBtn("detention", "Detention")}
+                              {roleBtn("mitigation", "Mitigation")}
+                              {roleBtn("dual", "Dual")}
+                            </span>
+                          </Field>
+                          {roleSource === "owner" && det.role !== suggested.role && (
+                            <div style={smallNote}>Overrides the elevation suggestion ({POND_ROLE_LABEL[suggested.role]}{pct != null ? ` — ~${pct}% of volume sits below the flood WSE` : ""}).</div>
+                          )}
+                          {roleSource === "auto" && pct == null && (
+                            <div style={smallNote}>No flood WSE at this pond — the auto role defaults to detention until a check anchors it.</div>
+                          )}
+                          {roleSource === "auto" && pct != null && (
+                            <div style={smallNote}>Auto from elevation: ~{pct}% of volume sits below the flood WSE. Mitigation/Dual credits the below-WSE cut to the compensating-storage ledger.</div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {/* B655 — per-pond required-vs-provided screening card. Editable inputs feed the
                         Modified Rational (rate-based) method in detentionRules.js; the authority
                         site total (detReq) is shown for reference. A pumped outfall credits its
@@ -15453,6 +15510,37 @@ function YieldPanel({
                   mitR.push(row(clsLbl, `${f2(bucket.acres)} ac`, cls === "floodway" ? "" : bucket.volumeCf != null ? `· ${f2(bucket.volumeCf / 43560)} ac-ft` : "· UNKNOWN"));
                 }
                 if (mit.volumeCf != null) mitR.push(row("Required compensating storage", `${f2(mit.volumeAcFt)} ac-ft`, `· ${f2(mit.cutCy)} cy`));
+                // NEW-8 — the Provided/Balance ledger: below-WSE cut CREDITED from ponds whose
+                // role is Mitigation or Dual (set per pond in its inspector). Role only gates
+                // credit — the detention usable split (B708) is untouched, and the exclusive
+                // bands mean no acre-foot ever lands in both ledgers. An over-dug state is as
+                // loud as a shortfall (wasted excavation is wasted money — warn, not danger).
+                if (mit.volumeCf != null && d.mitProvided) {
+                  const provCf = d.mitProvided.creditedCf;
+                  if (provCf == null) {
+                    mitR.push(row("Provided (credited pond cut)", "unknown — ↻ re-check"));
+                  } else {
+                    const provAcFt = provCf / 43560;
+                    const nProv = d.mitProvided.pondCount;
+                    mitR.push(infoRow("Provided (credited pond cut)", `${f2(provAcFt)} ac-ft`,
+                      "Below-WSE cut in ponds whose role is Mitigation or Dual — set each pond's role in its inspector. Credit is a screening call: the cut must be hydraulically connected to the floodplain at flood stages and sit in the same watershed; your engineer confirms both.",
+                      { key: "mit-prov", sub: nProv ? `· ${nProv} pond${nProv > 1 ? "s" : ""}` : "· no credited ponds" }));
+                    const bal = provAcFt - mit.volumeAcFt;
+                    const overBy = bal - Math.max(1, mit.volumeAcFt * 0.1); // over-dug = beyond required + max(1 ac-ft, 10%)
+                    const balText = bal < 0 ? `−${f2(Math.abs(bal))} ac-ft SHORT` : overBy > 0 ? `+${f2(bal)} ac-ft over` : "covered";
+                    const balColor = bal < 0 ? Y.dangerText : overBy > 0 ? Y.warnText : Y.green;
+                    mitR.push(
+                      <div key="mit-balance" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: Y.rowLabel }}>Balance</span>
+                        <span style={{ fontFamily: YMONO, fontSize: 13, fontWeight: 750, fontVariantNumeric: "tabular-nums", color: balColor }}>{balText}</span>
+                      </div>
+                    );
+                    if (overBy > 0) mitR.push(warnNote(`Over-dug: provided ${f2(provAcFt)} vs required ${f2(mit.volumeAcFt)} — ~${f0(bal)} ac-ft of cut buys nothing.`, "mit-overdug",
+                      "Excavation below the flood WSE beyond the required compensating storage earns no additional credit — it is dirt cost with no yield. The ledger balancer (below, when moves exist) ranks shrink options."));
+                    if (provCf > 0) mitR.push(warnNote("Credited cut needs hydraulic connection + same-watershed stage distribution — engineer confirms.", "mit-prov-confirm",
+                      "Screening credit only: compensating storage must fill and drain with the floodplain at flood stages (hydraulic connection) and offset storage in the same watershed. Both are design-level judgments — confirm with your engineer and the reviewing authority."));
+                  }
+                }
                 // B809 — the heat-map affordance rides the group: Auto follows this group's
                 // expansion; the tie-out line makes the overlay-equals-ledger fact VISIBLE
                 // (identical by construction — same retained cells; seeing it is the point).
@@ -15535,7 +15623,15 @@ function YieldPanel({
                 if (mit.gradeBasis === "median") mitR.push(keyedNote("Flat-grade estimate — one median grade priced every cell.", "mit-flat", "The per-cell 3DEP grid was unavailable this check (or the check predates it) — every cell priced at the site-median grade. ↻ Re-check to fetch the grid; a typed grade always overrides."));
                 if (mit.flags.includes("grid-voids")) mitR.push(warnNote("Over 5% of the priced footprint sits on DEM voids — those cells priced nothing.", "mit-voids", "The 3DEP grid has no ground return under part of the footprint (water, structures, data gaps). Void cells are EXCLUDED from the volume — treat the number as a floor there and confirm grades before design."));
                 if (mit.flags.includes("grid-median-delta") && mit.volumeFlatCf != null) mitR.push(warnNote(`Terrain relief moved this volume >15% vs the flat-grade estimate.`, "mit-delta", `Per-cell grid: ${f2(mit.volumeAcFt)} ac-ft vs flat median: ${f2(mit.volumeFlatCf / 43560)} ac-ft. The old single-grade number was silently wrong on this site — the per-cell figure stands (screening).`));
-                if (d.mitCandidateCf > 0) mitR.push(keyedNote(`Candidate compensating storage in drawn ponds (below the flood WSE): ${f2(d.mitCandidateCf / 43560)} ac-ft — hydraulic connection + stage distribution: engineer confirms.`, "mit-cand"));
+                // NEW-8 — what remains a footnote is only the UNCREDITED remainder (below-WSE
+                // cut sitting in detention-role ponds); the credited share now lives in the
+                // Provided row above instead of being footnoted away.
+                if (d.mitProvided && d.mitProvided.uncreditedCf > 0.05 * 43560) mitR.push(warnNote(`Below-WSE cut in detention-role ponds: ${f2(d.mitProvided.uncreditedCf / 43560)} ac-ft — uncredited.`, "mit-cand",
+                  "This volume sits below the flood WSE in ponds whose role is Detention, so it is credited to neither ledger (it earns no detention credit either). Set a pond's role to Mitigation or Dual in its inspector to credit its below-WSE cut here."));
+                // B833 (filed) — the flat-pad model prices element footprints only; daylight
+                // wedges past pad/court edges are real fill too. Say the floor out loud.
+                mitR.push(warnNote("Fill priced at element footprints — daylight/transition slopes aren't counted yet; treat as a floor.", "mit-wedge-floor",
+                  "Past a pad or court edge, fill continues as a graded wedge (3:1 default) down to existing grade; inside the mapped floodplain that wedge displaces storage too. Pricing those transition wedges is filed as B833 — until it lands, the required volume above is a FLOOR."));
               } else if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) {
                 // B824 — card-migrated honest state: a verified NONE is said out loud.
                 mitR.push(keyedNote("No mapped flood zones intersect the site envelope (FEMA NFHL, verified source) — no mitigation trigger on this screening pull.", "mit-nozones"));
@@ -15825,10 +15921,24 @@ function YieldPanel({
             const mitV = d.mitigation;
             let mitVerdict = "—", mitTone = null, mitSub = "";
             if (mitV && mitV.intersectAcres > 0) {
+              const mitTag = mitV.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : mitV.providers?.wse1pct === "bfe-line-interp" ? "BFE derived" : mitV.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr" : "";
               if (mitV.volumeCf != null) {
-                mitVerdict = `+${f2(mitV.volumeAcFt)} ac-ft`;
-                mitSub = mitV.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : mitV.providers?.wse1pct === "bfe-line-interp" ? "BFE derived" : mitV.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr" : "";
-              } else { mitVerdict = "UNKNOWN"; mitTone = "warn"; }
+                // NEW-8 — the closed face is the BALANCE (provided credited cut vs required),
+                // the same over-dug/short/covered states as the Balance row. Provided unknown
+                // (a NEW-9 demoted restore) says so — never a fabricated balance.
+                const provCf = d.mitProvided ? d.mitProvided.creditedCf : 0;
+                if (provCf == null) {
+                  mitVerdict = "provided unknown — ↻ re-check";
+                  mitTone = "warn";
+                  mitSub = `req ${f2(mitV.volumeAcFt)}`;
+                } else {
+                  const bal = provCf / 43560 - mitV.volumeAcFt;
+                  const overBy = bal - Math.max(1, mitV.volumeAcFt * 0.1);
+                  mitVerdict = bal < 0 ? `−${f2(Math.abs(bal))} ac-ft SHORT` : overBy > 0 ? `+${f2(bal)} ac-ft over-dug` : "covered";
+                  mitTone = bal < 0 ? "danger" : overBy > 0 ? "warn" : "good";
+                  mitSub = `req ${f2(mitV.volumeAcFt)}${mitTag ? ` · ${mitTag}` : ""}`;
+                }
+              } else { mitVerdict = "UNKNOWN"; mitTone = "warn"; mitSub = mitTag; }
               if (mitV.flags && mitV.flags.includes("floodway_intersect")) { mitVerdict = `FLOODWAY · ${mitVerdict}`; mitTone = "danger"; }
             } else if (d.mitRememberedMissing) { mitVerdict = "not screened"; mitTone = "warn"; }
             else if (d.floodGeo && d.floodGeo.state === "failed") { mitVerdict = "source down"; mitTone = "warn"; }

@@ -3,7 +3,7 @@
 // round-trip that lets a restored check replay the exact live split. Pure.
 import { describe, it, expect } from "vitest";
 import { detentionStorage, usablePondVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
-import { accumulatePondLedger } from "../src/workspaces/site-planner/lib/pondLedger.js";
+import { accumulatePondLedger, suggestPondRole, effectivePondRole, ROLE_SHARE, POND_ROLES } from "../src/workspaces/site-planner/lib/pondLedger.js";
 
 // The B708 fixture: 100×100 ft square, slope 3 → stage areas are exact.
 const SQ = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
@@ -106,5 +106,76 @@ describe("accumulatePondLedger — counters fold through unchanged (the B822 hon
     const led = accumulatePondLedger([e, { ...liveEntry("b", DET, { wseFt: 97 }), excavationCf: 766 }]);
     expect(led.autoAnchored).toBe(1);
     expect(led.excavationCf).toBe(2000);
+  });
+});
+
+// ---- NEW-8 — pond roles + the credited mitigation-provided gate --------------------
+
+// A WSE that puts the below share right where we want it: with the SQ/DET fixture the
+// share is monotonic in wseFt, so probe for threshold behavior via computed shares.
+const splitAt = (wseFt) => liveEntry("p", DET, { wseFt, inTrigger: true });
+
+describe("suggestPondRole — elevation auto-suggestion (NEW-8)", () => {
+  it("no WSE evidence → detention default with a null share (never a fabricated %)", () => {
+    expect(suggestPondRole(liveEntry("p", DET, {}))).toEqual({ role: "detention", belowShare: null });
+    expect(suggestPondRole(liveEntry("p", { depth: 4, freeboard: 1, slope: 3 }, { estPool: 2 }))).toEqual({ role: "detention", belowShare: null });
+  });
+  it("mostly flood-occupied (share ≥ 80%) → mitigation; mostly above (≤ 20%) → detention; else dual", () => {
+    const deep = suggestPondRole(splitAt(100.5)); // fully inundated → share 1
+    expect(deep).toMatchObject({ role: "mitigation", belowShare: 1 });
+    const shallow = suggestPondRole(splitAt(96.05)); // WSE barely above the floor
+    expect(shallow.role).toBe("detention");
+    expect(shallow.belowShare).toBeLessThan(1 - ROLE_SHARE);
+    const mid = suggestPondRole(splitAt(97.8));
+    expect(mid.belowShare).toBeGreaterThan(1 - ROLE_SHARE);
+    expect(mid.belowShare).toBeLessThan(ROLE_SHARE);
+    expect(mid.role).toBe("dual");
+  });
+});
+
+describe("effectivePondRole — the owner's pick wins; absent = auto (NEW-8)", () => {
+  it("owner override beats the suggestion; junk/absent role falls back to auto", () => {
+    const split = splitAt(100.5); // suggests mitigation
+    expect(effectivePondRole({ role: "detention" }, split)).toMatchObject({ role: "detention", source: "owner" });
+    expect(effectivePondRole({}, split)).toMatchObject({ role: "mitigation", source: "auto" });
+    expect(effectivePondRole({ role: "auto" }, split).source).toBe("auto"); // "auto" is not a stored role
+    expect(effectivePondRole({ role: "banana" }, split).source).toBe("auto");
+    expect(POND_ROLES).not.toContain("auto");
+  });
+});
+
+describe("accumulatePondLedger — the role credit gate (NEW-8)", () => {
+  const candOf = (e) => e.bands.mitigationCandidateCf;
+  it("mitigation/dual roles credit the candidate band; detention role leaves it uncredited", () => {
+    const mitPond = { ...splitAt(97.5), id: "m", role: "mitigation" };
+    const dualPond = { ...splitAt(97.5), id: "d", role: "dual" };
+    const detPond = { ...splitAt(97.5), id: "det", role: "detention" };
+    const led = accumulatePondLedger([mitPond, dualPond, detPond]);
+    expect(led.creditedMitCf).toBeCloseTo(candOf(mitPond) + candOf(dualPond), 6);
+    expect(led.uncreditedMitCf).toBeCloseTo(candOf(detPond), 6);
+    expect(led.mitCandidateCf).toBeCloseTo(led.creditedMitCf + led.uncreditedMitCf, 6);
+    expect(led.creditedPondCount).toBe(2);
+  });
+  it("auto role credits a mostly-inundated pond (suggested mitigation) without an owner pick", () => {
+    const led = accumulatePondLedger([{ ...splitAt(100.5), role: null }]);
+    expect(led.creditedMitCf).toBeGreaterThan(0);
+    expect(led.uncreditedMitCf).toBe(0);
+  });
+  it("role NEVER moves usable/dead — only which ledger the candidate band credits (no double-count)", () => {
+    for (const role of ["detention", "mitigation", "dual", null]) {
+      const e = { ...splitAt(97.5), role };
+      const led = accumulatePondLedger([e]);
+      expect(led.usableCf).toBeCloseTo(e.usableCf, 6);
+      expect(led.deadCf).toBeCloseTo(e.deadCf, 6);
+      // Exclusive bands: usable + candidate + poolDead ≈ gross, and the candidate lands
+      // in exactly ONE of credited/uncredited.
+      expect(led.usableCf + led.mitCandidateCf + (e.bands.poolDeadCf || 0)).toBeCloseTo(e.grossCf, -3);
+      expect((led.creditedMitCf || 0) + (led.uncreditedMitCf || 0)).toBeCloseTo(led.mitCandidateCf, 6);
+    }
+  });
+  it("unknown facts poison the credited/uncredited gates too (NEW-9 discipline)", () => {
+    const led = accumulatePondLedger([{ ...splitAt(97.5), role: "mitigation" }, unknownEntry("x", DET)]);
+    expect(led.creditedMitCf).toBeNull();
+    expect(led.uncreditedMitCf).toBeNull();
   });
 });

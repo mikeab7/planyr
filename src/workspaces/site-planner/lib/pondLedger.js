@@ -17,6 +17,30 @@
  *     wseFt, inTrigger, estPoolDepthFt, factsKnown,      // the facts used
  *     anchoredTob, autoAnchored, excavationCf, role }    // bookkeeping
  */
+export const POND_ROLES = ["detention", "mitigation", "dual"];
+export const POND_ROLE_LABEL = { detention: "Detention", mitigation: "Mitigation", dual: "Dual" };
+export const ROLE_SHARE = 0.8; // ≥80% of volume below the WSE → mitigation-primary; ≥80% above → detention
+
+/* NEW-8 — auto-suggest a pond's role from its elevation split. Screening share =
+ * (gross − usable) / gross, defined only when the pond is anchored WITH a known
+ * flood WSE (otherwise there is no elevation evidence and the suggestion defaults
+ * to detention with belowShare null — the caller says so). Pure. */
+export function suggestPondRole(split) {
+  const hasEvidence = split && split.mode === "anchored" && split.bands && split.wseFt != null && split.grossCf > 0;
+  if (!hasEvidence) return { role: "detention", belowShare: null };
+  const belowShare = Math.max(0, Math.min(1, 1 - split.usableCf / split.grossCf));
+  const role = belowShare >= ROLE_SHARE ? "mitigation" : belowShare <= 1 - ROLE_SHARE ? "detention" : "dual";
+  return { role, belowShare };
+}
+
+/* NEW-8 — the effective role: the owner's explicit det.role wins; absent/null means
+ * auto (never store the string "auto"). Pure. */
+export function effectivePondRole(det, split) {
+  const suggested = suggestPondRole(split);
+  const owner = det && POND_ROLES.includes(det.role) ? det.role : null;
+  return { role: owner || suggested.role, source: owner ? "owner" : "auto", suggested };
+}
+
 export function accumulatePondLedger(entries = []) {
   const out = {
     pondCount: entries.length,
@@ -24,6 +48,14 @@ export function accumulatePondLedger(entries = []) {
     usableCf: 0,
     deadCf: 0,
     mitCandidateCf: 0,
+    // NEW-8 — the role gate: candidate (below-WSE) volume is CREDITED to the
+    // mitigation Provided ledger only from ponds whose effective role is
+    // mitigation or dual; detention-role ponds' candidate volume stays visible
+    // as uncredited. Role NEVER touches usableCf/deadCf — the exclusive bands
+    // already partition each pond's gross exactly once (no double-count).
+    creditedMitCf: 0,
+    uncreditedMitCf: 0,
+    creditedPondCount: 0,
     excavationCf: 0,
     unknownIds: [],
     pondFullyInundated: false,
@@ -43,7 +75,15 @@ export function accumulatePondLedger(entries = []) {
     out.usableCf += p.usableCf || 0;
     out.deadCf += p.deadCf || 0;
     if (p.mode === "anchored" && p.bands) {
-      out.mitCandidateCf += p.bands.mitigationCandidateCf || 0;
+      const cand = p.bands.mitigationCandidateCf || 0;
+      out.mitCandidateCf += cand;
+      const eff = effectivePondRole({ role: p.role }, p);
+      if (eff.role === "mitigation" || eff.role === "dual") {
+        out.creditedMitCf += cand;
+        if (cand > 0) out.creditedPondCount++;
+      } else {
+        out.uncreditedMitCf += cand;
+      }
       if (p.bands.fullyInundated) out.pondFullyInundated = true;
     } else if (p.inTrigger) {
       // B822 — two DIFFERENT honesty states: anchored (manual or auto TOB) with an
@@ -56,6 +96,8 @@ export function accumulatePondLedger(entries = []) {
     out.usableCf = null;
     out.deadCf = null;
     out.mitCandidateCf = null;
+    out.creditedMitCf = null;
+    out.uncreditedMitCf = null;
   }
   return out;
 }
