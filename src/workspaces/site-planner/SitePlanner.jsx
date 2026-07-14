@@ -96,6 +96,7 @@ import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
+import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached, styleFor } from "./lib/vectorLayers.js";
@@ -6667,6 +6668,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       autoAnchored: (e.det?.tobElev == null) && !!pondAuto.tobElev, // B822 — riding the auto anchor
       excavationCf: excavationVolume(ringOf(e), detWithAuto(e.det)),
       role: e.det?.role ?? null,
+      // NEW-10/B830 — the balancer consumes the same entries (name for move labels,
+      // ring + effective det for the berm/shrink volume probes).
+      name: (e.name && String(e.name).trim()) || `Pond ${pondLedgerEntries.length + 1}`,
+      ring: ringOf(e),
+      det: detWithAuto(e.det),
     });
   }
   const pondLedger = accumulatePondLedger(pondLedgerEntries);
@@ -6816,6 +6822,66 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         wetlandsPresent: analysisWetlands === "present",
       })
     : null;
+  // ---- NEW-10/B830 — the ledger balancer (pure lib): ranked screening moves that
+  // close detention + mitigation together. Gated on an HONEST ledger: a point
+  // requirement AND a known usable split — a NEW-9 demoted restore ranks nothing
+  // (you can't balance an unknown ledger). Memoized on a cheap value signature so
+  // the berm/shrink volume probes never run per render-frame.
+  const balancerReady = !!(detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 && providedUsableCf != null && siteSqft > 0);
+  const balancerSig = balancerReady ? JSON.stringify({
+    r: detReq.requiredAcFt, u: Math.round(providedUsableCf), rate: detReq.rateAcFtPerAc ?? null,
+    mr: fmResultView?.volumeAcFt ?? null, mp: pondLedger.creditedMitCf == null ? null : Math.round(pondLedger.creditedMitCf),
+    ponds: pondLedgerEntries.map((p) => [p.id, Math.round(p.grossCf), p.usableCf == null ? -1 : Math.round(p.usableCf), p.role, p.wseFt, p.inTrigger ? 1 : 0, p.det?.tobElev ?? null, p.det?.depth ?? null]),
+    parcels: parcels.map((p) => [p.id, p.active !== false ? 1 : 0, p.points ? p.points.length : 0]),
+    bld: els.filter(isBuilding).map((b) => [b.id, b.points ? Math.round(polyArea(b.points)) : Math.round((b.w || 0) * (b.h || 0))]),
+    jur: floodJurKey, imp: Math.round(impPct * 10), ac: Math.round(acresActive * 100),
+    aid: drainAuthorityId, city: drainInCity ? 1 : 0, chan: drainsToChanEff ?? null, of: outfallTypeEff, cy: (settings.prices || {}).earthworkCy ?? null,
+  }) : "";
+  const drainBalancer = useMemo(() => {
+    if (!balancerReady) return null;
+    const bNums = buildingNumbers(els);
+    const buildingsIn = els.filter(isBuilding).map((b) => {
+      const ring = ringOf(b);
+      if (!ring || ring.length < 3) return null;
+      const areaSf = b.points ? polyArea(b.points) : (b.w || 0) * (b.h || 0);
+      const courtSf = els.reduce((s, x) => s + (x.attachedTo === b.id && (x.truckCourt || x.forCourt) ? (x.points ? polyArea(x.points) : (x.w || 0) * (x.h || 0)) : 0), 0);
+      return { id: b.id, name: (b.name && String(b.name).trim()) || `Building ${bNums.get(b.id) ?? ""}`.trim(), areaSf, courtSf, ring };
+    }).filter(Boolean);
+    const parcelsIn = parcels
+      .filter((p) => !supersededParcelIds.has(p.id) && p.points && p.points.length >= 3)
+      .map((p) => ({ id: p.id, name: (parcelInfo.get(p.id) || {}).name || "Parcel", acres: polyArea(p.points) / SQFT_PER_ACRE, active: p.active !== false }));
+    const pEarthRaw = (settings.prices || {}).earthworkCy;
+    const earthPerCy = pEarthRaw == null || pEarthRaw === "" ? null : Number.isFinite(+pEarthRaw) && +pEarthRaw >= 0 ? +pEarthRaw : null;
+    return rankLedgerMoves({
+      detention: { requiredAcFt: detReq.requiredAcFt, providedUsableAcFt: providedUsableCf / 43560, rateAcFtPerAc: detReq.rateAcFtPerAc ?? null, acres: acresActive },
+      mitigation: { requiredAcFt: fmResultView?.volumeAcFt ?? null, providedAcFt: pondLedger.creditedMitCf != null ? pondLedger.creditedMitCf / 43560 : null },
+      ponds: pondLedgerEntries,
+      parcels: parcelsIn,
+      buildings: buildingsIn,
+      criteriaRule: pondCriteria[floodJurKey] || pondCriteria.generic,
+      detRule: detReq.rule || null,
+      reqInputs: { ...detReqInputs, authorityId: drainAuthorityId },
+      earthPerCy,
+      maxPondDepthFt: maxPondDepthFt || 8,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balancerSig]);
+  // NEW-13 — applying the berm move IS the owner's click (the one deliberate exception
+  // to propose-only, per the owner's ask): history-backed, provenance-stamped, and the
+  // × on the elevation field restores auto. Sets BOTH the raised top of bank and the
+  // deepened basin so the applied ponds match the solved volume exactly.
+  const applyBermMove = (payload) => {
+    if (!payload || !payload.perPond || !payload.perPond.length) return;
+    pushHistory();
+    const byId = new Map(payload.perPond.map((t) => [t.id, t]));
+    setEls((a) => a.map((el) => {
+      const t = el.type === "pond" ? byId.get(el.id) : null;
+      if (!t) return el;
+      const det0 = el.det || {};
+      return { ...el, det: { ...det0, depth: t.depthTargetFt, ...(t.tobTargetFt != null ? { tobElev: t.tobTargetFt } : {}), tobBerm: { h: payload.hFt, applied: t.tobTargetFt ?? null } } };
+    }));
+    flashWarn(`Berm applied: +${payload.hFt}′ on ${payload.perPond.length} pond${payload.perPond.length > 1 ? "s" : ""} — the top of bank now carries "berm — auto-solved" provenance (× restores auto).`, 7000);
+  };
   // B750 — plain-English authority label from the shared choice list (never a raw id).
   const authLabelFor = (id) => (DETENTION_AUTHORITY_CHOICES.find((c) => c.id === id) || {}).label || id || null;
   // (B789: drainChannelRelevant now computed up with the drainage inputs — it county-gates
@@ -6843,6 +6909,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ponds whose effective role is mitigation/dual; detention-role ponds' candidate
     // volume stays visible as uncredited. Null when the split is unknown (NEW-9).
     mitProvided: { creditedCf: pondLedger.creditedMitCf, uncreditedCf: pondLedger.uncreditedMitCf, pondCount: pondLedger.creditedPondCount },
+    // NEW-10/B830 — the ranked ledger-balancer moves (null when the ledgers aren't
+    // honest enough to rank against); the berm move's apply rides NEW-13's click.
+    balancer: drainBalancer,
+    onApplyBerm: applyBermMove,
     pondFullyInundated,
     unanchoredInTrigger,
     anchoredNoWseInTrigger, // B822 — anchored (manual or auto TOB) but the reach WSE is unknown
@@ -13580,6 +13650,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </div>
                       );
                     })()}
+                    {/* NEW-13/B830 — the one-click berm: when the site is SHORT and this pond is
+                        part of the solved joint berm, offer the apply chip right here (and in the
+                        Yield balancer card — same payload, same click). Fringe ponds render the
+                        exclusion reason instead of a suggestion; an applied berm shows its
+                        provenance (× on the elevation field restores auto). */}
+                    {(() => {
+                      const bal = drainBalancer;
+                      if (!bal) return null;
+                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.4, margin: "3px 0 0" };
+                      const out = [];
+                      const bermApplied = det.tobBerm && (det.tobBerm.applied == null ? selEl.det?.tobElev == null : Math.abs((selEl.det?.tobElev ?? NaN) - det.tobBerm.applied) < 0.01);
+                      if (bermApplied) {
+                        out.push(<div key="berm-prov" style={smallNote}>Berm — auto-solved: +{f1(det.tobBerm.h)}′ over the pre-berm bank rides this pond's top of bank. × on the elevation field restores auto.</div>);
+                      }
+                      const bermMove = !bermApplied && bal.moves ? bal.moves.find((m) => m.kind === "berm-raise" && m.apply && m.apply.perPond.some((t) => t.id === selEl.id)) : null;
+                      if (bermMove) {
+                        const mine = bermMove.apply.perPond.find((t) => t.id === selEl.id);
+                        out.push(
+                          <button key="berm-chip" style={{ ...chip, width: "100%", marginTop: 8, padding: "7px 10px", fontWeight: 700, textAlign: "center" }} title={bermMove.info}
+                            onClick={() => applyBermMove(bermMove.apply)}>{bermMove.label} — Apply</button>
+                        );
+                        out.push(<div key="berm-note" style={smallNote}>Applies jointly to {bermMove.apply.perPond.length} upland detention pond{bermMove.apply.perPond.length > 1 ? "s" : ""} (one shared height — volume lands in proportion to area); this pond takes +{f2((mine?.addCf || 0) / 43560)} ac-ft. The berm itself is fill.</div>);
+                      }
+                      const excl = bal.bermExcluded && bal.bermExcluded.find((x) => x.id === selEl.id);
+                      if (excl && excl.reason === "floodplain-fringe") {
+                        out.push(
+                          <div key="berm-excl" title="Berming below the flood WSE changes how the floodplain itself behaves (levee-adjacent hydraulics) — the auto-suggest won't propose it; that is engineer territory." style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 6, fontWeight: 700, cursor: "help" }}>
+                            Excluded from the berm auto-suggest — floodplain fringe.<span style={{ fontSize: 9.5, color: PAL.muted, marginLeft: 4, fontWeight: 400 }} aria-hidden="true">ⓘ</span>
+                          </div>
+                        );
+                      }
+                      return out.length ? <>{out}</> : null;
+                    })()}
                     {/* B655 — per-pond required-vs-provided screening card. Editable inputs feed the
                         Modified Rational (rate-based) method in detentionRules.js; the authority
                         site total (detReq) is shown for reference. A pumped outfall credits its
@@ -15952,6 +16055,35 @@ function YieldPanel({
             else if (bb) { ffeVerdict = "unknown"; ffeTone = "warn"; }
             out.push(groupFold("det", "Detention", detVerdict, detTone, detR, detSub));
             out.push(groupFold("mit", "Floodplain mitigation", mitVerdict, mitTone, mitR, mitSub));
+            // NEW-10/B830 — the ledger balancer: one card of ranked screening moves that
+            // close detention + mitigation together. Every move is one line + ⓘ; nothing
+            // is applied without a click — the ONE apply affordance is the berm move
+            // (NEW-13, the owner's explicit ask), which is history-backed + provenance-
+            // stamped. Renders only when there are moves to rank.
+            {
+              const bal = d.balancer;
+              if (bal && bal.moves.length) {
+                const balR = [];
+                for (const m of bal.moves) {
+                  balR.push(
+                    <div key={`mv-${m.kind}-${m.id}`} title={m.info} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "help" }}>
+                      <span style={{ fontSize: 11, color: Y.rowLabel, lineHeight: 1.4 }}>{m.label}<span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span></span>
+                      {m.apply && d.onApplyBerm ? (
+                        <button onClick={() => d.onApplyBerm(m.apply)} style={{ padding: "3px 10px", border: "1px solid var(--accent)", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 10.5, whiteSpace: "nowrap", cursor: "pointer" }}>Apply</button>
+                      ) : null}
+                    </div>
+                  );
+                }
+                if (bal.bermExcluded && bal.bermExcluded.length) {
+                  const n = bal.bermExcluded.length;
+                  balR.push(warnNote(`${n} pond${n > 1 ? "s" : ""} excluded from the berm auto-suggest — floodplain fringe / role.`, "bal-excl",
+                    `Excluded: ${bal.bermExcluded.map((x) => `${x.name || x.id} (${x.reason === "floodplain-fringe" ? "in the mapped floodplain — berming below the WSE is levee-adjacent hydraulics, engineer territory" : x.reason === "mitigation-role" ? "mitigation-role pond" : "split facts unknown — re-check"})`).join(" · ")}.`));
+                }
+                balR.push(keyedNote("Proposals only — nothing changes without your click; redraw the plan to take a move. Screening.", "bal-caveat"));
+                const balSub = bal.detGapAcFt > 0 ? `det gap ${f2(bal.detGapAcFt)}` : bal.mitOverAcFt > 0 ? `over-dug ${f2(bal.mitOverAcFt)}` : "";
+                out.push(groupFold("bal", "Ledger balancer", `${bal.moves.length} move${bal.moves.length > 1 ? "s" : ""} screened`, null, balR, balSub));
+              }
+            }
             out.push(groupFold("ffe", "Buildability / FFE", ffeVerdict, ffeTone, ffeR, ""));
             // NEW-1(e) — the bottom "↻ Re-check" button folded into the top status line.
             out.push(keyedNote("Screening estimate — confirm with your engineer and the reviewing authority.", "caveat"));

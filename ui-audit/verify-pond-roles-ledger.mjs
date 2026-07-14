@@ -157,6 +157,54 @@ async function run() {
   expect("(c) Balance shows SHORT (0 provided vs 0.11 required)", /Balance −0\.11 ac-ft SHORT/.test(tB));
   await ctxB.close();
 
+  // ── Case E: NEW-10/B830 balancer + the NEW-13 one-click berm ──────────────────
+  // An upland pond (no WSE at it) leaves the site SHORT → the balancer ranks a berm
+  // move with an Apply button; applying raises the TOB with provenance and improves
+  // the detention verdict. Zone carries NO static BFE so the regime stays unknown →
+  // the pond reads gross (deterministic numbers for the screen).
+  const siteE = siteWith("s_bal", "Balancer Site", null);
+  siteE.els = [
+    { id: "b1", type: "building", cx: 300, cy: 300, w: 300, h: 200, rot: 0 },
+    { id: "p1", type: "pond", points: [{ x: 100, y: -500 }, { x: 500, y: -500 }, { x: 500, y: -100 }, { x: 100, y: -100 }], det: { depth: 8, freeboard: 1, slope: 3, tobElev: 100 } },
+  ];
+  siteE.settings.drainage.lastCheck.flood = { zones: [{ zone: "AE", subtype: "", staticBfeFt: null, vdatum: "NAVD88" }], state: "loaded", ageMs: 0 };
+  siteE.settings.drainage.lastCheck.detSplit = { screened: true, fmZonesSig: "seed:1", byId: { p1: { wseFt: null, inTrigger: false, estPoolDepthFt: null } } };
+  const ctxE2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctxE2.addInitScript(`(() => { try {
+    localStorage.setItem('planarfit:sites:v1', JSON.stringify({ s_bal: ${JSON.stringify(siteE)} }));
+    localStorage.setItem('planarfit:currentSite:v1', 's_bal');
+  } catch (e) {} })();`);
+  const pageE = await ctxE2.newPage();
+  pageE.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(E) — ${e.message}`); });
+  let tE = await openYield(pageE);
+  await pageE.locator('button:has-text("▸ Ledger balancer")').first().click({ timeout: 4000 }).catch(() => {});
+  await pageE.waitForTimeout(250);
+  tE = (await pageE.locator("body").innerText()).replace(/\s+/g, " ");
+
+  console.log("Case E — balancer card + one-click berm (NEW-10/NEW-13):");
+  const preVerdict = tE.match(/−(\d+\.\d\d) ac-ft SHORT/);
+  expect("(e) detention reads SHORT before the berm", !!preVerdict, tE.match(/Detention[^A-Z]{0,40}/)?.[0]);
+  expect("(e) the Ledger balancer group renders with moves screened", /Ledger balancer/.test(tE) && /move(s)? screened/.test(tE));
+  expect("(e) the berm move renders with the solved height", /⛰ Berm \+\d(\.\d)?′/.test(tE), tE.match(/⛰ Berm[^A-Z]{0,60}/)?.[0]);
+  expect("(e) proposals-only caveat renders", /Proposals only — nothing changes without your click/.test(tE));
+  const applyBtn = pageE.getByRole("button", { name: "Apply" }).first();
+  const applyVisible = await applyBtn.isVisible().catch(() => false);
+  expect("(e) the berm move carries an Apply chip", applyVisible);
+  if (applyVisible) {
+    await applyBtn.click();
+    await pageE.waitForTimeout(800);
+    const tE2 = (await pageE.locator("body").innerText()).replace(/\s+/g, " ");
+    expect("(e) applying announces the provenance-stamped berm", /Berm applied: \+\d(\.\d)?′/.test(tE2));
+    const postShort = tE2.match(/−(\d+\.\d\d) ac-ft SHORT/);
+    const improved = !postShort || (preVerdict && parseFloat(postShort[1]) < parseFloat(preVerdict[1]) - 0.05);
+    expect("(e) the detention verdict improves after the berm (surplus or a smaller SHORT)", improved, postShort ? `still SHORT ${postShort[1]} (was ${preVerdict?.[1]})` : "now non-SHORT");
+    const clickedE = await clickPond(pageE);
+    const tE3 = clickedE ? (await pageE.locator("body").innerText()).replace(/\s+/g, " ") : "";
+    expect("(e) the pond carries the 'berm — auto-solved' provenance note (× restores auto)", clickedE && /Berm — auto-solved/.test(tE3), clickedE ? "" : "pond click missed");
+  }
+  await pageE.screenshot({ path: "ui-audit/verify-ledger-balancer.png" }).catch(() => {});
+  await ctxE2.close();
+
   await browser.close();
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL PASS");
   process.exit(failures ? 1 : 0);
