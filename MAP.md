@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-14 @ `6196cbc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-14 @ `699759d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_247 source files mapped._
+_248 source files mapped._
 
 ## infra
 
@@ -393,6 +393,8 @@ _247 source files mapped._
   - _exports_: `checkPondCriteria`, `DEFAULT_POND_CRITERIA`, `loadPondCriteria`, `savePondCriteria`
 - **`src/workspaces/site-planner/lib/pondGeom.js`** — Pond expansion label placement (deepest added-ground point) and stage contour rings with elevation/depth labels
   - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `bandedStorage`, `bermAsFillHeight`, `contourLabelPoint`, `detentionStorage`, `drawdownWarning`, `excavationVolume`, `pointInRing`, `pondContours`, `usablePondVolume`, `volumeBetween`
+- **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator: folds per-pond usable/dead splits into the detention totals; unknown facts poison usable to null (never gross-as-usable). Exports `accumulatePondLedger`.
+  - _exports_: `accumulatePondLedger`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names

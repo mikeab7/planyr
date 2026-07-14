@@ -8,6 +8,12 @@
  *          "not screened in this remembered view — re-check" row instead of nothing.
  *   NEW-4  outside Harris the tier's permanent "Channel adjacency unknown" noise is gone.
  *   NEW-1  the merged "As of <date> · ↻ Re-check" status line renders.
+ *   NEW-9  (pond-roles branch) the remembered DETENTION split: (C) a remembered check
+ *          whose slim record carries the per-pond facts (detSplit.byId) replays the live
+ *          usable/dead split — a mostly-inundated pond stays SHORT on reload, never the
+ *          gross-credited "surplus" flip; (D) a LEGACY snapshot (no detSplit) with a pond
+ *          demotes to "usable unknown — ↻ re-check" + the gross-OVERSTATES warning, and
+ *          fabricates NO verdict either way.
  *
  * Run: npm run build && npx vite preview --port 4188, then
  *      BASE_URL=http://localhost:4188/ node ui-audit/verify-remembered-drainage.mjs
@@ -36,15 +42,24 @@ const slimBase = () => ({
   channel: null, watershed: null, groundElevFt: 90, groundDatum: "NAVD88",
 });
 
-const siteWith = (id, mitigation) => ({
-  id, groupId: id, site: id === "s_mit" ? "Remembered Mitigation Site" : "Legacy Remembered Site",
+const siteWith = (id, mitigation, extra = {}) => ({
+  id, groupId: id, site: extra.siteName || (id === "s_mit" ? "Remembered Mitigation Site" : "Legacy Remembered Site"),
   name: "Plan 1", status: "active", origin: { lat: 29.55, lon: -95.80 }, county: "fortbend",
   parcels: [{ id: "pA", points: PARCEL, locked: true }],
-  els: [{ id: "b1", type: "building", cx: 0, cy: 0, w: 300, h: 200, rot: 0 }],
+  els: extra.els || [{ id: "b1", type: "building", cx: 0, cy: 0, w: 300, h: 200, rot: 0 }],
   measures: [], callouts: [], markups: [], deletedIds: [],
-  settings: { showSetback: false, drainage: { lastCheck: { ...slimBase(), sig: "seed-sig", checkedAt: Date.now() - 3 * 86400000, ...(mitigation ? { mitigation } : {}) } } },
+  settings: { showSetback: false, drainage: { lastCheck: { ...slimBase(), sig: "seed-sig", checkedAt: Date.now() - 3 * 86400000, ...(mitigation ? { mitigation } : {}), ...(extra.detSplit ? { detSplit: extra.detSplit } : {}) } } },
   underlay: null, updatedAt: Date.now(),
 });
+
+// NEW-9 — a big anchored pond, mostly flood-occupied: gross ≈ 53 ac-ft (would read
+// "surplus" if gross were credited), but the WSE (95′, the zone's static BFE) sits
+// above its 94′ top of bank → fully inundated → usable 0 → the honest verdict is SHORT.
+const POND = [{ x: -500, y: -500 }, { x: 100, y: -500 }, { x: 100, y: 100 }, { x: -500, y: 100 }];
+const pondEls = () => [
+  { id: "b1", type: "building", cx: 300, cy: 300, w: 300, h: 200, rot: 0 },
+  { id: "p1", type: "pond", points: POND.map((p) => ({ ...p })), det: { depth: 8, freeboard: 1, slope: 3, tobElev: 94 } },
+];
 
 let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${cond ? "PASS" : "FAIL"}] ${label}${extra ? ` — ${extra}` : ""}`); };
@@ -104,6 +119,47 @@ async function run() {
   expect("NEW-2(b): the row prompts a re-check (one-liner + ⓘ)", /↻ re-check to screen it/i.test(tB)
     && await pageB.locator('[title*="Re-check drainage criteria"]').count() > 0);
   await ctxB.close();
+
+  // ── Case C: remembered check WITH the per-pond detention-split facts (NEW-9) ──
+  // The pond's gross (~53 ac-ft) exceeds the site requirement — crediting gross would
+  // read "surplus". The persisted facts say WSE 95′ > TOB 94′ (fully inundated) →
+  // usable 0 → the verdict must stay SHORT on reload, exactly as the live check read.
+  const ctxC = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctxC.addInitScript(`(() => { try {
+    localStorage.setItem('planarfit:sites:v1', JSON.stringify({ s_split: ${JSON.stringify(siteWith("s_split", { screened: true, summary: MIT_SUMMARY }, {
+      siteName: "Remembered Split Site", els: pondEls(),
+      detSplit: { screened: true, fmZonesSig: "seed:1", byId: { p1: { wseFt: 95, inTrigger: true, estPoolDepthFt: null } } },
+    }))} }));
+    localStorage.setItem('planarfit:currentSite:v1', 's_split');
+  } catch (e) {} })();`);
+  const pageC = await ctxC.newPage();
+  pageC.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(C) — ${e.message}`); });
+  const tC = await openYield(pageC);
+
+  console.log("Case C — remembered check WITH detSplit facts (NEW-9):");
+  expect("NEW-9(C): the verdict stays SHORT on reload (usable replayed from the facts)", /ac-ft SHORT/.test(tC), tC.match(/Detention[^A-Z]{0,60}/)?.[0]);
+  expect("NEW-9(C): NO gross-credited 'surplus' flip", !/ac-ft surplus/.test(tC));
+  expect("NEW-9(C): the provided row splits usable off gross (usable 0.00 — fully inundated)", /usable 0\.00/.test(tC));
+  await pageC.screenshot({ path: "ui-audit/verify-remembered-split.png" }).catch(() => {});
+  await ctxC.close();
+
+  // ── Case D: LEGACY remembered snapshot (no detSplit) + a pond (NEW-9) ─────────
+  const ctxD = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctxD.addInitScript(`(() => { try {
+    localStorage.setItem('planarfit:sites:v1', JSON.stringify({ s_legpond: ${JSON.stringify(siteWith("s_legpond", { screened: true, summary: MIT_SUMMARY }, { siteName: "Legacy Split Site", els: pondEls() }))} }));
+    localStorage.setItem('planarfit:currentSite:v1', 's_legpond');
+  } catch (e) {} })();`);
+  const pageD = await ctxD.newPage();
+  pageD.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(D) — ${e.message}`); });
+  const tD = await openYield(pageD);
+
+  console.log("Case D — LEGACY snapshot without detSplit + a pond (NEW-9):");
+  expect("NEW-9(D): verdict demotes to 'usable unknown — ↻ re-check'", /usable unknown — ↻ re-check/.test(tD), tD.match(/Detention[^A-Z]{0,60}/)?.[0]);
+  expect("NEW-9(D): the gross-OVERSTATES warning renders", /gross OVERSTATES usable/.test(tD));
+  expect("NEW-9(D): NO fabricated surplus verdict", !/ac-ft surplus/.test(tD));
+  expect("NEW-9(D): NO fabricated SHORT verdict either (unknown is unknown)", !/ac-ft SHORT/.test(tD));
+  expect("NEW-9(D): gross is labeled AS gross", /Detention provided \(gross\)/.test(tD));
+  await ctxD.close();
 
   await browser.close();
   console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL PASS");
