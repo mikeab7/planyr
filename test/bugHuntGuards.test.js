@@ -610,8 +610,8 @@ describe("NEW-1 (two-tab cascade false conflicts) — the SitePlanner wiring exi
   });
 });
 
-describe("NEW-1 (2026-07-15, owner: \"i dont need this large pop up\") — the B313 banner shrunk + Scheduler no longer claims a false read-only lock", () => {
-  it("AppHeader's B313 banner is theme-tokened (not hardcoded hex), dismissible, and re-arms on a new conflict episode", () => {
+describe("B850 (2026-07-15, owner: \"i dont need this large pop up\" then \"shouldn't it just auto-reload\") — the B313 banner shrunk, then suppressed entirely for the Scheduler", () => {
+  it("AppHeader's B313 banner is theme-tokened (not hardcoded hex) and dismissible, re-arming on a new conflict episode", () => {
     const src = read("../src/shared/ui/AppHeader.jsx");
     // the old hardcoded-hex banner (a KEY DECISIONS violation) must not come back
     expect(src).not.toMatch(/background: "#3f2d12"/);
@@ -625,18 +625,17 @@ describe("NEW-1 (2026-07-15, owner: \"i dont need this large pop up\") — the B
     expect(src).toMatch(/setMultiTabDismissed\(true\)/);
     expect(src).toMatch(/if \(multiTab\.conflictRisk && !prevConflictRiskRef\.current\) setMultiTabDismissed\(false\);/);
     expect(src).toMatch(/accountActive && multiTab\.conflictRisk && !multiTabDismissed/);
-  });
-
-  it("the banner's copy is conditional on lockEnforced — no false \"read-only\" promise for a workspace with no real lock", () => {
-    const src = read("../src/shared/ui/AppHeader.jsx");
-    expect(src).toMatch(/lockEnforced = true,/); // default true preserves accurate copy for lock-enforcing workspaces (Doc Review)
+    // the single, accurate "read-only" copy (its only remaining reachers genuinely enforce a lock)
     expect(src).toMatch(/that tab is the active editor; this one is read-only until you switch there or close it/);
-    expect(src).toMatch(/edit in just one at a time so changes don&rsquo;t overwrite each other/);
+    // AUDIT-FIRST round 2 killed the lockEnforced dual-copy prop entirely — dead code once the
+    // Scheduler moved to full suppression (multiEditOk) instead of a softened banner variant
+    expect(src).not.toMatch(/lockEnforced/);
   });
 
-  it("the Scheduler passes lockEnforced={false} — AUDIT-FIRST: it never wired the shared editorLock, so a second tab is NOT actually read-only", () => {
+  it("the Scheduler passes multiEditOk (full suppression) — AUDIT-FIRST confirmed it's genuinely safe: version-guarded saves + a live-refresh poll that blocks (never silently overwrites) a stale write", () => {
     const schedulerSrc = read("../src/workspaces/scheduler/Scheduler.jsx");
-    expect(schedulerSrc).toMatch(/lockEnforced=\{false\}/);
+    expect(schedulerSrc).toMatch(/\bmultiEditOk\b/);
+    expect(schedulerSrc).not.toMatch(/lockEnforced/); // the softened-copy path is gone; suppression replaces it
     // and the claim holds: no editorLock WIRING (the actual import/call a real lock needs) exists
     // anywhere in the scheduler workspace — a bare word match would also trip on this file's own
     // comment explaining the fix, so match the wiring shape, not any mention of the word.
@@ -645,10 +644,16 @@ describe("NEW-1 (2026-07-15, owner: \"i dont need this large pop up\") — the B
     expect(schedulerSrc).not.toMatch(/createEditorLock/);
   });
 
-  it("Doc Review does NOT override lockEnforced — it keeps the accurate default (it DOES wire the shared editorLock)", () => {
-    const docReviewSrc = read("../src/workspaces/doc-review/DocReview.jsx");
-    expect(docReviewSrc).not.toMatch(/lockEnforced=/);
-    const persistenceSrc = read("../src/workspaces/doc-review/lib/usePersistence.js");
-    expect(persistenceSrc).toMatch(/editorLock/i);
+  it("the embedded scheduler's own live-refresh + version guard actually exist (the safety B850's suppression relies on)", () => {
+    const src = read("../public/sequence/index.html");
+    // poll every 20s + on focus/reconnect/tab-switch for a newer cloud version
+    const checkRemote = src.match(/const check = async \(\) => \{[\s\S]{0,400}/)[0];
+    expect(checkRemote).toMatch(/window\.storage\.checkRemote\("hs-v1"\)/);
+    expect(checkRemote).toMatch(/document\.hidden\) window\.location\.reload\(\)/); // silent reload when backgrounded + clean
+    expect(checkRemote).toMatch(/else setStaleNotice\(true\)/);                     // one-click prompt when visible / unsaved
+    // Layer 0: a stale auto-save is BLOCKED, never allowed to silently overwrite a newer cloud rev
+    expect(src).toMatch(/cloudRev != null && cloudRev > \(knownRev\[k\] \|\| 0\)\) \{/);
+    expect(src).toMatch(/_snapshot\(k, parsed, "stale-block", v\.length\)/); // the blocked copy is recoverable, not lost
+    expect(src).toMatch(/window\.dispatchEvent\(new CustomEvent\("planar:stale"/);
   });
 });
