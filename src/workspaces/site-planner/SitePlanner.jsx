@@ -66,6 +66,8 @@ import {
   aerialPlacement,
   overlayExportPlacement,
   feetExtentToBbox,
+  aerialTileGrid,
+  pickAerialTileZoom,
   humanizeError,
 } from "./lib/arcgis.js";
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
@@ -1628,7 +1630,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // so a fresh load / hard zoom-out never sits on the gray backdrop while the
     // heavy detail tiles stream in on top. No detectRetina (light + blurry is
     // fine for a placeholder); generous keepBuffer to cover the overscan. (B65)
-    const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: 6 }));
+    // crossOrigin (B839): request tiles with CORS so the same tile bytes are cached canvas-readable
+    // and can be reused to STITCH the export backdrop (Esri/USGS both send Access-Control-Allow-Origin:*).
+    const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: 6, crossOrigin: true }));
     bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
     // Honest status dot for the Basemap row: "loaded" only on a REAL painted tile
     // (`tileload`) — Leaflet's layer-level `load` fires even when every tile errored
@@ -1660,7 +1664,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // off / switched source during the wait (THIS backfill instance is gone then —
       // an identity check, so a stale timer can't build a layer for the old source).
       if (!geoMapRef.current || geoBaseRef.current || geoBackfillRef.current !== bf) return;
-      const t = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: bm.attr, keepBuffer: 4 }));
+      const t = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: bm.attr, keepBuffer: 4, crossOrigin: true }));
       t.on("tileload", () => { if (geoBaseRef.current === t) setBasemapStatus("loaded"); });
       t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
     };
@@ -7777,7 +7781,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         im.setAttribute("height", a.imgH * sy * view.ppf);
         im.setAttribute("preserveAspectRatio", "none");
         im.setAttribute("opacity", a.opacity ?? 1);
-        if (tag) im.setAttribute("data-export-aerial", "1"); // LOUD-FAILURE marker: a dropped fetch here must warn, not silently blank the PDF
+        if (tag) {
+          im.setAttribute("data-export-aerial", "1"); // LOUD-FAILURE marker: a dropped fetch here must warn, not silently blank the PDF
+          // B840: alternate-source (Esri↔USGS) /export URL — inlineImages retries this before dropping
+          // the aerial when the primary source's dynamic render times out. Absent when the src is a
+          // stitched data: URL (B839 fast path succeeded → no fetch, no fallback needed).
+          if (a.fallbackSrc) im.setAttribute("data-fallback-href", a.fallbackSrc);
+        }
         clone.insertBefore(im, anchor.nextSibling);
         anchor = im;
       }
@@ -7927,15 +7937,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ~INLINE_TIMEOUT_MS, not unbounded. On timeout/CORS/non-200 we drop the image (PNG)
   // or keep its remote href (print can still load it natively).
   const INLINE_TIMEOUT_MS = 8000;
+  // The aerial (data-export-aerial) gets its OWN, much longer budget than the small tile/overlay
+  // fetches (B840). Its src can be a slow dynamic /export render (Esri's World_Imagery/export took
+  // >8s on the owner's normal large frame — AbortError @ 8015ms — so the shared 8s cap dropped it
+  // and the sheet printed white). A per-image budget + one retry rescues the common case without
+  // slowing the many small fetches. B839's tile-stitch makes this the rare fallback, not the norm.
+  const AERIAL_INLINE_TIMEOUT_MS = 22000;
   // Fetch one URL and return it as a data: URL, time-boxed by its own AbortController so a hung
-  // request can't stall the whole (parallel) inline pass. Throws on timeout/CORS/non-200.
-  const fetchAsDataUrl = async (url) => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), INLINE_TIMEOUT_MS);
-    try {
-      const blob = await fetch(url, { mode: "cors", signal: ctrl.signal }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
-      return await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
-    } finally { clearTimeout(timer); }
+  // request can't stall the whole (parallel) inline pass. Retries once on an aborted (timed-out)
+  // attempt. Throws on timeout/CORS/non-200 after the last attempt.
+  const fetchAsDataUrl = async (url, { timeout = INLINE_TIMEOUT_MS, retries = 0 } = {}) => {
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeout);
+      try {
+        const blob = await fetch(url, { mode: "cors", signal: ctrl.signal }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
+        return await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+      } catch (e) { lastErr = e; } finally { clearTimeout(timer); }
+    }
+    throw lastErr;
   };
   // Returns { aerialDropped, overlaysDropped } (B735/B739, LOUD-FAILURE): the aerial <image>
   // (data-export-aerial) or any GIS overlay <image> (data-export-overlay) that couldn't be
@@ -7962,10 +7983,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const isAerial = img.hasAttribute("data-export-aerial");
       const isOverlay = img.hasAttribute("data-export-overlay");
       const fallback = img.getAttribute("data-fallback-href");
+      // B840: the aerial gets a longer budget + one retry; on failure it, like an overlay, retries
+      // its data-fallback-href — for the aerial that's the ALTERNATE source (Esri↔USGS), which
+      // renders the same frame far faster (USGS /export was ~4s where Esri timed out), so a slow
+      // primary source is rescued silently instead of dropping to a background-less sheet.
+      const opts = isAerial ? { timeout: AERIAL_INLINE_TIMEOUT_MS, retries: 1 } : {};
       try {
         let dataUrl;
-        try { dataUrl = await fetchAsDataUrl(href); }
-        catch (e) { if (isOverlay && fallback) dataUrl = await fetchAsDataUrl(fallback); else throw e; }
+        try { dataUrl = await fetchAsDataUrl(href, opts); }
+        catch (e) { if ((isOverlay || isAerial) && fallback) dataUrl = await fetchAsDataUrl(fallback, opts); else throw e; }
         img.setAttribute("href", dataUrl); img.removeAttributeNS(XL, "href");
       } catch (_) {
         if (dropOnFail) {
@@ -7977,16 +8003,61 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }));
     return { aerialDropped, overlaysDropped };
   };
-  // Synthesize a frame-exact aerial for the export (B735). The live basemap is a Leaflet tile
-  // <div> that the exported SVG can't capture, so when it's on we request ONE stitched image
-  // from the active source's `export` endpoint covering exactly the printed area, placed in the
-  // same feet frame as the parcels (aerialPlacement reverses feetExtentToBbox exactly) so it
-  // aligns pixel-for-pixel. Esri's endpoint is verified CORS `*` (a plain fetch inlines cleanly);
-  // USGS's is expected to be but is pending the live check (V251) — either way, a source that
-  // ISN'T CORS-open just drops the aerial and warns loudly (LOUD-FAILURE), never a silent white
-  // sheet. Returns null when there's no live basemap to capture (then buildExportSvg falls back
-  // to any dropped/from-map underlay).
-  const exportAerialForFrame = (frame) => {
+  // Per-tile budget for the B839 stitch. Tiles are small, static, CDN/browser-cached (many already
+  // warm from the live map), so this is generous; a tile that misses it fails the strict stitch and
+  // we fall back to the dynamic /export path (B840). Tries each tile twice.
+  const AERIAL_TILE_TIMEOUT_MS = 8000;
+  // Load ONE tile as a canvas-clean <img> (crossOrigin — Esri/USGS send Access-Control-Allow-Origin:*
+  // so drawing it never taints the canvas), time-boxed, retried once. Rejects on error/timeout.
+  const fetchTileImage = (url) => new Promise((resolve, reject) => {
+    let tries = 0;
+    const attempt = () => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      const timer = setTimeout(() => { img.onload = img.onerror = null; img.src = ""; onFail(); }, AERIAL_TILE_TIMEOUT_MS);
+      const onFail = () => { clearTimeout(timer); if (++tries <= 1) attempt(); else reject(new Error("tile load failed")); };
+      img.onload = () => { clearTimeout(timer); resolve(img); };
+      img.onerror = onFail;
+      img.src = url;
+    };
+    attempt();
+  });
+  // B839 — stitch the source's cached XYZ tiles into a frame-exact data: URL covering `bbox`. Picks a
+  // print-crisp zoom (≤ the source's native ceiling), fetches every covering tile in parallel, crops
+  // to the exact bbox pixel box, and returns a JPEG data URL. STRICT: if any tile can't be loaded we
+  // return null (clean output — the caller then tries the alternate source, then the dynamic /export
+  // fallback), rather than stitching a gappy sheet. Returns null on any DOM/canvas error too.
+  const stitchAerialDataUrl = async (bm, bbox) => {
+    try {
+      const z = pickAerialTileZoom(bbox, { maxNative: bm.maxNative, maxPx: 3072 });
+      const grid = aerialTileGrid(bbox, z);
+      if (!grid.tiles.length) return null;
+      const loaded = await Promise.all(grid.tiles.map(async (t) => {
+        const url = bm.tiles.replace("{z}", z).replace("{y}", t.y).replace("{x}", t.x);
+        try { return { t, img: await fetchTileImage(url) }; } catch (_) { return { t, img: null }; }
+      }));
+      if (loaded.some((r) => !r.img)) return null; // any missing tile → fall back (never a gappy exhibit)
+      const canvas = document.createElement("canvas");
+      canvas.width = grid.canvasW; canvas.height = grid.canvasH;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      for (const { t, img } of loaded) ctx.drawImage(img, Math.round(t.dx), Math.round(t.dy), 256, 256);
+      return canvas.toDataURL("image/jpeg", 0.92);
+    } catch (_) { return null; }
+  };
+  // Synthesize a frame-exact aerial for the export (B735). The live basemap is a Leaflet tile <div>
+  // the exported SVG can't capture, so when it's on we build ONE image covering exactly the printed
+  // area, placed in the same feet frame as the parcels (aerialPlacement reverses feetExtentToBbox
+  // exactly) so it aligns pixel-for-pixel. Two ways to source those pixels:
+  //   • B839 FAST PATH — stitch the active source's cached XYZ tiles into a data: URL (the same fast,
+  //     pre-rendered tiles the live map shows; no slow dynamic render, no inline timeout). Try the
+  //     active source, then the alternate.
+  //   • FALLBACK — if stitching fails, return the dynamic /export placement (remote src) + the
+  //     alternate source as data-fallback-href, rescued by B840's longer inline budget + one retry.
+  // A source that's genuinely unreachable still ends in a dropped aerial + a loud warning (never a
+  // silent white sheet — LOUD-FAILURE). Returns null when there's no live basemap to capture (then
+  // buildExportSvg falls back to any dropped/from-map underlay). Async (B839 tile fetches).
+  const exportAerialForFrame = async (frame) => {
     if (!origin || !basemapOn) return null;
     const bm = BASEMAPS[basemapSrc] || BASEMAPS.esri;
     // Use the SAME extent buildExportSvg crops to (dev → parcels → underlay), so a parcels-only
@@ -8000,7 +8071,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const bbox = feetExtentToBbox(ext, origin.lat, origin.lon);
     // maxPx 2400 (> the underlay's 1800) keeps the print-DPI raster crisp; ArcGIS export
     // caps at 4096, so this stays well inside the limit for any single sheet.
-    return { ...aerialPlacement(bbox, origin.lon, origin.lat, { exportBase: bm.export, maxPx: 2400 }), opacity: 1, fromMap: true };
+    const placement = aerialPlacement(bbox, origin.lon, origin.lat, { exportBase: bm.export, maxPx: 2400 });
+    const altKey = basemapSrc === "usgs" ? "esri" : "usgs";
+    const altBm = BASEMAPS[altKey];
+    // B839 fast path: stitch cached tiles (active source, then alternate) into a data: URL.
+    const stitched = (await stitchAerialDataUrl(bm, bbox)) || (altBm ? await stitchAerialDataUrl(altBm, bbox) : null);
+    if (stitched) return { ...placement, src: stitched, opacity: 1, fromMap: true };
+    // Fallback: dynamic /export URL + the alternate source as the inline retry (B840).
+    const altSrc = altBm ? aerialPlacement(bbox, origin.lon, origin.lat, { exportBase: altBm.export, maxPx: 2400 }).src : null;
+    return { ...placement, opacity: 1, fromMap: true, fallbackSrc: altSrc };
   };
   // Synthesize frame-exact images for the LIVE GIS overlay layers (FEMA floodplain, TxRRC
   // pipelines, wetlands, utilities, ground relief …) so they print, same as the aerial (B739).
@@ -8199,7 +8278,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn(`⚠ Couldn't load ${dropped.length} map layer${many ? "s" : ""} (${dropped.join(", ")}), so the ${fmt} was exported without ${many ? "them" : "it"}. Your plan and measurements are all included.`, 8000);
   };
   const exportPNG = async () => {
-    const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap for the export
+    const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (stitched cached tiles, or the dynamic /export fallback)
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …)
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
     const built = buildExportSvg(printFrame, true, PAL.paper, exportAerial, exportOverlays, true, exportVectorOverlays); // use the print crop if one's set, else dev extent
@@ -8228,7 +8307,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         aEl.click();
         URL.revokeObjectURL(aEl.href);
         // B735 LOUD-FAILURE: the PNG downloaded but without the aerial — say so (⚠ = red banner).
-        if (aerialDropped) flashWarn("⚠ Couldn't load the satellite imagery, so the PNG was exported without it. Check your connection and try again — your plan and measurements are all included.", 8000);
+        // B841: don't blame the connection — the usual cause is the imagery source being slow to
+        // render, not the user's network. Point them at a retry and the backdrop-source switch.
+        if (aerialDropped) flashWarn("⚠ The satellite imagery took too long to load, so the PNG was exported without it. Try again, or switch the backdrop source (Aerial ⇄ USGS). Your plan and measurements are all included.", 8000);
         warnDroppedOverlays(overlaysDropped, "PNG"); // B739 — same for any GIS layer that couldn't be fetched
       }, "image/png");
     } catch (_) {
@@ -8343,7 +8424,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
-    const exportAerial = exportAerialForFrame(printFrame); // B735 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image
+    const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
     const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays); // force WHITE paper for print/PDF
@@ -8409,7 +8490,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         mark("downloaded");
         URL.revokeObjectURL(aEl.href); // B544: revoke now (matches the PNG path L5112) — the 8s timer leaked a blob URL per export on rapid re-export / navigation
         // B735 LOUD-FAILURE: the file DID download, but without the aerial — say so (⚠ = red banner, not the success green).
-        if (aerialDropped) flashWarn("⚠ Couldn't load the satellite imagery, so the PDF was exported without it. Check your connection and try again — your plan and measurements are all included.", 8000);
+        // B841: don't blame the connection — the usual cause is the imagery source being slow to
+        // render, not the user's network. Point them at a retry and the backdrop-source switch.
+        if (aerialDropped) flashWarn("⚠ The satellite imagery took too long to load, so the PDF was exported without it. Try again, or switch the backdrop source (Aerial ⇄ USGS). Your plan and measurements are all included.", 8000);
         warnDroppedOverlays(overlaysDropped, "PDF"); // B739 — same for any GIS layer that couldn't be fetched
       } finally { URL.revokeObjectURL(url); }
     } catch (_) {
