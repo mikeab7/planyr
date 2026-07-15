@@ -312,8 +312,12 @@ describe("foldJournal (NEW-F4 pending-edit journal)", () => {
   it("skipKeys: a LIVE in-memory pending edit always beats the journal (never overridden by a stale snapshot)", () => {
     const next = { ...emptyModel(), els: [{ id: "e1", w: 555 }] }; // the fresher dirty edit, already substituted
     const j = [{ kind: "el", id: "e1", cls: "update", el: { id: "e1", w: 111 }, baseRev: 3 }]; // stale journal
-    const out = foldJournal(next, j, [row("el", "e1", 3)], { skipKeys: new Set(["el:e1"]) });
+    const discarded = [];
+    const out = foldJournal(next, j, [row("el", "e1", 3)], { skipKeys: new Set(["el:e1"]), onDiscard: (e) => discarded.push(e.id) });
     expect(out.els).toEqual([{ id: "e1", w: 555 }]); // the live edit survives; the stale entry is skipped
+    // LOUD-FAILURE (NEW-1): the skipped entry is reported — with per-session journals it may be an
+    // adopted orphan about to be swept, so its loss must reach telemetry, never vanish silently.
+    expect(discarded).toEqual(["e1"]);
   });
 
   it("does not mutate its inputs", () => {
@@ -375,6 +379,17 @@ describe("reconcileSeedRows (B759 ×2 — stale-refetch revert guard)", () => {
     const out = reconcileSeedRows([row("el", "e1", 9, { id: "e1", cx: 999 })], shadow);
     expect(out[0].data).toEqual({ id: "e1", cx: 999 }); // a later foreign write wins, never clobbered
     expect(out[0].rev).toBe(9);
+  });
+
+  // NEW-1 two-writer hardening — a `stale` shadow entry is a MIXED json↔rev pairing (the engine
+  // adopted a foreign/echoed rev while KEEPING an older json, e.g. a foreign row landing while an
+  // edit was dirty). Substituting that json under its high rev would seed provably-wrong data —
+  // with a second live writer this is the "bonded aprons separate for a beat" churn.
+  it("NEVER substitutes a `stale` shadow entry, even at a newer rev — the fetched row stays canonical", () => {
+    const shadow = shadowOf([{ kind: "el", id: "sw1", json: jstr({ id: "sw1", cx: 140 }), rev: 8, z: 7, stale: true }]);
+    const out = reconcileSeedRows([row("el", "sw1", 4, { id: "sw1", cx: 100 })], shadow);
+    expect(out[0].data).toEqual({ id: "sw1", cx: 100 }); // row untouched — the mixed pairing is not a truth source
+    expect(out[0].rev).toBe(4);
   });
 
   it("never overrides a TOMBSTONE row, even if the shadow holds a live newer rev (no resurrection)", () => {
