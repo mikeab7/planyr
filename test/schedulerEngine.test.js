@@ -1394,3 +1394,75 @@ describe("anti-drift: the B817 float/cost + health wiring exists in src + mirror
     expect(mjs).toMatch(/if \(task\.meetingDeadline && difBD\(NOW, task\.meetingDeadline\) <= 2\) return "yellow";/);
   });
 });
+
+// B835/B836 — cascade-drift detection. A non-pinned leaf task's SAVED start must equal the start its
+// predecessor chain implies; when a stale/fossil value survives (e.g. a lag zeroed without a re-cascade),
+// the load re-cascade corrects it. detectCascadeDrift surfaces those corrections so the heal is LOUD, not
+// silent. The scenario mirrors the exact owner repro: Grand Port task 81 saved 2026-08-03 while its FS
+// predecessor (task 80, ends 2026-07-10) implies 2026-07-13; task 82 is pinned and masks the wrong finish.
+describe("B836 — detectCascadeDrift flags non-pinned tasks whose stored start ≠ engine start", () => {
+  const fossil = () => [
+    T(80, { start: "2026-06-22", end: "2026-07-10", pinnedEnd: true, durValue: 15, durUnit: "d", predecessors: [] }),
+    T(81, { start: "2026-08-03", durValue: 10, durUnit: "d", predecessors: [{ id: 80, type: "FS", lag: 0 }] }), // fossil start
+    T(82, { start: "2026-08-17", pinnedStart: true, durValue: 30, durUnit: "d", predecessors: [{ id: 81, type: "FS", lag: 0 }] }),
+  ];
+
+  it("detects the fossil (task 81 saved 8/3 → engine 7/13) and reports from/to", () => {
+    const stored = fossil();
+    const engine = E.rollupParentDates(E.cascadeDates(stored.map(t => ({ ...t }))));
+    // sanity: the engine really does derive 7/13 from the FS predecessor
+    expect(engine.find(t => t.id === 81).start).toBe("2026-07-13");
+    const drift = E.detectCascadeDrift(stored, engine);
+    expect(drift).toHaveLength(1);
+    expect(drift[0]).toMatchObject({ id: 81, from: "2026-08-03", to: "2026-07-13" });
+  });
+
+  it("does NOT flag the downstream pinned task (82) that masked the wrong finish", () => {
+    const stored = fossil();
+    const engine = E.rollupParentDates(E.cascadeDates(stored.map(t => ({ ...t }))));
+    expect(E.detectCascadeDrift(stored, engine).some(d => d.id === 82)).toBe(false);
+  });
+
+  it("clean data (stored start already matches the predecessor) yields no drift", () => {
+    const stored = [
+      T(80, { start: "2026-06-22", end: "2026-07-10", pinnedEnd: true, durValue: 15, durUnit: "d", predecessors: [] }),
+      T(81, { start: "2026-07-13", durValue: 10, durUnit: "d", predecessors: [{ id: 80, type: "FS", lag: 0 }] }),
+    ];
+    const engine = E.rollupParentDates(E.cascadeDates(stored.map(t => ({ ...t }))));
+    expect(E.detectCascadeDrift(stored, engine)).toEqual([]);
+  });
+
+  it("pinned starts are exempt even when the engine array disagrees (a pin is intentional)", () => {
+    const stored = [T(5, { start: "2026-08-03", pinnedStart: true, predecessors: [{ id: 4, type: "FS", lag: 0 }] })];
+    const engine = [{ ...stored[0], start: "2026-07-13" }]; // engine says something else — still exempt
+    expect(E.detectCascadeDrift(stored, engine)).toEqual([]);
+  });
+
+  it("parents (rollup-derived) are not reported as cascade drift", () => {
+    const stored = [
+      T(1, { start: "2026-08-03", predecessors: [] }),                    // parent of 2 — start differs from engine
+      T(2, { start: "2026-06-22", parentId: 1, predecessors: [] }),
+    ];
+    const engine = [{ ...stored[0], start: "2026-06-22" }, { ...stored[1] }];
+    expect(E.detectCascadeDrift(stored, engine)).toEqual([]);
+  });
+
+  it("empty / missing inputs never throw", () => {
+    expect(() => E.detectCascadeDrift(undefined, undefined)).not.toThrow();
+    expect(E.detectCascadeDrift([], [])).toEqual([]);
+  });
+});
+
+describe("B836 — the drift guard is wired into the real source + engine mirror (anti-drift)", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("detectCascadeDrift is defined in both the app source and the engine mirror", () => {
+    expect(src).toContain("const detectCascadeDrift =");
+    expect(mjs).toContain("export const detectCascadeDrift =");
+  });
+  it("the load paths collect drift (recascadeWithDrift) and surface it loudly (setDriftNotice + banner)", () => {
+    expect(src).toContain("recascadeWithDrift");
+    expect(src).toContain("setDriftNotice");
+    expect(src).toContain("driftNotice && driftNotice.length");   // the banner render
+  });
+});
