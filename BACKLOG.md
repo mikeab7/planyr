@@ -1114,9 +1114,6 @@ Both are walled-off compute (Cloud Run); keys server-side only. Until deployed, 
      owner said leave it as-is (2026-06-20) → moved to BACKLOG-DONE.md. Email excluded per owner; the
      doc's already-shipped items (orig B2/B6/B8) were not re-filed. -->
 
-### B255 — Collapse the duplicate indent/outdent + column-autosize functions `[Scheduler / code health]` (task) #scheduler  *(orig "M2"; minted **B255**)*
-`[ ]` Two near-identical copies each of: indent/outdent — keyboard `indentTask`/`outdentTask` vs right-click `indentTaskById`/`outdentTaskById` — and column autosize — `autoSizeCol` (grid) vs `autoSizeMCol` (master). Merge each pair into one helper that takes the task id / column set as a parameter (keyboard passes `selectedId`, menu passes the ctx id). **Verify equivalence first** (the doc warns they may have drifted; if they have, decide which behaviour is canonical before merging) and verify keyboard vs menu produce identical results. Pure maintainability — no user-visible change — so it was kept *out* of the B247–B252 bug-fix shipment to isolate refactor risk on a live tool; pick it up as its own focused pass.
-
 <!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2") — resilient county parcel fetch. Minted
      **B244** (NEW-1: resilient fetch + TxGIO statewide fallback) + **B245** (NEW-2: validate the ArcGIS
      response BODY, not just HTTP status) — concurrent `main` took B239–B243 while this was in flight, so
