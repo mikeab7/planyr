@@ -554,3 +554,28 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect((src.match(/⚠ The satellite imagery took too long to load/g) || []).length).toBe(2);
   });
 });
+
+describe("B36(e)/B843: view-driven map layers guard against stale post-unmount renders", () => {
+  // Leaflet needs a DOM, so these layers can't be unit-tested in the node env — a source
+  // guard keeps a concurrent merge from silently reverting the fix (same rationale as the
+  // guards above). The defect: `if (!map) return` was checked only BEFORE the await, so a
+  // fetch that resolved AFTER the layer was toggled off (onRemove nulls `map`) still painted
+  // into the detached group + reported "loaded" for an off layer.
+  it("B36(e): evidenceLayers overpass + Mapillary have the post-await mount guard, and Mapillary aborts on removal", () => {
+    const src = read("../src/workspaces/site-planner/lib/evidenceLayers.js");
+    // Overpass rides gisCache.swr (cached) → guarded (not aborted; aborting would poison the cache).
+    expect(src).toMatch(/B36e: the layer may have been toggled off \/ the map torn down while the request was/);
+    // Mapillary is a direct fetch → AbortController threaded through + aborted on removal + post-await guard.
+    expect(src).toMatch(/B36e: abort a slow request the moment the layer is toggled off/);
+    expect(src).toMatch(/try \{ feats = await fetchMapillary\(bb, token, sig\); \}/);
+    expect(src).toMatch(/if \(sig\.aborted \|\| \(e && e\.name === "AbortError"\)\) return;/);
+    expect(src).toMatch(/if \(!map\) return; \/\/ B36e: removed mid-fetch/);
+    expect(src).toMatch(/group\.onRemove = function \(m\) \{ if \(ctrl\) ctrl\.abort\(\);/); // the Mapillary onRemove
+  });
+  it("B843: terrainLayer has the post-await mount guard before paint (same class as overpass)", () => {
+    const src = read("../src/workspaces/site-planner/lib/terrainLayers.js");
+    expect(src).toMatch(/The layer may have been toggled off \/ the map torn down during the \(heavy/);
+    // `if (!map) return` appears at least twice: the top-of-refresh guard AND the post-await guard.
+    expect((src.match(/if \(!map\) return;/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+});
