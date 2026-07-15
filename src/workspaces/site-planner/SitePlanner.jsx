@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -1668,11 +1668,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires
   }, [basemapSrc, basemapOn, origin]);
 
-  /* keep the basemap sized when the canvas resizes or the planner is shown */
+  /* Re-sync the basemap size when the planner is (re-)shown (keep-alive show/hide) or the origin
+     first lands. A resize WHILE the planner is shown (a docked panel opening/closing shrinks the
+     in-flow canvas) is handled UNDER the ghost by the view-sync effect's sizeChanged branch (B837),
+     so it no longer flashes — `size` is deliberately NOT a dependency here: this un-ghosted
+     invalidateSize must not fire on a panel toggle (it was the residual tile-wipe). */
   useEffect(() => {
     const map = geoMapRef.current;
     if (map && active) { const t = setTimeout(() => { try { map.invalidateSize(false); } catch (_) {} }, 60); return () => clearTimeout(t); }
-  }, [active, size, origin]);
+  }, [active, origin]);
 
   /* drive the basemap zoom/center from the planner view so it stays locked to
      the SVG. ppf→zoom keeps the scale identical; the canvas-center feet point
@@ -1742,11 +1746,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
     const prev = geoCommitRef.current;
     const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
-    // First paint (no prior tiles on screen to clone) → plain commit. But a RESIZE while a
-    // prior view IS on screen — e.g. a docked panel opening on select shrinks the in-flow
-    // canvas — still fires setView→viewreset→tile-wipe, so ghost-buffer it to hide the flash.
-    // (NEW-1: reuses B65's spawnGhost; `!!prev` is true only on resize, false on first paint.)
-    if (sizeChanged) { clearTimeout(geoCommitTimer.current); commit(center, z, !!prev); return; }
+    // First paint (no prior tiles on screen to clone) → plain commit. But a RESIZE while a prior
+    // view IS on screen — e.g. a docked panel opening/closing shrinks the in-flow canvas — needs
+    // Leaflet's size re-synced (invalidateSize) AND fires setView→viewreset→tile-wipe. Do BOTH under
+    // one ghost of the current tiles so the reflow + reload are never seen. (B837 folds the formerly
+    // separate, un-ghosted invalidateSize into this ghosted commit; reuses B65's spawnGhost. `prev`
+    // is null only on first paint → no ghost, no invalidateSize needed then.)
+    if (sizeChanged) {
+      clearTimeout(geoCommitTimer.current);
+      if (prev) {
+        spawnGhost();
+        try { map.invalidateSize(false); } catch (_) {}
+        wrap.style.transform = "";
+        try { map.setView(center, z, { animate: false }); } catch (_) {}
+        geoCommitRef.current = { center, zoom: z, w: size.w, h: size.h };
+      } else {
+        commit(center, z, false); // first paint: plain commit, nothing on screen to ghost
+      }
+      return;
+    }
 
     // A new gesture is happening: drop any lingering snapshot immediately. It's a
     // FROZEN copy that doesn't track this pan/zoom, so leaving it up would let the
@@ -2641,24 +2659,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.kind, sel?.id]);
-  // The left menu opening/closing resizes the canvas; pan to compensate so the
-  // drawing doesn't jump sideways (e.g. on the first element click of a session).
-  // Only the DESKTOP left panel resizes the canvas (it's an in-flow flex child); the phone
-  // panel OVERLAYS (position:absolute) and resizes nothing — so the drawing should be shifted
-  // by one panel width ONLY while the desktop panel is open, never on a phone (B556). We track
-  // the exact compensation currently applied and reconcile to the desired value whenever the
-  // panel opens/closes OR the screen crosses the phone breakpoint (rotation) — reversing the
-  // EXACT delta we applied, so a mid-open rotation can never leave a residual sideways offset.
-  const panelShiftRef = useRef(0);
-  useEffect(() => {
-    const want = ((!!leftPanel || (companionSel && propsMatches)) && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left (B656: the companion column counts; B750: only an EXPLICITLY-open companion holds the shift, else it leaves a blank rail gap)
-    if (want !== panelShiftRef.current) {
-      const delta = want - panelShiftRef.current;
-      panelShiftRef.current = want;
+  // The left menu opening/closing resizes the canvas; pan to compensate so the drawing doesn't
+  // jump sideways (e.g. on the first element click of a session, or a panel→panel switch).
+  //
+  // B837: compensate against the MEASURED canvas left-edge, not an assumed `leftWidth + 6`.
+  // `wrapRef.offsetLeft` (relative to the position:relative planner body row) is exactly the width
+  // to the canvas's left — the 54px rail plus whatever docked column is in flow. A phone panel
+  // OVERLAYS (position:absolute → out of flow, B556) and a floating card is portaled out (B717),
+  // so both contribute nothing to offsetLeft: the measurement is self-gating and desktop/docked-only
+  // without needing narrow/floating conditionals. Reconciling the EXACT measured delta cancels any
+  // panel width, a live rail-resize, and a panel→panel width change — no assumed-width mismatch and
+  // no residual offset. Running in a LAYOUT effect (before paint) lands the pan-shift in the SAME
+  // frame as the panel's reflow, so the drawing never skips sideways for a frame.
+  const panelShiftRef = useRef(null); // last-compensated canvas left-edge (px); null until the first measure seeds the baseline
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const left = Math.round(el.offsetLeft);
+    if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
+    const delta = left - panelShiftRef.current;
+    if (delta !== 0) {
+      panelShiftRef.current = left;
       setView((v) => ({ ...v, offX: v.offX - delta }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftPanel, narrow, companionSel, propsMatches]);
+    // These deps are intentional re-measure TRIGGERS (the body reads only refs, so exhaustive-deps
+    // is satisfied by any set): re-run whenever something that can move the canvas's left edge changes.
+  }, [leftPanel, narrow, companionSel, propsMatches, leftWidth, size.w]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
@@ -11421,6 +11447,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
+            data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             // Two-finger pinch runs on native touch events (B555) — see onTouchStartPinch. While a

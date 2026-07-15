@@ -68,6 +68,17 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V328 — B837: opening / switching / closing a left-rail panel no longer flashes the aerial or jumps the drawing ⏳ **LIVE APP (planyr.io), a site WITH the geo aerial ON — ideally a HEAVY real project** (timing/state + zoom-/data-density render class — the one-FRAME aerial tile-wipe and the multi-frame drawing skip on a heavy project aren't headless-observable; the aerial needs real tiles the sandbox egress-blocks)  *(minted V328 via `npm run next-id -- --against-main`; references **B837**; branch `claude/left-rail-panel-flash-jump-f7shz3`; `Cadence: once`)*
+- **Verified here (sandbox, 2026-07-15):** `npm run build` green; full suite green; `eslint` clean on `SitePlanner.jsx`; new e2e `e2e/panel-toggle-viewport.spec.js` green (logged-out, seeded 1-parcel site) — a fixed feet point holds its viewport x to **0px** across open / switch→Analysis / switch→Yield / close, zero page errors. The geometric JUMP is fully proven headless; the fix reads the real `wrapRef.offsetLeft` in a `useLayoutEffect` (same-paint) and folds the resize `invalidateSize` into B65's ghost.
+- **Pending live steps (planyr.io, aerial ON):**
+  1. Open a real site with the aerial basemap **ON** and (ideally) a lot of drawn geometry (a heavy test-fit).
+  2. Click a left-rail icon (Parcel) to OPEN the panel from closed → the aerial must **NOT** flash/blank, and the drawing/parcels must **NOT** skip sideways (not even for a frame), staying locked on their true parcels.
+  3. Click another rail icon (Analysis / Yield / References / Standards) to SWITCH panel→panel → no flash, no jump.
+  4. Click the active icon to CLOSE → no flash, no jump.
+  5. Drag the panel's right-edge divider to resize the rail while open → the drawing stays pinned to the aerial as the panel widens/narrows (B837 now compensates a live rail-resize too).
+  6. Narrow (<760px): the panel OVERLAYS — confirm it steals no width and the drawing doesn't shift (B556 intact); a floating/detached panel likewise doesn't pan the map (B717 intact).
+- On pass: move B837 from ⏳ Verify → BACKLOG-DONE, and this entry → VERIFICATION-DONE.
+
 ### V324 — B832: drainage facts auto-revalidate on Bain — drag inside the envelope = no fetch; outgrow it = one coalesced auto refresh ⏳ **LIVE APP (planyr.io), SIGNED IN (Bain)** (timing/debounce + GIS endpoint classes — the sandbox can't observe a real coalesced fetch)  *(V324; B832; branch `claude/pond-roles-mitigation-ledger-m2hrxm`; `Cadence: once`)*
 - **Verified here (sandbox, 2026-07-14):** 12 unit tests (`test/factRevalidation.test.js` — the envelope rule incl. never-refetch-inside even under a stale sig, anchor drift thresholds, load-kind triggers, stable retry keys); headless case G (a stale remembered snapshot fires ONE auto attempt on load, fails honestly against blocked GIS, never blocks editing, and the good snapshot survives — asserted via localStorage). Full suite + build green.
 - **Pending live steps:** open Bain fresh (stale or old snapshot) → the facts refresh WITHOUT pressing ↻ and the status line reads "Facts as of <time> · auto"; drag a pond a short distance WITHIN the checked area → numbers update instantly, no fetch fires (watch the network tab); drag it ~500 ft beyond the checked envelope → ONE coalesced auto-fetch ~2–3 s after the last drag; go offline and edit → editing still works with the honest stale labeling; ↻ still forces a refresh on demand.
