@@ -326,6 +326,10 @@ export const computeDisplayHealth = (task, settings) => {
     if (task.meetingInfeasible) return "red";
     if (task.meetingDeadline && difBD(NOW, task.meetingDeadline) <= 2) return "yellow";
   }
+  if (task.deadlineForTaskId != null && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
+    if (task.deadlineInfeasible) return "red";
+    if (task.end && difBD(NOW, task.end) >= 0 && difBD(NOW, task.end) <= 2) return "yellow";
+  }
   if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
   if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
     // Within 7 calendar days
@@ -361,6 +365,14 @@ export const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minA
   if (!packetReady) {                                 // nothing schedules it yet — stays blank (B386)
     t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false;
     return;
+  }
+  if (!predEarly && !drivingMeetingDate && !(t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate)) {
+    if (meetingDatesInRange(body, packetReady, packetReady).length) {
+      t.start = t.end = packetReady;
+      t.meetingDeadline = agendaDeadline(body, packetReady) || "";
+      t.meetingInfeasible = false;
+      return;
+    }
   }
   let readyDate = packetReady, afterDate = "";
   if (drivingMeetingDate) {                           // the driving predecessor is itself a meeting (1st→2nd reading)
@@ -439,6 +451,16 @@ export const cascadeDates = (tasks, bodies = []) => {
     } else if (t.meetingDeadline || t.meetingInfeasible) {
       t.meetingDeadline = ""; t.meetingInfeasible = false;
     }
+  });
+  tasks.forEach(x => {
+    const t = map[x.id];
+    if (t.deadlineForTaskId == null || t.meetingBound || parentIds.has(t.id)) { if (t.deadlineInfeasible) t.deadlineInfeasible = false; return; }
+    const anchor = map[t.deadlineForTaskId];
+    if (!anchor || !anchor.meetingBound || !anchor.meetingDeadline) { t.deadlineInfeasible = false; return; }
+    const hasLivePreds = t.predecessors.some(p => map[p.id]);
+    const naturalStart = hasLivePreds ? t.start : "";   // a stored date without preds is stale, not a constraint
+    t.start = t.end = anchor.meetingDeadline; t.duration = 0;
+    t.deadlineInfeasible = !!(naturalStart && naturalStart > anchor.meetingDeadline);
   });
   return tasks.map(t => { const {_pinStart, __wasDirectEdit, ...rest} = map[t.id] || t; return rest; });
 };
@@ -546,6 +568,10 @@ export const renumberTasks = (tasks) => {
     id: i + 1,
     parentId: t.parentId !== null && t.parentId !== undefined ? (map[t.parentId] ?? null) : null,
     predecessors: normPreds(t.predecessors).map(p => ({...p, id: map[p.id]})).filter(p => p.id),
+    ...(t.deadlineForTaskId != null ? { deadlineForTaskId: map[t.deadlineForTaskId] ?? null } : {}),
+    ...(t.minMeetingsAfter && t.minMeetingsAfter.taskId != null
+      ? { minMeetingsAfter: (map[t.minMeetingsAfter.taskId] ? { ...t.minMeetingsAfter, taskId: map[t.minMeetingsAfter.taskId] } : undefined) }
+      : {}),
   }));
 };
 
