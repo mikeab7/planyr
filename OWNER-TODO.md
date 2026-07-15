@@ -5,7 +5,17 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-12._
+_Last updated: 2026-07-15._
+
+## 🗓 Optional — one Scheduler date to sanity-check on Grand Port (B835)
+- [ ] **Nothing broken; just a judgment call only you can make.** The task you flagged — Grand Port →
+      Site Development → **"AHJ Review #1 - Civil Revisions"** (task 81) — is now correct: it starts the
+      next working day after the AHJ approval before it (7/13/26), and the stray old date (8/3) and the
+      pin that was hiding it are gone. The only open question is your intent: **did you want a gap of
+      roughly three weeks between the AHJ approval and starting civil revisions?** If yes, tell a Claude
+      session and it'll add that delay to the link. If not, it's already right — leave it. (The app now
+      also pops up a yellow heads-up banner any time a saved date gets auto-corrected like this, so you'll
+      never have to catch one by eye again — that's the B836 fix that shipped with this.)
 
 ## 🔐 Two 2-minute safety toggles in the Supabase dashboard (from the 2026-07-12 delete-safety audit)
 > Both live in the dashboard for the main app project `lyeqzkuiwngunutlkkmi` — no SQL, no files, just switches.
