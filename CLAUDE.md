@@ -94,6 +94,17 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > session is itself a blocker — raise it with a plan, never a silent stop after the easy half. (Owner rule,
 > 2026-06-19, after a session shipped only the quick half.)
 >
+> **📥 Owner CHAT BLOCKS are SHIP ORDERS, not filing requests (owner rule, 2026-07-15 — after the 7/14
+> multiwriter-cascade handoff was diagnosed, filed nowhere, and fixed by no one).** Three binding intake rules:
+> **(a)** every item in an owner chat block — bug, feature, or task — is **implement-in-THIS-session work**:
+> file it, ship it, then park it per the lifecycle (⏳ Verify + V### for a live-verify class). Filing alone is
+> an INCOMPLETE response, whatever the block's header says. **(b)** an item that genuinely can't ship in one
+> session (a hard unshipped dependency, a true blocker per STANDING RULE #1) must be **flagged LOUDLY** — in
+> the session reply AND on the filed item — never silently filed and left. **(c)** a **diagnosis/handoff doc**
+> reaching the repo or the project **without a corresponding B# is itself a protocol violation — mint the B#
+> on sight** (DEDUPE-FIRST still applies), so no diagnosis can go un-owned again. (Protocol doc:
+> `claude/protocol-2026-07-15-bug-blocks-are-fix-orders.md` in the owner's project.)
+>
 > **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
 > work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `BACKLOG-DONE.md` that same
 > session — never mark it done in place** (marking-done-in-place is exactly what bloated this file). The next

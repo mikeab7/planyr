@@ -60,6 +60,37 @@ export function stableStringify(v) {
   return "{" + parts.join(",") + "}";
 }
 
+// NEW-1 (two-tab cascade false-conflict) — SEMANTIC data equality. Two live writers on one plan
+// can hold copies of an element that are byte-DIVERGENT (a rows→canvas→re-derive round trip, float
+// relayout noise) yet geometrically IDENTICAL — nothing the user could ever see moved. Byte guards
+// (stableStringify equality, sentMatches) read such a copy as a foreign edit and toast. This
+// comparator is the tie-breaker: numbers agree within `eps` (geometry is feet — relayout float
+// noise is ~1e-12 ft, a real edit moves ≥ ~0.01 ft, so 1e-6 sits 4+ orders clear of both),
+// everything else must match exactly, and objects must agree on the whole key set both ways
+// (JSON semantics: an undefined-valued key equals an absent one, mirroring stableStringify).
+// Used ONLY to decide who gets TOLD (events/toasts) — never to skip a write or drop data.
+export function semanticallyEqual(a, b, eps = 1e-6) {
+  if (a === b) return true;
+  if (typeof a === "number" && typeof b === "number") {
+    if (Number.isNaN(a) || Number.isNaN(b)) return Number.isNaN(a) && Number.isNaN(b);
+    return Math.abs(a - b) <= eps;
+  }
+  if (a == null || b == null || typeof a !== typeof b || typeof a !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!semanticallyEqual(a[i], b[i], eps)) return false;
+    return true;
+  }
+  const ka = Object.keys(a).filter((k) => a[k] !== undefined);
+  const kb = Object.keys(b).filter((k) => b[k] !== undefined);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    if (b[k] === undefined) return false;
+    if (!semanticallyEqual(a[k], b[k], eps)) return false;
+  }
+  return true;
+}
+
 const skey = (kind, id) => kind + ":" + id;
 const DEFAULT_BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
@@ -80,6 +111,13 @@ export function createElementSync(opts = {}) {
     backoff = DEFAULT_BACKOFF,
     maxAttempts = 5,
     recentWindowMs = 15000,         // "authored within ~15s" window feeding B673
+    // NEW-1 — (kind, id, el|null) => bool: is this op a DIRECT user edit (the element the gesture /
+    // inline editor actually targeted), as opposed to an app-DERIVED relayout output (the bonded
+    // paving / sidewalks / parking a building edit re-fits)? Only DIRECT ops feed the `recent` map,
+    // so authoredRecently — and every "…you just edited" toast built on it — never fires for an
+    // element the user never touched. Defaults to "everything is direct" (single-caller opt-in;
+    // pre-NEW-1 behavior for tests and any caller that doesn't distinguish).
+    isDirectEdit = () => true,
   } = opts;
 
   // key -> { kind, id, json, rev, z }  (last COMMITTED state)
@@ -233,6 +271,13 @@ export function createElementSync(opts = {}) {
     return !!r && now() - r.at <= recentWindowMs;
   };
 
+  // NEW-1 — evaluate the direct-vs-derived tag for an op at enqueue time (the predicate reads the
+  // caller's live interaction state, so it must run when the op is minted, not when it commits).
+  // Fail-open to DIRECT: a predicate error must never silence a genuine "you just edited" heads-up.
+  const directTag = (kind, id, el) => {
+    try { return isDirectEdit(kind, id, el) !== false; } catch (_) { return true; }
+  };
+
   // ---- diff the live collections against the shadow, enqueue ops --------------
   // `busy` (a gesture is in flight) defers the diff; the caller re-invokes on gesture end.
   function reconcile(collections, { busy } = {}) {
@@ -267,7 +312,7 @@ export function createElementSync(opts = {}) {
           if (inf && inf.el && stableStringify(inf.el) === stableStringify(elc)) continue; // being created right now
           if (!pend || (pend.cls !== "create" && pend.cls !== "restore") || stableStringify(pend.el) !== stableStringify(elc)) {
             if (!(pend && pend.cls === "restore" && stableStringify(pend.el) === stableStringify(elc)))
-              enqueue(key, { kind, id: el.id, cls: pend && pend.cls === "restore" ? "restore" : "create", el: elc, z: elc.z });
+              enqueue(key, { kind, id: el.id, cls: pend && pend.cls === "restore" ? "restore" : "create", el: elc, z: elc.z, direct: directTag(kind, el.id, elc) });
             sawCreateOrDelete = true;
           }
           continue;
@@ -277,7 +322,7 @@ export function createElementSync(opts = {}) {
           if (inf && inf.el && stableStringify(inf.el) === json) continue; // this exact data is already in flight
           // changed since last commit → update (unless an identical update is already queued)
           if (!pend || pend.cls === "delete" || stableStringify(pend.el) !== json) {
-            enqueue(key, { kind, id: el.id, cls: "update", el, z: el.z });
+            enqueue(key, { kind, id: el.id, cls: "update", el, z: el.z, direct: directTag(kind, el.id, el) });
           }
         }
       }
@@ -289,7 +334,7 @@ export function createElementSync(opts = {}) {
       const inf = inflightKeys.get(key);
       if (inf && inf.cls === "delete") continue; // the delete is already on the wire
       if (!pend || pend.cls !== "delete") {
-        enqueue(key, { kind: shad.kind, id: shad.id, cls: "delete", el: null, z: shad.z });
+        enqueue(key, { kind: shad.kind, id: shad.id, cls: "delete", el: null, z: shad.z, direct: directTag(shad.kind, shad.id, null) });
         sawCreateOrDelete = true;
       }
     }
@@ -314,7 +359,7 @@ export function createElementSync(opts = {}) {
   // OUR data at a new rev. Immediate (like create/delete — a deliberate act, never debounced).
   function restore(kind, id, el) {
     if (stopped || !ready || !el) return;
-    enqueue(skey(kind, id), { kind, id, cls: "restore", el, z: el.z });
+    enqueue(skey(kind, id), { kind, id, cls: "restore", el, z: el.z, direct: true }); // an explicit user action is always direct
     schedule(true);
   }
 
@@ -385,7 +430,11 @@ export function createElementSync(opts = {}) {
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(e.el), rev: cur && cur.rev > r.rev ? cur.rev : r.rev, z: e.z });
           clearDeleteFloor(key); // element is live again → drop the stale-delete floor (incl. the never-pruned refetch high-water)
         }
-        recent.set(key, { at: now(), rev: r.rev });
+        // NEW-1 — only a DIRECT user edit claims authorship: a cascade-derived relayout write
+        // (the paving/sidewalks/parking a building edit re-fit) must never make a later foreign
+        // row toast "…changed ⟨element⟩ you just edited". Self-echo identity below is unaffected
+        // (recordOwnRev / recordSent are about which BYTES are ours, not who authored them).
+        if (e.direct !== false) recent.set(key, { at: now(), rev: r.rev });
         recordOwnRev(e.kind, e.id, r.rev); // B812 — this rev is one OUR commit produced; its echo is ours
       } else if (r.status === "conflict") {
         const row = r.row || {};
@@ -399,7 +448,7 @@ export function createElementSync(opts = {}) {
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(row.data), rev: row.rev, z: row.z_index });
           clearDeleteFloor(key);
           if (selfDup) {
-            recent.set(key, { at: now(), rev: row.rev });
+            if (e.direct !== false) recent.set(key, { at: now(), rev: row.rev }); // NEW-1 — restores are always direct; keep the gate uniform
             recordOwnRev(e.kind, e.id, row.rev); // B812 — our own restore landed at this rev; its echo is ours
             report("element-restore-self-dup", "restore conflict row IS our own committed data — silent", { siteId, id: e.id, kind: e.kind });
           } else {
@@ -407,9 +456,11 @@ export function createElementSync(opts = {}) {
             onEvent({ type: "restore-conflict", id: e.id, kind: e.kind, remote: row });
           }
         } else if (e.cls === "delete") {
-          // delete-vs-edit: delete WINS — re-issue at the fresh rev (per the B673 matrix)
-          shadow.set(key, { kind: e.kind, id: e.id, json: shadow.get(key)?.json || "", rev: row.rev, z: e.z });
-          enqueue(key, { kind: e.kind, id: e.id, cls: "delete", el: null, z: e.z });
+          // delete-vs-edit: delete WINS — re-issue at the fresh rev (per the B673 matrix).
+          // `stale`: the kept json predates the adopted rev — reconcileSeedRows must not
+          // substitute this mixed json↔rev pairing into a refetch re-seed (NEW-1 hardening).
+          shadow.set(key, { kind: e.kind, id: e.id, json: shadow.get(key)?.json || "", rev: row.rev, z: e.z, stale: true });
+          enqueue(key, { kind: e.kind, id: e.id, cls: "delete", el: null, z: e.z, direct: e.direct });
           report("element-delete-reapplied", "delete re-applied at fresh rev", { siteId, id: e.id, kind: e.kind });
           onEvent({ type: "delete-reapplied", id: e.id, kind: e.kind, remote: row });
         } else if (row.data && stableStringify(row.data) === stableStringify(e.el)) {
@@ -421,13 +472,26 @@ export function createElementSync(opts = {}) {
           // DIFFERENT data still surfaces per the B673 matrix.
           shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(row.data), rev: row.rev, z: e.z });
           clearDeleteFloor(key);
-          recent.set(key, { at: now(), rev: row.rev });
+          if (e.direct !== false) recent.set(key, { at: now(), rev: row.rev }); // NEW-1 — derived churn never claims authorship
           recordOwnRev(e.kind, e.id, row.rev); // B812 — the "conflict" row IS our data at this rev; its echo is ours
           report("element-conflict-self-dup", "conflict row IS our own committed data — silent", { siteId, id: e.id, kind: e.kind });
+        } else if (row.data && semanticallyEqual(row.data, e.el)) {
+          // NEW-1 — SEMANTICALLY-EQUAL conflict: the live row is byte-divergent from our data
+          // (another window's rows→canvas→re-derive round trip, float relayout noise) but
+          // geometrically identical — nothing the user could see differs, so there is nothing
+          // to warn about and nothing worth another write. Adopt the remote rev with OUR bytes
+          // as the diff baseline (the canvas already holds them, so the next reconcile stays
+          // quiet — no re-commit ping-pong between two live tabs), no event, no toast. A row
+          // carrying a GENUINE difference still falls through to the loud LWW branch below.
+          shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(e.el), rev: row.rev, z: e.z });
+          clearDeleteFloor(key);
+          if (e.direct !== false) recent.set(key, { at: now(), rev: row.rev });
+          report("element-conflict-sem-eq", "conflict row is semantically identical — silent adopt", { siteId, id: e.id, kind: e.kind });
         } else {
-          // edit-vs-edit: second writer wins — adopt the remote rev and re-commit local on top (LWW)
-          shadow.set(key, { kind: e.kind, id: e.id, json: "", rev: row.rev, z: e.z });
-          enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z });
+          // edit-vs-edit: second writer wins — adopt the remote rev and re-commit local on top (LWW).
+          // `stale`: json "" at the adopted rev is a mixed pairing — never a re-seed substitution source.
+          shadow.set(key, { kind: e.kind, id: e.id, json: "", rev: row.rev, z: e.z, stale: true });
+          enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct });
           report("element-conflict", "edit-vs-edit LWW re-commit", { siteId, id: e.id, kind: e.kind, remoteRev: row.rev });
           onEvent({ type: "edit-vs-edit-lost-race", id: e.id, kind: e.kind, remote: row, authoredRecently: isRecent(e.kind, e.id) });
         }
@@ -440,13 +504,13 @@ export function createElementSync(opts = {}) {
       } else if (r.status === "exists") {
         // create-vs-create — impossible with per-tab salted ids (B591). Assert + adopt as an update.
         const row = r.row || {};
-        shadow.set(key, { kind: e.kind, id: e.id, json: "", rev: row.rev, z: e.z });
-        enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z });
+        shadow.set(key, { kind: e.kind, id: e.id, json: "", rev: row.rev, z: e.z, stale: true });
+        enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct });
         report("element-create-collision", "create hit a live row (should be impossible)", { siteId, id: e.id, kind: e.kind });
       } else if (r.status === "missing") {
         // server has no such row. An update/delete on a purged row → re-create (update) or drop (delete).
         if (e.cls === "delete") { shadow.delete(key); }
-        else { shadow.delete(key); enqueue(key, { kind: e.kind, id: e.id, cls: "create", el: e.el, z: e.z }); }
+        else { shadow.delete(key); enqueue(key, { kind: e.kind, id: e.id, cls: "create", el: e.el, z: e.z, direct: e.direct }); }
         report("element-missing", "op targeted an absent row", { siteId, id: e.id, kind: e.kind, cls: e.cls });
       } else {
         // no result for this op (malformed response) — requeue to try again
@@ -516,8 +580,11 @@ export function createElementSync(opts = {}) {
     // self-echo that outlived the 15s window — Angle-4 — since anything at/below our max is ours.)
     if (!row.deleted_at && (isOwnRev(row.kind, row.id, rev) || atOrBelowOwnHighWater(row.kind, row.id, rev))) {
       const cur = shadow.get(key);
+      // `stale` when an existing entry's json is KEPT under the bumped rev (the kept json can be an
+      // older copy than the rev now claims — a mixed pairing reconcileSeedRows must never substitute
+      // into a refetch re-seed; NEW-1 hardening). A fresh entry built from row.data is authoritative.
       if (!cur || rev > cur.rev)
-        shadow.set(key, { kind: row.kind, id: row.id, json: cur ? cur.json : (row.data ? stableStringify(row.data) : ""), rev, z: cur ? cur.z : row.z_index });
+        shadow.set(key, { kind: row.kind, id: row.id, json: cur ? cur.json : (row.data ? stableStringify(row.data) : ""), rev, z: cur ? cur.z : row.z_index, ...(cur ? { stale: true } : {}) });
       return { action: "ignore" };
     }
     // A non-tombstone row for an element THIS tab already deleted, at a rev no newer than our delete,
@@ -552,13 +619,21 @@ export function createElementSync(opts = {}) {
         (pendDirty && pendDirty.el && stableStringify(pendDirty.el) === rowJson) ||
         sentMatches(row.kind, row.id, rowJson) // our own committed-but-unacked write echoing back after a transport failure requeued a newer edit (B757)
       );
+      // NEW-1 — a byte-divergent but SEMANTICALLY identical row (another window's re-derived copy,
+      // float noise apart) is not a conflict worth telling anyone about: keep the normal LWW
+      // re-commit (our bytes still land) but skip the remote-while-dirty toast.
+      const semEq = !sameData && rowJson != null && (
+        (pendInflight && pendInflight.el && semanticallyEqual(row.data, pendInflight.el)) ||
+        (pendDirty && pendDirty.el && semanticallyEqual(row.data, pendDirty.el))
+      );
       // A queued identical update can be dropped outright (server already has it); otherwise local data
       // stays on canvas, the commit re-targets the fresh rev (LWW re-commit), and B673 gets the event.
-      shadow.set(key, { kind: row.kind, id: row.id, json: sameData ? rowJson : (shad ? shad.json : ""), rev, z: row.z_index });
+      // `stale` on the kept-json pairing (NEW-1 hardening — see the own-echo branch above).
+      shadow.set(key, { kind: row.kind, id: row.id, json: sameData ? rowJson : (shad ? shad.json : ""), rev, z: row.z_index, ...(sameData ? {} : { stale: true }) });
       if (sameData) {
         const q = dirty.get(key);
         if (q && q.el && stableStringify(q.el) === rowJson) dirty.delete(key); // server already has it
-      } else {
+      } else if (!semEq) {
         onEvent({ type: "remote-while-dirty", id: row.id, kind: row.kind, remote: row, authoredRecently: isRecent(row.kind, row.id) });
       }
       return { action: "ignore" };
@@ -580,6 +655,17 @@ export function createElementSync(opts = {}) {
     if (!row.data) return { action: "ignore" }; // malformed live row (CHECK should prevent this)
     clearDeleteFloor(key); // a genuine higher-rev row (another session re-created it) → element is live again
     const upJson = stableStringify(row.data);
+    // NEW-1 — before the shadow adopts the row, test whether it is SEMANTICALLY identical to what
+    // the canvas already shows (the pre-adopt shadow json): another same-account window's
+    // rows→canvas→re-derive round trip commits byte-divergent copies of cascade-derived elements
+    // (paving / sidewalks / parking) whose geometry is unchanged. Those pass the byte guards
+    // (recentSent can't match bytes we never produced) and — because the cascade used to stamp
+    // `recent` — toasted "you (another window) changed a ⟨paving area⟩ you just edited" in a burst.
+    // Nothing visible differs, so: apply the upsert (bytes converge to the server's copy), no event.
+    let semEqShadow = false;
+    if (shad && shad.json && !shad.stale) {
+      try { semEqShadow = semanticallyEqual(row.data, JSON.parse(shad.json)); } catch (_) { semEqShadow = false; }
+    }
     shadow.set(key, { kind: row.kind, id: row.id, json: upJson, rev, z: row.z_index });
     // Our OWN just-committed edit can echo back at a rev ABOVE the shadow when a refetch-replace
     // re-seeded the shadow from a snapshot OLDER than that commit (the refetch's fetch was issued
@@ -592,7 +678,7 @@ export function createElementSync(opts = {}) {
     // the upsert still runs so a stale-seed canvas re-trues. A genuine foreign write carries DIFFERENT
     // data (→ still toasts per the B673 matrix); a byte-identical write is not a conflict anyway (same
     // LWW result, nothing lost).
-    if (!sentMatches(row.kind, row.id, upJson))
+    if (!sentMatches(row.kind, row.id, upJson) && !semEqShadow)
       onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
     return { action: "upsert", kind: row.kind, id: row.id, el: row.data, row };
   }
