@@ -67,6 +67,17 @@ export const nthWeekdayOfMonth = (y, m, weekday, setpos) => {
   const d = nthWeekday(y, m, setpos, weekday);
   return (d.getMonth() === m - 1) ? fdLocal(d) : null;
 };
+// nthWeekdayOnOrAfter (B845): the nth `weekday` (0=Sun..6=Sat) of month m/year y whose day-of-month is
+// >= dom, as an ISO date. The "Tuesday after the first Monday" primitive — Election Day is the 1st Tuesday
+// on/after Nov 2 (NOT "1st Tuesday of November", which lands a week early whenever Nov 1 is a Tuesday,
+// e.g. 2033/2039). Same local-midnight idiom as nthWeekday (no UTC slip). Null when the nth such
+// occurrence overflows the month; dom<1/NaN clamps to day 1.
+export const nthWeekdayOnOrAfter = (y, m, weekday, dom, nth = 1) => {
+  const d = new Date(y, m - 1, Math.max(1, Math.trunc(dom) || 1));
+  while (d.getDay() !== weekday) d.setDate(d.getDate() + 1);
+  if (nth > 1) d.setDate(d.getDate() + 7 * (nth - 1));
+  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
+};
 export const meetingDatesInRange = (body, from, to) => {
   if (!body || !from || !to || from > to) return [];
   const set = new Set();
@@ -95,7 +106,9 @@ export const meetingDatesInRange = (body, from, to) => {
         if (months && !months.includes(m)) continue;
         if (interval > 1 && ((((y * 12 + (m - 1) - anchorYM) % interval) + interval) % interval) !== 0) continue;
         setpos.forEach(sp => {
-          const iso = nthWeekdayOfMonth(y, m, r.weekday, sp);
+          const iso = (r.onOrAfter != null)
+            ? nthWeekdayOnOrAfter(y, m, r.weekday, r.onOrAfter, sp > 0 ? sp : 1)
+            : nthWeekdayOfMonth(y, m, r.weekday, sp);
           if (iso && iso >= from && iso <= to && inWin(iso, r)) set.add(iso);
         });
       }
