@@ -71,3 +71,18 @@ export function findBySiteId(projects, siteId) {
   if (siteId == null || !Array.isArray(projects)) return null;
   return projects.find((p) => p && p.linkedSiteId != null && p.linkedSiteId === siteId) || null;
 }
+
+// True while a routed site's linked schedule is NOT yet the iframe's ACTIVE one — i.e. the shell
+// must (re)post planar:nav-select-by-site so the grid follows the route. Stays true when the link
+// isn't resolvable yet (the embed's projects haven't loaded), so the carry-in keeps driving until
+// the iframe actually has the data to switch; goes false only once the active schedule equals the
+// link. This is what makes the carry-in self-heal the boot race where the FIRST select is dropped
+// before the embed's cloud data loads (the B644 null-data guard) and — pre-fix — was never retried,
+// stranding the grid on the previously-active schedule while the crumb correctly named the routed
+// one (the route↔grid divergence this fixes). Pure + null-safe; no siteId → nothing to carry.
+export function needsScheduleCarryIn(projects, siteId, activeId) {
+  if (siteId == null) return false;
+  const linked = findBySiteId(projects, siteId);
+  if (linked && linked.id === activeId) return false;
+  return true;
+}
