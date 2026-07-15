@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-15 @ `c9f17f2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-15 @ `2eb7477` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_251 source files mapped._
+_252 source files mapped._
 
 ## infra
 
@@ -471,6 +471,8 @@ _251 source files mapped._
 
 ## Doc Review
 
+- **`src/workspaces/doc-review/CompareView.jsx`** — Revision-compare overlay (B471 Phase 1): self-contained pan/zoom canvas painting the color-wash of what changed between two PDF revisions (removed/added tinted, unchanged dimmed) + an auto change-list you click to jump change-to-change; wraps the pure compareRegister/rasterCompare engine
+  - _exports_: `default (CompareView)`
 - **`src/workspaces/doc-review/components/ReviewsBar.jsx`** — Reviews filing dropdown: link to project, set discipline/item/revision/date/name, and open or delete saved reviews
   - _exports_: `default (ReviewsBar)`
 - **`src/workspaces/doc-review/DocReview.jsx`** — Document Review core: PDF.js viewer with immutable backdrop, measure/redline tools on an SVG overlay, calibrate, undo, cloud persistence
