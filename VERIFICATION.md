@@ -68,6 +68,18 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+
+### V328 — B837: opening / switching / closing a left-rail panel no longer flashes the aerial or jumps the drawing ⏳ **LIVE APP (planyr.io), a site WITH the geo aerial ON — ideally a HEAVY real project** (timing/state + zoom-/data-density render class — the one-FRAME aerial tile-wipe and the multi-frame drawing skip on a heavy project aren't headless-observable; the aerial needs real tiles the sandbox egress-blocks)  *(minted V328 via `npm run next-id -- --against-main`; references **B837**; branch `claude/left-rail-panel-flash-jump-f7shz3`; `Cadence: once`)*
+- **Verified here (sandbox, 2026-07-15):** `npm run build` green; full suite green; `eslint` clean on `SitePlanner.jsx`; new e2e `e2e/panel-toggle-viewport.spec.js` green (logged-out, seeded 1-parcel site) — a fixed feet point holds its viewport x to **0px** across open / switch→Analysis / switch→Yield / close, zero page errors. The geometric JUMP is fully proven headless; the fix reads the real `wrapRef.offsetLeft` in a `useLayoutEffect` (same-paint) and folds the resize `invalidateSize` into B65's ghost.
+- **Pending live steps (planyr.io, aerial ON):**
+  1. Open a real site with the aerial basemap **ON** and (ideally) a lot of drawn geometry (a heavy test-fit).
+  2. Click a left-rail icon (Parcel) to OPEN the panel from closed → the aerial must **NOT** flash/blank, and the drawing/parcels must **NOT** skip sideways (not even for a frame), staying locked on their true parcels.
+  3. Click another rail icon (Analysis / Yield / References / Standards) to SWITCH panel→panel → no flash, no jump.
+  4. Click the active icon to CLOSE → no flash, no jump.
+  5. Drag the panel's right-edge divider to resize the rail while open → the drawing stays pinned to the aerial as the panel widens/narrows (B837 now compensates a live rail-resize too).
+  6. Narrow (<760px): the panel OVERLAYS — confirm it steals no width and the drawing doesn't shift (B556 intact); a floating/detached panel likewise doesn't pan the map (B717 intact).
+- On pass: move B837 from ⏳ Verify → BACKLOG-DONE, and this entry → VERIFICATION-DONE.
+
 ### V327 — B255: Scheduler keyboard indent/outdent behave identically to the right-click menu, and double-click column auto-size fits in BOTH the grid and master views ⏳ **LIVE APP (planyr.io) — Project Scheduling tab** (the scheduler is a standalone `public/sequence/index.html` served verbatim; its CDN-React/Babel is egress-blocked in the sandbox, so it can't be driven headless)  *(V327; B255; branch `claude/next-backlog-item-2lots0`; `Cadence: once`)*
 - **Verified here (sandbox, 2026-07-15):** static equivalence — after the refactor the keyboard Alt+Shift+Right/Left handlers call the SAME `indentTaskById`/`outdentTaskById` the right-click menu already calls (one source per direction; divergence is impossible), and both `autoSizeCol`/`autoSizeMCol` call the shared `measuredColWidth` while keeping their own column-value switch + floors (36/40). `scratchpad/check-scheduler.mjs` transforms both `<script type="text/babel">` blocks through esbuild (JSX) clean before + after. lint 0 · 3985 tests · build green · MAP.md regenerated.
 - **Pending live steps (Project Scheduling on planyr.io):** (1) select a task, press **Alt+Shift+Right** (indent) then **Alt+Shift+Left** (outdent) → the row nests / promotes exactly as the right-click **Indent / Outdent** menu does on the same row; (2) in the per-project grid, **double-click a column header's resize edge** → the column auto-fits its widest cell/header; (3) switch to the **master (all-projects) view** and double-click a column edge there → it auto-fits too. No visual or behavioral change vs. before is expected — this is a pure dedup.
