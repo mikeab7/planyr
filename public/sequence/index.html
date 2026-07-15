@@ -4690,7 +4690,8 @@ function App() {
   const didInitialLoad = useRef(false);
   const [formatOpen, setFormatOpen] = useState(false);
   const [settingsOpen,    setSettingsOpen]    = useState(false);
-  const [settingsSection, setSettingsSection] = useState(null);   // B844 — pre-expand a Settings section (e.g. "meetings")
+  const [settingsSection, setSettingsSection] = useState(null);   // B844 — pre-expand a Settings section
+  const [meetingCalOpen,  setMeetingCalOpen]  = useState(false);  // the dedicated Meeting-calendars editor window
   const [automationOpen,  setAutomationOpen]  = useState(false);
   const [contactsOpen,    setContactsOpen]    = useState(false);
   const [historyOpen,     setHistoryOpen]     = useState(false);
@@ -4698,9 +4699,14 @@ function App() {
   const [reviewRows,      setReviewRows]      = useState([]);
   const [reviewLoading,   setReviewLoading]   = useState(true);
   const [reviewIdx,       setReviewIdx]       = useState(0);
-  // B844 — open Settings to a specific section on demand (e.g. an empty "Meeting" cell → Meeting calendars).
+  // B844 — deep-link listener (e.g. an empty "Meeting" cell → set up). The "meetings" detail now
+  // opens the dedicated Meeting-calendars window; any other section still opens Settings to it.
   useEffect(() => {
-    const openTo = e => { setSettingsSection(e?.detail || null); setSettingsOpen(true); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false); };
+    const openTo = e => {
+      if ((e?.detail || null) === "meetings") { setMeetingCalOpen(true); setSettingsOpen(false); }
+      else { setSettingsSection(e?.detail || null); setSettingsOpen(true); }
+      setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false);
+    };
     document.addEventListener("planar-open-settings", openTo);
     return () => document.removeEventListener("planar-open-settings", openTo);
   }, []);
@@ -5123,9 +5129,9 @@ function App() {
   useEffect(() => {
     overlayOpenRef.current = !!(successorPrompt || notesCtx || projCtx || taskCtx || renameModal ||
       pdfExportOpen || formatOpen || settingsOpen || automationOpen || contactsOpen || historyOpen ||
-      reviewOpen);
+      reviewOpen || meetingCalOpen);
   }, [successorPrompt, notesCtx, projCtx, taskCtx, renameModal, pdfExportOpen, formatOpen, settingsOpen,
-      automationOpen, contactsOpen, historyOpen, reviewOpen]);
+      automationOpen, contactsOpen, historyOpen, reviewOpen, meetingCalOpen]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -6977,7 +6983,18 @@ function App() {
         </div>
       </div>
 
-      {settingsOpen    && <SettingsPanel    data={data} setData={setData} onClose={()=>setSettingsOpen(false)} openFile={openFile} fileLinked={fileLinked} initialSection={settingsSection} />}
+      {settingsOpen    && <SettingsPanel    data={data} setData={setData} onClose={()=>setSettingsOpen(false)} openFile={openFile} fileLinked={fileLinked} initialSection={settingsSection} onOpenMeetingCalendars={()=>setMeetingCalOpen(true)} />}
+      {meetingCalOpen  && <MeetingCalendarsModal
+        projName={proj?.name}
+        bodies={(data.projects && data.projects[data.aPid] && data.projects[data.aPid].meetingBodies) || []}
+        onChange={next => setData(d => {
+          const p = d.projects && d.projects[d.aPid];
+          if (!p) return d;
+          const nd = {...d, projects:{...d.projects, [d.aPid]:{...p, meetingBodies: next}}};
+          rebuildMeetingBodyIndex(nd);   // B816 — keep the global index fresh so the next cascade uses the edited cadence
+          return nd;
+        })}
+        onClose={()=>setMeetingCalOpen(false)} />}
       {formatOpen      && <FormatPanel      data={data} setData={setData} onClose={()=>setFormatOpen(false)} />}
       {automationOpen  && <AutomationPanel  data={data} setData={setData} onClose={()=>setAutomationOpen(false)} />}
       {contactsOpen    && <ContactsPanel    data={data} setData={setData} onClose={()=>setContactsOpen(false)} />}
@@ -7034,7 +7051,7 @@ function App() {
             targets.forEach(id => updateTask(id, {meetingBound:false, meetingBodyId:null, pinnedMeetingDate:undefined}, taskCtx.projId));
             setTaskCtx(null);
           }}
-          onAddMeetingCalendar={() => { setSettingsSection("meetings"); setSettingsOpen(true); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false); setTaskCtx(null); }}
+          onAddMeetingCalendar={() => { setMeetingCalOpen(true); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false); setTaskCtx(null); }}
           onDelete={() => {
             // Right-click inside a multi-row selection deletes the whole selection
             const ids = fullRowSelIds();
@@ -9286,7 +9303,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       const cur = task.meetingBound ? (task.meetingBodyId || "") : "";
       if (!bodies.length) return (
         <span style={{...s,justifyContent:"center",color:"var(--amber)",fontSize:10,cursor:"pointer",textDecoration:"underline",textUnderlineOffset:2}}
-          title="Click to set up meeting calendars (Settings ⚙ → Meeting calendars)"
+          title="Click to set up meeting calendars"
           onClick={e => { e.stopPropagation(); document.dispatchEvent(new CustomEvent("planar-open-settings", {detail:"meetings"})); }}>set up…</span>);
       return (
         <span style={{...s,padding:0}} data-picker-cell={`meeting-${task.id}`}>
@@ -10043,12 +10060,15 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
   );
 }
 
-// ── SettingsPanel ────────────────────────────────────────
-// ── B815 (NEW-1) — Meeting-calendars editor (per-project proj.meetingBodies) ─────────────
-// Module-scope (MODULE-SCOPE-COMPONENTS): defining this inside SettingsPanel would make it a new
-// component type every render → React remounts it → its text inputs lose focus mid-keystroke.
-// Inline editing only (no modal — owner rule). Live-previews the next 6 resolved meeting dates +
-// agenda deadlines so a wrong recurrence rule is visible immediately, not three tasks downstream.
+// ── Meeting calendars — dedicated editor window (B815/B845 editor, promoted out of Settings) ──
+// B815 built this editor inside the 300px Settings popover; the owner called that UI out
+// (2026-07-15) — the dense editor (presets, multi-rule cadence cards, 12 month chips, the
+// next-6-meetings preview) needs real width. Now a centered master-detail window: left rail =
+// the project's bodies, right pane = the selected body's editor. Module-scope
+// (MODULE-SCOPE-COMPONENTS): an inner definition would remount per render and drop input focus.
+// Fully controlled: `bodies` in, `onChange(next)` out — the caller owns the setData write path
+// (and MUST call rebuildMeetingBodyIndex, see the render site). Live-previews the next 6
+// resolved meeting dates + agenda deadlines so a wrong rule is visible immediately.
 const MB_WD = [{v:0,l:"Sun"},{v:1,l:"Mon"},{v:2,l:"Tue"},{v:3,l:"Wed"},{v:4,l:"Thu"},{v:5,l:"Fri"},{v:6,l:"Sat"}];
 const MB_SETPOS = [{v:1,l:"1st"},{v:2,l:"2nd"},{v:3,l:"3rd"},{v:4,l:"4th"},{v:-1,l:"Last"}];
 const MB_MONTHS = [{v:1,l:"Jan"},{v:2,l:"Feb"},{v:3,l:"Mar"},{v:4,l:"Apr"},{v:5,l:"May"},{v:6,l:"Jun"},{v:7,l:"Jul"},{v:8,l:"Aug"},{v:9,l:"Sep"},{v:10,l:"Oct"},{v:11,l:"Nov"},{v:12,l:"Dec"}];
@@ -10069,158 +10089,229 @@ const newMeetingBody = () => ({
   blackoutDates: [], extraDates: [], sourceUrl: "", verifiedOn: "",
 });
 const mbFmt = iso => { if(!iso) return ""; const d=new Date(iso+"T12:00:00"); return isNaN(d)?"":d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); };
-function MeetingCalendarsEditor({ bodies, onChange }) {
-  const [openId, setOpenId] = useState(null);
+function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
   const list = Array.isArray(bodies) ? bodies : [];
+  const [selId, setSelId] = useState(() => (list[0] && list[0].id) || null);
+  const sel = list.find(b => b.id === selId) || null;
+  // NotesModal-style close hardening: a text-selection drag that ENDS on the backdrop must not
+  // dismiss (this editor is mostly text fields), and Escape closes via a capture-phase listener
+  // so the grid's own key handlers never see it.
+  const backdropRef = useRef(null);
+  const downOnBackdropRef = useRef(false);
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
   const patch = (id, fields) => onChange(list.map(b => b.id === id ? { ...b, ...fields } : b));
-  // B845 — a body's cadence is now a LIST of recurrence rules (was single rule[0]). patchRuleAt edits one
-  // rule in place; addRuleAt/removeRuleAt/setRules manage the list (setRules powers the one-click presets).
+  // B845 — a body's cadence is a LIST of recurrence rules. patchRuleAt edits one rule in place;
+  // addRuleAt/removeRuleAt/setRules manage the list (setRules powers the one-click presets).
   const rulesOf = b => (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ freq:"monthly", weekday:2, setpos:[2,4] }];
   const patchRuleAt = (id, idx, rf) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).map((r, i) => i === idx ? { ...r, ...rf } : r) } : b));
   const addRuleAt = id => onChange(list.map(b => b.id === id ? { ...b, recurrence: [...rulesOf(b), { freq:"monthly", weekday:2, setpos:[1] }] } : b));
   const removeRuleAt = (id, idx) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).filter((_, i) => i !== idx) } : b));
   const setRules = (id, rules) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rules.map(r => ({ ...r, setpos: Array.isArray(r.setpos) ? [...r.setpos] : r.setpos, months: Array.isArray(r.months) ? [...r.months] : r.months })) } : b));
   const patchLead = (id, lf) => onChange(list.map(b => b.id === id ? { ...b, agendaLead: { ...(b.agendaLead||{}), ...lf } } : b));
-  const add = () => { const b = newMeetingBody(); onChange([...list, b]); setOpenId(b.id); };
-  const remove = id => { if(openId===id) setOpenId(null); onChange(list.filter(b => b.id !== id)); };
-  const inp = { fontSize:11, padding:"3px 6px", border:"1px solid var(--bd2)", borderRadius:4, background:"#fff", color:"var(--txt)", width:"100%", boxSizing:"border-box", fontFamily:"'Inter',system-ui,sans-serif" };
-  const lbl = { fontSize:10, fontWeight:600, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".05em", margin:"7px 0 3px", display:"block" };
+  const add = () => { const b = newMeetingBody(); onChange([...list, b]); setSelId(b.id); };
+  const remove = id => { const rest = list.filter(b => b.id !== id); onChange(rest); if (selId === id) setSelId((rest[0] && rest[0].id) || null); };
+  const inp = { fontSize:12, padding:"5px 8px", border:"1px solid var(--bd2)", borderRadius:5, background:"#fff", color:"var(--txt)", width:"100%", boxSizing:"border-box", fontFamily:"'Inter',system-ui,sans-serif" };
+  const lbl = { fontSize:10, fontWeight:600, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".05em", margin:"0 0 4px", display:"block" };
+  const sect = { fontSize:10, fontWeight:700, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".07em", margin:"18px 0 8px", paddingBottom:5, borderBottom:"1px solid var(--bd)" };
   const seg = (opts, val, on) => (
-    <div style={{display:"flex",border:"1px solid var(--bd2)",borderRadius:4,overflow:"hidden",flexShrink:0}}>
-      {opts.map(o => <span key={String(o.v)} onClick={()=>on(o.v)} style={{padding:"3px 8px",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",background:val===o.v?"var(--amber)":"transparent",color:val===o.v?"#fff":"var(--mut)"}}>{o.l}</span>)}
+    <div style={{display:"flex",border:"1px solid var(--bd2)",borderRadius:5,overflow:"hidden",flexShrink:0}}>
+      {opts.map(o => <span key={String(o.v)} onClick={()=>on(o.v)} style={{padding:"4px 10px",fontSize:11.5,cursor:"pointer",whiteSpace:"nowrap",background:val===o.v?"var(--amber)":"transparent",color:val===o.v?"#fff":"var(--mut)"}}>{o.l}</span>)}
     </div>
   );
   const today = fdLocal(new Date());
   const preview = b => meetingDatesInRange(b, today, addD(today, 366*2)).slice(0, 6);
-  return (
-    <div style={{paddingBottom:6}}>
-      <div style={{fontSize:10,color:"var(--mut)",lineHeight:1.45,margin:"0 0 8px"}}>
-        External decision bodies (city council, P&amp;Z, commissioners court) whose approvals only happen on a cadence — stored per project. Bind a task to one and its hearing date snaps to the calendar.
-      </div>
-      {list.length === 0 && <div style={{fontSize:11,color:"var(--mut)",fontStyle:"italic",padding:"2px 0 8px"}}>No meeting bodies yet.</div>}
-      {list.map(b => {
-        const rules = rulesOf(b);
-        const lead = b.agendaLead || { type:"offset", n:10, unit:"business" };
-        const isOpen = openId === b.id;
-        const dates = isOpen ? preview(b) : [];
-        return (
-          <div key={b.id} style={{border:"1px solid var(--bd)",borderRadius:6,marginBottom:6,overflow:"hidden"}}>
-            <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 8px",background:"var(--surf)"}}>
-              <span onClick={()=>setOpenId(isOpen?null:b.id)} style={{cursor:"pointer",fontSize:10,color:"var(--mut)",transform:isOpen?"rotate(90deg)":"none",transition:"transform .15s",flexShrink:0}}>&#9656;</span>
-              <input value={b.name||""} placeholder="Body name (e.g. Baytown city council)" onChange={e=>patch(b.id,{name:e.target.value})} style={{...inp,flex:1,fontWeight:600}} />
-              <span onClick={()=>remove(b.id)} title="Remove" style={{cursor:"pointer",color:"var(--mut)",fontSize:14,padding:"0 2px",flexShrink:0}}>&#x2715;</span>
+  const detail = b => {
+    const rules = rulesOf(b);
+    const lead = b.agendaLead || { type:"offset", n:10, unit:"business" };
+    const dates = preview(b);
+    return (
+      <div style={{padding:"16px 20px 20px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:12,alignItems:"end"}}>
+          <div>
+            <label style={lbl}>Body name</label>
+            <input value={b.name||""} placeholder="e.g. Baytown city council" onChange={e=>patch(b.id,{name:e.target.value})} style={{...inp,fontWeight:600}} />
+          </div>
+          <div>
+            <label style={lbl}>Jurisdiction</label>
+            <input value={b.jurisdiction||""} placeholder="e.g. Baytown, TX" onChange={e=>patch(b.id,{jurisdiction:e.target.value})} style={inp} />
+          </div>
+          <button className="btn" onClick={()=>remove(b.id)} title="Remove this meeting body" style={{fontSize:11,padding:"5px 10px",color:"var(--danger,#d83a3a)"}}>Remove</button>
+        </div>
+
+        <div style={sect}>Meets</div>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+          <span style={{fontSize:11,color:"var(--mut)"}}>Presets:</span>
+          {MB_PRESETS.map(p => <button key={p.l} className="btn" title={p.title} onClick={()=>setRules(b.id,p.rules)} style={{fontSize:11,padding:"4px 10px"}}>{p.l}</button>)}
+        </div>
+        {rules.map((rule, ri) => {
+          const setpos = Array.isArray(rule.setpos) ? rule.setpos : (rule.setpos!=null ? [rule.setpos] : []);
+          const months = Array.isArray(rule.months) ? rule.months : [];
+          return (
+            <div key={ri} style={{border:"1px solid var(--bd)",borderRadius:6,padding:"10px 12px",marginBottom:8,background:"var(--surf)"}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                {seg([{v:"monthly",l:"Monthly"},{v:"weekly",l:"Weekly"}], rule.freq, v=>patchRuleAt(b.id,ri,{freq:v}))}
+                <span style={{fontSize:11,color:"var(--mut)"}}>on</span>
+                <select value={rule.weekday} onChange={e=>patchRuleAt(b.id,ri,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
+                  {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+                </select>
+                {rules.length>1 && <span onClick={()=>removeRuleAt(b.id,ri)} title="Remove this cadence rule" style={{marginLeft:"auto",cursor:"pointer",color:"var(--mut)",fontSize:14,padding:"0 2px",flexShrink:0}}>&#x2715;</span>}
+              </div>
+              {rule.freq==="monthly" && (<>
+                <div style={{display:"flex",gap:5,marginTop:10,alignItems:"center",flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,color:"var(--mut)",width:52,flexShrink:0}}>Weeks</span>
+                  {MB_SETPOS.map(sp=>{
+                    const on = setpos.includes(sp.v);
+                    return <span key={sp.v} onClick={()=>{ const ns = on ? setpos.filter(x=>x!==sp.v) : [...setpos,sp.v].sort((a,z)=>(a<0?99:a)-(z<0?99:z)); patchRuleAt(b.id,ri,{setpos:ns.length?ns:[sp.v]}); }}
+                      style={{padding:"4px 11px",fontSize:11.5,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)"}}>{sp.l}</span>;
+                  })}
+                </div>
+                <div style={{display:"flex",gap:5,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,color:"var(--mut)",width:52,flexShrink:0}}>Months</span>
+                  {MB_MONTHS.map(mo=>{
+                    const on = months.includes(mo.v);
+                    return <span key={mo.v} onClick={()=>{ const ns = on ? months.filter(x=>x!==mo.v) : [...months,mo.v].sort((a,z)=>a-z); patchRuleAt(b.id,ri,{months: ns.length?ns:undefined}); }}
+                      style={{padding:"4px 8px",fontSize:11,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)"}}>{mo.l}</span>;
+                  })}
+                  <span style={{fontSize:10,color:"var(--mut)",flexBasis:"100%",paddingLeft:57}}>Blank = every month · pick one month for a yearly cadence</span>
+                </div>
+                <label style={{fontSize:11.5,color:"var(--txt)",display:"flex",alignItems:"center",gap:6,cursor:"pointer",marginTop:9,flexWrap:"wrap"}}>
+                  <input type="checkbox" checked={rule.onOrAfter!=null} onChange={e=>patchRuleAt(b.id,ri,{onOrAfter: e.target.checked ? (rule.onOrAfter??2) : undefined})} />
+                  on or after day
+                  <input type="number" min={1} max={31} value={rule.onOrAfter??2} disabled={rule.onOrAfter==null}
+                    onChange={e=>patchRuleAt(b.id,ri,{onOrAfter: Math.min(31, Math.max(1, Math.trunc(+e.target.value)||1))})}
+                    style={{...inp,width:52,opacity:rule.onOrAfter==null?0.5:1}} />
+                  <span style={{color:"var(--mut)",fontSize:10.5}}>e.g. 1st Tue on/after Nov 2 = Election Day</span>
+                </label>
+              </>)}
             </div>
-            {isOpen && (
-              <div style={{padding:"4px 10px 10px"}}>
-                <label style={lbl}>Jurisdiction</label>
-                <input value={b.jurisdiction||""} placeholder="e.g. Baytown, TX" onChange={e=>patch(b.id,{jurisdiction:e.target.value})} style={inp} />
+          );
+        })}
+        <button className="btn" onClick={()=>addRuleAt(b.id)} style={{fontSize:11,padding:"4px 10px"}}>+ Add cadence rule</button>
 
-                <label style={lbl}>Meets</label>
-                <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
-                  {MB_PRESETS.map(p => <button key={p.l} className="btn" title={p.title} onClick={()=>setRules(b.id,p.rules)} style={{fontSize:10,padding:"3px 7px"}}>{p.l}</button>)}
-                </div>
-                {rules.map((rule, ri) => {
-                  const setpos = Array.isArray(rule.setpos) ? rule.setpos : (rule.setpos!=null ? [rule.setpos] : []);
-                  const months = Array.isArray(rule.months) ? rule.months : [];
-                  return (
-                    <div key={ri} style={{border:"1px dashed var(--bd2)",borderRadius:5,padding:"6px 7px",marginBottom:5}}>
-                      <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                        {seg([{v:"monthly",l:"Monthly"},{v:"weekly",l:"Weekly"}], rule.freq, v=>patchRuleAt(b.id,ri,{freq:v}))}
-                        <select value={rule.weekday} onChange={e=>patchRuleAt(b.id,ri,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
-                          {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
-                        </select>
-                        {rules.length>1 && <span onClick={()=>removeRuleAt(b.id,ri)} title="Remove this cadence rule" style={{marginLeft:"auto",cursor:"pointer",color:"var(--mut)",fontSize:13,padding:"0 2px",flexShrink:0}}>&#x2715;</span>}
-                      </div>
-                      {rule.freq==="monthly" && (<>
-                        <div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
-                          {MB_SETPOS.map(sp=>{
-                            const on = setpos.includes(sp.v);
-                            return <span key={sp.v} onClick={()=>{ const ns = on ? setpos.filter(x=>x!==sp.v) : [...setpos,sp.v].sort((a,z)=>(a<0?99:a)-(z<0?99:z)); patchRuleAt(b.id,ri,{setpos:ns.length?ns:[sp.v]}); }}
-                              style={{padding:"3px 8px",fontSize:11,borderRadius:4,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"transparent",color:on?"#fff":"var(--mut)"}}>{sp.l}</span>;
-                          })}
-                        </div>
-                        <label style={{fontSize:11,color:"var(--txt)",display:"flex",alignItems:"center",gap:5,cursor:"pointer",marginTop:7,flexWrap:"wrap"}}>
-                          <input type="checkbox" checked={rule.onOrAfter!=null} onChange={e=>patchRuleAt(b.id,ri,{onOrAfter: e.target.checked ? (rule.onOrAfter??2) : undefined})} />
-                          on or after day
-                          <input type="number" min={1} max={31} value={rule.onOrAfter??2} disabled={rule.onOrAfter==null}
-                            onChange={e=>patchRuleAt(b.id,ri,{onOrAfter: Math.min(31, Math.max(1, Math.trunc(+e.target.value)||1))})}
-                            style={{...inp,width:44,opacity:rule.onOrAfter==null?0.5:1}} />
-                          <span style={{color:"var(--mut)",fontSize:10}}>e.g. Tue on/after Nov 2 = Election Day</span>
-                        </label>
-                        <label style={{...lbl,margin:"7px 0 3px"}}>Only in months <span style={{textTransform:"none",fontWeight:400,letterSpacing:0}}>— blank = every month · pick one for a yearly cadence</span></label>
-                        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                          {MB_MONTHS.map(mo=>{
-                            const on = months.includes(mo.v);
-                            return <span key={mo.v} onClick={()=>{ const ns = on ? months.filter(x=>x!==mo.v) : [...months,mo.v].sort((a,z)=>a-z); patchRuleAt(b.id,ri,{months: ns.length?ns:undefined}); }}
-                              style={{padding:"2px 6px",fontSize:10,borderRadius:4,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"transparent",color:on?"#fff":"var(--mut)"}}>{mo.l}</span>;
-                          })}
-                        </div>
-                      </>)}
-                    </div>
-                  );
-                })}
-                <button className="btn" onClick={()=>addRuleAt(b.id)} style={{fontSize:10,padding:"3px 8px",marginBottom:2}}>+ Add cadence rule</button>
+        <div style={sect}>Agenda deadline</div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          {seg([{v:"offset",l:"Days before"},{v:"weekdayAnchor",l:"Weekday anchor"}], lead.type||"offset", v=>patchLead(b.id,{type:v}))}
+          {(lead.type||"offset")==="offset" ? (<>
+            <input type="number" min={0} value={lead.n??10} onChange={e=>patchLead(b.id,{n:+e.target.value})} style={{...inp,width:60}} />
+            {seg([{v:"business",l:"business"},{v:"calendar",l:"calendar"}], lead.unit||"business", v=>patchLead(b.id,{unit:v}))}
+            <span style={{fontSize:11.5,color:"var(--mut)"}}>days before</span>
+          </>) : (<>
+            <input type="number" min={0} value={lead.weeksBefore??2} onChange={e=>patchLead(b.id,{weeksBefore:+e.target.value})} style={{...inp,width:52}} />
+            <span style={{fontSize:11.5,color:"var(--mut)"}}>weeks before, on</span>
+            <select value={lead.weekday??3} onChange={e=>patchLead(b.id,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
+              {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+            </select>
+          </>)}
+        </div>
+        <div style={{display:"flex",gap:18,marginTop:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+          <div><label style={lbl}>Cutoff time</label>
+            <input value={b.cutoffTime||""} placeholder="12:00 PM" onChange={e=>patch(b.id,{cutoffTime:e.target.value})} style={{...inp,width:100}} /></div>
+          <label style={{fontSize:11.5,color:"var(--txt)",display:"flex",alignItems:"center",gap:6,cursor:"pointer",paddingBottom:6}}>
+            <input type="checkbox" checked={!!b.sameDayFilingAllowed} onChange={e=>patch(b.id,{sameDayFilingAllowed:e.target.checked})} /> Same-day filing OK
+          </label>
+        </div>
 
-                <label style={lbl}>Agenda deadline</label>
-                {seg([{v:"offset",l:"Days before"},{v:"weekdayAnchor",l:"Weekday anchor"}], lead.type||"offset", v=>patchLead(b.id,{type:v}))}
-                {(lead.type||"offset")==="offset" ? (
-                  <div style={{display:"flex",gap:6,alignItems:"center",marginTop:6,flexWrap:"wrap"}}>
-                    <input type="number" min={0} value={lead.n??10} onChange={e=>patchLead(b.id,{n:+e.target.value})} style={{...inp,width:56}} />
-                    {seg([{v:"business",l:"business"},{v:"calendar",l:"calendar"}], lead.unit||"business", v=>patchLead(b.id,{unit:v}))}
-                    <span style={{fontSize:11,color:"var(--mut)"}}>days before</span>
+        <div style={sect}>Exceptions &amp; source</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div>
+            <label style={lbl}>Cancelled / blackout dates</label>
+            <input value={(b.blackoutDates||[]).join(", ")} placeholder="2026-12-22, 2026-12-29" title="Comma-separated YYYY-MM-DD" onChange={e=>patch(b.id,{blackoutDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>Special-called / extra dates</label>
+            <input value={(b.extraDates||[]).join(", ")} placeholder="2026-08-18" title="Comma-separated YYYY-MM-DD" onChange={e=>patch(b.id,{extraDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>Published calendar URL</label>
+            <input value={b.sourceUrl||""} placeholder="https://…/agenda-calendar" onChange={e=>patch(b.id,{sourceUrl:e.target.value})} style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>Verified on</label>
+            <input type="date" value={b.verifiedOn||""} onChange={e=>patch(b.id,{verifiedOn:e.target.value})} style={{...inp,width:"auto"}} />
+          </div>
+        </div>
+
+        <div style={{marginTop:18,background:"var(--surf)",border:"1px solid var(--bd)",borderRadius:8,padding:"10px 14px 12px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:4}}>
+            <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em"}}>Next 6 meetings → file by</span>
+            <span style={{fontSize:10,color: b.verifiedOn ? "var(--mut)" : "var(--warn-text,#b45309)"}}>{b.verifiedOn ? `verified ${mbFmt(b.verifiedOn)}` : "rule-derived, unverified"}</span>
+          </div>
+          {dates.length===0 && <div style={{fontSize:12,color:"var(--mut)",fontStyle:"italic",marginTop:4}}>No dates resolve — check the recurrence rule.</div>}
+          {dates.map(m=>(
+            <div key={m} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",color:"var(--txt)",gap:8,borderTop:"1px dashed var(--bd)"}}>
+              <span style={{fontWeight:500}}>{mbFmt(m)}</span>
+              <span style={{color:"var(--mut)"}}>file by {mbFmt(agendaDeadline(b,m))}{b.cutoffTime?` · ${b.cutoffTime}`:""}</span>
+            </div>
+          ))}
+          {b.sourceUrl && <div style={{marginTop:6}}><a href={b.sourceUrl} target="_blank" rel="noreferrer" style={{fontSize:10.5,color:"var(--amber)"}}>published calendar ↗</a></div>}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div ref={backdropRef}
+      onMouseDown={e => { downOnBackdropRef.current = (e.target === backdropRef.current); }}
+      onClick={e => { const hit = e.target === backdropRef.current && downOnBackdropRef.current; downOnBackdropRef.current = false; if (hit) onClose(); }}
+      style={{position:"fixed",inset:0,background:"rgba(15,23,42,.38)",zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div data-testid="meeting-calendars-modal" onMouseDown={e=>e.stopPropagation()}
+        style={{background:"#fff",border:"1px solid var(--bd2)",borderRadius:10,width:"min(860px,96vw)",height:"min(640px,90vh)",
+          display:"flex",flexDirection:"column",overflow:"hidden",boxShadow:"0 16px 48px rgba(0,0,0,.18)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"12px 18px",borderBottom:"1px solid var(--bd)",flexShrink:0}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:"var(--amber)",letterSpacing:".07em",textTransform:"uppercase",lineHeight:1,marginBottom:2}}>Meeting calendars</div>
+            <div style={{fontSize:14,fontWeight:600,color:"var(--txt)"}}>{projName || "Project"}</div>
+          </div>
+          <div style={{display:"flex",gap:14,alignItems:"center",minWidth:0}}>
+            <span style={{fontSize:10.5,color:"var(--mut)",maxWidth:380,textAlign:"right",lineHeight:1.45}}>External decision bodies (city council, P&amp;Z, commissioners court). Bind a task to one and its hearing date snaps to the body's calendar.</span>
+            <span onClick={onClose} title="Close (Esc)" style={{cursor:"pointer",color:"var(--mut)",fontSize:17,lineHeight:1,flexShrink:0}}>&#x2715;</span>
+          </div>
+        </div>
+        <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+          <div style={{width:216,flexShrink:0,borderRight:"1px solid var(--bd)",display:"flex",flexDirection:"column",background:"var(--surf)"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"8px 0"}}>
+              {list.length===0 && <div style={{fontSize:11,color:"var(--mut)",fontStyle:"italic",padding:"8px 14px"}}>No meeting bodies yet.</div>}
+              {list.map(b => {
+                const isSel = b.id === selId;
+                return (
+                  <div key={b.id} onClick={()=>setSelId(b.id)}
+                    style={{padding:"8px 12px 8px 13px",cursor:"pointer",borderLeft:`3px solid ${isSel?"var(--amber)":"transparent"}`,background:isSel?"#fff":"transparent"}}>
+                    <div style={{fontSize:12,fontWeight:600,color:"var(--txt)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.name || <span style={{color:"var(--mut)",fontStyle:"italic",fontWeight:400}}>Untitled body</span>}</div>
+                    <div style={{fontSize:10,color:"var(--mut)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{cadenceSummary(b)}</div>
                   </div>
-                ) : (
-                  <div style={{display:"flex",gap:6,alignItems:"center",marginTop:6,flexWrap:"wrap"}}>
-                    <input type="number" min={0} value={lead.weeksBefore??2} onChange={e=>patchLead(b.id,{weeksBefore:+e.target.value})} style={{...inp,width:46}} />
-                    <span style={{fontSize:11,color:"var(--mut)"}}>weeks before, on</span>
-                    <select value={lead.weekday??3} onChange={e=>patchLead(b.id,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
-                      {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
-                    </select>
-                  </div>
-                )}
-
-                <div style={{display:"flex",gap:12,marginTop:8,alignItems:"flex-end",flexWrap:"wrap"}}>
-                  <div><label style={{...lbl,margin:"0 0 3px"}}>Cutoff time</label>
-                    <input value={b.cutoffTime||""} placeholder="12:00 PM" onChange={e=>patch(b.id,{cutoffTime:e.target.value})} style={{...inp,width:90}} /></div>
-                  <label style={{fontSize:11,color:"var(--txt)",display:"flex",alignItems:"center",gap:5,cursor:"pointer",paddingBottom:4}}>
-                    <input type="checkbox" checked={!!b.sameDayFilingAllowed} onChange={e=>patch(b.id,{sameDayFilingAllowed:e.target.checked})} /> Same-day filing OK
-                  </label>
+                );
+              })}
+            </div>
+            <div style={{padding:10,borderTop:"1px solid var(--bd)",flexShrink:0}}>
+              <button className="btn" onClick={add} style={{width:"100%",fontSize:11.5,padding:"6px 10px"}}>+ Add meeting body</button>
+            </div>
+          </div>
+          <div style={{flex:1,overflowY:"auto",minWidth:0}}>
+            {sel ? detail(sel) : (
+              <div style={{height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,textAlign:"center",padding:"0 48px"}}>
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--mut)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 21h18"/><path d="M5 21V10M9 21V10M15 21V10M19 21V10"/><path d="M4 10h16"/><path d="M12 3 3 8h18L12 3Z"/>
+                </svg>
+                <div style={{fontSize:13.5,fontWeight:600,color:"var(--txt)"}}>No meeting calendars yet</div>
+                <div style={{fontSize:11.5,color:"var(--mut)",lineHeight:1.55,maxWidth:380}}>
+                  Add an external decision body — a city council, P&amp;Z commission, or commissioners court.
+                  Bind a task to it (right-click the task) and its hearing date snaps to the body's calendar,
+                  with the agenda-filing deadline derived automatically.
                 </div>
-
-                <label style={lbl}>Cancelled / blackout dates (comma-separated YYYY-MM-DD)</label>
-                <input value={(b.blackoutDates||[]).join(", ")} placeholder="2026-12-22" onChange={e=>patch(b.id,{blackoutDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
-                <label style={lbl}>Special-called / extra dates</label>
-                <input value={(b.extraDates||[]).join(", ")} placeholder="2026-08-18" onChange={e=>patch(b.id,{extraDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
-
-                <label style={lbl}>Source URL</label>
-                <input value={b.sourceUrl||""} placeholder="https://…/agenda-calendar" onChange={e=>patch(b.id,{sourceUrl:e.target.value})} style={inp} />
-                <label style={lbl}>Verified on</label>
-                <input type="date" value={b.verifiedOn||""} onChange={e=>patch(b.id,{verifiedOn:e.target.value})} style={{...inp,width:"auto"}} />
-
-                <div style={{marginTop:10,paddingTop:8,borderTop:"1px dashed var(--bd)"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".05em"}}>Next 6 meetings → file by</span>
-                    <span style={{fontSize:9,color: b.verifiedOn ? "var(--mut)" : "var(--warn-text)"}}>{b.verifiedOn ? `verified ${mbFmt(b.verifiedOn)}` : "rule-derived, unverified"}</span>
-                  </div>
-                  {dates.length===0 && <div style={{fontSize:11,color:"var(--mut)",fontStyle:"italic",marginTop:4}}>No dates resolve — check the recurrence rule.</div>}
-                  {dates.map(m=>(
-                    <div key={m} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"2px 0",color:"var(--txt)",gap:8}}>
-                      <span style={{fontWeight:500}}>{mbFmt(m)}</span>
-                      <span style={{color:"var(--mut)"}}>file by {mbFmt(agendaDeadline(b,m))}{b.cutoffTime?` · ${b.cutoffTime}`:""}</span>
-                    </div>
-                  ))}
-                  {b.sourceUrl && <div style={{marginTop:5}}><a href={b.sourceUrl} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--amber)"}}>published calendar ↗</a></div>}
-                </div>
+                <button className="btn" onClick={add} style={{fontSize:12,padding:"7px 14px",marginTop:4}}>+ Add meeting body</button>
               </div>
             )}
           </div>
-        );
-      })}
-      <button className="btn" onClick={add} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,padding:"5px 11px",marginTop:2}}>+ Add meeting body</button>
+        </div>
+      </div>
     </div>
   );
 }
-function SettingsPanel({data, setData, onClose, openFile, fileLinked, initialSection}) {
+function SettingsPanel({data, setData, onClose, openFile, fileLinked, initialSection, onOpenMeetingCalendars}) {
   const s = data.settings || DEFAULT_SETTINGS;
   const upd = patch => setData(d => ({...d, settings:{...d.settings,...patch}}));
   const updHol = (k, v) => setData(d => {
@@ -10365,15 +10456,14 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked, initialSec
 
         <SectionHdr id="meetings" title="Meeting calendars" />
         {open.meetings && (
-          <MeetingCalendarsEditor
-            bodies={(data.projects && data.projects[data.aPid] && data.projects[data.aPid].meetingBodies) || []}
-            onChange={next => setData(d => {
-              const p = d.projects && d.projects[d.aPid];
-              if (!p) return d;
-              const nd = {...d, projects:{...d.projects, [d.aPid]:{...p, meetingBodies: next}}};
-              rebuildMeetingBodyIndex(nd);   // B816 — keep the global index fresh so the next cascade uses the edited cadence
-              return nd;
-            })} />
+          <div style={{paddingBottom:8}}>
+            <div style={{fontSize:10,color:"var(--mut)",lineHeight:1.45,margin:"0 0 8px"}}>
+              External decision bodies (city council, P&amp;Z, commissioners court) whose approvals only happen on a cadence — stored per project. Edited in their own window.
+            </div>
+            <button className="btn" onClick={()=>{ onOpenMeetingCalendars && onOpenMeetingCalendars(); onClose(); }} style={{fontSize:11,padding:"5px 11px"}}>
+              {(() => { const n = ((data.projects && data.projects[data.aPid] && data.projects[data.aPid].meetingBodies) || []).length; return n ? `Open Meeting calendars (${n}) ↗` : "Set up Meeting calendars ↗"; })()}
+            </button>
+          </div>
         )}
 
         <SectionHdr id="schedule" title="Schedule" />
