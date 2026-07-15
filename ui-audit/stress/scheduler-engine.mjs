@@ -153,7 +153,7 @@ export const normPreds = arr => {
   if (!Array.isArray(arr)) return [];
   return arr.map(x => {
     if (x === null || x === undefined) return null;
-    if (typeof x === "object") return {id: x.id, type: (x.type||"FS").toUpperCase(), lag: x.lag||0};
+    if (typeof x === "object") return {id: x.id, type: (x.type||"FS").toUpperCase(), lag: x.lag||0, ...(x.lagUnit === "calendar" ? {lagUnit: "calendar"} : {})};
     if (typeof x === "number" && !isNaN(x)) return {id: x, type: "FS", lag: 0};
     return null;
   }).filter(Boolean);
@@ -163,9 +163,12 @@ export const parsePreds = raw => {
   if (!str) return [];
   return str.split(/[,;]/).map(p => {
     p = p.trim(); if (!p) return null;
-    const m = p.match(/^(\d+)\s*(FS|FF|SS|SF)?\s*([+-]\s*\d+)?\s*d?$/i);
+    // unit suffix: "cd" = calendar days, "d"/none = working days (default). Only meaningful when lag ≠ 0.
+    const m = p.match(/^(\d+)\s*(FS|FF|SS|SF)?\s*([+-]\s*\d+)?\s*(cd|d)?$/i);
     if (!m) return null;
-    return {id: parseInt(m[1]), type: (m[2]||"FS").toUpperCase(), lag: m[3] ? parseInt(m[3].replace(/\s/g,"")) : 0};
+    const lag = m[3] ? parseInt(m[3].replace(/\s/g,"")) : 0;
+    const cal = lag !== 0 && /^cd$/i.test(m[4] || "");
+    return {id: parseInt(m[1]), type: (m[2]||"FS").toUpperCase(), lag, ...(cal ? {lagUnit: "calendar"} : {})};
   }).filter(Boolean);
 };
 // Validate a proposed predecessor list for task `id` (faithful copy from index.html):
@@ -195,14 +198,17 @@ export const validatePredEdit = (tasks, id, parsed) => {
 };
 export const constrainedStartFrom = (pred, dep, taskDur) => {
   const lag = dep.lag || 0;
+  // The LAG counts calendar days (addD) when lagUnit === "calendar", else working days (addBD).
+  // The FS "next business day" base step stays business either way (split from the lag).
+  const addLag = (base, n) => dep.lagUnit === "calendar" ? addD(base, n) : addBD(base, n);
   switch ((dep.type||"FS").toUpperCase()) {
-    case "FS": return addBD(pred.end, 1 + lag);
-    case "SS": return addBD(pred.start, lag);
-    case "FF": { const cEnd = addBD(pred.end, lag);
+    case "FS": return addLag(addBD(pred.end, 1), lag);
+    case "SS": return addLag(pred.start, lag);
+    case "FF": { const cEnd = addLag(pred.end, lag);
                  return taskDur <= 1 ? cEnd : addBD(cEnd, 1 - taskDur); }
-    case "SF": { const cEnd = addBD(pred.start, lag);
+    case "SF": { const cEnd = addLag(pred.start, lag);
                  return taskDur <= 1 ? cEnd : addBD(cEnd, 1 - taskDur); }
-    default:   return addBD(pred.end, 1 + lag);
+    default:   return addLag(addBD(pred.end, 1), lag);
   }
 };
 export const calcEnd = (start, dur) => !start ? "" : dur === 0 ? start : addBD(start, Math.max(0, dur - 1));

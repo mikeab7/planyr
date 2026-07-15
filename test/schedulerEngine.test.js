@@ -136,6 +136,24 @@ describe("parsePreds — hostile predecessor strings never throw", () => {
   it("never throws on null/objects/numbers", () => {
     for (const x of [null, undefined, 42, {}, "", "-3", "2FS+"]) expect(() => E.parsePreds(x)).not.toThrow();
   });
+  it("a 'cd' suffix marks the lag as calendar days; 'd'/none stays working days", () => {
+    expect(E.parsePreds("85FS+130cd")).toEqual([{ id: 85, type: "FS", lag: 130, lagUnit: "calendar" }]);
+    expect(E.parsePreds("85FS+130d")).toEqual([{ id: 85, type: "FS", lag: 130 }]);   // no lagUnit → business default
+    expect(E.parsePreds("85FS+130")).toEqual([{ id: 85, type: "FS", lag: 130 }]);
+    expect(E.parsePreds("3FF-2cd")).toEqual([{ id: 3, type: "FF", lag: -2, lagUnit: "calendar" }]); // negative calendar lag
+  });
+  it("'cd' with a zero lag carries no unit (nothing to count)", () => {
+    expect(E.parsePreds("5cd")).toEqual([{ id: 5, type: "FS", lag: 0 }]);
+    expect(E.parsePreds("2SS")).toEqual([{ id: 2, type: "SS", lag: 0 }]);
+  });
+});
+
+describe("normPreds — carries the calendar-lag unit through (dropped for business)", () => {
+  it("preserves lagUnit:'calendar', omits it otherwise", () => {
+    expect(E.normPreds([{ id: 2, type: "SS", lag: 3, lagUnit: "calendar" }])).toEqual([{ id: 2, type: "SS", lag: 3, lagUnit: "calendar" }]);
+    expect(E.normPreds([{ id: 2, type: "SS", lag: 3 }])).toEqual([{ id: 2, type: "SS", lag: 3 }]);
+    expect(E.normPreds([{ id: 2, type: "SS", lag: 3, lagUnit: "business" }])).toEqual([{ id: 2, type: "SS", lag: 3 }]);
+  });
 });
 
 describe("constrainedStartFrom — the four MS-Project conventions", () => {
@@ -148,6 +166,35 @@ describe("constrainedStartFrom — the four MS-Project conventions", () => {
   });
   it("unknown type falls back to FS and never throws", () => {
     expect(() => E.constrainedStartFrom(pred, { type: "ZZ", lag: 0 }, 1e9)).not.toThrow();
+  });
+  it("a calendar lag counts STRAIGHT days (weekends included) — it can even land on a weekend", () => {
+    // FS: next business day (Mon 06-29) then +5 CALENDAR days → Sat 07-04 (a working lag never lands on a weekend).
+    expect(E.constrainedStartFrom(pred, { type: "FS", lag: 5, lagUnit: "calendar" }, 1)).toBe("2026-07-04");
+  });
+  it("calendar vs working lag diverge across a weekend (SS +5)", () => {
+    // Calendar: Mon 06-22 + 5 straight days = Sat 06-27. Working: skips the weekend → Mon 06-29.
+    expect(E.constrainedStartFrom(pred, { type: "SS", lag: 5, lagUnit: "calendar" }, 1)).toBe("2026-06-27");
+    expect(E.constrainedStartFrom(pred, { type: "SS", lag: 5 }, 1)).toBe("2026-06-29");
+  });
+  it("a working (default) lag is unchanged by the refactor — FS +2 skips no weekend here", () => {
+    expect(E.constrainedStartFrom(pred, { type: "FS", lag: 2 }, 1)).toBe("2026-07-01"); // Mon 06-29 + 2 BD
+  });
+});
+
+describe("anti-drift: the calendar-lag wiring exists VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("constrainedStartFrom branches addD (calendar) vs addBD (working) on lagUnit in both", () => {
+    expect(src).toMatch(/dep\.lagUnit === "calendar" \? addD\(base, n\) : addBD\(base, n\)/);
+    expect(mjs).toMatch(/dep\.lagUnit === "calendar" \? addD\(base, n\) : addBD\(base, n\)/);
+  });
+  it("normPreds carries lagUnit:'calendar' through in both", () => {
+    expect(src).toMatch(/x\.lagUnit === "calendar" \? \{lagUnit: "calendar"\} : \{\}/);
+    expect(mjs).toMatch(/x\.lagUnit === "calendar" \? \{lagUnit: "calendar"\} : \{\}/);
+  });
+  it("parsePreds tokenizes the (cd|d) unit suffix in both", () => {
+    expect(src).toMatch(/\(cd\|d\)\?\$/);
+    expect(mjs).toMatch(/\(cd\|d\)\?\$/);
   });
 });
 
