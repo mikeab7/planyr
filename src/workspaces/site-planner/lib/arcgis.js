@@ -546,6 +546,63 @@ export function feetExtentToBbox(ext, lat0, lon0) {
   };
 }
 
+// ── B839: reuse cached basemap TILES for the export backdrop ──────────────────────────
+// Instead of a slow dynamic /export render (Esri's can exceed the client's inline budget on a
+// normal large frame → the aerial is dropped and the sheet prints white — the B738/V252 repro),
+// stitch the SAME fast, pre-rendered XYZ tiles the live Leaflet basemap already shows (browser/
+// CDN-cached) into a frame-exact image. These are the PURE math (Web Mercator / EPSG:3857 tile
+// grid); the fetch + canvas draw + toDataURL lives in SitePlanner (DOM-bound). The tiles are Web
+// Mercator while the planner's feet frame maps lat/lon LINEARLY — but over a single site the
+// Mercator↔linear difference within the frame is sub-pixel, and we crop to the SAME bbox corners
+// aerialPlacement already uses, so the stitched image registers on the parcels exactly like the
+// /export image did (only the pixels change, never the placement geometry).
+
+// Global pixel coordinate (256-px tiles) of a lon/lat at Web Mercator zoom z.
+export function lngLatToGlobalPixel(lon, lat, z) {
+  const scale = 256 * Math.pow(2, z);
+  const x = ((lon + 180) / 360) * scale;
+  const s = Math.min(Math.max(Math.sin((lat * Math.PI) / 180), -0.9999), 0.9999);
+  const y = (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * scale;
+  return { x, y };
+}
+
+// The XYZ tiles covering a lon/lat bbox at zoom z, plus the cropped-canvas size and each tile's
+// draw offset (dx,dy) relative to the bbox's NW corner. Cropping to the exact bbox pixel box means
+// the stitched image spans exactly [lonMin,lonMax]×[latMin,latMax] at its corners, so it reuses
+// aerialPlacement's feet geometry unchanged. Tile rows are clamped to the valid [0,2^z) range; the
+// x index wraps at the antimeridian (a no-op for Texas).
+export function aerialTileGrid(bbox, z) {
+  const n = Math.pow(2, z);
+  const nw = lngLatToGlobalPixel(bbox.lonMin, bbox.latMax, z); // top-left (NW)
+  const se = lngLatToGlobalPixel(bbox.lonMax, bbox.latMin, z); // bottom-right (SE)
+  const canvasW = Math.max(1, Math.round(se.x - nw.x));
+  const canvasH = Math.max(1, Math.round(se.y - nw.y));
+  const xMin = Math.floor(nw.x / 256), xMax = Math.floor((se.x - 1e-6) / 256);
+  const yMin = Math.floor(nw.y / 256), yMax = Math.floor((se.y - 1e-6) / 256);
+  const tiles = [];
+  for (let ty = yMin; ty <= yMax; ty++) {
+    if (ty < 0 || ty >= n) continue; // no tiles above the north / below the south edge of the world
+    for (let tx = xMin; tx <= xMax; tx++) {
+      const wx = ((tx % n) + n) % n; // wrap x at the antimeridian
+      tiles.push({ x: wx, y: ty, dx: tx * 256 - nw.x, dy: ty * 256 - nw.y });
+    }
+  }
+  return { z, canvasW, canvasH, tiles };
+}
+
+// Pick the deepest zoom (≤ the source's native ceiling) whose stitched canvas stays within maxPx
+// on both sides — sharp for print without an unbounded tile count. Never past maxNative: past it
+// Esri/USGS answer with the gray "Map data not yet available" placeholder as HTTP 200 (not an
+// error), which would silently stitch in as gray (the B182/B220 trap, per basemaps.js).
+export function pickAerialTileZoom(bbox, { maxNative = 19, maxPx = 4096, minZoom = 1 } = {}) {
+  const top = Math.max(minZoom, Math.round(maxNative));
+  for (let z = top; z > minZoom; z--) {
+    const g = aerialTileGrid(bbox, z);
+    if (g.canvasW <= maxPx && g.canvasH <= maxPx) return z;
+  }
+  return minZoom;
+}
+
 // Turn fetch/CORS failures into something actionable for a non-technical user.
 export function humanizeError(e) {
   // Typed parcel-fetch failures (B244/B245) carry a `kind` — give each its own plain

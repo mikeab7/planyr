@@ -521,4 +521,36 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/data-export-aerial/);                     // the dropped-aerial marker survives
     expect(src).toMatch(/aerialDropped/);                          // LOUD-FAILURE signal survives
   });
+
+  it("B839: the export aerial stitches cached tiles (fast) with a dynamic-/export fallback", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // The fast path reuses cached XYZ tiles instead of a slow dynamic /export render, and the live
+    // tile layers request CORS so those bytes are canvas-readable and shared with the stitch.
+    expect(src).toMatch(/stitchAerialDataUrl/);
+    expect(src).toMatch(/pickAerialTileZoom/);
+    expect(src).toMatch(/crossOrigin: true/);                      // both live tile layers (backfill + detail)
+    expect((src.match(/crossOrigin: true/g) || []).length).toBeGreaterThanOrEqual(2);
+    // exportAerialForFrame must be async (it awaits the tile fetches) and both callers await it.
+    expect(src).toMatch(/const exportAerialForFrame = async \(frame\)/);
+    expect((src.match(/await exportAerialForFrame\(printFrame\)/g) || []).length).toBe(2); // PNG + PDF
+  });
+
+  it("B840: the aerial fetch has its own longer budget + retry + alternate-source fallback", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    expect(src).toMatch(/AERIAL_INLINE_TIMEOUT_MS/);               // aerial-specific budget, not the shared 8s
+    expect(src).toMatch(/isOverlay \|\| isAerial\) && fallback/);  // aerial retries its data-fallback-href (alt source)
+    // fetchAsDataUrl accepts a per-call timeout + retries.
+    expect(src).toMatch(/const fetchAsDataUrl = async \(url, \{ timeout = INLINE_TIMEOUT_MS, retries = 0 \}/);
+  });
+
+  it("B841: the aerial-drop banner no longer blames the connection (PDF + PNG parity)", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // New copy on BOTH export paths (PDF-PARITY), and the misleading "Check your connection" tail
+    // is gone from the aerial banner specifically.
+    expect(src).toMatch(/took too long to load, so the PNG was exported without it/);
+    expect(src).toMatch(/took too long to load, so the PDF was exported without it/);
+    expect(src).not.toMatch(/satellite imagery, so the (?:PDF|PNG) was exported without it\. Check your connection/);
+    // Still a red-warning banner (the ⚠ prefix that flips it off the success-green — B341-class).
+    expect((src.match(/⚠ The satellite imagery took too long to load/g) || []).length).toBe(2);
+  });
 });
