@@ -831,6 +831,58 @@ describe("B815 nextEligibleMeeting — the core snap rule (deadline, not meeting
   });
 });
 
+// ── B845 — government date patterns: the "Tuesday after the first Monday" primitive ─────────────
+describe("B845 nthWeekdayOnOrAfter — Election-Day primitive (Tue after the 1st Monday in Nov)", () => {
+  it("resolves the 1st Tuesday on/after Nov 2 across the acceptance years", () => {
+    expect(E.nthWeekdayOnOrAfter(2024, 11, 2, 2)).toBe("2024-11-05");
+    expect(E.nthWeekdayOnOrAfter(2026, 11, 2, 2)).toBe("2026-11-03");
+    expect(E.nthWeekdayOnOrAfter(2032, 11, 2, 2)).toBe("2032-11-02"); // Nov 2 itself IS a Tuesday
+    expect(E.nthWeekdayOnOrAfter(2033, 11, 2, 2)).toBe("2033-11-08"); // Nov 1 is a Tuesday → must NOT be week-early
+    expect(E.nthWeekdayOnOrAfter(2039, 11, 2, 2)).toBe("2039-11-08");
+  });
+  it("differs from the classic 1st-Tuesday primitive exactly when Nov 1 is a Tuesday", () => {
+    expect(E.nthWeekdayOfMonth(2033, 11, 2, 1)).toBe("2033-11-01");        // the week-early bug the primitive avoids
+    expect(E.nthWeekdayOnOrAfter(2033, 11, 2, 2)).not.toBe("2033-11-01");
+    expect(E.nthWeekdayOnOrAfter(2026, 11, 2, 2)).toBe(E.nthWeekdayOfMonth(2026, 11, 2, 1)); // coincide when Nov 1 ≠ Tue
+  });
+  it("returns null when no such weekday exists on/after dom in the month", () => {
+    expect(E.nthWeekdayOnOrAfter(2026, 2, 1, 27)).toBeNull(); // no Monday on/after Feb 27 2026 stays in Feb
+  });
+  it("clamps dom<1 / non-integer down to day 1", () => {
+    expect(E.nthWeekdayOnOrAfter(2026, 11, 2, 0)).toBe(E.nthWeekdayOnOrAfter(2026, 11, 2, 1));
+    expect(E.nthWeekdayOnOrAfter(2026, 11, 2, 2.9)).toBe(E.nthWeekdayOnOrAfter(2026, 11, 2, 2));
+  });
+});
+
+describe("B845 meetingDatesInRange — Election Day + TX uniform-election-date preset", () => {
+  const election = { recurrence: [{ freq: "monthly", weekday: 2, setpos: [1], months: [11], onOrAfter: 2 }] };
+  it("the November uniform-election rule resolves the correct hearing date each year", () => {
+    expect(E.meetingDatesInRange(election, "2024-01-01", "2024-12-31")).toEqual(["2024-11-05"]);
+    expect(E.meetingDatesInRange(election, "2026-01-01", "2026-12-31")).toEqual(["2026-11-03"]);
+    expect(E.meetingDatesInRange(election, "2032-01-01", "2032-12-31")).toEqual(["2032-11-02"]);
+    expect(E.meetingDatesInRange(election, "2033-01-01", "2033-12-31")).toEqual(["2033-11-08"]);
+    expect(E.meetingDatesInRange(election, "2039-01-01", "2039-12-31")).toEqual(["2039-11-08"]);
+  });
+  it("never lands a week early (no 11-01) and stays month-restricted to November", () => {
+    const span = E.meetingDatesInRange(election, "2024-01-01", "2039-12-31");
+    expect(span).toContain("2033-11-08");
+    expect(span).toContain("2039-11-08");
+    expect(span).not.toContain("2033-11-01");
+    expect(span).not.toContain("2039-11-01");
+    expect(span.every(d => d.slice(5, 7) === "11")).toBe(true);
+  });
+  it("TX uniform election dates = 1st Sat in May + Election Day in Nov (two rules, unioned)", () => {
+    const tx = { recurrence: [
+      { freq: "monthly", weekday: 6, setpos: [1], months: [5] },
+      { freq: "monthly", weekday: 2, setpos: [1], months: [11], onOrAfter: 2 } ] };
+    expect(E.meetingDatesInRange(tx, "2026-01-01", "2026-12-31")).toEqual(["2026-05-02", "2026-11-03"]);
+  });
+  it("a plain 1st-Saturday-in-May rule uses the classic primitive (no onOrAfter)", () => {
+    const may = { recurrence: [{ freq: "monthly", weekday: 6, setpos: [1], months: [5] }] };
+    expect(E.meetingDatesInRange(may, "2026-01-01", "2027-12-31")).toEqual(["2026-05-02", "2027-05-01"]);
+  });
+});
+
 describe("anti-drift: the B815 meeting-body engine exists VERBATIM in src + mirror", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
@@ -849,6 +901,19 @@ describe("anti-drift: the B815 meeting-body engine exists VERBATIM in src + mirr
   it("nextEligibleMeeting gates on agenda deadline (dl >= readyDate) in both", () => {
     expect(src).toMatch(/if \(dl >= readyDate\) return \{ meetingDate: m, deadline: dl \};/);
     expect(mjs).toMatch(/if \(dl >= readyDate\) return \{ meetingDate: m, deadline: dl \};/);
+  });
+});
+
+describe("anti-drift: the B845 on/after primitive exists VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("nthWeekdayOnOrAfter applies the nth-week shift in both", () => {
+    expect(src).toMatch(/if \(nth > 1\) d\.setDate\(d\.getDate\(\) \+ 7 \* \(nth - 1\)\);/);
+    expect(mjs).toMatch(/if \(nth > 1\) d\.setDate\(d\.getDate\(\) \+ 7 \* \(nth - 1\)\);/);
+  });
+  it("meetingDatesInRange routes onOrAfter rules through the new primitive in both", () => {
+    expect(src).toMatch(/nthWeekdayOnOrAfter\(y, m, r\.weekday, r\.onOrAfter, sp > 0 \? sp : 1\)/);
+    expect(mjs).toMatch(/nthWeekdayOnOrAfter\(y, m, r\.weekday, r\.onOrAfter, sp > 0 \? sp : 1\)/);
   });
 });
 

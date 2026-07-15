@@ -1605,6 +1605,17 @@ const nthWeekdayOfMonth = (y, m, weekday, setpos) => {
   const d = nthWeekday(y, m, setpos, weekday);
   return (d.getMonth() === m - 1) ? fdLocal(d) : null;
 };
+// nthWeekdayOnOrAfter (B845): the nth `weekday` (0=Sun..6=Sat) of month m/year y whose day-of-month is
+// >= dom, as an ISO date. The "Tuesday after the first Monday" primitive — Election Day is the 1st Tuesday
+// on/after Nov 2 (NOT "1st Tuesday of November", which lands a week early whenever Nov 1 is a Tuesday,
+// e.g. 2033/2039). Same local-midnight idiom as nthWeekday (no UTC slip). Null when the nth such
+// occurrence overflows the month; dom<1/NaN clamps to day 1.
+const nthWeekdayOnOrAfter = (y, m, weekday, dom, nth = 1) => {
+  const d = new Date(y, m - 1, Math.max(1, Math.trunc(dom) || 1));
+  while (d.getDay() !== weekday) d.setDate(d.getDate() + 1);
+  if (nth > 1) d.setDate(d.getDate() + 7 * (nth - 1));
+  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
+};
 // meetingDatesInRange: sorted unique ISO meeting dates for `body` within [from,to] inclusive.
 // Applies each recurrence rule over its effective window, then removes blackoutDates and adds
 // extraDates — EXPLICIT DATES ALWAYS BEAT THE RULE. Interval>1 (bi-weekly / every-N-months)
@@ -1637,7 +1648,9 @@ const meetingDatesInRange = (body, from, to) => {
         if (months && !months.includes(m)) continue;
         if (interval > 1 && ((((y * 12 + (m - 1) - anchorYM) % interval) + interval) % interval) !== 0) continue;
         setpos.forEach(sp => {
-          const iso = nthWeekdayOfMonth(y, m, r.weekday, sp);
+          const iso = (r.onOrAfter != null)
+            ? nthWeekdayOnOrAfter(y, m, r.weekday, r.onOrAfter, sp > 0 ? sp : 1)
+            : nthWeekdayOfMonth(y, m, r.weekday, sp);
           if (iso && iso >= from && iso <= to && inWin(iso, r)) set.add(iso);
         });
       }
@@ -1701,13 +1714,23 @@ const rebuildMeetingBodyIndex = d => {
 // B816 — plain-English descriptors for the civic-mark explainer (never render a hearing date without why).
 const MB_WD_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MB_SETPOS_LABEL = {"1":"1st","2":"2nd","3":"3rd","4":"4th","-1":"last"};
+const MB_MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const mbOrdinal = n => { const s = ["th","st","nd","rd"], v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
+// cadenceSummary (B845): plain-English descriptor of EVERY recurrence rule (not just [0]), including the
+// month restriction (r.months) and the "on/after day" primitive (r.onOrAfter) so the civic-mark tooltip
+// never lies about a month-restricted or Election-Day body. e.g. "1st Tue on/after the 2nd of Nov".
 const cadenceSummary = body => {
-  const r = body && Array.isArray(body.recurrence) && body.recurrence[0];
-  if (!r || r.weekday == null) return "no cadence set";
-  const wd = MB_WD_NAMES[r.weekday] || "?";
-  if (r.freq === "weekly") return `every ${wd}`;
-  const sp = (Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : [])).map(x => MB_SETPOS_LABEL[String(x)] || x).join(" & ");
-  return `${sp || "?"} ${wd} monthly`;
+  const rules = (body && Array.isArray(body.recurrence)) ? body.recurrence.filter(r => r && r.weekday != null) : [];
+  if (!rules.length) return "no cadence set";
+  const one = r => {
+    const wd = MB_WD_NAMES[r.weekday] || "?";
+    if (r.freq === "weekly") return `every ${wd}`;
+    const sp = (Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : [])).map(x => MB_SETPOS_LABEL[String(x)] || x).join(" & ") || "?";
+    const mo = (Array.isArray(r.months) && r.months.length) ? r.months.map(m => MB_MONTH_NAMES[m - 1] || "?").join("/") : null;
+    if (r.onOrAfter != null) return `${sp} ${wd} on/after the ${mbOrdinal(r.onOrAfter)}${mo ? " of " + mo : ""}`;
+    return mo ? `${sp} ${wd} in ${mo}` : `${sp} ${wd} monthly`;
+  };
+  return rules.map(one).join(" + ");
 };
 const agendaLeadSummary = body => {
   const l = body && body.agendaLead; if (!l) return "no agenda lead";
@@ -2596,10 +2619,14 @@ const readGridCfg = (proj, data) => {
   else if (data && Array.isArray(data.gridColOrder) && data.gridColOrder.length) visible = data.gridColOrder.filter(k => COL_BY_K[k] && DEFAULT_GRID_COLS.includes(k)); // migrate legacy global order
   else visible = [...DEFAULT_GRID_COLS];
   if (!visible.includes("name")) visible = ["name", ...visible];   // the Task name column can't be hidden
-  // B817 — the Float / Cost columns default ON once any task in the project is bound (unless the user set
-  // an explicit column config); they render blank on unbound rows.
-  if (!(cfg && Array.isArray(cfg.visible) && cfg.visible.length) && Array.isArray(proj?.tasks) && proj.tasks.some(t => t.meetingBound)) {
-    ["floatToDeadline","costIfMissed"].forEach(k => { if (!visible.includes(k)) visible.push(k); });
+  // B817/B844 — meeting columns default ON (unless the user set an explicit column config). The Meeting
+  // column appears once the project DEFINES ≥1 meeting body (so right-click binding is discoverable via the
+  // column too — B844); Float / Cost appear once any task is actually BOUND. All render blank on unbound rows.
+  if (!(cfg && Array.isArray(cfg.visible) && cfg.visible.length)) {
+    if (Array.isArray(proj?.meetingBodies) && proj.meetingBodies.length && !visible.includes("meetingBody")) visible.push("meetingBody");
+    if (Array.isArray(proj?.tasks) && proj.tasks.some(t => t.meetingBound)) {
+      ["floatToDeadline","costIfMissed"].forEach(k => { if (!visible.includes(k)) visible.push(k); });
+    }
   }
   const saved = (cfg && cfg.widths) || (data && data.gridColWidths) || {};
   const widths = {};
@@ -4663,6 +4690,7 @@ function App() {
   const didInitialLoad = useRef(false);
   const [formatOpen, setFormatOpen] = useState(false);
   const [settingsOpen,    setSettingsOpen]    = useState(false);
+  const [settingsSection, setSettingsSection] = useState(null);   // B844 — pre-expand a Settings section (e.g. "meetings")
   const [automationOpen,  setAutomationOpen]  = useState(false);
   const [contactsOpen,    setContactsOpen]    = useState(false);
   const [historyOpen,     setHistoryOpen]     = useState(false);
@@ -4670,6 +4698,12 @@ function App() {
   const [reviewRows,      setReviewRows]      = useState([]);
   const [reviewLoading,   setReviewLoading]   = useState(true);
   const [reviewIdx,       setReviewIdx]       = useState(0);
+  // B844 — open Settings to a specific section on demand (e.g. an empty "Meeting" cell → Meeting calendars).
+  useEffect(() => {
+    const openTo = e => { setSettingsSection(e?.detail || null); setSettingsOpen(true); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false); };
+    document.addEventListener("planar-open-settings", openTo);
+    return () => document.removeEventListener("planar-open-settings", openTo);
+  }, []);
   const [ganttPPD,   setGanttPPD]   = useState(() => {
     const ganttW = window.innerWidth * 0.46; // 46% goes to Gantt in default split view
     return Math.max(1, Math.floor(ganttW / 365));
@@ -6943,7 +6977,7 @@ function App() {
         </div>
       </div>
 
-      {settingsOpen    && <SettingsPanel    data={data} setData={setData} onClose={()=>setSettingsOpen(false)} openFile={openFile} fileLinked={fileLinked} />}
+      {settingsOpen    && <SettingsPanel    data={data} setData={setData} onClose={()=>setSettingsOpen(false)} openFile={openFile} fileLinked={fileLinked} initialSection={settingsSection} />}
       {formatOpen      && <FormatPanel      data={data} setData={setData} onClose={()=>setFormatOpen(false)} />}
       {automationOpen  && <AutomationPanel  data={data} setData={setData} onClose={()=>setAutomationOpen(false)} />}
       {contactsOpen    && <ContactsPanel    data={data} setData={setData} onClose={()=>setContactsOpen(false)} />}
@@ -6985,6 +7019,22 @@ function App() {
           onIndent={() => { indentTaskById(taskCtx.task.id); setTaskCtx(null); }}
           onOutdent={() => { outdentTaskById(taskCtx.task.id); setTaskCtx(null); }}
           onAddNote={() => { setNotesCtx({taskId: taskCtx.task.id, projectId: taskCtx.projId}); setTaskCtx(null); }}
+          meetingBodies={(data.projects[taskCtx.projId] || {}).meetingBodies || []}
+          bindCount={(() => { const ids = fullRowSelIds(); return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1; })()}
+          onBindMeeting={bodyId => {
+            // Right-click inside a multi-row selection binds the whole selection (mirror the delete semantics)
+            const ids = fullRowSelIds();
+            const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
+            targets.forEach(id => updateTask(id, {meetingBound:true, meetingBodyId:bodyId}, taskCtx.projId));
+            setTaskCtx(null);
+          }}
+          onUnbindMeeting={() => {
+            const ids = fullRowSelIds();
+            const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
+            targets.forEach(id => updateTask(id, {meetingBound:false, meetingBodyId:null, pinnedMeetingDate:undefined}, taskCtx.projId));
+            setTaskCtx(null);
+          }}
+          onAddMeetingCalendar={() => { setSettingsSection("meetings"); setSettingsOpen(true); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false); setTaskCtx(null); }}
           onDelete={() => {
             // Right-click inside a multi-row selection deletes the whole selection
             const ids = fullRowSelIds();
@@ -7231,7 +7281,7 @@ function ProjContextMenu({x, y, projId, canDelete, onRename, onDuplicate, onDele
 }
 
 // ── TaskContextMenu ───────────────────────────────────────
-function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCopyName, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onAddNote, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
+function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCopyName, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onAddNote, meetingBodies = [], bindCount = 1, onBindMeeting, onUnbindMeeting, onAddMeetingCalendar, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -7295,6 +7345,11 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
   );
 
   const canOutdent = task.parentId !== null;
+  // B844 — "Bind to meeting calendar" flyout. The sub-panel opens leftward when the menu is near the right
+  // edge (the context menu already reflows leftward at L~7273, unlike the header menu's always-right flyout).
+  const [subMeet, setSubMeet] = useState(false);
+  const curBodyName = task.meetingBound ? ((meetingBodies.find(b => b.id === task.meetingBodyId) || {}).name || "") : "";
+  const subOpenLeft = left + mw + 200 > vw;
 
   return ReactDOM.createPortal(
     <div ref={menuRef} style={{position:"fixed",top,left,background:"#fff",border:"1px solid var(--bd2)",
@@ -7359,6 +7414,31 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
       <Item icon="ti-row-insert-top"    label="Insert Row Above"  hint="Ins"  onClick={onInsertAbove} />
       <Item icon="ti-row-insert-bottom" label="Insert Row Below"              onClick={onInsertBelow} />
       <Item icon="ti-sitemap"           label="Add Subtask"                   onClick={onAddSubtask} />
+      <Sep />
+      {/* B844 — bind the task (or the whole row selection) to a meeting calendar. The main front door for
+          the meeting-cadence engine — no longer requires un-hiding the hidden "Meeting" grid column. */}
+      <div style={{position:"relative"}} onMouseEnter={()=>setSubMeet(true)} onMouseLeave={()=>setSubMeet(false)}>
+        {meetingBodies.length === 0 ? (
+          <Item icon="ti-calendar-plus" label="Add a meeting calendar…" onClick={onAddMeetingCalendar} />
+        ) : (
+          <Item icon="ti-calendar-event" label={bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar"} hint="▸" />
+        )}
+        {subMeet && meetingBodies.length > 0 && (
+          <div style={{position:"absolute", top:-4, ...(subOpenLeft ? {right:"100%"} : {left:"100%"}), minWidth:190, maxHeight:300, overflow:"auto",
+            background:"#fff", border:"1px solid var(--bd2)", borderRadius:6, boxShadow:"0 8px 24px rgba(0,0,0,0.18)", padding:"3px 0", zIndex:10000}}>
+            {task.meetingBound && task.meetingBodyId && (<>
+              <Item icon="ti-calendar-off" label={curBodyName ? `Unbind from ${curBodyName}` : "Unbind"} onClick={onUnbindMeeting} />
+              <Sep />
+            </>)}
+            {meetingBodies.map(b => {
+              const isCur = task.meetingBound && task.meetingBodyId === b.id;
+              return <Item key={b.id} icon={isCur ? "ti-check" : "ti-calendar-event"} label={b.name || "Meeting body"} onClick={()=>onBindMeeting(b.id)} />;
+            })}
+            <Sep />
+            <Item icon="ti-settings" label="Manage meeting calendars…" onClick={onAddMeetingCalendar} />
+          </div>
+        )}
+      </div>
       <Sep />
       <Item icon="ti-copy"              label="Duplicate Row"                 onClick={onDuplicate} />
       <Sep />
@@ -8216,7 +8296,10 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   const formulaCols = useMemo(() => formulaColsOf(proj), [proj?.formulaCols]);
   const allCols = useMemo(() => effectiveColsOf(proj), [proj?.formulaCols]);
   const colByK = useMemo(() => Object.fromEntries(allCols.map(c => [c.k, c])), [allCols]);
-  const cfg = useMemo(() => readGridCfg(proj, data), [proj?.colConfig, proj?.formulaCols, data.gridColOrder, data.gridColWidths, pid]);
+  // B844 — proj.meetingBodies / proj.tasks are in the deps so the meeting-column auto-show (readGridCfg)
+  // recomputes when a body is defined or a task is bound; without them the memo went stale and the Meeting /
+  // Float / Cost columns never appeared until an unrelated column change forced a recompute.
+  const cfg = useMemo(() => readGridCfg(proj, data), [proj?.colConfig, proj?.formulaCols, proj?.meetingBodies, proj?.tasks, data.gridColOrder, data.gridColWidths, pid]);
   const colOrder = cfg.visible;
   // B583 — per-row computed values for every Formula column, evaluated AFTER the date
   // cascade has settled (this renders from the already-cascaded `tasks`). Dependent
@@ -9201,7 +9284,10 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       if (task.hasChildren) return <span style={{...s,justifyContent:"center",color:"#94a3b8"}} title="A summary/parent can't be meeting-bound">—</span>;
       const bodies = Array.isArray(proj?.meetingBodies) ? proj.meetingBodies : [];
       const cur = task.meetingBound ? (task.meetingBodyId || "") : "";
-      if (!bodies.length) return <span style={{...s,justifyContent:"center",color:"var(--mut)",fontSize:10}} title="Define meeting bodies first: Settings ⚙ → Meeting calendars">—</span>;
+      if (!bodies.length) return (
+        <span style={{...s,justifyContent:"center",color:"var(--amber)",fontSize:10,cursor:"pointer",textDecoration:"underline",textUnderlineOffset:2}}
+          title="Click to set up meeting calendars (Settings ⚙ → Meeting calendars)"
+          onClick={e => { e.stopPropagation(); document.dispatchEvent(new CustomEvent("planar-open-settings", {detail:"meetings"})); }}>set up…</span>);
       return (
         <span style={{...s,padding:0}} data-picker-cell={`meeting-${task.id}`}>
           <select value={cur}
@@ -9965,6 +10051,15 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
 // agenda deadlines so a wrong recurrence rule is visible immediately, not three tasks downstream.
 const MB_WD = [{v:0,l:"Sun"},{v:1,l:"Mon"},{v:2,l:"Tue"},{v:3,l:"Wed"},{v:4,l:"Thu"},{v:5,l:"Fri"},{v:6,l:"Sat"}];
 const MB_SETPOS = [{v:1,l:"1st"},{v:2,l:"2nd"},{v:3,l:"3rd"},{v:4,l:"4th"},{v:-1,l:"Last"}];
+const MB_MONTHS = [{v:1,l:"Jan"},{v:2,l:"Feb"},{v:3,l:"Mar"},{v:4,l:"Apr"},{v:5,l:"May"},{v:6,l:"Jun"},{v:7,l:"Jul"},{v:8,l:"Aug"},{v:9,l:"Sep"},{v:10,l:"Oct"},{v:11,l:"Nov"},{v:12,l:"Dec"}];
+// B845 — one-click cadence presets. The last is the Texas uniform-election-date pair (Tex. Elec. Code
+// §41.001): 1st Saturday in May + the Tuesday after the first Monday in November (two rules on one body).
+const MB_PRESETS = [
+  {l:"2nd & 4th Tue", title:"2nd & 4th Tuesday every month", rules:[{freq:"monthly",weekday:2,setpos:[2,4]}]},
+  {l:"1st Sat · May", title:"1st Saturday in May (TX uniform election date)", rules:[{freq:"monthly",weekday:6,setpos:[1],months:[5]}]},
+  {l:"Election Day · Nov", title:"Tuesday after the first Monday in November (US general / TX uniform election date)", rules:[{freq:"monthly",weekday:2,setpos:[1],months:[11],onOrAfter:2}]},
+  {l:"TX uniform (May + Nov)", title:"Both Texas uniform election dates — 1st Sat in May + Tue after 1st Mon in Nov (Tex. Elec. Code §41.001)", rules:[{freq:"monthly",weekday:6,setpos:[1],months:[5]},{freq:"monthly",weekday:2,setpos:[1],months:[11],onOrAfter:2}]},
+];
 const newMeetingBody = () => ({
   id: "mb_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
   name: "", jurisdiction: "",
@@ -9978,11 +10073,13 @@ function MeetingCalendarsEditor({ bodies, onChange }) {
   const [openId, setOpenId] = useState(null);
   const list = Array.isArray(bodies) ? bodies : [];
   const patch = (id, fields) => onChange(list.map(b => b.id === id ? { ...b, ...fields } : b));
-  const patchRule = (id, rf) => onChange(list.map(b => {
-    if (b.id !== id) return b;
-    const rules = (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ freq:"monthly", weekday:2, setpos:[2,4] }];
-    return { ...b, recurrence: [{ ...rules[0], ...rf }, ...rules.slice(1)] };
-  }));
+  // B845 — a body's cadence is now a LIST of recurrence rules (was single rule[0]). patchRuleAt edits one
+  // rule in place; addRuleAt/removeRuleAt/setRules manage the list (setRules powers the one-click presets).
+  const rulesOf = b => (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ freq:"monthly", weekday:2, setpos:[2,4] }];
+  const patchRuleAt = (id, idx, rf) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).map((r, i) => i === idx ? { ...r, ...rf } : r) } : b));
+  const addRuleAt = id => onChange(list.map(b => b.id === id ? { ...b, recurrence: [...rulesOf(b), { freq:"monthly", weekday:2, setpos:[1] }] } : b));
+  const removeRuleAt = (id, idx) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).filter((_, i) => i !== idx) } : b));
+  const setRules = (id, rules) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rules.map(r => ({ ...r, setpos: Array.isArray(r.setpos) ? [...r.setpos] : r.setpos, months: Array.isArray(r.months) ? [...r.months] : r.months })) } : b));
   const patchLead = (id, lf) => onChange(list.map(b => b.id === id ? { ...b, agendaLead: { ...(b.agendaLead||{}), ...lf } } : b));
   const add = () => { const b = newMeetingBody(); onChange([...list, b]); setOpenId(b.id); };
   const remove = id => { if(openId===id) setOpenId(null); onChange(list.filter(b => b.id !== id)); };
@@ -10002,9 +10099,8 @@ function MeetingCalendarsEditor({ bodies, onChange }) {
       </div>
       {list.length === 0 && <div style={{fontSize:11,color:"var(--mut)",fontStyle:"italic",padding:"2px 0 8px"}}>No meeting bodies yet.</div>}
       {list.map(b => {
-        const rule = (Array.isArray(b.recurrence) && b.recurrence[0]) || { freq:"monthly", weekday:2, setpos:[2,4] };
+        const rules = rulesOf(b);
         const lead = b.agendaLead || { type:"offset", n:10, unit:"business" };
-        const setpos = Array.isArray(rule.setpos) ? rule.setpos : (rule.setpos!=null ? [rule.setpos] : []);
         const isOpen = openId === b.id;
         const dates = isOpen ? preview(b) : [];
         return (
@@ -10020,21 +10116,50 @@ function MeetingCalendarsEditor({ bodies, onChange }) {
                 <input value={b.jurisdiction||""} placeholder="e.g. Baytown, TX" onChange={e=>patch(b.id,{jurisdiction:e.target.value})} style={inp} />
 
                 <label style={lbl}>Meets</label>
-                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                  {seg([{v:"monthly",l:"Monthly"},{v:"weekly",l:"Weekly"}], rule.freq, v=>patchRule(b.id,{freq:v}))}
-                  <select value={rule.weekday} onChange={e=>patchRule(b.id,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
-                    {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
-                  </select>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+                  {MB_PRESETS.map(p => <button key={p.l} className="btn" title={p.title} onClick={()=>setRules(b.id,p.rules)} style={{fontSize:10,padding:"3px 7px"}}>{p.l}</button>)}
                 </div>
-                {rule.freq==="monthly" && (
-                  <div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
-                    {MB_SETPOS.map(sp=>{
-                      const on = setpos.includes(sp.v);
-                      return <span key={sp.v} onClick={()=>{ const ns = on ? setpos.filter(x=>x!==sp.v) : [...setpos,sp.v].sort((a,z)=>(a<0?99:a)-(z<0?99:z)); patchRule(b.id,{setpos:ns.length?ns:[sp.v]}); }}
-                        style={{padding:"3px 8px",fontSize:11,borderRadius:4,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"transparent",color:on?"#fff":"var(--mut)"}}>{sp.l}</span>;
-                    })}
-                  </div>
-                )}
+                {rules.map((rule, ri) => {
+                  const setpos = Array.isArray(rule.setpos) ? rule.setpos : (rule.setpos!=null ? [rule.setpos] : []);
+                  const months = Array.isArray(rule.months) ? rule.months : [];
+                  return (
+                    <div key={ri} style={{border:"1px dashed var(--bd2)",borderRadius:5,padding:"6px 7px",marginBottom:5}}>
+                      <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                        {seg([{v:"monthly",l:"Monthly"},{v:"weekly",l:"Weekly"}], rule.freq, v=>patchRuleAt(b.id,ri,{freq:v}))}
+                        <select value={rule.weekday} onChange={e=>patchRuleAt(b.id,ri,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
+                          {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+                        </select>
+                        {rules.length>1 && <span onClick={()=>removeRuleAt(b.id,ri)} title="Remove this cadence rule" style={{marginLeft:"auto",cursor:"pointer",color:"var(--mut)",fontSize:13,padding:"0 2px",flexShrink:0}}>&#x2715;</span>}
+                      </div>
+                      {rule.freq==="monthly" && (<>
+                        <div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
+                          {MB_SETPOS.map(sp=>{
+                            const on = setpos.includes(sp.v);
+                            return <span key={sp.v} onClick={()=>{ const ns = on ? setpos.filter(x=>x!==sp.v) : [...setpos,sp.v].sort((a,z)=>(a<0?99:a)-(z<0?99:z)); patchRuleAt(b.id,ri,{setpos:ns.length?ns:[sp.v]}); }}
+                              style={{padding:"3px 8px",fontSize:11,borderRadius:4,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"transparent",color:on?"#fff":"var(--mut)"}}>{sp.l}</span>;
+                          })}
+                        </div>
+                        <label style={{fontSize:11,color:"var(--txt)",display:"flex",alignItems:"center",gap:5,cursor:"pointer",marginTop:7,flexWrap:"wrap"}}>
+                          <input type="checkbox" checked={rule.onOrAfter!=null} onChange={e=>patchRuleAt(b.id,ri,{onOrAfter: e.target.checked ? (rule.onOrAfter??2) : undefined})} />
+                          on or after day
+                          <input type="number" min={1} max={31} value={rule.onOrAfter??2} disabled={rule.onOrAfter==null}
+                            onChange={e=>patchRuleAt(b.id,ri,{onOrAfter: Math.min(31, Math.max(1, Math.trunc(+e.target.value)||1))})}
+                            style={{...inp,width:44,opacity:rule.onOrAfter==null?0.5:1}} />
+                          <span style={{color:"var(--mut)",fontSize:10}}>e.g. Tue on/after Nov 2 = Election Day</span>
+                        </label>
+                        <label style={{...lbl,margin:"7px 0 3px"}}>Only in months <span style={{textTransform:"none",fontWeight:400,letterSpacing:0}}>— blank = every month · pick one for a yearly cadence</span></label>
+                        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                          {MB_MONTHS.map(mo=>{
+                            const on = months.includes(mo.v);
+                            return <span key={mo.v} onClick={()=>{ const ns = on ? months.filter(x=>x!==mo.v) : [...months,mo.v].sort((a,z)=>a-z); patchRuleAt(b.id,ri,{months: ns.length?ns:undefined}); }}
+                              style={{padding:"2px 6px",fontSize:10,borderRadius:4,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"transparent",color:on?"#fff":"var(--mut)"}}>{mo.l}</span>;
+                          })}
+                        </div>
+                      </>)}
+                    </div>
+                  );
+                })}
+                <button className="btn" onClick={()=>addRuleAt(b.id)} style={{fontSize:10,padding:"3px 8px",marginBottom:2}}>+ Add cadence rule</button>
 
                 <label style={lbl}>Agenda deadline</label>
                 {seg([{v:"offset",l:"Days before"},{v:"weekdayAnchor",l:"Weekday anchor"}], lead.type||"offset", v=>patchLead(b.id,{type:v}))}
@@ -10095,7 +10220,7 @@ function MeetingCalendarsEditor({ bodies, onChange }) {
     </div>
   );
 }
-function SettingsPanel({data, setData, onClose, openFile, fileLinked}) {
+function SettingsPanel({data, setData, onClose, openFile, fileLinked, initialSection}) {
   const s = data.settings || DEFAULT_SETTINGS;
   const upd = patch => setData(d => ({...d, settings:{...d.settings,...patch}}));
   const updHol = (k, v) => setData(d => {
@@ -10111,7 +10236,9 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked}) {
     return {...d, settings:{...d.settings, holidays}, projects: newProjects};
   });
   const pinCount = Object.values(data.projects || {}).reduce((n, p) => n + (p.tasks || []).filter(t => t.pinnedStart).length, 0);
-  const [open, setOpen] = useState({view: true, holidays: false, cf: false, backup: false});
+  // B844 — seed the collapsible sections; initialSection (e.g. "meetings") starts expanded so a deep-link
+  // from the right-click menu / an empty Meeting cell lands directly on the right editor.
+  const [open, setOpen] = useState(() => ({view: true, holidays: false, cf: false, backup: false, ...(initialSection ? {[initialSection]: true} : {})}));
   const tog = k => setOpen(p => ({...p, [k]: !p[k]}));
   // Fix #10: close on Escape (consistent with other modals/pickers)
   useEffect(() => {
@@ -10119,6 +10246,12 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked}) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+  // B844 — when deep-linked to a section, scroll it into view (it may sit below the panel fold).
+  useEffect(() => {
+    if (!initialSection) return;
+    const el = document.querySelector(`[data-section="${initialSection}"]`);
+    if (el) el.scrollIntoView({ block: "start" });
+  }, [initialSection]);
 
   const thisYear = new Date().getFullYear();
   const holDates = {};
@@ -10130,7 +10263,7 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked}) {
   });
 
   const SectionHdr = ({id, title}) => (
-    <div onClick={()=>tog(id)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+    <div data-section={id} onClick={()=>tog(id)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
       padding:"10px 0 7px",borderBottom:"1px solid var(--bd)",marginBottom: open[id] ? 8 : 0,
       cursor:"pointer",userSelect:"none"}}>
       <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",letterSpacing:".08em",textTransform:"uppercase"}}>{title}</span>
