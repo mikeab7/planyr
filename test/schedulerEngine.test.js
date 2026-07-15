@@ -1029,6 +1029,173 @@ describe("anti-drift: the B816 meeting-bound snap exists VERBATIM in src + mirro
   });
 });
 
+describe("bound-task fixed point — a pred-less bound task must NOT ratchet a meeting per cascade", () => {
+  // Pre-existing B816 bug: packetReady fell back to the task's OWN snapped start, and a meeting's
+  // deadline always precedes the meeting, so the current meeting was never "eligible" from its own
+  // date — every cascade rolled it one cycle forward (bind → edit → edit = 3 meetings of drift).
+  const council = { id: "mb_bt", name: "Baytown council",
+    recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+    agendaLead: { type: "offset", n: 10, unit: "business" } };
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
+  it("first cascade snaps from the stored start; repeat cascades are a FIXED POINT", () => {
+    let r = E.cascadeDates([mk(2, { meetingBound: true, meetingBodyId: "mb_bt", start: "2026-06-01" })], [council]);
+    expect(r[0].start).toBe("2026-06-23");   // first meeting whose agenda (6/9) is still open on 6/1
+    r = E.cascadeDates(r, [council]);
+    expect(r[0].start).toBe("2026-06-23");   // stays — no ratchet
+    r = E.cascadeDates(r, [council]);
+    expect(r[0].start).toBe("2026-06-23");
+    expect(r[0].meetingDeadline).toBe("2026-06-09");
+  });
+  it("a later blackout of the current date re-snaps FORWARD (the fixed point releases)", () => {
+    const cancelled = { ...council, blackoutDates: ["2026-06-23"] };
+    const r = E.cascadeDates([mk(2, { meetingBound: true, meetingBodyId: "mb_bt", start: "2026-06-23" })], [cancelled]);
+    expect(r[0].start).toBe("2026-07-14");
+  });
+  it("a task WITH predecessors still re-derives from them (unchanged behavior)", () => {
+    const r = E.cascadeDates([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                              mk(2, { meetingBound: true, meetingBodyId: "mb_bt", start: "2026-06-23", predecessors: [{ id: 1, type: "FS" }] })], [council]);
+    expect(r[1].start).toBe("2026-08-11");   // preds say the packet isn't ready until 7/23 — roll forward
+  });
+});
+
+// ── Deadline rows (deadlineForTaskId) — a task that always sits on its anchor's derived
+// call/file-by date (anchor.meetingDeadline), recomputed by a cascade post-pass. One-way
+// derivation: deliberately NOT a predecessor link (that would be circular with the anchor's
+// meeting-eligibility). "The election must be CALLED ≥78 days before election day" as a row.
+describe("deadline rows — cascadeDates post-pass keeps the row on the anchor's call/file-by date", () => {
+  const council = { id: "mb_bt", name: "Baytown council",
+    recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+    agendaLead: { type: "offset", n: 10, unit: "business" } };
+  const bodies = [council];
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
+  const run = (tasks, b = bodies) => { const r = E.cascadeDates(tasks, b); const by = {}; r.forEach(t => by[t.id] = t); return by; };
+
+  it("the deadline row lands on the anchor's meetingDeadline as a milestone", () => {
+    // Anchor snaps to the 8/11 meeting (deadline 7/28) — the linked row must sit on 7/28.
+    const r = run([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] }),
+                   mk(3, { deadlineForTaskId: 2 })]);
+    expect(r[2].start).toBe("2026-08-11");
+    expect(r[3].start).toBe("2026-07-28");
+    expect(r[3].end).toBe("2026-07-28");
+    expect(r[3].duration).toBe(0);
+    expect(r[3].deadlineInfeasible).toBe(false);
+  });
+  it("when the anchor rolls to the next meeting, the deadline row follows", () => {
+    // Packet ready 8/4 misses the 8/11 agenda → anchor 8/25, deadline 8/11 — row follows to 8/11.
+    const r = run([mk(1, { start: "2026-07-27", pinnedStart: true, duration: 6, durValue: 6 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] }),
+                   mk(3, { deadlineForTaskId: 2 })]);
+    expect(r[2].start).toBe("2026-08-25");
+    expect(r[3].start).toBe("2026-08-11");
+  });
+  it("deadlineInfeasible fires when the row's own predecessors land AFTER the call/file-by date", () => {
+    const r = run([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] }),
+                   mk(4, { start: "2026-08-03", pinnedStart: true, duration: 2, durValue: 2 }),
+                   mk(3, { deadlineForTaskId: 2, predecessors: [{ id: 4, type: "FS" }] })]);
+    expect(r[3].start).toBe("2026-07-28");            // still sits on the deadline (date is derived)
+    expect(r[3].deadlineInfeasible).toBe(true);       // but the conflict is flagged loudly
+  });
+  it("a stored date WITHOUT predecessors is stale context, not a constraint — no false infeasible", () => {
+    // e.g. the body's lead just moved the deadline earlier; the row's old stored date must not flag.
+    const r = run([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] }),
+                   mk(3, { start: "2026-09-01", deadlineForTaskId: 2 })]);
+    expect(r[3].start).toBe("2026-07-28");
+    expect(r[3].deadlineInfeasible).toBe(false);
+  });
+  it("dangling anchor id → the row keeps its natural date (defensive, no crash)", () => {
+    const r = run([mk(3, { start: "2026-07-01", pinnedStart: true, deadlineForTaskId: 99 })]);
+    expect(r[3].start).toBe("2026-07-01");
+    expect(r[3].deadlineInfeasible).toBe(false);
+  });
+  it("an UNBOUND anchor leaves the row on its natural date", () => {
+    const r = run([mk(2, { start: "2026-08-03", pinnedStart: true }),
+                   mk(3, { start: "2026-07-01", pinnedStart: true, deadlineForTaskId: 2 })]);
+    expect(r[3].start).toBe("2026-07-01");
+  });
+  it("meeting binding wins over a stray deadline link (mutual exclusivity, defensive)", () => {
+    const r = run([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] }),
+                   mk(3, { meetingBound: true, meetingBodyId: "mb_bt", deadlineForTaskId: 2, predecessors: [{ id: 1, type: "FS" }] })]);
+    expect(r[3].start).toBe("2026-08-11");            // snapped to the MEETING, not the deadline
+  });
+  it("a parent row is never snapped by a deadline link", () => {
+    const r = run([mk(1, { start: "2026-07-20", pinnedStart: true, duration: 3, durValue: 3 }),
+                   mk(2, { meetingBound: true, meetingBodyId: "mb_bt", predecessors: [{ id: 1, type: "FS" }] }),
+                   mk(3, { start: "2026-07-01", pinnedStart: true, deadlineForTaskId: 2 }),
+                   mk(4, { start: "2026-07-01", pinnedStart: true, parentId: 3 })]);
+    expect(r[3].start).toBe("2026-07-01");            // parent (has child 4) is skipped
+  });
+});
+
+describe("deadline rows — renumberTasks remaps every task-id pointer (link survives inserts/deletes)", () => {
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, predecessors: [], parentId: null, ...o });
+  it("inserting a row above the anchor re-points the link at the anchor's NEW id", () => {
+    // [new(id 0), anchor(1), deadline(2 → anchor 1)] → renumber → [1, 2, 3]; link must follow to 2.
+    const r = E.renumberTasks([mk(0), mk(1), mk(2, { deadlineForTaskId: 1 })]);
+    expect(r[2].deadlineForTaskId).toBe(2);
+  });
+  it("deleting the anchor nulls the dangling link (the row visibly reverts to a normal task)", () => {
+    const r = E.renumberTasks([mk(2, { deadlineForTaskId: 1 })]);   // anchor id 1 already filtered out
+    expect(r[0].deadlineForTaskId).toBeNull();
+  });
+  it("minMeetingsAfter.taskId is remapped too (the latent re-pointing bug this remap fixes)", () => {
+    const r = E.renumberTasks([mk(0), mk(1), mk(2, { minMeetingsAfter: { taskId: 1, n: 2 } })]);
+    expect(r[2].minMeetingsAfter.taskId).toBe(2);
+    const gone = E.renumberTasks([mk(2, { minMeetingsAfter: { taskId: 1, n: 2 } })]);
+    expect(gone[0].minMeetingsAfter).toBeUndefined();
+  });
+  it("plain tasks gain no pointer fields from the remap", () => {
+    const r = E.renumberTasks([mk(1)]);
+    expect("deadlineForTaskId" in r[0]).toBe(false);
+  });
+});
+
+describe("deadline rows — computeDisplayHealth surfaces the call/file-by risk", () => {
+  const orig = E.NOW;
+  afterEach(() => E.setNOW(orig));
+  const cf = { cfRules: {} };
+  it("infeasible deadline row → red", () => {
+    E.setNOW("2026-08-01");
+    expect(E.computeDisplayHealth({ deadlineForTaskId: 2, deadlineInfeasible: true, health: "gray", percentComplete: 0, end: "2026-09-30" }, cf)).toBe("red");
+  });
+  it("deadline within 2 working days → at-risk yellow", () => {
+    E.setNOW("2026-08-24");
+    expect(E.computeDisplayHealth({ deadlineForTaskId: 2, health: "gray", percentComplete: 0, end: "2026-08-25" }, cf)).toBe("yellow");
+  });
+  it("a comfortable deadline passes through to the stored health", () => {
+    E.setNOW("2026-08-01");
+    expect(E.computeDisplayHealth({ deadlineForTaskId: 2, health: "gray", percentComplete: 0, end: "2026-09-15" }, cf)).toBe("gray");
+  });
+  it("a COMPLETE deadline row is exempt", () => {
+    E.setNOW("2026-08-24");
+    expect(E.computeDisplayHealth({ deadlineForTaskId: 2, deadlineInfeasible: true, health: "gray", percentComplete: 100, end: "2026-08-25" }, { cfRules: { completeGreen: true } })).toBe("green");
+  });
+});
+
+describe("anti-drift: the deadline-row wiring exists VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("the cascade post-pass snaps the row to anchor.meetingDeadline in both", () => {
+    expect(src).toMatch(/t\.start = t\.end = anchor\.meetingDeadline; t\.duration = 0;/);
+    expect(mjs).toMatch(/t\.start = t\.end = anchor\.meetingDeadline; t\.duration = 0;/);
+  });
+  it("renumberTasks remaps deadlineForTaskId (dangling → null) in both", () => {
+    expect(src).toMatch(/deadlineForTaskId: map\[t\.deadlineForTaskId\] \?\? null/);
+    expect(mjs).toMatch(/deadlineForTaskId: map\[t\.deadlineForTaskId\] \?\? null/);
+  });
+  it("computeDisplayHealth wires deadline-row infeasible→red in both", () => {
+    expect(src).toMatch(/if \(task\.deadlineInfeasible\) return "red";/);
+    expect(mjs).toMatch(/if \(task\.deadlineInfeasible\) return "red";/);
+  });
+  it("the pred-less fixed-point guard (no per-cascade ratchet) exists in both", () => {
+    expect(src).toMatch(/if \(meetingDatesInRange\(body, packetReady, packetReady\)\.length\) \{/);
+    expect(mjs).toMatch(/if \(meetingDatesInRange\(body, packetReady, packetReady\)\.length\) \{/);
+  });
+});
+
 // ── Round-2 scheduler bug-batch (2026-06-30) — anti-drift guards for the App-level fixes ──
 describe("anti-drift: the round-2 scheduler fixes still exist in the real source", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");

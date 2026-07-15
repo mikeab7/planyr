@@ -2044,6 +2044,20 @@ const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDat
     t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false;
     return;
   }
+  // Fixed-point guard: with NO external constraint (no preds, no pin, no driving meeting, no
+  // minMeetingsAfter), packetReady is the task's OWN previously-snapped start. Re-deriving
+  // eligibility from it would RATCHET one meeting forward per cascade (the deadline always
+  // precedes its meeting, so a meeting is never "eligible" from its own date). If the start is
+  // still one of the body's meetings, keep it; a cancelled/blacked-out date falls through and
+  // re-snaps forward from here.
+  if (!predEarly && !drivingMeetingDate && !(t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate)) {
+    if (meetingDatesInRange(body, packetReady, packetReady).length) {
+      t.start = t.end = packetReady;
+      t.meetingDeadline = agendaDeadline(body, packetReady) || "";
+      t.meetingInfeasible = false;
+      return;
+    }
+  }
   let readyDate = packetReady, afterDate = "";
   if (drivingMeetingDate) {                           // the driving predecessor is itself a meeting (1st→2nd reading)
     afterDate = drivingMeetingDate;
@@ -2133,6 +2147,23 @@ const cascadeDates = (tasks, bodies = []) => {
     } else if (t.meetingDeadline || t.meetingInfeasible) {
       t.meetingDeadline = ""; t.meetingInfeasible = false;             // stale derived fields on a now-unbound task
     }
+  });
+  // ── Deadline rows — a task linked via deadlineForTaskId ALWAYS sits on its anchor's derived
+  // call/file-by date (anchor.meetingDeadline), so the pair can never diverge and the deadline row
+  // rolls with the meeting. One-way derivation (deliberately NOT a predecessor link — the anchor's
+  // meeting-eligibility would then depend on a row whose date depends on the anchor: circular).
+  // Post-pass: every anchor's meetingDeadline is final after the topo loop above. The natural
+  // (pred-driven) date captured before the override feeds deadlineInfeasible — "your work lands
+  // after the call-by date". Dangling/unbound anchor → keep the natural date, clear the flag.
+  tasks.forEach(x => {
+    const t = map[x.id];
+    if (t.deadlineForTaskId == null || t.meetingBound || parentIds.has(t.id)) { if (t.deadlineInfeasible) t.deadlineInfeasible = false; return; }
+    const anchor = map[t.deadlineForTaskId];
+    if (!anchor || !anchor.meetingBound || !anchor.meetingDeadline) { t.deadlineInfeasible = false; return; }
+    const hasLivePreds = t.predecessors.some(p => map[p.id]);
+    const naturalStart = hasLivePreds ? t.start : "";   // a stored date without preds is stale, not a constraint
+    t.start = t.end = anchor.meetingDeadline; t.duration = 0;
+    t.deadlineInfeasible = !!(naturalStart && naturalStart > anchor.meetingDeadline);
   });
   return tasks.map(t => { const {_pinStart, __wasDirectEdit, ...rest} = map[t.id] || t; return rest; });
 };
@@ -2237,6 +2268,12 @@ const computeDisplayHealth = (task, settings) => {
   if (task.meetingBound && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
     if (task.meetingInfeasible) return "red";
     if (task.meetingDeadline && difBD(NOW, task.meetingDeadline) <= 2) return "yellow";
+  }
+  // Deadline rows (deadlineForTaskId): the row's date IS the call/file-by deadline — infeasible
+  // (predecessors land after it) = red; within 2 working days = at-risk yellow. Same exemptions.
+  if (task.deadlineForTaskId != null && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
+    if (task.deadlineInfeasible) return "red";
+    if (task.end && difBD(NOW, task.end) >= 0 && difBD(NOW, task.end) <= 2) return "yellow";
   }
   if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
   if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
@@ -2558,11 +2595,19 @@ const renumberTasks = (tasks) => {
   // silently scrambling the dependency graph on load. Guard makes the remap deterministic +
   // original-wins; no change for clean unique-id data (every other caller passes unique ids).
   tasks.forEach((t, i) => { if (!(t.id in map)) map[t.id] = i + 1; });
+  // Every task-id POINTER must be remapped here or it silently re-points after any insert/delete/
+  // indent (ids are reassigned to visual order every structural edit). deadlineForTaskId (deadline
+  // rows) and minMeetingsAfter.taskId (the n-th-subsequent-meeting anchor — previously MISSING from
+  // this remap, a latent re-pointing bug) follow the parentId/predecessors pattern; dangling → null.
   return tasks.map((t, i) => ({
     ...t,
     id: i + 1,
     parentId: t.parentId !== null && t.parentId !== undefined ? (map[t.parentId] ?? null) : null,
     predecessors: normPreds(t.predecessors).map(p => ({...p, id: map[p.id]})).filter(p => p.id),
+    ...(t.deadlineForTaskId != null ? { deadlineForTaskId: map[t.deadlineForTaskId] ?? null } : {}),
+    ...(t.minMeetingsAfter && t.minMeetingsAfter.taskId != null
+      ? { minMeetingsAfter: (map[t.minMeetingsAfter.taskId] ? { ...t.minMeetingsAfter, taskId: map[t.minMeetingsAfter.taskId] } : undefined) }
+      : {}),
   }));
 };
 
@@ -5509,7 +5554,7 @@ function App() {
           tasks = tasks.map(t => descIds.has(t.id) ? {...t, health: updates.health, ...extra} : t);
         }
       }
-      if ('duration' in updates || 'start' in updates || 'end' in updates || 'predecessors' in updates || 'meetingBound' in updates || 'meetingBodyId' in updates || 'pinnedMeetingDate' in updates || 'minMeetingsAfter' in updates) {
+      if ('duration' in updates || 'start' in updates || 'end' in updates || 'predecessors' in updates || 'meetingBound' in updates || 'meetingBodyId' in updates || 'pinnedMeetingDate' in updates || 'minMeetingsAfter' in updates || 'deadlineForTaskId' in updates) {
         tasks = cascadeDates(tasks);
         tasks = rollupParentDates(tasks);
         // B816 — a bound task whose meeting moved from a prior meeting rolled a cycle; announce it (once).
@@ -5931,6 +5976,27 @@ function App() {
       return { ...d, projects: { ...d.projects, [pid]: { ...d.projects[pid], tasks: renumberTasks(tasks) } } };
     });
     revealInserted();
+  }, []);
+
+  // Deadline row: a milestone spliced directly above its bound anchor, linked via deadlineForTaskId
+  // so the cascade post-pass keeps it on the anchor's call/file-by date forever. The link is set with
+  // the anchor's PRE-renumber id — renumberTasks remaps it alongside parentId/predecessors.
+  const addDeadlineTask = useCallback((anchorId, projId = null) => {
+    setData(d => {
+      const pid = projId ?? d.aPid;
+      const proj = d.projects[pid];
+      if (!proj) return d;
+      const rawTasks = proj.tasks || [];
+      const anchor = rawTasks.find(t => t.id === anchorId);
+      if (!anchor || !anchor.meetingBound) return d;
+      const body = MEETING_BODY_INDEX[anchor.meetingBodyId];
+      const newTask = { ...mkt(0, `Deadline — ${(body && body.name) || "meeting"}`, "", "", anchor.parentId), deadlineForTaskId: anchor.id };
+      const tasks = [...rawTasks];
+      const rawIdx = tasks.findIndex(t => t.id === anchorId);
+      if (rawIdx === -1) tasks.push(newTask); else tasks.splice(rawIdx, 0, newTask);
+      // Cascade BEFORE renumber (ids still match the link), so the row lands already dated.
+      return { ...d, projects: { ...d.projects, [pid]: { ...proj, tasks: renumberTasks(recomputeAfterStructureChange(tasks)) } } };
+    });
   }, []);
 
   const addSubtask = useCallback((taskId) => {
@@ -7001,6 +7067,10 @@ function App() {
           if (!p) return d;
           const nd = {...d, projects:{...d.projects, [d.aPid]:{...p, meetingBodies: next}}};
           rebuildMeetingBodyIndex(nd);   // B816 — keep the global index fresh so the next cascade uses the edited cadence
+          // Re-cascade immediately (same discipline as the Holidays editor): a cadence/lead edit must
+          // move bound tasks + deadline rows NOW, not on the next unrelated task edit.
+          const proj2 = nd.projects[nd.aPid];
+          nd.projects = {...nd.projects, [nd.aPid]: {...proj2, tasks: rollupParentDates(cascadeDates((proj2.tasks || []).map(t => ({...t}))))}};
           return nd;
         })}
         onClose={()=>setMeetingCalOpen(false)} />}
@@ -7047,11 +7117,23 @@ function App() {
           onAddNote={() => { setNotesCtx({taskId: taskCtx.task.id, projectId: taskCtx.projId}); setTaskCtx(null); }}
           meetingBodies={(data.projects[taskCtx.projId] || {}).meetingBodies || []}
           bindCount={(() => { const ids = fullRowSelIds(); return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1; })()}
+          boundTasks={(() => {
+            // Bound LEAF tasks this row could serve as the deadline row for (exclude self + parents).
+            const ts = (data.projects[taskCtx.projId] || {}).tasks || [];
+            const parents = new Set(ts.filter(t => t.parentId != null).map(t => t.parentId));
+            return ts.filter(t => t.meetingBound && t.meetingBodyId && t.id !== taskCtx.task.id && !parents.has(t.id)).map(t => ({ id: t.id, name: t.name || `Task ${t.id}` }));
+          })()}
+          deadlineAnchorName={(() => {
+            if (taskCtx.task.deadlineForTaskId == null) return null;
+            const a = ((data.projects[taskCtx.projId] || {}).tasks || []).find(t => t.id === taskCtx.task.deadlineForTaskId);
+            return a ? (a.name || `Task ${a.id}`) : null;
+          })()}
           onBindMeeting={bodyId => {
-            // Right-click inside a multi-row selection binds the whole selection (mirror the delete semantics)
+            // Right-click inside a multi-row selection binds the whole selection (mirror the delete semantics).
+            // Binding clears any deadline link — the two snap modes are mutually exclusive.
             const ids = fullRowSelIds();
             const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
-            targets.forEach(id => updateTask(id, {meetingBound:true, meetingBodyId:bodyId}, taskCtx.projId));
+            targets.forEach(id => updateTask(id, {meetingBound:true, meetingBodyId:bodyId, deadlineForTaskId:null}, taskCtx.projId));
             setTaskCtx(null);
           }}
           onUnbindMeeting={() => {
@@ -7060,6 +7142,9 @@ function App() {
             targets.forEach(id => updateTask(id, {meetingBound:false, meetingBodyId:null, pinnedMeetingDate:undefined}, taskCtx.projId));
             setTaskCtx(null);
           }}
+          onAddDeadlineRow={() => { addDeadlineTask(taskCtx.task.id, taskCtx.projId); setTaskCtx(null); }}
+          onLinkAsDeadline={anchorId => { updateTask(taskCtx.task.id, {deadlineForTaskId: anchorId, meetingBound:false, meetingBodyId:null, pinnedMeetingDate:undefined}, taskCtx.projId); setTaskCtx(null); }}
+          onUnlinkDeadline={() => { updateTask(taskCtx.task.id, {deadlineForTaskId: null}, taskCtx.projId); setTaskCtx(null); }}
           onAddMeetingCalendar={() => { setMeetingCalOpen(true); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false); setTaskCtx(null); }}
           onDelete={() => {
             // Right-click inside a multi-row selection deletes the whole selection
@@ -7307,7 +7392,7 @@ function ProjContextMenu({x, y, projId, canDelete, onRename, onDuplicate, onDele
 }
 
 // ── TaskContextMenu ───────────────────────────────────────
-function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCopyName, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onAddNote, meetingBodies = [], bindCount = 1, onBindMeeting, onUnbindMeeting, onAddMeetingCalendar, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
+function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCopyName, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onAddNote, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -7371,11 +7456,16 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
   );
 
   const canOutdent = task.parentId !== null;
-  // B844 — "Bind to meeting calendar" flyout. The sub-panel opens leftward when the menu is near the right
-  // edge (the context menu already reflows leftward at L~7273, unlike the header menu's always-right flyout).
+  // B844 — meeting-calendar flyout. Parent label reflects the row's CURRENT state (bound body /
+  // deadline link / unbound); the flyout is one radio list ("— none —" + bodies, ✓ on the current
+  // choice) plus the deadline-row actions. Opens leftward when the menu is near the right edge.
   const [subMeet, setSubMeet] = useState(false);
-  const curBodyName = task.meetingBound ? ((meetingBodies.find(b => b.id === task.meetingBodyId) || {}).name || "") : "";
-  const subOpenLeft = left + mw + 200 > vw;
+  const curBodyName = task.meetingBound ? ((meetingBodies.find(b => b.id === task.meetingBodyId) || {}).name || "Meeting body") : "";
+  const isDeadlineRow = task.deadlineForTaskId != null;
+  const subOpenLeft = left + mw + 210 > vw;
+  const SubCaption = ({children}) => (
+    <div style={{padding:"4px 11px 2px",fontSize:9,fontWeight:700,color:"var(--mut)",letterSpacing:".06em",textTransform:"uppercase",userSelect:"none"}}>{children}</div>
+  );
 
   return ReactDOM.createPortal(
     <div ref={menuRef} style={{position:"fixed",top,left,background:"#fff",border:"1px solid var(--bd2)",
@@ -7441,25 +7531,41 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
       <Item icon="ti-row-insert-bottom" label="Insert Row Below"              onClick={onInsertBelow} />
       <Item icon="ti-sitemap"           label="Add Subtask"                   onClick={onAddSubtask} />
       <Sep />
-      {/* B844 — bind the task (or the whole row selection) to a meeting calendar. The main front door for
-          the meeting-cadence engine — no longer requires un-hiding the hidden "Meeting" grid column. */}
+      {/* B844 — meeting-calendar flyout: the parent label reads the row's current state; the flyout
+          is one radio list (— none — + bodies) plus the deadline-row actions. */}
       <div style={{position:"relative"}} onMouseEnter={()=>setSubMeet(true)} onMouseLeave={()=>setSubMeet(false)}>
-        {meetingBodies.length === 0 ? (
+        {meetingBodies.length === 0 && !isDeadlineRow ? (
           <Item icon="ti-calendar-plus" label="Add a meeting calendar…" onClick={onAddMeetingCalendar} />
+        ) : isDeadlineRow ? (
+          <Item icon="ti-flag" label={`Deadline for: ${deadlineAnchorName || "(missing task)"}`} hint="▸" />
+        ) : task.meetingBound ? (
+          <Item icon="ti-calendar-event" label={`Meeting: ${curBodyName}`} hint="▸" />
         ) : (
           <Item icon="ti-calendar-event" label={bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar"} hint="▸" />
         )}
-        {subMeet && meetingBodies.length > 0 && (
-          <div style={{position:"absolute", top:-4, ...(subOpenLeft ? {right:"100%"} : {left:"100%"}), minWidth:190, maxHeight:300, overflow:"auto",
+        {subMeet && (meetingBodies.length > 0 || isDeadlineRow) && (
+          <div style={{position:"absolute", top:-4, ...(subOpenLeft ? {right:"100%"} : {left:"100%"}), minWidth:200, maxHeight:320, overflow:"auto",
             background:"#fff", border:"1px solid var(--bd2)", borderRadius:6, boxShadow:"0 8px 24px rgba(0,0,0,0.18)", padding:"3px 0", zIndex:10000}}>
-            {task.meetingBound && task.meetingBodyId && (<>
-              <Item icon="ti-calendar-off" label={curBodyName ? `Unbind from ${curBodyName}` : "Unbind"} onClick={onUnbindMeeting} />
-              <Sep />
+            {isDeadlineRow ? (<>
+              <SubCaption>Deadline row for “{deadlineAnchorName || "missing task"}”</SubCaption>
+              <Item icon="ti-flag-off" label="Unlink (keep current date)" onClick={onUnlinkDeadline} />
+            </>) : (<>
+              <SubCaption>{bindCount > 1 ? `Snap ${bindCount} rows to` : "Snap this row to"}</SubCaption>
+              <Item icon={!task.meetingBound ? "ti-check" : "ti-circle"} label="— none —" onClick={onUnbindMeeting} />
+              {meetingBodies.map(b => {
+                const isCur = task.meetingBound && task.meetingBodyId === b.id;
+                return <Item key={b.id} icon={isCur ? "ti-check" : "ti-circle"} label={b.name || "Meeting body"} onClick={()=>onBindMeeting(b.id)} />;
+              })}
+              {bindCount === 1 && task.meetingBound && !task.hasChildren && (<>
+                <Sep />
+                <Item icon="ti-flag" label="+ Add deadline row (call/file-by date)" onClick={onAddDeadlineRow} />
+              </>)}
+              {bindCount === 1 && !task.meetingBound && !task.hasChildren && boundTasks.length > 0 && (<>
+                <Sep />
+                <SubCaption>Use as deadline row for</SubCaption>
+                {boundTasks.slice(0, 8).map(bt => <Item key={bt.id} icon="ti-flag" label={bt.name} onClick={()=>onLinkAsDeadline(bt.id)} />)}
+              </>)}
             </>)}
-            {meetingBodies.map(b => {
-              const isCur = task.meetingBound && task.meetingBodyId === b.id;
-              return <Item key={b.id} icon={isCur ? "ti-check" : "ti-calendar-event"} label={b.name || "Meeting body"} onClick={()=>onBindMeeting(b.id)} />;
-            })}
             <Sep />
             <Item icon="ti-settings" label="Manage meeting calendars…" onClick={onAddMeetingCalendar} />
           </div>
@@ -9300,6 +9406,25 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
               </span>
             );
           })()}
+          {isStart && !task.hasChildren && task.deadlineForTaskId != null && (() => {
+            // Deadline-row mark: this row always sits on its anchor's call/file-by date (one-way
+            // derivation from the anchor's meeting binding — see the cascadeDates post-pass).
+            const anchor = (proj?.tasks || []).find(a => a.id === task.deadlineForTaskId);
+            const body = anchor ? MEETING_BODY_INDEX[anchor.meetingBodyId] : null;
+            const color = task.deadlineInfeasible ? "var(--danger,#d83a3a)" : "var(--mut)";
+            const title = [
+              anchor ? `Deadline row for "${anchor.name || "task " + anchor.id}"${body && body.name ? ` (${body.name})` : ""}.` : "Deadline row — its anchor task is missing; the date no longer auto-updates.",
+              body ? `Always sits ${agendaLeadSummary(body).replace("agenda due ", "")} the meeting — moves automatically when the meeting date moves.` : "",
+              task.deadlineInfeasible ? "⚠ INFEASIBLE: this row's predecessors land AFTER the call/file-by date." : "",
+            ].filter(Boolean).join("\n");
+            return (
+              <span title={title} style={{display:"inline-flex",alignItems:"center",marginRight:3,color,flexShrink:0,cursor:"help"}}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 21V4"/><path d="M4 4h12l-2 4 2 4H4"/>
+                </svg>
+              </span>
+            );
+          })()}
           {dateStr}
         </span>
       );
@@ -9308,6 +9433,12 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       // B816 — bind a task to a meeting body (native select = robust, no popover positioning). Setting a
       // body makes the task a milestone that snaps to the body's cadence; clearing it returns it to normal.
       if (task.hasChildren) return <span style={{...s,justifyContent:"center",color:"#94a3b8"}} title="A summary/parent can't be meeting-bound">—</span>;
+      if (task.deadlineForTaskId != null) {
+        // A deadline row derives its date from its anchor's binding — not directly bindable here.
+        const anchor = (proj?.tasks || []).find(a => a.id === task.deadlineForTaskId);
+        const body = anchor ? MEETING_BODY_INDEX[anchor.meetingBodyId] : null;
+        return <span style={{...s,fontSize:10,color:"var(--mut)"}} title={anchor ? `Deadline row for "${anchor.name || "task " + anchor.id}" — unlink via right-click to bind it directly` : "Deadline row (anchor missing)"}>deadline{body && body.name ? ` · ${body.name}` : ""}</span>;
+      }
       const bodies = Array.isArray(proj?.meetingBodies) ? proj.meetingBodies : [];
       const cur = task.meetingBound ? (task.meetingBodyId || "") : "";
       if (!bodies.length) return (
@@ -10200,7 +10331,10 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
         })}
         <button className="btn" onClick={()=>addRuleAt(b.id)} style={{fontSize:11,padding:"4px 10px"}}>+ Add cadence rule</button>
 
-        <div style={sect}>Agenda deadline</div>
+        <div style={sect}>Deadline before each meeting <span style={{textTransform:"none",fontWeight:400,letterSpacing:0}}>— file the agenda / call the election by (e.g. 78 calendar days before an election)</span></div>
+        <div style={{fontSize:10.5,color:"var(--mut)",margin:"0 0 8px",lineHeight:1.5}}>
+          To put this date on the schedule: right-click the bound task → “+ Add deadline row”. The row then always sits this far ahead of the meeting and moves with it.
+        </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           {seg([{v:"offset",l:"Days before"},{v:"weekdayAnchor",l:"Weekday anchor"}], lead.type||"offset", v=>patchLead(b.id,{type:v}))}
           {(lead.type||"offset")==="offset" ? (<>
