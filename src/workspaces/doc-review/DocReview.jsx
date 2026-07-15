@@ -5,7 +5,7 @@
  * overlay (an editable layer over it) and are stored in PAGE UNITS so they survive
  * zoom. Lazy-loaded by the shell.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
 import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
@@ -324,6 +324,27 @@ export default function DocReview({
   const [railW, setRailW] = useState(() => { try { const v = +localStorage.getItem("planarfit:reviewRailW"); return v >= 160 && v <= 460 ? v : 224; } catch (_) { return 224; } });
   const [railHidden, setRailHidden] = useState(() => { try { return localStorage.getItem("planarfit:reviewRailHidden") === "1"; } catch (_) { return false; } });
   useEffect(() => { try { localStorage.setItem("planarfit:reviewRailW", String(railW)); localStorage.setItem("planarfit:reviewRailHidden", railHidden ? "1" : "0"); } catch (_) { /* private mode */ } }, [railW, railHidden]);
+  // B838 / VIEWPORT-STABLE (compensate half): collapsing/expanding or drag-resizing the left sheet
+  // rail moves the canvas viewport's left edge; without compensation the drawing skips sideways by
+  // the full rail delta (in one frame on collapse, continuously on drag). Mirror the shipped B837
+  // discipline: read the MEASURED left edge (`wrapRef.offsetLeft`, relative to the position:relative
+  // review row) in a LAYOUT effect (before paint) and fold the exact delta into `view.tx` in the SAME
+  // frame — no assumed width, no passive-effect skip. Measuring the real edge self-gates the right-side
+  // takeoff panel, the portaled Layers popover, and the in-rail Properties panel (they leave offsetLeft
+  // unchanged → zero delta). Deps are the measure triggers: rail width/visibility, doc-open (numPages),
+  // and stitch→review remount (mode). (Guards a hidden keep-alive: offsetParent is null under display:none.)
+  const railShiftRef = useRef(null); // last-compensated canvas left-edge (px); null until seeded / while the wrap is absent or hidden
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el || el.offsetParent == null) return; // wrap not mounted (empty state / stitch) or hidden (keep-alive) — don't measure
+    const left = Math.round(el.offsetLeft);
+    if (railShiftRef.current == null) { railShiftRef.current = left; return; } // seed baseline — no shift
+    const delta = left - railShiftRef.current;
+    if (delta !== 0) {
+      railShiftRef.current = left;
+      setView((v) => (v ? { ...v, tx: v.tx - delta } : v));
+    }
+  }, [railHidden, railW, numPages, mode]);
   const startRailResize = (e) => {
     e.preventDefault();
     const startX = e.clientX, startW = railW;
@@ -1685,7 +1706,7 @@ export default function DocReview({
   if (mode === "stitch") return (
     <Stitcher
       isActive={isActive}
-      onReview={() => setMode("review")}
+      onReview={() => { setMode("review"); setBackdropReq((n) => n + 1); setDetailReq((n) => n + 1); }}
       loadReq={pendingStitch}
       onConsumeLoad={() => setPendingStitch(null)}
       onOpenReview={openReview}
@@ -2060,7 +2081,7 @@ export default function DocReview({
               </div>
             )}
             {pageBase && view && (
-              <div style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)",
+              <div data-testid="review-sheet" data-view-tx={view.tx} data-view-scale={view.scale} style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)",
                 // Sheet switch (B660): until the NEW page's backdrop lands, the double-buffered canvas
                 // still shows the PREVIOUS sheet — dim it so it clearly reads "in transition", never
                 // "the wrong sheet". The chip below names what's opening.
