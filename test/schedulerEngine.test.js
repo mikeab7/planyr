@@ -518,8 +518,9 @@ describe("anti-drift: the schedule-input fixes still exist in the real source", 
     expect(src).toMatch(/Prepared for: <strong>\$\{escapeHtml\(cfg\.preparedFor\)\}/);
     expect(src).toMatch(/Date:&nbsp;<strong>\$\{escapeHtml\(cfg\.docDate\)\}/);
   });
-  it("the master grid clamps duration the same way the project grid does", () => {
-    expect(src).toMatch(/Math\.max\(0, Math\.min\(100000, parseInt\(val\)\|\|0\)\)/);
+  it("the master grid parses duration UNIT-AWARE (d/w/cd/mo/y), like the project grid — no unit-blind parseInt", () => {
+    // B855: was Math.max(0, Math.min(100000, parseInt(val)||0)) which silently dropped any unit suffix.
+    expect(src).toMatch(/if \(parsed\.value !== taskDurValue\(t\) \|\| parsed\.unit !== taskDurUnit\(t\)\) updateTask\(t\.id, \{durValue: parsed\.value, durUnit: parsed\.unit\}, t\.projId\)/);
   });
   it("indent/outdent/paste recompute roll-ups after a structural move", () => {
     expect(src).toMatch(/const recomputeAfterStructureChange = tasks => rollupParentDates\(cascadeDates\(tasks\)\);/);
@@ -1353,6 +1354,12 @@ describe("B615 parseDurationInput — unit-aware duration parsing (visible error
     expect(E.parseDurationInput("1 year")).toEqual({ value: 1, unit: "y" });
     expect(E.parseDurationInput("3yrs")).toEqual({ value: 3, unit: "y" });
   });
+  it("calendar days ('cd') is its own unit, distinct from working days ('d')", () => {
+    expect(E.parseDurationInput("30cd")).toEqual({ value: 30, unit: "cd" });
+    expect(E.parseDurationInput("5 caldays")).toEqual({ value: 5, unit: "cd" });
+    expect(E.parseDurationInput("30d")).toEqual({ value: 30, unit: "d" });   // 'd' unchanged, never swallows cd
+    expect(E.parseDurationInput("30")).toEqual({ value: 30, unit: "d" });    // bare number still days
+  });
   it("a bare number → days; an empty field → 0 days (a cleared cell = milestone, not an error)", () => {
     expect(E.parseDurationInput("5")).toEqual({ value: 5, unit: "d" });
     expect(E.parseDurationInput("0")).toEqual({ value: 0, unit: "d" });
@@ -1448,6 +1455,25 @@ describe("B615 resolveDuration — days/weeks = working days · months/years = c
   it("years = same day next year (+ roll forward)", () => {
     expect(E.resolveDuration("2026-03-10", 1, "y").end).toBe(E.rollForwardToWorkday("2027-03-10"));
   });
+  it("calendar days ('cd') = an EXACT calendar window (weekends counted, no roll); working-day count DERIVED", () => {
+    // 10 calendar days from Mon 06-22 = through 07-01 (start + 9 straight days), no weekend skip.
+    const r = E.resolveDuration("2026-06-22", 10, "cd");
+    expect(r.end).toBe(E.addD("2026-06-22", 9));                    // exact, weekend-inclusive
+    expect(r.end).toBe("2026-07-01");
+    expect(r.duration).toBe(E.workdaysBetween("2026-06-22", r.end)); // derived, never an input
+    // a cd window MAY end on a weekend (a working span never does): 6 calendar days from Mon = Sat.
+    expect(E.resolveDuration("2026-06-22", 6, "cd").end).toBe("2026-06-27");
+  });
+  it("the SAME number is a shorter wall-clock window in cd than in d (cd skips no weekend)", () => {
+    const cd = E.resolveDuration("2026-06-22", 10, "cd");
+    const d  = E.resolveDuration("2026-06-22", 10, "d");
+    expect(cd.end < d.end).toBe(true);                   // ISO strings compare by date: 10cd ends before 10d
+    expect(cd.duration).toBeLessThanOrEqual(d.duration); // fewer working days inside the window
+  });
+  it("0cd is a milestone; a cd with no start yields a blank end", () => {
+    expect(E.resolveDuration("2026-06-22", 0, "cd")).toEqual({ end: "2026-06-22", duration: 0 });
+    expect(E.resolveDuration("", 10, "cd")).toEqual({ end: "", duration: 0 });
+  });
   it("0 of any unit is a milestone; no start yields a blank end", () => {
     expect(E.resolveDuration("2026-06-22", 0, "d")).toEqual({ end: "2026-06-22", duration: 0 });
     expect(E.resolveDuration("2026-06-22", 0, "mo")).toEqual({ end: "2026-06-22", duration: 0 });
@@ -1481,6 +1507,15 @@ describe("B615 cascadeDates — unit-aware end derivation flows through the depe
     const t2 = out.find(t => t.id === 2);
     expect(t2.end).toBe(E.rollForwardToWorkday(E.addCalendarMonths(t2.start, 2)));
     expect(t2.duration).toBe(E.workdaysBetween(t2.start, t2.end));
+  });
+  it("a CALENDAR-DAY successor cascades as an exact calendar window from its cascaded start", () => {
+    const out = E.cascadeDates([
+      leaf(1, { start: "2026-06-22", duration: 1, durValue: 1 }),
+      leaf(2, { durUnit: "cd", durValue: 30, predecessors: [{ id: 1, type: "FS" }] }),
+    ]);
+    const t2 = out.find(t => t.id === 2);
+    expect(t2.end).toBe(E.addD(t2.start, 29));                      // 30 calendar days, weekend-inclusive
+    expect(t2.duration).toBe(E.workdaysBetween(t2.start, t2.end));  // derived working-day count
   });
 });
 
@@ -1566,6 +1601,12 @@ describe("anti-drift: the B615/B616 duration + finish-lock engine exists in the 
       expect(s).toContain("workdaysBetween");
       expect(s).toContain("resolveDuration");
       expect(s).toContain("normalizeToV7");
+    }
+  });
+  it("B855: the calendar-days ('cd') duration unit + resolve branch exist in source AND mirror", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toMatch(/if \(u === "cd"\) \{ const end = addD\(start, v - 1\);/);   // exact calendar window, no roll
+      expect(s).toMatch(/\{ re: \/\^\(cd\|cds\|calday\|caldays\|caldy\)\$\/,\s*unit: "cd" \}/);
     }
   });
   it("B615: the V7 migration is wired into the load pipeline (source + mirror)", () => {

@@ -1934,20 +1934,21 @@ const DUR_UNIT_ALIASES = [
   { re: /^(mo|mos|month|months)$/,               unit: "mo" },
   { re: /^(y|yr|yrs|year|years)$/,               unit: "y"  },
   { re: /^(w|wk|wks|week|weeks)$/,               unit: "w"  },
+  { re: /^(cd|cds|calday|caldays|caldy)$/,       unit: "cd" },   // calendar days (weekends counted)
   { re: /^(d|day|days|wd|workday|workdays)$/,    unit: "d"  },
 ];
 const parseDurationInput = raw => {
   const str = String(raw == null ? "" : raw).trim().toLowerCase();
   if (str === "") return { value: 0, unit: "d" };                       // cleared → milestone, not an error
   const m = str.match(/^(-?\d+(?:\.\d+)?)\s*([a-z]*)$/);
-  if (!m) return { error: `Couldn't read "${String(raw).trim()}" — try 10d, 3w, 2mo, or 1y` };
+  if (!m) return { error: `Couldn't read "${String(raw).trim()}" — try 10d, 3w, 30cd, 2mo, or 1y` };
   let value = Math.trunc(Number(m[1]));
-  if (!Number.isFinite(value) || value < 0) return { error: `Duration can't be negative — try 10d, 3w, 2mo, or 1y` };
+  if (!Number.isFinite(value) || value < 0) return { error: `Duration can't be negative — try 10d, 3w, 30cd, 2mo, or 1y` };
   value = Math.min(value, 100000);                                      // upper clamp (fat-finger freeze guard)
   const suffix = m[2];
   if (suffix === "") return { value, unit: "d" };                       // bare number → days
   const hit = DUR_UNIT_ALIASES.find(u => u.re.test(suffix));
-  if (!hit) return { error: `Unknown unit "${suffix}" — try d (days), w (weeks), mo (months), y (years)` };
+  if (!hit) return { error: `Unknown unit "${suffix}" — try d (days), w (weeks), cd (calendar days), mo (months), y (years)` };
   return { value, unit: hit.unit };
 };
 // Add n calendar months to an ISO date, clamping to the target month's last day
@@ -2004,6 +2005,7 @@ const resolveDuration = (start, value, unit) => {
     return { end: start ? calcEnd(start, count) : "", duration: count };
   }
   if (!start || v === 0) return { end: start && v === 0 ? start : "", duration: 0 };  // 0 = milestone / no anchor yet
+  if (u === "cd") { const end = addD(start, v - 1); return { end, duration: workdaysBetween(start, end) }; }  // exact calendar window (weekends counted, no roll); working-day count derived
   const months = u === "y" ? v * 12 : v;
   const end = rollForwardToWorkday(addCalendarMonths(start, months));
   return { end, duration: workdaysBetween(start, end) };
@@ -2024,6 +2026,10 @@ const fmtTaskDuration = t => {
 };
 const durTooltip = t => {
   const u = taskDurUnit(t);
+  if (u === "cd") {
+    const n = taskDurValue(t);
+    return `${n} calendar day${n === 1 ? "" : "s"} (weekends counted) ≈ ${t.duration} working day${t.duration === 1 ? "" : "s"}`;
+  }
   if (u !== "mo" && u !== "y") return null;
   const n = taskDurValue(t);
   return `${n} ${u === "y" ? "year" : "month"}${n === 1 ? "" : "s"} ≈ ${t.duration} working day${t.duration === 1 ? "" : "s"} (calendar-based)`;
@@ -9295,6 +9301,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       }
       return (
         <input autoFocus className="ei"
+          placeholder={col.k==="duration" ? "e.g. 10d, 3w, 30cd, 2mo" : undefined}
           style={(col.k==="duration"||col.k==="percentComplete") ? {textAlign:"center", fontSize:11} : undefined}
           defaultValue={seedVal}
           onBlur={e => commit(task.id, col.k, e.target.value)}
@@ -11203,8 +11210,11 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
     // Only call updateTask if the value actually changed — prevents no-op edits
     // from triggering cascadeDates and shifting successor start dates
     if (col==="duration") {
-      const nv = Math.max(0, Math.min(100000, parseInt(val)||0));  // upper clamp matches the project grid (line ~5972) — stops a fat-fingered freeze
-      if (nv !== t.duration) updateTask(t.id, {duration: nv}, t.projId);
+      // Unit-aware like the project grid: honor d/w/cd/mo/y (was parseInt, which silently dropped any
+      // suffix). Visible error on garbage, never a silent 0. updateTask derives duration+end from the unit.
+      const parsed = parseDurationInput(val);
+      if (parsed.error) { showToast(parsed.error); return; }
+      if (parsed.value !== taskDurValue(t) || parsed.unit !== taskDurUnit(t)) updateTask(t.id, {durValue: parsed.value, durUnit: parsed.unit}, t.projId);
     } else if (col==="health") {
       if (val !== t.health) updateTask(t.id, {health: val}, t.projId);
     } else if (col==="percentComplete") {
@@ -11290,7 +11300,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         case 'name': val = t.name||''; break;
         case 'start': val = fmtD(t.start); break;
         case 'end': val = fmtD(t.end); break;
-        case 'duration': val = `${t.duration}d`; break;
+        case 'duration': val = fmtTaskDuration(t)||`${t.duration}d`; break;   // match the unit-aware cell display
         case 'health': val = HEALTH[t.health]?.label||''; break;
         case 'percentComplete': val = `${t.percentComplete||0}%`; break;
         case 'responsibleParty': val = t.responsibleParty||''; break;
@@ -11428,8 +11438,8 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         // Parent durations roll up from children — locked, same as the project grid.
         return <td key={col.k} style={{...tdBase,cursor:t.isLeaf?"text":"default"}} onClick={onCellClick} onDoubleClick={()=>{ if (!t.isLeaf) return; setLocalEdit({id:t.id,projId:t.projId,col:"duration"}); }}>
           {isE(t,"duration")
-            ? <input autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? t.duration} onBlur={e=>commit(t,"duration",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"duration",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
-            : <span style={{color:"var(--mut)"}}>{t.duration===""||t.duration==null?"0d":`${t.duration}d`}</span>}
+            ? <input autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? fmtTaskDuration(t)} onBlur={e=>commit(t,"duration",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"duration",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
+            : <span style={{color:"var(--mut)"}} title={durTooltip(t)||undefined}>{fmtTaskDuration(t)||"0d"}</span>}
         </td>;
       case "health":
         return <td key={col.k} data-hmenu="1" onClick={onCellClick}
