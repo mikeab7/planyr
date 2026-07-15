@@ -73,7 +73,7 @@
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
 | B851 | Schedule grid diverges from the route: crumb correct, grid stranded on the previously-active schedule (route Goose Creek, grid Grand Port) | [Scheduler / Header-Nav] | #scheduler #ui #persistence | ⏳ live — awaiting |
-| B850 | Scheduler's "open in another tab" banner is oversized AND falsely claims an enforced read-only lock | [Scheduler / Shell] | #scheduler #ui #infra | ⏳ live — awaiting |
+| B850 | Scheduler's "open in another tab" banner was oversized, falsely claimed a read-only lock, and turned out to be unnecessary entirely | [Scheduler / Shell] | #scheduler #ui #infra | ⏳ live — awaiting |
 | B846 | Idle second same-account tab makes cascade-derived elements fire false "you (another window) changed X you just edited" toasts | [Site Planner / persistence] | #site-planner #persistence #ui | ⏳ live — awaiting |
 | B839 | Export aerial reuses cached basemap tiles instead of a slow on-demand render (fixes the timeout that blanked the PDF) | [Site Planner] | #site-planner #export #gis #perf #stitching | ⏳ live — awaiting |
 | B840 | Interim: aerial-specific inline timeout + retry + Esri↔USGS source fallback on export | [Site Planner] | #site-planner #export #gis | ⏳ live — awaiting |

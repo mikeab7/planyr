@@ -264,13 +264,20 @@ export default function Scheduler({
         authControl={authControl}
         accountActive={accountActive}
         homeLabel="Dashboard"
-        // NEW-1 (2026-07-15, owner-reported) — the Scheduler never wired the shared editorLock
-        // (AUDIT-FIRST: no editorLock/readOnly reference anywhere under src/workspaces/scheduler
-        // or public/sequence/); the embedded app just auto-saves with a version guard, so a
-        // second tab is NOT actually read-only. lockEnforced=false swaps the B313 banner's
-        // "read-only until you take over" copy (false here) for an honest "edit one at a time"
-        // notice instead of promising an enforcement that doesn't exist.
-        lockEnforced={false}
+        // B850 (2026-07-15, owner-reported, then owner pushed back further: "shouldn't it just
+        // auto-reload... if I have it up in two tabs") — AUDIT-FIRST confirmed the Scheduler is
+        // genuinely safe for two tabs, same guarantee multiEditOk exists to convey: the embedded
+        // app (public/sequence/index.html) polls every 20s + on focus/reconnect/tab-switch for a
+        // newer cloud version — a clean backgrounded tab reloads itself SILENTLY, a tab you're
+        // looking at (or that has unsaved edits) gets a small one-click "Reload" banner instead of
+        // its screen being yanked out from under it. A save that would clobber a newer version is
+        // BLOCKED, never applied (the version-guard in the storage `set()`, "Layer 0"), and the
+        // blocked copy is snapshotted to Version History, never silently lost. So — unlike Doc
+        // Review, which genuinely enforces a single-writer lock — a second Scheduler tab was never
+        // actually read-only, and the outer B313 "another tab" banner added noise, not safety: the
+        // embedded app's own precise, in-context stale-version notice already covers the one real
+        // case (a blocked save) with better copy than a generic cross-workspace banner ever could.
+        multiEditOk
         // B566 — unified cloud save-status badge (Row-1, top-right), replacing the floppy Save
         // button. `saveState` is the embedded app's reported status mapped to the shared badge's
         // vocabulary; the loud error state's popover "Retry now" re-posts planar:save to re-attempt

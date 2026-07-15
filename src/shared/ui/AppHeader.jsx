@@ -241,19 +241,15 @@ export default function AppHeader({
   onDashboard,
   centerContent,
   saveSlot,
-  // B674 — the caller supports concurrent editing (per-element sync + multi-writer), so the B313
-  // "only one tab can edit" warning is FALSE for it and must not show. Default false: every other
-  // workspace (doc-review) keeps the warning until it, too, multi-writes.
+  // B674 — the caller supports concurrent editing (per-element sync + multi-writer, OR its own
+  // safe multi-tab convergence), so the B313 "only one tab can edit" warning is FALSE for it and
+  // must not show. Default false: every other workspace (doc-review) keeps the warning until it,
+  // too, is safe for two tabs. B850 (2026-07-15, AUDIT-FIRST) — the Scheduler was found to already
+  // BE safe (see Scheduler.jsx's comment: version-guarded saves + a 20s/on-focus live-refresh poll
+  // that blocks-never-overwrites a stale write and prompts a one-click reload), so it now passes
+  // this instead of getting its own banner copy — the embedded app's own precise, in-context
+  // "a newer version was saved" notice already covers the one case that matters.
   multiEditOk = false,
-  // NEW-1 (2026-07-15) — the B313 banner's copy claims an ENFORCED read-only lock ("the others
-  // are read-only until you take over editing there"). That is only true for a workspace that
-  // actually wired the shared `editorLock` (Doc Review; Site Planner pre-multiwriter) — a second
-  // tab there genuinely can't write. The Scheduler never adopted that lock (AUDIT-FIRST: no
-  // editorLock/readOnly reference anywhere under src/workspaces/scheduler or public/sequence/); its
-  // embedded app just auto-saves with a version guard, so BOTH tabs can edit and a second tab is
-  // NOT actually read-only. Default true preserves the accurate wording for lock-enforcing
-  // workspaces; the Scheduler passes false for honest copy instead of a false promise.
-  lockEnforced = true,
   authControl,
   toolbarContent,
   // Optional Row-2 center group (B387). When provided, Row 2 renders a 3-zone layout
@@ -506,20 +502,19 @@ export default function AppHeader({
         </div>
       )}
     </header>
-    {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
-        Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). NEW-1
-        (2026-07-15, owner: "i dont need this large pop up") — shrunk from a bold full-width
-        strip to a small dismissible pill, theme-tokened (was hardcoded hex — a KEY DECISIONS
-        violation), with copy that matches whether this workspace actually ENFORCES a read-only
-        lock (lockEnforced) or just auto-saves with a version guard (the Scheduler — no false
-        "read-only" promise). */}
+    {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab AND
+        this workspace actually enforces a read-only lock elsewhere (Doc Review; Site Planner
+        pre-multiwriter). Clears automatically when that tab closes/navigates (its 'bye' / TTL
+        prunes it). NEW-1 (2026-07-15, owner: "i dont need this large pop up") — shrunk from a
+        bold full-width strip to a small dismissible pill, theme-tokened (was hardcoded hex — a
+        KEY DECISIONS violation). B850 further found the Scheduler doesn't enforce a lock at all
+        (it's genuinely safe for two tabs — see multiEditOk above), so it now suppresses this
+        banner entirely via multiEditOk rather than getting its own copy variant here. */}
     {accountActive && multiTab.conflictRisk && !multiTabDismissed && (
       <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: 8, padding: "5px 6px 5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
         <span aria-hidden="true" style={{ color: "var(--warn-text)", fontWeight: 700, lineHeight: 1.5 }}>⧉</span>
         <span style={{ lineHeight: 1.4, paddingTop: 1 }}>
-          {lockEnforced
-            ? <>Also open in <b>another tab</b> — that tab is the active editor; this one is read-only until you switch there or close it.</>
-            : <>Also open in <b>another tab</b> on this device — edit in just one at a time so changes don&rsquo;t overwrite each other.</>}
+          Also open in <b>another tab</b> — that tab is the active editor; this one is read-only until you switch there or close it.
         </span>
         <button type="button" onClick={() => setMultiTabDismissed(true)} aria-label="Dismiss"
           style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "1px 3px", marginLeft: 1 }}>
