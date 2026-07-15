@@ -3,7 +3,7 @@
 // round-trip that lets a restored check replay the exact live split. Pure.
 import { describe, it, expect } from "vitest";
 import { detentionStorage, usablePondVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
-import { accumulatePondLedger, suggestPondRole, effectivePondRole, ROLE_SHARE, POND_ROLES } from "../src/workspaces/site-planner/lib/pondLedger.js";
+import { accumulatePondLedger, suggestPondRole, effectivePondRole, ROLE_SHARE, POND_ROLES, POND_ROLE_LABEL } from "../src/workspaces/site-planner/lib/pondLedger.js";
 
 // The B708 fixture: 100×100 ft square, slope 3 → stage areas are exact.
 const SQ = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
@@ -177,5 +177,16 @@ describe("accumulatePondLedger — the role credit gate (NEW-8)", () => {
     const led = accumulatePondLedger([{ ...splitAt(97.5), role: "mitigation" }, unknownEntry("x", DET)]);
     expect(led.creditedMitCf).toBeNull();
     expect(led.uncreditedMitCf).toBeNull();
+  });
+});
+
+// NEW-4 — the user-facing purpose label: "dual" stays the stored enum (renaming it
+// would orphan saved ponds); the label users see is "Hybrid".
+describe("NEW-4 — purpose labels", () => {
+  it("dual renders as Hybrid; the stored enum is unchanged", () => {
+    expect(POND_ROLES).toEqual(["detention", "mitigation", "dual"]);
+    expect(POND_ROLE_LABEL.dual).toBe("Hybrid");
+    expect(POND_ROLE_LABEL.detention).toBe("Detention");
+    expect(POND_ROLE_LABEL.mitigation).toBe("Mitigation");
   });
 });

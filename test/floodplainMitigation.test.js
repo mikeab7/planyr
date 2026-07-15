@@ -20,6 +20,9 @@ import {
   bfeLinesFromFeatureCollection,
   crossSectionWselFromFeatureCollection,
   governingCrossSectionWsel,
+  wedgeMitigation,
+  estimateZoneAWse,
+  hagForRing,
 } from "../src/workspaces/site-planner/lib/floodplainMitigation.js";
 import { DEFAULT_FLOODPLAIN_RULES, triggerClasses } from "../src/workspaces/site-planner/lib/floodplainRules.js";
 import { feetToLatLng } from "../src/workspaces/site-planner/lib/arcgis.js";
@@ -801,5 +804,127 @@ describe("B807 — the derived 1% WSE seam (FBCDD Atlas-14 DRAFT rasters), LAST 
     expect(below.flags).toContain("wse02-below-1pct"); // pre-B807, ref1 was -Infinity here and this could NEVER fire
     const above = computeMitigation({ footprints: fps, zones, rule: coh, elev: { padElevFt: 100, existGradeFt: 90, derivedWse1pctFt: 97, derivedWse1pctSrc: "fbcdd-wse100-draft", derivedWse02Ft: 98, derivedWse02Src: "fbcdd-wse02-draft" } });
     expect(above.flags).not.toContain("wse02-below-1pct");
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// NEW-1 (Waller) — the floodway prohibition BUFFER: fill within rule.floodwayBufferFt
+// of the mapped floodway screens as floodway-class (hard stop), while the flood
+// EXTENT semantics (trigger bands, WSE) stay unbuffered.
+describe("NEW-1 — Waller floodway buffer (floodwayBufferFt)", () => {
+  const waller = DEFAULT_FLOODPLAIN_RULES.waller;
+  // Floodway occupies x∈[0,100]; the footprint sits x∈[150,250] — 50 ft clear of the
+  // boundary, i.e. INSIDE a 100-ft buffer but fully outside the polygon itself.
+  const fw = () => mkZone("floodway", [rect(0, 0, 100, 300)], { zone: "AE", subtype: "FLOODWAY" });
+  const nearFp = { id: "n", ring: rect(150, 0, 100, 300) };
+  const farFp = { id: "f", ring: rect(500, 0, 100, 300) }; // 400 ft clear — outside the buffer
+
+  it("pointInZone honors zone.bufferFt as a true distance test (closed-loop edges included)", () => {
+    const z = fw();
+    expect(pointInZone({ x: 150, y: 150 }, z)).toBe(false);
+    expect(pointInZone({ x: 150, y: 150 }, { ...z, bufferFt: 100 })).toBe(true);
+    expect(pointInZone({ x: 250, y: 150 }, { ...z, bufferFt: 100 })).toBe(false); // 150 ft out
+    // a point inside the polygon stays inside regardless
+    expect(pointInZone({ x: 50, y: 150 }, { ...z, bufferFt: 100 })).toBe(true);
+  });
+  it("fill 50 ft from the floodway flags under Waller (buffered) but not under Harris (unbuffered)", () => {
+    const elev = { padElevFt: 100, existGradeFt: 90, bfeFt: 95 };
+    const w = computeMitigation({ footprints: [nearFp], zones: [fw()], rule: waller, elev });
+    expect(w.flags).toContain("floodway_intersect");
+    expect(w.flags).toContain("floodway_buffer"); // the buffer (not the polygon) caught it
+    expect(w.floodwayAcres).toBeGreaterThan(0);
+    const h = computeMitigation({ footprints: [nearFp], zones: [fw()], rule: harris, elev });
+    expect(h.flags).not.toContain("floodway_intersect");
+    expect(h.floodwayAcres).toBe(0);
+  });
+  it("fill outside the buffer stays clear; fill in the polygon itself doesn't take the buffer flag", () => {
+    const elev = { padElevFt: 100, existGradeFt: 90, bfeFt: 95 };
+    const far = computeMitigation({ footprints: [farFp], zones: [fw()], rule: waller, elev });
+    expect(far.flags).not.toContain("floodway_intersect");
+    const inside = computeMitigation({ footprints: [{ id: "i", ring: rect(10, 10, 80, 80) }], zones: [fw()], rule: waller, elev });
+    expect(inside.flags).toContain("floodway_intersect");
+    expect(inside.flags).not.toContain("floodway_buffer"); // polygon hit, no extra buffer acreage
+  });
+  it("the buffer never inflates the TRIGGER bands or the WSE chain (extent semantics unbuffered)", () => {
+    // A 1% zone at the same offset: Waller's buffer must not make the near footprint
+    // read as trigger-intersecting.
+    const z1 = mkZone("1pct", [rect(0, 0, 100, 300)], { staticBfeFt: 95 });
+    const r = computeMitigation({ footprints: [nearFp], zones: [z1], rule: waller, elev: { padElevFt: 100, existGradeFt: 90 } });
+    expect(r.triggerAcres).toBe(0);
+    expect(ringInTrigger(nearFp.ring, [z1], waller)).toBe(false);
+  });
+  it("wedgeMitigation screens wedge cells against the same buffered floodway", () => {
+    const cells = [
+      { wedge: true, dzFt: 1, x: 150, y: 150, wFt: 10, hFt: 10, gFt: 90, propFt: 91, elId: "e1" }, // in buffer
+      { wedge: true, dzFt: 1, x: 550, y: 150, wFt: 10, hFt: 10, gFt: 90, propFt: 91, elId: "e1" }, // clear
+    ];
+    const w = wedgeMitigation({ cells, zones: [fw()], rule: waller, elev: {} });
+    expect(w.floodwaySf).toBe(100);
+    const h = wedgeMitigation({ cells, zones: [fw()], rule: harris, elev: {} });
+    expect(h.floodwaySf).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// NEW-2 — estimated 1% WSE for unstudied Zone A from grade along the zone boundary.
+describe("NEW-2 — estimateZoneAWse (boundary-grade screening estimate)", () => {
+  // Zone A square x∈[0,1000], y∈[0,1000]; grade rises linearly with x: g = 100 + x/100.
+  // Boundary samples cover x∈{0..1000} → median ≈ 105 (the mid-x), spread ≈ 10.
+  const zA = () => mkZone("1pct", [rect(0, 0, 1000, 1000)], { zone: "A", staticBfeFt: null, unstudiedA: true });
+  const gradeAt = (pt) => 100 + pt.x / 100;
+
+  it("samples the boundary, returns the median with the spread reported", () => {
+    const est = estimateZoneAWse({ zones: [zA()], siteRings: [rect(0, 0, 1000, 1000)], gradeAt });
+    expect(est).not.toBeNull();
+    expect(est.provider).toBe("est-boundary-grade");
+    expect(est.wseFt).toBeCloseTo(105, 0);
+    expect(est.detail.minFt).toBeCloseTo(100, 5);
+    expect(est.detail.maxFt).toBeCloseTo(110, 5);
+    expect(est.detail.spreadFt).toBeCloseTo(10, 5);
+    expect(est.detail.samples).toBeGreaterThan(6);
+  });
+  it("no DEM sampler / an outage is NEVER an estimate", () => {
+    expect(estimateZoneAWse({ zones: [zA()], siteRings: [], gradeAt: null })).toBeNull();
+    // a sampler that always voids (DEM gap) → too few samples → null
+    expect(estimateZoneAWse({ zones: [zA()], siteRings: [], gradeAt: () => null })).toBeNull();
+  });
+  it("plain Zone A only — AO (own DEPTH provider) and studied zones never estimate", () => {
+    const ao = mkZone("1pct", [rect(0, 0, 1000, 1000)], { zone: "AO", aoDepthFt: null, unstudiedA: true });
+    expect(estimateZoneAWse({ zones: [ao], siteRings: [], gradeAt })).toBeNull();
+    const ae = mkZone("1pct", [rect(0, 0, 1000, 1000)], { zone: "AE", staticBfeFt: 96, unstudiedA: false });
+    expect(estimateZoneAWse({ zones: [ae], siteRings: [], gradeAt })).toBeNull();
+  });
+  it("samples only the site VICINITY of a huge zone (padded bbox filter)", () => {
+    // Site hugs the low-grade west edge; the far east boundary (higher grade) must not
+    // drag the median up. Site bbox x∈[0,100] + 300 pad → samples only x ≤ 400.
+    const est = estimateZoneAWse({ zones: [zA()], siteRings: [rect(0, 400, 100, 200)], gradeAt });
+    expect(est).not.toBeNull();
+    expect(est.wseFt).toBeLessThan(105); // never the whole-polygon median
+  });
+  it("the accepted estimate rides the manual rung with its OWN provider tag end-to-end", () => {
+    const zone = zA();
+    const fp = { id: "a", ring: rect(0, 0, 100, 100) };
+    const r = computeMitigation({ footprints: [fp], zones: [zone], rule: harris, elev: { padElevFt: 110, existGradeFt: 100, bfeFt: 105, bfeSrc: "est-boundary-grade" } });
+    expect(r.providers.wse1pct).toBe("est-boundary-grade");
+    expect(r.volumeCf).toBeCloseTo(10000 * 5, -2); // min(105,110) − 100 = 5 ft — priced like a manual BFE
+    // wse1pctForRing (the pond-split seam) carries the same tag
+    expect(wse1pctForRing(fp.ring, [zone], { bfeFt: 105, bfeSrc: "est-boundary-grade" })).toEqual({ wseFt: 105, provider: "est-boundary-grade" });
+    // an ordinary manual entry is unchanged
+    expect(wse1pctForRing(fp.ring, [zone], { bfeFt: 105 })).toEqual({ wseFt: 105, provider: "manual" });
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// NEW-3 — the HAG screening proxy: max DEM grade along a footprint perimeter.
+describe("NEW-3 — hagForRing (highest adjacent grade proxy)", () => {
+  it("returns the max grade along the perimeter of a tilted plane", () => {
+    const h = hagForRing(rect(0, 0, 100, 200), (pt) => 100 + pt.x / 10 + pt.y / 100);
+    expect(h).not.toBeNull();
+    expect(h.hagFt).toBeCloseTo(100 + 10 + 2, 1); // the (100,200) corner governs
+    expect(h.samples).toBeGreaterThan(4);
+  });
+  it("honest null on a void DEM or no sampler", () => {
+    expect(hagForRing(rect(0, 0, 100, 100), () => null)).toBeNull();
+    expect(hagForRing(rect(0, 0, 100, 100), null)).toBeNull();
   });
 });

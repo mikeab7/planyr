@@ -22,6 +22,12 @@
  *   ratio         — compensating-storage volume per volume of fill (1 = zero-net-fill)
  *   floodwayPolicy— "prohibit_fill": fill/structures in the regulatory FLOODWAY are
  *                   not mitigable at any ratio — a hard stop, not a volume price
+ *   floodwayBufferFt — (optional, NEW-1 Waller) the jurisdiction extends the floodway
+ *                   prohibition to a BUFFER ZONE this many feet beyond the mapped
+ *                   floodway boundary (Waller: 100 ft, Art. 5 §E). The engine screens
+ *                   fill within the buffer as floodway-class (hard stop), computed as a
+ *                   true distance test against the floodway rings — the flood EXTENT
+ *                   itself (trigger bands, WSE sampling) is unchanged by the buffer.
  *   offsetScope   — what the offset must replace: "storage" (volume only) or
  *                   "storage_and_conveyance" (the county rule also offsets conveyance
  *                   reductions — large contiguous fringe fill can trigger a hydraulic /
@@ -85,12 +91,17 @@ export const DEFAULT_FLOODPLAIN_RULES = {
     note: "Placeholder (1% @ 1:1) — VERIFY with Chambers County.",
   },
   waller: {
-    label: "Waller County",
-    trigger: "1pct", ratio: 1, floodwayPolicy: "prohibit_fill", offsetScope: "storage",
-    locationRule: "Verify placement rules with the county engineer.",
-    source: "Waller County floodplain order (not yet transcribed).",
-    sourceDate: null, verified: false,
-    note: "Placeholder (1% @ 1:1) — VERIFY with Waller County.",
+    label: "Waller County (unincorporated)",
+    trigger: "1pct_plus_02pct",
+    ratio: 1,
+    floodwayPolicy: "prohibit_fill",
+    floodwayBufferFt: 100,
+    offsetScope: "storage",
+    locationRule: "On the development site (Art. 5 §A(8): compensating storage “on the development site”) — no net fill up to the 500-year floodplain elevation.",
+    source: "Waller County Flood Damage Prevention Ordinance, Art. 5 §A(8)/§A(9)/§E (adopted 1/13/2009; cover states revised eff. 2/28/2013; county-posted PDF filename says “REVISED_FINAL-2021” — versioning ambiguous, see note). Owner primary-source pull 2026-07-15.",
+    sourceDate: "2026-07-15",
+    verified: true,
+    note: "Art. 5 §A(8) (verbatim, search-triangulated + owner-read 2026-07-15): compensating floodplain storage volume “on the development site at a 1:1 ratio for any fill placed within these flood hazard areas (no net fill up to 500-year floodplain elevation)” — trigger extends to the SFHA AND the moderate (0.2% / 500-yr) flood hazard area. §E: encroachment/fill is prohibited in the regulatory floodway PLUS a 100-ft buffer zone (Waller-specific — modeled as floodwayBufferFt). §A(9): NO structural fill in the SFHA or the 500-yr band — open foundations (pier and beam) only (see the buildability record's fillToElevate: “prohibited”). §C(3): developments >50 lots or >5 ac must generate BFE/500-yr elevations via an Atlas-14 study — Planyr's numbers are screening ahead of that study. VERSIONING: the county PDF cover says adopted 1/13/2009, revised eff. 2/28/2013, but the posted filename implies a 2021 repost — confirm the currently-enforced edition with the County Engineer. UNRESOLVED: the Brookshire–Katy Drainage District may separately govern detention criteria in south Waller near Katy — no BKDD record is modeled (nothing fabricated); verify locally. Sandbox note: co.waller.tx.us blocks automated fetch (403) — transcription rests on the owner's 2026-07-15 pull + search-indexed verbatim text.",
   },
   generic: {
     label: "Generic / unknown",

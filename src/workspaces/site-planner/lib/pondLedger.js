@@ -18,7 +18,9 @@
  *     anchoredTob, autoAnchored, excavationCf, role }    // bookkeeping
  */
 export const POND_ROLES = ["detention", "mitigation", "dual"];
-export const POND_ROLE_LABEL = { detention: "Detention", mitigation: "Mitigation", dual: "Dual" };
+// NEW-4 (owner naming): the third purpose reads "Hybrid" everywhere the user sees it.
+// The STORED enum stays "dual" — renaming the stored value would orphan saved ponds.
+export const POND_ROLE_LABEL = { detention: "Detention", mitigation: "Mitigation", dual: "Hybrid" };
 export const ROLE_SHARE = 0.8; // ≥80% of volume below the WSE → mitigation-primary; ≥80% above → detention
 
 /* NEW-8 — auto-suggest a pond's role from its elevation split. Screening share =

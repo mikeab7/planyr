@@ -5,10 +5,18 @@
  * Three screens, all copy-first and provider-fed by B707's WSE inputs:
  *   1. Required FFE — per-jurisdiction rule. Two shapes now (B759):
  *        • SINGLE basis  { basis, plusFt }              (COH & Harris seed).
- *        • MULTI  basis  { bases:[{ basis, plusFt, label }] } — take the MAX
+ *        • MULTI  basis  { bases:[{ basis, plusFt, label, when? }] } — take the MAX
  *          over every computable basis ("more restrictive controls"; Fort Bend
  *          §3.02(b)). Bases whose WSE input isn't supplied yet surface as
  *          `pendingBases` copy — NEVER fabricated (LOUD-FAILURE).
+ *          NEW-1 (Waller): a base may carry `when` — a location condition evaluated
+ *          against caller-supplied ctx flags (in1pct / in02pct / zoneANoBfe):
+ *            "in_1pct"       — applies unless ctx says the building is NOT in the 1%
+ *                              floodplain (unknown ⇒ applies: max-of stays conservative).
+ *            "in_02pct_only" — applies unless ctx says the building IS in the 1%
+ *                              (there the stricter in_1pct row governs anyway).
+ *            "zone_a_no_bfe" — applies ONLY when ctx.zoneANoBfe === true (this basis
+ *                              MANUFACTURES a requirement from grade — never assumed).
  *      Non-residential DRY-FLOODPROOFING alternatives exist under the NFIP —
  *      noted in copy, never modeled here.
  *   2. Foundation pathway — is fill-to-elevate allowed (with mitigation) or
@@ -85,7 +93,30 @@ export const DEFAULT_BUILDABILITY_RULES = {
   },
   montgomery: { label: "Montgomery County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
   chambers: { label: "Chambers County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
-  waller: { label: "Waller County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
+  // Waller (NEW-1): Art. 5 §B(2) nonresidential — lowest floor ≥ 500-yr WSE + 2 ft when
+  // the structure is in the 1% floodplain; ≥ 500-yr WSE + 1 ft when in the 500-yr band
+  // only. §D(5): an A Zone with no depth number → slab ≥ highest adjacent grade + 4 ft
+  // (the section lives under the AO/AH standards but is written as the A-Zone catch-all —
+  // placement transcribed as found). Max-of across the applicable bases.
+  waller: {
+    label: "Waller County (unincorporated)",
+    ffeRule: {
+      bases: [
+        { basis: "wse02pct", plusFt: 2, label: "500-yr WSE (structure in the 1% floodplain)", when: "in_1pct" },
+        { basis: "wse02pct", plusFt: 1, label: "500-yr WSE (500-yr band only)", when: "in_02pct_only" },
+        { basis: "hag", plusFt: 4, label: "highest adjacent grade (Zone A, no depth number)", when: "zone_a_no_bfe" },
+      ],
+    },
+    fillToElevate: "prohibited",
+    pathwayNote:
+      "Waller County Art. 5 §A(9): NO structural fill in the SFHA or the 500-yr band — open foundations (pier and beam) only. Slab-on-grade in the mapped 100-yr or 500-yr floodplain is a non-starter in unincorporated Waller — keep structures out of both bands (no fill-to-elevate / LOMR-F pathway).",
+    verified: true,
+    source:
+      "Waller County Flood Damage Prevention Ordinance, Art. 5 §B(2)/§D(5)/§A(9) (adopted 1/13/2009; cover states revised eff. 2/28/2013; posted filename implies a 2021 repost — versioning ambiguous). Owner primary-source pull 2026-07-15.",
+    sourceDate: "2026-07-15",
+    note:
+      "FFE = the HIGHEST applicable basis: 500-yr WSE + 2.0 when in the 1% floodplain (§B(2)); 500-yr WSE + 1.0 when in the 500-yr band only (§B(2)); Zone A with no depth number → slab ≥ highest adjacent grade + 4.0 (§D(5) — written under the AO/AH section but reads as the A-Zone catch-all; transcribed as found). §C(3): developments >50 lots or >5 ac must generate BFE/500-yr elevations via an Atlas-14 study — Planyr's numbers are screening ahead of that study; the County Engineer administers best-available data (Art. 4 §B(8)). UNRESOLVED: Brookshire–Katy Drainage District may separately govern detention criteria in south Waller near Katy (no BKDD record modeled). VERSIONING: confirm the currently-enforced edition with the County Engineer. Sandbox note: co.waller.tx.us blocks automated fetch (403) — transcription rests on the owner's 2026-07-15 pull + search-indexed verbatim text. NFIP non-residential dry-floodproofing alternatives exist; noted, not modeled.",
+  },
   generic: { label: "Generic / unknown", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "No jurisdiction matched.", sourceDate: null, note: "No FFE rule modeled — VERIFY locally." },
 };
 
@@ -125,6 +156,7 @@ const BASIS_INPUT = {
   pre_atlas14_100yr: "preAtlas100Ft",
   zone_a_est_bfe: "zoneAEstBfeFt",
   site: "siteBasisFt",
+  hag: "hagFt", // NEW-3 — highest adjacent grade (screening proxy: max 3DEP grade along the footprint perimeter)
 };
 
 /* Human copy for a basis when the rule row carries no label of its own (used by
@@ -136,7 +168,19 @@ const BASIS_COPY = {
   pre_atlas14_100yr: "pre-Atlas-14 100-yr WSE / legacy pond",
   zone_a_est_bfe: "Zone A estimated BFE",
   site: "outside-SFHA site basis (pond 100-yr WSE / top of curb / natural ground)",
+  hag: "highest adjacent grade (3DEP screening proxy)",
 };
+
+/* NEW-1 (Waller) — does a `when`-conditioned base row apply, given the caller's
+ * location ctx? Unknown flags stay conservative for the WSE rows (max-of governs)
+ * but the grade-derived zone_a_no_bfe row applies only on explicit evidence. */
+function baseApplies(when, ctx = {}) {
+  if (!when) return true; // unconditioned rows (every pre-NEW-1 record) are unchanged
+  if (when === "in_1pct") return ctx.in1pct !== false;
+  if (when === "in_02pct_only") return ctx.in1pct !== true && ctx.in02pct !== false;
+  if (when === "zone_a_no_bfe") return ctx.zoneANoBfe === true;
+  return true; // an unrecognized condition must not silently erase a rule row
+}
 
 /* Pull a basis's WSE from the bag, honestly: an absent or non-finite value reads
  * as null (never a fabricated 0) so the caller can surface it as pending. */
@@ -148,45 +192,53 @@ function inputForBasis(basis, bag) {
 }
 
 /* Required FFE from the rule + the WSE providers (B707/B759 inputs). Returns
- * { requiredFfeFt, basis, plusFt, governingBasis, pendingBases, unknownReason }.
+ * { requiredFfeFt, basis, plusFt, governingBasis, losingBases, pendingBases, unknownReason }.
  * requiredFfeFt is null with a reason when no governing WSE is available.
  *
  * The rule's `ffeRule` may be EITHER:
  *   • { basis, plusFt }                  — single basis (COH & Harris; unchanged).
- *   • { bases:[{ basis, plusFt, label }] } — multi basis: FFE = MAX over every
- *     COMPUTABLE basis (input present). Bases whose input is null surface in
- *     `pendingBases` as copy (never fabricated). If NO basis is computable the
- *     required FFE is null and `unknownReason` lists what's needed. Pure. */
-export function requiredFfe(rule, inputs = {}) {
+ *   • { bases:[{ basis, plusFt, label, when? }] } — multi basis: FFE = MAX over every
+ *     APPLICABLE (see baseApplies) and COMPUTABLE basis (input present). Bases whose
+ *     input is null surface in `pendingBases` as copy (never fabricated); bases whose
+ *     `when` condition fails are skipped entirely (not pending — the rule doesn't bind
+ *     there). Computable non-governing bases land in `losingBases` (NEW-3 tooltip).
+ *     If NO basis is computable the required FFE is null and `unknownReason` lists
+ *     what's needed. Pure. */
+export function requiredFfe(rule, inputs = {}, ctx = {}) {
   const bag = {
     wse1pctFt: null, wse02Ft: null, atlas14Wse100Ft: null,
-    preAtlas100Ft: null, zoneAEstBfeFt: null, siteBasisFt: null,
+    preAtlas100Ft: null, zoneAEstBfeFt: null, siteBasisFt: null, hagFt: null,
     ...inputs,
   };
   if (!rule || !rule.ffeRule) {
-    return { requiredFfeFt: null, basis: null, plusFt: null, governingBasis: null, pendingBases: [], unknownReason: "no FFE rule modeled for this jurisdiction — verify locally" };
+    return { requiredFfeFt: null, basis: null, plusFt: null, governingBasis: null, losingBases: [], pendingBases: [], unknownReason: "no FFE rule modeled for this jurisdiction — verify locally" };
   }
   const ffeRule = rule.ffeRule;
 
-  // Multi-basis (B759): take the MAX over every computable basis.
+  // Multi-basis (B759): take the MAX over every applicable computable basis.
   if (Array.isArray(ffeRule.bases)) {
     let best = null; // { basis, plusFt, label, requiredFfeFt }
+    const computable = []; // every applicable basis that priced (governing + losers)
     const pendingBases = [];
     for (const b of ffeRule.bases) {
+      if (!baseApplies(b.when, ctx)) continue; // the rule row doesn't bind at this location
       const wse = inputForBasis(b.basis, bag);
       if (wse == null) { pendingBases.push({ basis: b.basis, label: b.label, plusFt: b.plusFt }); continue; }
       const ffe = wse + b.plusFt;
-      if (best == null || ffe > best.requiredFfeFt) best = { basis: b.basis, plusFt: b.plusFt, label: b.label, requiredFfeFt: ffe };
+      computable.push({ basis: b.basis, plusFt: b.plusFt, label: b.label, requiredFfeFt: ffe });
+      if (best == null || ffe > best.requiredFfeFt) best = computable[computable.length - 1];
     }
     if (best == null) {
-      const needed = ffeRule.bases.map((b) => b.label || BASIS_COPY[b.basis] || b.basis).join("; ");
-      return { requiredFfeFt: null, basis: null, plusFt: null, governingBasis: null, pendingBases, unknownReason: `no water-surface elevation available for any FFE basis — need one of: ${needed}` };
+      const listed = ffeRule.bases.filter((b) => baseApplies(b.when, ctx));
+      const needed = (listed.length ? listed : ffeRule.bases).map((b) => b.label || BASIS_COPY[b.basis] || b.basis).join("; ");
+      return { requiredFfeFt: null, basis: null, plusFt: null, governingBasis: null, losingBases: [], pendingBases, unknownReason: `no water-surface elevation available for any FFE basis — need one of: ${needed}` };
     }
     return {
       requiredFfeFt: best.requiredFfeFt,
       basis: best.basis,
       plusFt: best.plusFt,
       governingBasis: { basis: best.basis, plusFt: best.plusFt, label: best.label },
+      losingBases: computable.filter((c) => c !== best),
       pendingBases,
       unknownReason: null,
     };
@@ -197,7 +249,7 @@ export function requiredFfe(rule, inputs = {}) {
   const wse = inputForBasis(basis, bag);
   if (wse == null) {
     return {
-      requiredFfeFt: null, basis, plusFt, governingBasis: null, pendingBases: [],
+      requiredFfeFt: null, basis, plusFt, governingBasis: null, losingBases: [], pendingBases: [],
       unknownReason: basis === "wse02pct"
         ? "0.2% (500-yr) water-surface elevation not entered — the FFE rule measures from it"
         : basis === "wse1pct"
@@ -205,7 +257,32 @@ export function requiredFfe(rule, inputs = {}) {
           : `${BASIS_COPY[basis] || basis} not available — the FFE rule measures from it`,
     };
   }
-  return { requiredFfeFt: wse + plusFt, basis, plusFt, governingBasis: null, pendingBases: [], unknownReason: null };
+  return { requiredFfeFt: wse + plusFt, basis, plusFt, governingBasis: null, losingBases: [], pendingBases: [], unknownReason: null };
+}
+
+/* NEW-3 — the suggested pad FFE for the empty Pad/FFE field: the jurisdictional code
+ * minimum, offered (never auto-committed) with its basis spelled out. Distinct from
+ * requiredFfe in TWO honesty rules:
+ *   • anyBuildingInTrigger === false → the county flood-ordinance FFE doesn't bind a
+ *     building outside the mapped floodplain — say so instead of suggesting a number.
+ *     (null/undefined = unknown → suggest normally; max-of stays conservative.)
+ *   • the result names whether an ESTIMATED WSE (NEW-2 est-boundary-grade) or the HAG
+ *     screening proxy fed the governing basis, so the stamp can never drop off.
+ * Pure. */
+export const OUTSIDE_FLOODPLAIN_FFE_NOTE =
+  "No county FFE rule applies outside the mapped floodplain — drainage-criteria / pond-WSE checks may still govern; verify locally.";
+export function suggestedFfe({ rule = null, inputs = {}, ctx = {}, anyBuildingInTrigger = null, estimatedBases = [] } = {}) {
+  if (anyBuildingInTrigger === false) {
+    return { applies: false, note: OUTSIDE_FLOODPLAIN_FFE_NOTE, requiredFfeFt: null, governingBasis: null, losingBases: [], pendingBases: [], unknownReason: null, estimated: false };
+  }
+  const req = requiredFfe(rule, inputs, ctx);
+  const estSet = new Set(estimatedBases || []);
+  return {
+    applies: req.requiredFfeFt != null,
+    note: null,
+    ...req,
+    estimated: req.requiredFfeFt != null && estSet.has(req.governingBasis ? req.governingBasis.basis : req.basis),
+  };
 }
 
 /* The full buildability screen. Inputs are FACTS the caller already holds (no
@@ -223,11 +300,18 @@ export function assessBuildability({
   preAtlas100Ft = null,
   zoneAEstBfeFt = null,
   siteBasisFt = null,
+  hagFt = null, // NEW-3 — highest-adjacent-grade proxy (Waller §D(5) basis)
   buildingIn1pct = false,
+  buildingIn02pct = null, // NEW-1 — tri-state ctx for `when`-conditioned bases (null = unknown)
+  zoneANoBfe = null,
   floodplainPresent = false,
   wetlandsPresent = false,
 } = {}) {
-  const req = requiredFfe(rule, { wse1pctFt, wse02Ft, atlas14Wse100Ft, preAtlas100Ft, zoneAEstBfeFt, siteBasisFt });
+  const req = requiredFfe(
+    rule,
+    { wse1pctFt, wse02Ft, atlas14Wse100Ft, preAtlas100Ft, zoneAEstBfeFt, siteBasisFt, hagFt },
+    { in1pct: buildingIn1pct === true ? true : buildingIn1pct === false ? false : null, in02pct: buildingIn02pct, zoneANoBfe: zoneANoBfe === true },
+  );
   let ffeStatus;
   let shortByFt = null;
   if (req.requiredFfeFt == null) ffeStatus = rule && rule.ffeRule ? "unknown" : "no_rule";
