@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-15 @ `73c830b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-15 @ `dd7d734` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -463,7 +463,7 @@ _252 source files mapped._
 - **`src/workspaces/scheduler/lib/gridColNav.js`** — Pure keyboard column-navigation that steps the grid cursor across VISIBLE columns in display order, skipping hidden ones
   - _exports_: `snapToVisible`, `stepVisibleCol`, `stepVisibleColByIdx`, `visibleColMasterIdxs`
 - **`src/workspaces/scheduler/lib/navState.js`** — Pure null-safe parse/sanitize of the embedded scheduler's postMessage nav-state and derive current/site-linked project for the breadcrumb
-  - _exports_: `deriveCurrentProject`, `findBySiteId`, `parseNavState`, `sanitizeProjects`
+  - _exports_: `deriveCurrentProject`, `findBySiteId`, `needsScheduleCarryIn`, `parseNavState`, `sanitizeProjects`
 - **`src/workspaces/scheduler/lib/saveState.js`** — Pure map of the embedded Gantt's reported save status (saving/error/offline/synced) onto the shared CloudSyncBadge, never a false-green
   - _exports_: `scheduleSaveState`
 - **`src/workspaces/scheduler/Scheduler.jsx`** — Scheduler workspace root: embeds the standalone Gantt iframe, bridges nav/toolbar/save/link over postMessage into the shell header

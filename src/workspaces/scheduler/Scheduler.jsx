@@ -10,7 +10,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
-import { parseNavState, deriveCurrentProject, findBySiteId } from "./lib/navState.js";
+import { parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn } from "./lib/navState.js";
+import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
 import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
 import { listProjects, warmProjectsIfEmpty, suggestNameMatch } from "../../shared/projects/projects.js";
@@ -148,14 +149,50 @@ export default function Scheduler({
   };
 
   // Project-aware header tabs (the cross-module payoff): when the route carries a Site Planner
-  // project (group_id), ask the embedded app to activate the schedule linked to it. Fires once
-  // the iframe is ready and whenever the routed project changes. No link yet → the embedded app
-  // ignores it and the resolution panel (below) offers create/link. The embedded handler no-ops
-  // when that schedule is already active, so re-posting is harmless (it can't trigger a save).
+  // project (group_id), keep the embedded app's ACTIVE schedule pinned to the schedule linked to it,
+  // so the grid always matches the crumb + route. No link yet → the embedded app ignores the post
+  // and the resolution panel (below) offers create/link. The embedded handler no-ops when that
+  // schedule is already active, so re-posting is harmless (it can't trigger a save).
+  //
+  // SELF-HEALING (B851 — the route↔grid divergence): this is a RE-DRIVE, not a fire-once. The
+  // original one-shot (deps `[ready, projectId]`) posted the select a single time when `ready`
+  // flipped; when `ready` flips via the fallback timer (onIframeLoad's 2.5s / the 6s backstop)
+  // BEFORE the embed's ~230 KB hs-v1 cloud data has loaded, the embed DROPS that select (its
+  // B644 null-data guard) and it was never retried — stranding the grid on the embed's
+  // previously-active schedule while the crumb correctly named the routed one (owner repro
+  // 2026-07-15: route Goose Creek, grid Grand Port). Re-running on `projects`/`activeId` means the
+  // dropped select is re-posted the moment the embed's data lands, and keeps re-driving until the
+  // grid ADOPTS the routed link; `carriedRef` then stops it so a later DELIBERATE pick of a
+  // cross-cutting unlinked schedule (Pursuits/Operations) isn't yanked back. Never writes the route
+  // (no onProjectChange) → cannot revive the B560/V172 A↔B ping-pong; the `projectId != null` gate
+  // keeps this strictly the carry-IN branch (carry-out below stays `projectId == null`).
+  const carriedRef = useRef(null);
   useEffect(() => {
     if (!ready || projectId == null) return;
+    // Already carried this route's grid onto its schedule once → let deliberate later picks stand.
+    // Re-arms whenever the routed project changes (carriedRef holds the last-carried projectId).
+    if (carriedRef.current === projectId) return;
+    if (!needsScheduleCarryIn(projects, projectId, activeId)) { carriedRef.current = projectId; return; }
     post({ type: "planar:nav-select-by-site", siteId: projectId });
-  }, [ready, projectId]);
+    // LOUD-FAILURE backstop: if the routed site's linked schedule is ALREADY loaded (resolvable in
+    // `projects`) yet the grid still hasn't adopted it after a short settle window, the drive isn't
+    // converging — a real fault, not the ordinary pre-load window. Surface it to telemetry (this was
+    // a silent no-op before). React runs THIS effect's cleanup before any re-run, so adoption
+    // (activeId changes → effect re-runs) clears the timer; it only fires when nothing changed for
+    // 2.5s. No user-facing banner → respects the anti-flash guard.
+    const linked = findBySiteId(projects, projectId);
+    if (!linked) return;
+    const t = setTimeout(() => {
+      try {
+        reportClientEvent(
+          "schedule-route-grid-divergence",
+          "routed site's linked schedule never became the active grid",
+          { siteId: projectId, linkedId: linked.id, activeId },
+        );
+      } catch (_) { /* telemetry must never throw into the app */ }
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [ready, projectId, projects, activeId]);
 
   // Carry the project the OTHER way ONLY when the route has no project yet (projectId == null):
   // adopt the iframe's active schedule's linked site into the empty route so the Site/Review tabs
