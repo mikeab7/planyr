@@ -1466,3 +1466,42 @@ describe("B836 — the drift guard is wired into the real source + engine mirror
     expect(src).toContain("driftNotice && driftNotice.length");   // the banner render
   });
 });
+
+// B835 — the cascade is FORWARD-ONLY: a task's start is derived from its PREDECESSORS, never its
+// successors. A pinned successor can therefore neither MOVE nor BLOCK the recompute of an upstream task.
+// Confirmed against the owner's live version history: Grand Port task 81 corrected 8/3 -> 7/13 while its
+// successor task 82 was STILL pinned — so the pin never gated 81's cascade. The 8/3 was a fossil from a
+// ~15-working-day lag on 81's OWN predecessor link (later zeroed); it lingered only because the app
+// recomputes on a fresh load or a date/dependency edit, and a run of non-date edits never triggered one.
+describe("B835 — a pinned successor never moves OR blocks an upstream task's recompute (cascade is forward-only)", () => {
+  const chain = (extra82 = {}) => [
+    T(80, { start: "2026-06-22", end: "2026-07-10", pinnedEnd: true, durValue: 15, durUnit: "d", predecessors: [] }),
+    T(81, { start: "2026-07-13", durValue: 10, durUnit: "d", predecessors: [{ id: 80, type: "FS", lag: 0 }] }),
+    T(82, { start: "2026-07-27", durValue: 30, durUnit: "d", predecessors: [{ id: 81, type: "FS", lag: 0 }], ...extra82 }),
+  ];
+  const startOf = (tasks, id) => E.cascadeDates(tasks).find(t => t.id === id).start;
+
+  it("task 81 holds its predecessor-derived 7/13 no matter where the successor (82) is pinned", () => {
+    expect(startOf(chain(), 81)).toBe("2026-07-13");                                              // baseline, no pin
+    expect(startOf(chain({ pinnedStart: true, start: "2026-08-17" }), 81)).toBe("2026-07-13");    // pinned later
+    expect(startOf(chain({ pinnedStart: true, start: "2027-01-01" }), 81)).toBe("2026-07-13");    // pinned far out
+    expect(startOf(chain({ pinnedStart: true, start: "2026-07-01" }), 81)).toBe("2026-07-13");    // pinned earlier
+  });
+
+  it("pinning the successor still moves the successor + its own downstream (proves the pin isn't a no-op)", () => {
+    const pinned = E.cascadeDates(chain({ pinnedStart: true, start: "2026-08-17" }));
+    expect(pinned.find(t => t.id === 82).start).toBe("2026-08-17");   // 82 obeys its pin (forward effect is real)
+  });
+
+  it("the 8/3 fossil is explained by a lag on 81's OWN link, not by task 82", () => {
+    const withLag = chain();
+    withLag[1].predecessors = [{ id: 80, type: "FS", lag: 15 }];      // FS +1 +15 working days from 7/10
+    expect(startOf(withLag, 81)).toBe("2026-08-03");
+  });
+
+  it("the reported fossil state (81 saved 8/3 non-pinned, 82 pinned) heals 81 back to 7/13 on recompute", () => {
+    const tasks = chain({ pinnedStart: true, start: "2026-08-17" });
+    tasks[1].start = "2026-08-03";                                    // inject the stale saved value
+    expect(startOf(tasks, 81)).toBe("2026-07-13");                   // recompute ignores the fossil, re-derives from 80
+  });
+});

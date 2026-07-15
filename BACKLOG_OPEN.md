@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _60 open · 103 awaiting live verification._
+> _59 open · 103 awaiting live verification._
 
 ## 🔲 Open
 
@@ -50,7 +50,6 @@
 | B268 | Independent scale cross-check against on-sheet geometry (verify the stated scale) | [Doc Review / Markup] | #doc-review #markup | — |
 | B269 | Remove the uploaded sample drawing PDFs from GitHub (test fixtures, not for `main`) | [Doc Review / repo hygiene] | #doc-review #testing | — |
 | B273 | Filing-workflow practice: read a dropped file's title block → propose its project / discipline / sheet / date | [Doc Review / filing] | #doc-review #filing | — |
-| B255 | Collapse the duplicate indent/outdent + column-autosize functions | [Scheduler / code health] | #scheduler | — |
 | B180 | Project Files repository as a tagged-index with saved views | [Document Review / Files] | #doc-review #files | — |
 | B181 | Capture placement-readiness flags in file facts at filing time | [Document Review / Files] | #doc-review #files | — |
 | B182 | "Place on map" auto-placement cascade | [Site Planner / Files] | #site-planner #files | — |
@@ -201,7 +200,7 @@
 - **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B836, B835, B832, B829, B819, B796, B799, B800, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
 - **#pond** — B834, B829, B830, B831, B822, B707
 - **#road** — B742, B719
-- **#scheduler** — B818, B778, B495, B255, B836, B835, B817, B816, B815, B644
+- **#scheduler** — B818, B778, B495, B836, B835, B817, B816, B815, B644
 - **#selection** — B741, B820, B750, B746, B742, B743, B740, B737, B682, B651
 - **#site-planner** — B810, B776, B777, B752, B753, B741, B723, B724, B725, B629, B553, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B131, B95, B837, B832, B833, B834, B829, B830, B831, B828, B808, B809, B826, B821, B824, B823, B822, B827, B691, B820, B807, B796, B797, B798, B799, B800, B801, B802, B793, B790, B789, B788, B787, B784, B785, B786, B782, B812, B811, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413
