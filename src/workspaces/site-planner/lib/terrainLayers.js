@@ -266,6 +266,12 @@ function terrainLayer(cfg, onStatus, render, emptyMsg) {
     busy = true;
     const r = await fresh;
     busy = false;
+    // The layer may have been toggled off / the map torn down during the (heavy — DEM decode +
+    // contour/flow compute) job; onRemove nulls `map`. Bail before painting or reporting status,
+    // so a stale response never renders into a detached group or fires "loaded" for an off layer.
+    // Same guard as evidenceLayers' overpass path (B36e); the fetch rides gisCache.swr (cached),
+    // so — like overpass — it is NOT aborted (that would poison the shared cache), just not painted.
+    if (!map) return;
     if (r.updated) paint(r.data, r.ts);
     else if (r.error && !cached) {
       lastKey = null; lastPainted = null;
