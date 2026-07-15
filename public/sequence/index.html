@@ -5202,13 +5202,13 @@ function App() {
       // Alt+Shift+Right → indent (make subtask of row above)
       if (e.altKey && e.shiftKey && e.key === "ArrowRight" && !typing) {
         e.preventDefault();
-        if (!e.repeat) indentTask();
+        if (!e.repeat) indentTaskById(selectedId);
         return;
       }
       // Alt+Shift+Left → outdent (promote one level up)
       if (e.altKey && e.shiftKey && e.key === "ArrowLeft" && !typing) {
         e.preventDefault();
-        if (!e.repeat) outdentTask();
+        if (!e.repeat) outdentTaskById(selectedId);
         return;
       }
       // Fix #2: Tab / Shift+Tab — advance to next/previous column (Excel-style)
@@ -5361,11 +5361,12 @@ function App() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-    // NOTE: deleteTask/insertTask/indentTask/outdentTask are intentionally NOT in this dependency
-    // array. They are defined later in this component and only depend on selectedId, which IS a
-    // dependency here — so the listener re-binds (capturing fresh callbacks) whenever they change.
-    // Referencing them directly here would read them before initialization if the build ever kept
-    // `const` block-scoping instead of hoisting to `var`.
+    // NOTE: deleteTask/insertTask/indentTaskById/outdentTaskById are intentionally NOT in this
+    // dependency array. They are defined later in this component; the indent/outdent by-id helpers
+    // are stable (useCallback([])) and read the current selection via `selectedId`, which IS a
+    // dependency here — so the listener re-binds (capturing the fresh selectedId) whenever it
+    // changes. Referencing the helpers directly here would read them before initialization if the
+    // build ever kept `const` block-scoping instead of hoisting to `var`.
   }, [selectedId, selectedColIdx, selRange, isUndoing]);
 
   // Ctrl+scroll → zoom Gantt timeline instead of browser zoom
@@ -5810,82 +5811,8 @@ function App() {
     revealInserted();
   }, [selectedId]);
 
-  // Alt+Shift+Right — indent exactly one level (child of nearest preceding task at same level)
-  const indentTask = useCallback(() => {
-    if (selectedId === null) return;
-    setData(d => {
-      const pid = d.aPid;
-      const tasks = d.projects[pid].tasks;
-
-      // Build flat visual order WITH level info
-      const flatOrder = [];
-      const walk = (parentId, level) => {
-        tasks.filter(t => t.parentId === parentId).forEach(t => {
-          flatOrder.push({...t, level});
-          if (t.isExpanded) walk(t.id, level + 1);
-        });
-      };
-      walk(null, 0);
-
-      const idx = flatOrder.findIndex(t => t.id === selectedId);
-      if (idx <= 0) return d;
-
-      const sel = flatOrder[idx];
-      const L = sel.level;
-
-      // Walk backward to find nearest preceding task at the SAME level → becomes parent
-      // Stop if we hit a task shallower than L (we've left our subtree)
-      let newParent = null;
-      for (let i = idx - 1; i >= 0; i--) {
-        if (flatOrder[i].level === L) { newParent = flatOrder[i]; break; }
-        if (flatOrder[i].level < L)  { break; } // no same-level task above
-      }
-
-      if (!newParent) return d;
-      if (sel.parentId === newParent.id) return d; // already a child of it
-
-      const newTasks = tasks.map(t => {
-        if (t.id === sel.id)       return {...t, parentId: newParent.id};
-        if (t.id === newParent.id) return {...t, isExpanded: true, focused: false};
-        return t;
-      });
-      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks)))}}};
-    });
-  }, [selectedId]);
-
-  // Alt+Shift+Left — promote selected task one level up (outdent)
-  const outdentTask = useCallback(() => {
-    if (selectedId === null) return;
-    setData(d => {
-      const pid = d.aPid;
-      const tasks = d.projects[pid].tasks;
-      const sel = tasks.find(t => t.id === selectedId);
-      if (!sel || sel.parentId === null) return d;
-      const parent = tasks.find(t => t.id === sel.parentId);
-      const grandParentId = parent ? parent.parentId : null;
-
-      const updated = tasks.map(t => t.id === sel.id ? {...t, parentId: grandParentId}
-        : (grandParentId !== null && t.id === grandParentId) ? {...t, focused: false} : t);
-
-      // Collect all ids in parent's subtree (excluding sel itself)
-      const getSubtreeIds = (rootId, tList) => {
-        const ids = new Set([rootId]);
-        tList.filter(t => t.parentId === rootId && t.id !== sel.id)
-             .forEach(c => getSubtreeIds(c.id, tList).forEach(x => ids.add(x)));
-        return ids;
-      };
-      const subtreeIds = parent ? getSubtreeIds(parent.id, updated) : new Set();
-
-      // Remove sel, find the last position of parent's subtree, re-insert sel right after it
-      const withoutSel = updated.filter(t => t.id !== sel.id);
-      let insertAfter = -1;
-      withoutSel.forEach((t, i) => { if (subtreeIds.has(t.id)) insertAfter = i; });
-      const reordered = [...withoutSel];
-      reordered.splice(insertAfter + 1, 0, updated.find(t => t.id === sel.id));
-
-      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(reordered)))}}};
-    });
-  }, [selectedId]);
+  // (indentTask/outdentTask removed — the keyboard handler now calls the identical
+  //  indentTaskById/outdentTaskById helpers below with the current selection. B255.)
 
   const insertTaskBelow = useCallback((taskId) => {
     setData(d => {
@@ -8058,6 +7985,23 @@ function FormulaColumnEditor({mode, initLabel, initFormula, columnNames, existin
   );
 }
 
+// Shared column-autosize measurement (B255). Both the per-project grid
+// (autoSizeCol) and the master multi-project list (autoSizeMCol) size a column to
+// the widest of its header + its cell strings, at the grid's header/body fonts,
+// with 24px of padding and a per-view minimum floor. The two callers keep their
+// own column-value extraction + width-persistence (their column sets have drifted
+// apart); this collapses the identical canvas-measure skeleton they duplicated.
+function measuredColWidth(headerLabel, cellValues, floor) {
+  const ctx = document.createElement("canvas").getContext("2d");
+  ctx.font = "bold 10px Inter, system-ui, sans-serif";
+  let maxW = ctx.measureText(String(headerLabel || "").toUpperCase()).width + 24;
+  ctx.font = "12px Inter, system-ui, sans-serif";
+  for (const val of cellValues) {
+    if (val) maxW = Math.max(maxW, ctx.measureText(val).width + 24);
+  }
+  return Math.max(floor, Math.ceil(maxW));
+}
+
 function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, indentTaskById, outdentTaskById, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom=1, setHoverZone, onColWidths, review}) {
   const [scrollTop, setScrollTop] = useState(0);
   const localRef = useRef(null);
@@ -8406,12 +8350,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   const autoSizeCol = (colKey) => {
     const col = colByK[colKey];
     if (!col) return;
-    const cv = document.createElement('canvas');
-    const ctx = cv.getContext('2d');
-    ctx.font = 'bold 10px Inter, system-ui, sans-serif';
-    let maxW = ctx.measureText((col.l||colKey).toUpperCase()).width + 24;
-    ctx.font = '12px Inter, system-ui, sans-serif';
-    tasks.forEach(t => {
+    const values = tasks.map(t => {
       let val = '';
       switch(colKey) {
         case 'name': val = t.name||''; break;
@@ -8426,9 +8365,9 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
         case 'cost': case 'budget': case 'actualCost': { const v=Number(t[colKey])||0; val = v?("$"+v.toLocaleString("en-US")):''; break; }
         default: val = col.t === "formula" ? (formulaValues[t.id]?.[colKey]?.display || '') : String(t[colKey]||'');
       }
-      if (val) maxW = Math.max(maxW, ctx.measureText(val).width + 24);
+      return val;
     });
-    persistWidths({ ...cfg.widths, [colKey]: Math.max(36, Math.ceil(maxW)) });
+    persistWidths({ ...cfg.widths, [colKey]: measuredColWidth(col.l||colKey, values, 36) });
   };
 
   return (
@@ -10888,13 +10827,8 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   const autoSizeMCol = (colKey) => {
     const colDef = MASTER_COL_DEFS.find(c => c.k === colKey);
     if (!colDef) return;
-    const cv = document.createElement('canvas');
-    const ctx = cv.getContext('2d');
-    ctx.font = 'bold 10px Inter, system-ui, sans-serif';
-    let maxW = ctx.measureText(colDef.label.toUpperCase()).width + 24;
-    ctx.font = '12px Inter, system-ui, sans-serif';
     const fmtD = s => { if(!s) return ''; const [y,m,d]=s.split('-'); return `${String(+m).padStart(2,'0')}/${String(+d).padStart(2,'0')}/${(y||'').slice(2)}`; };
-    sortedRows.forEach(t => {
+    const values = sortedRows.map(t => {
       let val = '';
       switch(colKey) {
         case 'project': val = t.projName||''; break;
@@ -10913,10 +10847,9 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         }
         default: val = String(t[colKey]||'');
       }
-      if (val) maxW = Math.max(maxW, ctx.measureText(val).width + 24);
+      return val;
     });
-    const nw = Math.max(40, Math.ceil(maxW));
-    const n = {...colWidths, [colKey]: nw};
+    const n = {...colWidths, [colKey]: measuredColWidth(colDef.label, values, 40)};
     setColWidths(n);
     setData(d => ({...d, masterColWidths: n}));
   };
