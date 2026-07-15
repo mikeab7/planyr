@@ -245,6 +245,15 @@ export default function AppHeader({
   // "only one tab can edit" warning is FALSE for it and must not show. Default false: every other
   // workspace (doc-review) keeps the warning until it, too, multi-writes.
   multiEditOk = false,
+  // NEW-1 (2026-07-15) — the B313 banner's copy claims an ENFORCED read-only lock ("the others
+  // are read-only until you take over editing there"). That is only true for a workspace that
+  // actually wired the shared `editorLock` (Doc Review; Site Planner pre-multiwriter) — a second
+  // tab there genuinely can't write. The Scheduler never adopted that lock (AUDIT-FIRST: no
+  // editorLock/readOnly reference anywhere under src/workspaces/scheduler or public/sequence/); its
+  // embedded app just auto-saves with a version guard, so BOTH tabs can edit and a second tab is
+  // NOT actually read-only. Default true preserves the accurate wording for lock-enforcing
+  // workspaces; the Scheduler passes false for honest copy instead of a false promise.
+  lockEnforced = true,
   authControl,
   toolbarContent,
   // Optional Row-2 center group (B387). When provided, Row 2 renders a 3-zone layout
@@ -291,6 +300,16 @@ export default function AppHeader({
   const headerRef = useRef(null); // visibility probe for the keep-alive gate below
   const { resolved } = useTheme();
   const multiTab = useMultiTab(accountActive && currentProject && !multiEditOk ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only; suppressed when the workspace multi-writes, B674)
+  // NEW-1 (2026-07-15) — the banner is dismissible (a small ×), unlike before. `dismissed` resets
+  // on the RISING edge of conflictRisk (false→true) so a closed banner reappears for a genuinely
+  // NEW another-tab episode (e.g. you closed the other tab, then opened a fresh one later) instead
+  // of staying silenced forever after the first dismiss.
+  const [multiTabDismissed, setMultiTabDismissed] = useState(false);
+  const prevConflictRiskRef = useRef(false);
+  useEffect(() => {
+    if (multiTab.conflictRisk && !prevConflictRiskRef.current) setMultiTabDismissed(false);
+    prevConflictRiskRef.current = multiTab.conflictRisk;
+  }, [multiTab.conflictRisk]);
   const narrow = useNarrow(); // V11 — phone-width header: scroll each row sideways instead of clipping its controls
   // On a phone, let a header row scroll horizontally and keep its zones at natural width
   // (no flex-shrink → no clipped slivers). On desktop these are no-ops, so the layout is
@@ -488,10 +507,24 @@ export default function AppHeader({
       )}
     </header>
     {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
-        Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}
-    {accountActive && multiTab.conflictRisk && (
-      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(660px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
-        <span>⧉ This project is open in <b>another tab</b>. Only one tab can edit at a time; the others are <b>read-only</b> until you take over editing there or close them.</span>
+        Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). NEW-1
+        (2026-07-15, owner: "i dont need this large pop up") — shrunk from a bold full-width
+        strip to a small dismissible pill, theme-tokened (was hardcoded hex — a KEY DECISIONS
+        violation), with copy that matches whether this workspace actually ENFORCES a read-only
+        lock (lockEnforced) or just auto-saves with a version guard (the Scheduler — no false
+        "read-only" promise). */}
+    {accountActive && multiTab.conflictRisk && !multiTabDismissed && (
+      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: "min(440px, calc(100vw - 16px))", display: "flex", alignItems: "flex-start", gap: 7, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--warn-text)", borderRadius: 8, padding: "5px 6px 5px 10px", fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,0.22)" }}>
+        <span aria-hidden="true" style={{ color: "var(--warn-text)", fontWeight: 700, lineHeight: 1.5 }}>⧉</span>
+        <span style={{ lineHeight: 1.4, paddingTop: 1 }}>
+          {lockEnforced
+            ? <>Also open in <b>another tab</b> — that tab is the active editor; this one is read-only until you switch there or close it.</>
+            : <>Also open in <b>another tab</b> on this device — edit in just one at a time so changes don&rsquo;t overwrite each other.</>}
+        </span>
+        <button type="button" onClick={() => setMultiTabDismissed(true)} aria-label="Dismiss"
+          style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "1px 3px", marginLeft: 1 }}>
+          ×
+        </button>
       </div>
     )}
     </>

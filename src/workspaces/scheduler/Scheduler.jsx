@@ -227,6 +227,13 @@ export default function Scheduler({
         authControl={authControl}
         accountActive={accountActive}
         homeLabel="Dashboard"
+        // NEW-1 (2026-07-15, owner-reported) — the Scheduler never wired the shared editorLock
+        // (AUDIT-FIRST: no editorLock/readOnly reference anywhere under src/workspaces/scheduler
+        // or public/sequence/); the embedded app just auto-saves with a version guard, so a
+        // second tab is NOT actually read-only. lockEnforced=false swaps the B313 banner's
+        // "read-only until you take over" copy (false here) for an honest "edit one at a time"
+        // notice instead of promising an enforcement that doesn't exist.
+        lockEnforced={false}
         // B566 — unified cloud save-status badge (Row-1, top-right), replacing the floppy Save
         // button. `saveState` is the embedded app's reported status mapped to the shared badge's
         // vocabulary; the loud error state's popover "Retry now" re-posts planar:save to re-attempt

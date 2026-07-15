@@ -609,3 +609,46 @@ describe("NEW-1 (two-tab cascade false conflicts) — the SitePlanner wiring exi
     expect(src).not.toMatch(/readJournal\(siteId, Date\.now\(\)\)/);
   });
 });
+
+describe("NEW-1 (2026-07-15, owner: \"i dont need this large pop up\") — the B313 banner shrunk + Scheduler no longer claims a false read-only lock", () => {
+  it("AppHeader's B313 banner is theme-tokened (not hardcoded hex), dismissible, and re-arms on a new conflict episode", () => {
+    const src = read("../src/shared/ui/AppHeader.jsx");
+    // the old hardcoded-hex banner (a KEY DECISIONS violation) must not come back
+    expect(src).not.toMatch(/background: "#3f2d12"/);
+    expect(src).not.toMatch(/border: "1px solid #f59e0b"/);
+    // theme tokens instead
+    expect(src).toMatch(/background: "var\(--surface-raised\)"/);
+    expect(src).toMatch(/border: "1px solid var\(--warn-text\)"/);
+    // a dismiss control exists and resets on the RISING edge of conflictRisk (a closed banner
+    // must reappear for a genuinely new another-tab episode, not stay silenced forever)
+    expect(src).toMatch(/multiTabDismissed/);
+    expect(src).toMatch(/setMultiTabDismissed\(true\)/);
+    expect(src).toMatch(/if \(multiTab\.conflictRisk && !prevConflictRiskRef\.current\) setMultiTabDismissed\(false\);/);
+    expect(src).toMatch(/accountActive && multiTab\.conflictRisk && !multiTabDismissed/);
+  });
+
+  it("the banner's copy is conditional on lockEnforced — no false \"read-only\" promise for a workspace with no real lock", () => {
+    const src = read("../src/shared/ui/AppHeader.jsx");
+    expect(src).toMatch(/lockEnforced = true,/); // default true preserves accurate copy for lock-enforcing workspaces (Doc Review)
+    expect(src).toMatch(/that tab is the active editor; this one is read-only until you switch there or close it/);
+    expect(src).toMatch(/edit in just one at a time so changes don&rsquo;t overwrite each other/);
+  });
+
+  it("the Scheduler passes lockEnforced={false} — AUDIT-FIRST: it never wired the shared editorLock, so a second tab is NOT actually read-only", () => {
+    const schedulerSrc = read("../src/workspaces/scheduler/Scheduler.jsx");
+    expect(schedulerSrc).toMatch(/lockEnforced=\{false\}/);
+    // and the claim holds: no editorLock WIRING (the actual import/call a real lock needs) exists
+    // anywhere in the scheduler workspace — a bare word match would also trip on this file's own
+    // comment explaining the fix, so match the wiring shape, not any mention of the word.
+    expect(schedulerSrc).not.toMatch(/from ["'].*editorLock/);
+    expect(schedulerSrc).not.toMatch(/editorLockRef/);
+    expect(schedulerSrc).not.toMatch(/createEditorLock/);
+  });
+
+  it("Doc Review does NOT override lockEnforced — it keeps the accurate default (it DOES wire the shared editorLock)", () => {
+    const docReviewSrc = read("../src/workspaces/doc-review/DocReview.jsx");
+    expect(docReviewSrc).not.toMatch(/lockEnforced=/);
+    const persistenceSrc = read("../src/workspaces/doc-review/lib/usePersistence.js");
+    expect(persistenceSrc).toMatch(/editorLock/i);
+  });
+});
