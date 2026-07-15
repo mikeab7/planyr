@@ -10222,29 +10222,38 @@ const newMeetingBody = () => ({
 });
 const mbFmt = iso => { if(!iso) return ""; const d=new Date(iso+"T12:00:00"); return isNaN(d)?"":d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); };
 function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
-  const list = Array.isArray(bodies) ? bodies : [];
+  // Draft / Save model (owner ask, 2026-07-15): the window edits a WORKING COPY — nothing touches the
+  // schedule until "Save changes", so it's unmistakable when the edits take effect. savedRef holds the
+  // last-applied snapshot, driving the dirty flag + the unsaved-close guard. All edits are JSON-safe.
+  const initial = Array.isArray(bodies) ? bodies : [];
+  const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(initial)));
+  const savedRef = useRef(JSON.stringify(initial));
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const list = draft;
+  const dirty = JSON.stringify(draft) !== savedRef.current;
   const [selId, setSelId] = useState(() => (list[0] && list[0].id) || null);
   const sel = list.find(b => b.id === selId) || null;
-  // NotesModal-style close hardening: a text-selection drag that ENDS on the backdrop must not
-  // dismiss (this editor is mostly text fields), and Escape closes via a capture-phase listener
-  // so the grid's own key handlers never see it.
+  const save = () => { onChange(JSON.parse(JSON.stringify(draft))); savedRef.current = JSON.stringify(draft); setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1600); };
+  const requestClose = () => { if (dirty) setConfirmClose(true); else onClose(); };
+  // NotesModal-style close hardening: a text-selection drag ending on the backdrop must not dismiss;
+  // Escape backs out (the confirm bar first, then the close) via a capture-phase listener.
   const backdropRef = useRef(null);
   const downOnBackdropRef = useRef(false);
   useEffect(() => {
-    const onKey = e => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    const onKey = e => { if (e.key === "Escape") { e.stopPropagation(); if (confirmClose) setConfirmClose(false); else requestClose(); } };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
-  const patch = (id, fields) => onChange(list.map(b => b.id === id ? { ...b, ...fields } : b));
-  // B845 — a body's cadence is a LIST of recurrence rules. patchRuleAt edits one rule in place;
-  // addRuleAt/removeRuleAt manage the list.
+  });
+  // All edits mutate the DRAFT only (setDraft) — the parent's onChange runs once, on Save.
+  const patch = (id, fields) => setDraft(prev => prev.map(b => b.id === id ? { ...b, ...fields } : b));
   const rulesOf = b => (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ freq:"monthly", weekday:2, setpos:[2,4] }];
-  const patchRuleAt = (id, idx, rf) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).map((r, i) => i === idx ? { ...r, ...rf } : r) } : b));
-  const addRuleAt = id => onChange(list.map(b => b.id === id ? { ...b, recurrence: [...rulesOf(b), { freq:"monthly", weekday:2, setpos:[1] }] } : b));
-  const removeRuleAt = (id, idx) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).filter((_, i) => i !== idx) } : b));
-  const patchLead = (id, lf) => onChange(list.map(b => b.id === id ? { ...b, agendaLead: { ...(b.agendaLead||{}), ...lf } } : b));
-  const add = () => { const b = newMeetingBody(); onChange([...list, b]); setSelId(b.id); };
-  const remove = id => { const rest = list.filter(b => b.id !== id); onChange(rest); if (selId === id) setSelId((rest[0] && rest[0].id) || null); };
+  const patchRuleAt = (id, idx, rf) => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).map((r, i) => i === idx ? { ...r, ...rf } : r) } : b));
+  const addRuleAt = id => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: [...rulesOf(b), { freq:"monthly", weekday:2, setpos:[1] }] } : b));
+  const removeRuleAt = (id, idx) => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).filter((_, i) => i !== idx) } : b));
+  const patchLead = (id, lf) => setDraft(prev => prev.map(b => b.id === id ? { ...b, agendaLead: { ...(b.agendaLead||{}), ...lf } } : b));
+  const add = () => { const b = newMeetingBody(); setDraft(prev => [...prev, b]); setSelId(b.id); };
+  const remove = id => { const rest = list.filter(b => b.id !== id); setDraft(prev => prev.filter(b => b.id !== id)); if (selId === id) setSelId((rest[0] && rest[0].id) || null); };
   const inp = { fontSize:12, padding:"5px 8px", border:"1px solid var(--bd2)", borderRadius:5, background:"#fff", color:"var(--txt)", width:"100%", boxSizing:"border-box", fontFamily:"'Inter',system-ui,sans-serif" };
   const lbl = { fontSize:10, fontWeight:600, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".05em", margin:"0 0 4px", display:"block" };
   const sect = { fontSize:10, fontWeight:700, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".07em", margin:"18px 0 8px", paddingBottom:5, borderBottom:"1px solid var(--bd)" };
@@ -10402,7 +10411,7 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
   return (
     <div ref={backdropRef}
       onMouseDown={e => { downOnBackdropRef.current = (e.target === backdropRef.current); }}
-      onClick={e => { const hit = e.target === backdropRef.current && downOnBackdropRef.current; downOnBackdropRef.current = false; if (hit) onClose(); }}
+      onClick={e => { const hit = e.target === backdropRef.current && downOnBackdropRef.current; downOnBackdropRef.current = false; if (hit) requestClose(); }}
       style={{position:"fixed",inset:0,background:"rgba(15,23,42,.38)",zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div data-testid="meeting-calendars-modal" onMouseDown={e=>e.stopPropagation()}
         style={{background:"#fff",border:"1px solid var(--bd2)",borderRadius:10,width:"min(860px,96vw)",height:"min(640px,90vh)",
@@ -10414,7 +10423,7 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
           </div>
           <div style={{display:"flex",gap:14,alignItems:"center",minWidth:0}}>
             <span style={{fontSize:10.5,color:"var(--mut)",maxWidth:380,textAlign:"right",lineHeight:1.45}}>External decision bodies (city council, P&amp;Z, commissioners court). Bind a task to one and its hearing date snaps to the body's calendar.</span>
-            <span onClick={onClose} title="Close (Esc)" style={{cursor:"pointer",color:"var(--mut)",fontSize:17,lineHeight:1,flexShrink:0}}>&#x2715;</span>
+            <span onClick={requestClose} title="Close (Esc)" style={{cursor:"pointer",color:"var(--mut)",fontSize:17,lineHeight:1,flexShrink:0}}>&#x2715;</span>
           </div>
         </div>
         <div style={{flex:1,display:"flex",overflow:"hidden"}}>
@@ -10452,6 +10461,25 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
               </div>
             )}
           </div>
+        </div>
+        {/* Footer — the explicit apply gate. Nothing on the schedule moves until Save changes. */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"10px 16px",borderTop:"1px solid var(--bd)",flexShrink:0,background:"var(--surf)"}}>
+          {confirmClose ? (<>
+            <span style={{fontSize:12,fontWeight:600,color:"var(--warn-text,#b45309)"}}>You have unsaved changes.</span>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn" onClick={()=>setConfirmClose(false)} style={{fontSize:12,padding:"6px 12px"}}>Keep editing</button>
+              <button className="btn" onClick={onClose} style={{fontSize:12,padding:"6px 12px",color:"var(--danger,#d83a3a)"}}>Discard</button>
+              <button className="btn" onClick={()=>{ save(); onClose(); }} style={{fontSize:12,padding:"6px 12px",background:"var(--amber)",color:"#fff",borderColor:"var(--amber)"}}>Save &amp; close</button>
+            </div>
+          </>) : (<>
+            <span style={{fontSize:11.5,fontWeight:600,color: dirty ? "var(--warn-text,#b45309)" : savedFlash ? "#15803d" : "var(--mut)"}}>
+              {dirty ? "● Unsaved changes — nothing on the schedule has moved yet" : savedFlash ? "✓ Saved — the schedule updated" : "All changes saved"}
+            </span>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn" onClick={requestClose} style={{fontSize:12,padding:"6px 12px"}}>{dirty ? "Cancel" : "Close"}</button>
+              <button className="btn" onClick={save} disabled={!dirty} style={{fontSize:12,padding:"6px 14px",...(dirty ? {background:"var(--amber)",color:"#fff",borderColor:"var(--amber)"} : {})}}>Save changes</button>
+            </div>
+          </>)}
         </div>
       </div>
     </div>
