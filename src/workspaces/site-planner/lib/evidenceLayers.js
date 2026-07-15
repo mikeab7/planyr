@@ -107,6 +107,10 @@ export function overpassLayer(want, onStatus) {
     busy = true;
     const r = await fresh;
     busy = false;
+    // B36e: the layer may have been toggled off / the map torn down while the request was
+    // in flight (onRemove nulls `map`). Bail before painting or reporting status, so a stale
+    // response never renders into a detached group or fires a "loaded" for an off layer.
+    if (!map) return;
     if (r.updated) paint(r.data, r.ts);
     else if (r.error && !cached) { lastKey = null; onStatus && onStatus("failed", `OSM Overpass: ${(r.error && r.error.message) || "request failed"}`); }
     else if (r.error && cached) paint(cached.data, cached.ts, { stale: true, note: "Showing last-good — refresh failed" }); // keep last-known-good
@@ -116,6 +120,11 @@ export function overpassLayer(want, onStatus) {
   group.onRemove = function (m) { m.off("moveend", refresh); map = null; lastKey = null; pending = false; L.LayerGroup.prototype.onRemove.call(this, m); };
   return group;
 }
+// NOTE (B36e): the Overpass fetch rides gisCache.swr (which owns + caches the request), so it
+// is NOT aborted on removal — aborting a cached fetch would poison the shared SWR cache. The
+// post-await `if (!map) return` guard above is enough there: the request completes and warms the
+// cache for next time, but never renders into a detached group. The Mapillary path is a direct
+// fetch with no cache, so it DOES abort.
 
 // ---- Mapillary (crowdsourced detections) ----
 export const mapillaryToken = () => {
@@ -132,12 +141,14 @@ export const setMapillaryToken = (t) => {
   _mlySubs.forEach((cb) => { try { cb(mapillaryToken()); } catch (_) {} });
 };
 
-async function fetchMapillary(bounds, token) {
+async function fetchMapillary(bounds, token, signal) {
   // Default → same-origin proxy (server injects the token); optional → user's own token
   // direct to Mapillary. The proxy 503s (no server token, e.g. a preview deploy) and a
   // static/preview build has no /api route (404) — both mean "not available here", a
   // graceful state, not a hard failure (B308).
-  const r = await fetch(mapillaryRequestUrl(bounds, token));
+  // `signal` (B36e) lets the layer abort a slow request the moment the layer is toggled
+  // off / the map is torn down, so a stale response can't render into a detached group.
+  const r = await fetch(mapillaryRequestUrl(bounds, token), signal ? { signal } : undefined);
   if (r.status === 503 || r.status === 404) { const e = new Error("Street imagery isn't available in this environment."); e.unconfigured = true; throw e; }
   if (!r.ok) throw new Error(`Mapillary HTTP ${r.status}`);
   let j;
@@ -150,7 +161,7 @@ async function fetchMapillary(bounds, token) {
 
 export function mapillaryLayer(onStatus) {
   const group = L.layerGroup();
-  let map = null, lastKey = null, opacity = 0.95, busy = false, pending = false;
+  let map = null, lastKey = null, opacity = 0.95, busy = false, pending = false, ctrl = null;
   group.setOpacity = (o) => { opacity = o; group.eachLayer((l) => l.setStyle && l.setStyle({ opacity: o, fillOpacity: o })); };
   const refresh = async () => {
     if (!map) return;
@@ -165,14 +176,21 @@ export function mapillaryLayer(onStatus) {
     if (key === lastKey) return;
     lastKey = key;
     let feats = null; busy = true; onStatus && onStatus("loading");
-    try { feats = await fetchMapillary(bb, token); }
+    // B36e: abort a slow request the moment the layer is toggled off (onRemove aborts `ctrl`),
+    // so it never renders into a detached group and stops wasting the network round-trip.
+    if (ctrl) ctrl.abort();
+    ctrl = new AbortController();
+    const sig = ctrl.signal;
+    try { feats = await fetchMapillary(bb, token, sig); }
     catch (e) {
+      if (sig.aborted || (e && e.name === "AbortError")) return; // B36e: superseded/removed — the removal (or a newer view) owns the UI; don't reset lastKey or report status
       lastKey = null; feats = null;
       // Missing server token (preview / not yet deployed) → quiet "unconfigured", never red "failed".
       if (e && e.unconfigured) onStatus && onStatus("unconfigured", e.message);
       else onStatus && onStatus("failed", `Mapillary: ${(e && e.message) || "request failed"}`);
     }
     finally { busy = false; }
+    if (!map) return; // B36e: removed mid-fetch — don't render/report into a detached group
     if (feats === null) { if (pending) { pending = false; refresh(); } return; }
     group.clearLayers();
     onStatus && onStatus(feats.length ? "loaded" : "empty", feats.length ? null : "No detections in view");
@@ -186,6 +204,6 @@ export function mapillaryLayer(onStatus) {
     if (pending) { pending = false; refresh(); } // trailing-edge refresh for the view that moved during the fetch (B56d)
   };
   group.onAdd = function (m) { L.LayerGroup.prototype.onAdd.call(this, m); map = m; m.on("moveend", refresh); refresh(); return this; };
-  group.onRemove = function (m) { m.off("moveend", refresh); map = null; lastKey = null; pending = false; L.LayerGroup.prototype.onRemove.call(this, m); };
+  group.onRemove = function (m) { if (ctrl) ctrl.abort(); m.off("moveend", refresh); map = null; lastKey = null; pending = false; L.LayerGroup.prototype.onRemove.call(this, m); };
   return group;
 }
