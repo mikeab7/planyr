@@ -1716,21 +1716,30 @@ const MB_WD_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MB_SETPOS_LABEL = {"1":"1st","2":"2nd","3":"3rd","4":"4th","-1":"last"};
 const MB_MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const mbOrdinal = n => { const s = ["th","st","nd","rd"], v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
-// cadenceSummary (B845): plain-English descriptor of EVERY recurrence rule (not just [0]), including the
-// month restriction (r.months) and the "on/after day" primitive (r.onOrAfter) so the civic-mark tooltip
-// never lies about a month-restricted or Election-Day body. e.g. "1st Tue on/after the 2nd of Nov".
+// mbRuleSummary (B845/B849): plain-English descriptor of ONE recurrence rule — month restriction
+// (r.months) + the "on/after day" primitive (r.onOrAfter), with the civic "Tuesday after the first
+// Monday" construct spelled out by name (1st Tue on/after the 2nd = Election Day) so the input reads
+// the way the owner thinks about it. e.g. "Tue after the 1st Mon of Nov", "2nd & 4th Tue monthly".
+const mbRuleSummary = r => {
+  if (!r || r.weekday == null) return "(no weekday set)";
+  const wd = MB_WD_NAMES[r.weekday] || "?";
+  if (r.freq === "weekly") return `every ${wd}`;
+  const posArr = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
+  const sp = posArr.map(x => MB_SETPOS_LABEL[String(x)] || x).join(" & ") || "?";
+  const mo = (Array.isArray(r.months) && r.months.length) ? r.months.map(m => MB_MONTH_NAMES[m - 1] || "?").join("/") : null;
+  if (r.onOrAfter != null) {
+    // "first Tuesday on/after the 2nd" is exactly "the Tuesday after the first Monday" (Election Day).
+    const isFirst = posArr.length === 0 || (posArr.length === 1 && posArr[0] === 1);
+    if (r.weekday === 2 && r.onOrAfter === 2 && isFirst) return `Tue after the 1st Mon${mo ? " of " + mo : ""}`;
+    return `${sp} ${wd} on/after the ${mbOrdinal(r.onOrAfter)}${mo ? " of " + mo : ""}`;
+  }
+  return mo ? `${sp} ${wd} in ${mo}` : `${sp} ${wd} monthly`;
+};
+// cadenceSummary: joins every rule of a body (not just [0]) so the civic-mark tooltip / rail never lie.
 const cadenceSummary = body => {
   const rules = (body && Array.isArray(body.recurrence)) ? body.recurrence.filter(r => r && r.weekday != null) : [];
   if (!rules.length) return "no cadence set";
-  const one = r => {
-    const wd = MB_WD_NAMES[r.weekday] || "?";
-    if (r.freq === "weekly") return `every ${wd}`;
-    const sp = (Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : [])).map(x => MB_SETPOS_LABEL[String(x)] || x).join(" & ") || "?";
-    const mo = (Array.isArray(r.months) && r.months.length) ? r.months.map(m => MB_MONTH_NAMES[m - 1] || "?").join("/") : null;
-    if (r.onOrAfter != null) return `${sp} ${wd} on/after the ${mbOrdinal(r.onOrAfter)}${mo ? " of " + mo : ""}`;
-    return mo ? `${sp} ${wd} in ${mo}` : `${sp} ${wd} monthly`;
-  };
-  return rules.map(one).join(" + ");
+  return rules.map(mbRuleSummary).join(" + ");
 };
 const agendaLeadSummary = body => {
   const l = body && body.agendaLead; if (!l) return "no agenda lead";
@@ -10072,14 +10081,6 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
 const MB_WD = [{v:0,l:"Sun"},{v:1,l:"Mon"},{v:2,l:"Tue"},{v:3,l:"Wed"},{v:4,l:"Thu"},{v:5,l:"Fri"},{v:6,l:"Sat"}];
 const MB_SETPOS = [{v:1,l:"1st"},{v:2,l:"2nd"},{v:3,l:"3rd"},{v:4,l:"4th"},{v:-1,l:"Last"}];
 const MB_MONTHS = [{v:1,l:"Jan"},{v:2,l:"Feb"},{v:3,l:"Mar"},{v:4,l:"Apr"},{v:5,l:"May"},{v:6,l:"Jun"},{v:7,l:"Jul"},{v:8,l:"Aug"},{v:9,l:"Sep"},{v:10,l:"Oct"},{v:11,l:"Nov"},{v:12,l:"Dec"}];
-// B845 — one-click cadence presets. The last is the Texas uniform-election-date pair (Tex. Elec. Code
-// §41.001): 1st Saturday in May + the Tuesday after the first Monday in November (two rules on one body).
-const MB_PRESETS = [
-  {l:"2nd & 4th Tue", title:"2nd & 4th Tuesday every month", rules:[{freq:"monthly",weekday:2,setpos:[2,4]}]},
-  {l:"1st Sat · May", title:"1st Saturday in May (TX uniform election date)", rules:[{freq:"monthly",weekday:6,setpos:[1],months:[5]}]},
-  {l:"Election Day · Nov", title:"Tuesday after the first Monday in November (US general / TX uniform election date)", rules:[{freq:"monthly",weekday:2,setpos:[1],months:[11],onOrAfter:2}]},
-  {l:"TX uniform (May + Nov)", title:"Both Texas uniform election dates — 1st Sat in May + Tue after 1st Mon in Nov (Tex. Elec. Code §41.001)", rules:[{freq:"monthly",weekday:6,setpos:[1],months:[5]},{freq:"monthly",weekday:2,setpos:[1],months:[11],onOrAfter:2}]},
-];
 const newMeetingBody = () => ({
   id: "mb_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
   name: "", jurisdiction: "",
@@ -10105,12 +10106,11 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
   }, [onClose]);
   const patch = (id, fields) => onChange(list.map(b => b.id === id ? { ...b, ...fields } : b));
   // B845 — a body's cadence is a LIST of recurrence rules. patchRuleAt edits one rule in place;
-  // addRuleAt/removeRuleAt/setRules manage the list (setRules powers the one-click presets).
+  // addRuleAt/removeRuleAt manage the list.
   const rulesOf = b => (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ freq:"monthly", weekday:2, setpos:[2,4] }];
   const patchRuleAt = (id, idx, rf) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).map((r, i) => i === idx ? { ...r, ...rf } : r) } : b));
   const addRuleAt = id => onChange(list.map(b => b.id === id ? { ...b, recurrence: [...rulesOf(b), { freq:"monthly", weekday:2, setpos:[1] }] } : b));
   const removeRuleAt = (id, idx) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).filter((_, i) => i !== idx) } : b));
-  const setRules = (id, rules) => onChange(list.map(b => b.id === id ? { ...b, recurrence: rules.map(r => ({ ...r, setpos: Array.isArray(r.setpos) ? [...r.setpos] : r.setpos, months: Array.isArray(r.months) ? [...r.months] : r.months })) } : b));
   const patchLead = (id, lf) => onChange(list.map(b => b.id === id ? { ...b, agendaLead: { ...(b.agendaLead||{}), ...lf } } : b));
   const add = () => { const b = newMeetingBody(); onChange([...list, b]); setSelId(b.id); };
   const remove = id => { const rest = list.filter(b => b.id !== id); onChange(rest); if (selId === id) setSelId((rest[0] && rest[0].id) || null); };
@@ -10143,32 +10143,36 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
         </div>
 
         <div style={sect}>Meets</div>
-        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
-          <span style={{fontSize:11,color:"var(--mut)"}}>Presets:</span>
-          {MB_PRESETS.map(p => <button key={p.l} className="btn" title={p.title} onClick={()=>setRules(b.id,p.rules)} style={{fontSize:11,padding:"4px 10px"}}>{p.l}</button>)}
-        </div>
         {rules.map((rule, ri) => {
           const setpos = Array.isArray(rule.setpos) ? rule.setpos : (rule.setpos!=null ? [rule.setpos] : []);
           const months = Array.isArray(rule.months) ? rule.months : [];
+          const ruleDates = meetingDatesInRange({ recurrence:[rule] }, today, addD(today, 366*4)).slice(0, 3);
           return (
             <div key={ri} style={{border:"1px solid var(--bd)",borderRadius:6,padding:"10px 12px",marginBottom:8,background:"var(--surf)"}}>
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                 {seg([{v:"monthly",l:"Monthly"},{v:"weekly",l:"Weekly"}], rule.freq, v=>patchRuleAt(b.id,ri,{freq:v}))}
-                <span style={{fontSize:11,color:"var(--mut)"}}>on</span>
-                <select value={rule.weekday} onChange={e=>patchRuleAt(b.id,ri,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
-                  {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
-                </select>
+                {!(rule.freq==="monthly" && rule.onOrAfter!=null) && (<>
+                  <span style={{fontSize:11,color:"var(--mut)"}}>on</span>
+                  <select value={rule.weekday} onChange={e=>patchRuleAt(b.id,ri,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
+                    {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+                  </select>
+                </>)}
+                {rule.freq==="monthly" && rule.onOrAfter!=null && (
+                  <span style={{fontSize:12,color:"var(--txt)"}}>— <span style={{fontWeight:600}}>the Tuesday after the first Monday</span></span>
+                )}
                 {rules.length>1 && <span onClick={()=>removeRuleAt(b.id,ri)} title="Remove this cadence rule" style={{marginLeft:"auto",cursor:"pointer",color:"var(--mut)",fontSize:14,padding:"0 2px",flexShrink:0}}>&#x2715;</span>}
               </div>
               {rule.freq==="monthly" && (<>
-                <div style={{display:"flex",gap:5,marginTop:10,alignItems:"center",flexWrap:"wrap"}}>
-                  <span style={{fontSize:11,color:"var(--mut)",width:52,flexShrink:0}}>Weeks</span>
-                  {MB_SETPOS.map(sp=>{
-                    const on = setpos.includes(sp.v);
-                    return <span key={sp.v} onClick={()=>{ const ns = on ? setpos.filter(x=>x!==sp.v) : [...setpos,sp.v].sort((a,z)=>(a<0?99:a)-(z<0?99:z)); patchRuleAt(b.id,ri,{setpos:ns.length?ns:[sp.v]}); }}
-                      style={{padding:"4px 11px",fontSize:11.5,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)"}}>{sp.l}</span>;
-                  })}
-                </div>
+                {rule.onOrAfter==null && (
+                  <div style={{display:"flex",gap:5,marginTop:10,alignItems:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:"var(--mut)",width:52,flexShrink:0}}>Weeks</span>
+                    {MB_SETPOS.map(sp=>{
+                      const on = setpos.includes(sp.v);
+                      return <span key={sp.v} onClick={()=>{ const ns = on ? setpos.filter(x=>x!==sp.v) : [...setpos,sp.v].sort((a,z)=>(a<0?99:a)-(z<0?99:z)); patchRuleAt(b.id,ri,{setpos:ns.length?ns:[sp.v]}); }}
+                        style={{padding:"4px 11px",fontSize:11.5,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)"}}>{sp.l}</span>;
+                    })}
+                  </div>
+                )}
                 <div style={{display:"flex",gap:5,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
                   <span style={{fontSize:11,color:"var(--mut)",width:52,flexShrink:0}}>Months</span>
                   {MB_MONTHS.map(mo=>{
@@ -10178,15 +10182,19 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
                   })}
                   <span style={{fontSize:10,color:"var(--mut)",flexBasis:"100%",paddingLeft:57}}>Blank = every month · pick one month for a yearly cadence</span>
                 </div>
-                <label style={{fontSize:11.5,color:"var(--txt)",display:"flex",alignItems:"center",gap:6,cursor:"pointer",marginTop:9,flexWrap:"wrap"}}>
-                  <input type="checkbox" checked={rule.onOrAfter!=null} onChange={e=>patchRuleAt(b.id,ri,{onOrAfter: e.target.checked ? (rule.onOrAfter??2) : undefined})} />
-                  on or after day
-                  <input type="number" min={1} max={31} value={rule.onOrAfter??2} disabled={rule.onOrAfter==null}
-                    onChange={e=>patchRuleAt(b.id,ri,{onOrAfter: Math.min(31, Math.max(1, Math.trunc(+e.target.value)||1))})}
-                    style={{...inp,width:52,opacity:rule.onOrAfter==null?0.5:1}} />
-                  <span style={{color:"var(--mut)",fontSize:10.5}}>e.g. 1st Tue on/after Nov 2 = Election Day</span>
+                <label style={{fontSize:11.5,color:"var(--txt)",display:"flex",alignItems:"flex-start",gap:6,cursor:"pointer",marginTop:10}}>
+                  <input type="checkbox" checked={rule.onOrAfter!=null} style={{marginTop:2,flexShrink:0}}
+                    onChange={e=>patchRuleAt(b.id,ri, e.target.checked ? {weekday:2, setpos:[1], onOrAfter:2, months:(months.length?months:[11])} : {onOrAfter:undefined})} />
+                  <span>Use the <span style={{fontWeight:600}}>“Tuesday after the first Monday”</span> rule <span style={{color:"var(--mut)"}}>— the U.S. / Texas Election Day pattern (defaults to November; the plain “1st Tuesday” is wrong when the 1st is a Tuesday)</span></span>
                 </label>
               </>)}
+              <div style={{marginTop:10,paddingTop:8,borderTop:"1px dashed var(--bd2)",fontSize:11.5,lineHeight:1.5}}>
+                <span style={{color:"var(--mut)"}}>Resolves to </span>
+                <span style={{fontWeight:600,color:"var(--txt)"}}>{mbRuleSummary(rule)}</span>
+                {ruleDates.length
+                  ? <span style={{color:"var(--mut)"}}> — next: {ruleDates.map(d=>mbFmt(d)).join(" · ")}</span>
+                  : <span style={{color:"var(--warn-text,#b45309)",fontWeight:600}}> — no dates resolve; check the rule</span>}
+              </div>
             </div>
           );
         })}
@@ -10236,6 +10244,10 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
         </div>
 
         <div style={{marginTop:18,background:"var(--surf)",border:"1px solid var(--bd)",borderRadius:8,padding:"10px 14px 12px"}}>
+          <div style={{fontSize:12,marginBottom:8,paddingBottom:8,borderBottom:"1px solid var(--bd)"}}>
+            <span style={{color:"var(--mut)"}}>This body meets </span>
+            <span style={{fontWeight:600,color:"var(--txt)"}}>{cadenceSummary(b)}</span>
+          </div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:4}}>
             <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em"}}>Next 6 meetings → file by</span>
             <span style={{fontSize:10,color: b.verifiedOn ? "var(--mut)" : "var(--warn-text,#b45309)"}}>{b.verifiedOn ? `verified ${mbFmt(b.verifiedOn)}` : "rule-derived, unverified"}</span>
