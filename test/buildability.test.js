@@ -8,6 +8,8 @@ import {
   loadBuildabilityRules,
   requiredFfe,
   assessBuildability,
+  suggestedFfe,
+  OUTSIDE_FLOODPLAIN_FFE_NOTE,
   LOMR_NOTE,
   WETLANDS_404_NOTE,
 } from "../src/workspaces/site-planner/lib/buildability.js";
@@ -219,5 +221,95 @@ describe("pathway, LOMR-F, and the wetlands cross-flag", () => {
     // a verified rule (Fort Bend / Harris) does NOT stamp it
     expect(assessBuildability({ rule: fortbend }).flags).not.toContain("rule_unverified");
     expect(assessBuildability({ rule: harris }).flags).not.toContain("rule_unverified");
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// NEW-1 (Waller) — `when`-conditioned bases + the hag basis + fillToElevate "prohibited".
+describe("NEW-1 — Waller record: conditioned bases, HAG, prohibited pathway", () => {
+  const waller = DEFAULT_BUILDABILITY_RULES.waller;
+  it("ships verified with the Art. 5 provenance and the prohibited pathway", () => {
+    expect(waller.verified).toBe(true);
+    expect(waller.sourceDate).toBe("2026-07-15");
+    expect(waller.fillToElevate).toBe("prohibited");
+    expect(waller.pathwayNote).toMatch(/open foundations/i);
+    expect(waller.pathwayNote).toMatch(/non-starter/i);
+    expect(waller.note).toMatch(/§C\(3\)/);           // Atlas-14 study threshold
+    expect(waller.note).toMatch(/§D\(5\)/);           // HAG placement note (AO/AH section, A-Zone catch-all)
+    expect(waller.note).toMatch(/Brookshire–Katy|BKDD/);
+  });
+  it("in the 1% floodplain: 500-yr WSE + 2 governs (the +1 row is redundant there)", () => {
+    const r = requiredFfe(waller, { wse02Ft: 100 }, { in1pct: true, in02pct: true });
+    expect(r.requiredFfeFt).toBe(102);
+    expect(r.governingBasis.plusFt).toBe(2);
+  });
+  it("500-yr band ONLY: the +1 row governs (the in_1pct row doesn't bind)", () => {
+    const r = requiredFfe(waller, { wse02Ft: 100 }, { in1pct: false, in02pct: true });
+    expect(r.requiredFfeFt).toBe(101);
+    expect(r.governingBasis.plusFt).toBe(1);
+  });
+  it("unknown location stays conservative: both WSE rows apply → +2 governs", () => {
+    const r = requiredFfe(waller, { wse02Ft: 100 }, {});
+    expect(r.requiredFfeFt).toBe(102);
+  });
+  it("Zone A no BFE: HAG + 4 applies ONLY on explicit evidence, and can govern", () => {
+    // No evidence → the hag row is skipped entirely (not pending).
+    const noEv = requiredFfe(waller, { wse02Ft: 100, hagFt: 103 }, { in1pct: true });
+    expect(noEv.requiredFfeFt).toBe(102);
+    expect(noEv.pendingBases.map((b) => b.basis)).not.toContain("hag");
+    // Explicit unstudied-A evidence → HAG 103 + 4 = 107 outgoverns 500-yr + 2.
+    const ev = requiredFfe(waller, { wse02Ft: 100, hagFt: 103 }, { in1pct: true, zoneANoBfe: true });
+    expect(ev.requiredFfeFt).toBe(107);
+    expect(ev.governingBasis.basis).toBe("hag");
+    expect(ev.losingBases.map((b) => b.basis)).toContain("wse02pct"); // NEW-3 tooltip payload
+    // Evidence but NO DEM → the hag row surfaces as pending, never fabricated.
+    const pend = requiredFfe(waller, { wse02Ft: 100 }, { in1pct: true, zoneANoBfe: true });
+    expect(pend.requiredFfeFt).toBe(102);
+    expect(pend.pendingBases.map((b) => b.basis)).toContain("hag");
+  });
+  it("assessBuildability threads the ctx + hag input through (the Tsakiris shape)", () => {
+    const a = assessBuildability({ rule: waller, padFfeFt: 157.1, hagFt: 153.1, wse02Ft: null, buildingIn1pct: true, zoneANoBfe: true });
+    expect(a.ffe.status).toBe("pass");
+    expect(a.ffe.requiredFfeFt).toBeCloseTo(157.1, 6);
+    expect(a.ffe.governingBasis.basis).toBe("hag");
+    expect(a.pathway.fillToElevate).toBe("prohibited");
+  });
+  it("pre-NEW-1 records are untouched by the ctx machinery (unconditioned bases)", () => {
+    const r = requiredFfe(fortbend, { wse02Ft: 98, wse1pctFt: 96 }, { in1pct: false, in02pct: false, zoneANoBfe: false });
+    expect(r.requiredFfeFt).toBe(100); // Fort Bend max-of unchanged under any ctx
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// NEW-3 — suggestedFfe: the offered code minimum with the outside-floodplain honesty
+// rule and the ESTIMATED stamp.
+describe("NEW-3 — suggestedFfe", () => {
+  const waller = DEFAULT_BUILDABILITY_RULES.waller;
+  it("suggests the governing minimum with basis + losers", () => {
+    const s = suggestedFfe({ rule: waller, inputs: { wse02Ft: 100, hagFt: 103 }, ctx: { in1pct: true, zoneANoBfe: true }, anyBuildingInTrigger: true });
+    expect(s.applies).toBe(true);
+    expect(s.requiredFfeFt).toBe(107);
+    expect(s.governingBasis.basis).toBe("hag");
+    expect(s.estimated).toBe(false);
+  });
+  it("buildings fully outside the trigger bands → applies:false with the honesty note, never a number", () => {
+    const s = suggestedFfe({ rule: waller, inputs: { wse02Ft: 100 }, ctx: {}, anyBuildingInTrigger: false });
+    expect(s.applies).toBe(false);
+    expect(s.requiredFfeFt).toBeNull();
+    expect(s.note).toBe(OUTSIDE_FLOODPLAIN_FFE_NOTE);
+  });
+  it("unknown building location (null) still suggests — conservative, not silent", () => {
+    const s = suggestedFfe({ rule: waller, inputs: { wse02Ft: 100 }, ctx: {}, anyBuildingInTrigger: null });
+    expect(s.applies).toBe(true);
+    expect(s.requiredFfeFt).toBe(102);
+  });
+  it("the ESTIMATED stamp rides a suggestion whose governing basis fed off the estimate", () => {
+    const hc = DEFAULT_BUILDABILITY_RULES.harris; // wse02pct single basis — not estimated
+    const s1 = suggestedFfe({ rule: hc, inputs: { wse02Ft: 100 }, anyBuildingInTrigger: true, estimatedBases: ["wse1pct"] });
+    expect(s1.estimated).toBe(false);
+    const fb = DEFAULT_BUILDABILITY_RULES.fortbend; // wse1pct can govern
+    const s2 = suggestedFfe({ rule: fb, inputs: { wse1pctFt: 200 }, anyBuildingInTrigger: true, estimatedBases: ["wse1pct"] });
+    expect(s2.governingBasis.basis).toBe("wse1pct");
+    expect(s2.estimated).toBe(true);
   });
 });

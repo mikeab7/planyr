@@ -17,9 +17,9 @@ const memStore = () => {
   return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, v) };
 };
 
-// The seeds that are now research-confirmed (B758 Fort Bend, B760 Harris) and so ship
-// verified:true; every OTHER seed is still an honest unverified placeholder.
-const VERIFIED_SEEDS = ["fortbend", "harris"];
+// The seeds that are now research-confirmed (B758 Fort Bend, B760 Harris, NEW-1 Waller)
+// and so ship verified:true; every OTHER seed is still an honest unverified placeholder.
+const VERIFIED_SEEDS = ["fortbend", "harris", "waller"];
 
 describe("seed integrity", () => {
   it("every jurisdiction carries the full schema; only the still-placeholder seeds ship UNVERIFIED", () => {
@@ -73,6 +73,26 @@ describe("verified seeds (B758 Fort Bend, B760 Harris)", () => {
     expect(h.note).toMatch(/coastal/i);                     // coastal-area exemption surfaced
     expect(h.note).toMatch(/confirm/i);                     // honest lettering caveat
     expect(triggerClasses(h)).toEqual(["1pct", "02pct"]);
+  });
+  it("NEW-1 — Waller carries the verified Art. 5 record: 500-yr trigger, on-site 1:1, floodway + 100-ft buffer", () => {
+    const w = DEFAULT_FLOODPLAIN_RULES.waller;
+    expect(w.trigger).toBe("1pct_plus_02pct");              // §A(8): SFHA AND moderate (500-yr) areas
+    expect(w.ratio).toBe(1);
+    expect(w.floodwayPolicy).toBe("prohibit_fill");
+    expect(w.floodwayBufferFt).toBe(100);                   // §E: floodway PLUS a 100-ft buffer zone
+    expect(w.offsetScope).toBe("storage");
+    expect(w.locationRule).toMatch(/on the development site/i); // §A(8) on-site placement
+    expect(w.verified).toBe(true);
+    expect(w.sourceDate).toBe("2026-07-15");                // owner primary-source pull date
+    expect(w.note).toMatch(/no net fill up to 500-year floodplain elevation/); // §A(8) verbatim
+    expect(w.note).toMatch(/§C\(3\)/);                      // Atlas-14 study threshold noted
+    expect(w.note).toMatch(/Brookshire–Katy|BKDD/);         // BKDD flagged unresolved, never fabricated
+    expect(w.note).toMatch(/VERSIONING/i);                  // 2009/2013/2021 ambiguity recorded
+    expect(triggerClasses(w)).toEqual(["1pct", "02pct"]);
+    // No OTHER seed gained a buffer — the field is Waller-specific until transcribed elsewhere.
+    for (const [k, r] of Object.entries(DEFAULT_FLOODPLAIN_RULES)) {
+      if (k !== "waller") expect(r.floodwayBufferFt, k).toBeUndefined();
+    }
   });
 });
 

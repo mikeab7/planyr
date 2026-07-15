@@ -138,7 +138,8 @@ async function run() {
   expect("(d) B833 footprint-floor caveat renders", /treat as a floor/.test(tA));
   const clicked = await clickPond(pageA);
   const tA2 = clicked ? (await pageA.locator("body").innerText()).replace(/\s+/g, " ") : "";
-  expect("(a) pond inspector shows the role chips with the Auto suggestion", clicked && /Pond role/.test(tA2) && /Auto \(Mitigation\)/.test(tA2), clicked ? tA2.match(/Pond role[^A-Z]{0,40}/)?.[0] : "pond click missed");
+  // NEW-4 renamed the chips' user-facing label to "Pond purpose" (dual → Hybrid).
+  expect("(a) pond inspector shows the purpose chips with the Auto suggestion", clicked && /Pond purpose/.test(tA2) && /Auto \(Mitigation\)/.test(tA2), clicked ? tA2.match(/Pond purpose[^A-Z]{0,40}/)?.[0] : "pond click missed");
   await pageA.screenshot({ path: "ui-audit/verify-pond-roles-ledger.png" }).catch(() => {});
   await ctxA.close();
 
@@ -154,7 +155,7 @@ async function run() {
 
   console.log("Case B — owner role override to Detention un-credits the cut:");
   expect("(c) Provided shows 0.00 with 'no credited ponds'", /Provided \(credited pond cut\)[^0-9]{0,4}0\.00 ac-ft · no credited ponds/.test(tB), tB.match(/Provided \(credited pond cut\)[^A-Z]{0,40}/)?.[0]);
-  expect("(c) the uncredited remainder note renders (never silently vanished)", /detention-role ponds: 5[0-9]\.\d\d ac-ft — uncredited/.test(tB));
+  expect("(c) the uncredited remainder note renders (never silently vanished)", /detention-purpose ponds: 5[0-9]\.\d\d ac-ft — uncredited/.test(tB)); // NEW-4 purpose naming
   expect("(c) Balance shows SHORT (0 provided vs 0.11 required)", /Balance −0\.11 ac-ft SHORT/.test(tB));
   await ctxB.close();
 

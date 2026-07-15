@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-15 @ `6dc7f57` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-15 @ `de1281e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_252 source files mapped._
+_253 source files mapped._
 
 ## infra
 
@@ -244,7 +244,7 @@ _252 source files mapped._
 - **`src/workspaces/site-planner/lib/boundaryLabels.js`** — Pure label-placement math for boundary overlays: shoelace ring centroid, one anchor per name, greedy collision-drop by on-screen area, zoom gate (Leaflet-free, node-tested)
   - _exports_: `featureAnchor`, `labelAnchors`, `labelsVisible`, `placeLabels`, `ringAreaCentroid`, `titleCaseName`
 - **`src/workspaces/site-planner/lib/buildability.js`** — B710 buildability pathway: editable per-jurisdiction required-FFE rules (0.2% WSE + 2 ft seeds, verified-flagged), fill-to-elevate pathway flags, LOMR-F + wetlands-§404 copy flags
-  - _exports_: `assessBuildability`, `DEFAULT_BUILDABILITY_RULES`, `loadBuildabilityRules`, `LOMR_NOTE`, `requiredFfe`, `saveBuildabilityRules`, `WETLANDS_404_NOTE`
+  - _exports_: `assessBuildability`, `DEFAULT_BUILDABILITY_RULES`, `loadBuildabilityRules`, `LOMR_NOTE`, `OUTSIDE_FLOODPLAIN_FFE_NOTE`, `requiredFfe`, `saveBuildabilityRules`, `suggestedFfe`, `WETLANDS_404_NOTE`
 - **`src/workspaces/site-planner/lib/buildingGrid.js`** — Pure structural column-grid + dock-door layout: uniform in-band bays, pinned speed bays, doors avoiding column lines
   - _exports_: `computeBuildingGrid`, `divideSpan`, `GRID_DEFAULTS`, `placeDockDoors`, `resolveGridSettings`
 - **`src/workspaces/site-planner/lib/buildingProps.js`** — Pure tiered building-property rules: sf-driven clear-height + slab-thickness defaults with per-building manual overrides
@@ -316,7 +316,7 @@ _252 source files mapped._
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
-  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
+  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `estimateZoneAWse`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
   - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed
@@ -403,6 +403,8 @@ _252 source files mapped._
   - _exports_: `accumulatePondLedger`, `effectivePondRole`, `POND_ROLE_LABEL`, `POND_ROLES`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
+- **`src/workspaces/site-planner/lib/pondSizing.js`** — NEW-4 pond sizing assistant: solves an anchored pond's two banded targets (below-WSE mitigation depth/footprint growth, above-WSE usable via TOB raise) through the same pondGeom bands the audit reads, with the berm-as-fill fixed-point feedback and honest pinch-off/inundated/estimated states
+  - _exports_: `scaleRing`, `sizePondForTargets`, `solveMitigationDepth`, `solveMitigationGrow`, `solveTobRaise`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
   - _exports_: `presenceSummary`
 - **`src/workspaces/site-planner/lib/printSheet.js`** — Pure single-SVG print sheet composer: page geometry, buildings table, metrics band, title block, export filename builder

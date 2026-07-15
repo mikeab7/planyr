@@ -93,11 +93,38 @@ export function zonesFromFeatureCollection(fc, origin) {
 }
 
 // Even-odd containment across ALL of a zone's rings (outers + holes, unsplit).
+// NEW-1 (Waller floodway buffer): a zone carrying `bufferFt` also claims every point
+// within that distance of ANY ring boundary — a true distance test, so islands inside
+// the polygon and ground just outside it are both captured by the buffer band.
 export const pointInZone = (pt, zone) => {
   let inside = false;
   for (const ring of zone.rings) if (pointInRing(pt, ring)) inside = !inside;
-  return inside;
+  if (inside || !(zone.bufferFt > 0)) return inside;
+  for (const ring of zone.rings) {
+    if (distToPolyline(pt, ring) <= zone.bufferFt) return true;
+    // distToPolyline walks open segments — close the loop explicitly.
+    const n = ring.length;
+    if (n >= 2) {
+      const a = ring[n - 1], b = ring[0];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 === 0 ? 0 : ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      if (Math.hypot(pt.x - (a.x + t * dx), pt.y - (a.y + t * dy)) <= zone.bufferFt) return true;
+    }
+  }
+  return false;
 };
+
+/* NEW-1 (Waller) — wrap a floodway zone in its jurisdiction's prohibition buffer:
+ * pointInZone/gridIntersect then screen the buffer band as floodway-class (the hard
+ * stop extends `bufferFt` beyond the mapped boundary). The flood EXTENT semantics
+ * (trigger bands, WSE sampling, ringInTrigger) deliberately do NOT buffer — §E is a
+ * fill/encroachment setback, not a bigger flood. Pure. */
+export const bufferedFloodway = (z, bufferFt) =>
+  z.cls === "floodway" && bufferFt > 0
+    ? { ...z, bufferFt, bbox: [z.bbox[0] - bufferFt, z.bbox[1] - bufferFt, z.bbox[2] + bufferFt, z.bbox[3] + bufferFt] }
+    : z;
 
 const ringBBox = (ring) => {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -358,12 +385,98 @@ export function governingCrossSectionWsel({ point, sections, maxDistFt = 2500 } 
   };
 }
 
+/* ---------------------------------------------------------------------------------
+ * NEW-2 — estimated 1% WSE for UNSTUDIED Zone A, from grade along the zone boundary.
+ *
+ * FEMA's approximate-Zone-A method: the mapped flood extent is where the flood
+ * surface daylights into grade, so ground elevation along the Zone A polygon's
+ * boundary approximates the water surface (the contour-interpolation technique).
+ * We sample the DEM (the B808 per-cell 3DEP grid sampler) along the zone's REAL
+ * NFHL boundary segments near the site and take the MEDIAN, reporting the spread.
+ *
+ * Honesty rules:
+ *   • plain Zone A only (z.unstudiedA && z.zone === "A") — an AO zone's published
+ *     DEPTH is its own provider (ao-depth) and must never be overridden or mimicked.
+ *   • gradeAt null/absent (DEM outage or manual flat grade) → null. An outage is
+ *     never an estimate.
+ *   • fmZone rings are FULL NFHL polygons (never clipped to the site), so every
+ *     vertex is a real flood-boundary point; we filter samples to the site
+ *     VICINITY (padded bbox of the caller's rings) — no site-clip-line artifacts.
+ *   • too few valid samples → null (no defensible median).
+ * The result is a SCREENING estimate the user must explicitly ACCEPT into the BFE
+ * field (provider "est-boundary-grade") — never auto-committed. Pure. */
+export function sampleRingGrades(ring, gradeAt, { stepFt = 50, within = null } = {}) {
+  const vals = [];
+  if (!Array.isArray(ring) || ring.length < 2 || typeof gradeAt !== "function") return vals;
+  const inBox = (p) => !within || (p.x >= within[0] && p.y >= within[1] && p.x <= within[2] && p.y <= within[3]);
+  const n = ring.length;
+  for (let i = 0; i < n; i++) {
+    const a = ring[i], b = ring[(i + 1) % n];
+    const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.ceil(segLen / Math.max(1, stepFt)));
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps;
+      const pt = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      if (!inBox(pt)) continue;
+      const g = gradeAt(pt);
+      if (g != null && isFinite(g)) vals.push(g);
+    }
+  }
+  return vals;
+}
+
+export function estimateZoneAWse({ zones = [], siteRings = [], gradeAt = null, padFt = 300, stepFt = 50, minSamples = 6 } = {}) {
+  if (typeof gradeAt !== "function") return null;
+  const targets = zones.filter((z) => z.unstudiedA && z.zone === "A" && Array.isArray(z.rings) && z.rings.length);
+  if (!targets.length) return null;
+  // The site vicinity: padded bbox over the caller's rings (parcels + fill elements).
+  let within = null;
+  if (Array.isArray(siteRings) && siteRings.length) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const ring of siteRings) for (const p of ring || []) {
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    }
+    if (isFinite(minX)) within = [minX - padFt, minY - padFt, maxX + padFt, maxY + padFt];
+  }
+  const samples = [];
+  let zonesSampled = 0;
+  for (const z of targets) {
+    let zoneVals = [];
+    for (const ring of z.rings) zoneVals = zoneVals.concat(sampleRingGrades(ring, gradeAt, { stepFt, within }));
+    if (zoneVals.length) zonesSampled++;
+    for (const v of zoneVals) samples.push(v);
+  }
+  if (samples.length < minSamples) return null;
+  samples.sort((a, b) => a - b);
+  const mid = samples.length >> 1;
+  const median = samples.length % 2 ? samples[mid] : (samples[mid - 1] + samples[mid]) / 2;
+  const minFt = samples[0], maxFt = samples[samples.length - 1];
+  return {
+    wseFt: Math.round(median * 10) / 10,
+    provider: "est-boundary-grade",
+    detail: { samples: samples.length, zones: zonesSampled, minFt, maxFt, spreadFt: maxFt - minFt },
+  };
+}
+
+/* NEW-3 — screening "highest adjacent grade" (HAG) for one building footprint:
+ * the MAX DEM grade along the footprint's perimeter (Waller §D(5) measures the slab
+ * from the highest adjacent grade; per-element, since HAG varies by building).
+ * Returns { hagFt, samples } or null when the DEM can't support it. Pure. */
+export function hagForRing(ring, gradeAt, { stepFt = 25 } = {}) {
+  const vals = sampleRingGrades(ring, gradeAt, { stepFt });
+  if (!vals.length) return null;
+  let max = -Infinity;
+  for (const v of vals) if (v > max) max = v;
+  return { hagFt: max, samples: vals.length };
+}
+
 /* The governing (highest) 1% water surface across the zones that touch a ring —
  * static BFE where published, else the manual BFE, else the derived estimates.
  * B708's pond split consumes this. Returns { wseFt, provider } — provider
  * "static-bfe" | "ao-depth" | "manual" | "xs-wsel" | "bfe-line-interp" |
  * the caller-named derivedWse1pctSrc (default "derived-wse100", B807) | null. Pure. */
-export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null, derivedXsWselFt = null, derivedBfeFt = null, derivedWse1pctFt = null, derivedWse1pctSrc = null } = {}) {
+export function wse1pctForRing(ring, zones, { bfeFt = null, bfeSrc = null, existGradeFt = null, derivedXsWselFt = null, derivedBfeFt = null, derivedWse1pctFt = null, derivedWse1pctSrc = null } = {}) {
   const fb = ringBBox(ring);
   let best = null, provider = null;
   for (const z of zones) {
@@ -382,7 +495,9 @@ export function wse1pctForRing(ring, zones, { bfeFt = null, existGradeFt = null,
   if (best == null) {
     // Fallbacks, manual before derived: a value the user typed wins over the auto
     // BFE-line estimate. Only meaningful when the ring actually touches a 1% zone.
-    const fallback = (bfeFt != null && isFinite(bfeFt)) ? { v: bfeFt, p: "manual" }
+    // NEW-2: an ACCEPTED boundary-grade estimate rides the manual rung but keeps its
+    // own provider tag (bfeSrc "est-boundary-grade") so the ESTIMATED stamp survives.
+    const fallback = (bfeFt != null && isFinite(bfeFt)) ? { v: bfeFt, p: bfeSrc || "manual" }
       : (derivedXsWselFt != null && isFinite(derivedXsWselFt)) ? { v: derivedXsWselFt, p: "xs-wsel" }
       : (derivedBfeFt != null && isFinite(derivedBfeFt)) ? { v: derivedBfeFt, p: "bfe-line-interp" }
       // LAST in precedence (B807): a DRAFT study raster never outranks effective-model
@@ -439,12 +554,13 @@ export function ringInTrigger(ring, zones, rule) {
  *   override it (sheet-flow ponding isn't riverine backwater).
  *   0.2% band: manual WSE → derived 0.2% (B763 seam, caller-named source) → unknown.
  * env values are already realElev()-cleaned by the caller. Pure. */
-export function zoneWaterSurface(z, { grade = null, wse02 = null, manualBfe = null, derivedXsWsel = null, derivedBfe = null, derived1pct = null, derived02 = null, derivedWse1pctSrc = null, derivedWse02Src = null } = {}) {
+export function zoneWaterSurface(z, { grade = null, wse02 = null, manualBfe = null, manualBfeSrc = null, derivedXsWsel = null, derivedBfe = null, derived1pct = null, derived02 = null, derivedWse1pctSrc = null, derivedWse02Src = null } = {}) {
   let wse = null, wseSrc = null;
   if (z.cls === "1pct") {
     if (z.staticBfeFt != null) { wse = z.staticBfeFt; wseSrc = "static-bfe"; }
     else if (z.aoDepthFt != null && grade != null) { wse = grade + z.aoDepthFt; wseSrc = "ao-depth"; }
-    else if (manualBfe != null) { wse = manualBfe; wseSrc = "manual"; }
+    // NEW-2: an accepted boundary-grade estimate rides the manual rung, own tag.
+    else if (manualBfe != null) { wse = manualBfe; wseSrc = manualBfeSrc || "manual"; }
     else if (derivedXsWsel != null) { wse = derivedXsWsel; wseSrc = "xs-wsel"; }
     else if (derivedBfe != null) { wse = derivedBfe; wseSrc = "bfe-line-interp"; }
     else if (derived1pct != null) { wse = derived1pct; wseSrc = derivedWse1pctSrc || "derived-wse100"; }
@@ -501,7 +617,7 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
 
     // The zone's water surface — the shared provider chain (extracted for B833's
     // wedgeMitigation so the wedge cells price against the SAME precedence).
-    const { wse, wseSrc } = zoneWaterSurface(z, { grade, wse02, manualBfe, derivedXsWsel, derivedBfe, derived1pct, derived02, derivedWse1pctSrc: elev.derivedWse1pctSrc, derivedWse02Src: elev.derivedWse02Src });
+    const { wse, wseSrc } = zoneWaterSurface(z, { grade, wse02, manualBfe, manualBfeSrc: elev.bfeSrc || null, derivedXsWsel, derivedBfe, derived1pct, derived02, derivedWse1pctSrc: elev.derivedWse1pctSrc, derivedWse02Src: elev.derivedWse02Src });
 
     for (const fp of footprints) {
       const ring = fp.ring;
@@ -509,10 +625,16 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
 
       if (z.cls === "floodway") {
         // Geometry + hard flag only — fill in the floodway is prohibited, not priced.
-        const fw = gridIntersect(ring, z, null, { ...opts, retainCells });
+        // NEW-1 (Waller): a rule with floodwayBufferFt extends the prohibition band
+        // that far past the mapped boundary; buffer-only acreage flags separately so
+        // the copy can name the setback (still the same hard stop, never a price).
+        const bufFt = rule && rule.floodwayBufferFt > 0 ? rule.floodwayBufferFt : 0;
+        const zEff = bufFt ? bufferedFloodway(z, bufFt) : z;
+        const fw = gridIntersect(ring, zEff, null, { ...opts, retainCells });
         if (fw.areaSf > 0) {
           bucket.acres += fw.areaSf / SQFT_PER_ACRE;
           flags.add("floodway_intersect");
+          if (bufFt && gridIntersect(ring, z, null, opts).areaSf < fw.areaSf - 1e-6) flags.add("floodway_buffer");
           if (retainCells && fw.cells) for (const c of fw.cells) allCells.push({ cls: "floodway", fpId: fp.id, ...c });
         }
         continue;
@@ -695,6 +817,7 @@ export function wedgeMitigation({ cells = [], zones = [], rule = null, elev = {}
     grade: realElev(elev.existGradeFt),
     wse02: realElev(elev.wse02Ft),
     manualBfe: realElev(elev.bfeFt),
+    manualBfeSrc: elev.bfeSrc || null,
     derivedXsWsel: realElev(elev.derivedXsWselFt),
     derivedBfe: realElev(elev.derivedBfeFt),
     derived1pct: realElev(elev.derivedWse1pctFt),
@@ -704,12 +827,16 @@ export function wedgeMitigation({ cells = [], zones = [], rule = null, elev = {}
   };
   let volumeCf = 0, intersectSf = 0, unknownSf = 0, floodwaySf = 0;
   const out = [];
+  // NEW-1 (Waller): the wedge screen honors the same floodway prohibition buffer as
+  // the footprint screen — wrap floodway zones once, outside the cell loop.
+  const bufFt = rule && rule.floodwayBufferFt > 0 ? rule.floodwayBufferFt : 0;
+  const zonesEff = bufFt ? zones.map((z) => bufferedFloodway(z, bufFt)) : zones;
   for (const c of cells) {
     if (!c || c.wedge !== true || !(c.dzFt > 0)) continue;
     const pt = { x: c.x, y: c.y };
     const A = (c.wFt || 0) * (c.hFt || 0);
     if (!(A > 0)) continue;
-    const fw = zones.find((z) => z.cls === "floodway" && pointInZone(pt, z));
+    const fw = zonesEff.find((z) => z.cls === "floodway" && pointInZone(pt, z));
     if (fw) {
       floodwaySf += A;
       out.push({ cls: "floodway", fpId: `${c.elId}:wedge`, x: c.x, y: c.y, wFt: c.wFt, hFt: c.hFt, depthFt: null });
@@ -873,6 +1000,8 @@ export const DERIVED_WSE02_NOTE =
   "This 0.2% (500-yr) water surface was DERIVED from a cross-section / regional model at your fill — a screening estimate, not a published or surveyed value. Confirm before design; type a 0.2% WSE to override.";
 export const DERIVED_WSE02_DRAFT_NOTE =
   "This 0.2% (500-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: FBCDD's Interim §9 mitigation trigger references the PRE-Atlas-14 0.2% (the effective 2014 FIS profile) — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a 0.2% WSE from the effective FIS to override.";
+export const EST_BOUNDARY_WSE_NOTE =
+  "This 1% water surface is ESTIMATED from ground elevation along the mapped Zone A boundary (FEMA's approximate-Zone-A contour method) — screening only. Waller Art. 5 §C(3) requires an Atlas-14 study for developments >50 lots or >5 ac; the County Engineer administers best-available data (Art. 4 §B(8)). Type a BFE to override.";
 export const DERIVED_WSE100_DRAFT_NOTE =
   "This 1% (100-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: Fort Bend's mitigation and FFE rules reference the EFFECTIVE (pre-Atlas-14) floodplain — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a BFE to override.";
 
@@ -883,13 +1012,14 @@ export const WSE_PROVIDER_LABEL = {
   "bfe-line-interp": "derived (BFE lines)", "xs-wsel": "derived (cross-sections)",
   "xs-wsel-02": "derived (cross-sections)", "fbcdd-wse02-draft": "derived (FBCDD study — DRAFT)",
   "fbcdd-wse100-draft": "derived (FBCDD study — DRAFT)", "derived-wse100": "derived (100-yr raster)",
+  "est-boundary-grade": "ESTIMATED (grade @ Zone A boundary)",
   "mixed": "mixed",
 };
 export const wseProvLabel = (p) => WSE_PROVIDER_LABEL[p] || p || "—";
 export const FFE_BASIS_LABEL = {
   "wse02pct": "0.2% (500-yr) WSE", "wse1pct": "FEMA BFE", "atlas14_100yr": "Atlas-14 100-yr WSE",
   "pre_atlas14_100yr": "pre-Atlas-14 100-yr WSE", "zone_a_est_bfe": "Zone A estimated BFE",
-  "site": "outside-SFHA site basis",
+  "site": "outside-SFHA site basis", "hag": "highest adjacent grade",
 };
 export const ffeBasisText = (ffe) => {
   const g = ffe.governingBasis;

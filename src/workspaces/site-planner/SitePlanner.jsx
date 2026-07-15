@@ -116,14 +116,17 @@ import {
   wedgeMitigation, pointInZone,
   floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines,
   crossSectionWselFromFeatureCollection, governingCrossSectionWsel,
+  estimateZoneAWse, hagForRing,
   NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
   DERIVED_BFE_NOTE, DERIVED_XS_WSEL_NOTE, DERIVED_WSE02_DRAFT_NOTE, DERIVED_WSE100_DRAFT_NOTE,
+  EST_BOUNDARY_WSE_NOTE,
   wseProvLabel, ffeBasisText,
 } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
-import { loadBuildabilityRules, assessBuildability, requiredFfe } from "./lib/buildability.js";
+import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE } from "./lib/buildability.js";
+import { sizePondForTargets } from "./lib/pondSizing.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt, pondAutoValues,
@@ -718,15 +721,19 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
  * grid tests would otherwise jank drags on exactly the in-floodplain sites this
  * feature targets. */
 const _pondFactsMemo = new Map();
-function pondFloodFacts(ring, zones, rule, { bfeFt, existGradeFt, derivedBfeFt, derivedXsWselFt, derivedWse1pctFt, derivedWse1pctSrc }, zonesSig) {
-  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", existGradeFt ?? "", derivedBfeFt ?? "", derivedXsWselFt ?? "", derivedWse1pctFt ?? ""].join("~");
+function pondFloodFacts(ring, zones, rule, { bfeFt, bfeSrc, existGradeFt, derivedBfeFt, derivedXsWselFt, derivedWse1pctFt, derivedWse1pctSrc }, zonesSig) {
+  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", bfeSrc ?? "", existGradeFt ?? "", derivedBfeFt ?? "", derivedXsWselFt ?? "", derivedWse1pctFt ?? ""].join("~");
   if (_pondFactsMemo.has(sig)) {
     const hit = _pondFactsMemo.get(sig);
     _pondFactsMemo.delete(sig); _pondFactsMemo.set(sig, hit);
     return hit;
   }
+  // NEW-2 — keep the WSE provider tag beside the value so the pond split can stamp an
+  // ESTIMATED water surface (est-boundary-grade rides the manual rung with its own tag).
+  const w = wse1pctForRing(ring, zones, { bfeFt, bfeSrc, existGradeFt, derivedBfeFt, derivedXsWselFt, derivedWse1pctFt, derivedWse1pctSrc });
   const val = {
-    wseFt: wse1pctForRing(ring, zones, { bfeFt, existGradeFt, derivedBfeFt, derivedXsWselFt, derivedWse1pctFt, derivedWse1pctSrc }).wseFt,
+    wseFt: w.wseFt,
+    wseSrc: w.provider ?? null,
     inTrigger: ringInTrigger(ring, zones, rule),
   };
   _pondFactsMemo.set(sig, val);
@@ -6596,28 +6603,85 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the site builds to this floor, so mitigation prices WSE-governed (pad ≥ WSE by
   // construction) instead of blocking on a missing FFE. A typed pad still overrides.
   const fmBuildRule = buildRules[floodJurKey] || buildRules.generic;
+  // B808 — the per-cell existing-grade sampler off the site-extent DEM grid (a manual
+  // grade wins — the engine gates on sources.existGrade "manual" as well; the 3DEP
+  // median stays the labeled fallback whenever the grid didn't load). Hoisted above the
+  // AUTO FFE so the NEW-2 estimator and the NEW-3 HAG proxy can feed it.
+  const fmDemGrid = floodGeo?.demGrid && floodGeo.demGrid.state === "loaded" && floodGeo.demGrid.grid ? floodGeo.demGrid : null;
+  const fmGradeAt = fmDemGrid && !Number.isFinite(fmSettings.existGradeFt)
+    ? (pt) => { const gll = feetToLatLng(pt, origin.lat, origin.lon); return sampleAtLatLng(fmDemGrid.grid, fmDemGrid.req, gll[0], gll[1]); }
+    : null;
+  // NEW-1 (Waller) / NEW-3 — location ctx for `when`-conditioned FFE bases, computed from
+  // BUILDING footprints vs the flood zones (tri-state: null = no flood data yet, so a
+  // conditioned WSE base stays conservatively applicable; the grade-derived zone_a_no_bfe
+  // base applies only on explicit evidence).
+  const fmBuildingIn1pct = fmZones.length
+    ? els.some((e) => {
+        if (e.type !== "building") return false;
+        const r = ringOf(e);
+        return r && r.length >= 3 && ringInTrigger(r, fmZones, { trigger: "1pct" });
+      })
+    : false;
+  const fmZones02 = fmZones.filter((z) => z.cls === "02pct");
+  const fmBuildingIn02pct = fmZones.length
+    ? els.some((e) => {
+        if (e.type !== "building") return false;
+        const r = ringOf(e);
+        return r && r.length >= 3 && ringInTrigger(r, fmZones02, { trigger: "1pct_plus_02pct" });
+      })
+    : null;
+  const fmZonesUnstudiedA = fmZones.filter((z) => z.unstudiedA && z.zone === "A");
+  const fmBuildingInUnstudiedA = fmZones.length
+    ? els.some((e) => {
+        if (e.type !== "building") return false;
+        const r = ringOf(e);
+        return r && r.length >= 3 && ringInTrigger(r, fmZonesUnstudiedA, { trigger: "1pct" });
+      })
+    : null;
+  const fmFfeCtx = {
+    in1pct: fmZones.length ? fmBuildingIn1pct : null,
+    in02pct: fmBuildingIn02pct,
+    zoneANoBfe: fmBuildingInUnstudiedA === true,
+  };
+  // NEW-3 — the HAG screening proxy (Waller §D(5) basis): max DEM grade along each
+  // building footprint's perimeter, governing max across buildings. Honest null when
+  // the grid isn't loaded (the basis surfaces as pending — never fabricated).
+  const fmHagFt = (() => {
+    if (!fmGradeAt) return null;
+    let best = null;
+    for (const e of els) {
+      if (e.type !== "building") continue;
+      const r = ringOf(e);
+      if (!(r && r.length >= 3)) continue;
+      const h = hagForRing(r, fmGradeAt);
+      if (h && (best == null || h.hagFt > best)) best = h.hagFt;
+    }
+    return best;
+  })();
+  // NEW-2 — the accepted boundary-grade estimate keeps its provider tag (never "manual").
+  const fmBfeSrc = fmManualBfeFt != null && fmSettings.bfeSrc ? fmSettings.bfeSrc : null;
+  const fmGoverningBfeIsEst = fmManualBfeFt != null && fmBfeSrc === "est-boundary-grade"
+    && fmZones.every((z) => z.staticBfeFt == null); // a published static BFE would outrank it
   // B807 variant-(b) (owner 2026-07-13): the DRAFT Atlas-14 100-yr also seeds the FFE
   // recommendation via its OWN labeled basis (atlas14_100yr) — never via wse1pctFt.
-  const fmAutoFfe = requiredFfe(fmBuildRule, { wse1pctFt: fmGoverningBfe, wse02Ft: fmManualWse02Ft ?? fmDerivedWse02Ft, atlas14Wse100Ft: fmDerivedWse100Ft });
+  const fmAutoFfe = requiredFfe(
+    fmBuildRule,
+    { wse1pctFt: fmGoverningBfe, wse02Ft: fmManualWse02Ft ?? fmDerivedWse02Ft, atlas14Wse100Ft: fmDerivedWse100Ft, hagFt: fmHagFt },
+    fmFfeCtx,
+  );
   const fmAutoFfeFt = fmAutoFfe && Number.isFinite(fmAutoFfe.requiredFfeFt) ? fmAutoFfe.requiredFfeFt : null;
   // Plan-level pad precedence: manual padFfeFt → AUTO code-min FFE (per-element padElevFt
   // still overrides in effectivePadElev). padIsAuto drives the "assumed" buildability verdict
   // + the greyed input placeholder + the DRAFT/assumed tags on card and print (PDF-PARITY).
   const fmPadIsAuto = fmManualPadFt == null && fmAutoFfeFt != null;
   const fmEffectivePadFt = fmManualPadFt ?? fmAutoFfeFt;
-  // B808 — the per-cell existing-grade sampler off the site-extent DEM grid (a manual
-  // grade wins — the engine gates on sources.existGrade "manual" as well; the 3DEP
-  // median stays the labeled fallback whenever the grid didn't load).
-  const fmDemGrid = floodGeo?.demGrid && floodGeo.demGrid.state === "loaded" && floodGeo.demGrid.grid ? floodGeo.demGrid : null;
-  const fmGradeAt = fmDemGrid && !Number.isFinite(fmSettings.existGradeFt)
-    ? (pt) => { const gll = feetToLatLng(pt, origin.lat, origin.lon); return sampleAtLatLng(fmDemGrid.grid, fmDemGrid.req, gll[0], gll[1]); }
-    : null;
   const fmElev = {
     padElevFt: fmEffectivePadFt,
     existGradeFt: Number.isFinite(fmSettings.existGradeFt) ? fmSettings.existGradeFt : (drainCtxData?.groundElevFt ?? null),
     gradeAt: fmGradeAt,
     gradeAtKey: fmGradeAt ? fmDemGrid.req.key : "", // memo identity — a grid that lands later must re-price (the B807 stale-memo class)
     bfeFt: fmManualBfeFt,
+    bfeSrc: fmBfeSrc, // NEW-2 — "est-boundary-grade" when the accepted estimate rides the manual rung
     derivedBfeFt: fmDerivedBfeFt,
     derivedXsWselFt: fmDerivedXsWselFt,
     wse02Ft: fmManualWse02Ft,
@@ -6635,8 +6699,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     avgFillDepthFt: Number.isFinite(fmSettings.avgFillDepthFt) ? fmSettings.avgFillDepthFt : null,
     sources: {
       existGrade: Number.isFinite(fmSettings.existGradeFt) ? "manual" : (drainCtxData?.groundElevFt != null ? "3dep" : null),
-      // NEW-3 — "auto (code min)" when the pad defaulted to the required FFE; "manual" when typed.
-      padElev: fmManualPadFt != null ? "manual" : (fmPadIsAuto ? "auto (code min)" : null),
+      // NEW-3 — "auto (code min)" when the pad defaulted to the required FFE; "manual" when
+      // typed; "suggested-accepted" when the owner clicked the suggestion into the field.
+      padElev: fmManualPadFt != null
+        ? (fmSettings.padSrc === "suggested-accepted" ? "suggested-accepted" : "manual")
+        : (fmPadIsAuto ? "auto (code min)" : null),
       derivedBfe: fmDerivedBfe ? "bfe-line-interp" : null,
       derivedXsWsel: fmDerivedXsWsel ? "xs-wsel" : null,
       derivedWse02: floodGeo?.derivedWse02 ? floodGeo.derivedWse02.source : null,
@@ -6747,9 +6814,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: det.depth ?? 8, freeboardFt: det.freeboard ?? 1 })
       : null);
     if (fmZones.length) {
-      const facts = pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt, derivedWse1pctFt: fmElev.derivedWse1pctFt, derivedWse1pctSrc: fmElev.derivedWse1pctSrc }, fmZonesSig);
+      const facts = pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, bfeSrc: fmElev.bfeSrc, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt, derivedWse1pctFt: fmElev.derivedWse1pctFt, derivedWse1pctSrc: fmElev.derivedWse1pctSrc }, fmZonesSig);
       const estPool = estPoolFor();
-      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool }), wseFt: facts.wseFt, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true };
+      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool }), wseFt: facts.wseFt, wseSrc: facts.wseSrc ?? null, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true };
     }
     // NEW-9 — a restored view replays the facts the check persisted for this pond, so
     // the usable/dead split (and the verdict built on it) survives a reload unchanged.
@@ -6757,7 +6824,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (rf) {
       const estPool = Number.isFinite(rf.estPoolDepthFt) ? rf.estPoolDepthFt : estPoolFor(); // check-time measurement wins
       const wseFt = Number.isFinite(rf.wseFt) ? rf.wseFt : null;
-      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool }), wseFt, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true };
+      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool }), wseFt, wseSrc: rf.wseSrc ?? null, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true };
     }
     // NEW-9 — restored, flood evidence exists, but NO persisted fact for this pond (a
     // legacy snapshot saved before this fix, or a pond drawn after the check): the
@@ -6984,6 +7051,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           fmZonesSig,
           byId: Object.fromEntries(pondLedgerEntries.map((p) => [p.id, {
             wseFt: Number.isFinite(p.wseFt) ? Math.round(p.wseFt * 100) / 100 : null,
+            // NEW-2 — the provider tag persists WITH the value so an ESTIMATED water
+            // surface never restores as an unlabeled fact (stamp-survives-reload).
+            wseSrc: p.wseSrc ?? null,
             inTrigger: !!p.inTrigger,
             estPoolDepthFt: Number.isFinite(p.estPoolDepthFt) ? Math.round(p.estPoolDepthFt * 100) / 100 : null,
           }])),
@@ -7060,13 +7130,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // WSE inputs. Wetlands presence comes from the Site Analysis screen's own finding
   // (lifted via onFindings — no new fetch). fmGoverningBfe + fmEffectivePadFt + fmPadIsAuto
   // were computed up with the elevation intermediates (NEW-3 auto-pad).
-  const fmBuildingIn1pct = fmZones.length
-    ? els.some((e) => {
-        if (e.type !== "building") return false;
-        const r = ringOf(e);
-        return r && r.length >= 3 && ringInTrigger(r, fmZones, { trigger: "1pct" });
-      })
-    : false;
+  // (fmBuildingIn1pct / fmBuildingIn02pct / fmBuildingInUnstudiedA moved up with the
+  // elevation intermediates — the NEW-1 `when` ctx feeds the AUTO FFE there too.)
   const fmFloodplainPresent = fmZones.some((z) => z.cls === "1pct" || z.cls === "floodway");
   const fmBuild = floodGeo && floodGeo.state === "loaded"
     ? assessBuildability({
@@ -7077,9 +7142,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         wse02Ft: fmElev.wse02Ft ?? fmElev.derivedWse02Ft,
         // B807 variant-(b): the DRAFT Atlas-14 100-yr seeds its own labeled FFE basis.
         atlas14Wse100Ft: fmDerivedWse100Ft,
+        hagFt: fmHagFt, // NEW-3 — the HAG screening proxy (Waller §D(5))
         buildingIn1pct: fmBuildingIn1pct,
+        buildingIn02pct: fmBuildingIn02pct,
+        zoneANoBfe: fmBuildingInUnstudiedA === true,
         floodplainPresent: fmFloodplainPresent,
         wetlandsPresent: analysisWetlands === "present",
+      })
+    : null;
+  // NEW-2 — the boundary-grade WSE estimate for unstudied Zone A: offered ONLY when the
+  // 1% surface is otherwise unknown (no static/manual/derived value — the exact state
+  // that dead-ends mitigation, the heat map, and the pond split today). Recomputed as a
+  // GHOST each check; accepting writes bfeFt + bfeSrc once — never auto-committed, and
+  // a committed value is never silently overwritten by a recompute.
+  const fmEstWseWanted = fmGoverningBfe == null && fmZonesUnstudiedA.length > 0 && !!fmGradeAt;
+  const fmDemGridKey = fmDemGrid ? fmDemGrid.req.key : "";
+  const fmEstWse = useMemo(
+    () => {
+      if (!fmEstWseWanted) return null;
+      const siteRings = drainActive.map((p) => p.points);
+      for (const e of els) {
+        if (!FM_FILL_TYPES.has(e.type) && e.type !== "pond") continue;
+        const r = ringOf(e);
+        if (r && r.length >= 3) siteRings.push(r);
+      }
+      return estimateZoneAWse({ zones: fmZones, siteRings, gradeAt: fmGradeAt, padFt: 300 });
+    },
+    // Keyed on the check identity (floodGeo swaps per check; the grid key covers a
+    // late-landing DEM) + the drainage geometry sig — not the per-render closures.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fmEstWseWanted, floodGeo, fmDemGridKey, drainSigNow],
+  );
+  // NEW-3 — the suggested pad FFE (the ghost + accept chip): the same rule evaluation as
+  // the AUTO pad, wrapped with the outside-floodplain honesty rule + the ESTIMATED stamp.
+  const fmAnyBuildingInTrigger = floodGeo && floodGeo.state === "loaded" && fmZones.length
+    ? els.some((e) => {
+        if (e.type !== "building") return false;
+        const r = ringOf(e);
+        return r && r.length >= 3 && ringInTrigger(r, fmZones, fmRule);
+      })
+    : null;
+  const fmSuggestFfe = floodGeo && floodGeo.state === "loaded"
+    ? suggestedFfe({
+        rule: fmBuildRule,
+        inputs: { wse1pctFt: fmGoverningBfe, wse02Ft: fmManualWse02Ft ?? fmDerivedWse02Ft, atlas14Wse100Ft: fmDerivedWse100Ft, hagFt: fmHagFt },
+        ctx: fmFfeCtx,
+        anyBuildingInTrigger: fmAnyBuildingInTrigger,
+        estimatedBases: fmGoverningBfeIsEst ? ["wse1pct"] : [],
       })
     : null;
   // ---- NEW-11/B831 — ponds/basins vs easement + pipeline corridors. Drawn easements
@@ -7267,6 +7376,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       derivedBfe: fmDerivedBfe, // B755 — the FEMA-BFE-line estimate, for the input placeholder
       autoFfe: fmAutoFfe, // NEW-3 — the code-min required FFE, for the greyed pad placeholder
       padIsAuto: fmPadIsAuto, // NEW-3 — pad currently defaulted to the code minimum
+      suggestFfe: fmSuggestFfe, // NEW-3 — the suggestion wrapper (outside-floodplain honesty + basis chip + ESTIMATED stamp)
+      padSrc: fmSettings.padSrc || null, // NEW-3 — "suggested-accepted" provenance on the committed pad
+      estWse: fmEstWse, // NEW-2 — the boundary-grade Zone A estimate (accept-gated ghost; null when not applicable)
+      bfeSrc: fmBfeSrc, // NEW-2 — "est-boundary-grade" when the committed BFE is the accepted estimate
+      hagFt: fmHagFt, // NEW-3 — the HAG screening proxy feeding the Waller §D(5) basis
       // NEW-1 — auto-resolved values shown as grey "value · source" text until tapped to edit.
       autoGradeFt: drainCtxData?.groundElevFt ?? null, // 3DEP bare-earth median
       derivedWse02: floodGeo?.derivedWse02 || null, // FBCDD Atlas-14 DRAFT 0.2% WSE (Fort Bend)
@@ -8457,6 +8571,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B807 (PDF-PARITY): a 1% volume priced off the FBCDD DRAFT raster carries the same
       // stand-in qualifier on the sheet — the effective floodplain is the rule's basis.
       if (mit.volumeCf != null && mit.providers?.wse1pct === "fbcdd-wse100-draft") v += " (1% from DRAFT Atlas-14 study — basis is the effective floodplain)";
+      // NEW-2 (PDF-PARITY): a volume priced off the accepted Zone A boundary-grade
+      // estimate carries the ESTIMATED stamp on the sheet exactly like the panel.
+      if (mit.volumeCf != null && mit.providers?.wse1pct === "est-boundary-grade") v += " (1% WSE ESTIMATED — grade @ Zone A boundary, screening)";
+      // NEW-1 (PDF-PARITY with the panel's floodway line): Waller's prohibition buffer
+      // names itself wherever floodway acreage prints.
+      if (mit.flags && mit.flags.includes("floodway_buffer") && d.mitigationRule?.floodwayBufferFt > 0) v += ` (⚑ floodway + ${f0(d.mitigationRule.floodwayBufferFt)}-ft buffer intersect)`;
       if (mit.flags && mit.flags.includes("wse02-below-1pct")) v += " (⚠ derived 0.2% reads below the 1% — mismatched studies)";
       if (mit.volumeCf != null && d.floodGeo && d.floodGeo.truncated) v += " (floor — capped pull)";
       if (mit.volumeCf != null && d.mitigationStraddle && d.mitigationStraddle.anyUnknown) v += " (straddle — a candidate is unknown)";
@@ -8494,10 +8614,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft") v += " (0.2% WSE — DRAFT study)";
       // B807 variant-(b) (PDF-PARITY): same rule for the Atlas-14 100-yr basis.
       if (b.ffe.basis === "atlas14_100yr" && d.wse100Src === "fbcdd-wse100-draft") v += " (Atlas-14 100-yr WSE — DRAFT study)";
+      // NEW-2 (PDF-PARITY): an FFE governed by the accepted Zone A estimate stamps it.
+      if (b.ffe.basis === "wse1pct" && d.floodMit?.bfeSrc === "est-boundary-grade") v += " (1% WSE ESTIMATED — Zone A boundary grade)";
+      // NEW-3 (PDF-PARITY): the HAG screening proxy names itself when it governs.
+      if (b.ffe.basis === "hag") v += " (HAG — 3DEP screening proxy)";
       pairs.push(["Required FFE", v]);
     } else if (b && b.ffe && (b.ffe.status === "unknown" || b.ffe.status === "no_rule")) {
       // Mirror the on-screen card's no_rule/unknown advisory so the sheet doesn't drop it
-      // (PDF-PARITY — no_rule is the generic / Montgomery / Chambers / Waller fallback).
+      // (PDF-PARITY — no_rule is the generic / Montgomery / Chambers fallback; Waller
+      // gained a real FFE rule with NEW-1).
       pairs.push(["Required FFE", b.ffe.status === "no_rule" ? "no rule modeled" : "UNKNOWN"]);
     }
     return pairs;
@@ -11996,7 +12121,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <g>
                     <image href={fmHeat.dataUrl} x={tl.x} y={tl.y} width={wPx} height={hPx} opacity={0.68} preserveAspectRatio="none" pointerEvents="none" />
                     <g pointerEvents="none">
-                      <rect x={lx - 6} y={ly - 14} width={236} height={legend.length * 14 + 40} rx={6} fill="#ffffff" opacity={0.88} />
+                      <rect x={lx - 6} y={ly - 14} width={236} height={legend.length * 14 + (fmResultView && fmResultView.providers?.wse1pct === "est-boundary-grade" ? 52 : 40)} rx={6} fill="#ffffff" opacity={0.88} />
                       <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">Fill depth (priced cells)</text>
                       {legend.map((r, i) => (
                         <g key={r.label}>
@@ -12008,6 +12133,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">
                         {`Σ cells ${fmHeatTotals ? fmHeatTotals.volumeAcFt.toFixed(2) : "—"} ac-ft = ledger ${fmResultView && fmResultView.volumeAcFt != null ? fmResultView.volumeAcFt.toFixed(2) : "—"} ac-ft`}
                       </text>
+                      {/* NEW-2 — the ESTIMATED stamp rides the legend (and the export clone,
+                          PDF-PARITY) whenever the accepted Zone A estimate priced the depths. */}
+                      {fmResultView && fmResultView.providers?.wse1pct === "est-boundary-grade" && (
+                        <text x={lx} y={ly + 6 + legend.length * 14 + 24} fontSize={9} fontWeight="700" fill="#8A5A00" fontFamily="ui-monospace, monospace">
+                          1% WSE ESTIMATED (grade @ Zone A boundary) — screening
+                        </text>
+                      )}
                     </g>
                     {hovCell && hovPt && (
                       <g data-export="skip" pointerEvents="none" transform={`translate(${hovPt.x + 14}, ${hovPt.y - 10})`}>
@@ -14026,7 +14158,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             {split.bands.poolDeadCf > 0 && pondRow("Permanent pool (dead)", `${f2(split.bands.poolDeadCf / 43560)} ac-ft`)}
                           </div>
                         );
-                        out.push(noteLine(`Flood WSE ${f1(split.wseFt)}′ NAVD88. Below the WSE earns no detention credit (the flood already occupies it) — it is candidate compensating storage; hydraulic connection + stage distribution: engineer confirms.`, "split-note"));
+                        // NEW-4 — both bands captioned with what they are and why (plain language).
+                        out.push(noteLine(`Flood WSE ${f1(split.wseFt)}′ NAVD88. ABOVE the WSE the basin is empty when the design storm arrives — that volume counts toward detention. BELOW the WSE the flood already occupies the volume at design stage — no detention credit, but it's your candidate compensating storage for fill (hydraulic connection + stage distribution: engineer confirms).`, "split-note"));
+                        // NEW-2 — an estimated water surface stamps the split it shaped.
+                        if (split.wseSrc === "est-boundary-grade") out.push(warnLine("⚠ This split is priced off an ESTIMATED flood WSE (grade @ Zone A boundary) — screening only; Waller Art. 5 §C(3) requires an Atlas-14 study.", "split-est", false));
                         if (split.bands.fullyInundated) out.push(warnLine("⚠ The flood WSE is at or above this pond's top of bank — the basin is fully inundated in the design flood; usable detention is ZERO.", "inund", true));
                       } else if (split.mode === "unknown") {
                         // NEW-9 — a restored check without this pond's persisted facts: the split is
@@ -14090,12 +14225,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       };
                       return (
                         <div style={{ marginTop: 10 }}>
-                          <Field label="Pond role">
+                          {/* NEW-4 — owner naming: the user-facing concept is the pond's PURPOSE
+                              (Detention / Mitigation / Hybrid); "dual" stays the stored enum. */}
+                          <Field label="Pond purpose">
                             <span style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
                               {roleBtn(null, `Auto (${POND_ROLE_LABEL[suggested.role]})`)}
-                              {roleBtn("detention", "Detention")}
-                              {roleBtn("mitigation", "Mitigation")}
-                              {roleBtn("dual", "Dual")}
+                              {roleBtn("detention", POND_ROLE_LABEL.detention)}
+                              {roleBtn("mitigation", POND_ROLE_LABEL.mitigation)}
+                              {roleBtn("dual", POND_ROLE_LABEL.dual)}
                             </span>
                           </Field>
                           {roleSource === "owner" && det.role !== suggested.role && (
@@ -14105,7 +14242,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={smallNote}>No flood WSE at this pond — the auto role defaults to detention until a check anchors it.</div>
                           )}
                           {roleSource === "auto" && pct != null && (
-                            <div style={smallNote}>Auto from elevation: ~{pct}% of volume sits below the flood WSE. Mitigation/Dual credits the below-WSE cut to the compensating-storage ledger.</div>
+                            <div style={smallNote}>Auto from elevation: ~{pct}% of volume sits below the flood WSE. Mitigation/Hybrid credits the below-WSE cut to the compensating-storage ledger.</div>
                           )}
                         </div>
                       );
@@ -14142,6 +14279,82 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         );
                       }
                       return out.length ? <>{out}</> : null;
+                    })()}
+                    {/* NEW-4 — the sizing assistant: solve the pond's TWO banded targets (below-WSE
+                        mitigation, above-WSE usable detention) from the SAME bands the audit rows
+                        read, so the assistant can never disagree with the ledger. Proposals only —
+                        the owner redraws (the one apply affordance stays the B830 berm chip above). */}
+                    {(() => {
+                      const split = pondSplitFor(selEl);
+                      const effDet = detWithAuto(selEl.det);
+                      // Bands only exist on an anchored pond with a water surface — the assistant
+                      // refuses (with the reason) rather than designing off gross (LOUD-FAILURE).
+                      const mitReqCf = fmResultView && fmResultView.volumeCf != null ? fmResultView.volumeCf : null;
+                      const detReqCf = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt * 43560 : null;
+                      if (mitReqCf == null && detReqCf == null) return null; // nothing to solve toward
+                      if (split.wseFt == null && !split.inTrigger) return null; // upland pond — no bands; the B633 auto-size covers detention-only sizing
+                      const mineCredited = split.mode === "anchored" && split.bands ? split.bands.mitigationCandidateCf : 0;
+                      const eff = effectivePondRole(effDet, split);
+                      const mineCounted = eff.role === "mitigation" || eff.role === "dual" ? mineCredited : 0;
+                      const othersCredited = pondLedger.creditedMitCf != null ? Math.max(0, pondLedger.creditedMitCf - mineCounted) : null;
+                      const othersUsable = providedUsableCf != null && split.usableCf != null ? Math.max(0, providedUsableCf - split.usableCf) : null;
+                      const mitTargetCf = mitReqCf != null && othersCredited != null ? Math.max(0, mitReqCf - othersCredited) : 0;
+                      const detTargetCf = detReqCf != null && othersUsable != null ? Math.max(0, detReqCf - othersUsable) : 0;
+                      if (!(mitTargetCf > 0) && !(detTargetCf > 0) && split.wseFt == null) return null;
+                      const assist = sizePondForTargets({
+                        ring, det: effDet,
+                        wseFt: split.wseFt, wseProvider: split.wseSrc ?? null,
+                        inTrigger: !!split.inTrigger,
+                        gradeFt: fmElev.existGradeFt,
+                        mitTargetCf, detTargetCf,
+                        mitRatio: fmRule && isFinite(fmRule.ratio) ? fmRule.ratio : 1,
+                      });
+                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.45, margin: "3px 0 0" };
+                      const actLine = (txt, key, warn) => (
+                        <div key={key} style={{ fontSize: 10.5, color: warn ? "var(--warn-text)" : PAL.text, lineHeight: 1.5, marginTop: 3 }}>{txt}</div>
+                      );
+                      const head = (
+                        <div key="assist-head" style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 4 }}>
+                          Sizing assistant (screening){assist.estimated ? <span style={{ color: "var(--warn-text)", marginLeft: 6 }}>· est. WSE</span> : null}
+                        </div>
+                      );
+                      const body = [];
+                      if (!assist.ok) {
+                        body.push(actLine(`Assistant unavailable: ${assist.reason}.`, "assist-refuse", true));
+                      } else {
+                        const mitTxt = mitTargetCf > 0 || mitReqCf != null
+                          ? `mitigation ${assist.mitigation.covered ? "covered ✓" : `short ${f2(assist.mitigation.shortCf / 43560)} ac-ft`}`
+                          : null;
+                        const detTxt = detTargetCf > 0 || detReqCf != null
+                          ? `detention ${assist.detention.covered ? "covered ✓" : `short ${f2(assist.detention.shortCf / 43560)} ac-ft`}`
+                          : null;
+                        body.push(actLine([mitTxt, detTxt].filter(Boolean).join(" · ") || "no targets", "assist-status", !(assist.mitigation.covered && assist.detention.covered)));
+                        for (const a of assist.actions) {
+                          if (a.kind === "inundated") body.push(actLine(`→ ${a.label}.`, "assist-inund", true));
+                          else if (a.kind === "raise-tob") body.push(actLine(`→ raise the top of bank +${f1(a.hFt)}′ (berm) → +${f2(a.addCf / 43560)} ac-ft usable${a.partial ? ` — the +${f1(a.maxRaiseFt)}′ screening clamp still leaves it short` : ""}${a.bermFillBelowWseCf ? `; the berm prism below the WSE is NEW fill (~${f2(a.bermFillBelowWseCf / 43560)} ac-ft) — folded back into the mitigation requirement above` : ""}.`, "assist-tob"));
+                          else if (a.kind === "deepen") body.push(actLine(`→ deepen the floor to ${f1(a.depthFt)}′ design depth → +${f2(a.addCf / 43560)} ac-ft below the WSE (pinch-off ceiling ${f1(a.maxDepthFt)}′).`, "assist-deepen"));
+                          else if (a.kind === "pinch-off") body.push(actLine(`→ ${a.label} — the floor can only add ${f2((a.ceilingCf || 0) / 43560)} ac-ft more.`, "assist-pinch", true));
+                          else if (a.kind === "grow") body.push(actLine(`→ or grow the footprint ~+${f2(a.addAcres)} ac (at the current depth) to reach the mitigation target.`, "assist-grow"));
+                          else if (a.kind === "grow-infeasible") body.push(actLine("→ even ~3× the footprint can't reach the mitigation target at these slopes — rethink the basin.", "assist-grow-inf", true));
+                        }
+                        if (assist.ok && assist.mitigation.covered && assist.detention.covered && !assist.actions.length) {
+                          body.push(actLine("Both bands cover their remaining site targets — no resize needed.", "assist-ok"));
+                        }
+                        if (mitTargetCf > 0 && eff.role === "detention") {
+                          body.push(actLine("This pond's purpose is Detention — its below-WSE cut is NOT credited to mitigation. Switch the purpose to Mitigation or Hybrid to count it.", "assist-role", true));
+                        }
+                        if (assist.estimated) body.push(<div key="assist-est" style={smallNote}>Solved off the ESTIMATED water surface (grade @ Zone A boundary) — screening only, never off gross.</div>);
+                        if (split.inTrigger && floodJurKey === "waller" && assist.actions.some((a) => a.kind === "raise-tob")) {
+                          body.push(<div key="assist-waller" style={smallNote}>Unincorporated Waller: berms are fill — the 1:1 offset applies; the no-structural-fill rule (Art. 5 §A(9)) targets structures, but confirm berm treatment with the County Engineer.</div>);
+                        }
+                        body.push(<div key="assist-caveat" style={smallNote}>Targets = the site requirement minus what the OTHER ponds already provide (this pond closes the remainder). Proposals only — redraw the pond to take one; volumes come from the same banded split as the rows above.</div>);
+                      }
+                      return (
+                        <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                          {head}
+                          {body}
+                        </div>
+                      );
                     })()}
                     {/* B655 — per-pond required-vs-provided screening card. Editable inputs feed the
                         Modified Rational (rate-based) method in detentionRules.js; the authority
@@ -16104,7 +16317,7 @@ function YieldPanel({
                     const provAcFt = provCf / 43560;
                     const nProv = d.mitProvided.pondCount;
                     mitR.push(infoRow("Provided (credited pond cut)", `${f2(provAcFt)} ac-ft`,
-                      "Below-WSE cut in ponds whose role is Mitigation or Dual — set each pond's role in its inspector. Credit is a screening call: the cut must be hydraulically connected to the floodplain at flood stages and sit in the same watershed; your engineer confirms both.",
+                      "Below-WSE cut in ponds whose purpose is Mitigation or Hybrid — set each pond's purpose in its inspector. Below the flood WSE the flood already occupies the volume at design stage: no detention credit, but it IS candidate compensating storage for fill. Credit is a screening call: the cut must be hydraulically connected to the floodplain at flood stages and sit in the same watershed; your engineer confirms both.",
                       { key: "mit-prov", sub: nProv ? `· ${nProv} pond${nProv > 1 ? "s" : ""}` : "· no credited ponds" }));
                     const bal = provAcFt - mit.volumeAcFt;
                     const overBy = bal - Math.max(1, mit.volumeAcFt * 0.1); // over-dug = beyond required + max(1 ac-ft, 10%)
@@ -16182,9 +16395,12 @@ function YieldPanel({
                 }
                 if (mit.flags.includes("floodway_intersect")) mitR.push(
                   <div key="mit-fw" style={{ fontSize: 11, color: Y.dangerText, lineHeight: 1.45, margin: "4px 0 0", fontWeight: 800 }}>
-                    ⚑ FILL IN THE FLOODWAY IS PROHIBITED — {f2(mit.floodwayAcres)} ac of fill footprint sits in the regulatory floodway. Relocate it; no mitigation ratio prices floodway fill.
+                    ⚑ FILL IN THE FLOODWAY{d.mitigationRule?.floodwayBufferFt > 0 ? ` (+ its ${f0(d.mitigationRule.floodwayBufferFt)}-ft BUFFER)` : ""} IS PROHIBITED — {f2(mit.floodwayAcres)} ac of fill footprint sits in the regulatory floodway{d.mitigationRule?.floodwayBufferFt > 0 ? ` or within ${f0(d.mitigationRule.floodwayBufferFt)} ft of it (${d.mitigationRule.label} extends the prohibition to a buffer zone)` : ""}. Relocate it; no mitigation ratio prices floodway fill.
                   </div>
                 );
+                // NEW-2 — an accepted boundary-grade estimate priced the 1% surface: stamp
+                // the ledger loudly (the provider line below also names it).
+                if (mit.providers.wse1pct === "est-boundary-grade") mitR.push(warnNote("1% WSE is ESTIMATED (grade @ Zone A boundary) — screening only.", "mit-est-wse", EST_BOUNDARY_WSE_NOTE));
                 if (mit.flags.includes("rule_unverified")) mitR.push(warnNote("Mitigation rule unverified — edit & confirm in the inputs below.", "mit-unv"));
                 // B824 — sanity/datum flags + the rule and providers lines, migrated from the card.
                 if (mit.flags.includes("wse02-below-1pct")) mitR.push(warnNote("The 0.2% WSE reads BELOW the 1% here — mismatched studies; don't rely on it.", "mit-02below", "A 0.2% (500-yr) surface can never sit below the 1% (100-yr) surface on one reach — the two values come from mismatched studies or vintages. Enter a 0.2% WSE from the effective FIS profile."));
@@ -16207,8 +16423,8 @@ function YieldPanel({
                 // NEW-8 — what remains a footnote is only the UNCREDITED remainder (below-WSE
                 // cut sitting in detention-role ponds); the credited share now lives in the
                 // Provided row above instead of being footnoted away.
-                if (d.mitProvided && d.mitProvided.uncreditedCf > 0.05 * 43560) mitR.push(warnNote(`Below-WSE cut in detention-role ponds: ${f2(d.mitProvided.uncreditedCf / 43560)} ac-ft — uncredited.`, "mit-cand",
-                  "This volume sits below the flood WSE in ponds whose role is Detention, so it is credited to neither ledger (it earns no detention credit either). Set a pond's role to Mitigation or Dual in its inspector to credit its below-WSE cut here."));
+                if (d.mitProvided && d.mitProvided.uncreditedCf > 0.05 * 43560) mitR.push(warnNote(`Below-WSE cut in detention-purpose ponds: ${f2(d.mitProvided.uncreditedCf / 43560)} ac-ft — uncredited.`, "mit-cand",
+                  "This volume sits below the flood WSE in ponds whose purpose is Detention, so it is credited to neither ledger (it earns no detention credit either). Set a pond's purpose to Mitigation or Hybrid in its inspector to credit its below-WSE cut here."));
                 // B833 — transition wedges + in-floodplain pond berms are REAL fill: when the
                 // proposed surface priced them, the required volume above already includes
                 // them and the delta is named; without the surface the footprint-only figure
@@ -16342,19 +16558,30 @@ function YieldPanel({
               // input) until tapped: the common case is "leave it on the auto value", so the input
               // field is noise. Tap "edit" to override; the "auto" chip collapses back. Falls back
               // to the plain input when there's no auto value to show.
-              const autoField = (label, key, autoVal, sourceLabel, title) => {
+              const autoField = (label, key, autoVal, sourceLabel, title, opts = {}) => {
                 const manual = Number.isFinite(fm.settings[key]) ? fm.settings[key] : null;
                 const hasAuto = autoVal != null && isFinite(autoVal);
                 const editing = drainEditField === key;
+                // NEW-2/NEW-3 — srcKey: a provenance tag stored beside the value
+                // ("est-boundary-grade" / "suggested-accepted"). Typing or clearing the
+                // value ALWAYS clears the tag — a stale tag would mislabel a manual entry.
+                const srcPatch = opts.srcKey ? { [opts.srcKey]: null } : {};
                 if (manual == null && hasAuto && !editing) {
                   return (
                     <div key={"fm-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
                       <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
-                      <button type="button" onClick={() => setDrainEditField(key)} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "baseline", gap: 5 }}>
-                        <span style={{ fontSize: 11.5, fontFamily: YMONO, color: Y.rowLabel }}>~{f1(autoVal)}′</span>
-                        <span style={{ fontSize: 10, color: Y.muted }}>· {sourceLabel}</span>
-                        <span style={{ fontSize: 10, color: Y.muted, textDecoration: "underline" }}>edit</span>
-                      </button>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        {/* NEW-3 — the one-click accept: writes the suggestion into the field
+                            with provenance; distinct from "edit" (type your own value). */}
+                        {opts.accept && (
+                          <button type="button" title={opts.accept.title || ""} onClick={() => { fm.onChange(opts.accept.patch); setDrainEditField(null); }} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.rowLabel }}>{opts.accept.label || "✓ use"}</button>
+                        )}
+                        <button type="button" onClick={() => setDrainEditField(key)} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+                          <span style={{ fontSize: 11.5, fontFamily: YMONO, color: Y.rowLabel }}>~{f1(autoVal)}′</span>
+                          <span style={{ fontSize: 10, color: Y.muted }}>· {sourceLabel}</span>
+                          <span style={{ fontSize: 10, color: Y.muted, textDecoration: "underline" }}>edit</span>
+                        </button>
+                      </span>
                     </div>
                   );
                 }
@@ -16363,12 +16590,12 @@ function YieldPanel({
                     <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                       {manual != null && (
-                        <button type="button" title="Clear — back to blank (auto / unknown)" onClick={() => { fm.onChange({ [key]: null }); setDrainEditField(null); }} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>×</button>
+                        <button type="button" title="Clear — back to blank (auto / unknown)" onClick={() => { fm.onChange({ [key]: null, ...srcPatch }); setDrainEditField(null); }} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>×</button>
                       )}
                       {manual == null && hasAuto && (
                         <button type="button" title={`Use the auto value (~${f1(autoVal)}′ · ${sourceLabel})`} onClick={() => setDrainEditField(null)} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>auto</button>
                       )}
-                      <NumInput style={fmInputStyle} value={manual != null ? manual : ""} placeholder={hasAuto ? `~${f1(autoVal)}` : "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null })} />
+                      <NumInput style={fmInputStyle} value={manual != null ? manual : ""} placeholder={hasAuto ? `~${f1(autoVal)}` : "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null, ...srcPatch })} />
                     </span>
                   </div>
                 );
@@ -16407,10 +16634,50 @@ function YieldPanel({
                   {/* NEW-1(b) + NEW-3 — pad / grade / BFE / 0.2% render as grey "~value · source"
                       text until tapped (auto pad = code-min FFE, grade = 3DEP, BFE = derived lines,
                       0.2% = FBCDD DRAFT raster). No auto value → the plain blank input. */}
-                  {autoField("Pad / finished floor (FFE)", "padFfeFt",
-                    fm.autoFfe && Number.isFinite(fm.autoFfe.requiredFfeFt) ? fm.autoFfe.requiredFfeFt : null,
-                    "code min",
-                    "Blank = the code-minimum required FFE is ASSUMED (the rule dictates the floor on a floodplain fill). The plan-level pad elevation; a selected element's own padElevFt overrides it. Tap edit to check a real design.")}
+                  {(() => {
+                    // NEW-3 — the suggested pad FFE: the ghost names its GOVERNING basis
+                    // ("code min = HAG 153.1′ + 4′ — Waller §D(5)"), losing bases ride the
+                    // tooltip, and ✓ use writes it with provenance. Buildings fully outside
+                    // the trigger bands suppress the suggestion — the county FFE rule
+                    // doesn't bind there, and we say so instead of fabricating a number.
+                    const sf = fm.suggestFfe;
+                    const noRule = !!(sf && sf.applies === false);
+                    const gb = sf && sf.applies ? sf.governingBasis : null;
+                    const suggVal = !noRule && fm.autoFfe && Number.isFinite(fm.autoFfe.requiredFfeFt) ? fm.autoFfe.requiredFfeFt : null;
+                    const gbWse = gb && suggVal != null ? suggVal - gb.plusFt : null;
+                    const basisTxt = gb ? `${gbWse != null ? `${f1(gbWse)}′ ` : ""}(${gb.label || gb.basis}) + ${gb.plusFt}′` : null;
+                    const estTag = sf && sf.applies && sf.estimated ? " · ESTIMATED" : "";
+                    const losing = sf && sf.applies && sf.losingBases && sf.losingBases.length
+                      ? ` Non-governing bases: ${sf.losingBases.map((b) => `${b.label || b.basis} + ${b.plusFt}′ → ${f1(b.requiredFfeFt)}′`).join("; ")}.`
+                      : "";
+                    const rows = [autoField("Pad / finished floor (FFE)", "padFfeFt",
+                      suggVal,
+                      basisTxt ? `code min = ${basisTxt}${estTag}` : "code min",
+                      (noRule
+                        ? OUTSIDE_FLOODPLAIN_FFE_NOTE + " "
+                        : "Blank = the code-minimum required FFE is ASSUMED (the rule dictates the floor on a floodplain fill). The plan-level pad elevation; a selected element's own padElevFt overrides it. ✓ use writes the suggestion (re-prices the fill ledger + FFE check); tap edit to enter a real design pad.") + losing,
+                      {
+                        srcKey: "padSrc",
+                        accept: suggVal != null && !Number.isFinite(fm.settings.padFfeFt)
+                          ? { label: "✓ use", title: `Write the suggested ${f1(suggVal)}′ into the Pad/FFE field${basisTxt ? ` — ${basisTxt}` : ""}${estTag ? " (from an ESTIMATED water surface — screening only)" : ""}`, patch: { padFfeFt: Math.round(suggVal * 10) / 10, padSrc: "suggested-accepted" } }
+                          : null,
+                      })];
+                    if (noRule) {
+                      rows.push(
+                        <div key="fm-ffe-norule" style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.45, padding: "1px 0 3px" }} title={OUTSIDE_FLOODPLAIN_FFE_NOTE}>
+                          No suggested FFE: buildings sit outside the mapped floodplain — the county FFE rule doesn't bind them (drainage-criteria / pond-WSE checks may still govern; verify locally).
+                        </div>
+                      );
+                    }
+                    if (fm.padSrc === "suggested-accepted" && Number.isFinite(fm.settings.padFfeFt)) {
+                      rows.push(
+                        <div key="fm-ffe-prov" style={{ fontSize: 10, color: Y.muted, padding: "0 0 3px" }}>
+                          pad = accepted suggestion{basisTxt ? ` (${basisTxt}${estTag})` : ""} — × restores auto
+                        </div>
+                      );
+                    }
+                    return rows;
+                  })()}
                   {autoField("Existing grade", "existGradeFt", fm.autoGradeFt, "3DEP",
                     "Auto = the 3DEP bare-earth median sampled by this drainage check. Tap edit to enter a surveyed grade.")}
                   {/* B807 — on unstudied Zone A (no FEMA lines to derive from) the greyed
@@ -16421,7 +16688,26 @@ function YieldPanel({
                     fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? fm.derivedBfe.bfeFt
                       : fm.derivedWse100 && Number.isFinite(fm.derivedWse100.wseFt) ? fm.derivedWse100.wseFt : null,
                     fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? "derived (FEMA lines)" : "DRAFT (FBCDD 100-yr)",
-                    "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (a screening estimate); on unstudied Zone A in Fort Bend it falls back to the county's DRAFT Atlas-14 100-yr raster. Tap edit to override with the FIRM panel / effective model.")}
+                    "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (a screening estimate); on unstudied Zone A in Fort Bend it falls back to the county's DRAFT Atlas-14 100-yr raster. Tap edit to override with the FIRM panel / effective model.",
+                    { srcKey: "bfeSrc" })}
+                  {/* NEW-2 — unstudied Zone A with NO other 1% surface: offer the boundary-grade
+                      estimate as an ACCEPT-GATED chip (never auto-committed). The mapped flood
+                      extent is where the flood surface daylights into grade — FEMA's
+                      approximate-Zone-A contour method, sampled off the 3DEP grid. */}
+                  {fm.estWse && !Number.isFinite(fm.settings.bfeFt) && (
+                    <div key="fm-est-wse" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}
+                      title={`${EST_BOUNDARY_WSE_NOTE} Sampled ${fm.estWse.detail.samples} points along the mapped Zone A boundary near the site: ${f1(fm.estWse.detail.minFt)}–${f1(fm.estWse.detail.maxFt)}′.${fm.estWse.detail.spreadFt > 2 ? " Sloped reach — the estimate is coarse." : ""}`}>
+                      <span style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4 }}>
+                        Est. 1% WSE ≈ {f1(fm.estWse.wseFt)}′ — from grade along the mapped Zone A boundary (sampled {f1(fm.estWse.detail.minFt)}–{f1(fm.estWse.detail.maxFt)}′{fm.estWse.detail.spreadFt > 2 ? " · sloped reach — coarse" : ""})
+                      </span>
+                      <button type="button"
+                        title={`Write the estimate (${f1(fm.estWse.wseFt)}′) into the BFE field with provider “estimated (grade @ Zone A boundary)” — every consumer (mitigation, heat map, pond split, FFE) stamps it ESTIMATED. Screening only; × on the field restores unknown.`}
+                        onClick={() => fm.onChange({ bfeFt: fm.estWse.wseFt, bfeSrc: "est-boundary-grade" })}
+                        style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.rowLabel, whiteSpace: "nowrap" }}>✓ use</button>
+                    </div>
+                  )}
+                  {fm.bfeSrc === "est-boundary-grade" && Number.isFinite(fm.settings.bfeFt) &&
+                    warnNote("BFE is ESTIMATED (grade @ Zone A boundary) — screening only", "fm-est-bfe", EST_BOUNDARY_WSE_NOTE)}
                   {/* B794 — the ⓘ names WHERE the number comes from, county-specific: Fort Bend's
                       mitigation basis is the effective FIRM 48157C FIS (2014-04-02, pre-Atlas-14). */}
                   {autoField("0.2% (500-yr) WSE", "wse02Ft",
@@ -16483,7 +16769,14 @@ function YieldPanel({
                   ffeR.push(warnNote("The 0.2% WSE behind this required FFE is a DRAFT Fort Bend watershed-study value.", "ffe-draft02", "Screening only — confirm before design; enter the effective FIS 0.2% WSE to override."));
                 if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "atlas14_100yr" && d.wse100Src === "fbcdd-wse100-draft")
                   ffeR.push(warnNote("The Atlas-14 100-yr WSE behind this required FFE is a DRAFT Fort Bend watershed-study value.", "ffe-draft100", "Screening only — confirm before design; enter a BFE to override."));
-                if (b.pathway) ffeR.push((b.pathway.fillToElevate === "restricted" ? warnNote : keyedNote)(`${b.pathway.fillToElevate === "restricted" ? "⚠ " : ""}${b.pathway.note}`, "ffe-pathway"));
+                // NEW-2 — the ESTIMATED stamp rides the FFE verdict when the governing basis
+                // is the accepted boundary-grade Zone A estimate (never dropped off a consumer).
+                if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse1pct" && d.floodMit?.bfeSrc === "est-boundary-grade")
+                  ffeR.push(warnNote("The 1% WSE behind this required FFE is ESTIMATED (grade @ Zone A boundary).", "ffe-est-wse", EST_BOUNDARY_WSE_NOTE));
+                // NEW-1 (Waller) — "prohibited" is a stronger enum than "restricted": no
+                // structural fill in EITHER band, open foundations only (no fill-to-elevate
+                // / LOMR-F pathway at all). Reads as the loudest warn line.
+                if (b.pathway) ffeR.push((b.pathway.fillToElevate === "restricted" || b.pathway.fillToElevate === "prohibited" ? warnNote : keyedNote)(`${b.pathway.fillToElevate === "prohibited" ? "⛔ " : b.pathway.fillToElevate === "restricted" ? "⚠ " : ""}${b.pathway.note}`, "ffe-pathway"));
                 if (b.lomr) ffeR.push(warnNote(`⚑ ${b.lomr.note}`, "ffe-lomr"));
                 if (b.wetlands404) ffeR.push(warnNote(`⚑ ${b.wetlands404.note}`, "ffe-404"));
                 if (b.flags.includes("rule_unverified")) ffeR.push(keyedNote("Buildability rule unverified — edit & confirm in settings.", "ffe-unv"));

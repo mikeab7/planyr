@@ -44,7 +44,10 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `detentionStorage` (the pond stage/volume calc shared by panel, yield metrics, solver) plus the
   B708 anchored tier (`bandedStorage` / `usablePondVolume` — the ONE per-pond usable/dead split).
 - Floodplain suite (B707–B712): `floodplainRules.js` / `floodplainMitigation.js` (compensating-storage
-  engine, pure), `pondCriteriaRules.js` (berm/slope/freeboard criteria), `buildability.js` (FFE/LOMR-F),
+  engine, pure; incl. the NEW-1 Waller floodway-buffer screen + the NEW-2 Zone-A boundary-grade WSE
+  estimator + the NEW-3 HAG proxy), `pondCriteriaRules.js` (berm/slope/freeboard criteria),
+  `buildability.js` (FFE/LOMR-F; `when`-conditioned multi-basis rows + `suggestedFfe`),
+  `pondSizing.js` (NEW-4 two-target pond sizing assistant over the B708 bands),
   surfaced via the Yield → Stormwater collapsed verdict groups (B824 — ONE drainage home; the old Site Analysis sibling card was merged in and deleted; Analysis keeps a link row).
 - Grading/earthwork tier (B808/B809/B825/B826): `gradingRules.js` (per-surface-class slope registry
   with provenance) + `proposedSurface.js` (pure auto-grade engine: per-element planes, composite
