@@ -2162,6 +2162,35 @@ const rollupParentDates = tasks => {
 // array order (so a caller can still renumber afterwards).
 const recomputeAfterStructureChange = tasks => rollupParentDates(cascadeDates(tasks));
 
+// B836 — cascade-drift detector. A non-pinned task's SAVED start should always equal the start its
+// predecessor chain implies. When it doesn't (a stale value from an older build, a hand-edited store,
+// or a lag zeroed without a re-cascade — B835), the load re-cascade silently corrects it. This returns
+// the corrected leaf tasks so the load path can surface the change LOUDLY (a banner) instead of swapping
+// the number in silence. Pins are exempt (a pinned start is intentional); parents are excluded (their
+// dates are always rollup-derived, not cascade drift). Pure — mirrored in ui-audit/stress/scheduler-engine.mjs.
+const detectCascadeDrift = (storedTasks, engineTasks) => {
+  const eng = {}; (engineTasks || []).forEach(t => { eng[t.id] = t; });
+  const parentIds = new Set((storedTasks || []).map(t => t.parentId).filter(p => p !== null && p !== undefined));
+  const out = [];
+  (storedTasks || []).forEach(t => {
+    if (t.pinnedStart || (t.pinnedEnd && t.end)) return;   // intentional pins are exempt
+    if (parentIds.has(t.id)) return;                       // parents are rollup-derived, not cascade drift
+    const e = eng[t.id];
+    if (!e) return;
+    const was = t.start || "", now = e.start || "";
+    if (was !== now) out.push({ id: t.id, name: t.name || t.title || ("Task " + t.id), from: was, to: now });
+  });
+  return out;
+};
+// B836 — load-path glue: run the normal recompute (cascade → rollup) on a project's already-stripped
+// tasks AND record any drift it corrected into `sink`. Keeps the three load sites DRY and identical.
+const recascadeWithDrift = (tasks, projName, sink) => {
+  const out = rollupParentDates(cascadeDates(tasks));   // cascadeDates/rollup return NEW objects — `tasks` keeps its stored starts for the diff
+  const dr = detectCascadeDrift(tasks, out);
+  if (dr.length) sink.push({ project: projName, tasks: dr });
+  return out;
+};
+
 let NOW = fdLocal(new Date()); // local "today"; refreshed live by App (focus / midnight rollover)
 
 // Compute display health from conditional formatting rules
@@ -4629,6 +4658,7 @@ function App() {
   }, []);
   const [goToFocus,      setGoToFocus]      = useState(null); // {taskId, n} — grid scrolls to + pulses this row after a cross-view jump
   const [offlineFallback, setOfflineFallback] = useState(false);
+  const [driftNotice, setDriftNotice] = useState(null);   // B836 — non-pinned tasks whose saved start the load re-cascade corrected; surfaced loudly (banner)
   const [staleNotice, setStaleNotice] = useState(false);
   const didInitialLoad = useRef(false);
   const [formatOpen, setFormatOpen] = useState(false);
@@ -4869,12 +4899,12 @@ function App() {
         let d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed))))));
         d._pinnedClean = true;
         HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
+        const driftFound = [];   // B836 — same drift surfacing on import / version-restore
         Object.keys(d.projects).forEach(pid => {
           let tasks = d.projects[pid].tasks.map(({_pinStart, __wasDirectEdit, ...t}) => t);
-          tasks = cascadeDates(tasks);
-          tasks = rollupParentDates(tasks);
-          d.projects[pid] = {...d.projects[pid], tasks};
+          d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, d.projects[pid].name || pid, driftFound)};
         });
+        if (driftFound.length) { setDriftNotice(driftFound); console.warn("[planar cascade-drift] imported/restored data had saved starts out of sync with predecessors (auto-recalculated, B835/B836):", driftFound); }
         setData(d);
       };
       try {
@@ -4892,16 +4922,16 @@ function App() {
           const needsPinClean = !d._pinnedClean;
           d._pinnedClean = true;
           HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
+          const driftFound = [];   // B836 — collect non-pinned tasks whose saved start the recompute corrected
           Object.keys(d.projects).forEach(pid => {
             let tasks = d.projects[pid].tasks.map(t => {
               const {_pinStart, __wasDirectEdit, pinnedStart, ...rest} = t;
               if (!needsPinClean && pinnedStart) rest.pinnedStart = true; // preserve intentional pins
               return rest;
             });
-            tasks = cascadeDates(tasks);
-            tasks = rollupParentDates(tasks);
-            d.projects[pid] = {...d.projects[pid], tasks};
+            d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, d.projects[pid].name || pid, driftFound)};
           });
+          if (driftFound.length) { setDriftNotice(driftFound); console.warn("[planar cascade-drift] saved starts that didn't match their predecessor chain were auto-recalculated on load (B835/B836):", driftFound); }
           setData(d); return;
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
@@ -6663,6 +6693,32 @@ function App() {
           </button>
         </div>
       )}
+      {driftNotice && driftNotice.length > 0 && (() => {
+        // B836 — LOUD surface for cascade drift the load quietly corrected. A non-pinned task whose
+        // SAVED start didn't match its predecessor chain (B835) used to be re-derived in silence,
+        // hiding the fact that the stored value was ever wrong. Now the correction is announced so
+        // the user can confirm it matches their intent (or pin/lag a gap that was deliberate).
+        const flat = driftNotice.flatMap(p => (p.tasks || []).map(t => ({...t, project: p.project})));
+        const n = flat.length;
+        const sample = flat.slice(0, 3)
+          .map(t => `${t.project ? t.project + " — " : ""}"${t.name}" ${fmtD(t.from) || "(no date)"}→${fmtD(t.to)}`)
+          .join("; ");
+        return (
+          <div style={{background:"#fffbeb",borderBottom:"1px solid #fde68a",color:"#92400e",padding:"7px 14px",
+            display:"flex",alignItems:"flex-start",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
+            <span style={{fontSize:14,flexShrink:0}}>&#9888;</span>
+            <span style={{flex:1}}>
+              <strong>{n} saved task {n===1?"date was":"dates were"} out of sync with {n===1?"its":"their"} predecessor{n===1?"":"s"} and {n===1?"has":"have"} been recalculated.</strong>{" "}
+              {sample}{n>3?`; +${n-3} more`:""}. Check they match your intended schedule — if a gap was deliberate, pin the date or add a lag.
+            </span>
+            <button onClick={()=>setDriftNotice(null)}
+              style={{flexShrink:0,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,
+                background:"#fff",border:"1px solid #fcd34d",color:"#92400e",borderRadius:5,padding:"4px 12px"}}>
+              Dismiss
+            </button>
+          </div>
+        );
+      })()}
       {(() => {
         // B616 — LOUD, unmissable surface for locked-finish conflicts in the active project. A
         // conflicted task keeps its locked finish; this banner makes the user resolve it rather

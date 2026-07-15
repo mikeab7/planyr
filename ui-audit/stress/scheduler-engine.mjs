@@ -294,6 +294,9 @@ export const computeRolledHealth = (all) => {
 // focus / midnight rollover. Settable here so tests can pin a deterministic today.
 export let NOW = fdLocal(new Date());
 export const setNOW = v => { NOW = v; };
+// Test/audit hook: let a caller install a project-specific holiday set (the app rebuilds
+// HOLIDAY_SET from settings.holidays on load; mirror that here so business-day math matches).
+export const setHOLIDAY_SET = s => { HOLIDAY_SET = s; };
 
 // Conditional-format display health (faithful copy from index.html ~L1976). Applies the cfRules
 // (completeGreen / overdueRed / dueSoonYellow) on top of the raw stored health — this is the value
@@ -465,6 +468,27 @@ export const rollupParentDates = tasks => {
     });
   }
   return tasks.map(t => map[t.id]);
+};
+
+// B836 — cascade-drift detector. A non-pinned task's SAVED start should always equal the start its
+// predecessor chain implies. When it doesn't (a stale value from an older build, a hand-edited store,
+// or a lag zeroed without a re-cascade — B835), the load re-cascade silently corrects it. This returns
+// the corrected leaf tasks so the load path can surface the change LOUDLY (a banner) instead of swapping
+// the number in silence. Pins are exempt (a pinned start is intentional); parents are excluded (their
+// dates are always rollup-derived, not cascade drift). Pure — mirrored in public/sequence/index.html.
+export const detectCascadeDrift = (storedTasks, engineTasks) => {
+  const eng = {}; (engineTasks || []).forEach(t => { eng[t.id] = t; });
+  const parentIds = new Set((storedTasks || []).map(t => t.parentId).filter(p => p !== null && p !== undefined));
+  const out = [];
+  (storedTasks || []).forEach(t => {
+    if (t.pinnedStart || (t.pinnedEnd && t.end)) return;   // intentional pins are exempt
+    if (parentIds.has(t.id)) return;                       // parents are rollup-derived, not cascade drift
+    const e = eng[t.id];
+    if (!e) return;
+    const was = t.start || "", now = e.start || "";
+    if (was !== now) out.push({ id: t.id, name: t.name || t.title || ("Task " + t.id), from: was, to: now });
+  });
+  return out;
 };
 
 // Export filename — matches the Site Planner's PDF/PNG naming ("YYYY.MM.DD {Project} - {Plan}");

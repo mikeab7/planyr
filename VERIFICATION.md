@@ -1900,6 +1900,14 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
   2. **Expect:** the moved geometry is still on the canvas after the reload (not reverted to the pre-move position), and within a few seconds it lands in `site_elements` (badge returns to saved; a second reload still shows the move).
   3. Cross-writer sanity: with two windows on the same site, repeat — if the OTHER window moved the same element meanwhile, its newer edit wins and a `journal-superseded` event is logged (no resurrection, no clobber).
 
+### V326 — B835/B836: the Scheduler shows a LOUD banner when a load recalculates a non-pinned task's out-of-sync start ⏳ **LIVE APP (planyr.io), SIGNED IN** (real-project-data + can't-boot-headless class)
+- **Added** 2026-07-15 · **Cadence** once (bug-fix acceptance)
+- **Self-verified (sandbox):** `detectCascadeDrift` unit tests — the exact B835 fossil (task 81 saved 8/3 → engine 7/13 flagged with from/to), the downstream pinned task NOT flagged, clean data → no drift, pinned/parent exemptions, empty-input safety (7 tests, `test/schedulerEngine.test.js`) + anti-drift source guards (the detector + `recascadeWithDrift` + `setDriftNotice` + the banner exist in both `public/sequence/index.html` and the engine mirror). Full suite (+13) + lint + build green. Also empirically confirmed against the LIVE `planar_data` row: task 81 now stores 2026-07-13 and a business-day-aware scan of all 6 projects / 670 tasks shows **zero** current drift — so the banner won't fire on today's data (it's the recurrence guard). The board embeds CDN React/Babel that this session's egress blocks, so it can't boot headless here.
+- **⏳ Owed (LIVE, signed in):** the banner only renders in the running board.
+  1. To *see* it fire, temporarily edit one non-pinned task's saved start to a wrong value in the store (or load an older export that still has a fossil), then reload the Scheduler.
+  2. **Expect:** an amber banner atop the board — "N saved task dates were out of sync with their predecessors and have been recalculated" — naming the task(s) with from→to dates, dismissible via **Dismiss**; the grid shows the corrected (engine) dates; a `[planar cascade-drift]` line is in the console.
+  3. Normal load (no drift, e.g. today's data) shows **no** banner — confirm it doesn't false-fire on pinned tasks or parent roll-ups.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
