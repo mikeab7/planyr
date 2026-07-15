@@ -219,20 +219,21 @@ const DUR_UNIT_ALIASES = [
   { re: /^(mo|mos|month|months)$/,               unit: "mo" },
   { re: /^(y|yr|yrs|year|years)$/,               unit: "y"  },
   { re: /^(w|wk|wks|week|weeks)$/,               unit: "w"  },
+  { re: /^(cd|cds|calday|caldays|caldy)$/,       unit: "cd" },   // calendar days (weekends counted)
   { re: /^(d|day|days|wd|workday|workdays)$/,    unit: "d"  },
 ];
 export const parseDurationInput = raw => {
   const str = String(raw == null ? "" : raw).trim().toLowerCase();
   if (str === "") return { value: 0, unit: "d" };
   const m = str.match(/^(-?\d+(?:\.\d+)?)\s*([a-z]*)$/);
-  if (!m) return { error: `Couldn't read "${String(raw).trim()}" — try 10d, 3w, 2mo, or 1y` };
+  if (!m) return { error: `Couldn't read "${String(raw).trim()}" — try 10d, 3w, 30cd, 2mo, or 1y` };
   let value = Math.trunc(Number(m[1]));
-  if (!Number.isFinite(value) || value < 0) return { error: `Duration can't be negative — try 10d, 3w, 2mo, or 1y` };
+  if (!Number.isFinite(value) || value < 0) return { error: `Duration can't be negative — try 10d, 3w, 30cd, 2mo, or 1y` };
   value = Math.min(value, 100000);
   const suffix = m[2];
   if (suffix === "") return { value, unit: "d" };
   const hit = DUR_UNIT_ALIASES.find(u => u.re.test(suffix));
-  if (!hit) return { error: `Unknown unit "${suffix}" — try d (days), w (weeks), mo (months), y (years)` };
+  if (!hit) return { error: `Unknown unit "${suffix}" — try d (days), w (weeks), cd (calendar days), mo (months), y (years)` };
   return { value, unit: hit.unit };
 };
 export const addCalendarMonths = (iso, n) => {
@@ -279,6 +280,7 @@ export const resolveDuration = (start, value, unit) => {
     return { end: start ? calcEnd(start, count) : "", duration: count };
   }
   if (!start || v === 0) return { end: start && v === 0 ? start : "", duration: 0 };
+  if (u === "cd") { const end = addD(start, v - 1); return { end, duration: workdaysBetween(start, end) }; }  // exact calendar window (weekends counted, no roll); working-day count derived
   const months = u === "y" ? v * 12 : v;
   const end = rollForwardToWorkday(addCalendarMonths(start, months));
   return { end, duration: workdaysBetween(start, end) };
