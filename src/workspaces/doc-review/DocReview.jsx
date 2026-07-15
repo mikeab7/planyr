@@ -18,6 +18,7 @@ import { statedCalibration } from "./lib/sheetRead.js";
 import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
+import CompareView from "./CompareView.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, driveStreamSource, MAX_BYTES, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
@@ -173,6 +174,7 @@ export default function DocReview({
   const detailRef = useRef(null);       // viewport-clipped sharp canvas over the backdrop (B415)
   const pdfRef = useRef(null);
   const fileRef = useRef(null);
+  const compareInputRef = useRef(null); // B471: ad-hoc "compare two revisions" file picker
   const renderTok = useRef(0);
   const renderTaskRef = useRef(null);   // current DETAIL pdf.js RenderTask, cancellable (B40)
   const backdropTok = useRef(0);
@@ -220,6 +222,14 @@ export default function DocReview({
   }
 
   const [mode, setMode] = useState("review"); // review (single sheet) | stitch (multi-sheet)
+  const [compareFiles, setCompareFiles] = useState(null); // B471: { a:{name,source}, b:{name,source} } ad-hoc revision compare, or null
+  // Open the ad-hoc revision compare from a two-PDF pick (older first, newer second).
+  const onPickCompare = useCallback((e) => {
+    const fs = [...(e.target.files || [])].filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf").slice(0, 2);
+    e.target.value = "";
+    if (fs.length === 2) { setErr(""); setCompareFiles({ a: { name: fs[0].name, source: fs[0] }, b: { name: fs[1].name, source: fs[1] } }); }
+    else setErr("Pick exactly two PDFs to compare (older revision first, newer second).");
+  }, []);
   const [fileName, setFileName] = useState("");
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
@@ -1872,6 +1882,7 @@ export default function DocReview({
           <>
             <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
             <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
+            <button style={chromeBtn()} title="Compare two revisions of a drawing — see exactly what changed" onClick={() => compareInputRef.current?.click()}>⇄ Compare…</button>
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
             {/* Reviews (file/save this review) lives in the Row-2 tools row (B360). Its own
                 save chip was retired — the app-wide Row-1 CloudSyncBadge (NEW-1) is the single
@@ -1942,6 +1953,10 @@ export default function DocReview({
               <button onClick={() => fileRef.current?.click()}
                 style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 8, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
                 Open PDF…
+              </button>
+              <button data-testid="empty-compare" onClick={() => compareInputRef.current?.click()}
+                style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 8, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
+                ⇄ Compare revisions…
               </button>
             </div>
             {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: 12.5 }}>{err}</div>}
@@ -2310,6 +2325,11 @@ export default function DocReview({
           document.body,
         );
       })()}
+      {/* Always-mounted so both the toolbar and empty-state "Compare" buttons can trigger it (B471). */}
+      <input ref={compareInputRef} data-testid="compare-input" type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }} onChange={onPickCompare} />
+      {compareFiles ? (
+        <CompareView a={compareFiles.a} b={compareFiles.b} onClose={() => setCompareFiles(null)} />
+      ) : null}
     </div>
   );
 }
