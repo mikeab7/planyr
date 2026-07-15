@@ -14,7 +14,7 @@
  * workspace ErrorBoundary.
  */
 import { describe, it, expect } from "vitest";
-import { sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId } from "../src/workspaces/scheduler/lib/navState.js";
+import { sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn } from "../src/workspaces/scheduler/lib/navState.js";
 
 const WELL_FORMED = [{ id: 1, name: "Goose Creek" }, { id: 3, name: "Grand Port Logistics" }];
 const navMsg = (over = {}) => ({ source: "planar-seq", type: "planar:nav-state", section: "projects", activeId: 3, projects: WELL_FORMED, ...over });
@@ -124,5 +124,35 @@ describe("cross-module link (schema v9) — carry linkedSiteId and find a schedu
     expect(findBySiteId(projects, "grp-9")).toBeNull();
     expect(findBySiteId(projects, null)).toBeNull();
     expect(findBySiteId(undefined, "grp-9")).toBeNull();
+  });
+});
+
+describe("needsScheduleCarryIn — re-drive the grid onto the routed site's schedule (boot-race self-heal)", () => {
+  const LINKED = sanitizeProjects([
+    { id: 1, name: "Goose Creek", linkedSiteId: "gc", linkedSiteName: "Goose Creek" },
+    { id: 2, name: "Grand Port", linkedSiteId: "gp", linkedSiteName: "Grand Port" },
+    { id: 5, name: "Pursuits" }, // unlinked, cross-cutting schedule
+  ]);
+
+  it("false once the iframe's active schedule already IS the routed site's linked one (adopted → stop driving)", () => {
+    expect(needsScheduleCarryIn(LINKED, "gc", 1)).toBe(false);
+  });
+
+  it("true when the grid is on a DIFFERENT schedule than the routed link (the reported divergence: route=Goose Creek, grid=Grand Port)", () => {
+    expect(needsScheduleCarryIn(LINKED, "gc", 2)).toBe(true);
+  });
+
+  it("true while the embed's projects haven't loaded yet — keeps driving until the iframe can switch (the dropped-select race)", () => {
+    expect(needsScheduleCarryIn([], "gc", null)).toBe(true);
+    expect(needsScheduleCarryIn(undefined, "gc", 2)).toBe(true);
+  });
+
+  it("false when there is no routed site — nothing to carry", () => {
+    expect(needsScheduleCarryIn(LINKED, null, 2)).toBe(false);
+    expect(needsScheduleCarryIn(LINKED, undefined, 2)).toBe(false);
+  });
+
+  it("true for a routed site with no linked schedule — post is an inert no-op in the iframe; the resolution panel handles create/link", () => {
+    expect(needsScheduleCarryIn(LINKED, "unlinked-site", 1)).toBe(true);
   });
 });
