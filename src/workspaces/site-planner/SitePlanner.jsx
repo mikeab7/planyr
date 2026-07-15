@@ -9,7 +9,7 @@ import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
-import { writeJournal, readJournal, clearJournal } from "./lib/elementJournal.js";
+import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement } from "./lib/editorNames.js";
 import { toastForSyncEvent } from "./lib/conflictToasts.js";
@@ -307,6 +307,9 @@ const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't 
 // whole group is a separate path that re-stamps a fresh shared group id (duplicateGroup).
 const ORPHAN_TAGS = ["attachedTo", "groupId", "truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
 const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
+// NEW-1 — this TAB's pending-edit journal session id (sessionStorage-backed: survives a reload in
+// place, distinct across tabs — two live writers never share a journal key; see elementJournal.js).
+const journalSid = journalSessionId();
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
 const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
 
@@ -2160,6 +2163,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setter = { el: setEls, markup: setMarkups, measure: setMeasures, callout: setCallouts, parcel: setParcels }[kind];
     if (setter) setter((a) => a.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   };
+  // NEW-1 — direct-vs-derived edit attribution for the sync engine. A gesture on a building
+  // re-lays its bonded children (truck-court paving, sidewalks, side parking, dog-ears) in the
+  // same setEls — app-DERIVED writes the user never touched. Only DIRECT edits may feed the
+  // engine's `recent` map (→ authoredRecently → every "…you just edited" toast), so a second
+  // same-account window's byte-divergent copies of those derived elements can't fire the false
+  // "you (another window) changed a ⟨paving area⟩ you just edited" burst. The signal: the
+  // interaction-state effect below (the busyRef one) stamps the CURRENT gesture/selection
+  // targets every render; a bonded (attachedTo) element is direct only while stamped, and
+  // everything unbonded (buildings, top-level roads, markups, measures, callouts, parcels)
+  // stays direct as before. Mis-tagging on the quiet side only softens a heads-up toast —
+  // never data (LWW writes are identical either way).
+  const directTouchRef = useRef(new Map()); // "kind:id" -> last-seen ms (gesture/selection targets)
+  const DIRECT_TOUCH_MS = 10000;
+  const isDirectTouched = (kind, id) => {
+    const at = directTouchRef.current.get(kind + ":" + id);
+    return at != null && Date.now() - at <= DIRECT_TOUCH_MS;
+  };
+  // Stamp the CURRENT interaction/selection targets. Called from the every-render interaction
+  // effect (fresh through a drag — each move re-renders) AND at the top of reconcileElems, because
+  // the autosave effect that reconciles is declared ABOVE the render-effect stamp: a single-shot
+  // edit after >10s idle would otherwise enqueue against aged stamps and mis-tag a directly-edited
+  // bonded child as derived (adversarial-review finding).
+  const stampDirectTargets = () => {
+    try {
+      const t = Date.now();
+      const stamp = (kind, id) => { if (typeof id === "string") directTouchRef.current.set((kind || "el") + ":" + id, t); };
+      const d = drag.current;
+      if (d && typeof d.id === "string") stamp(d.kind, d.id);
+      if (sel && typeof sel.id === "string") stamp(sel.kind, sel.id);
+      if (Array.isArray(multi)) for (const r of multi) if (r) stamp(r.kind, r.id);
+      if (directTouchRef.current.size > 256) { // bound the map — drop aged stamps
+        for (const [k, at] of directTouchRef.current) if (t - at > DIRECT_TOUCH_MS) directTouchRef.current.delete(k);
+      }
+    } catch (_) { /* attribution is advisory — never let it break an interaction */ }
+  };
   // B674 — who else is on this plan right now (Supabase Realtime Presence on the element channel).
   const [peers, setPeers] = useState(null); // presenceSummary() result, or null when alone
   // B673 — the loud-but-non-blocking conflict surface: toast stack + name resolver + the
@@ -2264,14 +2302,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // is discarded LOUDLY (telemetry; the version ring stays the manual recovery). The journal is
     // cleared after folding — if the re-commit fails again, onStatus re-persists fresh entries
     // (self-healing loop, no double-apply).
-    const merged = foldJournal(foldedNew, readJournal(siteId, Date.now()), rows, {
+    // NEW-1 — per-session journal read: THIS tab's own entries (any age) + stale ORPHANS of
+    // dead sessions (incl. the legacy per-site key). A live sibling tab's fresh journal is
+    // never read here — folding it re-committed that tab's in-flight edits as OUR writes
+    // (byte-divergent echoes → the false "you (another window) changed …" toast burst).
+    // ONE timestamp for read AND sweep — two clock reads would let a journal cross the 5-min
+    // orphan boundary in between and be swept without ever being folded.
+    const journalNow = Date.now();
+    const merged = foldJournal(foldedNew, readJournal(siteId, journalSid, journalNow), rows, {
       isHusk: isHuskParcel,
       // The engine's LIVE pending edits (already substituted via `sub` above) always beat the
       // journal — a stale journal snapshot must never fold older geometry over them.
       skipKeys: new Set(dirtyByKey.keys()),
       onDiscard: (e, row) => reportClientEvent("journal-superseded", "pending-edit journal entry discarded — a newer copy won", { id: siteId, kind: e.kind, el: e.id, baseRev: e.baseRev, rowRev: row && row.rev }),
     });
-    clearJournal(siteId);
+    sweepJournals(siteId, journalSid, journalNow); // consume own + adopted-stale keys; a live sibling's (or fresh legacy) journal stays
     const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
     replace(setEls, merged.els); replace(setMarkups, merged.markups); replace(setMeasures, merged.measures);
     replace(setCallouts, merged.callouts); replace(setParcels, merged.parcels);
@@ -2315,19 +2360,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if (!live || live !== eng) return;
           // `pending` counts only the dirty queue; a just-flushed op rides IN FLIGHT with
           // pending 0 — journal during committing/retrying/failed too (dirtyEntries includes
-          // the in-flight batch), so a reload mid-RPC doesn't drop the op. Known limitation:
-          // the journal is one key per SITE, so a second tab on the same site (multi-writer)
-          // can overwrite/clear the first tab's journal — the mirror + version ring remain
-          // the backstop there; the journal is belt-and-suspenders, not the primary store.
+          // the in-flight batch), so a reload mid-RPC doesn't drop the op. The journal is
+          // keyed per SESSION (NEW-1 — planyr:elements:pending:<site>:s:<tab>), so a second
+          // same-account tab can neither clear this tab's crash protection nor adopt its
+          // in-flight edits as its own writes; every write refreshes `at`, which is what
+          // marks this journal LIVE to sibling tabs (see elementJournal.js).
           if (s.pending > 0 || s.state === "committing" || s.state === "retrying" || s.state === "failed")
-            writeJournal(siteId, live.dirtyEntries(), Date.now());
-          else if (s.state === "idle") clearJournal(siteId);
+            writeJournal(siteId, journalSid, live.dirtyEntries(), Date.now());
+          else if (s.state === "idle") clearJournal(siteId, journalSid);
         } catch (_) { /* journaling is belt-and-suspenders — never let it break sync */ }
       },
       onEvent: (ev) => { try { syncEventRef.current(ev); } catch (_) {} }, // B673 — late-bound (the handler needs helpers defined further down)
       patchElement: applyZPatch,
       report: reportClientEvent,
       selfUid: activeUid(),
+      // NEW-1 — bonded (attachedTo) elements are cascade-DERIVED unless the current gesture /
+      // selection targets them; everything else (incl. deletes, el = null) stays direct.
+      isDirectEdit: (kind, id, el) => kind !== "el" || !el || el.attachedTo == null || isDirectTouched(kind, id),
     });
     elSyncRef.current = eng;
     // B673 — who to blame in a conflict toast: self → "you (another window)"; teammates via the
@@ -2390,6 +2439,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const e = elSyncRef.current;
     if (!e || !isCloudActive()) return;
     if (!busy) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
+    stampDirectTargets(); // NEW-1 — refresh direct-touch stamps in the SAME tick the ops are enqueued
     const s = stateRef.current;
     try { e.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
   };
@@ -2413,7 +2463,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
   // background storage event never yanks the canvas out from under an active edit.
   const busyRef = useRef(false);
-  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || editInline || calloutDraft || numEdit); });
+  useEffect(() => {
+    busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || editInline || calloutDraft || numEdit);
+    // NEW-1 — stamp the CURRENT interaction/selection targets as directly-touched (feeds the
+    // engine's isDirectEdit; see directTouchRef above). Runs every render — during a drag each
+    // move re-renders, so the stamp stays fresh through the gesture and the flush at gesture end.
+    stampDirectTargets();
+  });
   // When ANOTHER tab saves this site, fold its content into our canvas (union — never drops
   // either tab's work) so two open tabs agree without a reload. Idle-only + only-if-changed
   // (avoids churn / ping-pong). `storage` events fire only in OTHER tabs, never the writer.

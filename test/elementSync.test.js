@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { createElementSync, stableStringify } from "../src/workspaces/site-planner/lib/elementSync.js";
-import { foldNeverSyncedLocal } from "../src/workspaces/site-planner/lib/elementRows.js";
+import { createElementSync, stableStringify, semanticallyEqual } from "../src/workspaces/site-planner/lib/elementSync.js";
+import { foldNeverSyncedLocal, reconcileSeedRows } from "../src/workspaces/site-planner/lib/elementRows.js";
+import { toastForSyncEvent } from "../src/workspaces/site-planner/lib/conflictToasts.js";
 
 // B671 — the per-element write engine. Injected commit + timers + clock, so the diff classes,
 // debounce-vs-immediate boundaries, batch coalescing, conflict matrix, and backoff are all
@@ -856,5 +857,174 @@ describe("stableStringify", () => {
   });
   it("an element differing only by an undefined-valued key serializes IDENTICALLY (no phantom diff)", () => {
     expect(stableStringify({ id: "pv", w: 10, z: 0, hatch: undefined })).toBe(stableStringify({ id: "pv", w: 10, z: 0 }));
+  });
+});
+
+/* NEW-1 — the two-tab cascade false-conflict class (owner-reported 2026-07-14 + 2026-07-15).
+ * Two same-account tabs on one plan: an edit in the active tab re-lays its bonded children
+ * (paving / sidewalks / parking), and the idle tab's rows→canvas→re-derive round trip can echo
+ * back byte-DIVERGENT but geometrically identical copies at foreign revs. Three engine guards:
+ *   #1 only DIRECT edits feed `recent`/authoredRecently (a cascade write never claims "you just
+ *      edited"), via the injected isDirectEdit predicate;
+ *   #2 semantically-equal copies are SILENT (no event) on every read/conflict path;
+ *   #3 `stale` (mixed json↔rev) shadow pairings never seed a refetch (reconcileSeedRows). */
+
+describe("NEW-1 #1 — derived cascade ops never claim authorship (isDirectEdit)", () => {
+  const bonded = (id, extra = {}) => ({ id, type: "paving", cx: 0, cy: 0, w: 10, h: 10, z: 2048, attachedTo: "b1", ...extra });
+  const byShape = { isDirectEdit: (kind, id, el) => !(el && el.attachedTo) }; // bonded = derived
+
+  it("a foreign overwrite of a DERIVED element fires remote-upsert with authoredRecently:false → the toast layer stays quiet", async () => {
+    const h = makeHarness({ sync: byShape });
+    h.sync.reconcile({ els: [el("b1", { z: 1024 }), bonded("pv1")] }, {}); await tick(); // creates
+    // the gesture: building edited (direct), bonded child re-laid by the cascade (derived)
+    h.sync.reconcile({ els: [el("b1", { z: 1024, w: 20 }), bonded("pv1", { cx: 5 })] }, {});
+    h.sync.flushGesture(); await tick();
+    // tab B's re-derived copy of the CHILD echoes in at a foreign rev with genuinely different data
+    const r = h.sync.applyRemoteRow({ kind: "el", id: "pv1", rev: 99, z_index: 2048, deleted_at: null, data: bonded("pv1", { cx: 555 }) });
+    expect(r.action).toBe("upsert"); // data still converges (LWW read) — only the BLAME is gated
+    const ev = h.events.filter((e) => e.type === "remote-upsert").pop();
+    expect(ev.authoredRecently).toBe(false); // never "…you just edited" for an element the user never touched
+    expect(toastForSyncEvent(ev, { name: "you (another window)", label: "a paving area" })).toBeNull();
+  });
+
+  it("GUARD: the DIRECT element (the one actually edited) still claims authorship — a real foreign overwrite toasts", async () => {
+    const h = makeHarness({ sync: byShape });
+    h.sync.reconcile({ els: [el("b1", { z: 1024 }), bonded("pv1")] }, {}); await tick();
+    h.sync.reconcile({ els: [el("b1", { z: 1024, w: 20 }), bonded("pv1", { cx: 5 })] }, {});
+    h.sync.flushGesture(); await tick();
+    const r = h.sync.applyRemoteRow({ kind: "el", id: "b1", rev: 99, z_index: 1024, deleted_at: null, data: el("b1", { z: 1024, w: 77 }) });
+    expect(r.action).toBe("upsert");
+    const ev = h.events.filter((e) => e.type === "remote-upsert").pop();
+    expect(ev.authoredRecently).toBe(true);
+    expect(toastForSyncEvent(ev, { name: "you (another window)", label: "a building" })).not.toBeNull();
+  });
+
+  it("the derived tag survives a conflict re-enqueue (LWW re-commit still never stamps recent)", async () => {
+    const h = makeHarness({ sync: byShape });
+    h.sync.reconcile({ els: [el("b1", { z: 1024 }), bonded("pv1")] }, {}); await tick();
+    // the child's cascade update loses a race (genuinely different remote data → loud LWW branch)
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) => (o.id === "pv1"
+      ? { id: o.id, status: "conflict", row: { rev: 7, z_index: 2048, data: bonded("pv1", { cx: 900 }) } }
+      : { id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }));
+    h.sync.reconcile({ els: [el("b1", { z: 1024 }), bonded("pv1", { cx: 5 })] }, {});
+    h.runTimers(); await tick();
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }));
+    h.runTimers(); await tick(); // the re-commit lands
+    // a later foreign overwrite still reads authoredRecently:false — the re-enqueue kept direct:false
+    const ev = (() => { h.sync.applyRemoteRow({ kind: "el", id: "pv1", rev: 99, z_index: 2048, deleted_at: null, data: bonded("pv1", { cx: 321 }) }); return h.events.filter((e) => e.type === "remote-upsert").pop(); })();
+    expect(ev.authoredRecently).toBe(false);
+  });
+
+  it("restore() is ALWAYS direct (an explicit user action), even under an everything-is-derived predicate", async () => {
+    const h = makeHarness({ sync: { isDirectEdit: () => false } });
+    h.sync.restore("el", "e1", el("e1", { z: 1024 })); await tick();
+    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 99, z_index: 1024, deleted_at: null, data: el("e1", { z: 1024, w: 50 }) });
+    const ev = h.events.filter((e) => e.type === "remote-upsert").pop();
+    expect(ev.authoredRecently).toBe(true);
+  });
+
+  it("a THROWING predicate fails open to direct — attribution problems never silence a real heads-up", async () => {
+    const h = makeHarness({ sync: { isDirectEdit: () => { throw new Error("boom"); } } });
+    h.sync.reconcile({ els: [el("e1", { z: 1024 })] }, {}); await tick();
+    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 99, z_index: 1024, deleted_at: null, data: el("e1", { z: 1024, w: 50 }) });
+    expect(h.events.filter((e) => e.type === "remote-upsert").pop().authoredRecently).toBe(true);
+  });
+
+  it("no predicate passed → everything stays direct (pre-NEW-1 behavior preserved)", async () => {
+    const h = makeHarness();
+    h.sync.reconcile({ els: [el("e1", { z: 1024 })] }, {}); await tick();
+    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 99, z_index: 1024, deleted_at: null, data: el("e1", { z: 1024, w: 50 }) });
+    expect(h.events.filter((e) => e.type === "remote-upsert").pop().authoredRecently).toBe(true);
+  });
+});
+
+describe("NEW-1 #2 — semantically-equal copies are silent (semanticallyEqual + the three read paths)", () => {
+  it("semanticallyEqual: float noise within eps is equal; a real edit is not; key sets must match both ways", () => {
+    expect(semanticallyEqual({ cx: 100, pts: [1, 2] }, { cx: 100 + 1e-9, pts: [1 + 1e-12, 2] })).toBe(true);
+    expect(semanticallyEqual({ cx: 100 }, { cx: 100.5 })).toBe(false);            // a genuine move
+    expect(semanticallyEqual({ cx: 1 }, { cx: 1, extra: 0 })).toBe(false);        // added key = real change
+    expect(semanticallyEqual({ a: undefined, cx: 1 }, { cx: 1 })).toBe(true);     // JSON semantics: undefined = absent
+    expect(semanticallyEqual({ n: NaN }, { n: NaN })).toBe(true);
+    expect(semanticallyEqual([1, 2], [1, 2, 3])).toBe(false);
+    expect(semanticallyEqual({ s: "a" }, { s: "b" })).toBe(false);
+    expect(semanticallyEqual(null, {})).toBe(false);
+    expect(semanticallyEqual({ deep: { pts: [{ x: 5 }] } }, { deep: { pts: [{ x: 5 + 1e-8 }] } })).toBe(true);
+  });
+
+  it("conflict path: a byte-divergent but semantically-equal live row adopts SILENTLY — no event, no re-commit ping-pong", async () => {
+    const h = makeHarness();
+    h.sync.reconcile({ els: [el("e1", { z: 1024 })] }, {}); await tick(); // create @ rev 1
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) => ({
+      id: o.id, status: "conflict", row: { rev: 5, z_index: 1024, data: { ...o.data, cx: 1e-9 } }, // the other tab's float-noise copy
+    })) }));
+    h.sync.reconcile({ els: [el("e1", { z: 1024, w: 20 })] }, {});
+    h.runTimers(); await tick();
+    expect(h.events).toHaveLength(0);          // no lost-race toast for an invisible difference
+    expect(h.commits).toHaveLength(2);         // and no third commit queued (no ping-pong)
+    expect(h.sync.pendingCount()).toBe(0);
+    // the remote rev WAS adopted — the next real edit targets it
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }));
+    h.sync.reconcile({ els: [el("e1", { z: 1024, w: 30 })] }, {});
+    h.runTimers(); await tick();
+    expect(h.commits[2][0].expected).toBe(5);
+  });
+
+  it("no-pending read path: a foreign-rev row semantically equal to the shadow upserts with NO remote-upsert event (the reported burst)", async () => {
+    const h = makeHarness();
+    h.sync.reconcile({ els: [el("pv1", { z: 2048, attachedTo: "b1" })] }, {}); await tick();
+    const r = h.sync.applyRemoteRow({ kind: "el", id: "pv1", rev: 42, z_index: 2048, deleted_at: null,
+      data: { ...el("pv1", { z: 2048, attachedTo: "b1" }), cx: 1e-10 } }); // tab B's re-derived copy
+    expect(r.action).toBe("upsert");           // bytes still converge to the server's copy
+    expect(h.events).toHaveLength(0);          // but nobody is told anything changed — nothing did
+  });
+
+  it("GUARD (no-pending): a genuinely different foreign row still fires remote-upsert(authoredRecently)", async () => {
+    const h = makeHarness();
+    h.sync.reconcile({ els: [el("e1", { z: 1024 })] }, {}); await tick();
+    h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 42, z_index: 1024, deleted_at: null, data: el("e1", { z: 1024, cx: 50 }) });
+    const ev = h.events.filter((e) => e.type === "remote-upsert").pop();
+    expect(ev).toBeTruthy();
+    expect(ev.authoredRecently).toBe(true);
+  });
+
+  it("pending read path: a semantically-equal foreign row while dirty is silent; the LWW re-commit still runs", async () => {
+    const h = makeHarness();
+    h.sync.reconcile({ els: [el("e1", { z: 1024 })] }, {}); await tick();
+    h.sync.reconcile({ els: [el("e1", { z: 1024, w: 20 })] }, {}); await tick(); // dirty (debounced)
+    const r = h.sync.applyRemoteRow({ kind: "el", id: "e1", rev: 9, z_index: 1024, deleted_at: null,
+      data: { ...el("e1", { z: 1024, w: 20 }), cx: 1e-9 } });
+    expect(r.action).toBe("ignore");           // local (dirty) data stays on canvas
+    expect(h.events).toHaveLength(0);          // no remote-while-dirty for an invisible difference
+    h.runTimers(); await tick();               // the pending edit still re-commits at the adopted rev
+    expect(h.commits[1][0].expected).toBe(9);
+  });
+});
+
+describe("NEW-1 #3 — stale (mixed json↔rev) shadow pairings never seed a refetch", () => {
+  it("a foreign row adopted while dirty leaves a `stale` shadow entry; reconcileSeedRows keeps the fetched row canonical", async () => {
+    const h = makeHarness();
+    h.sync.reconcile({ els: [el("sw1", { z: 1024 })] }, {}); await tick();            // create @ rev 1
+    h.sync.reconcile({ els: [el("sw1", { z: 1024, cx: 140 })] }, {}); await tick();   // dirty (debounced)
+    // a foreign row (different data) lands while dirty → the engine adopts rev 9 but KEEPS the old json
+    h.sync.applyRemoteRow({ kind: "el", id: "sw1", rev: 9, z_index: 1024, deleted_at: null, data: el("sw1", { z: 1024, cx: 900 }) });
+    const snap = h.sync.shadowSnapshot();
+    expect(snap.get("el:sw1").stale).toBe(true);
+    expect(snap.get("el:sw1").rev).toBe(9);
+    // a stale FETCH (rev 4 < 9) must NOT be overwritten from that mixed pairing — the row stays
+    const rows = [{ kind: "el", id: "sw1", rev: 4, z_index: 1024, deleted_at: null, data: el("sw1", { z: 1024, cx: 100 }) }];
+    const out = reconcileSeedRows(rows, snap, h.sync.tombstonedSnapshot());
+    expect(out[0].data).toEqual(el("sw1", { z: 1024, cx: 100 }));
+    expect(out[0].rev).toBe(4);
+  });
+
+  it("a CLEAN just-committed shadow entry still substitutes over a stale fetch (B759 behavior preserved)", async () => {
+    const h = makeHarness();
+    h.sync.reconcile({ els: [el("sw1", { z: 1024 })] }, {}); await tick();            // rev 1
+    h.sync.reconcile({ els: [el("sw1", { z: 1024, cx: 140 })] }, {});
+    h.sync.flushGesture(); await tick();                                              // committed @ rev 2
+    const rows = [{ kind: "el", id: "sw1", rev: 1, z_index: 1024, deleted_at: null, data: el("sw1", { z: 1024 }) }];
+    const out = reconcileSeedRows(rows, h.sync.shadowSnapshot(), h.sync.tombstonedSnapshot());
+    expect(out[0].rev).toBe(2);
+    expect(out[0].data.cx).toBe(140); // our committed move survives the stale fetch
   });
 });

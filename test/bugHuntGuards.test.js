@@ -579,3 +579,33 @@ describe("B36(e)/B843: view-driven map layers guard against stale post-unmount r
     expect((src.match(/if \(!map\) return;/g) || []).length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("NEW-1 (two-tab cascade false conflicts) — the SitePlanner wiring exists in source", () => {
+  it("the sync engine gets a bonded-aware isDirectEdit predicate + the interaction effect stamps gesture/selection targets", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // bonded (attachedTo) elements are derived unless directly touched; everything else stays direct
+    expect(src).toMatch(/isDirectEdit: \(kind, id, el\) => kind !== "el" \|\| !el \|\| el\.attachedTo == null \|\| isDirectTouched\(kind, id\)/);
+    // drag / sel / multi targets are stamped into directTouchRef…
+    expect(src).toMatch(/directTouchRef\.current\.set\(\(kind \|\| "el"\) \+ ":" \+ id, t\)/);
+    expect(src).toMatch(/if \(d && typeof d\.id === "string"\) stamp\(d\.kind, d\.id\);/);
+    expect(src).toMatch(/if \(sel && typeof sel\.id === "string"\) stamp\(sel\.kind, sel\.id\);/);
+    // …both every render AND in the same tick the ops are enqueued (the autosave effect that
+    // reconciles is declared above the render-effect stamp — a >10s-idle single-shot edit would
+    // otherwise enqueue against aged stamps and mis-tag a directly-edited bonded child as derived)
+    expect(src).toMatch(/stampDirectTargets\(\); \/\/ NEW-1 — refresh direct-touch stamps in the SAME tick the ops are enqueued/);
+  });
+
+  it("the pending-edit journal is keyed per SESSION (write/read/clear/sweep all pass the tab id)", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    expect(src).toMatch(/const journalSid = journalSessionId\(\)/);
+    expect(src).toMatch(/writeJournal\(siteId, journalSid, live\.dirtyEntries\(\), Date\.now\(\)\)/);
+    expect(src).toMatch(/clearJournal\(siteId, journalSid\)/);
+    // read + sweep share ONE timestamp (a journal must not cross the orphan boundary in between)
+    expect(src).toMatch(/readJournal\(siteId, journalSid, journalNow\)/);
+    // the refetch consumes own + orphaned journals but NEVER a live sibling's (sweep, not clear-all)
+    expect(src).toMatch(/sweepJournals\(siteId, journalSid, journalNow\)/);
+    // the old shared-key call shapes must not come back
+    expect(src).not.toMatch(/writeJournal\(siteId, live\.dirtyEntries\(\)/);
+    expect(src).not.toMatch(/readJournal\(siteId, Date\.now\(\)\)/);
+  });
+});

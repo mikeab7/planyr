@@ -170,7 +170,9 @@ export function foldJournal(next, journal, rows, { isHusk = () => false, onDisca
     // skipKeys = the LIVE engine's current pending (kind:id)s: an in-memory dirty edit is
     // strictly fresher than any journal snapshot and has already substituted into `next` —
     // a journal entry (possibly stale, e.g. after a failed re-write) must never override it.
-    if (skipKeys && skipKeys.has(e.kind + ":" + e.id)) continue;
+    // Reported through onDiscard (LOUD-FAILURE): with per-session journals this entry may be an
+    // ADOPTED orphan about to be swept — its loss must be visible in telemetry, never silent.
+    if (skipKeys && skipKeys.has(e.kind + ":" + e.id)) { onDiscard(e, null); continue; }
     const row = rowByKey.get(e.kind + ":" + e.id);
     const baseRev = Number(e.baseRev) || 1;
     const isDelete = e.cls === "delete";
@@ -243,6 +245,14 @@ export function reconcileSeedRows(rows, shadow, tombstones) {
     if (r.deleted_at) return r;                                     // tombstone / malformed → untouched
     const s = shad.get(key);
     if (!s || !((Number(s.rev) || 0) > (Number(r.rev) || 0))) return r; // fetch current/newer → canonical
+    // NEW-1 two-writer hardening — a `stale` shadow entry is a MIXED json↔rev pairing: the engine
+    // adopted a newer rev (a foreign row while dirty, an own-echo after a stale re-seed, a conflict
+    // adoption) while KEEPING an older json (or ""), because the data at that rev was never seen.
+    // Substituting that json here would seed provably-wrong data under a high rev — with a second
+    // live writer this is exactly the "bonded aprons separate for a beat" churn. The fetched row
+    // (internally consistent, possibly older) stays canonical instead; any newer local truth still
+    // on the canvas re-commits through the caller's post-seed reconcile diff.
+    if (s.stale) return r;
     let data;
     try { data = JSON.parse(s.json); } catch { return r; }          // never let a bad shadow json throw
     if (!data) return r;
