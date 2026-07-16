@@ -985,6 +985,11 @@ export function floodGeoBbox(lonLatRings, padDeg = 0.001) {
 /* Standing copy (single source so panel/print never drift). */
 export const NAVD88_NOTE =
   "All elevations are feet NAVD88. Older documents may cite NGVD29 — Houston-area subsidence makes mixed datums a multi-foot silent error; convert before entering.";
+// B861 (chat NEW-2) — the BKDD datum trap: the district's forms label elevations "1988
+// NGVD, 2001 Adj.", an internally contradictory string (NGVD is the 1929 datum, NAVD is
+// the 1988 one). Appended to the standing datum warning only when a site is inside BKDD.
+export const BKDD_DATUM_NOTE =
+  "BKDD forms cite “1988 NGVD (2001 Adj.)” — an internally contradictory datum string (NGVD=1929, NAVD=1988); confirm NAVD88 (2001 adjustment) with the district before converting. A datum mix-up here is a multi-foot silent error.";
 export const NEWER_MODEL_NOTE =
   "Jurisdictions may enforce newer model elevations (e.g. MAAPnext) HIGHER than the effective FIRM — when in doubt, enter the higher water surface.";
 export const EXCLUSIONS_NOTE =

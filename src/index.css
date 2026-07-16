@@ -347,6 +347,17 @@ input[type="range"] { height: 18px; }
 /* spinner — e.g. the "Preparing PDF…" indicator */
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* B860 (chat NEW-1) — verdict-changed flash on the Yield → Stormwater readout: a soft
+   accent highlight that fades out, so a number that recomputed live (detention, mitigation,
+   FFE) can't swap silently. Theme-aware via color-mix on --accent (reads in light + dark);
+   respects reduced-motion. Applied/replayed by the FlashValue component. */
+@keyframes planyr-flash {
+  0% { background: color-mix(in srgb, var(--accent) 34%, transparent); }
+  100% { background: transparent; }
+}
+.planyr-flash { animation: planyr-flash 0.9s ease; }
+@media (prefers-reduced-motion: reduce) { .planyr-flash { animation: none; } }
+
 /* Project Files upload tray (B260): a filed row demotes into the "Recently filed"
    trail with a subtle slide/fade — never an abrupt removal. */
 @keyframes pf-demote-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: .92; transform: none; } }
