@@ -2301,6 +2301,57 @@ const detectCascadeDrift = (storedTasks, engineTasks) => {
   });
   return out;
 };
+// B864(b) — pure 3-way merge for the cloud whole-document save (mirrored + unit-tested in
+// ui-audit/stress/scheduler-engine.mjs). The Scheduler cloud-saves the WHOLE document last-write-wins; the
+// rev-gate only BLOCKS a stale tab, so a sibling tab's independent addition (e.g. a just-created meeting
+// calendar) is lost when the other tab wins — the multi-writer clobber that orphaned hs-v1's election
+// binding (B864). Instead of blocking, we REBASE our edits onto the newer cloud:
+//   base = the ancestor doc (last loaded/saved) · ours = this tab's doc · theirs = the newer cloud.
+// A side unchanged vs base yields to the changed side; id-keyed arrays (tasks/meetingBodies/contacts/…)
+// merge per element by id (adds survive, a delete is honored only if the other side left the key alone);
+// a genuine same-leaf conflict prefers OURS (the losing copy stays in Version History). Module scope so the
+// storage layer AND the App's reconcile listener share one implementation.
+const _mIsObj = v => !!v && typeof v === "object" && !Array.isArray(v);
+const _mEq = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch { return a === b; } };
+const _mStripRev = o => { if (_mIsObj(o)) { const { __rev, ...rest } = o; return rest; } return o; };
+const _deepClone = o => { try { return JSON.parse(JSON.stringify(o)); } catch { return o; } };
+const _mIdArr = a => Array.isArray(a) && a.length > 0 && a.every(e => _mIsObj(e) && "id" in e);
+const mergeCloudDoc = (base, ours, theirs) => {
+  if (_mEq(ours, theirs)) return theirs;
+  if (_mEq(ours, base)) return theirs;
+  if (_mEq(theirs, base)) return ours;
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  if (Array.isArray(ours) && Array.isArray(theirs)) {
+    if (!_mIdArr(ours) || !_mIdArr(theirs)) return ours;
+    const bArr = Array.isArray(base) ? base : [];
+    const byId = arr => { const m = new Map(); arr.forEach(e => { if (!m.has(e.id)) m.set(e.id, e); }); return m; };
+    const bM = byId(bArr), tM = byId(theirs), oSeen = new Set();
+    const out = [];
+    for (const e of ours) {
+      if (oSeen.has(e.id)) continue; oSeen.add(e.id);
+      const inT = tM.has(e.id), inB = bM.has(e.id);
+      if (inT) out.push(mergeCloudDoc(inB ? bM.get(e.id) : undefined, e, tM.get(e.id)));
+      else if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);
+    }
+    for (const e of theirs) {
+      if (oSeen.has(e.id)) continue;
+      const inB = bM.has(e.id);
+      if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);
+    }
+    return out;
+  }
+  if (!_mIsObj(ours) || !_mIsObj(theirs)) return ours;
+  const b = _mIsObj(base) ? base : {};
+  const out = {};
+  for (const k of new Set([...Object.keys(ours), ...Object.keys(theirs)])) {
+    const inO = has(ours, k), inT = has(theirs, k), inB = has(b, k);
+    if (inO && inT) { out[k] = mergeCloudDoc(b[k], ours[k], theirs[k]); continue; }
+    if (inO && !inT) { if (!(inB && _mEq(ours[k], b[k]))) out[k] = ours[k]; continue; }
+    if (!inO && inT) { if (!(inB && _mEq(theirs[k], b[k]))) out[k] = theirs[k]; continue; }
+  }
+  return out;
+};
+
 // B836 — load-path glue: run the normal recompute (cascade → rollup) on a project's already-stripped
 // tasks AND record any drift it corrected into `sink`. Keeps the three load sites DRY and identical.
 const recascadeWithDrift = (tasks, projName, sink) => {
@@ -5217,6 +5268,24 @@ function App() {
     const onStale = () => setStaleNotice(true);
     window.addEventListener("planar:stale", onStale);
     return () => window.removeEventListener("planar:stale", onStale);
+  }, []);
+
+  // B864(b) — a sibling tab's newer save was AUTO-MERGED with ours (a calendar it added, a task it edited).
+  // Adopt the result so this tab's in-memory state converges with the cloud; reconcile against our CURRENT
+  // state (mergeCloudDoc(ancestor, current, merged)) so any edit made during the save round-trip survives.
+  useEffect(() => {
+    const onMerged = (e) => {
+      const merged = e && e.detail && e.detail.value;
+      const anc = e && e.detail && e.detail.base;
+      if (!merged || !merged.projects) return;
+      setData(cur => {
+        if (!cur) return merged;
+        try { return mergeCloudDoc(anc, cur, merged); } catch { return merged; }
+      });
+      if (typeof showToast === "function") showToast("Merged in changes from another tab.", { type: "info", duration: 4000 });
+    };
+    window.addEventListener("planar:merged", onMerged);
+    return () => window.removeEventListener("planar:merged", onMerged);
   }, []);
 
   // Last line of defense: if the tab is closed while the latest changes
@@ -13501,8 +13570,11 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
   // inside the JSON value; this tab remembers the rev it loaded or last wrote
   // (knownRev[k]) and refuses any auto-save once the cloud has moved past it.
   const knownRev = {};
+  const baseByKey = {};   // B864(b) — the doc THIS tab last loaded or saved (the 3-way merge ancestor)
   const staleSnapped = {};
   const revOf = (p) => (p && typeof p.__rev === "number") ? p.__rev : 0;
+  // mergeCloudDoc / _mStripRev / _deepClone are defined at module scope (B864(b)) so both this storage
+  // layer AND the App's reconcile listener share one implementation.
 
   const countTasks = (parsed) => {
     try {
@@ -13570,7 +13642,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
           return null;
         }
         const val = typeof data.value === "string" ? data.value : JSON.stringify(data.value);
-        try { knownRev[k] = revOf(typeof data.value === "string" ? JSON.parse(data.value) : data.value); } catch { knownRev[k] = 0; }
+        try { const p = typeof data.value === "string" ? JSON.parse(data.value) : data.value; knownRev[k] = revOf(p); baseByKey[k] = _mStripRev(_deepClone(p)); } catch { knownRev[k] = 0; }
         return { key: k, value: val };
       } catch { window.__planarCloudError = true; return null; }
     },
@@ -13602,11 +13674,40 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         // Layer 0: concurrency guard. Auto-saves only -- explicit actions
         // (restore/import/delete/recascade pass skipSanity) are intentional
         // overwrites and pass through, becoming the newest version.
-        if (isAuto && !skipSanity && cloudRev != null && cloudRev > (knownRev[k] || 0)) {  // treat an unknown base rev as 0 (seed/offline-fallback load never set knownRev) — matches checkRemote, so a stale tab can't silently overwrite newer cloud data
-          if (!staleSnapped[k]) { staleSnapped[k] = true; await _snapshot(k, parsed, "stale-block", v.length); }
-          console.error("[planar guard] Save blocked: cloud rev " + cloudRev + " is ahead of this tab (" + knownRev[k] + "). Reload to get the latest; your copy is saved as 'stale-block'.");
-          try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: k, cloudRev: cloudRev, knownRev: knownRev[k] } })); } catch {}
-          return null;
+        // B864(b) — the cloud moved ahead of this tab (a sibling wrote). The old behavior BLOCKED the save
+        // and forced a reload, which dropped THIS tab's edits from the cloud (and, when the loser was the
+        // tab that had a just-created meeting calendar, orphaned the binding). Now we 3-way MERGE our edits
+        // onto the newer cloud so BOTH survive; only if we lack a base ancestor do we fall back to blocking.
+        if (isAuto && !skipSanity && cloudRev != null && cloudRev > (knownRev[k] || 0)) {  // treat an unknown base rev as 0 (seed/offline-fallback load never set knownRev) — matches checkRemote
+          const base = baseByKey[k];
+          const preOurs = _mStripRev(_deepClone(parsed));   // this tab's doc as of save-start (the App reconcile ancestor)
+          if (base !== undefined && oldParsed && _mIsObj(parsed)) {
+            let merged;
+            try { merged = mergeCloudDoc(base, preOurs, _mStripRev(oldParsed)); } catch (e) { merged = null; }
+            if (merged && _mIsObj(merged)) {
+              // Snapshot the pre-merge doc so a bad merge is always recoverable, then continue with the merge.
+              await _snapshot(k, parsed, "premerge-ours", v.length);
+              staleSnapped[k] = false;
+              // The App must adopt the merged doc so its IN-MEMORY state converges with the cloud (else the
+              // next save, seeing the sibling's addition as a "delete" vs its new base, would drop it again).
+              // It reconciles the merge against its CURRENT state via mergeCloudDoc(preOurs, current, merged),
+              // so any edit made during this save's round-trip is preserved (preOurs is their common ancestor).
+              const mergedForApp = _deepClone(merged);
+              parsed = merged;   // fall through to Layer 2 + rev-stamp + write; oldParsed/cloudRev already read
+              console.info("[planar guard] Cloud rev " + cloudRev + " was ahead of this tab (" + (knownRev[k] || 0) + "); auto-merged our edits onto it (both copies in Version History).");
+              try { window.dispatchEvent(new CustomEvent("planar:merged", { detail: { key: k, cloudRev: cloudRev, knownRev: knownRev[k], base: preOurs, value: mergedForApp } })); } catch {}
+            } else {
+              if (!staleSnapped[k]) { staleSnapped[k] = true; await _snapshot(k, parsed, "stale-block", v.length); }
+              console.error("[planar guard] Save blocked (merge unavailable): cloud rev " + cloudRev + " is ahead of this tab (" + knownRev[k] + "). Reload to get the latest; your copy is saved as 'stale-block'.");
+              try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: k, cloudRev: cloudRev, knownRev: knownRev[k] } })); } catch {}
+              return null;
+            }
+          } else {
+            if (!staleSnapped[k]) { staleSnapped[k] = true; await _snapshot(k, parsed, "stale-block", v.length); }
+            console.error("[planar guard] Save blocked: cloud rev " + cloudRev + " is ahead of this tab (" + knownRev[k] + "). Reload to get the latest; your copy is saved as 'stale-block'.");
+            try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: k, cloudRev: cloudRev, knownRev: knownRev[k] } })); } catch {}
+            return null;
+          }
         }
 
         // Layer 2: pre-save sanity check (auto-saves only -- manual labels trusted)
@@ -13630,7 +13731,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         // Main upsert
         const { error } = await sb.from(TABLE).upsert({ key: k, value: parsed }, { onConflict: "key" });
         if (error) { console.error("Supabase set error:", error); return null; }
-        if (parsed && typeof parsed === "object") knownRev[k] = parsed.__rev;
+        if (parsed && typeof parsed === "object") { knownRev[k] = parsed.__rev; baseByKey[k] = _mStripRev(_deepClone(parsed)); }   // B864(b): the just-written doc is the new merge ancestor
         staleSnapped[k] = false;
 
         // Tell the UI a cloud write landed -- drives the green save pulse in the header
