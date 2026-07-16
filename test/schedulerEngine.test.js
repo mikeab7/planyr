@@ -1979,3 +1979,107 @@ describe("B864 — the orphaned-binding hardening exists in BOTH the app source 
     expect(src).toContain("Bound to a meeting calendar that no longer exists");
   });
 });
+
+// B864(b) — the 3-way cloud-doc merge that stops a stale tab from clobbering a sibling's changes (the
+// multi-writer whole-doc-save clobber that lost hs-v1's election calendar). Rebases OUR edits onto the
+// newer cloud (theirs) so independent additions on both sides survive.
+describe("B864(b) — mergeCloudDoc rebases our edits onto the newer cloud without dropping either side", () => {
+  it("THE REPRO: a stale tab's save preserves the sibling's just-created meeting calendar + binding", () => {
+    const base = { settings: { meetingBodies: [] }, projects: { p: { tasks: [{ id: 88, meetingBound: false }, { id: 50, start: "2026-01-01" }] } } };
+    // theirs (cloud): a sibling created the election calendar AND bound #88 to it
+    const theirs = { settings: { meetingBodies: [{ id: "mb_e", name: "TX Elections" }] }, projects: { p: { tasks: [{ id: 88, meetingBound: true, meetingBodyId: "mb_e", start: "2027-05-01" }, { id: 50, start: "2026-01-01" }] } } };
+    // ours (stale tab): never saw the calendar; independently moved task 50
+    const ours = { settings: { meetingBodies: [] }, projects: { p: { tasks: [{ id: 88, meetingBound: false }, { id: 50, start: "2026-02-15" }] } } };
+    const merged = E.mergeCloudDoc(base, ours, theirs);
+    expect(merged.settings.meetingBodies).toEqual([{ id: "mb_e", name: "TX Elections" }]);   // calendar SURVIVES
+    expect(merged.projects.p.tasks.find(t => t.id === 88).meetingBound).toBe(true);           // binding SURVIVES
+    expect(merged.projects.p.tasks.find(t => t.id === 88).start).toBe("2027-05-01");           // election date SURVIVES
+    expect(merged.projects.p.tasks.find(t => t.id === 50).start).toBe("2026-02-15");           // our own edit SURVIVES
+  });
+
+  it("symmetric: the calendar-creating tab's save keeps a sibling's independent task edit", () => {
+    const base = { settings: { meetingBodies: [] }, projects: { p: { tasks: [{ id: 1, name: "a" }] } } };
+    const ours = { settings: { meetingBodies: [{ id: "mb_e" }] }, projects: { p: { tasks: [{ id: 1, name: "a" }] } } };  // we added the calendar
+    const theirs = { settings: { meetingBodies: [] }, projects: { p: { tasks: [{ id: 1, name: "RENAMED" }] } } };          // sibling renamed task 1
+    const merged = E.mergeCloudDoc(base, ours, theirs);
+    expect(merged.settings.meetingBodies).toEqual([{ id: "mb_e" }]);            // our calendar kept
+    expect(merged.projects.p.tasks[0].name).toBe("RENAMED");                    // their rename kept
+  });
+
+  it("identical or no-op sides short-circuit", () => {
+    const d = { a: 1, b: { c: 2 } };
+    expect(E.mergeCloudDoc(d, d, d)).toBe(d);
+    expect(E.mergeCloudDoc({ a: 1 }, { a: 1 }, { a: 2 })).toEqual({ a: 2 });   // we didn't change → take theirs
+    expect(E.mergeCloudDoc({ a: 1 }, { a: 2 }, { a: 1 })).toEqual({ a: 2 });   // they didn't change → take ours
+  });
+
+  it("a true conflict on the same field prefers OURS (the active tab)", () => {
+    expect(E.mergeCloudDoc({ x: 0 }, { x: 1 }, { x: 2 }).x).toBe(1);
+    // a task edited by BOTH tabs: ours wins (loser recoverable from history)
+    const base = { t: { start: "2026-01-01" } }, ours = { t: { start: "2026-03-03" } }, theirs = { t: { start: "2026-09-09" } };
+    expect(E.mergeCloudDoc(base, ours, theirs).t.start).toBe("2026-03-03");
+  });
+
+  it("honors an add on either side and a delete only when the other side left the key alone", () => {
+    // their add survives; our add survives
+    expect(E.mergeCloudDoc({}, { a: 1 }, { b: 2 })).toEqual({ a: 1, b: 2 });
+    // we deleted `k` (they left it as-base) → stays deleted
+    expect(E.mergeCloudDoc({ k: 1, x: 0 }, { x: 0 }, { k: 1, x: 0 })).toEqual({ x: 0 });
+    // they deleted `k` (we left it as-base) → stays deleted
+    expect(E.mergeCloudDoc({ k: 1, x: 0 }, { k: 1, x: 0 }, { x: 0 })).toEqual({ x: 0 });
+    // they deleted `k` but WE changed it → our change wins (not silently dropped)
+    expect(E.mergeCloudDoc({ k: 1 }, { k: 9 }, {})).toEqual({ k: 9 });
+  });
+
+  it("is robust to a missing/undefined base (fail-safe: falls back to our doc on a full conflict)", () => {
+    expect(E.mergeCloudDoc(undefined, { a: 1 }, { a: 1 })).toEqual({ a: 1 });
+    expect(() => E.mergeCloudDoc(null, { a: 1 }, { b: 2 })).not.toThrow();
+  });
+});
+
+describe("B864(b) — the cloud-doc merge is wired into the save path in the real source", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("mergeCloudDoc is defined in BOTH the app source and the engine mirror", () => {
+    expect(src).toContain("mergeCloudDoc");
+    expect(mjs).toContain("export const mergeCloudDoc =");
+  });
+  it("the Layer-0 guard MERGES on a stale save instead of only blocking, and tracks a base doc", () => {
+    expect(src).toContain("baseByKey");
+    expect(src).toContain("mergeCloudDoc(");
+  });
+});
+
+describe("B864(b) — keyed-array (tasks/bodies) merge honors adds, deletes, and per-element conflicts", () => {
+  const P = (tasks) => ({ projects: { p: { tasks } } });
+  it("a sibling's NEW task survives our unrelated edit", () => {
+    const base = P([{ id: 1, name: "a" }]);
+    const ours = P([{ id: 1, name: "a-EDIT" }]);
+    const theirs = P([{ id: 1, name: "a" }, { id: 2, name: "sibling-added" }]);
+    const m = E.mergeCloudDoc(base, ours, theirs).projects.p.tasks;
+    expect(m.find(t => t.id === 1).name).toBe("a-EDIT");    // our edit kept
+    expect(m.find(t => t.id === 2)).toBeTruthy();           // their new task kept
+  });
+  it("our deletion of a task the sibling didn't touch stays deleted", () => {
+    const base = P([{ id: 1 }, { id: 2 }]);
+    const ours = P([{ id: 1 }]);                            // we deleted #2
+    const theirs = P([{ id: 1, name: "renamed" }, { id: 2 }]);
+    const m = E.mergeCloudDoc(base, ours, theirs).projects.p.tasks;
+    expect(m.find(t => t.id === 2)).toBeFalsy();            // delete honored
+    expect(m.find(t => t.id === 1).name).toBe("renamed");  // their unrelated edit kept
+  });
+  it("both tabs edited the SAME task → ours wins (loser is recoverable from history)", () => {
+    const base = P([{ id: 1, start: "2026-01-01" }]);
+    const ours = P([{ id: 1, start: "2026-05-05" }]);
+    const theirs = P([{ id: 1, start: "2026-09-09" }]);
+    expect(E.mergeCloudDoc(base, ours, theirs).projects.p.tasks[0].start).toBe("2026-05-05");
+  });
+  it("a sibling's brand-new project survives (nested object add)", () => {
+    const base = { projects: { a: { tasks: [] } } };
+    const ours = { projects: { a: { tasks: [{ id: 1 }] } } };
+    const theirs = { projects: { a: { tasks: [] }, b: { tasks: [{ id: 9 }] } } };
+    const m = E.mergeCloudDoc(base, ours, theirs);
+    expect(m.projects.a.tasks).toHaveLength(1);   // our task in project a
+    expect(m.projects.b).toBeTruthy();            // their new project b
+  });
+});

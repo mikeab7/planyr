@@ -1437,6 +1437,18 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
 // ── Constants ─────────────────────────────────────────────
 let ROW_H = 24;
 const PPD = 22, TL_H = 30, BUF = 6;
+// B865 — password-manager "leave this input alone" attributes. Spread {...NO_AUTOFILL} as the
+// FIRST attribute on every inline cell / free-text editor so 1Password / LastPass / Bitwarden /
+// Dashlane don't inject an inline icon + identity-autofill card over the grid cell. This iframe
+// has no login/signup form, so nothing here needs autofill. Kept byte-identical to
+// src/shared/ui/noAutofill.js (guarded by test/noAutofill.test.js).
+const NO_AUTOFILL = {
+  autoComplete: "off",
+  "data-1p-ignore": true,
+  "data-lpignore": "true",
+  "data-bwignore": true,
+  "data-form-type": "other",
+};
 // Excel-style fill palette: 5 columns x 4 rows = 20 swatches. Top rows = pastel tints
 // (read well on light grid rows + leave room for text); bottom rows = stronger fills
 // (work well as Gantt-bar accents). Used by the right-click Format toolbar.
@@ -2289,6 +2301,57 @@ const detectCascadeDrift = (storedTasks, engineTasks) => {
   });
   return out;
 };
+// B864(b) — pure 3-way merge for the cloud whole-document save (mirrored + unit-tested in
+// ui-audit/stress/scheduler-engine.mjs). The Scheduler cloud-saves the WHOLE document last-write-wins; the
+// rev-gate only BLOCKS a stale tab, so a sibling tab's independent addition (e.g. a just-created meeting
+// calendar) is lost when the other tab wins — the multi-writer clobber that orphaned hs-v1's election
+// binding (B864). Instead of blocking, we REBASE our edits onto the newer cloud:
+//   base = the ancestor doc (last loaded/saved) · ours = this tab's doc · theirs = the newer cloud.
+// A side unchanged vs base yields to the changed side; id-keyed arrays (tasks/meetingBodies/contacts/…)
+// merge per element by id (adds survive, a delete is honored only if the other side left the key alone);
+// a genuine same-leaf conflict prefers OURS (the losing copy stays in Version History). Module scope so the
+// storage layer AND the App's reconcile listener share one implementation.
+const _mIsObj = v => !!v && typeof v === "object" && !Array.isArray(v);
+const _mEq = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch { return a === b; } };
+const _mStripRev = o => { if (_mIsObj(o)) { const { __rev, ...rest } = o; return rest; } return o; };
+const _deepClone = o => { try { return JSON.parse(JSON.stringify(o)); } catch { return o; } };
+const _mIdArr = a => Array.isArray(a) && a.length > 0 && a.every(e => _mIsObj(e) && "id" in e);
+const mergeCloudDoc = (base, ours, theirs) => {
+  if (_mEq(ours, theirs)) return theirs;
+  if (_mEq(ours, base)) return theirs;
+  if (_mEq(theirs, base)) return ours;
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  if (Array.isArray(ours) && Array.isArray(theirs)) {
+    if (!_mIdArr(ours) || !_mIdArr(theirs)) return ours;
+    const bArr = Array.isArray(base) ? base : [];
+    const byId = arr => { const m = new Map(); arr.forEach(e => { if (!m.has(e.id)) m.set(e.id, e); }); return m; };
+    const bM = byId(bArr), tM = byId(theirs), oSeen = new Set();
+    const out = [];
+    for (const e of ours) {
+      if (oSeen.has(e.id)) continue; oSeen.add(e.id);
+      const inT = tM.has(e.id), inB = bM.has(e.id);
+      if (inT) out.push(mergeCloudDoc(inB ? bM.get(e.id) : undefined, e, tM.get(e.id)));
+      else if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);
+    }
+    for (const e of theirs) {
+      if (oSeen.has(e.id)) continue;
+      const inB = bM.has(e.id);
+      if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);
+    }
+    return out;
+  }
+  if (!_mIsObj(ours) || !_mIsObj(theirs)) return ours;
+  const b = _mIsObj(base) ? base : {};
+  const out = {};
+  for (const k of new Set([...Object.keys(ours), ...Object.keys(theirs)])) {
+    const inO = has(ours, k), inT = has(theirs, k), inB = has(b, k);
+    if (inO && inT) { out[k] = mergeCloudDoc(b[k], ours[k], theirs[k]); continue; }
+    if (inO && !inT) { if (!(inB && _mEq(ours[k], b[k]))) out[k] = ours[k]; continue; }
+    if (!inO && inT) { if (!(inB && _mEq(theirs[k], b[k]))) out[k] = theirs[k]; continue; }
+  }
+  return out;
+};
+
 // B836 — load-path glue: run the normal recompute (cascade → rollup) on a project's already-stripped
 // tasks AND record any drift it corrected into `sink`. Keeps the three load sites DRY and identical.
 const recascadeWithDrift = (tasks, projName, sink) => {
@@ -3355,7 +3418,7 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
 
   return (
     <div ref={wrapRef} style={{position:'relative', width:'100%'}}>
-      <input ref={inputRef} value={query}
+      <input {...NO_AUTOFILL} ref={inputRef} value={query}
         className={isGrid ? "ei" : undefined}
         style={isGrid ? undefined : masterInputStyle}
         onChange={e=>setQuery(e.target.value)}
@@ -3453,11 +3516,11 @@ function ContactsPanel({ data, setData, onClose }) {
               onMouseEnter={e=>e.currentTarget.style.background='#f8f9fa'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
               {editId===c.id ? (
                 <div style={{flex:1,display:'flex',gap:6,alignItems:'center'}}>
-                  <input value={editName} onChange={e=>setEditName(e.target.value)}
+                  <input {...NO_AUTOFILL} value={editName} onChange={e=>setEditName(e.target.value)}
                     autoFocus placeholder="Name *"
                     style={{flex:1,fontSize:12,border:'1px solid var(--blue)',borderRadius:4,padding:'4px 7px',fontFamily:'inherit',outline:'none'}}
                     onKeyDown={e=>{if(e.key==='Enter')commitEdit();if(e.key==='Escape')setEditId(null);}} />
-                  <input value={editEmail} onChange={e=>setEditEmail(e.target.value)}
+                  <input {...NO_AUTOFILL} value={editEmail} onChange={e=>setEditEmail(e.target.value)}
                     placeholder="Email"
                     style={{flex:1,fontSize:12,border:'1px solid var(--bd2)',borderRadius:4,padding:'4px 7px',fontFamily:'inherit',outline:'none'}}
                     onFocus={e=>e.target.style.borderColor='var(--blue)'} onBlur={e=>e.target.style.borderColor='var(--bd2)'}
@@ -3494,10 +3557,10 @@ function ContactsPanel({ data, setData, onClose }) {
           ) : (
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
               <div style={{display:'flex',gap:8}}>
-                <input autoFocus value={newName} onChange={e=>setNewName(e.target.value)}
+                <input {...NO_AUTOFILL} autoFocus value={newName} onChange={e=>setNewName(e.target.value)}
                   placeholder="Full name *" style={{flex:1,fontSize:12,border:'1px solid var(--blue)',borderRadius:5,padding:'6px 9px',fontFamily:'inherit',outline:'none'}}
                   onKeyDown={e=>{if(e.key==='Enter')addContact();if(e.key==='Escape')setAddMode(false);}} />
-                <input value={newEmail} onChange={e=>setNewEmail(e.target.value)}
+                <input {...NO_AUTOFILL} value={newEmail} onChange={e=>setNewEmail(e.target.value)}
                   placeholder="Email (optional)" style={{flex:1,fontSize:12,border:'1px solid var(--bd2)',borderRadius:5,padding:'6px 9px',fontFamily:'inherit',outline:'none'}}
                   onFocus={e=>e.target.style.borderColor='var(--blue)'} onBlur={e=>e.target.style.borderColor='var(--bd2)'}
                   onKeyDown={e=>{if(e.key==='Enter')addContact();if(e.key==='Escape')setAddMode(false);}} />
@@ -3965,7 +4028,7 @@ function SgqChangeRow({field, fromVal, toVal, onEditTo, onRemove}) {
         <span className="sgq-field">Owner</span>
         <span className="sgq-fromval">{fromVal || "—"}</span>
         <i className="ti ti-arrow-right sgq-toarrow"/>
-        <input className="sgq-miniinput" type="text" style={{minWidth:140}}
+        <input {...NO_AUTOFILL} className="sgq-miniinput" type="text" style={{minWidth:140}}
           value={toVal || ""}
           onChange={e => onEditTo(e.target.value)}/>
         <span className="sgq-grow"/>
@@ -3998,7 +4061,7 @@ function InlineDate({value, onCommit}) {
   const [txt, setTxt] = useState(disp);
   useEffect(() => { setTxt(disp); }, [disp]);
   const commit = () => { const isoV = parseFlexDate(txt); if (isoV) onCommit(isoV); else setTxt(disp); };
-  return <input className="rev-edit rev-date-edit" value={txt} placeholder="—"
+  return <input {...NO_AUTOFILL} className="rev-edit rev-date-edit" value={txt} placeholder="—"
     onChange={e => setTxt(e.target.value)}
     onBlur={commit}
     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } else if (e.key === 'Escape') { setTxt(disp); e.currentTarget.blur(); } }}/>;
@@ -4388,7 +4451,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
                     </select>
                   </div>
                   <div className="rev-cell">
-                    <input className="rev-edit" value={propOwner} placeholder="—"
+                    <input {...NO_AUTOFILL} className="rev-edit" value={propOwner} placeholder="—"
                       onChange={e => setPatchField(active.id, 'responsibleParty', e.target.value)} />
                   </div>
                   <div className="rev-cell rev-actcell">
@@ -4510,7 +4573,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
                   </span>
                 </div>
                 <div className="rev-lbl" style={{ marginTop: 10 }}>Task name</div>
-                <input className="rev-note" style={{ flex:"0 0 auto", minHeight:0, height:34, fontWeight:600 }} value={(eff.patch && eff.patch.name) || ''} placeholder="New task name"
+                <input {...NO_AUTOFILL} className="rev-note" style={{ flex:"0 0 auto", minHeight:0, height:34, fontWeight:600 }} value={(eff.patch && eff.patch.name) || ''} placeholder="New task name"
                   onChange={e => patchRow(active.id, { patch: { ...(eff.patch || {}), name: e.target.value } })}/>
                 <div className="rev-lbl" style={{ marginTop: 10 }}>Note</div>
                 <textarea className="rev-note" rows={2} value={noteText} placeholder="Add a note to the new task…"
@@ -5205,6 +5268,24 @@ function App() {
     const onStale = () => setStaleNotice(true);
     window.addEventListener("planar:stale", onStale);
     return () => window.removeEventListener("planar:stale", onStale);
+  }, []);
+
+  // B864(b) — a sibling tab's newer save was AUTO-MERGED with ours (a calendar it added, a task it edited).
+  // Adopt the result so this tab's in-memory state converges with the cloud; reconcile against our CURRENT
+  // state (mergeCloudDoc(ancestor, current, merged)) so any edit made during the save round-trip survives.
+  useEffect(() => {
+    const onMerged = (e) => {
+      const merged = e && e.detail && e.detail.value;
+      const anc = e && e.detail && e.detail.base;
+      if (!merged || !merged.projects) return;
+      setData(cur => {
+        if (!cur) return merged;
+        try { return mergeCloudDoc(anc, cur, merged); } catch { return merged; }
+      });
+      if (typeof showToast === "function") showToast("Merged in changes from another tab.", { type: "info", duration: 4000 });
+    };
+    window.addEventListener("planar:merged", onMerged);
+    return () => window.removeEventListener("planar:merged", onMerged);
   }, []);
 
   // Last line of defense: if the tab is closed while the latest changes
@@ -7317,7 +7398,7 @@ function ProjDropdown({data, setData, addProject, setProjCtx, breadcrumb=false})
                 onMouseLeave={e=>{ if(!isActive&&!isEditing) e.currentTarget.style.background="transparent"; }}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:HEALTH[h].dot,flexShrink:0}} />
                 {isEditing
-                  ? <input ref={editRef} value={editVal} onChange={e=>setEditVal(e.target.value)}
+                  ? <input {...NO_AUTOFILL} ref={editRef} value={editVal} onChange={e=>setEditVal(e.target.value)}
                       onClick={e=>e.stopPropagation()}
                       onKeyDown={e=>{if(e.key==="Enter"){e.stopPropagation();confirmRename();}if(e.key==="Escape"){e.stopPropagation();setEditingId(null);}}}
                       onBlur={confirmRename}
@@ -7381,7 +7462,7 @@ function RenameModal({name, onConfirm, onClose}) {
         padding:20,width:340,display:"flex",flexDirection:"column",gap:14}}
         onClick={e=>e.stopPropagation()}>
         <div style={{color:"var(--amber)",fontFamily:"'Inter',system-ui,sans-serif",fontWeight:600,fontSize:11,letterSpacing:".06em"}}>RENAME PROJECT</div>
-        <input ref={inputRef} className="ei" value={val} onChange={e=>setVal(e.target.value)}
+        <input {...NO_AUTOFILL} ref={inputRef} className="ei" value={val} onChange={e=>setVal(e.target.value)}
           onKeyDown={e=>{ if(e.key==="Enter") confirm(); if(e.key==="Escape") onClose(); }} />
         <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
           <button className="btn" onClick={onClose}>Cancel</button>
@@ -7829,7 +7910,7 @@ function StatusHeaderDropdown({data, setData}) {
                 <OptionIcon hk={hk} />
                 {isEditingThis ? (
                   <>
-                    <input autoFocus value={editing.label}
+                    <input {...NO_AUTOFILL} autoFocus value={editing.label}
                       onChange={e=>setEditing(ev=>({...ev,label:e.target.value}))}
                       onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditing(null);}}
                       style={{flex:1,fontSize:11,padding:"2px 5px",border:"1px solid var(--amber)",
@@ -7857,7 +7938,7 @@ function StatusHeaderDropdown({data, setData}) {
           <div style={{borderTop:"1px solid var(--bd)",marginTop:4,paddingTop:6}}>
             {adding ? (
               <div style={{display:"flex",flexDirection:"column",gap:6,padding:"0 2px"}}>
-                <input autoFocus value={newLabel} onChange={e=>setNewLabel(e.target.value)}
+                <input {...NO_AUTOFILL} autoFocus value={newLabel} onChange={e=>setNewLabel(e.target.value)}
                   onKeyDown={e=>{if(e.key==="Enter")addOption();if(e.key==="Escape"){setAdding(false);setNewLabel("");}}}
                   placeholder="Option label…"
                   style={{fontSize:11,padding:"4px 7px",border:"1px solid var(--bd2)",borderRadius:4,
@@ -8173,7 +8254,7 @@ function FormulaColumnEditor({mode, initLabel, initFormula, columnNames, existin
         </div>
 
         <label style={{fontSize:10,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",color:"var(--mut)"}}>Column name</label>
-        <input autoFocus value={label} onChange={e=>setLabel(e.target.value)} placeholder="e.g. Days remaining"
+        <input {...NO_AUTOFILL} autoFocus value={label} onChange={e=>setLabel(e.target.value)} placeholder="e.g. Days remaining"
           style={{width:"100%",boxSizing:"border-box",margin:"4px 0 2px",padding:"7px 9px",fontSize:13,border:`1px solid ${labelErr?"var(--danger,#d83a3a)":"var(--bd2)"}`,borderRadius:6,fontFamily:"inherit"}} />
         <div style={{fontSize:10.5,color:labelErr?"var(--danger,#d83a3a)":"transparent",minHeight:14}}>{labelErr||"."}</div>
 
@@ -8706,7 +8787,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     ? <span style={{...cs, ...mono, justifyContent:"center", color:"var(--mut)", fontSize:11}}>{dateDisp(rv.propStart)}</span>
                     : <span style={{...cs, ...mono, justifyContent:"center"}} />;
                   else if (c.k === "end") inner = (rvEdit === "end")
-                    ? <input autoFocus className="ei" placeholder="M/D or M/D/YY" defaultValue={toShortDate(rv.propEnd)}
+                    ? <input {...NO_AUTOFILL} autoFocus className="ei" placeholder="M/D or M/D/YY" defaultValue={toShortDate(rv.propEnd)}
                         onBlur={e => { const iso = parseFlexDate(e.target.value); if (iso && rv.onEnd) rv.onEnd(iso); setRvEdit(null); }}
                         onKeyDown={e => { if (e.key==="Enter"){ e.preventDefault(); const iso=parseFlexDate(e.target.value); if(iso&&rv.onEnd) rv.onEnd(iso); setRvEdit(null); } else if (e.key==="Escape"){ setRvEdit(null); } }} />
                     : <span style={{...cs, ...mono, justifyContent:"center", color:"var(--mut)", fontSize:11, cursor:"text"}} title="Click to edit" onClick={()=>setRvEdit("end")}>{dateDisp(rv.propEnd)}</span>;
@@ -8714,14 +8795,14 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     ? <span style={{...cs, color:"var(--amber)", fontWeight:600, gap:5, display:"inline-flex", alignItems:"center"}}><i className="ti ti-arrow-bar-to-right" style={{fontSize:13}}/>{rv.addedPreds.join(", ")}</span>
                     : <span style={cs} />;
                   else if (c.k === "duration") inner = (rvEdit === "duration")
-                    ? <input autoFocus className="ei" placeholder="days" defaultValue={rv.propDur!=null ? String(rv.propDur) : ""}
+                    ? <input {...NO_AUTOFILL} autoFocus className="ei" placeholder="days" defaultValue={rv.propDur!=null ? String(rv.propDur) : ""}
                         onBlur={e => { const n = parseInt(e.target.value, 10); if (!isNaN(n) && n >= 0 && rv.onDur) rv.onDur(n); setRvEdit(null); }}
                         onKeyDown={e => { if (e.key==="Enter"){ e.preventDefault(); const n=parseInt(e.target.value,10); if(!isNaN(n)&&n>=0&&rv.onDur) rv.onDur(n); setRvEdit(null); } else if (e.key==="Escape"){ setRvEdit(null); } }} />
                     : <span style={{...cs, ...mono, color:"var(--mut)", cursor:"text"}} title="Click to edit" onClick={()=>setRvEdit("duration")}>{rv.propDur!=null ? rv.propDur+"d" : ""}</span>;
                   else if (c.k === "health") inner = <span style={{...cs, justifyContent:"center", padding:0}}><HealthPicker value={rv.propStatus||"gray"} onChange={hk=>rv.onStatus&&rv.onStatus(hk)} /></span>;
                   else if (c.k === "status") inner = <span style={{...cs, padding:"0 4px"}}><StatusPicker value={rv.propStatus||"gray"} onChange={hk=>rv.onStatus&&rv.onStatus(hk)} /></span>;
                   else if (c.k === "responsibleParty") inner = (rvEdit === "owner")
-                    ? <input autoFocus className="ei" placeholder="Owner" defaultValue={rv.propOwner||""}
+                    ? <input {...NO_AUTOFILL} autoFocus className="ei" placeholder="Owner" defaultValue={rv.propOwner||""}
                         onBlur={e => { if (rv.onOwner) rv.onOwner(e.target.value); setRvEdit(null); }}
                         onKeyDown={e => { if (e.key==="Enter"){ e.preventDefault(); if(rv.onOwner) rv.onOwner(e.target.value); setRvEdit(null); } else if (e.key==="Escape"){ setRvEdit(null); } }} />
                     : <span style={{...cs, color: rv.propOwner ? "var(--txt)" : "var(--mut)", cursor:"text"}} title="Click to edit" onClick={()=>setRvEdit("owner")}>{rv.propOwner||""}</span>;
@@ -9221,7 +9302,7 @@ function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit
   const [hint, setHint] = useState(() => predLagPlainEnglish(seedVal));
   return (
     <React.Fragment>
-      <input autoFocus className="ei"
+      <input {...NO_AUTOFILL} autoFocus className="ei"
         placeholder="e.g. 2, 3SS, 4FF+2d  ·  add 'cd' for calendar days"
         defaultValue={seedVal}
         onChange={e => setHint(predLagPlainEnglish(e.target.value))}
@@ -9277,7 +9358,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       if (col.t==="date") {
         const seedVal = editStartChar != null ? editStartChar : toShortDate(task[col.k]);
         return (
-          <input autoFocus className="ei" placeholder="M/D or M/D/YY"
+          <input {...NO_AUTOFILL} autoFocus className="ei" placeholder="M/D or M/D/YY"
             style={{textAlign:"center", fontSize:11}}
             defaultValue={seedVal}
             onBlur={e => commit(task.id, col.k, e.target.value)}
@@ -9298,7 +9379,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         const fw = (task.bold || cf?.bold) ? 700 : ls.fontWeight;
         const fs = (task.italic || cf?.italic) ? "italic" : "normal";
         return (
-          <input autoFocus className="ei"
+          <input {...NO_AUTOFILL} autoFocus className="ei"
             defaultValue={seedVal}
             style={{fontSize:ls.fontSize, fontWeight:fw, fontStyle:fs, paddingLeft:20+task.level*14}}
             onFocus={e => { if (editStartChar == null) e.target.select(); }}
@@ -9332,7 +9413,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
           commit={commit} commitAndAdvance={commitAndAdvance} setEdit={setEdit} tabStep={tabStep} />;
       }
       return (
-        <input autoFocus className="ei"
+        <input {...NO_AUTOFILL} autoFocus className="ei"
           placeholder={col.k==="duration" ? "e.g. 10d, 3w, 30cd, 2mo" : undefined}
           style={(col.k==="duration"||col.k==="percentComplete") ? {textAlign:"center", fontSize:11} : undefined}
           defaultValue={seedVal}
@@ -10388,11 +10469,11 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:12,alignItems:"end"}}>
           <div>
             <label style={lbl}>Body name</label>
-            <input value={b.name||""} placeholder="e.g. Baytown city council" onChange={e=>patch(b.id,{name:e.target.value})} style={{...inp,fontWeight:600}} />
+            <input {...NO_AUTOFILL} value={b.name||""} placeholder="e.g. Baytown city council" onChange={e=>patch(b.id,{name:e.target.value})} style={{...inp,fontWeight:600}} />
           </div>
           <div>
             <label style={lbl}>Jurisdiction</label>
-            <input value={b.jurisdiction||""} placeholder="e.g. Baytown, TX" onChange={e=>patch(b.id,{jurisdiction:e.target.value})} style={inp} />
+            <input {...NO_AUTOFILL} value={b.jurisdiction||""} placeholder="e.g. Baytown, TX" onChange={e=>patch(b.id,{jurisdiction:e.target.value})} style={inp} />
           </div>
           <button className="btn" onClick={()=>remove(b.id)} title="Remove this meeting body" style={{fontSize:11,padding:"5px 10px",color:"var(--danger,#d83a3a)"}}>Remove</button>
         </div>
@@ -10475,7 +10556,7 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
         </div>
         <div style={{display:"flex",gap:18,marginTop:10,alignItems:"flex-end",flexWrap:"wrap"}}>
           <div><label style={lbl}>Cutoff time</label>
-            <input value={b.cutoffTime||""} placeholder="12:00 PM" onChange={e=>patch(b.id,{cutoffTime:e.target.value})} style={{...inp,width:100}} /></div>
+            <input {...NO_AUTOFILL} value={b.cutoffTime||""} placeholder="12:00 PM" onChange={e=>patch(b.id,{cutoffTime:e.target.value})} style={{...inp,width:100}} /></div>
           <label style={{fontSize:11.5,color:"var(--txt)",display:"flex",alignItems:"center",gap:6,cursor:"pointer",paddingBottom:6}}>
             <input type="checkbox" checked={!!b.sameDayFilingAllowed} onChange={e=>patch(b.id,{sameDayFilingAllowed:e.target.checked})} /> Same-day filing OK
           </label>
@@ -10485,15 +10566,15 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <div>
             <label style={lbl}>Cancelled / blackout dates</label>
-            <input value={(b.blackoutDates||[]).join(", ")} placeholder="2026-12-22, 2026-12-29" title="Comma-separated YYYY-MM-DD" onChange={e=>patch(b.id,{blackoutDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
+            <input {...NO_AUTOFILL} value={(b.blackoutDates||[]).join(", ")} placeholder="2026-12-22, 2026-12-29" title="Comma-separated YYYY-MM-DD" onChange={e=>patch(b.id,{blackoutDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
           </div>
           <div>
             <label style={lbl}>Special-called / extra dates</label>
-            <input value={(b.extraDates||[]).join(", ")} placeholder="2026-08-18" title="Comma-separated YYYY-MM-DD" onChange={e=>patch(b.id,{extraDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
+            <input {...NO_AUTOFILL} value={(b.extraDates||[]).join(", ")} placeholder="2026-08-18" title="Comma-separated YYYY-MM-DD" onChange={e=>patch(b.id,{extraDates:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} style={inp} />
           </div>
           <div>
             <label style={lbl}>Published calendar URL</label>
-            <input value={b.sourceUrl||""} placeholder="https://…/agenda-calendar" onChange={e=>patch(b.id,{sourceUrl:e.target.value})} style={inp} />
+            <input {...NO_AUTOFILL} value={b.sourceUrl||""} placeholder="https://…/agenda-calendar" onChange={e=>patch(b.id,{sourceUrl:e.target.value})} style={inp} />
           </div>
           <div>
             <label style={lbl}>Verified on</label>
@@ -11476,7 +11557,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       case "name":
         return <td key={col.k} style={{...tdBase,cursor:"text"}} onClick={onCellClick} onDoubleClick={()=>setLocalEdit({id:t.id,projId:t.projId,col:"name"})}>
           {isE(t,"name")
-            ? <input autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? t.name}
+            ? <input {...NO_AUTOFILL} autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? t.name}
                 onBlur={e=>commit(t,"name",e.target.value)}
                 onKeyDown={e=>{if(e.key==="Enter")commit(t,"name",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
             : <span style={{color:"#1f2328",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",display:"block"}}>{t.name}</span>}
@@ -11489,7 +11570,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         // Parent durations roll up from children — locked, same as the project grid.
         return <td key={col.k} style={{...tdBase,cursor:t.isLeaf?"text":"default"}} onClick={onCellClick} onDoubleClick={()=>{ if (!t.isLeaf) return; setLocalEdit({id:t.id,projId:t.projId,col:"duration"}); }}>
           {isE(t,"duration")
-            ? <input autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? fmtTaskDuration(t)} onBlur={e=>commit(t,"duration",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"duration",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
+            ? <input {...NO_AUTOFILL} autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? fmtTaskDuration(t)} onBlur={e=>commit(t,"duration",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"duration",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
             : <span style={{color:"var(--mut)"}} title={durTooltip(t)||undefined}>{fmtTaskDuration(t)||"0d"}</span>}
         </td>;
       case "health":
@@ -11511,7 +11592,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       case "percentComplete":
         return <td key={col.k} style={{...tdBase,cursor:"text"}} onClick={onCellClick} onDoubleClick={()=>setLocalEdit({id:t.id,projId:t.projId,col:"percentComplete"})}>
           {isE(t,"percentComplete")
-            ? <input autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? (t.percentComplete||0)} onBlur={e=>commit(t,"percentComplete",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"percentComplete",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
+            ? <input {...NO_AUTOFILL} autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? (t.percentComplete||0)} onBlur={e=>commit(t,"percentComplete",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"percentComplete",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
             : <span style={{color:"var(--mut)"}}>{t.percentComplete||0}%</span>}
         </td>;
       case "responsibleParty":
@@ -12682,7 +12763,7 @@ const SegBtn = ({options,value,onChange,small}) => (
   </div>
 );
 const Field = ({value,onChange,placeholder}) => (
-  <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder||""}
+  <input {...NO_AUTOFILL} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder||""}
     style={{width:"100%",background:"var(--bg)",border:"1px solid var(--bd2)",borderRadius:3,
       padding:"3px 7px",fontSize:11,color:"var(--txt)",fontFamily:"inherit",outline:"none"}}
     onFocus={e=>e.target.style.borderColor="var(--blue)"}
@@ -13489,8 +13570,11 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
   // inside the JSON value; this tab remembers the rev it loaded or last wrote
   // (knownRev[k]) and refuses any auto-save once the cloud has moved past it.
   const knownRev = {};
+  const baseByKey = {};   // B864(b) — the doc THIS tab last loaded or saved (the 3-way merge ancestor)
   const staleSnapped = {};
   const revOf = (p) => (p && typeof p.__rev === "number") ? p.__rev : 0;
+  // mergeCloudDoc / _mStripRev / _deepClone are defined at module scope (B864(b)) so both this storage
+  // layer AND the App's reconcile listener share one implementation.
 
   const countTasks = (parsed) => {
     try {
@@ -13558,7 +13642,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
           return null;
         }
         const val = typeof data.value === "string" ? data.value : JSON.stringify(data.value);
-        try { knownRev[k] = revOf(typeof data.value === "string" ? JSON.parse(data.value) : data.value); } catch { knownRev[k] = 0; }
+        try { const p = typeof data.value === "string" ? JSON.parse(data.value) : data.value; knownRev[k] = revOf(p); baseByKey[k] = _mStripRev(_deepClone(p)); } catch { knownRev[k] = 0; }
         return { key: k, value: val };
       } catch { window.__planarCloudError = true; return null; }
     },
@@ -13590,11 +13674,40 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         // Layer 0: concurrency guard. Auto-saves only -- explicit actions
         // (restore/import/delete/recascade pass skipSanity) are intentional
         // overwrites and pass through, becoming the newest version.
-        if (isAuto && !skipSanity && cloudRev != null && cloudRev > (knownRev[k] || 0)) {  // treat an unknown base rev as 0 (seed/offline-fallback load never set knownRev) — matches checkRemote, so a stale tab can't silently overwrite newer cloud data
-          if (!staleSnapped[k]) { staleSnapped[k] = true; await _snapshot(k, parsed, "stale-block", v.length); }
-          console.error("[planar guard] Save blocked: cloud rev " + cloudRev + " is ahead of this tab (" + knownRev[k] + "). Reload to get the latest; your copy is saved as 'stale-block'.");
-          try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: k, cloudRev: cloudRev, knownRev: knownRev[k] } })); } catch {}
-          return null;
+        // B864(b) — the cloud moved ahead of this tab (a sibling wrote). The old behavior BLOCKED the save
+        // and forced a reload, which dropped THIS tab's edits from the cloud (and, when the loser was the
+        // tab that had a just-created meeting calendar, orphaned the binding). Now we 3-way MERGE our edits
+        // onto the newer cloud so BOTH survive; only if we lack a base ancestor do we fall back to blocking.
+        if (isAuto && !skipSanity && cloudRev != null && cloudRev > (knownRev[k] || 0)) {  // treat an unknown base rev as 0 (seed/offline-fallback load never set knownRev) — matches checkRemote
+          const base = baseByKey[k];
+          const preOurs = _mStripRev(_deepClone(parsed));   // this tab's doc as of save-start (the App reconcile ancestor)
+          if (base !== undefined && oldParsed && _mIsObj(parsed)) {
+            let merged;
+            try { merged = mergeCloudDoc(base, preOurs, _mStripRev(oldParsed)); } catch (e) { merged = null; }
+            if (merged && _mIsObj(merged)) {
+              // Snapshot the pre-merge doc so a bad merge is always recoverable, then continue with the merge.
+              await _snapshot(k, parsed, "premerge-ours", v.length);
+              staleSnapped[k] = false;
+              // The App must adopt the merged doc so its IN-MEMORY state converges with the cloud (else the
+              // next save, seeing the sibling's addition as a "delete" vs its new base, would drop it again).
+              // It reconciles the merge against its CURRENT state via mergeCloudDoc(preOurs, current, merged),
+              // so any edit made during this save's round-trip is preserved (preOurs is their common ancestor).
+              const mergedForApp = _deepClone(merged);
+              parsed = merged;   // fall through to Layer 2 + rev-stamp + write; oldParsed/cloudRev already read
+              console.info("[planar guard] Cloud rev " + cloudRev + " was ahead of this tab (" + (knownRev[k] || 0) + "); auto-merged our edits onto it (both copies in Version History).");
+              try { window.dispatchEvent(new CustomEvent("planar:merged", { detail: { key: k, cloudRev: cloudRev, knownRev: knownRev[k], base: preOurs, value: mergedForApp } })); } catch {}
+            } else {
+              if (!staleSnapped[k]) { staleSnapped[k] = true; await _snapshot(k, parsed, "stale-block", v.length); }
+              console.error("[planar guard] Save blocked (merge unavailable): cloud rev " + cloudRev + " is ahead of this tab (" + knownRev[k] + "). Reload to get the latest; your copy is saved as 'stale-block'.");
+              try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: k, cloudRev: cloudRev, knownRev: knownRev[k] } })); } catch {}
+              return null;
+            }
+          } else {
+            if (!staleSnapped[k]) { staleSnapped[k] = true; await _snapshot(k, parsed, "stale-block", v.length); }
+            console.error("[planar guard] Save blocked: cloud rev " + cloudRev + " is ahead of this tab (" + knownRev[k] + "). Reload to get the latest; your copy is saved as 'stale-block'.");
+            try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: k, cloudRev: cloudRev, knownRev: knownRev[k] } })); } catch {}
+            return null;
+          }
         }
 
         // Layer 2: pre-save sanity check (auto-saves only -- manual labels trusted)
@@ -13618,7 +13731,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         // Main upsert
         const { error } = await sb.from(TABLE).upsert({ key: k, value: parsed }, { onConflict: "key" });
         if (error) { console.error("Supabase set error:", error); return null; }
-        if (parsed && typeof parsed === "object") knownRev[k] = parsed.__rev;
+        if (parsed && typeof parsed === "object") { knownRev[k] = parsed.__rev; baseByKey[k] = _mStripRev(_deepClone(parsed)); }   // B864(b): the just-written doc is the new merge ancestor
         staleSnapped[k] = false;
 
         // Tell the UI a cloud write landed -- drives the green save pulse in the header
