@@ -1825,3 +1825,89 @@ describe("B835 — a pinned successor never moves OR blocks an upstream task's r
     expect(startOf(tasks, 81)).toBe("2026-07-13");                   // recompute ignores the fossil, re-derives from 80
   });
 });
+
+// B835 (recurrence ×2) — the EDIT-time cascade gate. updateTask only re-runs cascadeDates when the edit
+// TOUCHES a scheduling input. The pre-fix gate was an OR-list that omitted the B615 typed-duration
+// keys (durValue/durUnit) and the pin toggles (pinnedStart/pinnedEnd), so a typed duration edit or an
+// unpin/unlock updated the edited task's own end but NEVER cascaded — successors kept stale dates and
+// the stale value got persisted. This is the exact hs-v1 repro: task 82 "Remove Tract from City of
+// Baytown ETJ" (pinned 2027-01-15) had its duration changed and its FS successor 83 "Petition TCEQ for
+// District Creation" (and the whole 83→85→87→88 chain) never re-flowed.
+describe("B835 (×2) — touchesSchedule fires the cascade for EVERY scheduling-input mutation", () => {
+  it("returns true for each scheduling-input key (incl. the ones the old gate missed)", () => {
+    for (const k of ["start", "end", "duration", "durValue", "durUnit", "predecessors",
+                     "pinnedStart", "pinnedEnd", "meetingBound", "meetingBodyId",
+                     "pinnedMeetingDate", "minMeetingsAfter", "deadlineForTaskId"]) {
+      expect(E.touchesSchedule({ [k]: 1 })).toBe(true);
+    }
+  });
+  it("fires for the EXACT commit shapes that used to slip through", () => {
+    expect(E.touchesSchedule({ durValue: 45, durUnit: "cd" })).toBe(true);   // typed duration cell (index.html :8374 / master :11217)
+    expect(E.touchesSchedule({ durUnit: "d" })).toBe(true);
+    expect(E.touchesSchedule({ pinnedStart: false, predecessors: [] })).toBe(true); // unpin start (:9426)
+    expect(E.touchesSchedule({ pinnedEnd: false, durValue: 5, durUnit: "d" })).toBe(true); // unlock finish (:9427)
+  });
+  it("returns false for edits that can never move a date (so they still skip the cascade)", () => {
+    for (const u of [{ name: "x" }, { health: "green" }, { percentComplete: 50 }, { notes: [] },
+                     { rowColor: "#fff" }, { bold: true }, { focused: true }, { isExpanded: false },
+                     { responsibleParty: "Sam" }, { cost: 10 }]) {
+      expect(E.touchesSchedule(u)).toBe(false);
+    }
+  });
+  it("guards empty / nullish input", () => {
+    expect(E.touchesSchedule(undefined)).toBe(false);
+    expect(E.touchesSchedule(null)).toBe(false);
+    expect(E.touchesSchedule({})).toBe(false);
+  });
+});
+
+describe("B835 (×2) — once the gate fires, a typed-duration edit re-flows the whole FS successor chain (hs-v1 repro)", () => {
+  // The live fossil: 82 pinned 2027-01-15 @ 45 working days (end 2027-03-18); 83/85/87/88 still hold
+  // the dates they had when 82 was 45 CALENDAR days (end 2027-02-28). A cascade re-flows them.
+  const T2 = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 0, durValue: 0, durUnit: "d", predecessors: [], parentId: 81, ...o });
+  const chain = () => [
+    T2(81, { parentId: 80, name: "District Creation" }),
+    T2(82, { start: "2027-01-15", pinnedStart: true, durValue: 45, durUnit: "d", predecessors: [] }),
+    T2(83, { start: "2027-03-01", predecessors: [{ id: 82, type: "FS", lag: 0 }] }),                       // fossil
+    T2(85, { start: "2027-09-01", predecessors: [{ id: 83, type: "FS", lag: 130 }] }),                     // fossil
+    T2(87, { start: "2027-09-02", predecessors: [{ id: 85, type: "FS", lag: 0 }] }),                       // fossil
+    T2(88, { start: "2028-05-06", predecessors: [{ id: 87, type: "FS", lag: 78, lagUnit: "calendar" }] }), // fossil
+  ];
+  it("re-flows 83→85→87→88 to their predecessor-derived starts", () => {
+    const by = {};
+    E.rollupParentDates(E.cascadeDates(chain().map(t => ({ ...t })))).forEach(t => (by[t.id] = t));
+    expect(by[82].end).toBe("2027-03-18");   // 45 working days from the pinned 01-15 (unchanged anchor)
+    expect(by[83].start).toBe("2027-03-19");  // FS: next business day after Thu 03-18
+    expect(by[85].start).toBe("2027-09-22");  // FS +130 working days
+    expect(by[87].start).toBe("2027-09-23");  // FS: next business day
+    expect(by[88].start).toBe("2027-12-11");  // FS +78 CALENDAR days
+  });
+  it("a weekend-ending calendar-day task hands off to the next WORKING day (no skew) — FS from Sun 02-28", () => {
+    // Secondary check from the repro: when 82 is 45cd (end Sun 2027-02-28), 83's FS start must roll to Mon 03-01.
+    const cd = chain();
+    cd[1] = T2(82, { start: "2027-01-15", pinnedStart: true, durValue: 45, durUnit: "cd", predecessors: [] });
+    const by = {};
+    E.cascadeDates(cd.map(t => ({ ...t }))).forEach(t => (by[t.id] = t));
+    expect(by[82].end).toBe("2027-02-28");    // 45 calendar days lands on a Sunday
+    expect(by[83].start).toBe("2027-03-01");  // and the FS hand-off resolves to the next working day, not the weekend
+  });
+});
+
+describe("B835 (×2) — the touchesSchedule gate is wired into the real source + engine mirror (anti-drift)", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("touchesSchedule + SCHEDULE_INPUT_KEYS are defined in BOTH the app source and the engine mirror", () => {
+    expect(src).toContain("const touchesSchedule =");
+    expect(src).toContain("const SCHEDULE_INPUT_KEYS =");
+    expect(mjs).toContain("export const touchesSchedule =");
+    expect(mjs).toContain("export const SCHEDULE_INPUT_KEYS =");
+  });
+  it("both key-lists carry the keys the pre-fix gate omitted (durValue/durUnit/pinnedStart/pinnedEnd)", () => {
+    for (const s of [src, mjs]) for (const k of ["durValue", "durUnit", "pinnedStart", "pinnedEnd"]) {
+      expect(s).toContain(`'${k}'`);
+    }
+  });
+  it("updateTask's cascade gate uses touchesSchedule (not the old hand-maintained OR-list)", () => {
+    expect(src).toContain("if (touchesSchedule(updates)) {");
+  });
+});
