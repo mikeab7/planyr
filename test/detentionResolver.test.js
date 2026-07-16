@@ -36,14 +36,18 @@ function fakeFetch(routes) {
 }
 const COUNTY = "Texas_County_Boundaries", CITY = "Texas_City_Boundaries", ETJ = "HGAC_City_ETJ";
 const MUD = "TCEQ_Water_Districts", CHAN = "HCFCD/Channels", WS = "HCFCD/Watershed", FLOOD = "NFHL";
+const BKDD = "Brookshire_Katy"; // B861 — the drainage-district boundary source (added to every route set)
 
 // A Houston-area point (keeps the H-GAC ETJ source in etjSourcesForPoint's region).
 const LNG = -95.37, LAT = 29.76;
-const baseRoutes = ({ county = "Harris", city = null, etj = null, mud = [], extra = {} } = {}) => ({
+// `bkdd`: pass an array of features to place the site inside the district, or `"error"`
+// to simulate a boundary-source outage; the default [] is a clean "not in a district".
+const baseRoutes = ({ county = "Harris", city = null, etj = null, mud = [], bkdd = [], extra = {} } = {}) => ({
   [COUNTY]: () => (Array.isArray(county) ? county : [county]).map((n) => ({ attributes: { CNTY_NM: n } })),
   [CITY]: () => (city ? (Array.isArray(city) ? city : [city]).map((n) => ({ attributes: { city_name: n } })) : []),
   [ETJ]: () => (etj ? [{ attributes: { CITY: etj } }] : []),
   [MUD]: () => mud,
+  [BKDD]: () => { if (bkdd === "error") throw new Error("bkdd source down"); return bkdd; },
   ...extra,
 });
 const optsFor = (routes) => ({ cache: freshCache(), fetchJson: fakeFetch(routes) });
@@ -150,6 +154,33 @@ describe("resolveDrainageAuthority — jurisdiction + the QUERIED MUD layer", ()
     const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(routes));
     expect(out.mud.state).toBe("failed");
     expect(out.flags).not.toContain("mud-district-present");
+  });
+  // B861 (chat NEW-2) — the Brookshire–Katy DD tier: additive, per-source isolated, loud on outage.
+  it("inside BKDD → an ADDITIVE drainage-district overlay + flag (never a reviewer replacement)", async () => {
+    const routes = baseRoutes({ county: "Waller", bkdd: [{ attributes: { Name: "BROOKSHIRE-KATY DRAINAGE DISTRICT" } }] });
+    const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(routes));
+    expect(out.flags).toContain("bkdd-district-present");
+    const dd = out.overlays.find((o) => o.kind === "drainage-district");
+    expect(dd).toBeTruthy();
+    expect(dd.id).toBe("bkdd");
+    expect(dd.short.length).toBeLessThanOrEqual(110);
+    // Additive — the county still governs; the district never becomes the primary reviewer.
+    expect(out.primaryReviewer?.authorityId).toBe("waller");
+    expect(out.district.state).toBe("loaded");
+  });
+  it("outside BKDD → no district overlay, no flag (a clean 'not in a district')", async () => {
+    const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(baseRoutes({ county: "Harris" })));
+    expect(out.flags).not.toContain("bkdd-district-present");
+    expect(out.flags).not.toContain("bkdd-unverified");
+    expect(out.overlays.filter((o) => o.kind === "drainage-district")).toHaveLength(0);
+    expect(out.district.state).toBe("empty");
+  });
+  it("a FAILED BKDD boundary query flags 'bkdd-unverified' — an outage is never 'not in a district'", async () => {
+    const out = await resolveDrainageAuthority({ lng: LNG, lat: LAT }, optsFor(baseRoutes({ county: "Waller", bkdd: "error" })));
+    expect(out.district.state).toBe("failed");
+    expect(out.flags).toContain("bkdd-unverified");
+    expect(out.flags).not.toContain("bkdd-district-present");
+    expect(out.overlays.filter((o) => o.kind === "drainage-district")).toHaveLength(0);
   });
   it("a FAILED county lookup flags jurisdiction-unavailable — an outage is never 'no requirement'", async () => {
     const routes = baseRoutes({});

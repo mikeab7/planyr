@@ -22,6 +22,8 @@ import {
   DETENTION_AUTHORITY_CHOICES,
   slimDrainageContext,
   hydrateDrainageContext,
+  BKDD_OVERLAY_SHORT,
+  BKDD_OVERLAY_DETAIL,
 } from "../src/workspaces/site-planner/lib/detentionRules.js";
 
 describe("rule records — integrity sweep", () => {
@@ -30,7 +32,7 @@ describe("rule records — integrity sweep", () => {
       for (const r of recs) {
         expect(r.id, auth).toBeTruthy();
         expect(r.authority).toBe(auth);
-        expect(["rate", "tiered", "table-band", "policy-band", "overlay"]).toContain(r.ruleType);
+        expect(["rate", "tiered", "table-band", "policy-band", "overlay", "rate-match"]).toContain(r.ruleType);
         expect(r.effectiveDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
         expect(r.verifiedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
         expect(r.source?.name).toBeTruthy();
@@ -703,5 +705,44 @@ describe("B789 — the COH >20-ac branch county-gates its HCFCD compare", () => 
     expect(r.flags).toContain("hcfcd-not-applicable");
     expect(r.flags).toContain("impervious-unknown");
     expect(r.requiredAcFt).toBeCloseTo(0.75 * 109, 1);
+  });
+});
+
+describe("B861 (chat NEW-2) — Brookshire–Katy Drainage District (rate-match, additive)", () => {
+  it("the BKDD record is a rate-match kind with NO fabricated volumetric rate", () => {
+    const rule = ruleFor("bkdd");
+    expect(rule).toBeTruthy();
+    expect(rule.ruleType).toBe("rate-match");
+    expect(rule.params.criterion).toBe("post-le-pre");
+    expect(rule.params.noPublishedVolumetricRate).toBe(true);
+    // never invents an ac-ft/ac number anywhere in the record
+    expect(rule.params.rateAcFtPerAc).toBeUndefined();
+    expect(rule.params.bandAcFtPerAc).toBeUndefined();
+    expect(rule.params.designStorms).toEqual([2, 10, 100]);
+    expect(rule.params.permitValidDays).toBe(365);
+    expect(rule.secondarySource).toBe(true); // storm list + freeboard not verbatim-quoted
+  });
+  it("computeRequiredDetention(bkdd) returns rate-control unknown — never a number", () => {
+    const r = computeRequiredDetention({ acres: 40, impPct: 70, authorityId: "bkdd" });
+    expect(r.kind).toBe("unknown");
+    expect(r.requiredAcFt).toBeNull();
+    expect(r.bandAcFt).toBeNull();
+    expect(r.rateAcFtPerAc).toBeNull();
+    expect(r.flags).toContain("rate-match");
+    expect(r.basis).toMatch(/rate control/i);
+    expect(r.basis).toMatch(/HEC-HMS|hydrograph/i);
+  });
+  it("BKDD is EXCLUDED from the reviewing-authority picker (additive, not a county reviewer)", () => {
+    expect(DETENTION_AUTHORITY_CHOICES.some((c) => c.id === "bkdd")).toBe(false);
+    // but the real county reviewers are still there
+    expect(DETENTION_AUTHORITY_CHOICES.some((c) => c.id === "waller")).toBe(true);
+    expect(DETENTION_AUTHORITY_CHOICES.some((c) => c.id === "hcfcd")).toBe(true);
+  });
+  it("the overlay short is a one-line badge (≤110 chars); the detail carries the datum trap", () => {
+    expect(BKDD_OVERLAY_SHORT.length).toBeLessThanOrEqual(110);
+    expect(BKDD_OVERLAY_SHORT).toMatch(/rate-control/i);
+    expect(BKDD_OVERLAY_DETAIL).toMatch(/1988 NGVD/);
+    expect(BKDD_OVERLAY_DETAIL).toMatch(/additive/i);
+    expect(BKDD_OVERLAY_DETAIL).toMatch(/HEC-HMS/);
   });
 });

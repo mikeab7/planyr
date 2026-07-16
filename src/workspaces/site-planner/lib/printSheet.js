@@ -19,8 +19,14 @@
 // live plan SVG, inlines images, sizes the clone to `layout.plan`, serializes it, and
 // hands the string in as `planSvg`.
 
+import { bulletBarSvg } from "./yieldBar.js";
+
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const r2 = (n) => Number(Number(n).toFixed(2));
+// B862 (chat NEW-3) — the Stormwater bar strip's row geometry (shared by the layout
+// reservation + the renderer so the reserved height always fits what's drawn). PDF-PARITY.
+const SW_ROW_H = 30, SW_HEAD_H = 16;
+export const stormwaterBandH = (barCount) => (barCount > 0 ? SW_HEAD_H + barCount * SW_ROW_H : 0);
 // Integer with thousands separators, locale-independent (e.g. 250000 → "250,000").
 const commas = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
@@ -57,7 +63,7 @@ export function metricsRowsFor(pairsOrCount, bandW) {
   return Math.max(2, rows);
 }
 
-export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null } = {}) {
+export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null, stormwaterBars = 0 } = {}) {
   const page = pageSize(paper, orient);
   const M = 28; // ≈0.28 in border inset
   const inner = { x: M, y: M, w: page.w - 2 * M, h: page.h - 2 * M };
@@ -66,8 +72,10 @@ export function printSheetLayout({ paper = "letter", orient = "landscape", build
   // pairs — some very wide) instead of clipping a wrapped row into the note line.
   // Sized from the same flow estimate buildMetricsSvg draws with; a bare count
   // falls back to a coarse average. Two rows minimum = the historical 64 c-in.
+  // B862 — the Stormwater required-vs-provided bar strip (when present) reserves its own
+  // rows on top of the text pairs, so the band deepens instead of clipping.
   const metricRows = metricsRowsFor(metricsPairs || metricsCount, inner.w);
-  const metricsH = 18 + metricRows * 17 + 12;
+  const metricsH = 18 + metricRows * 17 + 12 + stormwaterBandH(stormwaterBars);
   const gap = 14;
   const contentTop = inner.y + titleH + gap;
   const contentBot = inner.y + inner.h - metricsH - gap;
@@ -135,10 +143,36 @@ export function buildBuildingTableSvg({ x, y, w, h, rows = [], pal = {} } = {}) 
   return s;
 }
 
+// ---- stormwater required-vs-provided bar strip (B862, chat NEW-3) --------
+// The SAME bullet-bar the on-screen Yield → Stormwater readout draws (via yieldBar.js),
+// so the export can't drift from the screen (PDF-PARITY). `bars`: [{ label, verdict,
+// status, layout, unit }]. Returns an SVG string anchored at (x,y); its height is
+// stormwaterBandH(bars.length).
+const SW_MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+export function buildStormwaterSvg({ x, y, w, bars = [], pal = {} } = {}) {
+  const ink = pal.ink || "#26231e";
+  const muted = pal.muted || "#8a8473";
+  if (!bars.length) return "";
+  const padX = 4;
+  const labelW = 168, verdictW = 118;
+  const barX = x + padX + labelW + verdictW;
+  const barW = Math.max(120, Math.min(340, x + w - padX - barX - 8));
+  let s = `<text x="${r2(x + padX)}" y="${r2(y + 11)}" font-size="10.5" font-weight="700" letter-spacing="0.6" fill="${muted}">STORMWATER — REQUIRED vs PROVIDED</text>`;
+  bars.forEach((b, i) => {
+    const ry = y + SW_HEAD_H + i * SW_ROW_H;
+    const midY = ry + 12;
+    s += `<text x="${r2(x + padX)}" y="${r2(midY)}" font-size="11.5" font-weight="700" fill="${ink}">${esc(b.label)}</text>`;
+    if (b.verdict != null) s += `<text x="${r2(x + padX + labelW)}" y="${r2(midY)}" font-size="11.5" font-weight="700" font-family="${SW_MONO}" font-variant-numeric="tabular-nums" fill="${ink}">${esc(b.verdict)}</text>`;
+    if (b.layout) s += bulletBarSvg(b.layout, { x: barX, y: ry, w: barW, barH: 12, status: b.status || null, unit: b.unit || "ac-ft", mono: SW_MONO }).svg;
+  });
+  return s;
+}
+
 // ---- metrics band --------------------------------------------------------
 // Flow `pairs` ([label, value]) left→right, wrapping within the band width; a
-// disclaimer note is appended on its own line at the bottom.
-function buildMetricsSvg({ x, y, w, h, pairs = [], note = "", pal = {} }) {
+// disclaimer note is appended on its own line at the bottom. The optional Stormwater
+// bar strip (B862) renders at the TOP of the band, above the text pairs.
+function buildMetricsSvg({ x, y, w, h, pairs = [], note = "", pal = {}, stormwater = [] }) {
   const ink = pal.ink || "#26231e";
   const muted = pal.muted || "#8a8473";
   const line = pal.panelLine || "#cfc6af";
@@ -146,8 +180,13 @@ function buildMetricsSvg({ x, y, w, h, pairs = [], note = "", pal = {} }) {
   const fs = 12.5;
   const lh = 17;
   let s = `<line x1="${r2(x)}" y1="${r2(y)}" x2="${r2(x + w)}" y2="${r2(y)}" stroke="${line}" stroke-width="1"/>`;
+  const swH = stormwaterBandH(stormwater.length);
+  if (swH) {
+    s += buildStormwaterSvg({ x, y: y + 6, w, bars: stormwater, pal });
+    s += `<line x1="${r2(x)}" y1="${r2(y + swH + 4)}" x2="${r2(x + w)}" y2="${r2(y + swH + 4)}" stroke="${line}" stroke-width="0.5"/>`;
+  }
   let cx = x + padX;
-  let cy = y + 18;
+  let cy = y + swH + 18;
   const colGap = 26;
   const maxX = x + w - padX;
   pairs.forEach(([k, v]) => {
@@ -174,6 +213,7 @@ export function buildPrintSheetSvg({
   date = "",
   brand = "Planyr · Site Planner",
   metrics = [],
+  stormwater = [],
   note = "",
   buildings = [],
   pal = {},
@@ -202,8 +242,8 @@ export function buildPrintSheetSvg({
   s += planSvg;
   // buildings table (right column)
   if (L.table && buildings.length) s += buildBuildingTableSvg({ ...L.table, rows: buildings, pal });
-  // metrics band
-  s += buildMetricsSvg({ ...L.metrics, pairs: metrics, note, pal });
+  // metrics band (+ the B862 stormwater required-vs-provided bar strip)
+  s += buildMetricsSvg({ ...L.metrics, pairs: metrics, note, pal, stormwater });
   s += `</svg>`;
   return s;
 }
