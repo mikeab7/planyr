@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clampToBounds, initialFloatPos, reconcileForNarrow, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../src/shared/ui/floatingPanel.js";
+import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTakeDock, dockAfterRelinquish, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../src/shared/ui/floatingPanel.js";
 
 // NEW-1 — pure geometry + docked-only decision for the poppable Site Planner panels.
 // A viewport rect the size of a typical map area; card smaller than it on both axes.
@@ -60,6 +60,35 @@ describe("reconcileForNarrow", () => {
   it("is a no-op (empty floating) when nothing is floating", () => {
     expect(reconcileForNarrow({ floatingIds: [], leftPanel: "yield" }))
       .toEqual({ leftPanel: "yield", floating: {} });
+  });
+});
+
+describe("shouldInspectorTakeDock (NEW-1 single-occupancy dock)", () => {
+  it("takes over the dock when the inspector opens on desktop and isn't already docked", () => {
+    expect(shouldInspectorTakeDock({ inspectorOpen: true, narrow: false, alreadyDocked: false })).toBe(true);
+  });
+  it("never takes over on narrow (B556: the ✎ pill opens a companion overlay, not a dock takeover)", () => {
+    expect(shouldInspectorTakeDock({ inspectorOpen: true, narrow: true, alreadyDocked: false })).toBe(false);
+  });
+  it("doesn't take over when the inspector isn't open (a plain click selects only — B750)", () => {
+    expect(shouldInspectorTakeDock({ inspectorOpen: false, narrow: false, alreadyDocked: false })).toBe(false);
+  });
+  it("is a no-op when the inspector already holds the dock", () => {
+    expect(shouldInspectorTakeDock({ inspectorOpen: true, narrow: false, alreadyDocked: true })).toBe(false);
+  });
+});
+
+describe("dockAfterRelinquish (NEW-1 restore-on-deselect/✕)", () => {
+  it("restores the memoized panel while the inspector holds the dock", () => {
+    expect(dockAfterRelinquish({ leftPanel: "properties", restore: "yield" })).toBe("yield");
+  });
+  it("closes the dock (null) when nothing was docked before the takeover", () => {
+    expect(dockAfterRelinquish({ leftPanel: "properties", restore: null })).toBe(null);
+    expect(dockAfterRelinquish({ leftPanel: "properties", restore: undefined })).toBe(null);
+  });
+  it("leaves a deliberately-switched panel untouched — the manual choice wins over the memo", () => {
+    expect(dockAfterRelinquish({ leftPanel: "analysis", restore: "yield" })).toBe("analysis");
+    expect(dockAfterRelinquish({ leftPanel: null, restore: "yield" })).toBe(null);
   });
 });
 

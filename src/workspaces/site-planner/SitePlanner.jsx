@@ -45,7 +45,7 @@ import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
 import FloatingPanel from "../../shared/ui/FloatingPanel.jsx";
-import { clampToBounds, initialFloatPos, reconcileForNarrow, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../../shared/ui/floatingPanel.js";
+import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTakeDock, dockAfterRelinquish, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../../shared/ui/floatingPanel.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
@@ -1263,6 +1263,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // marquee, shift-multi, programmatic, undo/redo — leaves the companion closed without touching the
   // ~70 setSel sites. Holds {kind,id} or the sentinel 'multi' (a styleable multi-selection).
   const [propsFor, setPropsFor] = useState(null);
+  // NEW-1 (single-occupancy left dock, amends B656/B733): when the element inspector OPENS on desktop
+  // (a double-click / the Properties tab — B750's explicit-open, NOT a plain click) it TAKES OVER the
+  // dock (leftPanel → "properties") instead of stacking above the open panel — the dock holds at most
+  // ONE panel. `dockMemo` remembers the panel the inspector replaced so closing it (deselect / ✕)
+  // restores it. Transient UI state (never persisted). To see the inspector AND another panel at once,
+  // detach one to a floating card (B717) — the only two-at-once path.
+  const [dockMemo, setDockMemo] = useState(null);         // null | { restore: <panelId|null> }
   useEffect(() => {
     let mq; try { mq = window.matchMedia(`(max-width: ${FLOAT_MIN_WIDTH}px)`); } catch (_) { return undefined; }
     const on = () => setNarrow(mq.matches);
@@ -1314,6 +1321,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Synced during render (idempotent; a passive effect would lag the same window).
   const selRef = useRef(sel); selRef.current = sel;
   const multiRef = useRef(multi); multiRef.current = multi;
+  // NEW-1: live mirrors read by the takeover / restore layout effects (whose deps intentionally
+  // EXCLUDE leftPanel/dockMemo so a deliberate manual rail switch can't re-trigger a takeover).
+  const leftPanelRef = useRef(leftPanel); leftPanelRef.current = leftPanel;
+  const dockMemoRef = useRef(dockMemo); dockMemoRef.current = dockMemo;
   const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
   const inMulti = (kind, id) => multi.some((m) => m.kind === kind && m.id === id);
   const refEq = (a, b) => a.kind === b.kind && a.id === b.id; // compares {kind,id} refs in the multi set (B569)
@@ -2708,6 +2719,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : (!!propsFor && !!sel && propsFor.kind === sel.kind && propsFor.id === sel.id);
     if (propsFor && !keep) { setPropsFor(null); setNarrowProps(false); }
   }, [sel, multi, propsFor, multiStyleable]);
+  // NEW-1 — single-occupancy left dock (desktop): when the inspector OPENS for the current selection
+  // (propsMatches — B750's explicit open: a double-click, or the Properties tab; a plain click still
+  // just selects) it TAKES OVER the dock (leftPanel → "properties"), memoizing whatever it replaced.
+  // When it closes (deselect / ✕ drops propsFor), the memoized panel is handed back. Two panels never
+  // stack — to keep another panel visible alongside the inspector, detach it to a floating card (B717).
+  // Runs in a LAYOUT effect so the dock swap lands before paint (no stacked-panel flash); B556 keeps
+  // narrow untouched (there the inspector is a companion overlay, never a dock takeover). Deps exclude
+  // leftPanel/dockMemo on purpose (read via refs) so a deliberate manual rail switch can't re-take.
+  useLayoutEffect(() => {
+    if (narrow) return;
+    if (shouldInspectorTakeDock({ inspectorOpen: propsMatches, narrow, alreadyDocked: leftPanelRef.current === "properties" })) {
+      setDockMemo({ restore: leftPanelRef.current }); // the panel we replace (id, or null = nothing docked)
+      setLeftPanel("properties");
+    } else if (!propsMatches) {
+      // inspector closed → hand the dock back to the memoized panel (dockAfterRelinquish no-ops if a
+      // deliberate manual switch already moved leftPanel off "properties", so the manual choice wins).
+      const memo = dockMemoRef.current;
+      if (memo) { setLeftPanel((p) => dockAfterRelinquish({ leftPanel: p, restore: memo.restore })); setDockMemo(null); }
+    }
+  }, [propsMatches, narrow]);
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
   // so a later manual visit opens with the normal all-collapsed overview.
@@ -2784,6 +2815,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [narrow, floating]);
   const dockPanel = useCallback((id) => {
     setFloating((f) => { const n = { ...f }; delete n[id]; return n; });
+    setDockMemo(null); // NEW-1: re-docking a floating panel is a deliberate choice — drop any takeover memo
     setLeftPanel(id); // ≤1 docked: whatever was docked simply closes
   }, []);
   const moveFloating = useCallback((id, pos) => {
@@ -9751,17 +9783,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     { id: "references", label: "References" }, // B654: Aerial + Overlay merged into one panel
     { id: "standards", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
   ];
-  // B656: the Properties companion coexists with the open panel — it renders whenever a
-  // qualifying selection exists. On a phone it stays closed unless a panel is already
-  // open (B556: tap = select only) or the ✎ Properties pill explicitly opened it.
-  // B750: on desktop the companion opens ONLY when Properties was explicitly opened for this selection
-  // (propsMatches) — a plain click selects without popping it. Phone is unchanged: the ✎ pill (narrowProps)
-  // or an already-open panel gates it there (B556: tap = select only).
-  const companionOpen = companionSel && (narrow ? (!!leftPanel || narrowProps) : propsMatches);
-  // B733 — the Properties tab is active. When it is, the inspector docks as the MAIN panel
-  // (full height + its own empty state), rather than riding above another panel as the B656
-  // companion does. Properties is dock-only (it reuses the companion, which is outside the
-  // B717 float system), so it's excluded from the PanelChrome detach path below.
+  // NEW-1 (single-occupancy left dock, amends B656/B733): on DESKTOP the inspector only ever renders
+  // as the docked "properties" panel — it takes over the dock on selection (the takeover layout effect
+  // above sets leftPanel), it never stacks above another open panel. So the desktop companion is open
+  // exactly when the Properties panel holds the dock with an inspectable selection. NARROW is unchanged
+  // (B556): a tap only selects; the companion opens over the panel via the ✎ pill (narrowProps) or when
+  // a panel is already open.
+  const companionOpen = companionSel && (narrow ? (!!leftPanel || narrowProps) : leftPanel === "properties");
+  // B733 — the Properties tab is active. When it is, the inspector docks as the MAIN panel (full height
+  // + its own empty state). Properties is dock-only (it reuses the companion, which is outside the B717
+  // float system), so it's excluded from the PanelChrome detach path below.
   const propsTab = leftPanel === "properties";
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
@@ -13430,6 +13461,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   // leave the freshly-opened tab headers-only). The tab renders via `propsTab && companionSel`,
                   // independent of the double-click `propsFor` marker, so it always shows the current selection.
                   if (tb.id === "properties") { setPropsCollapsed(false); }
+                  // NEW-1: a deliberate rail choice ends any active inspector takeover — the chosen
+                  // panel wins over the restore memo, so a later deselect won't yank it back.
+                  setDockMemo(null);
                   setLeftPanel((p) => (p === tb.id ? null : tb.id));
                 }}>
                 <span style={{ display: "grid", placeItems: "center", height: 18, lineHeight: 1 }}><RailIcon id={tb.id} /></span>
@@ -13442,26 +13476,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {(leftPanel || companionOpen) && (<>
           <div data-testid="left-menu-panel" style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
-          {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
-              so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).
-              With no panel open it takes the full column. */}
-          {/* B733: also render when the Properties tab is active (even if a prior ✕ dismissed the
-              companion) — the tab is an explicit request to see the inspector. When it's the active
-              tab the inspector is the MAIN panel (full height, no 45% cap, no bottom divider). */}
+          {/* NEW-1 (single-occupancy left dock): on DESKTOP the inspector is ALWAYS the docked
+              "properties" panel (full height) — it never stacks above another panel. The 45%-cap /
+              bottom-divider "rides above" layout survives ONLY on NARROW, where the companion still
+              shares the overlay column with an open panel (B556/B656). */}
           {(companionOpen || (propsTab && companionSel)) && (
-          <div data-testid="property-panel" style={{ flex: (leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (leftPanel && !propsTab) ? "1px solid var(--border-default)" : "none" }}>
+          <div data-testid="property-panel" style={{ flex: (narrow && leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (narrow && leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (narrow && leftPanel && !propsTab) ? "1px solid var(--border-default)" : "none" }}>
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
               {multiStyleable ? `${multi.length} selected` : <>Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` — ${l}` : ""; })()}</>}
             </span>
-            {/* B656 follow-up: explicit close. On the phone-pill overlay it just closes the overlay (element stays
-                selected, pill returns); everywhere else it dismisses the companion but KEEPS the element selected —
-                re-clicking the element (or picking another) reopens it via the [sel] effect above. */}
-            {/* B733: the ✕ dismisses the auto-companion — but in the Properties TAB it would do
-                nothing visible (the tab re-shows it), so hide it there; you close the tab from the rail. */}
-            {!propsTab && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); }}>✕</button>}
+            {/* Explicit close. The element STAYS selected — double-click it again to reopen. ✕ drops the
+                explicit-open marker (setPropsFor(null)); on DESKTOP that closes propsMatches, so the
+                takeover effect above hands the dock back to whatever panel the inspector replaced. On
+                NARROW it closes the ✎-pill overlay / drops the companion marker (as before). Shown on
+                desktop (the docked inspector) and the narrow companion; hidden only in the narrow
+                Properties TAB, where the rail is how you close it. */}
+            {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); }}>✕</button>}
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
