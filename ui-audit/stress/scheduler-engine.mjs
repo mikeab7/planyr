@@ -423,6 +423,10 @@ export const cascadeDates = (tasks, bodies = []) => {
     const t = map[id];
     const preds = t.predecessors.filter(p => map[p.id]);
     const bound = !!(t.meetingBound && bodyMap[t.meetingBodyId] && !parentIds.has(t.id) && !(t.pinnedEnd && t.end));
+    // B864 — bound to a calendar that no longer exists (a lost meeting body). PRESERVE the stored date
+    // (soft-pin, below) instead of reverting to a plain FS date, and flag it. VERBATIM mirror of index.html.
+    const bodyMissing = !!(t.meetingBound && !bodyMap[t.meetingBodyId] && !parentIds.has(t.id));
+    t.meetingBodyMissing = bodyMissing;
     // Locked FINISH (B616): the end is a FIXED POINT; the start back-calcs; the end never moves.
     if (t.pinnedEnd && t.end) {
       if (t.pinnedStart && t.start) {
@@ -444,7 +448,7 @@ export const cascadeDates = (tasks, bodies = []) => {
     const predEarly = preds.length
       ? preds.map(p => constrainedStartFrom(map[p.id], p, Math.max(1, t.duration || 1))).filter(Boolean).reduce((a,b)=>a>b?a:b, "")
       : "";
-    if (!preds.length || t.pinnedStart) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; }
+    if (!preds.length || t.pinnedStart || (bodyMissing && t.start)) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; }
     else {
       const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
       if (starts.length) t.start = starts.reduce((a,b) => a>b?a:b, starts[0]);
@@ -456,6 +460,8 @@ export const cascadeDates = (tasks, bodies = []) => {
         .reduce((a,b) => a>b?a:b, "");
       const minAfterDate = (t.minMeetingsAfter && map[t.minMeetingsAfter.taskId]) ? map[t.minMeetingsAfter.taskId].start : "";
       applyMeetingBinding(t, bodyMap[t.meetingBodyId], predEarly, drivingMeetingDate, minAfterDate);
+    } else if (bodyMissing) {
+      t.meetingInfeasible = false;   // B864: preserve the stored date + last-known deadline; clear the unverifiable alert
     } else if (t.meetingDeadline || t.meetingInfeasible) {
       t.meetingDeadline = ""; t.meetingInfeasible = false;
     }
@@ -525,6 +531,7 @@ export const detectCascadeDrift = (storedTasks, engineTasks) => {
   const out = [];
   (storedTasks || []).forEach(t => {
     if (t.pinnedStart || (t.pinnedEnd && t.end)) return;   // intentional pins are exempt
+    if (t.meetingBound || t.deadlineForTaskId != null) return;   // B864 — meeting-/deadline-derived dates aren't simple-cascade drift (like pins)
     if (parentIds.has(t.id)) return;                       // parents are rollup-derived, not cascade drift
     const e = eng[t.id];
     if (!e) return;
