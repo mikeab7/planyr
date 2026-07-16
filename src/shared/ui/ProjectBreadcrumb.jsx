@@ -31,6 +31,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import AnchoredMenu from "./AnchoredMenu.jsx";
+import { NO_AUTOFILL } from "./noAutofill.js";
 import {
   listProjects, filterProjects, relTime, warmProjectsIfEmpty,
   renameProject as storeRename, deleteProject as storeDelete,
@@ -320,6 +321,7 @@ export default function ProjectBreadcrumb({
         placement="below-left" width={304} gap={8} panelStyle={panel}>
         {/* Search */}
         <input
+          {...NO_AUTOFILL}
           autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -378,6 +380,7 @@ export default function ProjectBreadcrumb({
                 >
                   {editing ? (
                     <input
+                      {...NO_AUTOFILL}
                       autoFocus
                       value={editVal}
                       onChange={(e) => setEditVal(e.target.value)}

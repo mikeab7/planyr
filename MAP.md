@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-16 @ `22f0b9d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-16 @ `5d2484a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_254 source files mapped._
+_255 source files mapped._
 
 ## infra
 
@@ -192,6 +192,8 @@ _254 source files mapped._
   - _exports_: `default (ModuleLoader)`, `SHOW_DELAY_MS`
 - **`src/shared/ui/moduleLoaderTheme.js`** — Pure loader theming: resolves a module id to accent+skin-kind+caption (LOADER_SKINS), never-throw fallback, SHOW_DELAY_MS constant
   - _exports_: `LOADER_SKINS`, `resolveLoaderTheme`, `SHOW_DELAY_MS`
+- **`src/shared/ui/noAutofill.js`** — Shared NO_AUTOFILL attribute bag spread onto inline cell / free-text editors so password managers (1Password/LastPass/Bitwarden/Dashlane) don't inject an autofill card over them; never on auth forms (B865)
+  - _exports_: `default`, `NO_AUTOFILL`
 - **`src/shared/ui/PanelChrome.jsx`** — NEW-1/NEW-2 shared panel title bar for both docked + floating hosts: title + detach(PiP)/dock/close icons + double-click-to-toggle + optional drag handle
   - _exports_: `default (PanelChrome)`
 - **`src/shared/ui/persistedSet.js`** — Tiny localStorage Set-of-ids persistence (loadIdSet/saveIdSet/pruneSet) for remembered UI state like Library tree expansion; corrupt payloads read empty + clear
