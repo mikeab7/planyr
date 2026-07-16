@@ -230,8 +230,19 @@ export function requiredFfe(rule, inputs = {}, ctx = {}) {
     }
     if (best == null) {
       const listed = ffeRule.bases.filter((b) => baseApplies(b.when, ctx));
-      const needed = (listed.length ? listed : ffeRule.bases).map((b) => b.label || BASIS_COPY[b.basis] || b.basis).join("; ");
-      return { requiredFfeFt: null, basis: null, plusFt: null, governingBasis: null, losingBases: [], pendingBases, unknownReason: `no water-surface elevation available for any FFE basis — need one of: ${needed}` };
+      // NEW-3 — dedupe the "need one of" list by the underlying INPUT each basis reads, so two
+      // rows that measure from the same water surface (e.g. Waller's two 500-yr WSE bases) collapse
+      // to one line instead of demanding "500-yr WSE" twice. Names the input (BASIS_COPY), not the
+      // location-qualified label, since the input is what the user must supply.
+      const seen = new Set();
+      const neededList = [];
+      for (const b of (listed.length ? listed : ffeRule.bases)) {
+        const key = BASIS_INPUT[b.basis] || b.basis;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        neededList.push(BASIS_COPY[b.basis] || b.label || b.basis);
+      }
+      return { requiredFfeFt: null, basis: null, plusFt: null, governingBasis: null, losingBases: [], pendingBases, unknownReason: `no water-surface elevation available for any FFE basis — need one of: ${neededList.join("; ")}` };
     }
     return {
       requiredFfeFt: best.requiredFfeFt,
@@ -271,17 +282,69 @@ export function requiredFfe(rule, inputs = {}, ctx = {}) {
  * Pure. */
 export const OUTSIDE_FLOODPLAIN_FFE_NOTE =
   "No county FFE rule applies outside the mapped floodplain — drainage-criteria / pond-WSE checks may still govern; verify locally.";
-export function suggestedFfe({ rule = null, inputs = {}, ctx = {}, anyBuildingInTrigger = null, estimatedBases = [] } = {}) {
-  if (anyBuildingInTrigger === false) {
-    return { applies: false, note: OUTSIDE_FLOODPLAIN_FFE_NOTE, requiredFfeFt: null, governingBasis: null, losingBases: [], pendingBases: [], unknownReason: null, estimated: false };
+// NEW-4 — the site-based screening pad is EXPLICITLY not a rule. Its provenance copy must never
+// read as an ordinance minimum (the reviewing agency still sets the binding FFE).
+export const SITE_BASED_FFE_NOTE =
+  "Good-practice screening from your pond's design water surface — not an ordinance minimum; the reviewing agency sets the final FFE.";
+
+/* NEW-4 — the site-basis screening pad, used ONLY when no ordinance FFE rule binds the
+ * structure (e.g. every building outside the mapped floodplain). It is the MAX of:
+ *   • pond 100-yr / design WSE + governing freeboard (BKDD 1 ft where the district applies), and
+ *   • highest adjacent grade + a good-practice margin (seeded +1 ft, editable in Advanced).
+ * This mirrors BKDD's Design Report template (Lowest FFE vs Maximum Allowable pond WSE). An
+ * unanchored pond can't supply a design WSE — the basis reports UNAVAILABLE with the resolving
+ * action rather than a guess (LOUD-FAILURE). Pure. */
+export function siteBasisFfe({ pondDesignWseFt = null, pondFreeboardFt = 1, freeboardSource = null, hagFt = null, hagMarginFt = 1, pondAnchored = null, pondWseEstimated = false } = {}) {
+  const cands = [];
+  if (pondDesignWseFt != null && isFinite(pondDesignWseFt)) {
+    const fb = isFinite(pondFreeboardFt) ? pondFreeboardFt : 1;
+    cands.push({ key: "pond", ffe: pondDesignWseFt + fb, label: `pond design WSE + ${fb}′ freeboard${freeboardSource ? ` (${freeboardSource})` : ""}`, estimated: !!pondWseEstimated });
   }
+  if (hagFt != null && isFinite(hagFt)) {
+    const m = isFinite(hagMarginFt) ? hagMarginFt : 1;
+    cands.push({ key: "hag", ffe: hagFt + m, label: `highest adjacent grade + ${m}′ margin`, estimated: false });
+  }
+  if (!cands.length) {
+    return { requiredFfeFt: null, governingLabel: null, governingKey: null, losingBases: [], estimated: false, unavailableReason: pondAnchored === false ? "set the pond's top-of-bank elevation first — an unanchored pond has no design water surface to measure from" : "no pond design water surface or adjacent grade available yet" };
+  }
+  const best = cands.reduce((a, c) => (c.ffe > a.ffe ? c : a), cands[0]);
+  return { requiredFfeFt: Math.round(best.ffe * 100) / 100, governingLabel: best.label, governingKey: best.key, losingBases: cands.filter((c) => c !== best), estimated: !!best.estimated, unavailableReason: null };
+}
+
+export function suggestedFfe({ rule = null, inputs = {}, ctx = {}, anyBuildingInTrigger = null, estimatedBases = [], site = null } = {}) {
   const req = requiredFfe(rule, inputs, ctx);
   const estSet = new Set(estimatedBases || []);
+  const ordinanceBinds = anyBuildingInTrigger !== false && req.requiredFfeFt != null;
+  // The site basis is computed once and reused: it's the SUGGESTION when no ordinance binds, and
+  // demotes to the popover (`site`) when an ordinance rule governs. DEDUPE-FIRST — one derivation.
+  const sb = site ? siteBasisFfe(site) : null;
+  if (ordinanceBinds) {
+    return {
+      applies: true, note: null, basisKind: "ordinance", ...req,
+      estimated: estSet.has(req.governingBasis ? req.governingBasis.basis : req.basis),
+      site: sb, // demoted to the popover — the ordinance minimum supersedes
+    };
+  }
+  // NEW-4 — no ordinance requirement binds → the site-based screening tier (distinct provenance).
+  if (sb && sb.requiredFfeFt != null) {
+    return {
+      applies: true, basisKind: "site", note: SITE_BASED_FFE_NOTE,
+      requiredFfeFt: sb.requiredFfeFt, basis: "site", plusFt: null,
+      governingBasis: { basis: "site", label: sb.governingLabel },
+      losingBases: sb.losingBases, pendingBases: [], unknownReason: null,
+      estimated: sb.estimated, site: sb,
+    };
+  }
+  // Outside the floodplain but no usable site basis (e.g. unanchored pond) → the honest
+  // unavailable state carrying the resolving action, never a number.
+  if (anyBuildingInTrigger === false) {
+    return { applies: false, basisKind: "none", note: OUTSIDE_FLOODPLAIN_FFE_NOTE, requiredFfeFt: null, governingBasis: null, losingBases: [], pendingBases: [], unknownReason: sb ? sb.unavailableReason : null, estimated: false, site: sb };
+  }
+  // Inside the floodplain but the ordinance requirement isn't computable yet → the prior behavior
+  // (surface pending bases / unknown), with the site basis available in the popover.
   return {
-    applies: req.requiredFfeFt != null,
-    note: null,
-    ...req,
-    estimated: req.requiredFfeFt != null && estSet.has(req.governingBasis ? req.governingBasis.basis : req.basis),
+    applies: false, note: null, basisKind: "ordinance", ...req,
+    estimated: false, site: sb,
   };
 }
 
@@ -306,7 +369,24 @@ export function assessBuildability({
   zoneANoBfe = null,
   floodplainPresent = false,
   wetlandsPresent = false,
+  anyBuildingInTrigger = null, // NEW-3 — false ⇒ every building sits OUTSIDE the mapped floodplain
 } = {}) {
+  // NEW-3 — the outside-floodplain SHORT-CIRCUIT (mirrors suggestedFfe, closing the split-brain
+  // where the verdict/chip path kept demanding a WSE while the suggestion path already said
+  // "outside — no rule binds"). When every building is outside the mapped floodplain, no county
+  // FFE ordinance binds the structure, so we surface the quiet no-rule verdict instead of an
+  // input demand — never a "SET BFE" call to action, never a phantom "need one of …" list. The
+  // §A(9)-class pathway hard-stop copy is retained (it still governs structural fill). A
+  // null/undefined flag means "unknown" → evaluate normally (max-of stays conservative).
+  if (anyBuildingInTrigger === false) {
+    return {
+      ffe: { status: "no_rule", requiredFfeFt: null, basis: null, plusFt: null, governingBasis: null, pendingBases: [], shortByFt: null, unknownReason: null, outsideFloodplain: true, note: OUTSIDE_FLOODPLAIN_FFE_NOTE },
+      pathway: rule && rule.fillToElevate ? { fillToElevate: rule.fillToElevate, note: rule.pathwayNote } : null,
+      lomr: null, // no building in the 1% floodplain → no LOMR-F pathway note
+      wetlands404: floodplainPresent && wetlandsPresent ? { note: WETLANDS_404_NOTE } : null,
+      flags: rule && rule.verified === false ? ["rule_unverified"] : [],
+    };
+  }
   const req = requiredFfe(
     rule,
     { wse1pctFt, wse02Ft, atlas14Wse100Ft, preAtlas100Ft, zoneAEstBfeFt, siteBasisFt, hagFt },

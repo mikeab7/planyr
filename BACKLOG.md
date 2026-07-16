@@ -1439,6 +1439,83 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B866 — Detention verdict computed off gross while delta uses usable; fully-inundated crisis under-surfaced; chip vocabulary drift `[Site Planner]` (bug) #site-planner #yield #floodplain #pond  *(owner-dropped 2026-07-16 as "NEW-1"; minted **B866** via `npm run next-id -- --against-main`. Branch `claude/detention-verdict-delta-bugs-l3mm1l`. Regressing branch: B862 readout overhaul.)*
+`[ ]` **IMPLEMENTED this session; parks in ⏳ Verify (Verify: live — real-project-data repro (Tsakiris) + zoom-/data-density render class) → V349.** Repro (Tsakiris): the section bar plotted GROSS (38.84 ac-ft) against the required band → read "covered", while the delta read −33.82 (off usable 0.00) and the chip literally read "BAND".
+- Verify: live
+- Origin: filed 2026-07-16 from chat.
+- **ONE source of truth (usable):** `yieldBar.js stormwaterBarSpecs` — the band branch now computes the verdict/status/delta off `providedUsableCf` ONLY (never the gross fallback); the header (`SitePlanner.jsx`) band branch mirrors it — the CHIP carries STATUS (COVERED / SHORT / NEEDS INPUT), the requirement TYPE ("screening band") rides the value suffix, never the chip. Gross renders only as a de-emphasized dashed **reference tick** (`bulletBarLayout.refFrac` → `bulletBarMarks` → both `<BulletBar>` and `bulletBarSvg`, so screen == PDF).
+- **Fully-inundated crisis:** usable 0 with gross > 0 (flood WSE ≥ TOB) now forces the verdict SHORT (danger) and renders a LOUD inline warning row ("Flood WSE ≥ top of bank: usable detention is ZERO. Raise TOB (berm)") carrying the NEW-5 Apply chip; the usable bar is zero-length with the gross tick.
+- **Per-pond split-bar marker:** the flood-WSE marker sits at the usable/mit-candidate boundary (segments re-ordered dead→mit→usable, marker at the below-WSE cumulative) → with usable = 0 it pins to the RIGHT edge, not far left.
+- **Regime unknown:** states the CAUSE (no-published-bfe / bfe-datum / ground-missing) + the ONE resolving action (Enter BFE → / confirm datum / ↻ Re-check), never the naked label.
+- **Chip vocabulary** closed to status-only (COVERED / SHORT / NEEDS INPUT / UNKNOWN / RE-CHECK / CLEAR / NONE / STOP); "BAND" retired.
+- **DEDUPE-FIRST:** a defect in B862's just-shipped readout overhaul; not a recurrence (distinct bug in new code).
+- **Verified (sandbox):** `yieldBar.test.js` (+4: band off usable → SHORT with gross ref tick; unknown-usable band → hatched; point ref tick; retired-over). Full suite (4196) + lint 0 errors + build green; headless mount clean.
+- **⏳ V349 (live):** see VERIFICATION.md.
+
+### B867 — Stale fetch prices mitigation required at a hard 0.00 (silent-failure class) + dev-speak stale box swallowed the Reviewing-agency input `[Site Planner]` (bug — crash-severity class) #site-planner #yield #floodplain #gis  *(owner-dropped 2026-07-16 as "NEW-2"; minted **B867** via `npm run next-id -- --against-main`. Branch `claude/detention-verdict-delta-bugs-l3mm1l`. Regressing branch: B860/B862.)*
+`[ ]` **IMPLEMENTED this session; parks in ⏳ Verify (Verify: live — timing/race + GIS-endpoint + real-project-data) → V350.** Repro: a stale fetch (drawn area outgrew the fetched flood envelope) let `computeMitigation` price the enlarged fill against the OLD, too-small zones → a hard required 0.00 that read as a false all-clear (LOUD-FAILURE violation); an all-caps "ASSUMPTIONS — THE FETCH PREDATES THE DRAWN AREA" box wrapped the Reviewing-agency dropdown.
+- Verify: live
+- Origin: filed 2026-07-16 from chat.
+- **Stale never all-clears:** a new `drainLastGoodMitRef` captures the last NON-stale live compute; while `drainFetchStale`, the readout serves that last-known-good stamped `stale` (its data age still rides the header), or UNKNOWN-pending (`stalePending`) if none exists — never a fresh hard 0. The real-0-vs-UNKNOWN rule now applies only to CURRENT geometry; on the next fetch the flag clears and the verdict flashes (existing behavior). The mit verdict honors `mitStale`/`mitStalePending`.
+- **One place for stale:** the `assumptionsBlock` header no longer morphs into the dev-speak "the fetch predates the drawn area" banner and no longer demotes to a dashed border — it's a plain "Assumptions — correct if needed" INPUTS group (the reviewing-agency selector is no longer trapped in a notice container). Fetch staleness surfaces in EXACTLY one place: the status line.
+- **OVER-DUG retired:** the chip / balance line / bar status / print pair all read COVERED for an over-provided cut (a zero-requirement surplus must never out-shout a real shortfall); the surplus note demotes to a quiet method fold.
+- **req-0 quiet state:** no fill in the trigger floodplain → chip COVERED (muted), "nothing to offset".
+- **DEDUPE-FIRST:** extends B860's fetch/recompute split (the `fetchStaleForEdit` signal now reaches the pricing path); not a recurrence.
+- **Verified (sandbox):** `yieldBar.test.js` (over → covered; shortfall stays loud). Full suite (4196) + lint 0 errors + build green; headless mount clean.
+- **⏳ V350 (live):** see VERIFICATION.md.
+
+### B868 — Buildability regression: outside-floodplain suppression lost, stale "SET BFE" chip, duplicate-basis copy `[Site Planner]` (bug) #site-planner #yield #floodplain #entitlements  *(owner-dropped 2026-07-16 as "NEW-3"; minted **B868** via `npm run next-id -- --against-main`. Branch `claude/detention-verdict-delta-bugs-l3mm1l`. Regressing branch: B862.)*
+`[ ]` **IMPLEMENTED this session; parks in ⏳ Verify (Verify: live — real-project-data repro (Tsakiris) + drag-into/out-of-zone directions) → V351.** Repro: buildings outside the mapped floodplain, yet Buildability demanded "need one of: 500-yr WSE …" and the chip read SET BFE (BFE already entered, and BFE isn't even a basis of the Waller record).
+- Verify: live
+- Origin: filed 2026-07-16 from chat.
+- **Fix:** `assessBuildability` gained an `anyBuildingInTrigger` param (call site passes `fmAnyBuildingInTrigger`) and short-circuits to the quiet `no_rule` verdict (`outsideFloodplain:true`, OUTSIDE_FLOODPLAIN note, no pendingBases, no unknownReason) when every building is outside — mirroring `suggestedFfe`, closing the split-brain. The header FFE chip gained a `no_rule` branch (neutral "NO RULE" / "outside floodplain", never "SET BFE"); the detail row + print sheet show the outside note. §A(9) pathway hard-stop copy retained.
+- **Basis-list dedupe:** `requiredFfe`'s "need one of" list dedupes by the underlying INPUT (Waller's two 500-yr-WSE bases → one line), naming the input via BASIS_COPY.
+- **Directions:** a building dragged INTO the zone flips to live basis evaluation on auto-recompute; dragged OUT returns to the quiet state (both need the live check).
+- **DEDUPE-FIRST:** a defect in B857/B862; not a recurrence.
+- **Verified (sandbox):** `buildability.test.js` (+3: outside short-circuit, unknown-location still evaluates, 500-yr dedupe once). Full suite (4196) + lint 0 errors + build green.
+- **⏳ V351 (live):** see VERIFICATION.md.
+
+### B869 — Site-based suggested FFE when no ordinance rule binds (pond WSE + HAG bases) `[Site Planner]` (feature) #site-planner #yield #floodplain #entitlements #pond  *(owner-dropped 2026-07-16 as "NEW-4"; minted **B869** via `npm run next-id -- --against-main`. Branch `claude/detention-verdict-delta-bugs-l3mm1l`.)*
+`[ ]` **IMPLEMENTED this session; parks in ⏳ Verify (Verify: live — real-project-data (Tsakiris pond WSE) + accept-then-reprice) → V352.** A developer outside the mapped floodplain still needs a defensible screening pad; BKDD's Design Report compares "Lowest FFE" vs "Maximum Allowable pond WSE".
+- Verify: live
+- Origin: filed 2026-07-16 from chat.
+- **New tier:** `buildability.js` `siteBasisFfe` + `suggestedFfe`'s `site` param — used ONLY when no ordinance ffeRule binds: MAX of (pond design WSE + governing freeboard, BKDD 1-ft where the district applies, labeled) and (HAG + good-practice margin, seeded +1 ft, `fmSettings.siteFfeMarginFt`). Distinct provenance: chip **SITE-BASED**, note "good-practice screening from your pond's design water surface — not an ordinance minimum; the reviewing agency sets the final FFE" (`SITE_BASED_FFE_NOTE`); `basisKind:"site"`.
+- **Wiring:** the caller derives the site's most conservative pond design WSE (TOB − pond freeboard) across `pondLedgerEntries` (auto-anchored TOB stamps ESTIMATED) + the BKDD flag + the HAG proxy. Accept-gated into Pad/FFE via the existing `padSrc:"suggested-accepted"` flow; feeds the fill ledger on accept.
+- **Edge cases:** unanchored pond → basis UNAVAILABLE with the "set top-of-bank" action (never a guess); ESTIMATED pond WSE propagates the stamp; an ordinance rule that later binds supersedes and the site basis demotes to the popover (`sf.site`).
+- **DEDUPE-FIRST:** the `basis:"site"` seam is built once, reused by the ordinance-supersede demotion; extends B857's suggestedFfe.
+- **Verified (sandbox):** `buildability.test.js` (+7: max-of, HAG governs, unanchored unavailable, estimated stamp, site tier when outside, ordinance supersedes, outside+unanchored). Full suite (4196) + lint 0 errors + build green.
+- **⏳ V352 (live):** see VERIFICATION.md.
+
+### B870 — Sizing-assistant suggestions become one-click applicable (apply-gated, preview, atomic undo — never silent auto) `[Site Planner]` (feature) #site-planner #yield #pond #floodplain  *(owner-dropped 2026-07-16 as "NEW-5"; minted **B870** via `npm run next-id -- --against-main`. Branch `claude/detention-verdict-delta-bugs-l3mm1l`.)*
+`[ ]` **IMPLEMENTED this session; parks in ⏳ Verify (Verify: live — real-project-data + apply→recompute→undo round-trip) → V353.** Assistant remedies were prose; the user had to hand-edit fields to act.
+- Verify: live
+- Origin: filed 2026-07-16 from chat.
+- **Apply on every remedy:** the per-pond sizing-assistant `raise-tob` / `deepen` / `grow` actions each render an **Apply** chip with a compact preview diff on hover (TOB → · berm ft above grade · usable → · mitigation req + · post-berm per B871, never pre-berm). One click writes the real element fields through the normal element-sync path (`setDet` = `pushHistory` + `setSelEl`, full-object, null-never-undefined) → auto-recompute re-runs → changed rows flash. **Applies ride the undo stack as ONE atomic step** (one Ctrl+Z reverts).
+- **Apply-gated, never auto** (locked design decision): remedies are choices with different land/cost consequences. Multiple remedies render side-by-side as alternative Apply chips.
+- **Collision / infeasible:** grow collision-checks (B709 `ringsOverlap` + property line) and renders the Apply DISABLED with the reason on a hit; solver-infeasible (`pinch-off`) renders no Apply, only the geometric-ceiling explanation.
+- **The fully-inundated crisis Apply** (B866 warning row) is a site-level joint TOB raise (`fmInundatedBermApply`) that closes the detention deficit across the inundated ponds, written atomically through `applyBermMove`.
+- **KNOWN GAP (live-verify refinement):** the grow remedy commits directly (collision-checked + atomically undoable) rather than showing a live *hover-ghost* of the new ring on the map — the map-ghost overlay is a follow-up; the atomic undo is the safety net. Flagged in V353.
+- **DEDUPE-FIRST:** generalizes the B830 berm-move `applyBermMove` apply primitive to the pondSizing actions; not a recurrence.
+- **Verified (sandbox):** build green (the apply writes reuse the tested `setDet`/`applyBermMove`/`scaleRing` paths); the apply→recompute→undo round-trip is the live check. Full suite (4196) + lint 0 errors.
+- **⏳ V353 (live):** see VERIFICATION.md.
+
+### B871 — Berm materialization: an applied TOB raise becomes modeled dirt with full downstream propagation `[Site Planner]` (feature) #site-planner #yield #pond #floodplain #grading  *(owner-dropped 2026-07-16 as "NEW-6"; minted **B871** via `npm run next-id -- --against-main`. Branch `claude/detention-verdict-delta-bugs-l3mm1l`.)*
+`[ ]` **IMPLEMENTED this session; parks in ⏳ Verify (Verify: live — real-project-data (Tsakiris 144–159′ reach) + apply→heat-map/ledger/label round-trip + undo) → V354.** A TOB above grade was a number with no dirt behind it.
+- Verify: live
+- Origin: filed 2026-07-16 from chat.
+- **Per-cell materialization:** new `pondGeom.bermFillCells(ring, det, { gradeAt, wseFt, ratio, triggerClassAt, fpId })` — crest at TOB, outer face at the pond side slopes, height = TOB − LOCAL grade PER-CELL off the 3DEP grid (tall on the low side, absent on the high side). Returns cells + heatCells + volCf + floodCf + toe ring + landTakeSf + maxHeight + crest. Below-WSE, in-trigger cells are the compensating-fill contribution.
+- **Propagation** (SitePlanner `pondBerms` rewritten to consume it, per-cell when a grade sampler exists, else the median constant):
+  - (a) **mitigation ledger** — the below-WSE berm prism joins the fill set and raises the requirement (`pondBermFloodCf`, already folded via `addCf`); intersect acreage bumps so a berm-only intersect never mis-reads "no fill"; the existing berm-as-fill fixed-point feeds NEW-5's preview.
+  - (b) **fill-depth heat map** — the below-WSE berm cells join `fmResultView.cells` (engine-truth: Σ cells × ratio == the ledger contribution, unit-tested).
+  - (c) **land take** — the fill-berm toe ring joins the maintenance-berm ring in the pond inspector's true land take (the greater reach governs); collision checks extend to it.
+  - (d) **earthwork** — berm fill CY (`pondBermFillCf`) joins the ledger, netted against basin cut, with "berm can be built from basin spoil — haul math is your engineer's".
+  - (e) **pond inspector/label** — berm height + crest elevation shown; the banded diagram's TOB line moves with the applied TOB.
+  - (f) **rules copy** — in-trigger berms keep the berm-as-fill warning + the Waller note (1:1 offset · §A(9)) + the conveyance caution (a ring levee can block flow — engineer's check).
+- **Edge cases:** TOB at/below grade → no berm (dormant, never a zero-height ring polluting ledgers); partial in-trigger berms price only in-trigger cells; the NEW-5 TOB remedy on an unanchored pond is gated (the assistant refuses without an anchor).
+- **DEDUPE-FIRST:** extends B833 (the berm-as-fill mitigation contribution) with per-cell height + heat-map cells + land take; not a recurrence.
+- **Verified (sandbox):** `pondGeom.bands.test.js` (+6: cells+volume+toe+land-take; dormant at/below grade; heat-cell tie-out Σ==floodCf; no-trigger → earthwork-only; per-cell height varies; degenerate → null). Full suite (4196) + lint 0 errors + build green.
+- **⏳ V354 (live):** see VERIFICATION.md.
+
 ### B865 — Suppress password-manager autofill on inline grid editors `[Scheduler]` (bug) #scheduler #ui  *(owner-dropped 2026-07-16 as "NEW-1"; minted **B865** via `npm run next-id -- --against-main`. Branch `claude/suppress-autofill-grid-editors-m9n0a0`.)*
 `[ ]` **IMPLEMENTED this session; parks in ⏳ Verify (Verify: live — extension-injected UI can't be reproduced in the Claude Code sandbox) → V348.** Repro: with the 1Password browser extension installed, clicking into a date cell in the Gantt grid and typing makes 1Password inject its inline icon + pop an identity-autofill card ("Michael Butler") over the cell and the rows below it.
 - Verify: live
