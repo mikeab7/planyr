@@ -1911,3 +1911,71 @@ describe("B835 (×2) — the touchesSchedule gate is wired into the real source 
     expect(src).toContain("if (touchesSchedule(updates)) {");
   });
 });
+
+// B864 — a task bound to a meeting calendar that no longer exists (a lost meeting body — the multi-writer
+// clobber that orphaned hs-v1's election binding). cascadeDates must PRESERVE the stored meeting date
+// instead of silently reverting it to a plain FS date, and flag it; detectCascadeDrift must exempt
+// meeting-bound + deadline rows (their dates are derived by a different mechanism, like pins).
+describe("B864 — orphaned meeting binding: preserve the date + flag it, never revert to FS", () => {
+  const body = { id: "mb_e", name: "Elections", recurrence: [{ freq: "monthly", weekday: 6, setpos: [1], months: [5] }], agendaLead: { type: "offset", n: 10, unit: "business" } };
+  const base = () => [
+    T(1, { start: "2026-01-05", end: "2026-01-09", pinnedStart: true, durValue: 5, durUnit: "d" }),
+    T(2, { start: "2027-05-01", duration: 0, durValue: 0, durUnit: "d", meetingBound: true, meetingBodyId: "mb_e", predecessors: [{ id: 1, type: "FS", lag: 0 }] }),
+  ];
+
+  it("with the calendar MISSING, the bound task holds its stored date and is flagged meetingBodyMissing", () => {
+    const by = {};
+    E.cascadeDates(base(), []).forEach(t => (by[t.id] = t));   // no bodies passed → body missing
+    expect(by[2].start).toBe("2027-05-01");        // preserved, NOT the FS date its predecessor implies
+    expect(by[2].meetingBodyMissing).toBe(true);
+    expect(by[2].meetingInfeasible).toBe(false);   // unverifiable alert cleared
+  });
+
+  it("proves preservation is real: unbinding the SAME task reverts it to the plain FS date", () => {
+    const unbound = base().map(t => t.id === 2 ? { ...t, meetingBound: false, meetingBodyId: undefined } : t);
+    const by = {};
+    E.cascadeDates(unbound, []).forEach(t => (by[t.id] = t));
+    expect(by[2].start).not.toBe("2027-05-01");     // a plain FS task DOES move off the stored date
+    expect(by[2].start).toBe("2026-01-12");         // FS: next business day after the predecessor's 2026-01-09 end
+  });
+
+  it("with the calendar PRESENT, the task snaps to the meeting date and the flag clears", () => {
+    const by = {};
+    E.cascadeDates(base(), [body]).forEach(t => (by[t.id] = t));
+    expect(by[2].start).toBe("2026-05-02");         // 1st Saturday of May 2026 on/after packet-ready
+    expect(by[2].meetingBodyMissing).toBe(false);
+  });
+
+  it("detectCascadeDrift EXEMPTS a meeting-bound task even when stored != engine (a legitimate re-snap)", () => {
+    const stored = base();                          // task 2 stored 2027-05-01
+    const engine = E.cascadeDates(base(), [body]);  // engine snaps it to 2026-05-02
+    expect(engine.find(t => t.id === 2).start).toBe("2026-05-02");   // they genuinely differ
+    expect(E.detectCascadeDrift(stored, engine).some(d => d.id === 2)).toBe(false);
+  });
+
+  it("detectCascadeDrift EXEMPTS a deadline row (deadlineForTaskId) too", () => {
+    const stored = [T(3, { start: "2027-01-01", deadlineForTaskId: 9, predecessors: [] })];
+    const engine = [{ ...stored[0], start: "2026-01-01" }];
+    expect(E.detectCascadeDrift(stored, engine)).toEqual([]);
+  });
+});
+
+describe("B864 — the orphaned-binding hardening exists in BOTH the app source and the engine mirror (anti-drift)", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("cascadeDates computes bodyMissing and soft-pins the start in both files", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toContain("const bodyMissing = !!(t.meetingBound && !bodyMap[t.meetingBodyId] && !parentIds.has(t.id));");
+      expect(s).toContain("t.pinnedStart || (bodyMissing && t.start)");
+    }
+  });
+  it("detectCascadeDrift exempts meeting-bound + deadline rows in both files", () => {
+    for (const s of [src, mjs]) {
+      expect(s).toContain("if (t.meetingBound || t.deadlineForTaskId != null) return;");
+    }
+  });
+  it("the row surfaces a missing-calendar badge (LOUD-FAILURE) in the app source", () => {
+    expect(src).toContain("task.meetingBound && !MEETING_BODY_INDEX[task.meetingBodyId]");
+    expect(src).toContain("Bound to a meeting calendar that no longer exists");
+  });
+});
