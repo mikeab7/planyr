@@ -541,6 +541,68 @@ export const detectCascadeDrift = (storedTasks, engineTasks) => {
   return out;
 };
 
+// B864(b) — pure 3-way merge for the cloud whole-document save (VERBATIM mirror of public/sequence/index.html).
+// The Scheduler cloud-saves the ENTIRE document last-write-wins; its rev-gate only BLOCKS a stale tab (and
+// snapshots the loser to history), so a sibling tab's independent addition — e.g. a just-created meeting
+// calendar — is lost when the other tab wins (the multi-writer clobber that orphaned hs-v1's election
+// binding, B864). Instead of blocking, we REBASE our changes onto the newer cloud doc:
+//   base   = the doc THIS tab last loaded or saved (the common ancestor)
+//   ours   = this tab's current doc (base + our edits)
+//   theirs = the newer cloud doc a sibling wrote (base + their edits)
+// Rules, applied recursively on plain objects: a side unchanged vs base yields to the side that changed;
+// a per-key add on either side survives; a delete on one side is honored only if the other side left that
+// key untouched; a genuine both-changed conflict on the same leaf/array prefers OURS (the actively-edited
+// tab), with the losing copy still recoverable from Version History. Pure + deterministic.
+export const _mIsObj = v => !!v && typeof v === "object" && !Array.isArray(v);
+export const _mEq = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch { return a === b; } };
+export const _mStripRev = o => { if (_mIsObj(o)) { const { __rev, ...rest } = o; return rest; } return o; };
+// Arrays of id-bearing objects (tasks, meetingBodies, contacts, customHealth…) are keyed collections, not
+// ordered scalars — so both tabs editing DIFFERENT elements of the same array must merge per element, keyed
+// by id, not "whole array, active tab wins" (which was silently dropping a sibling's binding). Order follows
+// OURS for shared/our elements; a sibling's brand-new element is appended (load re-derives visual order).
+const _mIdArr = a => Array.isArray(a) && a.length > 0 && a.every(e => _mIsObj(e) && "id" in e);
+export const mergeCloudDoc = (base, ours, theirs) => {
+  if (_mEq(ours, theirs)) return theirs;
+  if (_mEq(ours, base)) return theirs;    // we changed nothing vs base → take the newer cloud
+  if (_mEq(theirs, base)) return ours;    // cloud unchanged vs base → our doc IS the update
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  if (Array.isArray(ours) && Array.isArray(theirs)) {
+    if (!_mIdArr(ours) || !_mIdArr(theirs)) return ours;   // scalar/mixed array both changed → active tab wins
+    const bArr = Array.isArray(base) ? base : [];
+    const byId = arr => { const m = new Map(); arr.forEach(e => { if (!m.has(e.id)) m.set(e.id, e); }); return m; };
+    const bM = byId(bArr), tM = byId(theirs), oSeen = new Set();
+    const out = [];
+    for (const e of ours) {                // keep OUR order for shared/our-only elements
+      if (oSeen.has(e.id)) continue; oSeen.add(e.id);
+      const inT = tM.has(e.id), inB = bM.has(e.id);
+      if (inT) out.push(mergeCloudDoc(inB ? bM.get(e.id) : undefined, e, tM.get(e.id)));
+      else if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);   // their delete honored only if we left it as-base
+    }
+    for (const e of theirs) {              // append a sibling's brand-new / changed elements (their adds survive)
+      if (oSeen.has(e.id)) continue;
+      const inB = bM.has(e.id);
+      if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);        // our delete honored only if they left it as-base
+    }
+    return out;
+  }
+  if (!_mIsObj(ours) || !_mIsObj(theirs)) return ours;   // scalar both changed → active tab wins
+  const b = _mIsObj(base) ? base : {};
+  const out = {};
+  for (const k of new Set([...Object.keys(ours), ...Object.keys(theirs)])) {
+    const inO = has(ours, k), inT = has(theirs, k), inB = has(b, k);
+    if (inO && inT) { out[k] = mergeCloudDoc(b[k], ours[k], theirs[k]); continue; }
+    if (inO && !inT) {                    // theirs lacks k: their delete (if we left it as-base) else our add/change
+      if (!(inB && _mEq(ours[k], b[k]))) out[k] = ours[k];
+      continue;
+    }
+    if (!inO && inT) {                     // ours lacks k: our delete (if they left it as-base) else their add/change
+      if (!(inB && _mEq(theirs[k], b[k]))) out[k] = theirs[k];   // preserves a sibling's just-added calendar
+      continue;
+    }
+  }
+  return out;
+};
+
 // B835 (recurrence ×2) — the scheduling-input gate updateTask uses to decide whether an edit must re-run
 // cascadeDates + rollupParentDates before persist. VERBATIM mirror of public/sequence/index.html.
 // A typed duration edit commits {durValue,durUnit} (grid + master-view cells) and an unpin/unlock
