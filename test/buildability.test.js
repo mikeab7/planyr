@@ -9,7 +9,9 @@ import {
   requiredFfe,
   assessBuildability,
   suggestedFfe,
+  siteBasisFfe,
   OUTSIDE_FLOODPLAIN_FFE_NOTE,
+  SITE_BASED_FFE_NOTE,
   LOMR_NOTE,
   WETLANDS_404_NOTE,
 } from "../src/workspaces/site-planner/lib/buildability.js";
@@ -311,5 +313,77 @@ describe("NEW-3 — suggestedFfe", () => {
     const s2 = suggestedFfe({ rule: fb, inputs: { wse1pctFt: 200 }, anyBuildingInTrigger: true, estimatedBases: ["wse1pct"] });
     expect(s2.governingBasis.basis).toBe("wse1pct");
     expect(s2.estimated).toBe(true);
+  });
+});
+
+describe("NEW-3 — assessBuildability outside-floodplain suppression", () => {
+  const waller = DEFAULT_BUILDABILITY_RULES.waller;
+  it("buildings OUTSIDE the mapped floodplain short-circuit to the quiet no-rule verdict (no SET BFE, no input demand)", () => {
+    const b = assessBuildability({ rule: waller, padFfeFt: 153.1, anyBuildingInTrigger: false, floodplainPresent: false });
+    expect(b.ffe.status).toBe("no_rule");
+    expect(b.ffe.outsideFloodplain).toBe(true);
+    expect(b.ffe.requiredFfeFt).toBeNull();
+    expect(b.ffe.pendingBases).toEqual([]); // never demands an input outside the floodplain
+    expect(b.ffe.unknownReason).toBeNull(); // no "need one of …" list
+    expect(b.pathway).not.toBeNull(); // §A(9) hard-stop pathway copy is retained
+    expect(b.lomr).toBeNull(); // no building in the 1% → no LOMR-F note
+  });
+  it("unknown location (null) still evaluates the rule — conservative, not suppressed", () => {
+    const b = assessBuildability({ rule: waller, padFfeFt: null, wse02Ft: 100, buildingIn1pct: true, anyBuildingInTrigger: null });
+    expect(b.ffe.status).not.toBe("no_rule"); // the rule still binds when location is unknown
+  });
+  it("the 'need one of' list dedupes bases that read the SAME input (Waller's two 500-yr WSE bases → one line)", () => {
+    // Both wse02pct bases apply (in1pct null → conservative) but no wse02Ft supplied → pending; hag supplied only.
+    const r = requiredFfe(waller, {}, { in1pct: null, in02pct: null, zoneANoBfe: true });
+    expect(r.requiredFfeFt).toBeNull();
+    // "500-yr WSE" (the wse02pct input) must appear ONCE, not twice.
+    const count500 = (r.unknownReason.match(/500-yr/g) || []).length;
+    expect(count500).toBe(1);
+  });
+});
+
+describe("NEW-4 — siteBasisFfe + the site-based suggestion tier", () => {
+  it("takes the MAX of pond-design-WSE+freeboard and HAG+margin, labeled with its source", () => {
+    const sb = siteBasisFfe({ pondDesignWseFt: 150, pondFreeboardFt: 1, freeboardSource: "BKDD 1-ft", hagFt: 148, hagMarginFt: 1 });
+    expect(sb.requiredFfeFt).toBe(151); // max(150+1, 148+1) = 151 (pond governs)
+    expect(sb.governingKey).toBe("pond");
+    expect(sb.governingLabel).toMatch(/BKDD 1-ft/);
+  });
+  it("HAG governs when it is higher", () => {
+    const sb = siteBasisFfe({ pondDesignWseFt: 150, pondFreeboardFt: 1, hagFt: 152, hagMarginFt: 1 });
+    expect(sb.requiredFfeFt).toBe(153); // 152+1 beats 150+1
+    expect(sb.governingKey).toBe("hag");
+  });
+  it("an unanchored pond (no design WSE) with no HAG → UNAVAILABLE with the resolving action, never a guess", () => {
+    const sb = siteBasisFfe({ pondDesignWseFt: null, hagFt: null, pondAnchored: false });
+    expect(sb.requiredFfeFt).toBeNull();
+    expect(sb.unavailableReason).toMatch(/top-of-bank/);
+  });
+  it("an ESTIMATED pond WSE propagates the stamp onto the governing site basis", () => {
+    const sb = siteBasisFfe({ pondDesignWseFt: 160, pondFreeboardFt: 1, hagFt: 150, hagMarginFt: 1, pondWseEstimated: true });
+    expect(sb.governingKey).toBe("pond");
+    expect(sb.estimated).toBe(true);
+  });
+  it("suggestedFfe returns the SITE-BASED tier when NO ordinance rule binds (outside floodplain)", () => {
+    const waller = DEFAULT_BUILDABILITY_RULES.waller;
+    const s = suggestedFfe({ rule: waller, inputs: {}, ctx: {}, anyBuildingInTrigger: false, site: { pondDesignWseFt: 150, pondFreeboardFt: 1, freeboardSource: "BKDD 1-ft", hagFt: 148, hagMarginFt: 1 } });
+    expect(s.applies).toBe(true);
+    expect(s.basisKind).toBe("site");
+    expect(s.requiredFfeFt).toBe(151);
+    expect(s.note).toBe(SITE_BASED_FFE_NOTE);
+  });
+  it("an ordinance rule SUPERSEDES the site basis (which demotes to the popover data)", () => {
+    const waller = DEFAULT_BUILDABILITY_RULES.waller;
+    const s = suggestedFfe({ rule: waller, inputs: { wse02Ft: 200 }, ctx: { in1pct: true }, anyBuildingInTrigger: true, site: { pondDesignWseFt: 150, pondFreeboardFt: 1, hagFt: 148, hagMarginFt: 1 } });
+    expect(s.basisKind).toBe("ordinance");
+    expect(s.requiredFfeFt).toBe(202); // 200 + 2 (Waller §B(2) in the 1%)
+    expect(s.site).toBeTruthy(); // the site basis is still available, demoted
+    expect(s.site.requiredFfeFt).toBe(151);
+  });
+  it("outside the floodplain with an unanchored pond → applies:false carrying the resolving action", () => {
+    const waller = DEFAULT_BUILDABILITY_RULES.waller;
+    const s = suggestedFfe({ rule: waller, inputs: {}, ctx: {}, anyBuildingInTrigger: false, site: { pondDesignWseFt: null, hagFt: null, pondAnchored: false } });
+    expect(s.applies).toBe(false);
+    expect(s.unknownReason).toMatch(/top-of-bank/);
   });
 });
