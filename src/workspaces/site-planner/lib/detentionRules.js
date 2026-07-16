@@ -333,6 +333,49 @@ export const DETENTION_RULES = {
       },
     },
   ],
+  // B861 (chat NEW-2) — Brookshire–Katy Drainage District. NOT a county-level reviewing
+  // authority (it's ADDITIVE — a drainage-district OVERLAY, excluded from
+  // DETENTION_AUTHORITY_CHOICES below); this record holds the transcribed criteria + the
+  // provenance the readout stamps when a site falls inside the district boundary.
+  // ruleType "rate-match": BKDD is RATE control (Post ≤ Pre peak discharge), NOT a
+  // volumetric ac-ft/ac rate — so there is NO published number to fabricate, and the
+  // county's volumetric band renders as a labeled PROXY (final sizing is hydrograph routing).
+  bkdd: [
+    {
+      id: "bkdd-rules-2022",
+      authority: "bkdd",
+      authorityLabel: "Brookshire–Katy Drainage District",
+      ruleType: "rate-match",
+      effectiveDate: "2022-02-28", // Rules & Regulations signed 2022-02-28
+      verifiedOn: "2026-07-16",
+      // Provenance (owner primary-source pull 2026-07-16 + agent verification): CONFIRMED
+      // from BKDD's posted pages/templates — the rate-control criterion (match pre-development
+      // peak runoff / no increase in post-development peak discharge), PE-sealed engineering
+      // plans + RPLS-sealed plat, and a permit valid 365 days. The exact 2/10/100-yr storm
+      // list and the 1-ft freeboard are CONSISTENT with the Drainage & Detention Summary
+      // Tables template + regional (HCFCD / H-GAC) practice but were NOT verbatim-quoted
+      // (bkdd.dst.tx.us blocks automated fetch), so they carry secondarySource + verify.
+      // There is NO volumetric ac-ft/ac rate — never fabricate one (sizing is HEC-HMS routing).
+      secondarySource: true,
+      source: {
+        name: "Brookshire–Katy Drainage District Rules & Regulations (signed 2022-02-28) + Master Drainage/Design Report — Drainage & Detention Summary Tables (REV template 2023-04-20). Statutory body under Texas Special District Local Laws Ch. 6603.",
+        section: "Detention = rate-match (no increase in post-development peak discharge, offsite areas included); Summary Tables Pre vs Post @ 100-yr; PE-sealed plans / RPLS-sealed plat; 365-day permit validity",
+        url: "https://www.bkdd.dst.tx.us/page/BKDD.RulesRegulations",
+      },
+      params: {
+        criterion: "post-le-pre",   // Post ≤ Pre peak discharge — RATE control, not volume
+        designStorms: [2, 10, 100], // yr — rate-match at each (consistent w/ template + regional practice; verify)
+        offsiteIncluded: true,      // the Summary Tables carry offsite contributing area into the post/100-yr rate
+        freeboardFt: 1,             // 1-ft freeboard from the 100-yr WSE to pond top (regional practice; verify)
+        wetPondPool: true,          // wet-pond permanent pool staging
+        peSealed: true,             // PE-sealed engineering plans + RPLS-sealed plat
+        permitValidDays: 365,       // permit approval valid 365 calendar days, then re-approval
+        noPublishedVolumetricRate: true, // NO ac-ft/ac number exists — the volumetric band is a proxy
+        hydrographGoverns: true,    // final sizing is hydrograph routing (HEC-HMS), not modeled here
+        additiveToCounty: true,     // a district overlay, never the county floodplain reviewing authority
+      },
+    },
+  ],
 };
 
 /* Municipal adopt-by-reference overlays — thin records pointing at a parent
@@ -550,6 +593,21 @@ export function computeRequiredDetention({
     }
     const basis = `${lo}–${hi} ac-ft/ac (${why}) × ${acres.toFixed(2)} ac`;
     return bandResult([lo * acres, hi * acres], basis, rule, flags, [lo, hi], "screening band");
+  }
+
+  // ---- rate-match records (B861, BKDD): RATE control, no volumetric rate to price ----
+  // Post ≤ Pre peak discharge — there is NO published ac-ft/ac number, so we never
+  // fabricate one. Returns kind:"unknown" with an explicit rate-control basis + a flag the
+  // readout stamps ("this band is a volumetric proxy; final sizing is hydrograph routing").
+  // Rate-match records are additive districts, excluded from the reviewer picker, so this
+  // is defensive — a district is never a site's PRIMARY reviewing authority.
+  if (rule.ruleType === "rate-match") {
+    const storms = (p.designStorms || []).join("/");
+    return {
+      kind: "unknown", requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
+      basis: `${rule.authorityLabel}: rate control (Post ≤ Pre peak${storms ? ` at ${storms}-yr` : ""}) — no volumetric rate; sizing by hydrograph routing (HEC-HMS)`,
+      rule, governing: null, flags: ["rate-match", "verify-with-county-engineer"], caveat: SCREENING_CAVEAT,
+    };
   }
 
   // ---- municipal overlays: dispatch through the parent -------------------
@@ -1215,6 +1273,17 @@ export const DETENTION_SOURCES = {
     sourceName: GIS_SOURCES.mud.provider,
     note: "District boundary — a taxing/authority district, not proof of service. Screening only.",
   },
+  bkdd: {
+    id: "bkdd",
+    role: "district",
+    label: "Brookshire–Katy Drainage District",
+    kind: "polygon",
+    url: GIS_SOURCES.bkdd.serviceUrl + "/" + GIS_SOURCES.bkdd.layerId,
+    fields: GIS_SOURCES.bkdd.fields,
+    ttl: 30 * DAY,
+    sourceName: GIS_SOURCES.bkdd.provider,
+    note: "District BOUNDARY — membership means BKDD's rate-control drainage/detention criteria ALSO apply (additive to the county). Screening only.",
+  },
   hcfcdChannel: {
     id: "hcfcdChannel",
     role: "channel",
@@ -1277,6 +1346,23 @@ export const AUTHORITY_SHORT = {
   chambers: "Chambers Co.",
   waller: "Waller Co.",
 };
+
+/* B861 (chat NEW-2) — the Brookshire–Katy DD overlay copy. `short` is the ≤110-char
+ * one-line badge; `detail` is the full teaching copy for the ⓘ (rate-control basis,
+ * additive-to-county, the hydrograph-routing reality, PE/RPLS seals, 365-day permit, and
+ * the datum trap). Single source so the readout + print never drift. */
+export const BKDD_OVERLAY_SHORT =
+  "in Brookshire–Katy DD — rate-control detention (Post ≤ Pre at 2/10/100-yr) also applies";
+export const BKDD_OVERLAY_DETAIL =
+  "This site falls inside the Brookshire–Katy Drainage District. BKDD is a RATE-control district: " +
+  "detention must hold the post-development peak discharge to the pre-development rate (matched at the " +
+  "2-, 10-, and 100-yr storms, offsite areas included), NOT a volumetric ac-ft/ac rate. Its criteria are " +
+  "ADDITIVE to the county floodplain ordinance — both apply. Final detention sizing comes from hydrograph " +
+  "routing (HEC-HMS); the volumetric band shown is a screening proxy only. BKDD requires PE-sealed " +
+  "engineering plans + an RPLS-sealed plat, and a permit approval is valid 365 days. Datum trap: BKDD " +
+  "forms cite “1988 NGVD (2001 Adj.)” — an internally contradictory string (NGVD=1929, " +
+  "NAVD=1988); confirm NAVD88 (2001 adjustment) with the district before converting elevations. Verify " +
+  "all criteria with the district engineer.";
 
 /* Pure mapping: jurisdiction facts → who reviews drainage. Straddles surface in
  * `ambiguous` (never silently defaulted); unmodeled cities keep the county
@@ -1390,9 +1476,13 @@ export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, o
   // (authorityForJurisdiction's straddle branch needs counties.length>1, which a
   // point query can't produce), and city/ETJ membership reads centroid-only.
   const jurOpts = geom.ring ? { ...opts, ring: geom.ring } : opts;
-  const [jur, mudRes] = await Promise.all([
+  const [jur, mudRes, bkddRes] = await Promise.all([
     identifyJurisdiction(lng, lat, jurOpts),
     identifySource(DETENTION_SOURCES.mud, geom, opts).fresh,
+    // B861 (chat NEW-2) — the Brookshire–Katy Drainage District membership tier. One
+    // parallel, SWR-cached, per-source-isolated query (a match outside the district is a
+    // cheap empty). Failure is a loud honest unknown, never a silent no (below).
+    identifySource(DETENTION_SOURCES.bkdd, geom, opts).fresh,
   ]);
   const auth = authorityForJurisdiction(jur);
   const out = {
@@ -1403,7 +1493,10 @@ export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, o
     flags: [...auth.flags],
     jurisdiction: jur,
     mud: { districts: [], state: shapeSourceState(mudRes, mudRes.error), ageMs: mudRes.ageMs, msg: mudRes.error ? String(mudRes.error.message || mudRes.error) : null },
-    sources: [...jur.sources, { id: "mud", state: shapeSourceState(mudRes, mudRes.error), ageMs: mudRes.ageMs }],
+    // B861 — the drainage-district tier's own source state (so a boundary-source outage
+    // surfaces as "district membership unverified", distinct from "not in a district").
+    district: { state: shapeSourceState(bkddRes, bkddRes.error), ageMs: bkddRes.ageMs, msg: bkddRes.error ? String(bkddRes.error.message || bkddRes.error) : null },
+    sources: [...jur.sources, { id: "mud", state: shapeSourceState(mudRes, mudRes.error), ageMs: mudRes.ageMs }, { id: "bkdd", state: shapeSourceState(bkddRes, bkddRes.error), ageMs: bkddRes.ageMs }],
     note: "Screening only — verify the reviewing authority before design. District and city criteria change.",
   };
   if (!mudRes.error) {
@@ -1415,6 +1508,17 @@ export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, o
       out.overlays.push({ kind: "mud", name: d.name, type: d.typeDesc || d.type });
     }
     if (districts.length) out.flags.push("mud-district-present");
+  }
+  // B861 — Brookshire–Katy DD membership → an ADDITIVE drainage-district overlay (never a
+  // reviewer replacement). A source OUTAGE is an honest "unverified", never a silent no.
+  if (bkddRes.error) {
+    out.flags.push("bkdd-unverified");
+  } else if (bkddRes.items && bkddRes.items.length) {
+    out.overlays.push({
+      kind: "drainage-district", id: "bkdd", name: "Brookshire–Katy Drainage District",
+      short: BKDD_OVERLAY_SHORT, detail: BKDD_OVERLAY_DETAIL,
+    });
+    out.flags.push("bkdd-district-present");
   }
   // The county lookup FAILING (outage) with no authority resolved is an unknown, not
   // an unincorporated-nowhere: flag it so the UI can say "couldn't resolve" instead
@@ -1535,7 +1639,12 @@ export function effectiveReviewer(overrideAuthorityId, detectedAuthorityId) {
  * the picker automatically (never a hand-maintained label list). HCFCD + City of
  * Houston lead because DETENTION_RULES is keyed hcfcd, coh, … in that order. Pure. */
 export const DETENTION_AUTHORITY_CHOICES = [
-  ...Object.keys(DETENTION_RULES).map((id) => ({ id, label: (DETENTION_RULES[id][0] && DETENTION_RULES[id][0].authorityLabel) || id })),
+  // B861 — a "rate-match" record (BKDD) is an ADDITIVE drainage-district overlay, never a
+  // county-level reviewing authority, so it's excluded from the reviewer picker (it still
+  // carries provenance + is detected as an overlay tier). Every other record is selectable.
+  ...Object.keys(DETENTION_RULES)
+    .filter((id) => (DETENTION_RULES[id][0] || {}).ruleType !== "rate-match")
+    .map((id) => ({ id, label: (DETENTION_RULES[id][0] && DETENTION_RULES[id][0].authorityLabel) || id })),
   ...Object.keys(MUNICIPAL_OVERLAYS).map((id) => ({ id, label: MUNICIPAL_OVERLAYS[id].authorityLabel || id })),
 ];
 

@@ -2,7 +2,7 @@
 // Load-kind (missing/stale/incomplete snapshot) vs edit-kind (envelope exit /
 // anchor drift) and the never-refetch-inside-the-envelope rule. Pure — no browser.
 import { describe, it, expect } from "vitest";
-import { envelopeOf, envelopeContains, anchorDriftFt, revalidationNeed, ANCHOR_DRIFT_FT } from "../src/workspaces/site-planner/lib/factRevalidation.js";
+import { envelopeOf, envelopeContains, anchorDriftFt, revalidationNeed, ANCHOR_DRIFT_FT, fetchStaleForEdit, FETCH_TTL_MS } from "../src/workspaces/site-planner/lib/factRevalidation.js";
 
 const ENV = { mnX: 0, mnY: 0, mxX: 1000, mxY: 1000 };
 const IN = { mnX: 100, mnY: 100, mxX: 900, mxY: 900 };
@@ -75,5 +75,50 @@ describe("revalidationNeed — edit kind (the envelope rule)", () => {
     const c = revalidationNeed({ ...base, bboxNow: { ...OUT, mxX: 2400 } });
     expect(a.key).toBe(b.key);
     expect(a.key).not.toBe(c.key);
+  });
+});
+
+describe("B860 (chat NEW-1) — TTL refresh-on-open", () => {
+  const NOW = 1_000_000_000_000;
+  it("a remembered snapshot older than the TTL background-refreshes once on open (load/ttl-aged)", () => {
+    const lc = { sig: "sig-1", checkedAt: NOW - FETCH_TTL_MS - 60_000, fetch: { env: ENV } };
+    const r = revalidationNeed({ hasSessionCtx: false, lastCheck: lc, sigNow: "sig-1", bboxNow: IN, nowMs: NOW });
+    expect(r).toMatchObject({ need: true, kind: "load", reason: "ttl-aged" });
+  });
+  it("a fresh remembered snapshot within the TTL does NOT refresh", () => {
+    const lc = { sig: "sig-1", checkedAt: NOW - 60_000, fetch: { env: ENV } };
+    expect(revalidationNeed({ hasSessionCtx: false, lastCheck: lc, sigNow: "sig-1", bboxNow: IN, nowMs: NOW }).need).toBe(false);
+  });
+  it("TTL check is skipped without a clock (nowMs omitted) — pure default off", () => {
+    const lc = { sig: "sig-1", checkedAt: 1, fetch: { env: ENV } };
+    expect(revalidationNeed({ hasSessionCtx: false, lastCheck: lc, sigNow: "sig-1", bboxNow: IN }).need).toBe(false);
+  });
+  it("a live in-session check suppresses the TTL trigger too", () => {
+    const lc = { sig: "sig-1", checkedAt: NOW - FETCH_TTL_MS - 60_000, fetch: { env: ENV } };
+    expect(revalidationNeed({ hasSessionCtx: true, lastCheck: lc, sigNow: "sig-1", bboxNow: IN, nowMs: NOW }).need).toBe(false);
+  });
+  it("the TTL key buckets by TTL window so it fires a single attempt, not per render", () => {
+    const lc = { sig: "sig-1", checkedAt: 0, fetch: { env: ENV } };
+    const a = revalidationNeed({ hasSessionCtx: false, lastCheck: lc, sigNow: "sig-1", bboxNow: IN, nowMs: NOW });
+    const b = revalidationNeed({ hasSessionCtx: false, lastCheck: lc, sigNow: "sig-1", bboxNow: IN, nowMs: NOW + 5_000 });
+    expect(a.key).toBe(b.key); // same TTL bucket → same key → one attempt
+  });
+});
+
+describe("B860 (chat NEW-1) — fetchStaleForEdit (the UI flag mirrors edit-kind)", () => {
+  const REC = { env: ENV, anchorPt: P(500, 500), groundPt: P(400, 400) };
+  it("in-envelope geometry is NOT fetch-stale (numbers recompute live)", () => {
+    expect(fetchStaleForEdit(REC, { bboxNow: IN, anchorNow: P(500, 500), groundNow: P(400, 400) })).toBe(false);
+  });
+  it("an envelope exit IS fetch-stale", () => {
+    expect(fetchStaleForEdit(REC, { bboxNow: OUT, anchorNow: P(500, 500), groundNow: P(400, 400) })).toBe(true);
+  });
+  it("anchor / ground drift beyond the threshold is fetch-stale", () => {
+    expect(fetchStaleForEdit(REC, { bboxNow: IN, anchorNow: P(500 + ANCHOR_DRIFT_FT + 5, 500), groundNow: P(400, 400) })).toBe(true);
+    expect(fetchStaleForEdit(REC, { bboxNow: IN, anchorNow: P(500, 500), groundNow: P(400, 400 + ANCHOR_DRIFT_FT + 5) })).toBe(true);
+  });
+  it("no fetch record or no geometry → never stale (guards)", () => {
+    expect(fetchStaleForEdit(null, { bboxNow: OUT })).toBe(false);
+    expect(fetchStaleForEdit(REC, { bboxNow: null })).toBe(false);
   });
 });

@@ -100,7 +100,8 @@ import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterv
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
 import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
-import { envelopeOf, revalidationNeed } from "./lib/factRevalidation.js";
+import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS } from "./lib/factRevalidation.js";
+import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs } from "./lib/yieldBar.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { gisCache } from "./lib/gisCache.js";
@@ -119,7 +120,7 @@ import {
   estimateZoneAWse, hagForRing,
   NAVD88_NOTE, NEWER_MODEL_NOTE, EXCLUSIONS_NOTE, OFFSITE_NOTE, EXPERT_BYPASS_LABEL,
   DERIVED_BFE_NOTE, DERIVED_XS_WSEL_NOTE, DERIVED_WSE02_DRAFT_NOTE, DERIVED_WSE100_DRAFT_NOTE,
-  EST_BOUNDARY_WSE_NOTE,
+  EST_BOUNDARY_WSE_NOTE, BKDD_DATUM_NOTE,
   wseProvLabel, ffeBasisText,
 } from "./lib/floodplainMitigation.js";
 import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses } from "./lib/floodplainRules.js";
@@ -6330,7 +6331,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const sig = drainSigNow;
     // Keep the prior good answer visible under a "checking…" hint rather than blanking
     // the whole readout (and don't lose it if this re-check then fails).
-    setDrainCtx((prev) => ({ busy: true, prev: prev?.ctx ? prev : prev?.prev }));
+    setDrainCtx((prev) => ({ busy: true, auto: isAuto, prev: prev?.ctx ? prev : prev?.prev }));
     try {
       // The identify takes ONE ring — use the largest active parcel (flagged when several).
       const largest = act.reduce((b, p) => (polyArea(p.points) > polyArea(b.points) ? p : b), act[0]);
@@ -7108,8 +7109,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         sigNow: drainSigNow,
         ...drainFactsNow,
         incomplete: drainIsRestored && (drainMitRememberedMissing || pondLedger.unknownIds.length > 0),
+        nowMs: Date.now(), // B860 — SWR refresh-on-open when the remembered fetch aged past FETCH_TTL_MS
+        ttlMs: FETCH_TTL_MS,
       })
     : { need: false, kind: null, reason: null, key: "" };
+  // B860 (chat NEW-1) — the ONLY real "flood fetch is stale" condition: the drawn
+  // geometry no longer fits inside the fetched envelope (edit-kind). A pure in-envelope
+  // edit is false here — the numbers recompute live off the cached context, so the
+  // readout drops the old "numbers reflect the old boundary" banner. Same math the
+  // auto-refetch keys on (drainReval edit-kind), so the flag and the refetch never disagree.
+  const drainFetchStale = fetchStaleForEdit(settings.drainage?.lastCheck?.fetch || null, drainFactsNow);
+  // A background refetch is pending (reval need) or actually in flight (busy from an auto run).
+  const drainAutoRefreshing = drainAutoEnabled && (drainReval.need || !!(drainCtx?.busy && drainCtx?.auto));
   useEffect(() => {
     if (!drainReval.need || drainCtx?.busy) return;
     if (drainAutoAttempts.current.has(drainReval.key)) return; // one attempt per target — a failure is honest, never a loop
@@ -7393,6 +7404,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     mudDistricts: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "mud"),
     // ETJ notes (e.g. "in Houston's ETJ, county criteria govern detention" — owner rule 2026-07-10).
     etjNotes: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "etj"),
+    // B861 (chat NEW-2) — drainage-district membership (additive to the county). BKDD is the
+    // first; districtFailed distinguishes a boundary-source outage ("membership unverified")
+    // from a clean "not in a district".
+    districtOverlays: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "drainage-district"),
+    districtFailed: (drainCtxData?.authority?.flags || []).includes("bkdd-unverified") || drainCtxData?.authority?.district?.state === "failed",
     ambiguous: drainCtxData?.authority?.ambiguous || [],
     authorityFlags: drainCtxData?.authority?.flags || [],
     floodFailed: !!drainCtxData && !drainFloodOk,
@@ -7400,6 +7416,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     mudFailed: drainCtxData?.authority?.mud?.state === "failed",
     watershedFailed: drainCtxData?.watershed?.state === "failed",
     stale: !!(drainViewCtx?.sig && drainViewCtx.sig !== drainSigNow),
+    // B860 (chat NEW-1) — the RECOMPUTE/RE-FETCH split the status line reads:
+    //   sig          — the live geometry signature; the child flashes changed verdicts + shows
+    //                  a transient "Recomputing…" when it changes (pure math, no network).
+    //   fetchStale   — the fetched flood envelope no longer covers the drawn geometry (the ONLY
+    //                  real staleness); replaces the misleading "numbers reflect the old boundary".
+    //   autoRefreshing — a background flood re-fetch is pending / in flight (auto).
+    //   autoEnabled  — auto-revalidation is on (off → the fetch half needs the manual ↻).
+    //   floodAgeMs   — the fetched flood data's age, surfaced as a persistent chip.
+    sig: drainSigNow,
+    fetchStale: drainFetchStale,
+    fetchStaleReason: drainReval.kind === "edit" ? drainReval.reason : (drainFetchStale ? "env-exit" : null),
+    autoRefreshing: drainAutoRefreshing,
+    autoEnabled: drainAutoEnabled,
+    floodAgeMs: floodGeo && floodGeo.ts != null ? Date.now() - floodGeo.ts : null,
     multiParcel: !!drainViewCtx?.multiParcel,
     showingPrior: !!(drainCtx && !drainCtx.ctx && drainViewCtx), // a busy/error state over a preserved prior answer (live or restored)
     // B750 — the reviewing authority the number is priced against (detected or overridden),
@@ -8484,7 +8514,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Thin line work + restyle labels to the SAME physical weights the PDF uses, by
     // scaling against a notional letter-landscape plan box (PNG has no paper of its own),
     // so a downloaded PNG looks as crisp/professional as the PDF (NEW-2 / NEW-3).
-    const lp = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: buildingRows().length, metricsPairs: printMetricPairs() });
+    const lp = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: buildingRows().length, metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length });
     restyleExportClone(clone, sheetFitScale(w, h, lp.plan.w, lp.plan.h));
     const xml = new XMLSerializer().serializeToString(clone);
     const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
@@ -8627,6 +8657,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return pairs;
   };
+  // B862 (chat NEW-3) — the Stormwater required-vs-provided bar specs for the PRINT sheet.
+  // Same shared derivation (yieldBar.js stormwaterBarSpecs) the on-screen readout uses, so the
+  // printed bars match the screen exactly (PDF-PARITY).
+  const printStormwaterBars = () => {
+    const specs = stormwaterBarSpecs(drainage);
+    const bars = [];
+    if (specs.det) bars.push({ label: specs.det.label, verdict: specs.det.verdict, status: specs.det.status, layout: specs.det.layout, unit: "ac-ft" });
+    if (specs.mit) bars.push({ label: specs.mit.label, verdict: specs.mit.verdict, status: specs.mit.status, layout: specs.mit.layout, unit: "ac-ft" });
+    return bars;
+  };
   const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
@@ -8650,7 +8690,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // (B197) and metrics live in the SAME outer SVG coordinate system.
       const rows = buildingRows();
       const metricPairs = printMetricPairs();
-      const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsPairs: metricPairs });
+      const swBars = printStormwaterBars();
+      const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsPairs: metricPairs, stormwaterBars: swBars.length });
       // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
       // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
       // is identical regardless of the zoom the user was at when they hit print.
@@ -8665,6 +8706,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         title: siteLabel, sub: planLabel,
         date: formatDateStamp(),
         metrics: metricPairs,
+        stormwater: swBars,
         note: drainage && drainage.mitigation && drainage.mitigation.intersectAcres > 0
           ? "Concept site plan — planning-level estimates, not a survey. Detention & floodplain-mitigation volumes are screening figures — confirm with your engineer and the reviewing authority."
           : "Concept site plan — planning-level estimates, not a survey.",
@@ -8714,7 +8756,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // exist — the right-hand buildings-table column. So the frame the owner draws is
   // exactly what fills the printed plan area (WYSIWYG), computed from the same layout
   // the print routine uses.
-  const printAspect = () => { const L = printSheetLayout({ paper: printPaper, orient: printOrient, buildingCount: nBuildings, metricsPairs: printMetricPairs() }); return L.plan.w / L.plan.h; };
+  const printAspect = () => { const L = printSheetLayout({ paper: printPaper, orient: printOrient, buildingCount: nBuildings, metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length }); return L.plan.w / L.plan.h; };
   // A frame of the given aspect, centred at cx,cy, that contains a w×h area.
   const fitFrame = (cx, cy, w, h, aspect) => { const wFt = Math.max(w, h * aspect, 40); return { cx, cy, wFt, hFt: wFt / aspect }; };
   const enterPrintMode = () => {
@@ -8728,7 +8770,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Re-fit the frame's aspect when paper/orientation changes (keep it around the
   // same coverage). Skip the initial render.
-  const printAspectKey = `${printPaper}:${printOrient}:${nBuildings > 0}:${printMetricPairs().length}`;
+  const printAspectKey = `${printPaper}:${printOrient}:${nBuildings > 0}:${printMetricPairs().length}:${printStormwaterBars().length}`;
   const prevAspectKey = useRef(printAspectKey);
   useEffect(() => {
     if (prevAspectKey.current === printAspectKey) return;
@@ -15821,6 +15863,86 @@ const YIELD_PAL = {
   warnText: "var(--warn-text)", dangerText: "var(--danger-text)",
 };
 
+// B860 (chat NEW-1) — flash a value when it changes, so a silent number swap can't slip
+// past (a 5 ac-ft detention move is exactly what a user must NOT miss). Skips the first
+// mount (no flash on panel open); restarts the CSS animation on every `token` change by
+// removing + re-adding the class after a forced reflow. Module scope (MODULE-SCOPE-COMPONENTS).
+function FlashValue({ token, children, style }) {
+  const ref = useRef(null);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    const el = ref.current;
+    if (!el) return;
+    el.classList.remove("planyr-flash");
+    void el.offsetWidth; // force reflow so the animation replays even for the same class
+    el.classList.add("planyr-flash");
+  }, [token]);
+  return <span ref={ref} style={{ display: "inline-block", borderRadius: 4, ...style }}>{children}</span>;
+}
+
+// B862 (chat NEW-3) — the verdict status chip: a SOLID semantic fill (house rule) with
+// theme-correct text. Every semantic *-text token is DARK in light / BRIGHT in dark, and
+// --on-accent is white in light / near-black in dark — i.e. --on-accent is exactly the AA
+// text colour on any of these fills, in both themes. Hierarchy by weight/size/letter-
+// spacing, never by fading (theming rule). Module scope (MODULE-SCOPE-COMPONENTS).
+const CHIP_FILL = { danger: "var(--danger-text)", good: "var(--success-text)", warn: "var(--warn-text)", info: "var(--info-text)" };
+function StatusChip({ label, tone }) {
+  const fill = CHIP_FILL[tone] || CHIP_FILL.info;
+  return (
+    <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--on-accent)", background: fill, borderRadius: 4, padding: "2px 5px", whiteSpace: "nowrap", flex: "none" }}>{label}</span>
+  );
+}
+
+// B862 — the shared required-vs-provided bullet bar (screen renderer). It walks the SAME
+// primitive list (yieldBar.js bulletBarMarks / stackedBarMarks) that the PDF export walks,
+// so the on-screen bar and the printed bar can never drift (PDF-PARITY). Inline SVG; fills go
+// through `style` so the theme tokens actually resolve (a `fill=` attribute would not).
+function barFill(role, status, Y) {
+  if (role === "provided") {
+    return status === "covered" ? "var(--success-text)"
+      : status === "short" ? "var(--danger-text)"
+      : status === "over" || status === "needs-input" ? "var(--warn-text)"
+      : Y.detention;
+  }
+  return Y.rowLabel;
+}
+const segFill = (key, Y) => (key === "usable" ? "var(--success-text)" : key === "mit" || key === "mitigation" ? Y.detention : Y.detZeroBorder);
+function barAria(layout, status, unit) {
+  if (!layout || layout.unknown) return "Required vs provided: unknown — an input is missing";
+  if (layout.mode === "stacked") return `Storage split across ${layout.segments.length} bands, total ${(Math.round(layout.total * 100) / 100)} ${unit}`;
+  if (layout.noneRequired) return `Provided ${Math.round(layout.provided * 100) / 100} ${unit}; nothing required`;
+  const req = layout.bandHi != null ? `band ${layout.bandLo}–${layout.bandHi}` : layout.required;
+  return `Provided ${Math.round(layout.provided * 100) / 100} vs required ${req} ${unit} — ${status || ""}`;
+}
+function BulletBar({ layout, width = 210, status = null, unit = "ac-ft", Y }) {
+  if (!layout) return null;
+  const built = layout.mode === "stacked" ? stackedBarMarks(layout, { w: width }) : bulletBarMarks(layout, { w: width, unit });
+  const { marks, w, h } = built;
+  const pad = 4;
+  return (
+    <svg width={w} height={h + pad} viewBox={`0 ${-pad} ${w} ${h + pad}`} style={{ display: "block", overflow: "visible" }} role="img" aria-label={barAria(layout, status, unit)}>
+      <defs>
+        <pattern id="planyrBarHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="6" height="6" style={{ fill: Y.track }} />
+          <line x1="0" y1="0" x2="0" y2="6" style={{ stroke: Y.muted, strokeWidth: 2, opacity: 0.55 }} />
+        </pattern>
+      </defs>
+      {marks.map((m, i) => {
+        if (m.t === "rect") {
+          if (m.role === "hatch") return <rect key={i} x={m.x} y={m.y} width={m.w} height={m.h} rx={m.rx || 0} fill="url(#planyrBarHatch)" />;
+          if (m.role === "required-span") return <rect key={i} x={m.x} y={m.y} width={m.w} height={m.h} style={{ fill: Y.rowLabel, opacity: 0.16 }} />;
+          if (m.role === "seg") return <rect key={i} x={m.x} y={m.y} width={m.w} height={m.h} style={{ fill: segFill(m.segKey, Y) }} />;
+          return <rect key={i} x={m.x} y={m.y} width={m.w} height={m.h} rx={m.rx || 0} style={{ fill: barFill(m.role, status, Y) }} />;
+        }
+        if (m.t === "tick") return <line key={i} x1={m.x} y1={m.y0} x2={m.x} y2={m.y1} style={{ stroke: Y.rowLabel, strokeWidth: m.role === "required-edge" ? 1.25 : 2 }} />;
+        if (m.t === "text") return <text key={i} x={m.x} y={m.y} textAnchor={m.anchor} style={{ fill: m.role === "good" ? "var(--success-text)" : m.role === "danger" ? "var(--danger-text)" : Y.muted, fontSize: 10, fontWeight: m.role === "good" || m.role === "danger" ? 750 : 400, fontFamily: m.mono ? YMONO : "inherit", fontVariantNumeric: "tabular-nums" }}>{m.s}</text>;
+        return null;
+      })}
+    </svg>
+  );
+}
+
 function YieldPanel({
   siteSqft, bldg, cov, stalls, ratio, trailers, impPct, pondArea, detPct, open,
   providedDetCf, pondCount, // B719: site-wide provided detention VOLUME (cf) + pond count — the same accumulator the drainage screen uses
@@ -15838,6 +15960,24 @@ function YieldPanel({
   // B824 — which of the three Stormwater verdict groups (det/mit/ffe) are expanded.
   // Collapsed by default: one verdict line per group is the whole closed face.
   const [drainGroupOpen, setDrainGroupOpen] = useState({});
+  // B862 (chat NEW-3) — which group's "Assumptions & method ▸" fold is open. The method /
+  // exclusion notes (prismoidal, tie-in slopes, NGVD29, offsite flow, …) collapse into it so
+  // ≤3 lines of non-warning prose show before expansion; actionable warnings stay inline.
+  const [drainMethodOpen, setDrainMethodOpen] = useState({});
+  // B860 (chat NEW-1) — a transient "Recomputing…" acknowledgement: when the drainage
+  // geometry signature changes, the pure math has already re-run live (synchronous), so
+  // this is a ~500 ms visual cue that the edit folded in — then the changed verdicts flash
+  // (FlashValue). Debounced by the sig dep: rapid edits coalesce to one settle.
+  const [drainRecomputing, setDrainRecomputing] = useState(false);
+  const drainSigRef = useRef(drainage?.sig);
+  useEffect(() => {
+    const sig = drainage?.sig;
+    if (sig == null || drainSigRef.current === sig) return;
+    drainSigRef.current = sig;
+    setDrainRecomputing(true);
+    const t = setTimeout(() => setDrainRecomputing(false), 520);
+    return () => clearTimeout(t);
+  }, [drainage?.sig]);
   const Y = YIELD_PAL;
   const acres = siteSqft / SQFT_PER_ACRE;
   const hasSite = siteSqft > 0;
@@ -16007,7 +16147,10 @@ function YieldPanel({
                 {text}{info ? <span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4, fontStyle: "normal" }} aria-hidden="true">ⓘ</span> : null}
               </div>
             );
-            const keyedNote = (text, key) => <div key={key} style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
+            // B862 — keyedNote is the METHOD/basis/exclusion note (muted, non-actionable). It's
+            // tagged data-note="method" so groupFold folds it into "Assumptions & method ▸";
+            // actionable warnings use warnNote (which stays inline).
+            const keyedNote = (text, key) => <div key={key} data-note="method" style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
             // NEW-1 — verdict-first density: ONE line per concept (value or honest state) with
             // the basis / source / caveats tucked into an ⓘ hover (native title — the Impervious-
             // row pattern), so the ~30-row floodplain-101 wall collapses. `info` is the teaching
@@ -16024,6 +16167,25 @@ function YieldPanel({
                 </div>
               );
             };
+            // B862 (chat NEW-3) — jump-to-field: open the mitigation group, reveal the target
+            // input (autoField rows carry id="drain-field-<key>"), scroll it into view + focus it.
+            // So an actionable warning offers the FIX, not prose alone ("Set BFE →").
+            const jumpToDrainField = (fieldKey) => {
+              setDrainGroupOpen((s2) => ({ ...s2, mit: true }));
+              if (fieldKey) setDrainEditField(fieldKey);
+              if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(() => {
+                const el = typeof document !== "undefined" ? document.getElementById("drain-field-" + fieldKey) : null;
+                if (el) { try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {} const inp = el.querySelector("input"); if (inp) try { inp.focus(); } catch (_) {} }
+              });
+            };
+            // An actionable warning that carries its fix affordance (a jump-to-field button),
+            // distinct from the prose-only warnNote. Text stays one line (≤110); detail rides ⓘ.
+            const actionWarn = (text, key, info, onAction, actionLabel) => (
+              <div key={key} title={info || ""} style={{ fontSize: 10.5, color: Y.warnText, lineHeight: 1.45, margin: "3px 0 0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                <span style={{ fontStyle: "italic" }}>{text}{info ? <span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4, fontStyle: "normal" }} aria-hidden="true">ⓘ</span> : null}</span>
+                {onAction ? <button type="button" onClick={onAction} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 999, border: `1px solid ${Y.warnText}`, background: "transparent", color: Y.warnText, whiteSpace: "nowrap" }}>{actionLabel || "Set →"}</button> : null}
+              </div>
+            );
             // B750 — one segmented button for the Auto/Yes/No channel control (mirrors the
             // per-pond Outfall toggle). Selected rides the global accent + --on-accent text.
             const seg = (label, selected, onClick, key, aria = "Drains to HCFCD channel") => (
@@ -16096,12 +16258,14 @@ function YieldPanel({
                   </div>
                 );
               }
-              // B791 — a stale check's assumptions are historical, not current assertions:
-              // dashed border + a "saved before the boundary changed" heading (weight/wording
-              // demotion, never contrast fading — theming rule).
+              // B791/B860 — the assumptions demote to "historical" only when the FETCH is stale
+              // (the drawn area outgrew the fetched envelope), not on any in-envelope edit: a
+              // reviewing-agency / channel assumption stays current while the fetch still covers
+              // the site. Dashed border + wording demotion (weight/wording, never contrast fading).
+              const assumeStale = d.fetchStale;
               return (
-                <div key="assumptions" style={{ marginTop: 7, border: `1px ${d.stale ? "dashed" : "solid"} ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
-                  <div title={d.channelDischarge?.overrideIgnored ? "HCFCD n/a outside Harris — saved channel answer ignored." : ""} style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: d.channelDischarge?.overrideIgnored ? "help" : undefined }}>{d.stale ? "Assumptions — saved before the boundary changed" : "Assumptions — correct if needed"}{d.channelDischarge?.overrideIgnored ? <span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span> : null}</div>
+                <div key="assumptions" style={{ marginTop: 7, border: `1px ${assumeStale ? "dashed" : "solid"} ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
+                  <div title={d.channelDischarge?.overrideIgnored ? "HCFCD n/a outside Harris — saved channel answer ignored." : ""} style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: d.channelDischarge?.overrideIgnored ? "help" : undefined }}>{assumeStale ? "Assumptions — the fetch predates the drawn area" : "Assumptions — correct if needed"}{d.channelDischarge?.overrideIgnored ? <span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span> : null}</div>
                   {rows}
                 </div>
               );
@@ -16133,29 +16297,41 @@ function YieldPanel({
             const detectedPhrase = (d.restored || d.stale) && checkedOnDate
               ? `(from city-limits GIS, checked ${checkedOnDate})`
               : "(detected from city-limits GIS)";
-            // NEW-1(e) — ONE status line merges the old stale banner + the remembered line + the
-            // bottom re-check button + the in-flight hint: "As of <date> · ↻ Re-check". A stale
-            // check demotes it (warn colour + a "boundary changed" clause) and it leads the readout
-            // so old numbers can't read as current-boundary truth; a live check reads present-tense.
+            // NEW-1(e)/B860 — ONE status line. The old "⚠ site boundary changed since; numbers
+            // below reflect the old boundary" banner is GONE: the detention/mitigation/pond/FFE
+            // math recomputes LIVE off the cached facts, so a pure in-envelope edit never demotes
+            // the numbers (a click's worth of staleness on pure math was the whole bug). Only the
+            // FETCH can go stale — d.fetchStale, the drawn area outgrowing the fetched flood
+            // envelope. Auto on → that self-heals ("Refreshing…", the numbers stay live); auto off
+            // or a failed refresh → an honest last-good + ↻ prompt (LOUD-FAILURE, never blank). A
+            // fresh edit shows a transient "Recomputing…" then the changed verdicts flash. The
+            // fetched flood data's age rides every line so a stale pull is never mistaken for now.
             {
               const busy = d.status === "busy";
+              const ageChip = d.floodAgeMs != null ? ` · flood data ${formatAge(d.floodAgeMs)}` : "";
               let statusText, statusWarn = false;
-              if (d.stale) { statusText = `⚠ As of ${checkedOnDate || "your last check"} — site boundary changed since; numbers below reflect the old boundary`; statusWarn = true; }
-              else if (d.showingPrior && !busy) { statusText = `Re-check failed (${d.error}) — showing the previous result`; statusWarn = true; }
-              else if (busy) statusText = d.showingPrior ? "Re-checking… showing the previous result" : "Checking…";
-              // B832 — the facts line carries HOW they were produced (auto vs manual)
-              // and reads a same-day time instead of a bare date.
-              else if (d.restored && checkedOnDate) statusText = `As of ${checkedOnDate} · remembered from your last check${d.checkMode ? ` · ${d.checkMode}` : ""}`;
+              if (busy && !d.showingPrior) statusText = "Checking drainage criteria…";
+              else if (d.showingPrior && !busy) { statusText = `Couldn't refresh — showing the last good result${checkedOnDate ? ` (as of ${checkedOnDate})` : ""}${ageChip}`; statusWarn = true; }
+              else if (busy) statusText = `Refreshing flood data…${ageChip}`;
+              // The drawn footprint outgrew the fetched flood envelope but auto-refresh is off:
+              // the flood-dependent numbers screen a smaller area until a manual ↻ — say so loudly.
+              else if (d.fetchStale && !d.autoEnabled) { statusText = `⚠ The flood pull predates the drawn area — ↻ re-check to screen the new footprint${ageChip}`; statusWarn = true; }
+              // Auto refresh pending / in flight (geometry outgrew the envelope, or refresh-on-open):
+              // the numbers are already live — this only says the flood pull is catching up.
+              else if (d.autoRefreshing) statusText = `Refreshing flood data for the drawn area…${ageChip}`;
+              else if (drainRecomputing) statusText = "Recomputing…";
+              // B832 — the facts line carries HOW they were produced (auto vs manual) + a same-day time.
+              else if (d.restored && checkedOnDate) statusText = `As of ${checkedOnDate} · remembered from your last check${d.checkMode ? ` · ${d.checkMode}` : ""}${ageChip}`;
               else if (d.lastCheckedAt) {
                 const w = new Date(d.lastCheckedAt);
                 const label = w.toDateString() === new Date().toDateString() ? w.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : checkedOnDate;
-                statusText = `Facts as of ${label}${d.checkMode ? ` · ${d.checkMode}` : ""}`;
+                statusText = `Facts as of ${label}${d.checkMode ? ` · ${d.checkMode}` : ""}${ageChip}`;
               }
               else statusText = "Checked this session";
               out.push(
                 <div key="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "7px 0 2px", ...(statusWarn ? { border: `1px solid ${Y.warnText}`, borderRadius: 8, padding: "6px 9px", background: Y.cardBg } : {}) }}>
-                  <span style={{ fontSize: statusWarn ? 11 : 10.5, color: statusWarn ? Y.warnText : Y.muted, fontWeight: statusWarn ? 700 : 400, lineHeight: 1.4 }}>{statusText}</span>
-                  <button onClick={d.onCheck} disabled={busy} style={{ padding: "4px 9px", border: `1px solid ${Y.border}`, borderRadius: 7, background: statusWarn ? Y.cardBg : "transparent", color: statusWarn ? Y.text : Y.muted, fontWeight: statusWarn ? 700 : 400, fontSize: 10.5, whiteSpace: "nowrap", cursor: busy ? "default" : "pointer" }}>↻ Re-check</button>
+                  <span title={d.showingPrior && d.error ? `Refresh error: ${d.error}` : ""} style={{ fontSize: statusWarn ? 11 : 10.5, color: statusWarn ? Y.warnText : Y.muted, fontWeight: statusWarn ? 700 : 400, lineHeight: 1.4, cursor: d.showingPrior && d.error ? "help" : undefined }}>{statusText}</span>
+                  <button onClick={d.onCheck} disabled={busy} title="Refresh the GIS fetch (flood zones + reviewing authority). The detention / mitigation / pond numbers already recompute live on every edit — this only re-pulls the map data." style={{ padding: "4px 9px", border: `1px solid ${Y.border}`, borderRadius: 7, background: statusWarn ? Y.cardBg : "transparent", color: statusWarn ? Y.text : Y.muted, fontWeight: statusWarn ? 700 : 400, fontSize: 10.5, whiteSpace: "nowrap", cursor: busy ? "default" : "pointer" }}>↻ Re-check</button>
                 </div>
               );
             }
@@ -16165,19 +16341,49 @@ function YieldPanel({
             // Site Analysis FloodMitigationCard (deleted — the split-brain fix) expands inside.
             // detR / mitR / ffeR collect each group's rows; fold state is drainGroupOpen.
             const detR = [], mitR = [], ffeR = [];
-            const groupFold = (gKey, label, verdict, tone, kids, sub) => {
+            // B862 (chat NEW-3) — verdict-first group. Closed face = a solid status CHIP + the
+            // section label + the one-line verdict (the largest type in the row; hierarchy by
+            // weight/size, never fading) + an always-visible required-vs-provided BAR. Expanded:
+            // the data rows + actionable warnings inline, and the method/exclusion notes folded
+            // into "Assumptions & method ▸" (the caveat budget). opts: { chip, bar }.
+            const groupFold = (gKey, label, verdict, tone, kids, sub, opts = {}) => {
               const open = !!drainGroupOpen[gKey];
-              const vColor = tone === "danger" ? Y.dangerText : tone === "warn" ? Y.warnText : tone === "good" ? Y.green : Y.text;
+              const vColor = tone === "danger" ? Y.dangerText : tone === "warn" ? Y.warnText : tone === "good" ? "var(--success-text)" : Y.text;
+              const { chip, bar } = opts;
+              // Partition the group's children: method notes (keyedNote → data-note="method")
+              // collapse into the fold; everything else (data rows, verdict rows, actionable
+              // warnings, inputs, bars) stays inline.
+              const inlineKids = [], methodKids = [];
+              for (const k of (kids || [])) {
+                if (k && k.props && k.props["data-note"] === "method") methodKids.push(k); else inlineKids.push(k);
+              }
+              const methodShown = !!drainMethodOpen[gKey];
               return (
-                <div key={"grp-" + gKey}>
+                <div key={"grp-" + gKey} style={{ borderBottom: `1px solid ${Y.hairline}`, padding: "2px 0" }}>
                   <button type="button" aria-expanded={open} onClick={() => setDrainGroupOpen((s2) => { const next = { ...s2, [gKey]: !s2[gKey] }; if (gKey === "mit" && onMitOpenChange) onMitOpenChange(!!next.mit); return next; })}
-                    style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, background: "transparent", border: "none", padding: "6px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-                    <span style={{ fontSize: 11.5, fontWeight: 800, color: Y.rowLabel, letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{open ? "▾" : "▸"} {label}</span>
-                    <span style={{ fontFamily: YMONO, fontSize: 12.5, fontWeight: 750, fontVariantNumeric: "tabular-nums", color: vColor, textAlign: "right" }}>
-                      {verdict}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
+                    style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: "transparent", border: "none", padding: "5px 0", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <span style={{ color: Y.muted, fontSize: 10, flex: "none" }}>{open ? "▾" : "▸"}</span>
+                      {chip ? <StatusChip label={chip} tone={tone} /> : null}
+                      <span style={{ fontSize: 11, fontWeight: 700, color: Y.rowLabel, letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+                    </span>
+                    <span style={{ fontFamily: YMONO, fontSize: 13.5, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: vColor, textAlign: "right", whiteSpace: "nowrap", flex: "none" }}>
+                      <FlashValue token={String(verdict)}>{verdict}</FlashValue>{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10 }}> {sub}</span> : null}
                     </span>
                   </button>
-                  {open && <div style={{ padding: "1px 0 3px 10px", borderLeft: `2px solid ${Y.hairline}` }}>{kids}</div>}
+                  {bar ? <div style={{ padding: "1px 2px 5px 20px" }}>{bar}</div> : null}
+                  {open && <div style={{ padding: "1px 0 3px 10px", borderLeft: `2px solid ${Y.hairline}` }}>
+                    {inlineKids}
+                    {methodKids.length > 0 && (
+                      <div style={{ marginTop: 4 }}>
+                        <button type="button" onClick={() => setDrainMethodOpen((s2) => ({ ...s2, [gKey]: !s2[gKey] }))}
+                          style={{ background: "transparent", border: "none", padding: "2px 0", cursor: "pointer", fontFamily: "inherit", fontSize: 10, color: Y.rowLabel, fontWeight: 700, letterSpacing: "0.04em" }}>
+                          {methodShown ? "▾" : "▸"} Assumptions &amp; method ({methodKids.length})
+                        </button>
+                        {methodShown && <div style={{ marginTop: 1 }}>{methodKids}</div>}
+                      </div>
+                    )}
+                  </div>}
                 </div>
               );
             };
@@ -16275,6 +16481,27 @@ function YieldPanel({
                 { key: "provided", sub: d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""} · usable ${f2(usableAcFt)}` : `· usable ${f2(usableAcFt)}` }));
             } else {
               detR.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn"));
+            }
+            // B862 (chat NEW-3) — the three-band pond-storage split as stacked SOLID segments
+            // (usable above the flood WSE · mitigation-candidate + dead below it), so the
+            // usable-vs-dead breakdown reads at a glance. The flood-WSE line sits at the usable
+            // boundary. Site-level aggregate across the drawn ponds.
+            if (d.providedUsableCf != null && d.deadCf > 0 && d.pondCount > 0) {
+              const usAf = d.providedUsableCf / 43560;
+              const mitAf = d.mitProvided && d.mitProvided.creditedCf != null ? d.mitProvided.creditedCf / 43560 : 0;
+              const deadRemAf = Math.max(0, d.deadCf / 43560 - mitAf);
+              const splitLayout = stackedBarLayout({ segments: [{ key: "usable", value: usAf }, { key: "mit", value: mitAf }, { key: "dead", value: deadRemAf }], markerValue: usAf });
+              const swatch = (c) => <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: c, marginRight: 3, verticalAlign: "middle" }} />;
+              detR.push(
+                <div key="det-split" style={{ padding: "3px 2px 4px 0" }} title="How the drawn ponds' gross storage divides: usable detention (above the flood water surface) · below-WSE cut credited to mitigation · dead storage (permanent pool / below WSE — no detention credit). The tick marks the flood water surface.">
+                  <BulletBar layout={splitLayout} Y={Y} width={200} />
+                  <div style={{ display: "flex", gap: 10, marginTop: 2, fontSize: 9.5, color: Y.muted, flexWrap: "wrap" }}>
+                    <span>{swatch("var(--success-text)")}usable {f2(usAf)}</span>
+                    {mitAf > 0.005 && <span>{swatch(Y.detention)}mit-candidate {f2(mitAf)}</span>}
+                    <span>{swatch(Y.detZeroBorder)}dead {f2(deadRemAf)}</span>
+                  </div>
+                </div>
+              );
             }
             // NEW-11/B831 — ponds sitting in easement / pipeline corridors: one loud line
             // with the acreage; a corridor-source outage says "not screened", never a
@@ -16454,7 +16681,7 @@ function YieldPanel({
               if (d.unanchoredInTrigger > 0) mitR.push(warnNote(`${d.unanchoredInTrigger} floodplain pond${d.unanchoredInTrigger > 1 ? "s" : ""} not elevation-anchored — gross volume OVERSTATES usable detention.`, "mit-unanch", "An unanchored pond can't split usable from dead storage at the flood water surface, so the gross volume above overstates usable detention. Set each pond's top-of-bank elevation in its panel."));
               // B822 — the anchored-but-WSE-unknown half: the anchor exists (manual or the 3DEP
               // auto), the reach's flood elevation doesn't — the BFE input is what's missing.
-              if (d.anchoredNoWseInTrigger > 0) mitR.push(warnNote(`${d.anchoredNoWseInTrigger} anchored floodplain pond${d.anchoredNoWseInTrigger > 1 ? "s" : ""} — flood WSE unknown; gross volume OVERSTATES.`, "mit-anch-nowse", "The pond has a top-of-bank anchor but the reach's flood elevation is unknown, so usable storage can't be split from flood-occupied volume. Enter a BFE (inputs below) — on Fort Bend Zone A the DRAFT Atlas-14 raster usually supplies it automatically."));
+              if (d.anchoredNoWseInTrigger > 0) mitR.push(actionWarn(`${d.anchoredNoWseInTrigger} anchored floodplain pond${d.anchoredNoWseInTrigger > 1 ? "s" : ""} — flood WSE unknown; gross OVERSTATES.`, "mit-anch-nowse", "The pond has a top-of-bank anchor but the reach's flood elevation is unknown, so usable storage can't be split from flood-occupied volume. Enter a BFE (inputs below) — on Fort Bend Zone A the DRAFT Atlas-14 raster usually supplies it automatically.", () => jumpToDrainField("bfeFt"), "Set BFE →"));
               if (d.pondFullyInundated) mitR.push(warnNote("A pond's top of bank sits at/below the flood WSE — its usable detention is ZERO.", "mit-inund", "Fully inundated in the design flood: every acre-foot below the flood water surface is already water, so the pond credits nothing."));
               if (d.floodGeo && d.floodGeo.state === "failed") mitR.push(warnNote("Flood-zone geometry unavailable — mitigation not screened; re-check.", "fmgeo-fail", "The flood-zone source didn't answer, so nothing could be screened this check. An outage is never an all-clear — re-check shortly."));
               if (d.floodGeo && d.floodGeo.truncated) mitR.push(warnNote("The flood-zone pull hit the feature cap — mitigation figures may UNDERCOUNT; treat them as a floor.", "fmgeo-trunc"));
@@ -16512,6 +16739,17 @@ function YieldPanel({
             }
             for (const w of d.watersheds) detR.push(warnNote(`${w.authorityLabel}: ${w.note}`, w.id));
             if (d.watershedFailed) detR.push(warnNote("HCFCD watershed data unavailable — supplemental-retention screening skipped.", "wsfail", "Any Addicks/Barker or Upper-Cypress Creek supplemental-retention requirement can't be screened while the watershed source is down."));
+            // NEW-2/B861 — drainage-district membership (BKDD): ADDITIVE to the county, so it
+            // renders whether or not a reviewer resolved. The overlay's `short` is the rate-
+            // control stamp; its `detail` ⓘ carries the full basis (hydrograph routing, PE/RPLS
+            // seals, 365-day permit, datum trap). A boundary-source outage is an honest unknown.
+            for (const dd of d.districtOverlays) detR.push(warnNote(dd.short, "district-" + (dd.id || dd.name), dd.detail));
+            // The county's volumetric number renders as usual — stamp it a PROXY inside a
+            // rate-control district (final sizing is hydrograph routing, not a volume).
+            if (d.districtOverlays.length && req && (req.kind === "point" || req.kind === "band")) {
+              detR.push(warnNote("Rate-control district — the volume above is a screening proxy, not the sizing basis.", "district-proxy", "Inside the Brookshire–Katy DD detention is sized by RATE (post-development peak ≤ pre-development at the 2/10/100-yr storms, offsite areas included) via hydrograph routing (HEC-HMS) — there is no volumetric ac-ft/ac rule. The number above is the county's volumetric screening estimate; treat it as a scale proxy only, and let the district engineer's routing govern."));
+            }
+            if (d.districtFailed) detR.push(warnNote("Drainage-district membership unverified — the boundary source didn't answer.", "districtfail", "The Brookshire–Katy DD boundary layer didn't respond, so district membership couldn't be confirmed on this check — an outage is never a 'not in a district'. ↻ Re-check shortly."));
             // NEW-1(d) — suppress the "district criteria may ALSO apply" note for any district
             // that is already the applied reviewing jurisdiction above (it isn't an ALSO then).
             if (d.mudDistricts.length) {
@@ -16539,7 +16777,7 @@ function YieldPanel({
               // every "blank = auto/unknown" input carries an explicit Clear chip — the
               // expert bypass especially must never be one-way.
               const fmRow = (label, key, placeholder, title) => (
-                <div key={"fm-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
                   <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                     {Number.isFinite(fm.settings[key]) && (
@@ -16568,7 +16806,7 @@ function YieldPanel({
                 const srcPatch = opts.srcKey ? { [opts.srcKey]: null } : {};
                 if (manual == null && hasAuto && !editing) {
                   return (
-                    <div key={"fm-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
                       <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                         {/* NEW-3 — the one-click accept: writes the suggestion into the field
@@ -16586,7 +16824,7 @@ function YieldPanel({
                   );
                 }
                 return (
-                  <div key={"fm-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                  <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
                     <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                       {manual != null && (
@@ -16759,8 +16997,9 @@ function YieldPanel({
                   ffeR.push(keyedNote("No pad entered — the pad is ASSUMED at this code minimum. Enter a finished-floor elevation to check a real design.", "ffe-assumed"));
                 }
                 if (b.ffe.status === "short") ffeR.push(
-                  <div key="ffe-short" style={{ fontSize: 11, color: Y.dangerText, lineHeight: 1.45, margin: "4px 0 0", fontWeight: 800 }}>
-                    ⚠ Pad FFE is {f2(b.ffe.shortByFt)}′ SHORT of the required {f2(b.ffe.requiredFfeFt)}′ ({ffeBasisText(b.ffe)}).
+                  <div key="ffe-short" style={{ fontSize: 11, color: Y.dangerText, lineHeight: 1.45, margin: "4px 0 0", fontWeight: 800, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                    <span>⚠ Pad FFE is {f2(b.ffe.shortByFt)}′ SHORT of the required {f2(b.ffe.requiredFfeFt)}′ ({ffeBasisText(b.ffe)}).</span>
+                    <button type="button" onClick={() => jumpToDrainField("padFfeFt")} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 999, border: `1px solid ${Y.dangerText}`, background: "transparent", color: Y.dangerText, whiteSpace: "nowrap" }}>Set pad →</button>
                   </div>
                 );
                 if (b.ffe.status === "unknown" || b.ffe.status === "no_rule") ffeR.push(keyedNote(`Required FFE unknown — ${b.ffe.unknownReason}.`, "ffe-unk"));
@@ -16781,62 +17020,68 @@ function YieldPanel({
                 if (b.wetlands404) ffeR.push(warnNote(`⚑ ${b.wetlands404.note}`, "ffe-404"));
                 if (b.flags.includes("rule_unverified")) ffeR.push(keyedNote("Buildability rule unverified — edit & confirm in settings.", "ffe-unv"));
                 const g2 = d.floodGeo;
-                ffeR.push(keyedNote([NAVD88_NOTE, NEWER_MODEL_NOTE, g2 && g2.derivedBfe ? DERIVED_BFE_NOTE : "", g2 && g2.derivedXsWsel ? DERIVED_XS_WSEL_NOTE : "", g2 && g2.derivedWse02 ? DERIVED_WSE02_DRAFT_NOTE : "", g2 && g2.derivedWse100 ? DERIVED_WSE100_DRAFT_NOTE : "", EXCLUSIONS_NOTE, OFFSITE_NOTE].filter(Boolean).join(" "), "ffe-standing"));
+                ffeR.push(keyedNote([NAVD88_NOTE, d.districtOverlays.length ? BKDD_DATUM_NOTE : "", NEWER_MODEL_NOTE, g2 && g2.derivedBfe ? DERIVED_BFE_NOTE : "", g2 && g2.derivedXsWsel ? DERIVED_XS_WSEL_NOTE : "", g2 && g2.derivedWse02 ? DERIVED_WSE02_DRAFT_NOTE : "", g2 && g2.derivedWse100 ? DERIVED_WSE100_DRAFT_NOTE : "", EXCLUSIONS_NOTE, OFFSITE_NOTE].filter(Boolean).join(" "), "ffe-standing"));
               }
               if (!ffeR.length) ffeR.push(keyedNote("Not assessed on this check — ↻ Re-check to screen the required finished floor.", "ffe-none"));
             }
-            // B824 — the one-line verdicts: the whole closed face of each group.
-            let detVerdict = "—", detTone = null, detSub = "";
+            // B862 (chat NEW-3) — verdict-first: each group's closed face is a solid status CHIP
+            // (COVERED / SHORT / OVER-DUG / NEEDS INPUT / UNKNOWN / STOP), the NUMBER as the
+            // verdict (largest type), and a required-vs-provided BAR. Copy is verb/numbers-first;
+            // every UNKNOWN names the one action that resolves it. The bar geometry is the shared
+            // yieldBar.js layout so screen + PDF can't drift.
+            // The BAR geometry comes from the ONE shared spec (yieldBar.js) so the screen and
+            // the PDF export can't drift; only the header CHIP / verdict word (richer — floodway,
+            // straddle, remembered states) is computed here.
+            const swSpecs = stormwaterBarSpecs(d);
+            const detBar = swSpecs.det ? <BulletBar layout={swSpecs.det.layout} status={swSpecs.det.status} Y={Y} /> : null;
+            const mitBar = swSpecs.mit ? <BulletBar layout={swSpecs.mit.layout} status={swSpecs.mit.status} Y={Y} /> : null;
+            let detVerdict = "—", detTone = null, detSub = "", detChip = null;
             if (req && req.kind === "point" && req.requiredAcFt > 0 && usableAcFt == null) {
-              // NEW-9 — the usable split is unknown on this remembered view: an honest
-              // non-verdict, never a gross-credited "+surplus".
-              detVerdict = "usable unknown — ↻ re-check";
-              detTone = "warn";
-              detSub = `req ${f2(req.requiredAcFt)}`;
+              // NEW-9 — usable split unknown on a remembered view: an honest non-verdict + the action.
+              detVerdict = "usable unknown"; detTone = "warn"; detChip = "RE-CHECK"; detSub = `req ${f2(req.requiredAcFt)}`;
             } else if (req && req.kind === "point" && req.requiredAcFt > 0) {
               const dv = usableAcFt - req.requiredAcFt;
-              detVerdict = `${dv >= 0 ? "+" : "−"}${f2(Math.abs(dv))} ac-ft ${dv >= 0 ? "surplus" : "SHORT"}`;
-              detTone = dv >= 0 ? "good" : "danger";
-              detSub = `req ${f2(req.requiredAcFt)}`;
-            } else if (req && req.kind === "point") { detVerdict = `${f2(req.requiredAcFt ?? 0)} ac-ft required`; }
-            else if (req && req.kind === "band") { detVerdict = `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`; detTone = "warn"; detSub = "screening band"; }
-            else if (req && req.kind === "unknown") { detVerdict = "required unknown"; detTone = "warn"; }
-            else if (d.reqCandidates) { detVerdict = "boundary straddle"; detTone = "warn"; }
-            else { detVerdict = "unresolved"; detTone = "warn"; }
+              detVerdict = `${dv >= 0 ? "+" : "−"}${f2(Math.abs(dv))} ac-ft`;
+              detTone = dv >= 0 ? "good" : "danger"; detChip = dv >= 0 ? "COVERED" : "SHORT"; detSub = `req ${f2(req.requiredAcFt)}`;
+            } else if (req && req.kind === "point") {
+              detVerdict = "none required"; detChip = "NONE";
+            } else if (req && req.kind === "band") {
+              detVerdict = `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`; detTone = "warn"; detChip = "BAND"; detSub = "screening band";
+            } else if (req && req.kind === "unknown") { detVerdict = "required unknown"; detTone = "warn"; detChip = "UNKNOWN"; }
+            else if (d.reqCandidates) { detVerdict = "boundary straddle"; detTone = "warn"; detChip = "STRADDLE"; }
+            else { detVerdict = "unresolved"; detTone = "warn"; detChip = "SET AGENCY"; }
             const mitV = d.mitigation;
-            let mitVerdict = "—", mitTone = null, mitSub = "";
+            let mitVerdict = "—", mitTone = null, mitSub = "", mitChip = null;
             if (mitV && mitV.intersectAcres > 0) {
               const mitTag = mitV.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : mitV.providers?.wse1pct === "bfe-line-interp" ? "BFE derived" : mitV.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr" : "";
               if (mitV.volumeCf != null) {
-                // NEW-8 — the closed face is the BALANCE (provided credited cut vs required),
-                // the same over-dug/short/covered states as the Balance row. Provided unknown
-                // (a NEW-9 demoted restore) says so — never a fabricated balance.
+                // NEW-8 — the closed face is the BALANCE (provided credited cut vs required).
                 const provCf = d.mitProvided ? d.mitProvided.creditedCf : 0;
                 if (provCf == null) {
-                  mitVerdict = "provided unknown — ↻ re-check";
-                  mitTone = "warn";
-                  mitSub = `req ${f2(mitV.volumeAcFt)}`;
+                  mitVerdict = "provided unknown"; mitTone = "warn"; mitChip = "RE-CHECK"; mitSub = `req ${f2(mitV.volumeAcFt)}`;
                 } else {
-                  const bal = provCf / 43560 - mitV.volumeAcFt;
+                  const provAcFt = provCf / 43560;
+                  const bal = provAcFt - mitV.volumeAcFt;
                   const overBy = bal - Math.max(1, mitV.volumeAcFt * 0.1);
-                  mitVerdict = bal < 0 ? `−${f2(Math.abs(bal))} ac-ft SHORT` : overBy > 0 ? `+${f2(bal)} ac-ft over-dug` : "covered";
+                  mitVerdict = bal < 0 ? `−${f2(Math.abs(bal))} ac-ft` : overBy > 0 ? `+${f2(bal)} ac-ft` : "covered";
                   mitTone = bal < 0 ? "danger" : overBy > 0 ? "warn" : "good";
+                  mitChip = bal < 0 ? "SHORT" : overBy > 0 ? "OVER-DUG" : "COVERED";
                   mitSub = `req ${f2(mitV.volumeAcFt)}${mitTag ? ` · ${mitTag}` : ""}`;
                 }
-              } else { mitVerdict = "UNKNOWN"; mitTone = "warn"; mitSub = mitTag; }
-              if (mitV.flags && mitV.flags.includes("floodway_intersect")) { mitVerdict = `FLOODWAY · ${mitVerdict}`; mitTone = "danger"; }
-            } else if (d.mitRememberedMissing) { mitVerdict = "not screened"; mitTone = "warn"; }
-            else if (d.floodGeo && d.floodGeo.state === "failed") { mitVerdict = "source down"; mitTone = "warn"; }
-            else if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) { mitVerdict = "none mapped"; }
-            else if (mitV && mitV.intersectAcres === 0) { mitVerdict = "0 — no fill in zones"; }
+              } else { mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = mitTag; }
+              if (mitV.flags && mitV.flags.includes("floodway_intersect")) { mitVerdict = `floodway fill · ${mitVerdict}`; mitTone = "danger"; mitChip = "STOP"; }
+            } else if (d.mitRememberedMissing) { mitVerdict = "not screened"; mitTone = "warn"; mitChip = "RE-CHECK"; }
+            else if (d.floodGeo && d.floodGeo.state === "failed") { mitVerdict = "flood source down"; mitTone = "warn"; mitChip = "RE-CHECK"; }
+            else if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) { mitVerdict = "no mapped zones"; mitChip = "CLEAR"; }
+            else if (mitV && mitV.intersectAcres === 0) { mitVerdict = "no fill in zones"; mitChip = "CLEAR"; }
             const bb = d.buildability;
-            let ffeVerdict = "—", ffeTone = null;
-            if (bb && bb.ffe.status === "pass") { ffeVerdict = `FFE ${f2(bb.ffe.requiredFfeFt)}′ — PASSES`; ffeTone = "good"; }
-            else if (bb && bb.ffe.status === "assumed") { ffeVerdict = `FFE ${f2(bb.ffe.requiredFfeFt)}′ assumed`; }
-            else if (bb && bb.ffe.status === "short") { ffeVerdict = `${f2(bb.ffe.shortByFt)}′ SHORT`; ffeTone = "danger"; }
-            else if (bb) { ffeVerdict = "unknown"; ffeTone = "warn"; }
-            out.push(groupFold("det", "Detention", detVerdict, detTone, detR, detSub));
-            out.push(groupFold("mit", "Floodplain mitigation", mitVerdict, mitTone, mitR, mitSub));
+            let ffeVerdict = "—", ffeTone = null, ffeChip = null;
+            if (bb && bb.ffe.status === "pass") { ffeVerdict = `${f2(bb.ffe.requiredFfeFt)}′ req`; ffeTone = "good"; ffeChip = "PASSES"; }
+            else if (bb && bb.ffe.status === "assumed") { ffeVerdict = `${f2(bb.ffe.requiredFfeFt)}′ req`; ffeChip = "ASSUMED"; }
+            else if (bb && bb.ffe.status === "short") { ffeVerdict = `pad ${f2(bb.ffe.shortByFt)}′ short`; ffeTone = "danger"; ffeChip = "SHORT"; }
+            else if (bb) { ffeVerdict = "unknown"; ffeTone = "warn"; ffeChip = "SET BFE"; }
+            out.push(groupFold("det", "Detention", detVerdict, detTone, detR, detSub, { chip: detChip, bar: detBar }));
+            out.push(groupFold("mit", "Floodplain mitigation", mitVerdict, mitTone, mitR, mitSub, { chip: mitChip, bar: mitBar }));
             // NEW-10/B830 — the ledger balancer: one card of ranked screening moves that
             // close detention + mitigation together. Every move is one line + ⓘ; nothing
             // is applied without a click — the ONE apply affordance is the berm move
@@ -16866,7 +17111,7 @@ function YieldPanel({
                 out.push(groupFold("bal", "Ledger balancer", `${bal.moves.length} move${bal.moves.length > 1 ? "s" : ""} screened`, null, balR, balSub));
               }
             }
-            out.push(groupFold("ffe", "Buildability / FFE", ffeVerdict, ffeTone, ffeR, ""));
+            out.push(groupFold("ffe", "Buildability / FFE", ffeVerdict, ffeTone, ffeR, "", { chip: ffeChip }));
             // NEW-1(e) — the bottom "↻ Re-check" button folded into the top status line.
             out.push(keyedNote("Screening estimate — confirm with your engineer and the reviewing authority.", "caveat"));
             return out;

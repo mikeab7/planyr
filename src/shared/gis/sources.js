@@ -292,6 +292,35 @@ export const GIS_SOURCES = {
       "or every Harris point reads as 'in a district'. detentionRules.js owns that filter. " +
       "Same service the jur_mud map overlay renders (layers.js reads this row).",
   },
+  bkdd: {
+    // B861 (chat NEW-2) — the Brookshire–Katy Drainage District boundary. A single
+    // polygon (EPSG:2278, Planyr's spine) published by Waller County GIS on ArcGIS Online
+    // (item a6befac4c0f84e6ab066ff8716076239, access: public, anonymous Query). Membership
+    // is ADDITIVE to the county — the district's drainage/detention criteria ALSO apply; it
+    // never replaces the county floodplain regime. detentionRules.js queries it as the
+    // DETENTION_SOURCES.bkdd tier (server-side esriSpatialRelIntersects, like the MUD tier).
+    key: "bkdd",
+    label: "Brookshire–Katy Drainage District boundary",
+    provider: "Waller County GIS (ArcGIS Online, hosted)",
+    serviceUrl: "https://services1.arcgis.com/BqVKz0o32DERqyE4/arcgis/rest/services/Brookshire_Katy_Drainage_District1/FeatureServer",
+    layerId: 54,
+    geometryType: "polygon",
+    fields: { name: "Name" },
+    coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend; ~47k ac, EPSG:2278)",
+    tier: "production",
+    lastVerified: "2026-07-16",
+    fixtures: [
+      // A point well inside the district near Katy/Brookshire → the single boundary polygon.
+      { label: "Inside BKDD (near Katy)", point: [-95.9, 29.82], expectMinCount: 1 },
+    ],
+    notes:
+      "Single DISTRICT BOUNDARY polygon — a taxing/authority extent, not proof of service. " +
+      "Additive to the county (district drainage/detention criteria ALSO apply); never a " +
+      "replacement for the county floodplain ordinance. Boundary-source failure is an honest " +
+      "'district membership unverified', never a silent no. Same feature the BKDD Quiddity " +
+      "WebGIS viewer draws; the county-published AGOL layer is used because it's anonymously " +
+      "queryable (the Quiddity Enterprise portal requires auth).",
+  },
   hcfcdChannels: {
     key: "hcfcdChannels",
     label: "HCFCD channels",

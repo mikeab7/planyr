@@ -4,10 +4,13 @@ import {
   printSheetLayout,
   buildBuildingTableSvg,
   buildPrintSheetSvg,
+  buildStormwaterSvg,
+  stormwaterBandH,
   formatDateStamp,
   sanitizeFilename,
   sheetFileName,
 } from "../src/workspaces/site-planner/lib/printSheet.js";
+import { bulletBarLayout } from "../src/workspaces/site-planner/lib/yieldBar.js";
 
 const PAL = { ink: "#26231e", muted: "#8a8473", panelLine: "#cfc6af", paper: "#fff" };
 const ROWS = [
@@ -161,5 +164,47 @@ describe("export filename (B201) — date · project · plan name", () => {
   });
   it("sanitizeFilename keeps spaces, dots and hyphens", () => {
     expect(sanitizeFilename("Cross-Dock 2.0")).toBe("Cross-Dock 2.0");
+  });
+});
+
+describe("B862 (chat NEW-3) — the Stormwater required-vs-provided bar strip (PDF parity)", () => {
+  it("no bars → the historical band height is unchanged (metrics.h stays 64)", () => {
+    expect(printSheetLayout({}).metrics.h).toBe(64);
+    expect(stormwaterBandH(0)).toBe(0);
+  });
+  it("bars reserve extra band height so they never clip the text pairs", () => {
+    const none = printSheetLayout({ metricsCount: 9 });
+    const withBars = printSheetLayout({ metricsCount: 9, stormwaterBars: 2 });
+    expect(withBars.metrics.h).toBeGreaterThan(none.metrics.h);
+    expect(withBars.metrics.h - none.metrics.h).toBe(stormwaterBandH(2));
+    // the plan area shrinks by the same amount the band grew (band lives at the bottom)
+    expect(none.plan.h - withBars.plan.h).toBe(stormwaterBandH(2));
+  });
+  it("buildStormwaterSvg draws a labelled row + a bar (rect) per spec", () => {
+    const bars = [
+      { label: "Detention", verdict: "+5.02 ac-ft", status: "covered", layout: bulletBarLayout({ provided: 15, required: 10 }), unit: "ac-ft" },
+      { label: "Mitigation", verdict: "−1.20 ac-ft", status: "short", layout: bulletBarLayout({ provided: 3, required: 4.2 }), unit: "ac-ft" },
+    ];
+    const svg = buildStormwaterSvg({ x: 28, y: 700, w: 1044, bars, pal: PAL });
+    expect(svg).toMatch(/STORMWATER/);
+    expect(svg).toMatch(/Detention/);
+    expect(svg).toMatch(/Mitigation/);
+    expect(svg).toMatch(/\+5\.02 ac-ft/);
+    expect((svg.match(/<rect/g) || []).length).toBeGreaterThanOrEqual(2); // ≥1 track/provided rect per bar
+    expect(svg).toMatch(/#15803D/); // the covered (green) provided fill
+    expect(svg).toMatch(/#B3361B/); // the short (red) provided fill
+  });
+  it("buildPrintSheetSvg embeds the stormwater bars when passed", () => {
+    const L = printSheetLayout({ stormwaterBars: 1 });
+    const svg = buildPrintSheetSvg({
+      layout: L, planSvg: "", title: "T", buildings: [], pal: PAL,
+      metrics: [["Site area", "10 ac"]],
+      stormwater: [{ label: "Detention", verdict: "+5.02 ac-ft", status: "covered", layout: bulletBarLayout({ provided: 15, required: 10 }), unit: "ac-ft" }],
+    });
+    expect(svg).toMatch(/STORMWATER/);
+    expect(svg).toMatch(/Detention/);
+  });
+  it("an empty stormwater array renders nothing (no strip)", () => {
+    expect(buildStormwaterSvg({ x: 0, y: 0, w: 1000, bars: [], pal: PAL })).toBe("");
   });
 });
