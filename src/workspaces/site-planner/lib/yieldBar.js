@@ -28,8 +28,8 @@ const CF_PER_ACFT = 43560;
  * signed delta — all as fractions of a shared scale (max of provided & required + headroom),
  * so the two renderers only need pixel width. `status` is the domain verdict the CALLER passes
  * (covered/short/over/needs-input/unknown); it only colours the fill, never the geometry. */
-export function bulletBarLayout({ provided = 0, required = null, bandLo = null, bandHi = null, unknown = false, headroom = 1.15 } = {}) {
-  if (unknown) return { mode: "bullet", unknown: true, provFrac: 1, reqFrac: null, spanFrac: null, scaleMax: null, noneRequired: false, delta: null };
+export function bulletBarLayout({ provided = 0, required = null, bandLo = null, bandHi = null, unknown = false, headroom = 1.15, reference = null } = {}) {
+  if (unknown) return { mode: "bullet", unknown: true, provFrac: 1, reqFrac: null, spanFrac: null, scaleMax: null, noneRequired: false, delta: null, refFrac: null };
   const p = fin(provided) ? Math.max(0, provided) : 0;
   const hasBand = fin(bandLo) && fin(bandHi);
   const lo = hasBand ? Math.min(bandLo, bandHi) : null;
@@ -37,7 +37,12 @@ export function bulletBarLayout({ provided = 0, required = null, bandLo = null, 
   const rPoint = !hasBand && fin(required) ? Math.max(0, required) : null;
   const refHi = hasBand ? hi : (rPoint ?? 0);
   const noneRequired = !hasBand && (rPoint == null || rPoint === 0);
-  const scaleMax = Math.max(p, refHi, 1e-9) * headroom;
+  // NEW-1 — a de-emphasized GROSS reference tick (the total excavated volume before the
+  // usable/dead split). It only shows when it exceeds the plotted provided (usable) value,
+  // and it participates in the scale so a "usable 0, gross large" pond still renders the
+  // tick to the right of a zero-length provided bar (never a full-length provided bar).
+  const ref = fin(reference) && reference > p + 1e-9 ? Math.max(0, reference) : null;
+  const scaleMax = Math.max(p, refHi, ref ?? 0, 1e-9) * headroom;
   // Delta: vs the point requirement, or vs the band's conservative (high) end. Nothing to
   // offset (zero/null required) → no delta (a "+3.00" against a 0 requirement is noise).
   const delta = noneRequired ? null : hasBand ? p - hi : rPoint != null ? p - rPoint : null;
@@ -54,6 +59,8 @@ export function bulletBarLayout({ provided = 0, required = null, bandLo = null, 
     scaleMax,
     noneRequired,
     delta,
+    refFrac: ref != null ? clamp01(ref / scaleMax) : null,
+    reference: ref,
   };
 }
 
@@ -103,6 +110,12 @@ export function bulletBarMarks(layout, { w = 200, barH = 12, unit = "ac-ft", sho
   } else if (layout.reqFrac != null && !layout.noneRequired) {
     marks.push({ t: "tick", role: "required", x: px(layout.reqFrac), y0: y - 3, y1: y + barH + 3 });
   }
+  // NEW-1 — the de-emphasized GROSS reference tick (a faint hollow marker), so a
+  // usable-vs-gross gap stays legible without letting gross drive the verdict. Its meaning
+  // rides the bar's aria/title (no label row text — that would collide with the delta).
+  if (layout.refFrac != null) {
+    marks.push({ t: "tick", role: "reference", x: px(layout.refFrac), y0: y - 1, y1: y + barH + 1 });
+  }
   // Delta / microcopy label row.
   if (showDelta) {
     if (layout.noneRequired) {
@@ -127,17 +140,23 @@ export function stormwaterBarSpecs(d) {
   const req = d.req;
   const usableAcFt = d.providedUsableCf == null ? null : d.providedUsableCf / CF_PER_ACFT;
   const providedAcFt = d.providedCf != null ? d.providedCf / CF_PER_ACFT : 0;
+  // NEW-1 — ONE source of truth: the verdict, bar, and delta ALL read USABLE
+  // (providedUsableCf → usableAcFt); GROSS never drives the fill or the delta — it rides
+  // only as the de-emphasized `reference` tick. A null usable is honestly "unknown" (never a
+  // silent gross fallback). Point AND band both compute a covered/short verdict off usable.
   if (req && req.kind === "point" && req.requiredAcFt > 0 && usableAcFt == null) {
     out.det = { label: "Detention", layout: bulletBarLayout({ unknown: true }), status: "unknown", verdict: "usable unknown" };
   } else if (req && req.kind === "point" && req.requiredAcFt > 0) {
     const dv = usableAcFt - req.requiredAcFt;
-    out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt, required: req.requiredAcFt }), status: dv >= 0 ? "covered" : "short", verdict: `${dv >= 0 ? "+" : "−"}${_f2(Math.abs(dv))} ac-ft` };
+    out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt, required: req.requiredAcFt, reference: providedAcFt }), status: dv >= 0 ? "covered" : "short", verdict: `${dv >= 0 ? "+" : "−"}${_f2(Math.abs(dv))} ac-ft` };
   } else if (req && req.kind === "point") {
     out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt ?? providedAcFt, required: 0 }), status: null, verdict: "none required" };
+  } else if (req && req.kind === "band" && usableAcFt == null) {
+    out.det = { label: "Detention", layout: bulletBarLayout({ unknown: true }), status: "unknown", verdict: "usable unknown" };
   } else if (req && req.kind === "band") {
-    const prov = usableAcFt ?? providedAcFt;
+    const prov = usableAcFt; // never gross — gross rides the reference tick only
     const status = prov >= req.bandAcFt[1] ? "covered" : prov < req.bandAcFt[0] ? "short" : "needs-input";
-    out.det = { label: "Detention", layout: bulletBarLayout({ provided: prov, bandLo: req.bandAcFt[0], bandHi: req.bandAcFt[1] }), status, verdict: `${_f2(req.bandAcFt[0])}–${_f2(req.bandAcFt[1])} ac-ft` };
+    out.det = { label: "Detention", layout: bulletBarLayout({ provided: prov, bandLo: req.bandAcFt[0], bandHi: req.bandAcFt[1], reference: providedAcFt }), status, verdict: `${_f2(req.bandAcFt[0])}–${_f2(req.bandAcFt[1])} ac-ft` };
   } else if (req && req.kind === "unknown") {
     out.det = { label: "Detention", layout: bulletBarLayout({ unknown: true }), status: "unknown", verdict: "required unknown" };
   }
@@ -150,12 +169,14 @@ export function stormwaterBarSpecs(d) {
       } else {
         const provAcFt = provCf / CF_PER_ACFT;
         const bal = provAcFt - mit.volumeAcFt;
-        const overBy = bal - Math.max(1, mit.volumeAcFt * 0.1);
+        // NEW-2 — the "OVER-DUG" state is retired: an over-provided cut simply reads COVERED
+        // (a zero-requirement surplus must never out-shout a real shortfall). Only a genuine
+        // shortfall is loud; a surplus is quiet good.
         out.mit = {
           label: "Mitigation",
           layout: bulletBarLayout({ provided: provAcFt, required: mit.volumeAcFt }),
-          status: bal < 0 ? "short" : overBy > 0 ? "over" : "covered",
-          verdict: bal < 0 ? `−${_f2(Math.abs(bal))} ac-ft` : overBy > 0 ? `+${_f2(bal)} ac-ft` : "covered",
+          status: bal < 0 ? "short" : "covered",
+          verdict: bal < 0 ? `−${_f2(Math.abs(bal))} ac-ft` : "covered",
         };
       }
     } else {
@@ -210,7 +231,10 @@ export function bulletBarSvg(layout, { x = 0, y = 0, w = 200, barH = 12, status 
       else if (m.role === "seg") s += `<rect x="${_r2(mx)}" y="${_r2(my)}" width="${_r2(m.w)}" height="${_r2(m.h)}" fill="${(C.seg || {})[m.segKey] || C.neutral}"/>`;
       else if (m.role === "provided") s += `<rect x="${_r2(mx)}" y="${_r2(my)}" width="${_r2(m.w)}" height="${_r2(m.h)}" rx="${m.rx || 0}" fill="${providedHex(status, C)}"/>`;
     } else if (m.t === "tick") {
-      s += `<line x1="${_r2(mx)}" y1="${_r2(y + m.y0)}" x2="${_r2(mx)}" y2="${_r2(y + m.y1)}" stroke="${C.tick}" stroke-width="${m.role === "required-edge" ? 1.25 : 2}"/>`;
+      // NEW-1 — the gross reference tick is faint (thin, dashed, muted) so it reads as a
+      // reference, never the requirement/provided edge.
+      if (m.role === "reference") s += `<line x1="${_r2(mx)}" y1="${_r2(y + m.y0)}" x2="${_r2(mx)}" y2="${_r2(y + m.y1)}" stroke="${C.muted}" stroke-width="1" stroke-dasharray="2 2" opacity="0.7"/>`;
+      else s += `<line x1="${_r2(mx)}" y1="${_r2(y + m.y0)}" x2="${_r2(mx)}" y2="${_r2(y + m.y1)}" stroke="${C.tick}" stroke-width="${m.role === "required-edge" ? 1.25 : 2}"/>`;
     } else if (m.t === "text") {
       const fill = m.role === "good" ? C.good : m.role === "danger" ? C.danger : C.muted;
       s += `<text x="${_r2(mx)}" y="${_r2(y + m.y)}" text-anchor="${m.anchor}" font-size="10" fill="${fill}"${m.mono ? ` font-family="${mono}" font-weight="700"` : ""} font-variant-numeric="tabular-nums">${_esc(m.s)}</text>`;

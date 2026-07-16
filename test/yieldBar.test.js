@@ -110,17 +110,42 @@ describe("stormwaterBarSpecs — the ONE shared derivation (screen == PDF)", () 
     expect(det.layout.unknown).toBe(true);
     expect(det.verdict).toMatch(/usable unknown/);
   });
-  it("band detention → a span layout, status by where provided lands", () => {
+  it("band detention → a span layout, status by where USABLE lands", () => {
     const d = { req: { kind: "band", bandAcFt: [7.5, 10] }, providedUsableCf: 9 * AF, providedCf: 9 * AF };
     const { det } = stormwaterBarSpecs(d);
     expect(det.layout.spanFrac).toHaveLength(2);
     expect(det.status).toBe("needs-input"); // between lo and hi
   });
-  it("mitigation: over-dug → +delta + over status", () => {
+  it("NEW-1 band detention computes off USABLE, not gross: usable 0 with gross large → SHORT", () => {
+    // The Tsakiris repro: gross 38.84, usable 0.00 (fully inundated), band 28.62–33.82.
+    const d = { req: { kind: "band", bandAcFt: [28.62, 33.82] }, providedUsableCf: 0, providedCf: 38.84 * AF };
+    const { det } = stormwaterBarSpecs(d);
+    expect(det.status).toBe("short"); // usable 0 < lo → short (never "covered" off gross 38.84)
+    expect(det.layout.provFrac).toBe(0); // zero-length usable bar
+    expect(det.layout.refFrac).toBeGreaterThan(0); // gross rides the de-emphasized reference tick
+  });
+  it("NEW-1 band detention with unknown usable → an unknown (hatched) bar, never gross-fed", () => {
+    const d = { req: { kind: "band", bandAcFt: [7.5, 10] }, providedUsableCf: null, providedCf: 20 * AF };
+    const { det } = stormwaterBarSpecs(d);
+    expect(det.layout.unknown).toBe(true);
+    expect(det.status).toBe("unknown");
+  });
+  it("NEW-1 point detention exposes the gross reference tick (usable < gross)", () => {
+    const d = { req: { kind: "point", requiredAcFt: 10 }, providedUsableCf: 6 * AF, providedCf: 12 * AF };
+    const { det } = stormwaterBarSpecs(d);
+    expect(det.layout.refFrac).toBeGreaterThan(det.layout.provFrac); // gross tick right of the usable fill
+  });
+  it("NEW-2 mitigation: an over-provided cut reads COVERED (the OVER status is retired)", () => {
     const d = { mitigation: { intersectAcres: 2, volumeCf: 4 * AF, volumeAcFt: 4 }, mitProvided: { creditedCf: 8 * AF } };
     const { mit } = stormwaterBarSpecs(d);
-    expect(mit.status).toBe("over");
-    expect(mit.verdict).toMatch(/\+4\.00 ac-ft/);
+    expect(mit.status).toBe("covered");
+    expect(mit.verdict).toBe("covered");
+  });
+  it("NEW-2 mitigation shortfall stays loud (short)", () => {
+    const d = { mitigation: { intersectAcres: 2, volumeCf: 8 * AF, volumeAcFt: 8 }, mitProvided: { creditedCf: 3 * AF } };
+    const { mit } = stormwaterBarSpecs(d);
+    expect(mit.status).toBe("short");
+    expect(mit.verdict).toMatch(/−5\.00 ac-ft/);
   });
   it("mitigation volume UNKNOWN → an unknown bar", () => {
     const d = { mitigation: { intersectAcres: 2, volumeCf: null } };
