@@ -534,6 +534,15 @@ export const detectCascadeDrift = (storedTasks, engineTasks) => {
   return out;
 };
 
+// B835 (recurrence ×2) — the scheduling-input gate updateTask uses to decide whether an edit must re-run
+// cascadeDates + rollupParentDates before persist. VERBATIM mirror of public/sequence/index.html.
+// A typed duration edit commits {durValue,durUnit} (grid + master-view cells) and an unpin/unlock
+// commits {pinnedStart:false} / {pinnedEnd:false,durValue,durUnit}; the pre-fix gate omitted those
+// keys, so the edited task's own end updated but successors never cascaded — stale downstream dates +
+// stale persist (the B835 recurrence). Any key NOT here can't move a date, so it skips the cascade.
+export const SCHEDULE_INPUT_KEYS = ['start','end','duration','durValue','durUnit','predecessors','pinnedStart','pinnedEnd','meetingBound','meetingBodyId','pinnedMeetingDate','minMeetingsAfter','deadlineForTaskId'];
+export const touchesSchedule = updates => !!updates && SCHEDULE_INPUT_KEYS.some(k => k in updates);
+
 // Export filename — matches the Site Planner's PDF/PNG naming ("YYYY.MM.DD {Project} - {Plan}");
 // here the trailing slot is "Schedule". Faithful copy from index.html (date injectable for tests).
 export const scheduleExportName = (projects, date = new Date()) => {

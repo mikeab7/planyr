@@ -2237,6 +2237,20 @@ const rollupParentDates = tasks => {
 // array order (so a caller can still renumber afterwards).
 const recomputeAfterStructureChange = tasks => rollupParentDates(cascadeDates(tasks));
 
+// B835 (recurrence ×2) — the SCHEDULING-INPUT fields. Editing ANY of these can move this task's OR a
+// successor's dates, so updateTask must re-run cascadeDates + rollupParentDates before it persists. The
+// gate used to be a hand-maintained OR-list that omitted `durValue`/`durUnit` (the B615 typed-duration
+// commit — the grid + master-view duration cells send {durValue,durUnit}, never {duration}) and
+// `pinnedStart`/`pinnedEnd` (unpin / unlock-finish send {pinnedStart:false,…} / {pinnedEnd:false,durValue,durUnit}).
+// Those edits resolved the EDITED task's own end but never cascaded, so successors kept STALE dates —
+// and the stale value was persisted. B835's first pass wrongly concluded "no code bug"; the live repro
+// (hs-v1: task 82's duration changed 45cd→45d, its FS successor 83 never re-flowed) is exactly this gap.
+// Anything NOT in this set (name, health, %-complete, notes, color,
+// focused, isExpanded, responsibleParty, cost) can never move a date, so it correctly skips the cascade.
+// Mirrored + unit-tested in ui-audit/stress/scheduler-engine.mjs (source-guarded in test/schedulerEngine.test.js).
+const SCHEDULE_INPUT_KEYS = ['start','end','duration','durValue','durUnit','predecessors','pinnedStart','pinnedEnd','meetingBound','meetingBodyId','pinnedMeetingDate','minMeetingsAfter','deadlineForTaskId'];
+const touchesSchedule = updates => !!updates && SCHEDULE_INPUT_KEYS.some(k => k in updates);
+
 // B836 — cascade-drift detector. A non-pinned task's SAVED start should always equal the start its
 // predecessor chain implies. When it doesn't (a stale value from an older build, a hand-edited store,
 // or a lag zeroed without a re-cascade — B835), the load re-cascade silently corrects it. This returns
@@ -5566,7 +5580,7 @@ function App() {
           tasks = tasks.map(t => descIds.has(t.id) ? {...t, health: updates.health, ...extra} : t);
         }
       }
-      if ('duration' in updates || 'start' in updates || 'end' in updates || 'predecessors' in updates || 'meetingBound' in updates || 'meetingBodyId' in updates || 'pinnedMeetingDate' in updates || 'minMeetingsAfter' in updates || 'deadlineForTaskId' in updates) {
+      if (touchesSchedule(updates)) {   // B835 (recurrence ×2) — fires for durValue/durUnit (typed duration) + pinnedStart/pinnedEnd (unpin/unlock) too, not just {duration}/{start}
         tasks = cascadeDates(tasks);
         tasks = rollupParentDates(tasks);
         // B816 — a bound task whose meeting moved from a prior meeting rolled a cycle; announce it (once).
