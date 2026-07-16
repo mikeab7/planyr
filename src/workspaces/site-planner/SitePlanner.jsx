@@ -95,6 +95,7 @@ import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbed
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds } from "./lib/labelLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
+import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight, bermFillVolume } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
@@ -2991,6 +2992,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setEls((a) => a.map((el) => ids.has(el.id) ? shiftEl(el, dx, dy) : el));
     }
   };
+  // Translate a points element by (dx,dy). NEW-1/B872 — a reshaped building (footEdit) also carries its
+  // dock-frame box (cx/cy) + pinned walls (dockLines), so copy/paste/duplicate keeps its dock frame in
+  // sync with the moved outline instead of stranding it at the source location.
+  const shiftPointsEl = (el, dx, dy) => ({
+    ...el,
+    points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+    ...(el.footEdit ? { cx: el.cx + dx, cy: el.cy + dy, dockLines: translateDockLines(el.dockLines, dx, dy) } : {}),
+  });
   // Copy / cut / paste the selected element (rectangles or polygons).
   const copySel = () => { if (sel?.kind === "el") clip.current = els.find((x) => x.id === sel.id) || clip.current; };
   const cutSel = () => { if (sel?.kind === "el") { copySel(); deleteSel(); } };
@@ -3004,7 +3013,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (isCenterlineRoad(src)) {
         el = { ...shiftEl(src, a.x - src.cx, a.y - src.cy), id: uid() }; // road: bbox centre under the cursor (pts move too)
       } else if (src.points) {
-        el = { ...src, id: uid(), points: centerOn(src.points, a) }; // polygon: bbox center sits under the cursor
+        const np = centerOn(src.points, a);                         // polygon: bbox center sits under the cursor
+        const dxp = np[0].x - src.points[0].x, dyp = np[0].y - src.points[0].y; // uniform translation → same delta for the frame
+        el = { ...shiftPointsEl(src, dxp, dyp), id: uid() };
       } else {
         el = { ...src, id: uid(), cx: a.x, cy: a.y }; // a rect's cx/cy IS its center
       }
@@ -3013,7 +3024,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       el = isCenterlineRoad(src)
         ? { ...shiftEl(src, off, off), id: uid() }
         : src.points
-          ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
+          ? { ...shiftPointsEl(src, off, off), id: uid() }
           : { ...src, id: uid(), cx: src.cx + off, cy: src.cy + off };
     }
     pushHistory();
@@ -3029,7 +3040,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = isCenterlineRoad(rest)
       ? { ...shiftEl(rest, off, off), id: uid() }
       : rest.points
-        ? { ...rest, id: uid(), points: rest.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
+        ? { ...shiftPointsEl(rest, off, off), id: uid() } // NEW-1/B872: carry a reshaped building's dock frame with the ring
         : { ...rest, id: uid(), cx: rest.cx + off, cy: rest.cy + off };
     pushHistory();
     setEls((a) => [...a, el]);
@@ -3642,7 +3653,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const mkIds = new Set(refs.filter((m) => m.kind === "markup").map((m) => m.id));
     const measIds = new Set(refs.filter((m) => m.kind === "measure").map((m) => m.id));
     const orig = {
-      els: els.filter((x) => elIds.has(x.id)).map((x) => isCenterlineRoad(x) ? { id: x.id, pts: x.pts, cx: x.cx, cy: x.cy } : x.points ? { id: x.id, points: x.points } : { id: x.id, cx: x.cx, cy: x.cy }),
+      els: els.filter((x) => elIds.has(x.id)).map((x) => isCenterlineRoad(x) ? { id: x.id, pts: x.pts, cx: x.cx, cy: x.cy } : x.points ? { id: x.id, points: x.points, ...(x.footEdit ? { cx: x.cx, cy: x.cy, dockLines: x.dockLines } : {}) } : { id: x.id, cx: x.cx, cy: x.cy }),
       markups: markups.filter((m) => mkIds.has(m.id)).map((m) => ({ ...m })),
       measures: measures.filter((m) => measIds.has(m.id)).map((m) => ({ ...m })), // B569: measurements move with the set
     };
@@ -3774,7 +3785,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setSel({ kind: "el", id });
     setSelVtx({ layer: "el", id, index });
-    drag.current = { mode: "elVertex", id, index };
+    // NEW-1/B872 — a reshaped building constrains a LOADED-wall corner to slide ALONG its wall (the
+    // dock frame stays straight); an end/rear vertex moves freely. Snapshot the pre-drag ring so a
+    // self-crossing drop can be reverted (checked on release).
+    const dockLine = el.footEdit ? dockLineAt(el.dockLines, el.points[index]) : null;
+    drag.current = { mode: "elVertex", id, index, dockLine, footEdit: !!el.footEdit, origPoints: el.points };
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
@@ -3863,6 +3878,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setRoadVtxSel({ id, idx: edgeIndex + 1 });            // and surface its per-vertex curve control in the panel
       return;
     }
+    // NEW-1/B872 — a LOADED (dock) wall must stay straight: refuse a control point on it, LOUD (never
+    // a silent drop). End/rear walls insert freely. This one guard covers Shift-click AND the right-
+    // click "Add control point" menu, since both route here.
+    if (layer === "el") {
+      const bx = els.find((x) => x.id === id);
+      if (bx && bx.footEdit && dockEdgeLine(bx.points, bx.dockLines, edgeIndex)) {
+        flashWarn("Can't add a point on a loaded (dock) wall — it stays straight. Add points on an end or rear wall instead.", 6000);
+        return;
+      }
+    }
     const np = snapPt(ptFeet);
     const ins = (arr) => { const a = [...arr]; a.splice(edgeIndex + 1, 0, np); return a; };
     pushHistory();
@@ -3897,7 +3922,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // element delete) instead of silently doing nothing and leaving a bogus history entry.
     let removable = false;
     if (layer === "parcel") { const pc = parcels.find((p) => p.id === id); removable = !!pc && pc.points.length > 3; }
-    else if (layer === "el") { const x = els.find((e) => e.id === id); removable = !!(x && x.points && x.points.length > 3); }
+    else if (layer === "el") {
+      const x = els.find((e) => e.id === id);
+      // NEW-1/B872 — a loaded-wall corner anchors the dock frame; refuse to delete it, but CONSUME the
+      // key (return true) so Delete never falls through and nukes the whole building. Delete an
+      // end/rear control point you added instead.
+      if (x && x.footEdit && x.points && dockLineAt(x.dockLines, x.points[index])) {
+        flashWarn("That corner anchors a loaded (dock) wall and can't be deleted. Delete a control point you added on an end/rear wall instead.", 6000);
+        setSelVtx(null); return true;
+      }
+      removable = !!(x && x.points && x.points.length > 3);
+    }
     else if (layer === "measure") { const mm = measures[id]; if (mm) { const pts = measPts(mm), min = measMode(mm) === "area" ? 3 : measMode(mm) === "count" ? 1 : 2; removable = pts.length > min; } }
     else if (layer === "ease") { const x = markups.find((m) => m.id === id); if (x) { const p = easeEditPath(x), min = x.mode === "boundary" ? 3 : 2; removable = p.length > min; } }
     else if (layer === "markup") { const x = markups.find((m) => m.id === id); if (x) { const pts = mkPts(x); removable = pts.length > mkMinPts(x); } }
@@ -4081,7 +4116,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "groupMove") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       const eids = new Set(d.orig.els.map((o) => o.id)), mids = new Set(d.orig.markups.map((o) => o.id));
-      setEls((a) => a.map((el) => { if (!eids.has(el.id)) return el; const o = d.orig.els.find((x) => x.id === el.id); return o.pts ? { ...el, pts: o.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })), cx: o.cx + dx, cy: o.cy + dy } : o.points ? { ...el, points: o.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: o.cx + dx, cy: o.cy + dy }; }));
+      setEls((a) => a.map((el) => { if (!eids.has(el.id)) return el; const o = d.orig.els.find((x) => x.id === el.id); return o.pts ? { ...el, pts: o.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })), cx: o.cx + dx, cy: o.cy + dy } : o.points ? { ...el, points: o.points.map((p) => ({ x: p.x + dx, y: p.y + dy })), ...(o.cx != null ? { cx: o.cx + dx, cy: o.cy + dy } : {}), ...(o.dockLines ? { dockLines: translateDockLines(o.dockLines, dx, dy) } : {}) } : { ...el, cx: o.cx + dx, cy: o.cy + dy }; }));
       setMarkups((a) => a.map((m) => { if (!mids.has(m.id)) return m; const o = d.orig.markups.find((x) => x.id === m.id); return translateMarkup(o, dx, dy); }));
       if (d.orig.measures?.length) { // B569: measurements travel with the set
         const sids = new Set(d.orig.measures.map((o) => o.id));
@@ -4203,7 +4238,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const m = d.members.find((x) => x.id === el.id);
           if (!m) return el;
           if (m.pts) return { ...el, pts: m.pts.map((p) => ({ x: p.x + effDx, y: p.y + effDy })), cx: m.cx + effDx, cy: m.cy + effDy };
-          if (m.points) return { ...el, points: m.points.map((p) => ({ x: p.x + effDx, y: p.y + effDy })) };
+          if (m.points) return { ...el, points: m.points.map((p) => ({ x: p.x + effDx, y: p.y + effDy })),
+            // NEW-1/B872 — a reshaped building carries its dock-frame box + pinned walls with the ring
+            ...(m.cx != null ? { cx: m.cx + effDx, cy: m.cy + effDy } : {}),
+            ...(m.dockLines ? { dockLines: translateDockLines(m.dockLines, effDx, effDy) } : {}) };
           return { ...el, cx: m.cx + effDx, cy: m.cy + effDy };
         }));
       } else {
@@ -4218,7 +4256,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (d.mode === "elVertex") {
-      const sp = snapPt(fp);
+      // A dock-wall corner projects onto its stored wall line (slides along it, no grid snap so it
+      // never kinks off the wall); every other vertex grid-snaps as usual. (NEW-1/B872)
+      const sp = d.dockLine ? projectOntoLine(d.dockLine, fp) : snapPt(fp);
       setEls((a) => a.map((x) => x.id === d.id && x.points
         ? { ...x, points: x.points.map((p, i) => (i === d.index ? sp : p)) } : x));
       return;
@@ -4461,6 +4501,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const stt = r && roadRadiusStatus(r, settings);
       if (stt) flashWarn(`⚠ ${f0(stt.minR)}′ radius — below ${f0(stt.threshold)}′ min for ${stt.label}`, 6000);
       if (d.moved) setSelVtx(null); // NEW-1: after actually reshaping a dot, Delete deletes the whole road; a plain click (no move) still arms the dot for a targeted vertex-delete
+    }
+    // NEW-1/B872 — a reshaped-building vertex drop: reject a self-crossing / zero-area result (revert
+    // to the pre-drag ring, LOUD), else recompute the dock-frame bounding box (w/h/cx/cy) off the new
+    // outline so every downstream consumer keeps reading correct dims, and relay the dock-zone stack
+    // onto the (possibly re-lengthened) walls. Rotation stays fixed — the dock frame never spins.
+    if (d && d.mode === "elVertex" && d.footEdit) {
+      const b = els.find((x) => x.id === d.id);
+      if (b && b.points) {
+        if (b.points.length < 3 || polyArea(b.points) < 1 || polySelfIntersects(b.points)) {
+          setEls((a) => a.map((x) => x.id === d.id ? { ...x, points: d.origPoints } : x));
+          flashWarn("That reshape crosses the outline over itself — reverted. Keep the walls from crossing.", 7000);
+        } else {
+          const bb = frameBBox(b.points, b.rot || 0);
+          const nbCalc = { ...b, cx: bb.cx, cy: bb.cy, w: bb.w, h: bb.h };
+          const stranded = strandedZoneIds(els, nbCalc);
+          setEls((a) => {
+            let next = a.map((x) => x.id === d.id ? { ...x, cx: bb.cx, cy: bb.cy, w: bb.w, h: bb.h } : x);
+            const nb = next.find((x) => x.id === d.id);
+            if (nb) next = relayoutAllSides(next, nb);
+            if (stranded.length) next = next.filter((x) => !stranded.includes(x.id));
+            return next;
+          });
+          if (stranded.length) tombstone(stranded);
+        }
+      }
     }
     drag.current = null;
     setPanning(false);
@@ -5354,7 +5419,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const courtBumpOpts = (arr, b, side) => {
     const horiz = side === "top" || side === "bottom";
     const full = horiz ? b.w : b.h;
-    const { along: usable, shift } = usableCourtSpan(full, bumpAlongOnSide(arr, b, side, -1), bumpAlongOnSide(arr, b, side, 1));
+    let insStart = bumpAlongOnSide(arr, b, side, -1), insEnd = bumpAlongOnSide(arr, b, side, 1);
+    // NEW-1/B872 — on a reshaped building the loaded wall may be shorter than the bounding box (a
+    // clipped corner / angled end). Pull the truck court (and the whole outward stack) in to the TRUE
+    // wall span, reusing the same B492 clear-span mechanism the corner bump-outs use.
+    if (b.footEdit) { const seg = dockSegExtent(b, side); if (seg) { insStart = Math.max(insStart, seg.startF); insEnd = Math.max(insEnd, seg.L - seg.endF); } }
+    const { along: usable, shift } = usableCourtSpan(full, insStart, insEnd);
     const court = findCourtIn(arr, b, side);
     const along = court && Number.isFinite(court.alongLen) && court.alongLen > 0 ? Math.min(court.alongLen, usable) : usable;
     return { along, alongShift: shift };
@@ -5869,7 +5939,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const members = assemblyOf(id).map((m) => isCenterlineRoad(m)
       ? { id: m.id, pts: m.pts, cx: m.cx, cy: m.cy }
       : m.points
-        ? { id: m.id, points: m.points }
+        ? { id: m.id, points: m.points, ...(m.footEdit ? { cx: m.cx, cy: m.cy, dockLines: m.dockLines } : {}) }
         : { id: m.id, cx: m.cx, cy: m.cy, w: m.w, h: m.h });
     drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
@@ -10136,6 +10206,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // those zones; tombstone them so they stay gone across a merge and the ≥2 drop doesn't false-conflict.
     if (stranded.length) tombstone(stranded);
   };
+  // NEW-1 / B872 — reshape a placed rectangular building. PROMOTE it to an editable polygon
+  // (`el.points`), pinning the loaded (dock) walls as fixed world-feet lines so the shared B230
+  // vertex engine can angle an end wall / clip a corner while the dock frame is preserved: a dock
+  // corner slides ALONG its wall, an end-wall vertex moves freely (see lib/footprintEdit.js). Blocks
+  // while corner bump-outs are attached — dog-ears anchor to rect corners and would misplace on an
+  // angled wall (they must be removed first, never silently dropped).
+  const editBuildingFootprint = (id) => {
+    const el = els.find((x) => x.id === id);
+    if (!el || el.type !== "building" || el.dogEar || el.points) return; // already irregular / not a plain building
+    if (els.some((x) => x.attachedTo === id && x.dogEar)) {
+      flashWarn("Remove the corner bump-outs before editing the footprint (they anchor to square corners).", 7000);
+      return;
+    }
+    pushHistory();
+    setEls((a) => a.map((x) => x.id === id ? { ...x, ...convertBuildingToPolygon(x) } : x));
+    setSel({ kind: "el", id });
+    setSelVtx(null);
+    flashWarn("Reshape mode: drag a corner to move it. Loaded (dock) walls stay straight — their corners slide along the wall; Shift-click an end/rear wall to add a control point.", 9000);
+  };
+  // Undo the reshape: drop back to the rectangle that bounds the current outline (keeps cx/cy/w/h/rot,
+  // which are the live dock-frame box). Relays out the dock zones onto the restored square walls.
+  const resetBuildingFootprint = (id) => {
+    const el = els.find((x) => x.id === id);
+    if (!el || !el.footEdit) return;
+    pushHistory();
+    setEls((a) => {
+      let next = a.map((x) => { if (x.id !== id) return x; const y = { ...x }; delete y.points; delete y.dockLines; delete y.footEdit; return y; });
+      const nb = next.find((x) => x.id === id);
+      return nb ? relayoutAllSides(next, nb) : next;
+    });
+  };
   // Rotate the selected element to an absolute angle, carrying its whole bonded
   // assembly (sidewalks, truck court, trailer parking, dog-ears) around its centre.
   const rotateAssemblyTo = (el, newRot) => {
@@ -13526,7 +13627,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* selected element */}
           {!multiStyleable && selEl && (
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
-              {!selEl.points ? (
+              {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
+                  inspector (Footprint reshape controls, dock zones, structure, column grid), routed through
+                  the isBuilding branch below whose Footprint group handles the polygon case. A hand-CLICK-
+                  DRAWN irregular building (points, no dock frame) still gets the generic polygon inspector. */}
+              {(!selEl.points || selEl.footEdit) ? (
                 <>
                   {selEl.type === "road" ? (() => {
                     const cl = isCenterlineRoad(selEl);
@@ -13692,8 +13797,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                       <>
                         {grpHdr("Footprint")}
-                        <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.length]: n })} /></Field>
-                        <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} /></Field>
+                        {b.points ? (
+                          // NEW-1/B872 — an irregular building: Length/Depth become the read-only BOUNDING dims
+                          // (true area is polygon-exact). A reshaped-from-rect building (footEdit) can reset;
+                          // a hand-click-drawn one just reads out (no rectangle to go back to).
+                          <>
+                            <Field label="Length (ft)"><span style={{ fontSize: 12.5, color: PAL.ink }}>{Math.round(footprintLength(b))} <span style={{ color: PAL.muted, fontSize: 10 }}>bounding</span></span></Field>
+                            <Field label="Depth (ft)"><span style={{ fontSize: 12.5, color: PAL.ink }}>{Math.round(footprintDepth(b))} <span style={{ color: PAL.muted, fontSize: 10 }}>bounding</span></span></Field>
+                            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>Irregular footprint · <b style={{ color: PAL.ink }}>{f0(buildingSqft(b))} sf</b>. Length/Depth show the bounding box.{b.footEdit ? " Drag corners on the canvas to reshape — loaded walls stay straight (their corners slide along the wall); Shift-click an end/rear wall to add a control point." : ""}</div>
+                            {b.footEdit && <button style={{ ...chip, width: "100%" }} title="Discard the reshape — back to the bounding rectangle" onClick={() => resetBuildingFootprint(b.id)}>↺ Reset to rectangle</button>}
+                          </>
+                        ) : (
+                          <>
+                            <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.length]: n })} /></Field>
+                            <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} /></Field>
+                            <button style={{ ...chip, width: "100%", marginTop: 2 }} title="Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)" onClick={() => editBuildingFootprint(b.id)}>✎ Edit footprint…</button>
+                          </>
+                        )}
 
                         {grpHdr("Loading")}
                         <Field label="Docks">
@@ -13709,12 +13829,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           onRem: () => removeOuterDockZone(b), remOn: dockCanRemove(b), remTitle: "Pull every dock side in by one zone",
                         })}
                         {featRow("Car parking", carN, {
-                          onAdd: () => addEmployeeParking(b), addOn: carEndsSides(b).length > 0,
-                          addTitle: "Build out the non-dock sides — sidewalk, then parking rows (one more each click)",
+                          onAdd: () => addEmployeeParking(b), addOn: carEndsSides(b).length > 0 && !b.footEdit,
+                          addTitle: b.footEdit ? "Reset the footprint to a rectangle to add end-wall parking (an angled end wall would misplace it)" : "Build out the non-dock sides — sidewalk, then parking rows (one more each click)",
                           onRem: () => shrinkEmployeeParking(b), remOn: employeeSideHasAny(b), remTitle: "Pull the non-dock-side parking in by one row (then the sidewalk)",
                         })}
                         {featRow("Bump-outs", bumpN, {
-                          onAdd: () => addDogEars(b), addOn: !noDock, addTitle: `Add dock-corner bump-outs · ${DOGEAR_W}′×${DOGEAR_D}′ corners`,
+                          onAdd: () => addDogEars(b), addOn: !noDock && !b.footEdit, addTitle: b.footEdit ? "Reset the footprint to a rectangle first — bump-outs anchor to square corners" : `Add dock-corner bump-outs · ${DOGEAR_W}′×${DOGEAR_D}′ corners`,
                           onRem: () => removeAllDogEars(b), remOn: bumpN > 0, remTitle: "Remove all bump-outs",
                         })}
                         {layerChooserRow("Behind the dock stack", "dock", dockSides)}
@@ -15161,9 +15281,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         {nextL && <button style={menuItem(false)} onClick={() => { addDockZone(t); setTypeMenu(null); }}>＋ Add {nextL.toLowerCase()} (outward)</button>}
                         {outerL && <button style={menuItem(false)} onClick={() => { removeOuterDockZone(t); setTypeMenu(null); }}>－ Remove {outerL.toLowerCase()} (outermost)</button>}
                         <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
+                        <button style={menuItem(false)} onClick={() => { editBuildingFootprint(t.id); setTypeMenu(null); }} title="Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)">✎ Edit footprint (reshape)</button>
                       </>
                     );
                   })()}
+                  {t.type === "building" && !t.dogEar && t.footEdit && (
+                    <>
+                      <div style={hdr(true)}>Footprint</div>
+                      <button style={menuItem(false)} onClick={() => { resetBuildingFootprint(t.id); setTypeMenu(null); }} title="Discard the reshape — back to the bounding rectangle">↺ Reset footprint to rectangle</button>
+                    </>
+                  )}
                   {t.type === "parking" && !t.points && explodePiecesOf(t).length >= 2 && (
                     <>
                       <div style={hdr(true)}>Parking</div>
@@ -15333,11 +15460,20 @@ function pondContourEls(el, f2p, ppf, keyPfx = "") {
 function dockDoorRun(el, side, dogEars, lengthLines, g) {
   const horiz = side === "top" || side === "bottom";
   const L = horiz ? el.w : el.h; // wall length (ft)
-  // Subtract a dog-ear by its ACTUAL span along this wall (B362: a resized bump consumes
-  // more/less of the dock face than the nominal 55′).
-  const bumpAlong = (sign) => { const d = (dogEars || []).find((x) => x.dogEar && x.dogEar.side === side && x.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
-  const startF = bumpAlong(-1);
-  const endF = L - bumpAlong(1);
+  let startF, endF;
+  // NEW-1/B872 — a reshaped building's doors ride the TRUE dock-wall segment (it shortens when a
+  // corner is clipped / an end wall angled), so the door count tracks the real wall, not the bbox.
+  if (el.footEdit) {
+    const seg = dockSegExtent(el, side);
+    if (!seg) return { startF: 0, endF: 0, horiz, doors: [] };
+    startF = seg.startF; endF = seg.endF;
+  } else {
+    // Subtract a dog-ear by its ACTUAL span along this wall (B362: a resized bump consumes
+    // more/less of the dock face than the nominal 55′).
+    const bumpAlong = (sign) => { const d = (dogEars || []).find((x) => x.dogEar && x.dogEar.side === side && x.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
+    startF = bumpAlong(-1);
+    endF = L - bumpAlong(1);
+  }
   const doors = endF - startF < g.doorWidth ? [] : placeDockDoors(startF, endF, lengthLines, { doorOC: g.doorOC, doorWidth: g.doorWidth });
   return { startF, endF, horiz, doors };
 }
@@ -15400,6 +15536,71 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // added ring reads as a lighter solid tint. Either zone is user-overridable.
     const existF = el.det?.existFill ?? waterFill;
     const addF = el.det?.addFill ?? POND_ADD_FILL_DEFAULT;
+    // NEW-1/B872 — a RESHAPED building keeps its column grid + dock doors. The rect renderer draws
+    // these in the rect branch this early-return skips, so redraw them here off the dock-frame box
+    // (cx/cy/w/h/rot), CLIP every grid line to the true (irregular) outline, and repoint the doors to
+    // the real dock-wall segment (which shortens when a corner is clipped / an end wall is angled).
+    // Gate on `footEdit` (a rect reshaped via NEW-1) — those carry the dock frame (dockLines) needed to
+    // clip the grid + repoint doors. A hand-CLICK-DRAWN irregular building has no dock frame, so it keeps
+    // its prior fill-only render (no regression — parity requirement).
+    const buildingChrome = (el.type === "building" && el.footEdit && !el.dogEar && (settings.showDocks || settings.showGrid)) ? (() => {
+      const ppf = f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x;
+      const rot = el.rot || 0;
+      // Recompute the dock-frame box LIVE from the current outline (el.w/h/cx/cy only re-sync on drop),
+      // so the grid + doors track the reshape frame-by-frame. The dock AXIS is read off the (stable)
+      // element so it can't flip mid-drag.
+      const fax = footprintAxes(el), lenIsW = fax.length === "w";
+      const bb = frameBBox(el.points, rot);
+      const L = lenIsW ? bb.w : bb.h, D = lenIsW ? bb.h : bb.w;
+      if (!(L > 0) || !(D > 0)) return null;
+      const dock = el.dock || "cross";
+      const { dside, dockSides } = dockSidesFor(el);
+      const faceAtZero = dock === "cross" || dock === "none" ? true : (dside === "top" || dside === "left");
+      const depthFt = (d) => (faceAtZero ? d : D - d);
+      // Frame-local (length 0..L, depth 0..D) → world feet, via the dock-frame box + rotation.
+      const fw = (lenOff, depOff) => {
+        const lc = lenOff - L / 2, dc = depOff - D / 2;
+        const fx = lenIsW ? lc : dc, fy = lenIsW ? dc : lc;
+        const r = rot2(fx, fy, rot);
+        return { x: bb.cx + r.x, y: bb.cy + r.y };
+      };
+      const gridLine = (aOff, bOff, style, key) => clipSegmentToRing(fw(aOff[0], aOff[1]), fw(bOff[0], bOff[1]), el.points).map((s, i) => {
+        const p = f2p(s.a), q = f2p(s.b);
+        return <line key={`${key}_${i}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} {...style} pointerEvents="none" />;
+      });
+      const out = [];
+      const g = resolveGridSettings(el, settings);
+      const grid = computeBuildingGrid({ length: L, depth: D, dock, grid: g });
+      const wpx = Math.abs(bb.w) * ppf, hpx = Math.abs(bb.h) * ppf;
+      if (settings.showGrid && grid.summary && Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX) {
+        const lineStyle = (role) => role === "flex"
+          ? { stroke: GRID_FLEX, strokeWidth: 0.6, strokeDasharray: "5 4", opacity: 0.85 }
+          : { stroke: GRID_LINE, strokeWidth: 0.5, opacity: 0.8 };
+        grid.lengthLines.forEach((ln, i) => { out.push(...gridLine([ln.at, 0], [ln.at, D], lineStyle(ln.role), `pgl${i}`)); });
+        grid.depthLines.forEach((ln, i) => { const d = depthFt(ln.at); out.push(...gridLine([0, d], [L, d], lineStyle(ln.role), `pgd${i}`)); });
+        dockSides.forEach((s) => { // heavy dock wall(s) — the TRUE (possibly shortened) loaded segment
+          const ex = dockSegExtent(el, s); if (!ex) return;
+          const edge = (s === "top" || s === "left") ? 0 : D;
+          const p = f2p(fw(ex.startF, edge)), q = f2p(fw(ex.endF, edge));
+          out.push(<line key={`pgw${s}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke={GRID_WALL} strokeWidth={1.6} pointerEvents="none" />);
+        });
+      }
+      if (settings.showDocks && dockSides.length) {
+        const apF = Math.min(8, Math.min(Math.abs(bb.w), Math.abs(bb.h)) * 0.25);
+        const lenOffsets = grid.lengthLines.map((l) => l.at);
+        const leaf = g.doorWidth;
+        const poly = (corners, fill, stroke, sw, key) => <polygon key={key} points={corners.map((pp) => { const q = f2p(fw(pp[0], pp[1])); return `${q.x},${q.y}`; }).join(" ")} fill={fill} fillOpacity={0.92} stroke={stroke} strokeWidth={sw} pointerEvents="none" />;
+        dockSides.forEach((s) => {
+          const { startF, endF, doors } = dockDoorRun(el, s, [], lenOffsets, g);
+          if (!doors.length) return;
+          const e0 = (s === "top" || s === "left") ? 0 : D;
+          const e1 = (s === "top" || s === "left") ? apF : D - apF;
+          out.push(poly([[startF, e0], [endF, e0], [endF, e1], [startF, e1]], "#9aa3b0", "#5b6470", 1, `pda${s}`));
+          doors.forEach((cF, i) => out.push(poly([[cF - leaf / 2, e0], [cF + leaf / 2, e0], [cF + leaf / 2, e1], [cF - leaf / 2, e1]], "#c2c9d2", "#5b6470", 0.6, `pdd${s}${i}`)));
+        });
+      }
+      return out.length ? out : null;
+    })() : null;
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
@@ -15407,6 +15608,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         <path d={dPath} fill={ghostPath ? addF : waterFill} fillOpacity={waterOp} stroke="none" />
         {ghostPath && <path d={ghostPath} fill={existF} fillOpacity={waterOp} stroke="none" pointerEvents="none" />}
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
+        {buildingChrome}
         {/* B617: a polygon element is a filled AREA (irregular pond / building / paving / landscape) —
             its outline is a filled-area edge, so it keeps a FIXED pixel weight (the fill carries the
             shape). Only linear features (roads, markup/utility lines) scale. */}
