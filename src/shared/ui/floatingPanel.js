@@ -57,3 +57,29 @@ export function reconcileForNarrow({ floatingIds, leftPanel }) {
   const nextDocked = leftPanel || ids[0];
   return { leftPanel: nextDocked, floating: {} };
 }
+
+/**
+ * NEW-1 (single-occupancy left dock, amends B656/B733) — the element inspector TAKES OVER the dock
+ * ("properties") on selection instead of stacking above the open panel; the dock holds at most one
+ * panel. These two pure predicates capture the decisions; the host (SitePlanner) owns the React
+ * state (the restore memo + the ✕-dismiss key) and the wiring.
+ *
+ * Should the inspector take over the dock right now? True only on desktop, when the inspector is OPEN
+ * for the current selection (`inspectorOpen` = B750's explicit-open marker matches the selection — a
+ * double-click or the Properties tab; a plain click does NOT open it), and only when the inspector
+ * doesn't already hold the dock. (Narrow keeps B556: the ✎ Properties pill opens a companion overlay,
+ * never a dock takeover.)
+ */
+export function shouldInspectorTakeDock({ inspectorOpen, narrow, alreadyDocked }) {
+  return !!inspectorOpen && !narrow && !alreadyDocked;
+}
+
+/**
+ * When the inspector relinquishes the dock (deselect or the inspector ✕), what should `leftPanel`
+ * become? Restore the memoized panel (an id, or null = close the dock) only while the inspector
+ * still holds the dock; otherwise leave the current panel untouched — a deliberate manual rail
+ * switch already moved on, and its choice wins over the restore memo.
+ */
+export function dockAfterRelinquish({ leftPanel, restore }) {
+  return leftPanel === "properties" ? (restore ?? null) : leftPanel;
+}
