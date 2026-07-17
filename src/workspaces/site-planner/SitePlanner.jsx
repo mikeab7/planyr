@@ -101,7 +101,7 @@ import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterv
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
 import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
-import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS } from "./lib/factRevalidation.js";
+import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs } from "./lib/yieldBar.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
@@ -1270,6 +1270,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // restores it. Transient UI state (never persisted). To see the inspector AND another panel at once,
   // detach one to a floating card (B717) — the only two-at-once path.
   const [dockMemo, setDockMemo] = useState(null);         // null | { restore: <panelId|null> }
+  // B875 — pond discoverability: a plain click / the map label / the right-click menu REVEALS the
+  // pond inspector (opens the Properties companion) and scroll-flashes the relevant card, so a
+  // pond's rich per-element data (purpose · sizing assistant · usable/dead split) isn't buried
+  // behind a double-click nobody discovers. The tick + target ref drive the scroll+flash effect.
+  const [pondRevealTick, setPondRevealTick] = useState(0);
+  const pondRevealTargetRef = useRef(null); // null = the card root; "assistant" / "purpose" for a sub-card
+  // B875 — a one-time hint the first time a pond auto-classifies as Hybrid (its cut serves both
+  // detention above the flood WSE and mitigation below it). Dismiss persists so it never nags.
+  const [hybridHintSeen, setHybridHintSeen] = useState(() => { try { return !!localStorage.getItem("planarfit:pondHybridHintSeen"); } catch (_) { return true; } });
+  const dismissHybridHint = () => { try { localStorage.setItem("planarfit:pondHybridHintSeen", "1"); } catch (_) {} setHybridHintSeen(true); };
   useEffect(() => {
     let mq; try { mq = window.matchMedia(`(max-width: ${FLOAT_MIN_WIDTH}px)`); } catch (_) { return undefined; }
     const on = () => setNarrow(mq.matches);
@@ -2943,6 +2953,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
+      // B875 — Enter on a selected pond opens its inspector (keyboard peer of double-click).
+      if (e.key === "Enter" && tool === "select" && sel?.kind === "el") { const se = els.find((x) => x.id === sel.id); if (se && se.type === "pond") { e.preventDefault(); revealPondInspector(se.id); return; } }
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
@@ -5964,8 +5976,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (multi.length) setMulti([]);
-    if (el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
+    // B875 — selecting a pond (that wasn't already selected) reveals its inspector card + flash, so
+    // the purpose / sizing assistant / split is discoverable from a plain click. Guarded to the
+    // first select so dragging an already-selected pond doesn't re-flash.
+    const revealPondSel = el.type === "pond" && !(sel?.kind === "el" && sel.id === id);
+    if (el.locked) { setSel({ kind: "el", id }); if (revealPondSel) revealPondInspector(id); return; } // locked: select only, don't move
     setSel({ kind: "el", id });
+    if (revealPondSel) revealPondInspector(id);
     pushHistory();
     // Snapshot every member of the assembly (attachedTo children) so they move together.
     const members = assemblyOf(id).map((m) => isCenterlineRoad(m)
@@ -6277,6 +6294,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!(multi.length > 1 && inMulti("el", id))) setSel({ kind: "el", id });
     setTypeMenu({ id, x: e.clientX, y: e.clientY });
   };
+  // B875 — reveal a pond's inspector card (open the Properties companion) and scroll-flash it.
+  // `target` optionally focuses a sub-card ("assistant" | "purpose"). Selecting a pond does this
+  // for ponds only — a deliberate, owner-requested discoverability exception to B750's
+  // "single-click = select only" (a pond carries far more per-element data than other shapes).
+  const revealPondInspector = (id, target = null) => {
+    setSel({ kind: "el", id });
+    setPropsFor({ kind: "el", id });
+    if (narrow) setNarrowProps(true);
+    pondRevealTargetRef.current = target;
+    setPondRevealTick((n) => n + 1);
+  };
+  // B875 — set a pond's purpose (role) from the right-click "Set purpose" menu. null = Auto (clear
+  // the override so the elevation split re-classifies). Rides the undo stack as one step.
+  const setPondRole = (id, role) => {
+    pushHistory();
+    setEls((a) => a.map((el) => (el.id === id ? { ...el, det: { ...(el.det || {}), ...(role == null ? { role: undefined } : { role }) } } : el)));
+  };
+  useEffect(() => {
+    if (!pondRevealTick || typeof requestAnimationFrame === "undefined" || typeof document === "undefined") return;
+    const key = pondRevealTargetRef.current;
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => {
+      const node = document.querySelector(key ? `[data-pond-card="${key}"]` : "[data-pond-card]");
+      if (!node) return;
+      try { node.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (_) {}
+      node.classList.remove("planyr-flash");
+      void node.offsetWidth; // force reflow so the animation re-triggers on a repeat reveal
+      node.classList.add("planyr-flash");
+    }));
+    return () => cancelAnimationFrame(raf);
+  }, [pondRevealTick]);
   const toggleLock = (id) => {
     pushHistory();
     setEls((a) => a.map((el) => (el.id === id ? { ...el, locked: !el.locked } : el)));
@@ -6426,6 +6473,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     (origin ? `${origin.lat.toFixed(4)},${origin.lon.toFixed(4)}` : "nogeo") + ":" + drainElsSig;
   const checkDrainage = async (opts = {}) => {
     const isAuto = opts && opts.auto === true; // B832 — auto-revalidation runs tag themselves (status line + the remembered record)
+    // B874 — a manual ↻ is the escape hatch from a STALLED auto-refetch: clear the one-attempt-per-
+    // key guard so the same target can be auto-retried later (and the manual pull itself always runs).
+    if (!isAuto) drainAutoAttempts.current.clear();
     if (!origin) { setDrainCtx((prev) => ({ error: "This plan isn't georeferenced — bring the parcel in from the map first.", prev: prev?.ctx ? prev : prev?.prev })); return; }
     const act = parcels.filter((p) => p.active !== false && p.points && p.points.length >= 3);
     if (!act.length) { setDrainCtx((prev) => ({ error: "No parcel boundary on the plan yet.", prev: prev?.ctx ? prev : prev?.prev })); return; }
@@ -6502,12 +6552,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             .then((r) => ({ grid: r.grid, req: r.req, state: "loaded" }))
             .catch(() => ({ grid: null, req: null, state: "failed" }))
         : Promise.resolve({ grid: null, req: null, state: "empty" });
-      const [ctx, floodGeo, bfeLines, xs, siteGrid] = await Promise.all([
-        resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
-        floodGeoP,
-        bfeLinesP,
-        crossSectionsP,
-        siteGridP,
+      // B874 — BOUND the whole pull: a black-holed fetch (no resolve, no reject) would otherwise
+      // leave `busy` stuck true forever (one half of the stuck-refresh class). Race the group
+      // against a 30 s timeout that REJECTS → the outer catch sets a terminal error state (↻ to
+      // retry), never an indefinite spinner. The per-source .catch()es still handle plain outages.
+      const DRAIN_FETCH_TIMEOUT_MS = 30000;
+      let drainTimeoutId = null;
+      const [ctx, floodGeo, bfeLines, xs, siteGrid] = await Promise.race([
+        Promise.all([
+          resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
+          floodGeoP,
+          bfeLinesP,
+          crossSectionsP,
+          siteGridP,
+        ]).then((r) => { if (drainTimeoutId) clearTimeout(drainTimeoutId); return r; }),
+        new Promise((_, reject) => { drainTimeoutId = setTimeout(() => reject(new Error("flood-data source timed out — ↻ Re-check")), DRAIN_FETCH_TIMEOUT_MS); }),
       ]);
       if (tok !== drainTok.current) return;
       // Representative point for the derived BFE: the centroid of the fill footprints
@@ -6574,7 +6633,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // area" (numbers recompute live, no fetch) from "outgrew it" (refetch). JSON-safe.
       const groundPt = largest.points.reduce((s, p) => ({ x: s.x + p.x / largest.points.length, y: s.y + p.y / largest.points.length }), { x: 0, y: 0 });
       const fetchRec = {
-        env: isFinite(mnX) ? { mnX: Math.round(mnX), mnY: Math.round(mnY), mxX: Math.round(mxX), mxY: Math.round(mxY) } : null,
+        // B874 — canonEnv rounds OUTWARD so the stored env always CONTAINS the measured geometry.
+        // The old Math.round shrank it (min↑ / max↓), so a fresh load with zero edits read
+        // "outgrew the fetched envelope" and the refresh spinner stuck ambiently forever.
+        env: isFinite(mnX) ? canonEnv({ mnX, mnY, mxX, mxY }) : null,
         anchorPt: { x: Math.round(bfePt.x), y: Math.round(bfePt.y) },
         groundPt: { x: Math.round(groundPt.x), y: Math.round(groundPt.y) },
         mode: isAuto ? "auto" : "manual",
@@ -7238,8 +7300,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? { ...drainLastGoodMitRef.current, stale: true }
         : (fmResultView ? { ...fmResultView, stale: true, stalePending: true, volumeCf: null, volumeAcFt: null, cutCy: null } : null))
     : fmResultView;
-  // A background refetch is pending (reval need) or actually in flight (busy from an auto run).
-  const drainAutoRefreshing = drainAutoEnabled && (drainReval.need || !!(drainCtx?.busy && drainCtx?.auto));
+  // B874 — the refresh state machine, made BOUNDED. The old flag was
+  // `drainReval.need || busy` — so it showed "Refreshing flood data…" whenever a refetch was
+  // merely WANTED, even after the single auto-attempt was spent and nothing was in flight → an
+  // indefinite ambient spinner (the crash-severity bug). Now the spinner reflects a REAL fetch:
+  //   • in flight        — an auto pull is actually running (busy && auto), OR
+  //   • armed            — a refetch is wanted and its one attempt hasn't fired/been consumed yet.
+  // A wanted refetch whose single attempt is spent while nothing is in flight is STALLED — a
+  // terminal state that offers ↻ Re-check, never an endless spinner.
+  const drainAutoInFlight = !!(drainCtx?.busy && drainCtx?.auto);
+  const drainAutoAttemptSpent = drainReval.need && drainAutoAttempts.current.has(drainReval.key);
+  const drainAutoRefreshing = drainAutoEnabled && (drainAutoInFlight || (drainReval.need && !drainAutoAttemptSpent && !drainCtx?.busy));
+  const drainAutoStalled = drainAutoEnabled && drainReval.need && drainAutoAttemptSpent && !drainAutoInFlight;
   useEffect(() => {
     if (!drainReval.need || drainCtx?.busy) return;
     if (drainAutoAttempts.current.has(drainReval.key)) return; // one attempt per target — a failure is honest, never a loop
@@ -7615,6 +7687,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     fetchStale: drainFetchStale,
     fetchStaleReason: drainReval.kind === "edit" ? drainReval.reason : (drainFetchStale ? "env-exit" : null),
     autoRefreshing: drainAutoRefreshing,
+    autoStalled: drainAutoStalled, // B874 — a wanted refetch whose one attempt is spent + not in flight (terminal, offer ↻)
     autoEnabled: drainAutoEnabled,
     floodAgeMs: floodGeo && floodGeo.ts != null ? Date.now() - floodGeo.ts : null,
     multiParcel: !!drainViewCtx?.multiParcel,
@@ -9244,8 +9317,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fam = carto ? "Inter, system-ui, sans-serif" : "ui-monospace, Menlo, monospace";
     const halo = carto || leader;
     const ink = carto ? "#0E2E36" : (leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill));
+    // B875 — a pond's map label is a click target: tapping it selects the pond + reveals its
+    // inspector (a leadered pond label often sits away from the basin, so it's a real second
+    // handle). Other labels stay pointer-transparent (clicks fall through to the shape).
+    const isPondLabel = tool === "select" && d.el && d.el.type === "pond" && !d.added;
     return (
-      <g key={`lbl${d.lid}`} pointerEvents="none">
+      <g key={`lbl${d.lid}`} pointerEvents={isPondLabel ? "auto" : "none"} style={isPondLabel ? { cursor: "pointer" } : undefined}
+        onPointerDown={isPondLabel ? (e) => { e.stopPropagation(); revealPondInspector(d.el.id); } : undefined}>
         {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
         {!d.added && d.el.locked && <text x={x} y={top - 3 * dls} textAnchor="middle" fontSize={12 * dls}>🔒</text>}
         <text x={x} y={first} textAnchor="middle" fontSize={dfs}
@@ -14526,9 +14604,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         );
                       };
                       return (
-                        <div style={{ marginTop: 10 }}>
+                        <div data-pond-card="purpose" style={{ marginTop: 10 }}>
                           {/* NEW-4 — owner naming: the user-facing concept is the pond's PURPOSE
                               (Detention / Mitigation / Hybrid); "dual" stays the stored enum. */}
+                          {/* B875 — the effective purpose reads prominently ("Hybrid — auto"), so a
+                              selected pond immediately shows what ledger its cut serves + why. */}
+                          <div style={{ fontSize: 12, fontWeight: 800, color: PAL.ink, marginBottom: 4 }}>
+                            Purpose: {POND_ROLE_LABEL[effRole]} <span style={{ fontWeight: 400, color: PAL.muted, fontSize: 10.5 }}>— {roleSource === "auto" ? "auto (from elevation)" : "you set this"}</span>
+                          </div>
+                          {effRole === "dual" && !hybridHintSeen && (
+                            <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "0 0 6px", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                              <span><strong>Hybrid</strong> = this pond serves BOTH ledgers: usable detention above the flood water surface, and compensating-storage mitigation for the cut below it. Set it to Detention or Mitigation to force one.</span>
+                              <button type="button" onClick={dismissHybridHint} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 999, border: `1px solid ${PAL.border}`, background: "transparent", color: PAL.muted, whiteSpace: "nowrap" }}>Got it</button>
+                            </div>
+                          )}
                           <Field label="Pond purpose">
                             <span style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
                               {roleBtn(null, `Auto (${POND_ROLE_LABEL[suggested.role]})`)}
@@ -14689,7 +14778,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         body.push(<div key="assist-caveat" style={smallNote}>Targets = the site requirement minus what the OTHER ponds already provide (this pond closes the remainder). Proposals only — redraw the pond to take one; volumes come from the same banded split as the rows above.</div>);
                       }
                       return (
-                        <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                        <div data-pond-card="assistant" style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
                           {head}
                           {body}
                         </div>
@@ -15489,6 +15578,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {arrRow("Bring Forward", "forward", af.atTop, `${MOD}]`)}
                       {arrRow("Send Backward", "backward", af.atBottom, `${MOD}[`)}
                       {arrRow("Send to Back", "back", af.atBottom, `${MOD}⇧[`)}
+                    </>
+                  )}
+                  {/* B875 — pond discoverability: the right-click menu carries the pond-specific
+                      actions (was a generic Duplicate/Pin/Attach/Delete menu only). */}
+                  {t.type === "pond" && (
+                    <>
+                      <div style={hdr(true)}>Detention pond</div>
+                      <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, null); setTypeMenu(null); }} title="Open this pond's inspector — anchor, depth, purpose, usable/dead split">⚙ Pond settings…</button>
+                      <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, "assistant"); setTypeMenu(null); }} title="Size this pond toward its detention + mitigation targets (one-click Apply)">📐 Sizing assistant…</button>
+                      <div style={hdr(false)}>Set purpose</div>
+                      {[[null, "Auto"], ["detention", POND_ROLE_LABEL.detention], ["mitigation", POND_ROLE_LABEL.mitigation], ["dual", POND_ROLE_LABEL.dual]].map(([v, label]) => {
+                        const active = v == null ? (t.det?.role == null) : t.det?.role === v;
+                        return (
+                          <button key={String(v)} style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                            onClick={() => { setPondRole(t.id, v); setTypeMenu(null); }}>
+                            <span>{label}{v == null ? " (from elevation)" : ""}</span>{active ? <span style={{ color: PAL.accent, fontWeight: 700 }}>✓</span> : null}
+                          </button>
+                        );
+                      })}
                     </>
                   )}
                   <div style={hdr(true)}>Edit</div>
@@ -16697,6 +16805,10 @@ function YieldPanel({
               // The drawn footprint outgrew the fetched flood envelope but auto-refresh is off:
               // the flood-dependent numbers screen a smaller area until a manual ↻ — say so loudly.
               else if (d.fetchStale && !d.autoEnabled) { statusText = `⚠ The flood pull predates the drawn area — ↻ re-check to screen the new footprint${ageChip}`; statusWarn = true; }
+              // B874 — STALLED: a refetch is wanted but its single auto attempt is spent and nothing
+              // is in flight. A TERMINAL state (never an endless spinner) — the numbers stay live off
+              // the cached facts; ↻ Re-check re-arms the pull.
+              else if (d.autoStalled) { statusText = `⚠ Couldn't refresh the flood data for the drawn area — ↻ Re-check to retry${ageChip}`; statusWarn = true; }
               // Auto refresh pending / in flight (geometry outgrew the envelope, or refresh-on-open):
               // the numbers are already live — this only says the flood pull is catching up.
               else if (d.autoRefreshing) statusText = `Refreshing flood data for the drawn area…${ageChip}`;
@@ -17516,15 +17628,17 @@ function YieldPanel({
             }
             const mitV = d.mitigation;
             let mitVerdict = "—", mitTone = null, mitSub = "", mitChip = null;
-            // NEW-2 — a STALE fetch (drawn area outgrew the fetched flood envelope) must NEVER
-            // read as a fresh all-clear. UNKNOWN-pending (no last-good yet) shows RE-CHECK; a held
-            // last-good shows its prior verdict with a "· stale" suffix so the number is never
-            // mistaken for now. Both self-heal on the next fetch (the verdict then flashes).
+            // B867 reopen — STALE state lives in the HEADER line ONLY (never a per-section chip):
+            // the old NEW-2 code put a "RE-CHECK · flood pull predates the drawn area" chip and a
+            // "· stale" suffix INSIDE this section — the exact per-section stale pathway the owner
+            // reopened B867 to kill. Deleted. The last-good HOLD (drainMitDisplay, NEW-2) still
+            // prevents a fresh-0 all-clear; while a genuine refresh is in flight with no last-good to
+            // show, the section reads an honest UNKNOWN (we don't know the volume yet) — the header
+            // line ("Refreshing…" / "Couldn't refresh — last good · ↻") carries the staleness.
             if (d.mitStalePending) {
-              mitVerdict = "refreshing"; mitTone = "warn"; mitChip = "RE-CHECK"; mitSub = "flood pull predates the drawn area";
+              mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = "";
             } else if (mitV && mitV.intersectAcres > 0) {
               const mitTag = mitV.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : mitV.providers?.wse1pct === "bfe-line-interp" ? "BFE derived" : mitV.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr" : "";
-              const staleTag = d.mitStale ? "stale" : "";
               if (mitV.volumeCf != null) {
                 // NEW-8 — the closed face is the BALANCE (provided credited cut vs required).
                 const provCf = d.mitProvided ? d.mitProvided.creditedCf : 0;
@@ -17538,9 +17652,9 @@ function YieldPanel({
                   mitVerdict = bal < 0 ? `−${f2(Math.abs(bal))} ac-ft` : "covered";
                   mitTone = bal < 0 ? "danger" : "good";
                   mitChip = bal < 0 ? "SHORT" : "COVERED";
-                  mitSub = `req ${f2(mitV.volumeAcFt)}${[mitTag, staleTag].filter(Boolean).length ? ` · ${[mitTag, staleTag].filter(Boolean).join(" · ")}` : ""}`;
+                  mitSub = `req ${f2(mitV.volumeAcFt)}${mitTag ? ` · ${mitTag}` : ""}`;
                 }
-              } else { mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = [mitTag, staleTag].filter(Boolean).join(" · "); }
+              } else { mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = mitTag; }
               if (mitV.flags && mitV.flags.includes("floodway_intersect")) { mitVerdict = `floodway fill · ${mitVerdict}`; mitTone = "danger"; mitChip = "STOP"; }
             } else if (d.mitRememberedMissing) { mitVerdict = "not screened"; mitTone = "warn"; mitChip = "RE-CHECK"; }
             else if (d.floodGeo && d.floodGeo.state === "failed") { mitVerdict = "flood source down"; mitTone = "warn"; mitChip = "RE-CHECK"; }
