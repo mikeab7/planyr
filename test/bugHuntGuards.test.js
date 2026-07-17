@@ -441,14 +441,34 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // element (centerline road is the only text-bearing el): already-selected road → edit label; else Properties
     expect(src).toMatch(/if \(!el\.groupId && !el\.locked && isDoubleTap\(e, id, /);
     expect(src).toMatch(/if \(dblWasSelRef\.current && isCenterlineRoad\(el\)\) beginEditInline\("el", id\);[\s\S]{0,90}setPropsFor\(\{ kind: "el", id \}\)/);
-    // the Properties companion is now gated on an EXPLICIT open (propsMatches), not raw selection —
-    // on desktop a plain click selects without popping it; phone still uses the ✎ pill (narrowProps).
+    // NEW-1 supersedes the B656 stacking: on DESKTOP the inspector is the docked "properties" panel
+    // (leftPanel === "properties"), never a companion riding above another panel; NARROW keeps the ✎
+    // pill (narrowProps) + companion overlay. propsMatches stays for the double-click explicit-open path.
     expect(src).toMatch(/const propsMatches = propsFor === "multi"/);
-    expect(src).toMatch(/const companionOpen = companionSel && \(narrow \?/);
+    expect(src).toMatch(/const companionOpen = companionSel && \(narrow \? \(!!leftPanel \|\| narrowProps\) : leftPanel === "properties"\)/);
     // onElDouble (the native/raw-dblclick fallback) now OPENS PROPERTIES; the type/actions menu moved
     // off double-click and stays on right-click via onElContext.
     expect(src).toMatch(/const onElDouble = \(e, id\) => \{[\s\S]*?setPropsFor\(\{ kind: "el", id \}\);\s*\n\s*\};/);
     expect(src).toMatch(/const onElContext = \(e, id\) => \{[\s\S]*?setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY \}\);/);
+  });
+
+  it("NEW-1: single-occupancy left dock — inspector TAKES OVER the dock when it opens, never stacks", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the takeover layout effect is gated on the inspector OPENING (propsMatches — B750's explicit open,
+    // NOT a plain click), docks "properties", and memoizes what it replaced
+    expect(src).toMatch(/if \(shouldInspectorTakeDock\(\{ inspectorOpen: propsMatches, narrow, alreadyDocked: leftPanelRef\.current === "properties" \}\)\) \{/);
+    expect(src).toMatch(/setDockMemo\(\{ restore: leftPanelRef\.current \}\);/);
+    // closing the inspector hands the dock back (or closes it) via the pure resolver
+    expect(src).toMatch(/setLeftPanel\(\(p\) => dockAfterRelinquish\(\{ leftPanel: p, restore: memo\.restore \}\)\); setDockMemo\(null\);/);
+    // the pure decision helpers live in the shared floating-panel module (host owns the state/wiring)
+    expect(src).toMatch(/import \{[^}]*shouldInspectorTakeDock, dockAfterRelinquish[^}]*\} from "\.\.\/\.\.\/shared\/ui\/floatingPanel\.js";/);
+    // the 45%-cap "rides above another panel" layout survives ONLY on narrow (never stacks on desktop)
+    expect(src).toMatch(/flex: \(narrow && leftPanel && !propsTab\) \? "0 1 auto" : "1 1 auto"/);
+    expect(src).not.toMatch(/flex: \(leftPanel && !propsTab\) \? "0 1 auto"/);
+    // a plain single click still SELECTS ONLY on desktop (B750 preserved — the takeover keys off propsMatches)
+    expect(src).toMatch(/const companionOpen = companionSel && \(narrow \? \(!!leftPanel \|\| narrowProps\) : leftPanel === "properties"\)/);
+    // a deliberate rail choice drops the takeover memo so a later deselect can't yank the panel back
+    expect(src).toMatch(/setDockMemo\(null\);\s*\n\s*setLeftPanel\(\(p\) => \(p === tb\.id \? null : tb\.id\)\);/);
   });
 
   it("B680: callout editor hides the committed box + chrome while editing (no doubling), keeps a typeable min", () => {

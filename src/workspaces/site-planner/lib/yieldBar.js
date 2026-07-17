@@ -95,7 +95,9 @@ export function bulletBarMarks(layout, { w = 200, barH = 12, unit = "ac-ft", sho
   marks.push({ t: "rect", role: "track", x: 0, y, w, h: barH, rx: 3 });
   if (layout.unknown) {
     marks.push({ t: "rect", role: "hatch", x: 0, y, w, h: barH, rx: 3 });
-    if (showDelta) marks.push({ t: "text", role: "muted", x: w, y: barH + 10, s: "unknown — enter the missing input", anchor: "end" });
+    // B867 reopen — the bar carries only "unknown"; the SECTION rows name the specific missing
+    // input + link to its field (a generic "enter the missing input" on the bar is non-compliant).
+    if (showDelta) marks.push({ t: "text", role: "muted", x: w, y: barH + 10, s: "unknown", anchor: "end" });
     return { marks, w, h: barH + (showDelta ? 13 : 0) };
   }
   const px = (f) => Math.round(f * w);

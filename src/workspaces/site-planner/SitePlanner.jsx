@@ -45,7 +45,7 @@ import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
 import FloatingPanel from "../../shared/ui/FloatingPanel.jsx";
-import { clampToBounds, initialFloatPos, reconcileForNarrow, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../../shared/ui/floatingPanel.js";
+import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTakeDock, dockAfterRelinquish, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../../shared/ui/floatingPanel.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
@@ -101,7 +101,7 @@ import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterv
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
 import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
-import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS } from "./lib/factRevalidation.js";
+import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs } from "./lib/yieldBar.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
@@ -1263,6 +1263,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // marquee, shift-multi, programmatic, undo/redo — leaves the companion closed without touching the
   // ~70 setSel sites. Holds {kind,id} or the sentinel 'multi' (a styleable multi-selection).
   const [propsFor, setPropsFor] = useState(null);
+  // NEW-1 (single-occupancy left dock, amends B656/B733): when the element inspector OPENS on desktop
+  // (a double-click / the Properties tab — B750's explicit-open, NOT a plain click) it TAKES OVER the
+  // dock (leftPanel → "properties") instead of stacking above the open panel — the dock holds at most
+  // ONE panel. `dockMemo` remembers the panel the inspector replaced so closing it (deselect / ✕)
+  // restores it. Transient UI state (never persisted). To see the inspector AND another panel at once,
+  // detach one to a floating card (B717) — the only two-at-once path.
+  const [dockMemo, setDockMemo] = useState(null);         // null | { restore: <panelId|null> }
+  // B875 — pond discoverability: a plain click / the map label / the right-click menu REVEALS the
+  // pond inspector (opens the Properties companion) and scroll-flashes the relevant card, so a
+  // pond's rich per-element data (purpose · sizing assistant · usable/dead split) isn't buried
+  // behind a double-click nobody discovers. The tick + target ref drive the scroll+flash effect.
+  const [pondRevealTick, setPondRevealTick] = useState(0);
+  const pondRevealTargetRef = useRef(null); // null = the card root; "assistant" / "purpose" for a sub-card
+  // B875 — a one-time hint the first time a pond auto-classifies as Hybrid (its cut serves both
+  // detention above the flood WSE and mitigation below it). Dismiss persists so it never nags.
+  const [hybridHintSeen, setHybridHintSeen] = useState(() => { try { return !!localStorage.getItem("planarfit:pondHybridHintSeen"); } catch (_) { return true; } });
+  const dismissHybridHint = () => { try { localStorage.setItem("planarfit:pondHybridHintSeen", "1"); } catch (_) {} setHybridHintSeen(true); };
   useEffect(() => {
     let mq; try { mq = window.matchMedia(`(max-width: ${FLOAT_MIN_WIDTH}px)`); } catch (_) { return undefined; }
     const on = () => setNarrow(mq.matches);
@@ -1314,6 +1331,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Synced during render (idempotent; a passive effect would lag the same window).
   const selRef = useRef(sel); selRef.current = sel;
   const multiRef = useRef(multi); multiRef.current = multi;
+  // NEW-1: live mirrors read by the takeover / restore layout effects (whose deps intentionally
+  // EXCLUDE leftPanel/dockMemo so a deliberate manual rail switch can't re-trigger a takeover).
+  const leftPanelRef = useRef(leftPanel); leftPanelRef.current = leftPanel;
+  const dockMemoRef = useRef(dockMemo); dockMemoRef.current = dockMemo;
   const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
   const inMulti = (kind, id) => multi.some((m) => m.kind === kind && m.id === id);
   const refEq = (a, b) => a.kind === b.kind && a.id === b.id; // compares {kind,id} refs in the multi set (B569)
@@ -2708,6 +2729,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : (!!propsFor && !!sel && propsFor.kind === sel.kind && propsFor.id === sel.id);
     if (propsFor && !keep) { setPropsFor(null); setNarrowProps(false); }
   }, [sel, multi, propsFor, multiStyleable]);
+  // NEW-1 — single-occupancy left dock (desktop): when the inspector OPENS for the current selection
+  // (propsMatches — B750's explicit open: a double-click, or the Properties tab; a plain click still
+  // just selects) it TAKES OVER the dock (leftPanel → "properties"), memoizing whatever it replaced.
+  // When it closes (deselect / ✕ drops propsFor), the memoized panel is handed back. Two panels never
+  // stack — to keep another panel visible alongside the inspector, detach it to a floating card (B717).
+  // Runs in a LAYOUT effect so the dock swap lands before paint (no stacked-panel flash); B556 keeps
+  // narrow untouched (there the inspector is a companion overlay, never a dock takeover). Deps exclude
+  // leftPanel/dockMemo on purpose (read via refs) so a deliberate manual rail switch can't re-take.
+  useLayoutEffect(() => {
+    if (narrow) return;
+    if (shouldInspectorTakeDock({ inspectorOpen: propsMatches, narrow, alreadyDocked: leftPanelRef.current === "properties" })) {
+      setDockMemo({ restore: leftPanelRef.current }); // the panel we replace (id, or null = nothing docked)
+      setLeftPanel("properties");
+    } else if (!propsMatches) {
+      // inspector closed → hand the dock back to the memoized panel (dockAfterRelinquish no-ops if a
+      // deliberate manual switch already moved leftPanel off "properties", so the manual choice wins).
+      const memo = dockMemoRef.current;
+      if (memo) { setLeftPanel((p) => dockAfterRelinquish({ leftPanel: p, restore: memo.restore })); setDockMemo(null); }
+    }
+  }, [propsMatches, narrow]);
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
   // so a later manual visit opens with the normal all-collapsed overview.
@@ -2784,6 +2825,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [narrow, floating]);
   const dockPanel = useCallback((id) => {
     setFloating((f) => { const n = { ...f }; delete n[id]; return n; });
+    setDockMemo(null); // NEW-1: re-docking a floating panel is a deliberate choice — drop any takeover memo
     setLeftPanel(id); // ≤1 docked: whatever was docked simply closes
   }, []);
   const moveFloating = useCallback((id, pos) => {
@@ -2911,6 +2953,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
+      // B875 — Enter on a selected pond opens its inspector (keyboard peer of double-click).
+      if (e.key === "Enter" && tool === "select" && sel?.kind === "el") { const se = els.find((x) => x.id === sel.id); if (se && se.type === "pond") { e.preventDefault(); revealPondInspector(se.id); return; } }
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
@@ -5932,8 +5976,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (multi.length) setMulti([]);
-    if (el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
+    // B875 — selecting a pond (that wasn't already selected) reveals its inspector card + flash, so
+    // the purpose / sizing assistant / split is discoverable from a plain click. Guarded to the
+    // first select so dragging an already-selected pond doesn't re-flash.
+    const revealPondSel = el.type === "pond" && !(sel?.kind === "el" && sel.id === id);
+    if (el.locked) { setSel({ kind: "el", id }); if (revealPondSel) revealPondInspector(id); return; } // locked: select only, don't move
     setSel({ kind: "el", id });
+    if (revealPondSel) revealPondInspector(id);
     pushHistory();
     // Snapshot every member of the assembly (attachedTo children) so they move together.
     const members = assemblyOf(id).map((m) => isCenterlineRoad(m)
@@ -6245,6 +6294,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!(multi.length > 1 && inMulti("el", id))) setSel({ kind: "el", id });
     setTypeMenu({ id, x: e.clientX, y: e.clientY });
   };
+  // B875 — reveal a pond's inspector card (open the Properties companion) and scroll-flash it.
+  // `target` optionally focuses a sub-card ("assistant" | "purpose"). Selecting a pond does this
+  // for ponds only — a deliberate, owner-requested discoverability exception to B750's
+  // "single-click = select only" (a pond carries far more per-element data than other shapes).
+  const revealPondInspector = (id, target = null) => {
+    setSel({ kind: "el", id });
+    setPropsFor({ kind: "el", id });
+    if (narrow) setNarrowProps(true);
+    pondRevealTargetRef.current = target;
+    setPondRevealTick((n) => n + 1);
+  };
+  // B875 — set a pond's purpose (role) from the right-click "Set purpose" menu. null = Auto (clear
+  // the override so the elevation split re-classifies). Rides the undo stack as one step.
+  const setPondRole = (id, role) => {
+    pushHistory();
+    setEls((a) => a.map((el) => (el.id === id ? { ...el, det: { ...(el.det || {}), ...(role == null ? { role: undefined } : { role }) } } : el)));
+  };
+  useEffect(() => {
+    if (!pondRevealTick || typeof requestAnimationFrame === "undefined" || typeof document === "undefined") return;
+    const key = pondRevealTargetRef.current;
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => {
+      const node = document.querySelector(key ? `[data-pond-card="${key}"]` : "[data-pond-card]");
+      if (!node) return;
+      try { node.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (_) {}
+      node.classList.remove("planyr-flash");
+      void node.offsetWidth; // force reflow so the animation re-triggers on a repeat reveal
+      node.classList.add("planyr-flash");
+    }));
+    return () => cancelAnimationFrame(raf);
+  }, [pondRevealTick]);
   const toggleLock = (id) => {
     pushHistory();
     setEls((a) => a.map((el) => (el.id === id ? { ...el, locked: !el.locked } : el)));
@@ -6394,6 +6473,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     (origin ? `${origin.lat.toFixed(4)},${origin.lon.toFixed(4)}` : "nogeo") + ":" + drainElsSig;
   const checkDrainage = async (opts = {}) => {
     const isAuto = opts && opts.auto === true; // B832 — auto-revalidation runs tag themselves (status line + the remembered record)
+    // B874 — a manual ↻ is the escape hatch from a STALLED auto-refetch: clear the one-attempt-per-
+    // key guard so the same target can be auto-retried later (and the manual pull itself always runs).
+    if (!isAuto) drainAutoAttempts.current.clear();
     if (!origin) { setDrainCtx((prev) => ({ error: "This plan isn't georeferenced — bring the parcel in from the map first.", prev: prev?.ctx ? prev : prev?.prev })); return; }
     const act = parcels.filter((p) => p.active !== false && p.points && p.points.length >= 3);
     if (!act.length) { setDrainCtx((prev) => ({ error: "No parcel boundary on the plan yet.", prev: prev?.ctx ? prev : prev?.prev })); return; }
@@ -6470,12 +6552,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             .then((r) => ({ grid: r.grid, req: r.req, state: "loaded" }))
             .catch(() => ({ grid: null, req: null, state: "failed" }))
         : Promise.resolve({ grid: null, req: null, state: "empty" });
-      const [ctx, floodGeo, bfeLines, xs, siteGrid] = await Promise.all([
-        resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
-        floodGeoP,
-        bfeLinesP,
-        crossSectionsP,
-        siteGridP,
+      // B874 — BOUND the whole pull: a black-holed fetch (no resolve, no reject) would otherwise
+      // leave `busy` stuck true forever (one half of the stuck-refresh class). Race the group
+      // against a 30 s timeout that REJECTS → the outer catch sets a terminal error state (↻ to
+      // retry), never an indefinite spinner. The per-source .catch()es still handle plain outages.
+      const DRAIN_FETCH_TIMEOUT_MS = 30000;
+      let drainTimeoutId = null;
+      const [ctx, floodGeo, bfeLines, xs, siteGrid] = await Promise.race([
+        Promise.all([
+          resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
+          floodGeoP,
+          bfeLinesP,
+          crossSectionsP,
+          siteGridP,
+        ]).then((r) => { if (drainTimeoutId) clearTimeout(drainTimeoutId); return r; }),
+        new Promise((_, reject) => { drainTimeoutId = setTimeout(() => reject(new Error("flood-data source timed out — ↻ Re-check")), DRAIN_FETCH_TIMEOUT_MS); }),
       ]);
       if (tok !== drainTok.current) return;
       // Representative point for the derived BFE: the centroid of the fill footprints
@@ -6542,7 +6633,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // area" (numbers recompute live, no fetch) from "outgrew it" (refetch). JSON-safe.
       const groundPt = largest.points.reduce((s, p) => ({ x: s.x + p.x / largest.points.length, y: s.y + p.y / largest.points.length }), { x: 0, y: 0 });
       const fetchRec = {
-        env: isFinite(mnX) ? { mnX: Math.round(mnX), mnY: Math.round(mnY), mxX: Math.round(mxX), mxY: Math.round(mxY) } : null,
+        // B874 — canonEnv rounds OUTWARD so the stored env always CONTAINS the measured geometry.
+        // The old Math.round shrank it (min↑ / max↓), so a fresh load with zero edits read
+        // "outgrew the fetched envelope" and the refresh spinner stuck ambiently forever.
+        env: isFinite(mnX) ? canonEnv({ mnX, mnY, mxX, mxY }) : null,
         anchorPt: { x: Math.round(bfePt.x), y: Math.round(bfePt.y) },
         groundPt: { x: Math.round(groundPt.x), y: Math.round(groundPt.y) },
         mode: isAuto ? "auto" : "manual",
@@ -7206,8 +7300,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? { ...drainLastGoodMitRef.current, stale: true }
         : (fmResultView ? { ...fmResultView, stale: true, stalePending: true, volumeCf: null, volumeAcFt: null, cutCy: null } : null))
     : fmResultView;
-  // A background refetch is pending (reval need) or actually in flight (busy from an auto run).
-  const drainAutoRefreshing = drainAutoEnabled && (drainReval.need || !!(drainCtx?.busy && drainCtx?.auto));
+  // B874 — the refresh state machine, made BOUNDED. The old flag was
+  // `drainReval.need || busy` — so it showed "Refreshing flood data…" whenever a refetch was
+  // merely WANTED, even after the single auto-attempt was spent and nothing was in flight → an
+  // indefinite ambient spinner (the crash-severity bug). Now the spinner reflects a REAL fetch:
+  //   • in flight        — an auto pull is actually running (busy && auto), OR
+  //   • armed            — a refetch is wanted and its one attempt hasn't fired/been consumed yet.
+  // A wanted refetch whose single attempt is spent while nothing is in flight is STALLED — a
+  // terminal state that offers ↻ Re-check, never an endless spinner.
+  const drainAutoInFlight = !!(drainCtx?.busy && drainCtx?.auto);
+  const drainAutoAttemptSpent = drainReval.need && drainAutoAttempts.current.has(drainReval.key);
+  const drainAutoRefreshing = drainAutoEnabled && (drainAutoInFlight || (drainReval.need && !drainAutoAttemptSpent && !drainCtx?.busy));
+  const drainAutoStalled = drainAutoEnabled && drainReval.need && drainAutoAttemptSpent && !drainAutoInFlight;
   useEffect(() => {
     if (!drainReval.need || drainCtx?.busy) return;
     if (drainAutoAttempts.current.has(drainReval.key)) return; // one attempt per target — a failure is honest, never a loop
@@ -7583,6 +7687,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     fetchStale: drainFetchStale,
     fetchStaleReason: drainReval.kind === "edit" ? drainReval.reason : (drainFetchStale ? "env-exit" : null),
     autoRefreshing: drainAutoRefreshing,
+    autoStalled: drainAutoStalled, // B874 — a wanted refetch whose one attempt is spent + not in flight (terminal, offer ↻)
     autoEnabled: drainAutoEnabled,
     floodAgeMs: floodGeo && floodGeo.ts != null ? Date.now() - floodGeo.ts : null,
     multiParcel: !!drainViewCtx?.multiParcel,
@@ -9217,8 +9322,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fam = carto ? "Inter, system-ui, sans-serif" : "ui-monospace, Menlo, monospace";
     const halo = carto || leader;
     const ink = carto ? "#0E2E36" : (leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill));
+    // B875 — a pond's map label is a click target: tapping it selects the pond + reveals its
+    // inspector (a leadered pond label often sits away from the basin, so it's a real second
+    // handle). Other labels stay pointer-transparent (clicks fall through to the shape).
+    const isPondLabel = tool === "select" && d.el && d.el.type === "pond" && !d.added;
     return (
-      <g key={`lbl${d.lid}`} pointerEvents="none">
+      <g key={`lbl${d.lid}`} pointerEvents={isPondLabel ? "auto" : "none"} style={isPondLabel ? { cursor: "pointer" } : undefined}
+        onPointerDown={isPondLabel ? (e) => { e.stopPropagation(); revealPondInspector(d.el.id); } : undefined}>
         {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
         {!d.added && d.el.locked && <text x={x} y={top - 3 * dls} textAnchor="middle" fontSize={12 * dls}>🔒</text>}
         <text x={x} y={first} textAnchor="middle" fontSize={dfs}
@@ -9756,17 +9866,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     { id: "references", label: "References" }, // B654: Aerial + Overlay merged into one panel
     { id: "standards", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
   ];
-  // B656: the Properties companion coexists with the open panel — it renders whenever a
-  // qualifying selection exists. On a phone it stays closed unless a panel is already
-  // open (B556: tap = select only) or the ✎ Properties pill explicitly opened it.
-  // B750: on desktop the companion opens ONLY when Properties was explicitly opened for this selection
-  // (propsMatches) — a plain click selects without popping it. Phone is unchanged: the ✎ pill (narrowProps)
-  // or an already-open panel gates it there (B556: tap = select only).
-  const companionOpen = companionSel && (narrow ? (!!leftPanel || narrowProps) : propsMatches);
-  // B733 — the Properties tab is active. When it is, the inspector docks as the MAIN panel
-  // (full height + its own empty state), rather than riding above another panel as the B656
-  // companion does. Properties is dock-only (it reuses the companion, which is outside the
-  // B717 float system), so it's excluded from the PanelChrome detach path below.
+  // NEW-1 (single-occupancy left dock, amends B656/B733): on DESKTOP the inspector only ever renders
+  // as the docked "properties" panel — it takes over the dock on selection (the takeover layout effect
+  // above sets leftPanel), it never stacks above another open panel. So the desktop companion is open
+  // exactly when the Properties panel holds the dock with an inspectable selection. NARROW is unchanged
+  // (B556): a tap only selects; the companion opens over the panel via the ✎ pill (narrowProps) or when
+  // a panel is already open.
+  const companionOpen = companionSel && (narrow ? (!!leftPanel || narrowProps) : leftPanel === "properties");
+  // B733 — the Properties tab is active. When it is, the inspector docks as the MAIN panel (full height
+  // + its own empty state). Properties is dock-only (it reuses the companion, which is outside the B717
+  // float system), so it's excluded from the PanelChrome detach path below.
   const propsTab = leftPanel === "properties";
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
@@ -13435,6 +13544,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   // leave the freshly-opened tab headers-only). The tab renders via `propsTab && companionSel`,
                   // independent of the double-click `propsFor` marker, so it always shows the current selection.
                   if (tb.id === "properties") { setPropsCollapsed(false); }
+                  // NEW-1: a deliberate rail choice ends any active inspector takeover — the chosen
+                  // panel wins over the restore memo, so a later deselect won't yank it back.
+                  setDockMemo(null);
                   setLeftPanel((p) => (p === tb.id ? null : tb.id));
                 }}>
                 <span style={{ display: "grid", placeItems: "center", height: 18, lineHeight: 1 }}><RailIcon id={tb.id} /></span>
@@ -13447,26 +13559,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {(leftPanel || companionOpen) && (<>
           <div data-testid="left-menu-panel" style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
             ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
-          {/* B656: Properties companion — rides ABOVE the open panel in its own scroll region,
-              so selecting a pond and opening Yield shows BOTH (the old props rail tab is gone).
-              With no panel open it takes the full column. */}
-          {/* B733: also render when the Properties tab is active (even if a prior ✕ dismissed the
-              companion) — the tab is an explicit request to see the inspector. When it's the active
-              tab the inspector is the MAIN panel (full height, no 45% cap, no bottom divider). */}
+          {/* NEW-1 (single-occupancy left dock): on DESKTOP the inspector is ALWAYS the docked
+              "properties" panel (full height) — it never stacks above another panel. The 45%-cap /
+              bottom-divider "rides above" layout survives ONLY on NARROW, where the companion still
+              shares the overlay column with an open panel (B556/B656). */}
           {(companionOpen || (propsTab && companionSel)) && (
-          <div data-testid="property-panel" style={{ flex: (leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (leftPanel && !propsTab) ? "1px solid var(--border-default)" : "none" }}>
+          <div data-testid="property-panel" style={{ flex: (narrow && leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (narrow && leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (narrow && leftPanel && !propsTab) ? "1px solid var(--border-default)" : "none" }}>
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
               {multiStyleable ? `${multi.length} selected` : <>Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` — ${l}` : ""; })()}</>}
             </span>
-            {/* B656 follow-up: explicit close. On the phone-pill overlay it just closes the overlay (element stays
-                selected, pill returns); everywhere else it dismisses the companion but KEEPS the element selected —
-                re-clicking the element (or picking another) reopens it via the [sel] effect above. */}
-            {/* B733: the ✕ dismisses the auto-companion — but in the Properties TAB it would do
-                nothing visible (the tab re-shows it), so hide it there; you close the tab from the rail. */}
-            {!propsTab && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); }}>✕</button>}
+            {/* Explicit close. The element STAYS selected — double-click it again to reopen. ✕ drops the
+                explicit-open marker (setPropsFor(null)); on DESKTOP that closes propsMatches, so the
+                takeover effect above hands the dock back to whatever panel the inspector replaced. On
+                NARROW it closes the ✎-pill overlay / drops the companion marker (as before). Shown on
+                desktop (the docked inspector) and the narrow companion; hidden only in the narrow
+                Properties TAB, where the rail is how you close it. */}
+            {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); }}>✕</button>}
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
@@ -14498,9 +14609,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         );
                       };
                       return (
-                        <div style={{ marginTop: 10 }}>
+                        <div data-pond-card="purpose" style={{ marginTop: 10 }}>
                           {/* NEW-4 — owner naming: the user-facing concept is the pond's PURPOSE
                               (Detention / Mitigation / Hybrid); "dual" stays the stored enum. */}
+                          {/* B875 — the effective purpose reads prominently ("Hybrid — auto"), so a
+                              selected pond immediately shows what ledger its cut serves + why. */}
+                          <div style={{ fontSize: 12, fontWeight: 800, color: PAL.ink, marginBottom: 4 }}>
+                            Purpose: {POND_ROLE_LABEL[effRole]} <span style={{ fontWeight: 400, color: PAL.muted, fontSize: 10.5 }}>— {roleSource === "auto" ? "auto (from elevation)" : "you set this"}</span>
+                          </div>
+                          {effRole === "dual" && !hybridHintSeen && (
+                            <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "0 0 6px", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                              <span><strong>Hybrid</strong> = this pond serves BOTH ledgers: usable detention above the flood water surface, and compensating-storage mitigation for the cut below it. Set it to Detention or Mitigation to force one.</span>
+                              <button type="button" onClick={dismissHybridHint} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 999, border: `1px solid ${PAL.border}`, background: "transparent", color: PAL.muted, whiteSpace: "nowrap" }}>Got it</button>
+                            </div>
+                          )}
                           <Field label="Pond purpose">
                             <span style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
                               {roleBtn(null, `Auto (${POND_ROLE_LABEL[suggested.role]})`)}
@@ -14661,7 +14783,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         body.push(<div key="assist-caveat" style={smallNote}>Targets = the site requirement minus what the OTHER ponds already provide (this pond closes the remainder). Proposals only — redraw the pond to take one; volumes come from the same banded split as the rows above.</div>);
                       }
                       return (
-                        <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                        <div data-pond-card="assistant" style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
                           {head}
                           {body}
                         </div>
@@ -15461,6 +15583,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {arrRow("Bring Forward", "forward", af.atTop, `${MOD}]`)}
                       {arrRow("Send Backward", "backward", af.atBottom, `${MOD}[`)}
                       {arrRow("Send to Back", "back", af.atBottom, `${MOD}⇧[`)}
+                    </>
+                  )}
+                  {/* B875 — pond discoverability: the right-click menu carries the pond-specific
+                      actions (was a generic Duplicate/Pin/Attach/Delete menu only). */}
+                  {t.type === "pond" && (
+                    <>
+                      <div style={hdr(true)}>Detention pond</div>
+                      <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, null); setTypeMenu(null); }} title="Open this pond's inspector — anchor, depth, purpose, usable/dead split">⚙ Pond settings…</button>
+                      <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, "assistant"); setTypeMenu(null); }} title="Size this pond toward its detention + mitigation targets (one-click Apply)">📐 Sizing assistant…</button>
+                      <div style={hdr(false)}>Set purpose</div>
+                      {[[null, "Auto"], ["detention", POND_ROLE_LABEL.detention], ["mitigation", POND_ROLE_LABEL.mitigation], ["dual", POND_ROLE_LABEL.dual]].map(([v, label]) => {
+                        const active = v == null ? (t.det?.role == null) : t.det?.role === v;
+                        return (
+                          <button key={String(v)} style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                            onClick={() => { setPondRole(t.id, v); setTypeMenu(null); }}>
+                            <span>{label}{v == null ? " (from elevation)" : ""}</span>{active ? <span style={{ color: PAL.accent, fontWeight: 700 }}>✓</span> : null}
+                          </button>
+                        );
+                      })}
                     </>
                   )}
                   <div style={hdr(true)}>Edit</div>
@@ -16669,6 +16810,10 @@ function YieldPanel({
               // The drawn footprint outgrew the fetched flood envelope but auto-refresh is off:
               // the flood-dependent numbers screen a smaller area until a manual ↻ — say so loudly.
               else if (d.fetchStale && !d.autoEnabled) { statusText = `⚠ The flood pull predates the drawn area — ↻ re-check to screen the new footprint${ageChip}`; statusWarn = true; }
+              // B874 — STALLED: a refetch is wanted but its single auto attempt is spent and nothing
+              // is in flight. A TERMINAL state (never an endless spinner) — the numbers stay live off
+              // the cached facts; ↻ Re-check re-arms the pull.
+              else if (d.autoStalled) { statusText = `⚠ Couldn't refresh the flood data for the drawn area — ↻ Re-check to retry${ageChip}`; statusWarn = true; }
               // Auto refresh pending / in flight (geometry outgrew the envelope, or refresh-on-open):
               // the numbers are already live — this only says the flood pull is catching up.
               else if (d.autoRefreshing) statusText = `Refreshing flood data for the drawn area…${ageChip}`;
@@ -17488,15 +17633,17 @@ function YieldPanel({
             }
             const mitV = d.mitigation;
             let mitVerdict = "—", mitTone = null, mitSub = "", mitChip = null;
-            // NEW-2 — a STALE fetch (drawn area outgrew the fetched flood envelope) must NEVER
-            // read as a fresh all-clear. UNKNOWN-pending (no last-good yet) shows RE-CHECK; a held
-            // last-good shows its prior verdict with a "· stale" suffix so the number is never
-            // mistaken for now. Both self-heal on the next fetch (the verdict then flashes).
+            // B867 reopen — STALE state lives in the HEADER line ONLY (never a per-section chip):
+            // the old NEW-2 code put a "RE-CHECK · flood pull predates the drawn area" chip and a
+            // "· stale" suffix INSIDE this section — the exact per-section stale pathway the owner
+            // reopened B867 to kill. Deleted. The last-good HOLD (drainMitDisplay, NEW-2) still
+            // prevents a fresh-0 all-clear; while a genuine refresh is in flight with no last-good to
+            // show, the section reads an honest UNKNOWN (we don't know the volume yet) — the header
+            // line ("Refreshing…" / "Couldn't refresh — last good · ↻") carries the staleness.
             if (d.mitStalePending) {
-              mitVerdict = "refreshing"; mitTone = "warn"; mitChip = "RE-CHECK"; mitSub = "flood pull predates the drawn area";
+              mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = "";
             } else if (mitV && mitV.intersectAcres > 0) {
               const mitTag = mitV.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : mitV.providers?.wse1pct === "bfe-line-interp" ? "BFE derived" : mitV.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr" : "";
-              const staleTag = d.mitStale ? "stale" : "";
               if (mitV.volumeCf != null) {
                 // NEW-8 — the closed face is the BALANCE (provided credited cut vs required).
                 const provCf = d.mitProvided ? d.mitProvided.creditedCf : 0;
@@ -17510,9 +17657,9 @@ function YieldPanel({
                   mitVerdict = bal < 0 ? `−${f2(Math.abs(bal))} ac-ft` : "covered";
                   mitTone = bal < 0 ? "danger" : "good";
                   mitChip = bal < 0 ? "SHORT" : "COVERED";
-                  mitSub = `req ${f2(mitV.volumeAcFt)}${[mitTag, staleTag].filter(Boolean).length ? ` · ${[mitTag, staleTag].filter(Boolean).join(" · ")}` : ""}`;
+                  mitSub = `req ${f2(mitV.volumeAcFt)}${mitTag ? ` · ${mitTag}` : ""}`;
                 }
-              } else { mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = [mitTag, staleTag].filter(Boolean).join(" · "); }
+              } else { mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = mitTag; }
               if (mitV.flags && mitV.flags.includes("floodway_intersect")) { mitVerdict = `floodway fill · ${mitVerdict}`; mitTone = "danger"; mitChip = "STOP"; }
             } else if (d.mitRememberedMissing) { mitVerdict = "not screened"; mitTone = "warn"; mitChip = "RE-CHECK"; }
             else if (d.floodGeo && d.floodGeo.state === "failed") { mitVerdict = "flood source down"; mitTone = "warn"; mitChip = "RE-CHECK"; }
