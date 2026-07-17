@@ -377,8 +377,13 @@ export default function AppHeader({
       {/* ── Row 1 — 35px (−20% from 44 per B169; contents stay vertically centered) ── */}
       <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 35, display: "flex", alignItems: "center", ...rowScroll }}>
 
-        {/* Left zone */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...zoneFixed }}>
+        {/* Left zone. Desktop: clip overflow so a long breadcrumb (project + plan) can never
+            paint OVER the centered badge — the "text overlaps and looks like shit" bug the owner
+            reported. The breadcrumb's project crumb already ellipsis-truncates; this guarantees
+            nothing spills past the zone edge if it's still wider than its share. (Dropdowns
+            portal to <body>, so overflow:hidden here never clips a menu.) Narrow keeps the
+            zoneFixed no-shrink so the whole row scrolls sideways instead — unchanged. */}
+        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...(narrow ? zoneFixed : { overflow: "hidden" }) }}>
           {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
               Also a secondary route to the Dashboard (the labeled crumb is primary, B192). */}
           <button
@@ -417,13 +422,18 @@ export default function AppHeader({
           )}
         </div>
 
-        {/* Center zone — project name. On desktop it's capped at 40% so it stays optically
-            centered; on a phone that cap squeezes the site/plan switcher, so let it take its
-            natural width and ride the row's sideways scroll instead. */}
+        {/* Center zone — the jurisdiction badge. On desktop it's capped at 40% AND allowed to
+            SHRINK (flex 0 1 auto + minWidth 0 + overflow hidden), so when the row gets tight the
+            badge truncates via its own ellipsis instead of holding a fixed width and shoving the
+            breadcrumb into an overlap (the old flexShrink:0 was the root cause). On a phone the cap
+            squeezes the site/plan switcher, so it keeps its natural width and rides the row's
+            sideways scroll (no shrink/clip) as before. */}
         <div
           style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0, maxWidth: narrow ? "none" : "40%", padding: "0 8px",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: "0 8px",
+            ...(narrow
+              ? { flexShrink: 0, maxWidth: "none" }
+              : { flex: "0 1 auto", minWidth: 0, overflow: "hidden", maxWidth: "40%" }),
           }}
         >
           {centerContent}

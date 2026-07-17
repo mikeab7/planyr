@@ -228,6 +228,24 @@ describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
     expect(out.etj).toEqual([]);
     expect(out.sources.find((s) => s.id === "etj").state).toBe("empty");
   });
+  it("the header badge role set (no isd) skips the ISD query and yields a badge without a school district (2026-07-17)", async () => {
+    // The passive header badge (SitePlanner.jsx) requests only county/city/etj — the owner
+    // dropped the school district from that one-line screening summary. Prove that with those
+    // roles the ISD source is never fetched and formatJurisdictionBadge emits no ISD segment,
+    // even though the ISD route is wired in `base`.
+    const fetchJson = fakeFetch(base);
+    const out = await identifyJurisdiction(-95.37, 29.76, {
+      cache: freshCache(), fetchJson, roles: ["county", "city", "etj"],
+    });
+    expect(out.city).toEqual(["Houston"]);
+    expect(out.county).toEqual(["Harris"]);
+    expect(out.isd).toEqual([]); // ISD role not requested → stays empty (no query)
+    expect(out.sources.find((s) => s.id === "isd")).toBeUndefined(); // never processed
+    const b = formatJurisdictionBadge(out);
+    expect(b.text).toBe("City of Houston · Harris County"); // no "· … ISD" tail
+    expect(b.isd).toBeNull();
+    expect(b.text).not.toMatch(/ISD/);
+  });
   it("an unincorporated point inside Houston's ETJ resolves via the H-GAC CITY field", async () => {
     const out = await identifyJurisdiction(-95.38, 29.93, {
       cache: freshCache(),

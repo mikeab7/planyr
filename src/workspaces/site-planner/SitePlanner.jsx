@@ -7879,7 +7879,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const rep = representativeRing(jurActiveRings);
     if (!rep) { setJurBadge(null); return; }
     const c = ringCentroid(rep);
-    identifyJurisdiction(c.lng, c.lat, { ring: rep })
+    // Owner decision (2026-07-17): the passive header badge drops the school district (ISD) —
+    // it's an industrial-development screen and the ISD (a taxing/attendance boundary) just
+    // clutters the one-line summary. So the badge identify skips the `isd` role entirely (one
+    // fewer GIS query, and formatJurisdictionBadge then has no ISD to append). The opt-in
+    // "⚖︎ Jurisdiction & road authority" detail panel (checkJurisdiction) still shows it.
+    identifyJurisdiction(c.lng, c.lat, { ring: rep, roles: ["county", "city", "etj"] })
       .then((j) => {
         const b = formatJurisdictionBadge(j);
         if (!b) return; // failed / empty identify → no badge (display-only screening info)
