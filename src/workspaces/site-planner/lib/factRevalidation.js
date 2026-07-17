@@ -37,6 +37,25 @@ export const FETCH_TTL_MS = 24 * 3600 * 1000;
 // a 2-ft floor never masks true staleness.
 export const ENV_TOL_FT = 2;
 
+// B874 (recurrence, edit-path) — the HARD CEILING for a single refresh episode. PR #656 fixed the
+// ambient on-load spinner but left the edit-triggered re-fetch unbounded: on a boundary change the
+// spinner could show indefinitely with no success-settle and no timeout→terminal. The fetch itself
+// races a 30 s timeout; this ceiling (> that, so a slow-but-completing pull isn't cut off) is the
+// INDEPENDENT backstop the derived spinner state leans on, so no awaited promise — a black-holed
+// fetch, a superseded early-return that stranded `busy`, or a rate-floored/hidden-tab auto attempt
+// that never fired — can hold the "Refreshing…" state open forever. Both the busy branch and the
+// "armed but not yet fired" branch are bounded by this. 45 s ≫ 30 s fetch timeout + 8 s FBCDD.
+export const DRAIN_STUCK_MS = 45000;
+
+/* B874 — pure watchdog predicate: has a refresh episode that began at `startedMs` exceeded the
+ * hard ceiling as of `nowMs`? Used by BOTH the in-flight (busy) watchdog and the armed-but-unfired
+ * bound so the "Refreshing…" spinner can never outlive one ceiling. `startedMs` of 0/null means no
+ * episode is running (never stuck). Pure. */
+export function fetchWatchdogFired(startedMs, nowMs, ceilingMs = DRAIN_STUCK_MS) {
+  if (!startedMs || !Number.isFinite(startedMs) || !Number.isFinite(nowMs)) return false;
+  return nowMs - startedMs > ceilingMs;
+}
+
 /* B874 — the ONE canonical fetched-envelope. Rounds OUTWARD (floor the mins, ceil the maxs) so
  * the STORED envelope always CONTAINS the geometry it was measured from. The writer persists
  * this; the reader compares its raw live bbox against it (with ENV_TOL_FT slack). The old writer

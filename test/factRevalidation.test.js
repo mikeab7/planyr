@@ -2,7 +2,7 @@
 // Load-kind (missing/stale/incomplete snapshot) vs edit-kind (envelope exit /
 // anchor drift) and the never-refetch-inside-the-envelope rule. Pure — no browser.
 import { describe, it, expect } from "vitest";
-import { envelopeOf, envelopeContains, anchorDriftFt, revalidationNeed, ANCHOR_DRIFT_FT, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, ENV_TOL_FT } from "../src/workspaces/site-planner/lib/factRevalidation.js";
+import { envelopeOf, envelopeContains, anchorDriftFt, revalidationNeed, ANCHOR_DRIFT_FT, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, ENV_TOL_FT, DRAIN_STUCK_MS, fetchWatchdogFired } from "../src/workspaces/site-planner/lib/factRevalidation.js";
 
 const ENV = { mnX: 0, mnY: 0, mxX: 1000, mxY: 1000 };
 const IN = { mnX: 100, mnY: 100, mxX: 900, mxY: 900 };
@@ -167,5 +167,33 @@ describe("B874 — canonEnv + tolerance kill the ambient stuck-refresh (rounding
   it("canonEnv guards: null / non-finite → null", () => {
     expect(canonEnv(null)).toBeNull();
     expect(canonEnv({ mnX: NaN, mnY: 0, mxX: 1, mxY: 1 })).toBeNull();
+  });
+});
+
+describe("B874 (edit-path recurrence) — fetchWatchdogFired bounds the refresh spinner", () => {
+  it("the hard ceiling exceeds the 30 s fetch timeout so a slow-but-completing pull isn't cut off", () => {
+    expect(DRAIN_STUCK_MS).toBeGreaterThan(30000);
+  });
+
+  it("a fresh episode has NOT fired; one older than the ceiling HAS", () => {
+    const start = 1_000_000;
+    expect(fetchWatchdogFired(start, start)).toBe(false); // just began
+    expect(fetchWatchdogFired(start, start + DRAIN_STUCK_MS)).toBe(false); // exactly at ceiling — not yet
+    expect(fetchWatchdogFired(start, start + DRAIN_STUCK_MS + 1)).toBe(true); // over → terminal
+  });
+
+  it("respects a custom ceiling (the busy and armed watchdogs pass DRAIN_STUCK_MS)", () => {
+    expect(fetchWatchdogFired(0 + 1, 0 + 1 + 5001, 5000)).toBe(true);
+    expect(fetchWatchdogFired(1, 1 + 4999, 5000)).toBe(false);
+  });
+
+  it("no episode running (startedMs 0/null) is NEVER stuck — the spinner is simply idle", () => {
+    expect(fetchWatchdogFired(0, 9_999_999)).toBe(false);
+    expect(fetchWatchdogFired(null, 9_999_999)).toBe(false);
+    expect(fetchWatchdogFired(undefined, 9_999_999)).toBe(false);
+  });
+
+  it("guards non-finite now", () => {
+    expect(fetchWatchdogFired(1000, NaN)).toBe(false);
   });
 });

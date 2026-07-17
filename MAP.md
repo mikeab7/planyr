@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-17 @ `f101b3a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-17 @ `b384d26` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -314,7 +314,7 @@ _256 source files mapped._
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export
   - _exports_: `PRINT_WEIGHTS`, `printStrokeWidth`, `PT_PER_CENTI_INCH`, `sheetFitScale`
 - **`src/workspaces/site-planner/lib/factRevalidation.js`** — Drainage facts auto-revalidation decision layer (B832): load-kind (missing/stale/incomplete snapshot) vs edit-kind (fetch-envelope exit, point-anchor drift >100 ft) triggers with stable retry keys. Exports `revalidationNeed`, `envelopeOf`, `envelopeContains`, `anchorDriftFt`.
-  - _exports_: `ANCHOR_DRIFT_FT`, `anchorDriftFt`, `canonEnv`, `ENV_TOL_FT`, `envelopeContains`, `envelopeOf`, `FETCH_TTL_MS`, `fetchStaleForEdit`, `revalidationNeed`
+  - _exports_: `ANCHOR_DRIFT_FT`, `anchorDriftFt`, `canonEnv`, `DRAIN_STUCK_MS`, `ENV_TOL_FT`, `envelopeContains`, `envelopeOf`, `FETCH_TTL_MS`, `fetchStaleForEdit`, `fetchWatchdogFired`, `revalidationNeed`
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
