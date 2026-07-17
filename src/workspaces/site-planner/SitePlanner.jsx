@@ -101,7 +101,7 @@ import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterv
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
 import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
-import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv } from "./lib/factRevalidation.js";
+import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs } from "./lib/yieldBar.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
@@ -7246,6 +7246,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const drainAutoEnabled = (settings.drainage?.autoFacts !== false) && !!origin && drainActive.length > 0;
   const drainAutoAttempts = useRef(new Set());
   const drainAutoLastAt = useRef(0);
+  // B874 (edit-path recurrence) — the refresh WATCHDOG. `drainBusyStartRef` stamps when the current
+  // in-flight fetch began; `drainArmedStartRef` stamps when a "wanted but not yet fired" auto-refetch
+  // episode began (keyed by target). A forcing tick re-renders exactly at the hard ceiling so the
+  // derived spinner can flip to a TERMINAL state even when no other state changed — the guarantee the
+  // #656 fix lacked on the edit path (the fetch itself is 30 s-bounded, but the derived spinner had two
+  // unbounded branches: a stranded `busy`, and a rate-floored/hidden-tab attempt that never fired).
+  const drainBusyStartRef = useRef(0);
+  const drainArmedStartRef = useRef({ key: "", at: 0 });
+  const [, setDrainStuckTick] = useState(0); // bump forces the derived spinner booleans to re-evaluate at the watchdog ceiling
   // NEW-2 — last-known-good mitigation, captured only from a NON-stale live compute. While the
   // fetch predates the drawn area (drainFetchStale), the fresh compute prices the enlarged fill
   // against the OLD, too-small flood zones → a hard 0 that reads as a false all-clear (the
@@ -7315,10 +7324,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (!drainReval.need || drainCtx?.busy) return;
     if (drainAutoAttempts.current.has(drainReval.key)) return; // one attempt per target — a failure is honest, never a loop
-    const delay = drainReval.kind === "load" ? 1200 : 2500;
+    // B874 (edit-path) — FOLD the 20 s rate floor INTO the delay instead of bailing inside the timer.
+    // The old code let the timer fire and then `return` on the floor WITHOUT marking the attempt spent
+    // and WITHOUT re-arming — so the "armed" spinner branch (need && !spent) stayed true forever with no
+    // fetch and no terminal (one half of the edit-path stuck-refresh). A floor-respecting delay means the
+    // attempt ALWAYS fires (→ busy → the watchdog bounds it), never silently dropped.
+    const base = drainReval.kind === "load" ? 1200 : 2500;
+    const floorRemaining = Math.max(0, 20000 - (Date.now() - drainAutoLastAt.current));
+    const delay = Math.max(base, floorRemaining);
     const t = setTimeout(() => {
-      if (typeof document !== "undefined" && document.hidden) return; // yield to the active tab
-      if (Date.now() - drainAutoLastAt.current < 20000) return; // rate floor — the next edit re-arms
+      if (typeof document !== "undefined" && document.hidden) return; // yield to the active tab — the armed watchdog still bounds this
       if (drainAutoAttempts.current.has(drainReval.key)) return;
       drainAutoAttempts.current.add(drainReval.key);
       drainAutoLastAt.current = Date.now();
@@ -7327,6 +7342,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => clearTimeout(t); // any geometry change re-arms the timer — the coalescing debounce
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drainReval.need, drainReval.key, drainCtx?.busy]);
+  // B874 (edit-path) — WATCHDOG #1: an in-flight fetch (busy) that never settles. The fetch has a 30 s
+  // race, but a superseded early-return can leave `busy` latched, and a black-holed promise after the
+  // race would too. When busy begins, stamp the start; at the hard ceiling, if the SAME fetch (tok
+  // unchanged) is still busy, ABANDON it (bump tok so its late resolve is ignored) and drop to a
+  // terminal error state with a working ↻. Guarantees the "Refreshing flood data…" spinner terminates.
+  useEffect(() => {
+    if (!drainCtx?.busy) { drainBusyStartRef.current = 0; return undefined; }
+    if (!drainBusyStartRef.current) drainBusyStartRef.current = Date.now();
+    const startedTok = drainTok.current;
+    const t = setTimeout(() => {
+      if (drainTok.current !== startedTok) return; // a newer fetch already took over
+      drainTok.current++; // abandon the hung fetch — its eventual resolve/reject hits the tok guard and no-ops
+      drainBusyStartRef.current = 0;
+      setDrainCtx((prev) => ({ error: "flood-data source timed out — ↻ Re-check", prev: prev?.ctx ? prev : prev?.prev }));
+    }, DRAIN_STUCK_MS);
+    return () => clearTimeout(t);
+  }, [drainCtx?.busy]);
+  // B874 (edit-path) — WATCHDOG #2: a WANTED auto-refetch that never actually fires (rate-floored past
+  // the ceiling, or dropped because the tab was hidden). Bound the "armed" spinner branch: track when
+  // the current armed episode began (by target key); at the ceiling, if it's still armed and unfired,
+  // mark its one attempt spent (→ the terminal `drainAutoStalled` state, ↻ to retry) and force a
+  // re-render. Without this the armed branch could hold the spinner open with no fetch and no terminal.
+  const drainArmedNow = drainAutoEnabled && drainReval.need && !drainCtx?.busy && !drainAutoAttempts.current.has(drainReval.key);
+  useEffect(() => {
+    if (!drainArmedNow) { drainArmedStartRef.current = { key: "", at: 0 }; return undefined; }
+    if (drainArmedStartRef.current.key !== drainReval.key) drainArmedStartRef.current = { key: drainReval.key, at: Date.now() };
+    const t = setTimeout(() => {
+      if (drainAutoAttempts.current.has(drainReval.key)) return; // it fired in the meantime
+      drainAutoAttempts.current.add(drainReval.key); // spend the attempt → drainAutoStalled terminal
+      setDrainStuckTick((n) => n + 1);
+    }, DRAIN_STUCK_MS);
+    return () => clearTimeout(t);
+  }, [drainArmedNow, drainReval.key]);
 
   // Buildability (B710): FFE / pathway / LOMR-F / §404 screens off the same zones +
   // WSE inputs. Wetlands presence comes from the Site Analysis screen's own finding
@@ -9328,7 +9376,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const isPondLabel = tool === "select" && d.el && d.el.type === "pond" && !d.added;
     return (
       <g key={`lbl${d.lid}`} pointerEvents={isPondLabel ? "auto" : "none"} style={isPondLabel ? { cursor: "pointer" } : undefined}
-        onPointerDown={isPondLabel ? (e) => { e.stopPropagation(); revealPondInspector(d.el.id); } : undefined}>
+        onPointerDown={isPondLabel ? (e) => { e.stopPropagation(); revealPondInspector(d.el.id); } : undefined}
+        onContextMenu={isPondLabel ? (e) => onElContext(e, d.el.id) : undefined}>
+        {/* B875 (edit-path recurrence) — a pond label sits OVER the basin and, since #656, is
+            pointer-enabled; without its own onContextMenu a right-click on it fell THROUGH to the
+            canvas's empty-map menu (Zoom to fit / Paste / Export…) instead of the pond's element
+            menu. Route it to the same onElContext the pond body uses so the "Detention pond" section
+            (Pond settings / Sizing assistant / Set purpose ▸) appears wherever you right-click a pond. */}
         {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
         {!d.added && d.el.locked && <text x={x} y={top - 3 * dls} textAnchor="middle" fontSize={12 * dls}>🔒</text>}
         <text x={x} y={first} textAnchor="middle" fontSize={dfs}

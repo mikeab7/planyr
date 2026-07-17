@@ -74,8 +74,8 @@
 |---|---|---|---|---|
 | B879 | Header: drop the school district (ISD) from the jurisdiction badge + fix the Row-1 breadcrumb/badge overlap at narrow widths | [Site Planner] | #site-planner #ui #gis | ⏳ live — awaiting |
 | B876 | Single-occupancy left dock: element inspector REPLACES the docked panel, never stacks above it | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
-| B874 | Ambient stuck flood-refresh: the "Refreshing flood data…" spinner never clears on a fresh load | [Site Planner / yield] | #site-planner #yield #floodplain #gis | ⏳ live — awaiting |
-| B875 | Pond discoverability: click / label / right-click reach the pond inspector, purpose + sizing assistant | [Site Planner] | #site-planner #pond #ui | ⏳ live — awaiting |
+| B874 | Stuck flood-refresh: the "Refreshing flood data…" spinner never clears (×1 — edit path) | [Site Planner / yield] | #site-planner #yield #floodplain #gis | ⏳ live — awaiting |
+| B875 | Pond discoverability: click / label / right-click reach the pond inspector, purpose + sizing assistant (×1 — label right-click) | [Site Planner] | #site-planner #pond #ui | ⏳ live — awaiting |
 | B878 | Re-verify buildability-quiet-state (B868) + site-based-FFE (B869) AFTER B874 lands live — do NOT patch blind | [Site Planner] | #site-planner #yield #floodplain #testing | ⏳ live — awaiting |
 | B873 | Verification-targeting audit: reconcile today's three ship blocks against tonight's nine-step live pass | [Site Planner] | #site-planner #yield #floodplain #testing | ⏳ live — awaiting |
 | B872 | Reshape a placed rectangular building: convert-to-polygon + constrained (dock-frame) vertex editing | [Site Planner] | #site-planner #selection #ui #yield | ⏳ live — awaiting |
