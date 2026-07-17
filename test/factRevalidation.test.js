@@ -2,7 +2,7 @@
 // Load-kind (missing/stale/incomplete snapshot) vs edit-kind (envelope exit /
 // anchor drift) and the never-refetch-inside-the-envelope rule. Pure — no browser.
 import { describe, it, expect } from "vitest";
-import { envelopeOf, envelopeContains, anchorDriftFt, revalidationNeed, ANCHOR_DRIFT_FT, fetchStaleForEdit, FETCH_TTL_MS } from "../src/workspaces/site-planner/lib/factRevalidation.js";
+import { envelopeOf, envelopeContains, anchorDriftFt, revalidationNeed, ANCHOR_DRIFT_FT, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, ENV_TOL_FT } from "../src/workspaces/site-planner/lib/factRevalidation.js";
 
 const ENV = { mnX: 0, mnY: 0, mxX: 1000, mxY: 1000 };
 const IN = { mnX: 100, mnY: 100, mxX: 900, mxY: 900 };
@@ -120,5 +120,52 @@ describe("B860 (chat NEW-1) — fetchStaleForEdit (the UI flag mirrors edit-kind
   it("no fetch record or no geometry → never stale (guards)", () => {
     expect(fetchStaleForEdit(null, { bboxNow: OUT })).toBe(false);
     expect(fetchStaleForEdit(REC, { bboxNow: null })).toBe(false);
+  });
+});
+
+describe("B874 — canonEnv + tolerance kill the ambient stuck-refresh (rounding can't shrink the env)", () => {
+  it("canonEnv rounds OUTWARD (floor mins, ceil maxs) so it always CONTAINS the source geometry", () => {
+    const raw = { mnX: 100.6, mnY: 50.4, mxX: 900.4, mxY: 800.6 };
+    const c = canonEnv(raw);
+    expect(c).toEqual({ mnX: 100, mnY: 50, mxX: 901, mxY: 801 });
+    // the canonical env contains the raw bbox it was measured from (the whole point)
+    expect(envelopeContains(c, raw)).toBe(true);
+  });
+
+  it("REGRESSION: the OLD Math.round writer shrank the env → env-exit tripped on UNCHANGED geometry", () => {
+    // A fractional bbox whose min rounds UP and max rounds DOWN (both shrink the env).
+    const raw = { mnX: 100.6, mnY: 100.6, mxX: 900.4, mxY: 900.4 };
+    const oldRounded = { mnX: Math.round(raw.mnX), mnY: Math.round(raw.mnY), mxX: Math.round(raw.mxX), mxY: Math.round(raw.mxY) };
+    expect(oldRounded).toEqual({ mnX: 101, mnY: 101, mxX: 900, mxY: 900 });
+    // Old behavior (tol 0): the stored env does NOT contain the true geometry → false stale.
+    expect(envelopeContains(oldRounded, raw, 0)).toBe(false);
+    // New behavior: canonEnv + the ENV_TOL_FT slack → contained → NOT stale (no ambient trigger).
+    expect(envelopeContains(canonEnv(raw), raw, ENV_TOL_FT)).toBe(true);
+  });
+
+  it("fetchStaleForEdit: unchanged geometry stored via canonEnv is NOT stale (ambient load stays quiet)", () => {
+    const raw = { mnX: 12.3, mnY: 45.6, mxX: 678.9, mxY: 234.1 };
+    const rec = { env: canonEnv(raw), anchorPt: P(300, 150), groundPt: P(300, 150), mode: "manual" };
+    // bboxNow is the raw un-rounded geometry (exactly what drainFactsNow feeds).
+    expect(fetchStaleForEdit(rec, { bboxNow: raw, anchorNow: P(300, 150), groundNow: P(300, 150) })).toBe(false);
+  });
+
+  it("revalidationNeed: unchanged geometry via canonEnv fires NO edit-kind refetch (need:false)", () => {
+    const raw = { mnX: 12.3, mnY: 45.6, mxX: 678.9, mxY: 234.1 };
+    const lc = { sig: "sig-1", fetch: { env: canonEnv(raw), anchorPt: P(300, 150), groundPt: P(300, 150), mode: "auto" } };
+    const r = revalidationNeed({ hasSessionCtx: true, lastCheck: lc, sigNow: "sig-1", bboxNow: raw, anchorNow: P(300, 150), groundNow: P(300, 150) });
+    expect(r.need).toBe(false);
+  });
+
+  it("a REAL boundary growth (many feet past the env) still trips env-exit — the slack doesn't mask staleness", () => {
+    const raw = { mnX: 100, mnY: 100, mxX: 900, mxY: 900 };
+    const rec = { env: canonEnv(raw), anchorPt: P(500, 500), groundPt: P(500, 500), mode: "manual" };
+    const grown = { mnX: 100, mnY: 100, mxX: 1500, mxY: 900 }; // grew 600 ft east
+    expect(fetchStaleForEdit(rec, { bboxNow: grown, anchorNow: P(500, 500), groundNow: P(500, 500) })).toBe(true);
+  });
+
+  it("canonEnv guards: null / non-finite → null", () => {
+    expect(canonEnv(null)).toBeNull();
+    expect(canonEnv({ mnX: NaN, mnY: 0, mxX: 1, mxY: 1 })).toBeNull();
   });
 });

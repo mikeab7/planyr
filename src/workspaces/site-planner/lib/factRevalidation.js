@@ -30,6 +30,26 @@ export const ANCHOR_DRIFT_FT = 100;
 // on open"). 24 h keeps flood/authority facts fresh-ish without refetching every reload;
 // the caller's 20 s rate floor + one-attempt-per-key guard keep it a single background pull.
 export const FETCH_TTL_MS = 24 * 3600 * 1000;
+// B874 — envelope-containment slack (feet). The stored fetch envelope is a WHOLE-FOOT
+// canonicalization (canonEnv) of the drawn geometry; the live bbox is raw feet. This slack
+// absorbs the ≤1-ft rounding gap so unchanged geometry can NEVER spuriously read "outgrew the
+// fetched envelope" — the ambient stuck-refresh bug. A real boundary growth moves many feet, so
+// a 2-ft floor never masks true staleness.
+export const ENV_TOL_FT = 2;
+
+/* B874 — the ONE canonical fetched-envelope. Rounds OUTWARD (floor the mins, ceil the maxs) so
+ * the STORED envelope always CONTAINS the geometry it was measured from. The writer persists
+ * this; the reader compares its raw live bbox against it (with ENV_TOL_FT slack). The old writer
+ * used Math.round, which rounds a min UP or a max DOWN — shrinking the stored env below the real
+ * geometry, so `envelopeContains` failed on a FRESH load with zero edits → `need` stayed true
+ * forever → the "Refreshing flood data…" spinner stuck ambiently. Outward rounding removes that
+ * root cause; writer and reader now agree by construction. Pure. */
+export function canonEnv(env) {
+  if (!env) return null;
+  const { mnX, mnY, mxX, mxY } = env;
+  if (![mnX, mnY, mxX, mxY].every((v) => Number.isFinite(v))) return null;
+  return { mnX: Math.floor(mnX), mnY: Math.floor(mnY), mxX: Math.ceil(mxX), mxY: Math.ceil(mxY) };
+}
 
 /* Axis-aligned feet envelope of a point set. Null when under 3 points. */
 export function envelopeOf(pts = []) {
@@ -62,7 +82,7 @@ export function anchorDriftFt(a, b) {
  * `revalidationNeed`'s edit-kind uses, so the flag and the auto-refetch can never disagree. */
 export function fetchStaleForEdit(fetchRec, { bboxNow = null, anchorNow = null, groundNow = null } = {}) {
   if (!fetchRec || !bboxNow) return false;
-  if (fetchRec.env && !envelopeContains(fetchRec.env, bboxNow)) return true;
+  if (fetchRec.env && !envelopeContains(fetchRec.env, bboxNow, ENV_TOL_FT)) return true; // B874 — slack absorbs the whole-foot canonicalization gap
   const aDrift = anchorDriftFt(fetchRec.anchorPt, anchorNow);
   if (aDrift != null && aDrift > ANCHOR_DRIFT_FT) return true;
   const gDrift = anchorDriftFt(fetchRec.groundPt, groundNow);
@@ -99,7 +119,7 @@ export function revalidationNeed({ hasSessionCtx = false, lastCheck = null, sigN
   // Edit-kind: only when a check (live or remembered) exists to extend.
   const fetchRec = lastCheck && lastCheck.fetch;
   if ((hasSessionCtx || lastCheck) && fetchRec && bboxNow) {
-    if (fetchRec.env && !envelopeContains(fetchRec.env, bboxNow)) {
+    if (fetchRec.env && !envelopeContains(fetchRec.env, bboxNow, ENV_TOL_FT)) { // B874 — same slack the flag uses, so they never disagree
       return { need: true, kind: "edit", reason: "env-exit", key: `edit:env:${rk(bboxNow)}` };
     }
     const aDrift = anchorDriftFt(fetchRec.anchorPt, anchorNow);
