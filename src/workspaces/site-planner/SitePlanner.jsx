@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, Fragment } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -15462,12 +15462,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>ROUTED</span>
                                 <span />
                                 {routed.perStorm.map((s) => (
-                                  <React.Fragment key={s.returnPeriodYr}>
+                                  <Fragment key={s.returnPeriodYr}>
                                     <span style={{ fontWeight: 700 }}>{s.returnPeriodYr}-yr</span>
                                     <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{s.preCfs ?? "—"}</span>
                                     <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: s.status === "short" ? PAL.danger : PAL.text }}>{s.routedPeakCfs ?? "—"}</span>
                                     <span style={{ textAlign: "right" }}>{s.status === "unknown" ? <span style={{ fontSize: 9.5, color: PAL.muted }}>—</span> : passChip(s.status === "pass")}</span>
-                                  </React.Fragment>
+                                  </Fragment>
                                 ))}
                               </div>
                               {routed.flags.includes("overtopping") && <div style={{ ...smallNote, color: PAL.danger }}>⚠ Basin overtops before the outlet can pass the storm — routing is at the top-of-bank limit; enlarge the outlet or the basin.</div>}
