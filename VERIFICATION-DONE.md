@@ -4,6 +4,24 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V269 — parcel/markup outline style editor (color / weight / line-style) persists across a SIGNED-IN cloud reload ✅ PASS 2026-07-18 (Cowork live-verification session, signed-in on planyr.io)
+- **Added** 2026-07-10 (renumbered from V268 on merge-in of `origin/main`) · **Cadence** once (feature acceptance).
+- **Verified in sandbox (2026-07-10) + self-verified headless 2026-07-18:** the outline editor (Outline color / Line weight / Line style / Reset outline) renders and live-updates the boundary stroke/dash on a seeded parcel; `test/anchoredMenuPlacement.test.js`-adjacent full suite (3337+) green, `ui-audit/verify-v269-parcel-outline.mjs` (6/6) green logged-out.
+- **✅ Live result (2026-07-18, Cowork session, signed-in on planyr.io):** selected the Markup/Encumbrance deed-overlay line on a real parcel, changed outline color / line-weight / dash, then did a full page reload while still signed in — all three changes survived.
+- Cadence: once — CLOSED. (Verification-only entry — no matching open BACKLOG.md item to fold.)
+
+### V253 — B740: multi-selection shared style/opacity edits PERSIST across reload (signed-in) ✅ PASS 2026-07-18 (Cowork live-verification session, signed-in on planyr.io)
+- **Added** 2026-07-09 · **Cadence** once (feature acceptance) · references **B740**.
+- **Verified in sandbox (2026-07-09):** `test/multiStyle.test.js` (20 cases) + the `bugHuntGuards.test.js` B740 guard; `ui-audit/verify-b740.mjs` 12/12 logged-out (3-element Shift toggle add/remove, shared "N selected" panel, Opacity-restore-to-100% on all, per-member outlines, 0 page errors).
+- **✅ Live result (2026-07-18, Cowork session, signed-in on planyr.io):** Shift-selected 2 parcels — the "2 SELECTED" panel showed shared Outline / Line-weight / Dash only — changed the shared line-weight, reloaded, and both parcels retained it.
+- Cadence: once — CLOSED. (B740 folded → BACKLOG-DONE.)
+
+### V250 — B734: the account dropdown drops UNDER the account pill (not the top-left corner), across module/mode switches ✅ PASS 2026-07-18 (Cowork live-verification session, signed-in on planyr.io)
+- **Added** 2026-07-09 · **Cadence** once (bug-fix acceptance) · references **B734**.
+- **Verified in sandbox (2026-07-09):** the placement math is pure + unit-tested — `test/anchoredMenuPlacement.test.js` (8 cases, incl. the zero-sized `display:none` anchor → `null` = the exact B734 failure input, so the menu HIDES instead of pinning to the corner). Structural fix: the account pill moved into a self-contained `src/app/AccountControl.jsx` owning its own anchor ref + open state per mounted header. Full unit suite green (3147) · lint 0 errors · build green.
+- **✅ Live result (2026-07-18, Cowork session, signed-in on planyr.io):** verified on BOTH the Schedule and Site tabs — the account dropdown consistently anchors directly under the pill, right-aligned, fully on-screen, across module switches.
+- Cadence: once — CLOSED. (B734 folded → BACKLOG-DONE.)
+
 ### V248 — B719: road curb/border drawn to a true 6″ (0.5′) curb, to scale — thin at site zoom + PDF/print parity ✅ PASS 2026-07-18 (this session, headless self-verify on the local production build, logged-out)
 - **Added** 2026-07-08 · **Cadence** once (feature acceptance) · references **B719**.
 - **✅ Result:** `ui-audit/verify-v248-curb-pdf-parity.mjs` (new harness, 8/8): at fit zoom the 6″ curb reads 1.03px (12″ curb reads 2.06px, ratio 2.00 — to scale); zooming in grows both proportionally (1.03px→2.55px, 2.06px→5.10px) while the 2.00 ratio holds; triggering **File ▾ → Download PDF / pick frame… → Download PDF** and capturing the composed print-sheet SVG (intercepted before rasterization) shows the SAME 2.00 ratio in the printed curb strokes (0.465px/0.897px) — PDF-PARITY confirmed empirically, not just by code inspection. 0 page errors/alerts.
