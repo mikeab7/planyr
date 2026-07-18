@@ -132,6 +132,20 @@ export const STATEWIDE = {
     note: "Well symbols show status — active, plugged, dry hole, injection, etc.",
     opacity: 0.9,
   },
+  ccn_service: {
+    // Public-data screening PHASE 1 — water & sewer CCN service areas ("who holds the
+    // certificate to serve this site"). The Site Analysis Water/Sewer CCN cards drive this
+    // overlay (mapLayer: "ccn_service"). Rendered as an agency /export image (like jur_mud) so
+    // the PUCT symbology comes through and it paints via a CORS-exempt <img>. The Harris County
+    // GIS MapServer hosts BOTH water (layer 1) + sewer (layer 2) in EPSG:2278; its URL comes
+    // from the registry (ccnSewer row) so no endpoint is inlined here. Coverage is the Houston
+    // region (see the ccnSewer registry notes); the analysis WATER card reads the statewide TWDB
+    // source, so a site's certificated-provider ANSWER can be more complete than this visual.
+    kind: "dynamic", label: "Water/sewer CCN (Houston region)",
+    url: GIS_SOURCES.ccnSewer.serviceUrl, layers: [1, 2], opacity: 0.5,
+    note: "PUC water (blue) + sewer (green) certificate-of-convenience service areas — who is certificated to serve retail water/sewer. A boundary is a retail monopoly to serve, NOT proof a line is in the ground. Houston-region coverage. Screening only — confirm with the utility/PUC.",
+    infoCaveat: "A CCN boundary means a utility is CERTIFICATED to serve retail water/sewer here — not that a main is already built to a given parcel. Confirm service, capacity, and tap availability with the utility.",
+  },
 };
 
 /* Utility-evidence layers — power & hydrant evidence from crowd/agency sources,
@@ -359,6 +373,7 @@ export const LAYER_VINTAGE = {
   txrrc_pipe: "RRC permit data — continuously updated",
   txrrc_pipe_easement: "Assumed buffer off RRC T-4 routes — not a recorded width",
   txrrc_wells: "RRC permit data — continuously updated",
+  ccn_service: "PUC CCN (via Harris County GIS) — Dec 2023 edition",
   // Utility evidence
   osm_power: "OpenStreetMap — community-edited, live",
   osm_hydrants: "OpenStreetMap — community-edited, live",

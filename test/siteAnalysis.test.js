@@ -431,6 +431,8 @@ describe("runSiteAnalysis — orchestration", () => {
       "Wetlands_gdb_split": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/1/query": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/13/query": () => [],
+      "PUC_CCN_2023Dec": () => [{ attributes: { UTILITY: "CITY OF KATY", STATUS: "Commission Approved", CCN_NO: "10001" } }], // water CCN present
+      "PUC_CCN_Sewer_Water": () => [], // no sewer CCN → info well/septic flag
     });
     const identifyJurisdiction = async () => ({
       county: ["Harris"], city: ["Houston"], etj: [], unincorporated: false, straddle: false,
@@ -439,8 +441,12 @@ describe("runSiteAnalysis — orchestration", () => {
     const identifyRoadAuthority = async () => ({ roads: [{ name: "IH 10", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 }], authorities: ["State (TxDOT)"], ageMs: 500, note: "ok" });
     const { findings } = await runSiteAnalysis([SQUARE], { cache, fetchJson, identifyJurisdiction, identifyRoadAuthority });
     const ids = findings.map((f) => f.id);
-    expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "contamination", "jurisdiction", "road", "zoning"]);
+    expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "contamination", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"]);
     expect(findings.find((f) => f.id === "flood").status).toBe("present");
+    // CCN is a fact (info), never a good/bad constraint: water names the certificated provider,
+    // sewer with no polygon reads as an honest well/septic flag (not a green all-clear).
+    expect(findings.find((f) => f.id === "ccnWater").summary).toMatch(/CITY OF KATY \(a city\)/);
+    expect(findings.find((f) => f.id === "ccnSewer").status).toBe("info");
     expect(findings.find((f) => f.id === "zoning").summary).toMatch(/NO zoning/i);
     const road = findings.find((f) => f.id === "road");
     expect(road.rows[0][1]).toMatch(/TxDOT.*all roads/); // single-authority roll-up
@@ -453,6 +459,8 @@ describe("runSiteAnalysis — orchestration", () => {
       "Wetlands_gdb_split": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/1/query": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/13/query": () => [],
+      "PUC_CCN_2023Dec": () => [],
+      "PUC_CCN_Sewer_Water": () => [],
     });
     const identifyJurisdiction = async () => { throw new Error("down"); };
     const identifyRoadAuthority = async () => { throw new Error("down"); };
