@@ -915,3 +915,160 @@ _Move items here with the date and who/what checked them._
 - **Pending live steps (Claude coworker on planyr.io — never Michael):** open Tsakiris, select the pond. **Expect:** (1) single-click → it selects AND the Properties companion scrolls to + briefly flashes the pond's card; (2) double-click the pond, and separately press Enter with it selected → both open the pond inspector; (3) right-click the pond → a "Detention pond" section with ⚙ Pond settings…, 📐 Sizing assistant…, and Set purpose ▸ (Auto/Detention/Mitigation/Hybrid, the active one ✓'d); right-click a pond near the map EDGE → the menu stays fully on-screen; (4) click the pond's (leadered) map label → it selects + reveals the pond. In the inspector confirm the bold "Purpose: Hybrid — auto" line and, first time, a dismissible Hybrid explainer that stays dismissed after.
 - On pass: this entry → VERIFICATION-DONE and move B875 (BACKLOG.md ⏳ Verify) → BACKLOG-DONE.
 
+### V180 — Marketing landing page (`/landing/`) + new-visitor front door ✅ **render + scroll VERIFIED LIVE 2026-07-03**; 🔴 auth round-trip (real signup) still owed
+- **Added** 2026-06-30 · **Cadence** once (ship acceptance) · **Last checked** 2026-06-30 (headless ✅) · **Next check** — on planyr.io once `main` deploys. Shipped in **PR #436**; front door hardened against auth callbacks + tablet-rotation in **PR #439** (`ui-audit/verify-frontdoor.mjs` + `verify-login-ui.mjs`).
+- **🔴 MUST confirm the auth round-trip on planyr.io (a real signup the sandbox can't drive):** PR #439 fixed a front-door bug that bounced PKCE auth callbacks (`/?code=…`) to `/landing/`, which would have **silently broken every new-user email confirmation**. Headless proves the redirect now lets `?code=`/`?error=`/recovery through to the app, but the real email round-trip needs a live test: on planyr.io, **(a)** sign up a brand-new account → click the **confirmation email** link → confirm it lands in the app **signed in** (not bounced to `/landing/`); **(b)** run **Forgot password** → click the **reset email** link → confirm the "set new password" form opens and the change works. (Requires `https://planyr.io/` to remain in Supabase → Auth → Redirect URLs.)
+- **✅ Proven here (headless Chromium, software WebGL — `ui-audit/verify-landing.mjs`):** `/landing/` loads at 1440 / 834 / 390 with the Three.js hero booting (`ready=true`, `webglFallback=false`), **zero page errors**, the Site build + yield odometers running, and the Review stitch + Spine (vertical stack on phone) rendering; **no horizontal overflow 320–414px**. The front door (pre-boot snippet in `index.html`) is verified across all six paths: new→`/landing/`, returning(localStorage)→app, deep-link `#/…`→app, `/?app`→app, automation(`navigator.webdriver`)→app, direct `/landing/`→landing (no loop). lint 0 · tests green · build green.
+- **✅ VERIFIED LIVE on planyr.io (Cowork, 2026-07-03) — render + scroll animation:** `planyr.io/landing/` loads with the header + nav (SITE/SCHEDULE/REVIEW/LIBRARY dots), a dark hero with the coordinate scale-bar motif ("358 ft · EPSG:2278 · US survey feet") + scroll indicator, and clean Inter-style type. Scrolling animates the sections — the hero CTAs ("Start a site — free in your browser" / "See the deed-to-schedule flow"), the "THE THESIS — One coordinate system." block, and the **yield odometers** (COVERAGE 42% · FAR 0.47 · IMPERVIOUS 64% · OPEN SPACE 16% · CAR STALLS 286 · TRAILER STALLS 58 · DETENTION 3.8 ac-ft) with the Site-build visual emerging. **Not covered:** the coral 3D hero mark's WebGL assembly animation (headless already proved `ready=true/webglFallback=false`), real-phone scroll smoothness, and the 🔴 auth round-trip below (needs a real signup — not done here).
+- **⏳ Why pending (live edge / real device / web fonts — not drivable in the sandbox):** the egress proxy blocks Google Fonts (Inter) and the sandbox can't drive the real production domain, a real touch device, or a signed-in session. **On planyr.io (after the `main` deploy):** (1) in a **fresh/incognito** browser hit `https://planyr.io/` → confirm you're sent to `/landing/`, it renders with **Inter** loaded, and the coral 3D mark assembles + the Site build/yield animates on scroll; (2) scroll the whole page on a **real phone** → the build, the Review stitch, and the vertical spine feel smooth and nothing clips; (3) as a **returning or signed-in** user hit `https://planyr.io/` → you go **straight into the app** (resume last project), and a deep link `planyr.io/#/project/<id>` still opens the app; (4) on the landing, click **"Start a site"** → lands in the app.
+
+### V157 — B500: pond grading contours rebuilt on a robust offset (no spikes, valid floor, loud infeasibility) ✅ headless 9/9 here on the acute-triangle repro; ◐ PARTIAL live (Cowork 2026-07-03: feature enabled + on-plan storage label confirmed; close-zoom ring render over the aerial not captured)
+- **What changed (2026-06-27, branch `claude/pond-storage-site-plan-pzkjnf`).** The pond depth-ring offset moved from the hand-rolled `offsetPolygon` (which spiked/self-intersected on acute corners and silently mis-reported storage) to a robust clipper-lib inward buffer (`lib/pondOffset.js`, round joins, pinch-off, multipolygon). Contours now step cleanly to a valid floor; `detentionStorage` reports `feasible`/`maxDepth` and an average-end-area volume; an over-deep pond fails LOUD (red on-canvas max-depth callout + panel message) instead of drawing garbage.
+- **✅ Verified here (sandbox, real headless Chromium, logged-out).** `ui-audit/verify-pond-contours.mjs` **9/9** — seeds the **actual acute-triangle repro** + an over-deep narrow pond; parses every rendered contour path and asserts **0 self-intersecting rings** (the spike is gone), water + floor rings present, real-elevation WS/Floor labels, the **loud infeasibility callout** on the over-deep pond, and the LOD declutter/return round-trip (still spike-free). Plus `npm test` **1694 (+19: `pondOffset.test.js` 8, `pondContours.test.js` 11 incl. acute-corner simplicity, pinch-off, dumbbell split, infeasibility)**, `npm run lint` 0 errors, `npm run build` green. Screenshot: `ui-audit/screens/pond-contours-fit.png`.
+- **⏳ Why pending.** The headless harness draws over the gray work surface, not the live Leaflet aerial. Signed-in eyeball owed: open the real triangular pond (off Hwy 6 N) over the aerial and confirm the rings read as clean, smooth shelving down to the floor (no spikes), the WS/Floor elevations and "Holds … (max)" line are legible over imagery, and an intentionally over-deep pond shows the red max-depth warning.
+- **◐ Cowork attempt 2026-07-03 — PARTIAL (feature confirmed enabled; close-zoom ring render not captured).** On **8 South** over the live Esri aerial, the detention pond selects as a **DETENTION POND** element whose panel confirms the grading-contour feature is live: **☑ "Show stage contours on plan"** (checked), **Contour interval 2 ft**, **Total depth 8 ft**, **Freeboard 1 ft**, **Side slope 3:1**, area **16.62 ac**. The pond carries its on-plan storage label **"Detention Pond · 10.62 ac-ft · 724,047 sf"** (the "Holds … (max)" line — V155/V157 acceptance). At site-overview zoom the interior contour rings are **decluttered**, which itself matches the documented zoom-gated behavior. **Not captured** — the actual contour rings + WS/Floor elevation callouts rendered at *working* zoom over the aerial (the legibility-over-busy-imagery eyeball). Two environment issues blocked it: (1) the planner's scroll-wheel zoom didn't respond to the automation, and (2) the Chrome window kept dropping to the background, so occluded screenshots timed out. **To close:** open the pond, zoom in over the aerial, and eyeball that the rings + WS/Floor elevations + "Holds …" line stay legible (white halos) — a quick manual look, or a re-run with the Planyr window kept on-screen and a working zoom control.
+- Cadence: once after ship.
+
+### V155 — B497: pond stage contours + on-plan storage ✅ headless 12/12 here; ◐ PARTIAL live (Cowork 2026-07-03: feature enabled + on-plan storage label confirmed; close-zoom ring render over the aerial not captured)
+- **What changed (2026-06-27, branch `claude/pond-storage-site-plan-pzkjnf`).** A detention pond now draws its **stage contour rings** (smoothed depth shelves) inside the basin, with the water surface + floor emphasized and labelled by real elevation (when a top-of-bank elevation is set) or depth below top, plus a **"Holds N ac-ft · D′ deep"** line on the pond. Default on (panel toggle to hide), auto ring interval, optional top-of-bank elevation; zoom-gated (B149 floor) and stops cleanly on an over-taper ("✕ slopes meet"). Pure helpers in `lib/pondGeom.js`; reuses `offsetPolygon`/`detentionStorage`/`layoutLabels`.
+- **✅ Verified here (sandbox, real headless Chromium, logged-out).** `ui-audit/verify-pond-contours.mjs` **12/12** — concentric rings render; water + bottom rings present; the on-plan "Holds … ac-ft" matches the math; a datum pond labels its water surface as a real elevation (WS 95.0); a non-datum pond labels by depth; the over-taper pond shows the "slopes meet" marker; and the whole overlay **disappears at site-overview zoom and returns on zoom-in**. Plus `npm test` **1656 (+15 `pondContours.test.js`)**, `npm run lint` 0 errors, `npm run build` green. Screenshot: `ui-audit/screens/pond-contours-fit.png`.
+- **⏳ Why pending.** The headless harness draws over the gray work surface, not the **live Leaflet aerial basemap** (cross-origin tiles don't render headless). Signed-in eyeball owed: open a real pond over the aerial and confirm the rings + "WS/Floor" elevation callouts + the "Holds" line stay **legible over busy imagery** at working zoom (white halos should carry them), and that the top-of-bank-elevation input reads as true grades.
+- **◐ Cowork attempt 2026-07-03 — PARTIAL (same visual-over-aerial check as V157).** On **8 South** over the live Esri aerial, the detention pond selects as a **DETENTION POND** element and its panel confirms the stage-contour feature is live: **☑ "Show stage contours on plan"** (checked), **Contour interval 2 ft**, **Total depth 8 ft**, **Freeboard 1 ft**, **Side slope 3:1**, area **16.62 ac**. The on-plan storage label **"Detention Pond · 10.62 ac-ft · 724,047 sf"** renders on the pond (the "Holds N ac-ft" acceptance line), and the interior rings correctly **declutter at site-overview zoom** (documented zoom-gated behavior). **Not captured** — the contour rings + WS/Floor elevation callouts at *working* zoom over busy imagery (the legibility eyeball), blocked because (1) scroll-wheel zoom didn't respond to the automation and (2) the Chrome window kept dropping to the background, timing out occluded screenshots. **To close:** open the pond, zoom in over the aerial, and confirm the rings + WS/Floor elevations + "Holds …" line stay legible (white halos) — a manual look, or a re-run with the window on-screen and a working zoom control.
+- Cadence: once after ship.
+
+### V142 — B474 Stage B (increment): site-plan overlays + parcel drawings → IndexedDB ✅ lint 0 · 1574 tests (+1) · build green · headless 7/7 (`ui-audit/verify-b474-overlay-idb.mjs`) — nothing pending
+- **What changed.** Overlays/drawings are stashed in IndexedDB on creation (`addOverlayFile`/`addDrawingFromRaster`); their rehydrate effects now try IndexedDB **first** (fast, offline) and fall back to cloud Storage; `dropIdbBackedSrc` drops their heavy `src` from the persisted record (off the cap). With this + V141 (underlay) + V139 (history), all three heavy local stores are now on IndexedDB.
+- **Verified (sandbox, real browser).** `verify-b474-overlay-idb.mjs` 7/7: drop a site-plan overlay → renders (SVG `<image data-overlay-image>`) → raster in IndexedDB → saved record `hasSrc:false` + the ref → reload → overlay re-hydrates from IndexedDB. +1 unit test (overlay/drawing `dropIdbBackedSrc`). Underlay V141 re-run 7/7 (no regression); full suite green. Drawings share the identical pattern (storage unit-tested; same rehydrate code).
+- **Remaining by design:** the cross-tab-coordinated sites MAP stays on localStorage (its two-window guard needs synchronous cross-tab visibility). (Fully passed; archivable next run.)
+
+### V141 — B474 Stage B (increment): underlay raster → IndexedDB (off the 5 MB cap + survives reload) ✅ lint 0 · 1573 tests (+2) · build green · headless 7/7 (`ui-audit/verify-b474-underlay-idb.mjs`) — nothing pending
+- **What changed.** The heavy underlay image is stashed in IndexedDB on drop; the persisted record drops the data-URL `src` (proactive off-cap via `dropIdbBackedSrc`, conditional on an `idbKey` so non-backed rasters keep `src`) and rehydrates from IndexedDB on load. Fixes the one raster that previously had NO recovery path (it needed a re-drop after a quota strip).
+- **Verified (sandbox, real browser).** `verify-b474-underlay-idb.mjs` 7/7: drop an underlay → it renders (SVG `<image>`) → raster lands in IndexedDB → the saved record shows `hasSrc:false` + the `idbKey` ref → reload → underlay re-hydrates from IndexedDB. +2 unit tests prove `dropIdbBackedSrc` drops only idb-backed src (keeps non-backed = safe). No regressions (full suite green).
+- **Scope.** sheetOverlays/parcelDrawings already recover from cloud Storage (functional) — adding idb to them is an optional optimization; the cross-tab-coordinated sites map stays on localStorage by design. (Fully passed; archivable next run.)
+
+### V139 — B474 Stage A: version-history ring → IndexedDB (off the 5 MB localStorage cap) ✅ lint 0 · 1571 tests (+6 `historyIdb.test.js`) · build green · headless 7/7 (`ui-audit/verify-b474-history-idb.mjs`) — nothing pending
+- **What changed.** The biggest on-device store — the automatic version-history ring (~1.6 MB) — now lives in **IndexedDB** (gigabytes) via a synchronous in-memory ring + a byte-capped localStorage fallback (`lib/localDb.js`; `historyMem`/`initHistoryStore` in `storage.js`; hydrated from `SitePlannerApp`). Undo depth is no longer byte-throttled, and the ring survives in a store that can't fill. Public API unchanged + synchronous; the IndexedDB-ABSENT path is byte-for-byte the old localStorage behavior (the 1565 prior tests are the faithfulness guard).
+- **Verified (sandbox, real browser).** `verify-b474-history-idb.mjs` 7/7: create a site → 3 edits → the ring lands in IndexedDB → reload → history survives → boot intact, no errors. Boot/save/reload regression `verify-new-site-save.mjs` still 10/10. +6 fake-indexeddb unit tests.
+- **Scope note.** The live sites map deliberately STAYS on localStorage (its two-window guard needs synchronous cross-tab visibility); moving it (Stage B) is deferred per owner — see B474. (Fully passed; archivable to VERIFICATION-DONE.md next run.)
+
+### V127 — B432 + e2e loop hardening: matrix↔schema conformance + per-tool rail + live CI green ✅ VERIFIED LIVE (CI run 28100509947, ~1 min, green; @claude issue #323 auto-closed)
+- **What changed.** `e2e/markup-tools.spec.js` Section A: pure-JS conformance loop — for every doc-workspace tool (non-mode), asserts `schemaForMarkup({kind})` keys match the matrix row's `properties[]`. Section B: per-tool `getByTestId("tool-<id>")` + `aria-pressed="true"` assertions; gracefully skips when the rail isn't visible. Loop driver in CLAUDE.md. **Plus the B280-live hardening this session:** (1) sign in ONCE via `storageState` (`auth.setup.js`) + CI workers 1→4 — **31 min → ~1 min**; (2) signIn submits via **Enter** (the form has two "Sign in" buttons + the `auth-submit` testid isn't on the live build — Enter is deploy-independent); (3) `openModule` retries through a transient post-sign-in overlay; (4) `the Review workspace mounts` falls back to the tab-current signal when `doc-review-root` isn't deployed yet; (5) the e2e **job now fails honestly** on a red suite (was masked green by `set +e`).
+- **Verified.** Live CI run **28100509947** against planyr.io: **green in ~1 min**, and the auto-`@claude` issue (#323) was **auto-closed** by the green run — proving the close-on-green path (i.e. a real pass, not masked). Local logged-out: lint 0, 22 passed + 22 skipped.
+- **B436 update — per-tool ARM now executes for real (CI run 28102406142, green ~45s).** The fixture-PDF load landed, so Section B opens a drawing and **every deployed tool genuinely arms** against production (arc/dimension/pen/highlight/eraser/snapshot/count/… all `aria-pressed=true` ✓; 39 passed). Two notes: (a) the cold first wave was **flaky** (rail render >30 s under 4-worker PDF.js cold start) → bumped the per-tool group timeout to 60 s + rail wait to 45 s; (b) **`callout` is the one tool that skips** — it's in the matrix for `doc` but missing from the Review rail (real drift the loop caught) → filed **B437**. Cadence: once per engine change. Last checked: 2026-06-24, live green (per-tool arm verified).
+
+### V58 — Schedule module recovers after a deploy instead of dead-ending (B239) ✅ module loads/renders live (Cowork 2026-06-25) + self-heal headless-proven 3/3; only the OPTIONAL post-deploy self-heal click remains
+- **✅ 2026-06-25 (Cowork, signed-in on planyr.io):** the Schedule module **loads/renders** (all-projects report + a full project Gantt), **no deploy dead-end**. The self-heal-after-a-deploy path is already headless-proven 3/3 (harness A/B/C); the live post-deploy click stays an OPTIONAL low-risk confirm below.
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-25 ✅ (Cowork, signed-in; module loads/renders live) · **Next check** — one optional live confirm on planyr.io after deploy (steps below)
+- **Harness:** `ui-audit/diagnose-scheduler.mjs` (three scenarios: normal click, stale-but-recoverable chunk, permanently-missing chunk) + `ui-audit/verify-chunk-reload.mjs` (the B221 guard contract).
+- **✅ A (module not broken):** clicking **Schedule** on a fresh load mounts the `/sequence/` iframe and the embedded Gantt renders **44 task rows** — confirms the failure was never the Scheduler/iframe code, only the chunk-fetch recovery.
+- **✅ B (stale chunk recovers):** a `Scheduler-<hash>.js` that 404s once then succeeds → the `vite:preloadError` guard performs a **cache-busting** reload and lands in the module (no error screen).
+- **✅ C (chunk permanently missing):** the boundary surfaces **"A new version of Planyr is ready"** (no reload loop), and clicking the single primary **"Reload to update"** does a real cache-busting reload — captured nav trail `"/" → "/?_r=<ts>" → "/"` (param added to force fresh HTML, then stripped on the recovered load). `verify-chunk-reload.mjs` still **3/3** (reload-once · cooldown holds · re-arms).
+- **⏳ Optional live confirm:** on planyr.io, open the app in a tab, deploy a new build, then (in the still-open tab) click into **Schedule** — expect it to self-heal (auto cache-busting reload) and land in the Gantt, not the error screen. Low-risk (the recovery path is fully headless-verified); worth one real-deploy click if convenient.
+
+### V1 — Jurisdiction & road-authority identify (B93 / B94) ✅
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 ✅ · **Next check** done
+- **Steps:** On planyr.io open a georeferenced site (or bring a parcel in from the map).
+  Right panel → **🔍 Identify parcel** → click a lot → **⚖︎ Jurisdiction & road authority**.
+- **Expect:** County / City (or "Unincorporated") / ETJ / Road maint. rows each render with
+  a data-age. A City-of-Houston lot reads **Houston / Harris**; an unincorporated lot near
+  Houston reads **Unincorporated + "Houston ETJ"**; the road row shows an authority (e.g.
+  **State (TxDOT) · City**). **No CORS or network errors in the browser console.**
+- **If it fails:** most likely a CORS block — a GIS host must allow the planyr.io origin.
+  Note the failing host from the console. The feature degrades to honest "unknown"/error
+  text, so a failure is visible, not silent.
+- **2026-06-16 — data path verified live** (Node, calling the shipped functions against
+  the production endpoints): downtown Houston → **Houston / Harris**, not in ETJ, road
+  **City**; Spring → **unincorporated + Houston ETJ + Harris**; Sugar Land → **Fort Bend**.
+  Field maps, normalization, the ETJ constant and county-key mapping are all correct
+  against live data. **The browser layer was the only ⏳ — now ✅ too.**
+- **✅ VERIFIED LIVE 2026-06-17 on planyr.io** (headless Chromium, logged-out). (1) **CORS/data
+  from the planyr.io origin:** ran the feature's four GIS queries in-page for a downtown-Houston
+  point — county `services.arcgis.com` → **200 "Harris"**, city `feature.geographic.texas.gov`
+  (TxGIO) → **200 "Houston"**, ETJ COHGIS → **200, 0 features** (in-city, correctly not in ETJ),
+  road TxDOT → **200, maint-agency 4 = City**. No CORS block from the production origin. (2)
+  **On-screen render end-to-end:** brought a Houston Heights parcel in from the map → planner →
+  **🔍 Identify parcel** → clicked the lot → **⚖︎ Jurisdiction & road authority** → the panel
+  rendered **County: Harris · City: Houston · ETJ: not in Houston ETJ · Road maint.: City**, each
+  with a data-age ("just now") and the "Screening only — verify with the jurisdiction" disclaimer.
+  Screenshot evidence captured. The B93/B94 feature is shipped + working in the live app.
+- **2026-06-17 — ETJ upgraded from Houston-only → regional, verified from the planyr.io origin.**
+  Swapped the ETJ source to **H-GAC's regional layer** (all metro cities' ETJ). In-browser fetch
+  from the planyr.io origin: Spring/Aldine → **Houston**, SW of Sugar Land → **Richmond** (HTTP 200,
+  CORS-clean). So ETJ now covers the whole 13-county metro, not just Houston. (Post-deploy, the
+  on-screen ETJ row reads e.g. "Richmond ETJ" for a non-Houston unincorporated lot; county/city/road
+  were already statewide.)
+- **2026-06-17 — ETJ extended to Austin + DFW, region-routed (data + CORS verified from origin).**
+  ETJ is now a bbox-scoped list; a click only queries the metro it falls in, so **Houston still fires
+  exactly one ETJ query** (unit test asserts this). Wired clean AGOL layers: **Austin** (City of Austin
+  2-/5-mile ETJ) and **Fort Worth** (City of Fort Worth ETJ; Dallas is landlocked, ~no ETJ). Verified
+  from the planyr.io origin: both CORS-clean + return features at real ETJ points (Austin: Del Valle /
+  NW edge; Fort Worth: Alliance / SW). **Still ⏳ — on-screen click-through for an Austin/DFW lot:**
+  the planner's parcel-identify there needs a working county CAD; do a live click in an Austin or
+  Fort Worth ETJ area once the new build deploys, and confirm the ETJ row names the city.
+
+### V5 — Opening a saved site is reliable (B64) ✅ confirmed live (Cowork 2026-06-25)
+- **Added** 2026-06-16 · **Cadence** on-change + monthly · **Last checked** 2026-06-25 ✅ (Cowork, signed-in — opened 8 South from the finder cleanly several times, landed in the planner with the plan intact each time) · **Next check** 2026-07-25 (monthly)
+- **Steps:** Open a saved site, zoom/pan to find its pin, then click it to enter the planner
+  — repeatedly, especially right after a zoom.
+- **Expect:** The open registers **every time** (no dropped click). A mitigation shipped but
+  is UNVERIFIED; if it still drops, that confirms the map-level hit-test fallback is needed.
+
+### V7 — 🌐 GIS endpoint liveness (no browser needed) ✅
+- **Added** 2026-06-16 · **Cadence** monthly · **Last checked** 2026-06-16 (all 4 → HTTP 200 + fields: county 12 / city 11 / etj 6 / road 133) · **Next check** 2026-07-16
+- **Steps (any session, curl):** probe each source root for HTTP 200 + JSON:
+  - County `https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/Texas_County_Boundaries/FeatureServer/0?f=json`
+  - City `https://feature.geographic.texas.gov/arcgis/rest/services/City_Boundaries/Texas_City_Boundaries/MapServer/0?f=json`
+  - ETJ `https://services.arcgis.com/NummVBqZSIJKUeVR/arcgis/rest/services/COH_ETJ_view/FeatureServer/1?f=json`
+  - Road `https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Roadway_Inventory/FeatureServer/0?f=json`
+- **Expect:** all 200 with a `fields` array. County/city GIS hosts move occasionally — if one
+  404s/moves, re-point its row in `src/workspaces/site-planner/lib/jurisdiction.js`.
+
+### V18 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ✅
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 ✅
+- **Steps:** Open a site in the Site Planner. Place a **Building** → its label reads **"Building 1"**
+  (above its sf and dimensions). Place a second and third → they read **"Building 2"** then
+  **"Building 3"** in placement order. Now **delete "Building 2"** → expect the old "Building 3" to
+  re-label **immediately** as "Building 2" (numbers stay contiguous 1…N, no gap). Add another → it
+  appends as the next number. A site with a **single** building still reads "Building 1".
+- **Identity check (the important one):** give a building attached **parking** or a **bump-out**, then
+  delete a *lower-numbered* building so this one renumbers. Confirm the attached pieces stay attached and
+  nothing re-points — attachment binds to the hidden stable id, not the visible number, so a renumber
+  must never detach or mis-link anything.
+- **Expect:** every visible building label updates in one pass on delete; non-building elements
+  (car parking, paving, roads, detention ponds, sidewalks) are unaffected; bump-out pieces don't get
+  their own number.
+- **Result ✅ (2026-06-17, self-verified headless Chromium on the built artifact):** drew three buildings
+  → labelled **Building 1 / 2 / 3** in placement order; selected the **middle** one (Building 2) and
+  deleted it → the former **Building 3 renumbered to Building 2** (same 156,735 sf / 457′×343′ — identity
+  unchanged), leaving a contiguous {1, 2} with no gap. Screenshot eyeballed; the static 4-line stack
+  (name / sf / dims) rendered correctly too. (Attached-piece identity on renumber wasn't separately driven,
+  but identity is keyed on the stable `el.id`, which the delete leaves untouched.)
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+
+### V29 — Fort Bend parcels are clickable, not just visible (B137) ✅
+- **Added** 2026-06-17 · **Cadence** once (bugfix) · **Last checked** 2026-06-17 ✅ · **Next check** done
+- **✅ VERIFIED LIVE 2026-06-17 on planyr.io** (headless Chromium, logged-out). Geocoded to Sugar Land (Fort
+  Bend), entered **Select parcels**, clicked a lot → it **selected on the first click**: the selection card
+  read **"1 parcel · 0.34 ac · Highway 90A"** with the orange highlight, and **"No parcel right there" never
+  fired**. The browser console confirmed `gis.fbcad.org/serverarcgis2/.../layers` was **CORS-blocked /
+  unreachable** (FBCAD down, as at fix time) — so the lot selected **purely via the statewide TxGIO fallback**,
+  which is exactly the B137 fix. Screenshot evidence captured. (Signed-in county-label relabel — B36a / V3 —
+  still rides the same code path; not re-exercised here since auth is CORS-blocked in the sandbox.)
+- **Steps:** Map view → "＋ Select parcels" → pan to a **Fort Bend** area (e.g. Sugar Land / Rosenberg /
+  Richmond) and zoom in until purple parcel outlines paint. (1) Click directly on a lot → it should
+  **select** (orange highlight + the selection card shows acreage), NOT pop "No parcel right there." (2)
+  Click it again → it deselects. (3) Confirm a **Harris** lot still selects exactly as before (no regression).
+  (4) Plan the selected Fort Bend lot → the planner hand-off should record **county = fortbend** (the B36a
+  relabel runs because the hit came via the statewide TxGIO layer).
+- **Expect:** any displayed Fort Bend outline is selectable; Harris unchanged; the saved site's county reads
+  Fort Bend. Works even though FBCAD's own host may be down — the statewide TxGIO layer answers the click.
+- **Note:** FBCAD (`gis.fbcad.org/serverarcgis2`) was returning HTTP 503 at fix time; if it comes back up the
+  county CAD will answer first and TxGIO stays the fallback — either way the lot must select.
+- **If it fails:** if a clearly-outlined Fort Bend lot still won't select, that's a real regression — log ❌
+  here with the coordinate; otherwise note what looked off (no data risk).
+
+### V283 — Doc Review "Drawing viewer": OCG Layers panel (B490) + crispness (B489) ✅ headless-verified; B489 visual/feel eyeball owed  *(RENUMBERED V197→**V283** 2026-07-11 to resolve a latent duplicate-V197 collision — the active V197 is B625's deed-align check; this archival Doc-Review item took the next free V#. Ref updated in BACKLOG-DONE.md.)*
+- **Added** 2026-07-03 · **Cadence** once (feature acceptance) · **Self-verified 2026-07-03** (headless Chromium, logged-out preview build)
+- **✅ PASS (logged-out headless):** **B490 Layers** — `ui-audit/verify-ocg.mjs` (8/8) on a hand-authored 2-layer OCG fixture: the Layers button appears only for a doc with optional content, the portaled popover lists Electrical+Plumbing and is genuinely visible (`elementFromPoint` at its centre lands inside it — NOT clipped by the toolbar `overflow:hidden`), unchecking Electrical re-rasters the backdrop red→0 while blue persists, re-checking restores it, no page errors (`ui-audit/screens/ocg-layers-open.png`). Plus `test/ocg.test.js`. **B489 seam** — proven by algebra in `test/renderBudget.test.js` (`deviceRect` round-trip idempotence + the page→CSS density-match; the old unrounded region provably mismatched). Full suite **2225** + lint 0 + build green + DocReview lazy chunk intact.
+- **⏳ Owed (a browser-equipped eyeball — logged-out is fine, just not pixel-assertable in the harness, never a Michael to-do):** (1) **B489a seam** — eyeball a hairline crossing the detail↔backdrop boundary at a non-integer zoom: it should read as ONE band, not a doubled echo; (2) **B489b continuous-pan** — on a real (ideally low-power) machine a slow continuous pan should stay sharp near the leading edge without stutter (throttle 140ms, pinch excluded — tune if heavy); (3) **B489c useSystemFonts:false** — non-embedded-font text should render from the bundled substitutes consistently across machines.
+
