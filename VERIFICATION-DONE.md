@@ -4,6 +4,15 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V211 — B644 (×2): the Schedule first paint never crashes on null `projects` ✅ PASS 2026-07-18 (this session, headless self-verify on the local production build, logged-out)
+- **Added** 2026-07-05 · **Cadence** once (bug-fix acceptance) · references **B644** · earlier: `ui-audit/verify-b644-fresh-null.mjs` (deterministic nav-bridge-race repro/fix proof).
+- **✅ Result — re-ran on the merged HEAD, both pending steps confirmed, no residual open:**
+  - **(1) Fresh project → Schedule tab:** `node ui-audit/verify-b644-fresh-null.mjs` re-run PASS on a fresh build (embed renders, zero null-`projects` console/page errors).
+  - **(2) Cold-boot Site→Schedule first switch (V153 path):** new harness `ui-audit/verify-v211-schedule-coldboot.mjs` (2/2) drives TWO independent brand-new browser contexts through Start blank → Schedule as the very first navigation — no `"This view failed to load — Cannot read properties of null (reading 'projects')"` banner, no null-`projects` console/page error either time. A screenshot confirms the clean loading skeleton + "Assembling schedule…" caption render in place of any error.
+  - **(3) Loader-timing observation (non-blocking, per B494/B495 the fix doesn't claim to change this):** the "Assembling schedule…" overlay was still showing at ~2s into the cold load in the screenshot check — consistent with the known separate loader-timing behavior, not a regression from this fix.
+- **Sandbox note:** headless Chromium in this environment cannot load `https://planyr.io` directly (`net::ERR_CONNECTION_RESET` on the egress proxy, the same class of external-host block documented elsewhere in this file); verification ran against a local `vite build` + `vite preview` of the merged HEAD — the identical code `main` deploys — which is the accepted logged-out self-verify substitute used throughout this file's 2026-07-18 batch passes.
+- Cadence: once — CLOSED. (B644 folded → BACKLOG-DONE.)
+
 ### V263 — B750: single-click SELECTS, double-click OPENS Properties — the Review (Doc Review) click-through + the Site Planner phone ✎ pill ✅ PASS 2026-07-18 (this session, headless self-verify on the local production build, logged-out — BOTH workspaces)
 - **Added** 2026-07-10 · **Cadence** once (feature acceptance) · references **B750** · earlier: `e2e/click-behavior.spec.js` (Site Planner desktop, 3× stable) + `e2e/element-delete.spec.js` green.
 - **✅ Result — the full B750 gesture model is confirmed in BOTH workspaces, logged-out, on the merged HEAD (0 page errors):**

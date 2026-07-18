@@ -30,6 +30,8 @@ import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gis
 import { classifyCcn } from "./ccnClassify.js";
 import { screenProximity, fmtDistFt } from "./proximityScreen.js";
 import { summarizeWells } from "./wellStatus.js";
+import { summarizeTransmission, summarizeSubstations } from "./powerScreen.js";
+import { summarizeAadt, summarizeRail, summarizeAirports } from "./accessScreen.js";
 
 const DAY = 24 * 3600 * 1000;
 
@@ -162,6 +164,65 @@ export const ANALYSIS_SOURCES = [
     plural: "fault trace(s)", onSiteLabel: "crosses the site",
     absentLabel: "No mapped growth-fault traces within a quarter-mile",
     caveat: "Houston-area active growth faults (aseismic slow-slip faults that crack foundations, slabs, and pavement over time). A trace crossing or near the site is a real design constraint — set structures/ponds off the trace and get a geotechnical/fault study. Screening only; a community-hosted republication of the USGS Houston fault map (SIM 2874).",
+  },
+  {
+    // Electric transmission (public-data screening PHASE 5) — HIFLD transmission lines crossing
+    // or near the parcel, by PROXIMITY to the LINES. onSiteLabel makes a 0-ft nearest read
+    // "crosses the site"; classifyProx (powerScreen.js) flags a crossing as a likely easement.
+    id: "transmission", category: "Electric transmission", label: "Transmission lines (HIFLD)", kind: "line",
+    mapLayer: "hifld_tx", // the existing HIFLD transmission overlay (EVIDENCE block) gets the "◍ Map" toggle
+    ...reg("transmission"),
+    screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
+    plural: "transmission line(s)", onSiteLabel: "crosses the site",
+    absentLabel: "No mapped transmission lines within a quarter-mile",
+    classifyProx: (scr, ctx) => summarizeTransmission(scr, ctx),
+    caveat: "HIFLD electric transmission (≥69 kV). A line CROSSING the site is a transmission easement — you can't build under it, and towers/guy-wires take usable area. Routes are schematic and some owners/voltages are withheld. Screening only — the utility and a survey are the real check.",
+  },
+  {
+    // Electric substations (PHASE 5) — distance to the nearest HIFLD substation as a SERVICE /
+    // interconnect proxy (a heavy-power industrial user wants to be near one). An INFO fact,
+    // not a good/bad constraint, so classifyProx returns `info` either way (bufferMi 3 to reliably
+    // capture the nearest in a metro; "none within 3 mi" is itself informative — far from grid).
+    id: "substations", category: "Electric substation (nearest)", label: "Substations (HIFLD)", kind: "point",
+    mapLayer: "hifld_substations",
+    ...reg("substations"),
+    screenMode: "proximity", bufferMi: 3, ttl: 30 * DAY, verified: true,
+    plural: "substation(s)",
+    classifyProx: (scr, ctx) => summarizeSubstations(scr, ctx),
+    caveat: "HIFLD electric substation points — the nearest-distance is a SERVICE / interconnect proxy, not a constraint. NAMEs are anonymized on some records and voltages are withheld (shown as blank). Screening only — confirm service, capacity, and interconnect cost with the utility.",
+  },
+  {
+    // Traffic / AADT (public-data screening PHASE 6, access tier) — the average daily traffic
+    // on the nearest TxDOT-counted road, an access / visibility proxy. Point proximity, info fact.
+    id: "aadt", category: "Traffic (AADT)", label: "TxDOT traffic counts", kind: "point",
+    mapLayer: "txdot_aadt",
+    ...reg("aadt"),
+    screenMode: "proximity", bufferMi: 0.5, ttl: 30 * DAY, verified: true,
+    plural: "traffic count(s)",
+    classifyProx: (scr, ctx) => summarizeAadt(scr, ctx),
+    caveat: "TxDOT preliminary AADT (average annual daily traffic) on the nearest counted road — an access / visibility proxy, not a capacity or level-of-service study. Some records have no road name. Screening only.",
+  },
+  {
+    // Rail access (PHASE 6) — distance to the nearest BTS/FRA rail line + its owner. A line
+    // crossing/adjacent is a potential rail-served siding (industrial plus). Line proximity, info.
+    id: "rail", category: "Rail access", label: "Rail lines (BTS/FRA)", kind: "line",
+    mapLayer: "bts_rail", onSiteLabel: "crosses/abuts the site",
+    ...reg("rail"),
+    screenMode: "proximity", bufferMi: 0.5, ttl: 30 * DAY, verified: true,
+    plural: "rail line(s)",
+    classifyProx: (scr, ctx) => summarizeRail(scr, ctx),
+    caveat: "BTS/FRA rail-network lines (owner = the railroad's reporting mark). A line adjacent or crossing the site is a POTENTIAL rail-served siding — confirm service, rates, and a spur agreement with the railroad. Screening only; not a surveyed alignment or a confirmed spur right.",
+  },
+  {
+    // Airport proximity (PHASE 6) — distance to the nearest FAA airport as a PROXY for Part 77
+    // height-restriction surfaces. classifyProx flags a Part 77 caution near a public-use airport.
+    id: "airports", category: "Airport proximity (FAA Part 77)", label: "FAA airports", kind: "point",
+    mapLayer: "faa_airports",
+    ...reg("airports"),
+    screenMode: "proximity", bufferMi: 3, ttl: 30 * DAY, verified: true,
+    plural: "airport(s)",
+    classifyProx: (scr, ctx) => summarizeAirports(scr, ctx),
+    caveat: "FAA airports. Distance to the nearest is a PROXY for FAA Part 77 height-restriction surfaces near a public-use airport — NOT the computed Part 77 surfaces. A tall structure near an airport may require an FAA Form 7460 determination. Screening only.",
   },
   {
     // Zoning / entitlement — derived from the jurisdiction result rather than a single
@@ -756,7 +817,7 @@ export function deriveZoning(j) {
 // Orchestrator
 // ---------------------------------------------------------------------------
 // Display order for the assembled findings.
-const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"];
+const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "transmission", "substations", "jurisdiction", "road", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"];
 
 /* Run the full screen against the active-parcel rings ([[ [lng,lat], ... ], ...]).
  * Returns { findings, generatedAt }. Findings are presence-first and each carries its
