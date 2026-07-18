@@ -164,10 +164,10 @@ async function checkMultiplexCatalog(key, s) {
   return { problems, notes };
 }
 
-/* B881 — reachability + layer-presence check for a MapServer whose sublayers are RASTERS
+/* B882 — reachability + layer-presence check for a MapServer whose sublayers are RASTERS
  * read via /identify (FEMA InFRM EBFE): confirm the service root answers and that each
  * identifyLayer id still exists in the live layer list (a renamed/renumbered raster would
- * silently break the point sampler). A live value probe belongs to the app + V362; this
+ * silently break the point sampler). A live value probe belongs to the app + V363; this
  * weekly check guards the endpoint shape. */
 async function checkIdentifySource(key, s) {
   const problems = [];

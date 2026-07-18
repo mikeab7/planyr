@@ -1,4 +1,4 @@
-// B881 — the "challenge the estimate" engine: sanity-check vs grade, the ±1 ft sensitivity
+// B882 — the "challenge the estimate" engine: sanity-check vs grade, the ±1 ft sensitivity
 // band, and estimate-vs-estimate disagreement. Pure — no I/O.
 import { describe, it, expect } from "vitest";
 import {

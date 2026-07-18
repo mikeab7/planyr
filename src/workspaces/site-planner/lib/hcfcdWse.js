@@ -1,4 +1,4 @@
-/* B881 (scope note 2) — HCFCD MAAPnext model WSE sampler (Harris County).
+/* B882 (scope note 2) — HCFCD MAAPnext model WSE sampler (Harris County).
  *
  * Harris County Flood Control District's MAAPnext program publishes public ArcGIS ImageServer
  * rasters of model results. Its GROUND-ELEVATION raster is confirmed live:
@@ -8,7 +8,7 @@
  * build sandbox's egress policy blocks fximgservices.hcfcd.org (403), so those endpoints are
  * carried as PROVISIONAL config in the registry (femaEbfe sibling row `hcfcdMaapnext`) and this
  * sampler is a NO-OP (returns null → the provider is simply absent, and the resolver falls
- * through to EBFE) until the endpoints are confirmed and filled in (live-verify V362).
+ * through to EBFE) until the endpoints are confirmed and filled in (live-verify V363).
  *
  * MAAPnext model elevations often run HIGHER than the effective FIRM and Harris-area reviewers
  * enforce them, so in Harris County this WSE OUTRANKS EBFE and effective-style data (the
@@ -47,7 +47,7 @@ const cacheKey = (lat, lng) => `${lat.toFixed(4)},${lng.toFixed(4)}`;
 export function clearMaapnextCache() { _maapCache.clear(); }
 
 /* The confirmed/provisional WSE ImageServer endpoints from the registry. `wseLayers.wse1pct`
- * and `.wse02` are null until the live directory probe fills them (V362). */
+ * and `.wse02` are null until the live directory probe fills them (V363). */
 export function maapnextEndpoints() {
   return gisSource("hcfcdMaapnext").wseLayers || { wse1pct: null, wse02: null };
 }

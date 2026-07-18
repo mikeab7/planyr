@@ -1014,7 +1014,7 @@ export const EST_MAAPNEXT_NOTE =
 export const DERIVED_WSE100_DRAFT_NOTE =
   "This 1% (100-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: Fort Bend's mitigation and FFE rules reference the EFFECTIVE (pre-Atlas-14) floodplain — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a BFE to override.";
 
-/* B881 — the estimated-WSE source tags the accept-gated ghost writes as bfeSrc (one per
+/* B882 — the estimated-WSE source tags the accept-gated ghost writes as bfeSrc (one per
  * provider in the wseProviders registry). Uniform handling downstream: any of these is an
  * ESTIMATE (screening) — the warn-note + label are chosen by source, not hardcoded to one. */
 export const EST_WSE_SRCS = new Set(["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext"]);
@@ -1034,11 +1034,11 @@ export const WSE_PROVIDER_LABEL = {
   "xs-wsel-02": "derived (cross-sections)", "fbcdd-wse02-draft": "derived (FBCDD study — DRAFT)",
   "fbcdd-wse100-draft": "derived (FBCDD study — DRAFT)", "derived-wse100": "derived (100-yr raster)",
   "est-boundary-grade": "ESTIMATED (grade @ Zone A boundary)",
-  "est-ebfe": "ESTIMATED (FEMA InFRM Base Level Engineering)", // B881
-  "est-fbcdd": "ESTIMATED (FBCDD Atlas-14 study — DRAFT)", // B881
-  "est-maapnext": "ESTIMATED (HCFCD MAAPnext model)", // B881
+  "est-ebfe": "ESTIMATED (FEMA InFRM Base Level Engineering)", // B882
+  "est-fbcdd": "ESTIMATED (FBCDD Atlas-14 study — DRAFT)", // B882
+  "est-maapnext": "ESTIMATED (HCFCD MAAPnext model)", // B882
   "ebfe-wse02": "derived (FEMA InFRM EBFE — screening)", "ebfe-1pct": "derived (FEMA InFRM EBFE — screening)",
-  "maapnext-wse02": "derived (HCFCD MAAPnext — screening)", // B881
+  "maapnext-wse02": "derived (HCFCD MAAPnext — screening)", // B882
   "mixed": "mixed",
 };
 export const wseProvLabel = (p) => WSE_PROVIDER_LABEL[p] || p || "—";

@@ -1,4 +1,4 @@
-// B881 (scope note 2) — the pluggable estimated-WSE provider registry: per-county precedence
+// B882 (scope note 2) — the pluggable estimated-WSE provider registry: per-county precedence
 // (local district → FEMA InFRM EBFE → grade), the winning-source provenance, the 0.2% fill,
 // and cross-provider disagreement. Pure.
 import { describe, it, expect } from "vitest";

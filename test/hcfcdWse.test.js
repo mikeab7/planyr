@@ -1,4 +1,4 @@
-// B881 (scope note 2) — the HCFCD MAAPnext WSE sampler. The 1%/0.2% WSE ImageServer
+// B882 (scope note 2) — the HCFCD MAAPnext WSE sampler. The 1%/0.2% WSE ImageServer
 // endpoints are PROVISIONAL in the registry (sandbox can't confirm the raster names), so the
 // default sampler is a no-op (returns null → the provider is absent → the resolver falls
 // through to EBFE). With endpoints injected it behaves exactly like the FBCDD getSamples core:
@@ -14,7 +14,7 @@ const EPS = { wse1pct: "https://x/MAAPNext/WSE_1pct/ImageServer", wse02: "https:
 beforeEach(() => clearMaapnextCache());
 
 describe("provisional (unconfigured) endpoints", () => {
-  it("the registry ships MAAPnext WSE endpoints as provisional (null) pending V362", () => {
+  it("the registry ships MAAPnext WSE endpoints as provisional (null) pending V363", () => {
     const eps = maapnextEndpoints();
     expect(eps.provisional).toBe(true);
     expect(eps.wse1pct).toBeNull();

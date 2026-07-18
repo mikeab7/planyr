@@ -93,6 +93,7 @@ import JurisdictionBadge from "./components/JurisdictionBadge.jsx";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx } from "./lib/roadGeometry.js";
+import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
@@ -144,7 +145,7 @@ import {
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
-import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
+import { buildSheetFurnitureSvg, screenFurniturePlates, calibBadgePlacement } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
 import { printStrokeWidth, sheetFitScale } from "./lib/exportStyle.js";
@@ -682,7 +683,7 @@ const ringOf = (e) => (e.points ? e.points : elCorners(e));
  * parking, trailer courts). Ponds are CUT, never fill; roads ride their strip math
  * elsewhere and are deliberately out of the v1 screening set. */
 const FM_FILL_TYPES = new Set(["building", "paving", "parking", "trailer"]);
-// B881 — plain-language labels for the estimate-sensitivity band's flipped outputs.
+// B882 — plain-language labels for the estimate-sensitivity band's flipped outputs.
 const EST_FLIP_LABEL = {
   ffeVerdict: "the buildability verdict",
   requiredFfeFt: "the required finished-floor",
@@ -1367,7 +1368,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
 
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
-  const [size, setSize] = useState({ w: 800, h: 560 });
+  // `w`/`h` are clamped to a sane minimum for the coordinate math; `rawW` is the TRUE
+  // (unclamped) map-pane width, used only to keep the bottom furniture from overlapping
+  // when a docked left panel narrows the pane below the clamp (NEW-1 / B881).
+  const [size, setSize] = useState({ w: 800, h: 560, rawW: 800 });
+  // NEW-1 (B881): the calibration badge is text-width (not viewport-capped like the scale
+  // bar), so it's the one bottom item that can run into the right-anchored scale bar when
+  // the pane narrows. We measure its natural width and, when it WOULD collide, reflow it up
+  // to its own row above the bar (see the badge block below).
+  const calibBadgeRef = useRef(null);
+  const [calibBadgeW, setCalibBadgeW] = useState(0);
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -2627,7 +2637,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!wrapRef.current) return;
     const ro = new ResizeObserver((ents) => {
       const r = ents[0].contentRect;
-      setSize({ w: Math.max(320, r.width), h: Math.max(360, r.height) });
+      setSize({ w: Math.max(320, r.width), h: Math.max(360, r.height), rawW: r.width });
     });
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
@@ -6629,7 +6639,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         }
         if (tok !== drainTok.current) return; // superseded while sampling
       }
-      // B881 — FEMA/USGS InFRM Estimated BFE (EBFE / Base Level Engineering). For a FEMA
+      // B882 — FEMA/USGS InFRM Estimated BFE (EBFE / Base Level Engineering). For a FEMA
       // Zone A / unstudied "no published BFE" area, InFRM publishes an ENGINEERED screening
       // flood surface — a far better estimated BFE than the grade-@-boundary guess it
       // replaces. Sampled at the SAME representative point, ANY county (InFRM is FEMA Region 6
@@ -6651,9 +6661,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           floodGeo.ebfeFlags = { state: "failed" }; // → grade fallback, honest UNKNOWN
         }
         if (tok !== drainTok.current) return; // superseded while sampling
-        // B881 (scope note 2) — HCFCD MAAPnext model WSE (Harris County local-district provider).
+        // B882 (scope note 2) — HCFCD MAAPnext model WSE (Harris County local-district provider).
         // Sampled behind the SAME provider interface; in Harris it OUTRANKS EBFE (enforced there).
-        // The WSE endpoints are provisional (sandbox can't confirm the raster names — V362), so
+        // The WSE endpoints are provisional (sandbox can't confirm the raster names — V363), so
         // the sampler is a no-op until they're filled; wired now so Harris activates by config.
         floodGeo.maapnext = null;
         floodGeo.maapnextFlags = { state: "not-applicable" };
@@ -6810,7 +6820,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmDerivedWse02Ft = floodGeo?.derivedWse02 && Number.isFinite(floodGeo.derivedWse02.wseFt) ? floodGeo.derivedWse02.wseFt : null;
   // B807 — the DRAFT Atlas-14 1% WSE from the per-watershed rasters (Fort Bend only).
   const fmDerivedWse100Ft = floodGeo?.derivedWse100 && Number.isFinite(floodGeo.derivedWse100.wseFt) ? floodGeo.derivedWse100.wseFt : null;
-  // B881 — the pluggable estimated-WSE providers for unstudied Zone A: HCFCD MAAPnext (Harris,
+  // B882 — the pluggable estimated-WSE providers for unstudied Zone A: HCFCD MAAPnext (Harris,
   // scope note 2), FEMA InFRM EBFE (any county), and FBCDD (Fort Bend, already fetched above).
   // The 0.2% (500-yr) field fills by the SAME precedence (district → EBFE); a manual entry still
   // overrides downstream. Precedence + provenance live in lib/wseProviders.js (one registry).
@@ -6900,7 +6910,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
   // NEW-2 — the accepted boundary-grade estimate keeps its provider tag (never "manual").
   const fmBfeSrc = fmManualBfeFt != null && fmSettings.bfeSrc ? fmSettings.bfeSrc : null;
-  const fmGoverningBfeIsEst = fmManualBfeFt != null && isEstimatedWseSrc(fmBfeSrc) // B881 — any estimate provider
+  const fmGoverningBfeIsEst = fmManualBfeFt != null && isEstimatedWseSrc(fmBfeSrc) // B882 — any estimate provider
     && fmZones.every((z) => z.staticBfeFt == null); // a published static BFE would outrank it
   // B807 variant-(b) (owner 2026-07-13): the DRAFT Atlas-14 100-yr also seeds the FFE
   // recommendation via its OWN labeled basis (atlas14_100yr) — never via wse1pctFt.
@@ -6930,7 +6940,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the source tag keeps the provenance visible everywhere the number surfaces, and a
     // manual wse02Ft always wins (engine precedence).
     derivedWse02Ft: fmDerivedWse02FtEff,
-    derivedWse02Src: fmDerivedWse02SrcEff, // B881 — FBCDD DRAFT where covered, else EBFE screening
+    derivedWse02Src: fmDerivedWse02SrcEff, // B882 — FBCDD DRAFT where covered, else EBFE screening
     // B807 — the derived 1% seam (LAST in engine precedence): the FBCDD Atlas-14
     // per-watershed DRAFT rasters on Fort Bend sites. Same provenance discipline as
     // the 0.2%: the source tag rides everywhere the number surfaces.
@@ -6946,7 +6956,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         : (fmPadIsAuto ? "auto (code min)" : null),
       derivedBfe: fmDerivedBfe ? "bfe-line-interp" : null,
       derivedXsWsel: fmDerivedXsWsel ? "xs-wsel" : null,
-      derivedWse02: fmDerivedWse02SrcEff, // B881 — EBFE fills the 0.2% source tag off Fort Bend
+      derivedWse02: fmDerivedWse02SrcEff, // B882 — EBFE fills the 0.2% source tag off Fort Bend
       derivedWse100: floodGeo?.derivedWse100 ? floodGeo.derivedWse100.source : null,
     },
   };
@@ -7486,12 +7496,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         anyBuildingInTrigger: fmAnyBuildingInTrigger, // NEW-3 — the outside-floodplain suppression
       })
     : null;
-  // NEW-2 / B881 — the estimated 1% WSE for unstudied Zone A: offered ONLY when the 1% surface
+  // NEW-2 / B882 — the estimated 1% WSE for unstudied Zone A: offered ONLY when the 1% surface
   // is otherwise unknown (no static/manual/derived value — the exact state that dead-ends
   // mitigation, the heat map, and the pond split today). Recomputed as a GHOST each check;
   // accepting writes bfeFt + bfeSrc once — never auto-committed, and a committed value is never
   // silently overwritten by a recompute.
-  //   • B881: the estimate comes from the pluggable provider REGISTRY (lib/wseProviders.js) by
+  //   • B882: the estimate comes from the pluggable provider REGISTRY (lib/wseProviders.js) by
   //     per-location precedence — local district model (HCFCD MAAPnext in Harris / FBCDD in Fort
   //     Bend) → FEMA InFRM EBFE → grade-@-Zone-A-boundary. The winning source is named in the
   //     provenance; adding a future district is a registry entry, not a code path here.
@@ -7534,7 +7544,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [fmEstWseWanted, floodGeo, fmDemGridKey, drainSigNow],
   );
-  // B881 (scope addition) — the "challenge the estimate" layer. A go/no-go decision can ride on
+  // B882 (scope addition) — the "challenge the estimate" layer. A go/no-go decision can ride on
   // this screening number and it can be wrong in either direction, so:
   //   (a) sanity-check the estimated WSE against site grade (implausible depth / below invert),
   //   (b) a BFE −1/BFE/+1 sensitivity band over the estimate-driven outputs, and
@@ -7861,17 +7871,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       padIsAuto: fmPadIsAuto, // NEW-3 — pad currently defaulted to the code minimum
       suggestFfe: fmSuggestFfe, // NEW-3 — the suggestion wrapper (outside-floodplain honesty + basis chip + ESTIMATED stamp)
       padSrc: fmSettings.padSrc || null, // NEW-3 — "suggested-accepted" provenance on the committed pad
-      estWse: fmEstWse, // NEW-2 / B881 — the estimated Zone A BFE (accept-gated ghost; provider-resolved; null when N/A)
-      estSanity: fmEstSanity, // B881 — (a) sanity-check vs site grade (suspect flag)
-      estSensitivity: fmEstSensitivity, // B881 — (b) BFE ±1 ft sensitivity band (estimate-sensitive flag)
-      estDisagreement: fmEstDisagreement, // B881 — (c) cross-provider disagreement (show both + delta)
+      estWse: fmEstWse, // NEW-2 / B882 — the estimated Zone A BFE (accept-gated ghost; provider-resolved; null when N/A)
+      estSanity: fmEstSanity, // B882 — (a) sanity-check vs site grade (suspect flag)
+      estSensitivity: fmEstSensitivity, // B882 — (b) BFE ±1 ft sensitivity band (estimate-sensitive flag)
+      estDisagreement: fmEstDisagreement, // B882 — (c) cross-provider disagreement (show both + delta)
       bfeSrc: fmBfeSrc, // NEW-2 — "est-boundary-grade" when the committed BFE is the accepted estimate
       hagFt: fmHagFt, // NEW-3 — the HAG screening proxy feeding the Waller §D(5) basis
       // NEW-1 — auto-resolved values shown as grey "value · source" text until tapped to edit.
       autoGradeFt: drainCtxData?.groundElevFt ?? null, // 3DEP bare-earth median
       derivedWse02: floodGeo?.derivedWse02 || null, // FBCDD Atlas-14 DRAFT 0.2% WSE (Fort Bend)
-      derivedWse02Ft: fmDerivedWse02FtEff, // B881 — the effective derived 0.2% (FBCDD → EBFE → MAAPnext)
-      derivedWse02Src: fmDerivedWse02SrcEff, // B881 — its winning source tag
+      derivedWse02Ft: fmDerivedWse02FtEff, // B882 — the effective derived 0.2% (FBCDD → EBFE → MAAPnext)
+      derivedWse02Src: fmDerivedWse02SrcEff, // B882 — its winning source tag
       derivedWse100: floodGeo?.derivedWse100 || null, // B807 — FBCDD Atlas-14 DRAFT 1% WSE (Fort Bend, per-watershed)
       hasDockElements: els.some((e) => e && (e.truckCourt || e.forCourt)), // NEW-1(c) — gate the dock-drop row
       onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
@@ -9084,7 +9094,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B807 (PDF-PARITY): a 1% volume priced off the FBCDD DRAFT raster carries the same
       // stand-in qualifier on the sheet — the effective floodplain is the rule's basis.
       if (mit.volumeCf != null && mit.providers?.wse1pct === "fbcdd-wse100-draft") v += " (1% from DRAFT Atlas-14 study — basis is the effective floodplain)";
-      // NEW-2 / B881 (PDF-PARITY): a volume priced off ANY accepted estimate (grade / EBFE /
+      // NEW-2 / B882 (PDF-PARITY): a volume priced off ANY accepted estimate (grade / EBFE /
       // district model) carries the ESTIMATED stamp on the sheet exactly like the panel, naming
       // the winning source.
       if (mit.volumeCf != null && isEstimatedWseSrc(mit.providers?.wse1pct)) v += ` (1% WSE ${wseProvLabel(mit.providers.wse1pct)} — screening)`;
@@ -9125,10 +9135,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (b.ffe.pendingBases && b.ffe.pendingBases.length) v += " (max-of — more bases pending)";
       // B770 (PDF-PARITY with the card's ⚑ note): an FFE governed by the 0.2% basis whose
       // WSE came from the FBCDD DRAFT raster must carry the draft label on the sheet too.
-      if (b.ffe.basis === "wse02pct" && d.wse02Src && d.wse02Src !== "manual") v += ` (0.2% WSE ${wseProvLabel(d.wse02Src)})`; // B881 — name FBCDD/EBFE/MAAPnext
+      if (b.ffe.basis === "wse02pct" && d.wse02Src && d.wse02Src !== "manual") v += ` (0.2% WSE ${wseProvLabel(d.wse02Src)})`; // B882 — name FBCDD/EBFE/MAAPnext
       // B807 variant-(b) (PDF-PARITY): same rule for the Atlas-14 100-yr basis.
       if (b.ffe.basis === "atlas14_100yr" && d.wse100Src === "fbcdd-wse100-draft") v += " (Atlas-14 100-yr WSE — DRAFT study)";
-      // NEW-2 / B881 (PDF-PARITY): an FFE governed by ANY accepted estimate stamps it, naming the source.
+      // NEW-2 / B882 (PDF-PARITY): an FFE governed by ANY accepted estimate stamps it, naming the source.
       if (b.ffe.basis === "wse1pct" && isEstimatedWseSrc(d.floodMit?.bfeSrc)) v += ` (1% WSE ${wseProvLabel(d.floodMit.bfeSrc)})`;
       // NEW-3 (PDF-PARITY): the HAG screening proxy names itself when it governs.
       if (b.ffe.basis === "hag") v += " (HAG — 3DEP screening proxy)";
@@ -11995,7 +12005,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const renderMarkupNode = (m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
                 const zk = view.ppf / 0.35; // B617 zoom multiplier (matches the callout scale)
-                const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
+                const sw = (m.weight ?? 2), da = dashZoom(dashArray(m.dash, sw), zk); // B880 — scale the dash period with zoom too (B617 scaled only the weight)
                 // B619: NEVER recolor a markup on select — every markup keeps its own authored stroke
                 // (so a live color-picker change shows instantly instead of hiding under an accent tint);
                 // selection is cued by the blue grips / halo, plus a faint width bump. (Generalizes the
@@ -12032,7 +12042,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
                       {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
-                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? "5 4" : undefined} />
+                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? dashZoom("5 4", zk) : undefined} />
                       <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
                       <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
                       <text x={padC.x} y={padC.y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
@@ -12065,7 +12075,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
                       <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* centerline + per-call bearing/distance labels */}
-                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.12 && (m.calls || []).map((c, i) => {
                         const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
@@ -12091,9 +12101,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
                   return (
                     <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
-                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? "7 5" : undefined} />
+                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
-                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
                       {editInline?.id !== m.id && inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
@@ -12143,6 +12153,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </g>
                 );
   };
+
+  // Bottom map furniture, computed ONCE and shared by the furniture overlay (scale bar +
+  // north arrow) and the calibration badge below it (NEW-1 / B881). The badge needs the
+  // bar's plate width/height so it can tell whether it would collide and, if so, reflow up
+  // to its own row that clears the bar. `paneW` is the TRUE pane width (see `size.rawW`).
+  const paneW = size.rawW ?? size.w;
+  const furnPlates = screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
+  // Would the calibration badge (anchored at left:56, bottom:40) run into the right-anchored
+  // scale bar on the same row? Pure decision in sheetFurniture.js: when they'd meet the badge
+  // is lifted to its own row above the bar (and its width capped). `calibBadgeW` is measured
+  // below; 0 until then → never raised.
+  const calibPlace = calibBadgePlacement({ paneW, badgeW: calibBadgeW, scaleBarW: furnPlates.scaleBar.plateW, scaleBarH: furnPlates.scaleBar.plateH });
+  // Measure the badge's natural width. The ref sits on the LABEL span, whose `scrollWidth`
+  // reports the FULL text width even after the pill caps + ellipsis-truncates it — so raising
+  // the badge (which applies the cap) can never feed back and shrink this measurement into an
+  // oscillation. Add a fixed chrome allowance (dot + gaps + horizontal padding ≈ 40px) to get
+  // the whole pill's natural width. Re-measures only when the label text changes.
+  useLayoutEffect(() => {
+    const el = calibBadgeRef.current;
+    if (!el) return;
+    const w = el.scrollWidth + 40;
+    setCalibBadgeW((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+  }, [calibrationState, underlay]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--planner-panel)",
@@ -12425,11 +12458,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* connectors: trace = the measured line; align = each drawing→map pair */}
               {ovCalib && ovCalib.kind === "trace" && ovCalib.pts.length >= 2 && (() => {
                 const a = f2p(ovCalib.pts[0]), b = f2p(ovCalib.pts[1]);
-                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" pointerEvents="none" />;
+                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray={dashZoom("5 4", view.ppf / 0.35)} pointerEvents="none" />;
               })()}
               {ovCalib && ovCalib.kind === "align" && Array.from({ length: Math.floor(ovCalib.pts.length / 2) }, (_, k) => {
                 const a = f2p(ovCalib.pts[2 * k]), b = f2p(ovCalib.pts[2 * k + 1]);
-                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray="4 3" pointerEvents="none" />;
+                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray={dashZoom("4 3", view.ppf / 0.35)} pointerEvents="none" />;
               })}
 
               {/* setback outlines (per-edge) — anchored to the parcel, so an INACTIVE
@@ -12441,12 +12474,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   render later (on top) and keep their own stopPropagation, so editing them is unchanged. */}
               {settings.showSetback && parcels.filter((pc) => pc.active !== false).map((pc) => {
                 const sb = parcelSetbacks(pc);
-                if (!sb.some((v) => v > 0)) return null;
+                const posSb = sb.filter((v) => v > 0);
+                if (!posSb.length) return null;
+                // B880 — when the smallest setback's on-screen inset drops below ~3 px the dashed ring
+                // collapses onto the parcel boundary → the garbled double-line the owner saw on zoom-out.
+                // Suppress it there (it reappears on zoom-in), the same way a sub-pixel 6" curb drops (B719).
+                if (!insetRingVisible(Math.min(...posSb), view.ppf)) return null;
                 const o = offsetPolygon(pc.points, sb);
                 if (!o) return null;
+                const zk = view.ppf / 0.35; // B617/B880 zoom factor — hold the setback weight + dash constant relative to the drawing
                 const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 return <g key={`sb${pc.id}`}>
-                  <polygon points={ring} fill="none" stroke={PAL.setback} strokeWidth={1.25} strokeDasharray="7 6" pointerEvents="none" />
+                  <polygon points={ring} fill="none" stroke={PAL.setback} strokeWidth={strokeZoom(1.25, zk)} strokeDasharray={dashZoom("7 6", zk)} pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
@@ -12701,7 +12740,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">
                         {`Σ cells ${fmHeatTotals ? fmHeatTotals.volumeAcFt.toFixed(2) : "—"} ac-ft = ledger ${fmResultView && fmResultView.volumeAcFt != null ? fmResultView.volumeAcFt.toFixed(2) : "—"} ac-ft`}
                       </text>
-                      {/* NEW-2 / B881 — the ESTIMATED stamp rides the legend (and the export clone,
+                      {/* NEW-2 / B882 — the ESTIMATED stamp rides the legend (and the export clone,
                           PDF-PARITY) whenever ANY accepted estimate priced the depths. */}
                       {fmResultView && isEstimatedWseSrc(fmResultView.providers?.wse1pct) && (
                         <text x={lx} y={ly + 6 + legend.length * 14 + 24} fontSize={9} fontWeight="700" fill="#8A5A00" fontFamily="ui-monospace, monospace">
@@ -13220,7 +13259,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               controls, which were nudged to make room). pointerEvents:none so they never
               swallow a click. data-export="skip" — the export draws its own copy. */}
           {(() => {
-            const furn = screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
+            const furn = furnPlates; // computed once in the body; shared with the calibration badge (B881)
             const plate = (p) => (
               <svg width={p.plateW} height={p.plateH} viewBox={`0 0 ${p.plateW} ${p.plateH}`}
                 fontFamily="Inter, system-ui, sans-serif" style={{ display: "block", overflow: "visible" }}
@@ -13364,11 +13403,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               uncalibrated: { bg: "rgba(180,83,9,0.95)", dot: "#fbbf24", text: "▲ Not calibrated", sub: "click to calibrate" },
             }[calibrationState];
             const warn = calibrationState === "uncalibrated";
+            // NEW-1 (B881): when a docked left panel narrows the map pane, the badge (left:56)
+            // would run into the right-anchored scale bar on the same bottom:40 row. Reflow it up
+            // to its own row just above the bar (clearing the bar below AND the bottom-right zoom
+            // controls above, which start at bottom:100), and cap its width so it truncates with
+            // an ellipsis instead of overflowing the pane. Wide panes keep the original layout.
+            const badgeMaxW = calibPlace.maxWidth ?? undefined;
             return (
               <div onClick={warn ? () => { setShowAerial(true); setLeftPanel("references"); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); } : undefined}
-                style={{ position: "absolute", left: 56, bottom: 40, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6 }}>
-                <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
-                {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>· {cfg.sub}</span>}
+                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6, overflow: "hidden" }}>
+                <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, flex: "none", animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+                <span ref={calibBadgeRef} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>· {cfg.sub}</span>}
+                </span>
               </div>
             );
           })()}
@@ -13573,7 +13620,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
               EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
           {cursorLL && (
-            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums" }}>
+            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums", maxWidth: "calc(100% - 20px)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", boxSizing: "border-box" }}>
               {cursorLL.lat.toFixed(6)}°,&nbsp;{cursorLL.lng.toFixed(6)}°
               {cursorElFt != null && <span data-ground-el> · El ≈ {cursorElFt.toFixed(1)} ft NAVD88</span>}
             </div>
@@ -14758,7 +14805,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         );
                         // NEW-4 — both bands captioned with what they are and why (plain language).
                         out.push(noteLine(`Flood WSE ${f1(split.wseFt)}′ NAVD88. ABOVE the WSE the basin is empty when the design storm arrives — that volume counts toward detention. BELOW the WSE the flood already occupies the volume at design stage — no detention credit, but it's your candidate compensating storage for fill (hydraulic connection + stage distribution: engineer confirms).`, "split-note"));
-                        // NEW-2 / B881 — an estimated water surface (any provider) stamps the split it shaped.
+                        // NEW-2 / B882 — an estimated water surface (any provider) stamps the split it shaped.
                         if (isEstimatedWseSrc(split.wseSrc)) out.push(warnLine(`⚠ This split is priced off an ESTIMATED flood WSE (${wseProvLabel(split.wseSrc)}) — screening only; confirm with a sealed H&H / Atlas-14 study.`, "split-est", false));
                         if (split.bands.fullyInundated) out.push(warnLine("⚠ The flood WSE is at or above this pond's top of bank — the basin is fully inundated in the design flood; usable detention is ZERO.", "inund", true));
                       } else if (split.mode === "unknown") {
@@ -17365,7 +17412,7 @@ function YieldPanel({
                     ⚑ FILL IN THE FLOODWAY{d.mitigationRule?.floodwayBufferFt > 0 ? ` (+ its ${f0(d.mitigationRule.floodwayBufferFt)}-ft BUFFER)` : ""} IS PROHIBITED — {f2(mit.floodwayAcres)} ac of fill footprint sits in the regulatory floodway{d.mitigationRule?.floodwayBufferFt > 0 ? ` or within ${f0(d.mitigationRule.floodwayBufferFt)} ft of it (${d.mitigationRule.label} extends the prohibition to a buffer zone)` : ""}. Relocate it; no mitigation ratio prices floodway fill.
                   </div>
                 );
-                // NEW-2 / B881 — an accepted estimate (any provider) priced the 1% surface: stamp
+                // NEW-2 / B882 — an accepted estimate (any provider) priced the 1% surface: stamp
                 // the ledger loudly, naming the winning source.
                 if (isEstimatedWseSrc(mit.providers.wse1pct)) mitR.push(warnNote(`1% WSE is ESTIMATED (${wseProvLabel(mit.providers.wse1pct)}) — screening only.`, "mit-est-wse", estWseNote(mit.providers.wse1pct)));
                 if (mit.flags.includes("rule_unverified")) mitR.push(warnNote("Mitigation rule unverified — edit & confirm in the inputs below.", "mit-unv"));
@@ -17711,7 +17758,7 @@ function YieldPanel({
                     fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? "derived (FEMA lines)" : "DRAFT (FBCDD 100-yr)",
                     "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (a screening estimate); on unstudied Zone A in Fort Bend it falls back to the county's DRAFT Atlas-14 100-yr raster. Tap edit to override with the FIRM panel / effective model.",
                     { srcKey: "bfeSrc" })}
-                  {/* NEW-2 / B881 — unstudied Zone A with NO other 1% surface: offer the estimated
+                  {/* NEW-2 / B882 — unstudied Zone A with NO other 1% surface: offer the estimated
                       BFE as an ACCEPT-GATED chip (never auto-committed), sourced by the provider
                       REGISTRY (district model → FEMA InFRM EBFE → grade-@-boundary) and NAMED. */}
                   {fm.estWse && !Number.isFinite(fm.settings.bfeFt) && (() => {
@@ -17733,7 +17780,7 @@ function YieldPanel({
                       </div>
                     );
                   })()}
-                  {/* B881 (scope additions) — the "challenge the estimate" signals, shown while the
+                  {/* B882 (scope additions) — the "challenge the estimate" signals, shown while the
                       estimate is on offer so a go/no-go decision is never made on a screening number
                       alone. (a) suspect vs grade · (c) cross-provider disagreement · (b) ±1 ft sensitivity. */}
                   {fm.estWse && !Number.isFinite(fm.settings.bfeFt) && fm.estSanity && fm.estSanity.suspect &&
@@ -17753,7 +17800,7 @@ function YieldPanel({
                       : fm.derivedWse02Src === "ebfe-wse02" ? "InFRM BLE (screening)" : "screening",
                     fmFortBend
                       ? "From the EFFECTIVE FIS profile — Fort Bend: countywide FIRM 48157C, eff. 2014-04-02 (pre-Atlas-14, the basis FBCDD Interim §9 references). The Atlas-14 DRAFT raster auto-fills a labeled stand-in when it can (screening only); tap edit to enter the FIS value."
-                      : "Not an NFHL attribute — from the effective FEMA FIS profile, HCFCD MAAPnext model, or FEMA InFRM Base Level Engineering (screening estimate, B881); tap edit to enter the effective FIS value.")}
+                      : "Not an NFHL attribute — from the effective FEMA FIS profile, HCFCD MAAPnext model, or FEMA InFRM Base Level Engineering (screening estimate, B882); tap edit to enter the effective FIS value.")}
                   {/* NEW-1(c) — dock-drop row only when dock-stack court elements exist. */}
                   {fm.hasDockElements && fmRow("Dock-high drop: court below slab FF (ft)", "dockDropFt", "4", "Industrial dock-high: building-attached truck courts + their trailer strips auto-price at slab FF minus this drop (typ. 48\u2033 docks); blank = 4")}
                   {/* NEW-1(c) — expert bypass, whole-site-as-pad, and the ratio / verified rule
@@ -17810,11 +17857,11 @@ function YieldPanel({
                 if (b.ffe.pendingBases && b.ffe.pendingBases.length > 0) ffeR.push(keyedNote(`The finished floor must clear the HIGHEST of several bases (more-restrictive controls governs). Not computed here yet — enter or confirm: ${b.ffe.pendingBases.map((pb) => `${pb.label || pb.basis} +${pb.plusFt}′`).join(" · ")}.`, "ffe-pending"));
                 if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft")
                   ffeR.push(warnNote("The 0.2% WSE behind this required FFE is a DRAFT Fort Bend watershed-study value.", "ffe-draft02", "Screening only — confirm before design; enter the effective FIS 0.2% WSE to override."));
-                if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse02pct" && (d.wse02Src === "ebfe-wse02" || d.wse02Src === "maapnext-wse02")) // B881
+                if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse02pct" && (d.wse02Src === "ebfe-wse02" || d.wse02Src === "maapnext-wse02")) // B882
                   ffeR.push(warnNote(`The 0.2% WSE behind this required FFE is a screening estimate (${wseProvLabel(d.wse02Src)}).`, "ffe-est02", "Screening only — an estimate, not a published FIS value; confirm before design; enter the effective FIS 0.2% WSE to override."));
                 if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "atlas14_100yr" && d.wse100Src === "fbcdd-wse100-draft")
                   ffeR.push(warnNote("The Atlas-14 100-yr WSE behind this required FFE is a DRAFT Fort Bend watershed-study value.", "ffe-draft100", "Screening only — confirm before design; enter a BFE to override."));
-                // NEW-2 / B881 — the ESTIMATED stamp rides the FFE verdict when the governing basis
+                // NEW-2 / B882 — the ESTIMATED stamp rides the FFE verdict when the governing basis
                 // is ANY accepted estimate (never dropped off a consumer), naming the source.
                 if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse1pct" && isEstimatedWseSrc(d.floodMit?.bfeSrc))
                   ffeR.push(warnNote(`The 1% WSE behind this required FFE is ESTIMATED (${wseProvLabel(d.floodMit.bfeSrc)}).`, "ffe-est-wse", estWseNote(d.floodMit.bfeSrc)));

@@ -49,7 +49,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `buildability.js` (FFE/LOMR-F; `when`-conditioned multi-basis rows + `suggestedFfe`),
   `pondSizing.js` (NEW-4 two-target pond sizing assistant over the B708 bands),
   surfaced via the Yield → Stormwater collapsed verdict groups (B824 — ONE drainage home; the old Site Analysis sibling card was merged in and deleted; Analysis keeps a link row).
-  Estimated-BFE providers for unstudied Zone A (B881): `wseProviders.js` (pure pluggable registry +
+  Estimated-BFE providers for unstudied Zone A (B882): `wseProviders.js` (pure pluggable registry +
   precedence resolver: district → FEMA InFRM EBFE → grade) + `ebfe.js` (FEMA InFRM EBFE /identify
   sampler) + `hcfcdWse.js` (HCFCD MAAPnext WSE sampler, Harris) + `estimateChallenge.js` (the pure
   sanity-check / ±1 ft sensitivity band / cross-provider disagreement "challenge the estimate" layer).

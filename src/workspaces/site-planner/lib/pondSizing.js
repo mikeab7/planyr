@@ -29,7 +29,7 @@ import { maxInwardOffset } from "./pondOffset.js";
 import { BERM_MAX_RAISE_FT } from "./ledgerBalancer.js";
 
 const AC_FT = 43560;
-const EST_PROVIDERS = new Set(["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext"]); // B881 — every estimate provider stamps
+const EST_PROVIDERS = new Set(["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext"]); // B882 — every estimate provider stamps
 
 const detOf = (det = {}) => ({
   depth: Number.isFinite(det.depth) ? det.depth : 8,

@@ -1,4 +1,4 @@
-// B881 — the FEMA/USGS InFRM EBFE point sampler: /identify parse (layers 17 + 21), the
+// B882 — the FEMA/USGS InFRM EBFE point sampler: /identify parse (layers 17 + 21), the
 // no-coverage/timeout → null fallback contract, the throw-on-error contract, and the
 // per-location cache. The service publishes FEET (ft-NAVD88); an out-of-coverage point
 // returns no result / "NoData" → honest null (the caller falls back to grade).

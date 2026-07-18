@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-18 @ `0955cd4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-18 @ `c00ab52` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_260 source files mapped._
+_261 source files mapped._
 
 ## infra
 
@@ -295,7 +295,7 @@ _260 source files mapped._
   - _exports_: `DEFAULT_EASEMENT_RULES`, `defaultJurForCounty`, `loadEasementRules`, `saveEasementRules`
 - **`src/workspaces/site-planner/lib/easements.js`** — Easement domain logic: type catalog, label, and derive drawn ring from centerline/boundary/parcel-edge input modes with area
   - _exports_: `buildParcelEdgeStrip`, `DEFAULT_EASEMENT_ATTRS`, `deriveEasementRing`, `EASEMENT_TYPES`, `easementArea`, `easementColor`, `easementLabel`, `easementType`, `ringArea`
-- **`src/workspaces/site-planner/lib/ebfe.js`** — FEMA/USGS InFRM Estimated BFE (EBFE) point sampler (B881): reads the estimated 1% BFE (layer 17) + 0.2% WSE (layer 21) via ArcGIS MapServer /identify, per-location cache, bounded fetch. `sampleEbfePoint`/`foldIdentify`/`pixelValueOf`/`ebfeIdentifyUrl`.
+- **`src/workspaces/site-planner/lib/ebfe.js`** — FEMA/USGS InFRM Estimated BFE (EBFE) point sampler (B882): reads the estimated 1% BFE (layer 17) + 0.2% WSE (layer 21) via ArcGIS MapServer /identify, per-location cache, bounded fetch. `sampleEbfePoint`/`foldIdentify`/`pixelValueOf`/`ebfeIdentifyUrl`.
   - _exports_: `clearEbfeCache`, `EBFE_LAYERS`, `EBFE_URL`, `ebfeIdentifyUrl`, `foldIdentify`, `pixelValueOf`, `sampleEbfePoint`
 - **`src/workspaces/site-planner/lib/edgeRuns.js`** — Group parcel boundary edges into logical sides (runs) by bearing tolerance, with per-run length, midpoint, and shared setback value
   - _exports_: `bearingDelta`, `edgeRuns`, `runOfEdge`, `runSetbackValue`, `segBearing`
@@ -311,7 +311,7 @@ _260 source files mapped._
   - _exports_: `createElementSync`, `semanticallyEqual`, `stableStringify`
 - **`src/workspaces/site-planner/lib/elevation.js`** — USGS 3DEP bare-earth DEM sampling: profile elevations along a polyline (metres to survey-ft) plus ditch-depth screening stats
   - _exports_: `DEP_URL`, `ditchStats`, `M_TO_FT`, `samplePoint`, `sampleProfile`
-- **`src/workspaces/site-planner/lib/estimateChallenge.js`** — the "challenge the estimate" engine (B881, pure): sanity-check the estimated WSE vs site grade (`sanityCheckEstimate`), the BFE ±1 ft sensitivity band (`sensitivityBand`), and the estimate-vs-estimate disagreement (`compareEstimates`).
+- **`src/workspaces/site-planner/lib/estimateChallenge.js`** — the "challenge the estimate" engine (B882, pure): sanity-check the estimated WSE vs site grade (`sanityCheckEstimate`), the BFE ±1 ft sensitivity band (`sensitivityBand`), and the estimate-vs-estimate disagreement (`compareEstimates`).
   - _exports_: `BELOW_INVERT_TOL_FT`, `compareEstimates`, `DISAGREE_THRESHOLD_FT`, `IMPLAUSIBLE_DEPTH_FT`, `impliedDepthFt`, `MATERIAL_ABS_FLOOR`, `MATERIAL_REL`, `sanityCheckEstimate`, `SENSITIVITY_DELTA_FT`, `sensitivityBand`
 - **`src/workspaces/site-planner/lib/evidenceLayers.js`** — View-driven Leaflet utility-evidence overlays (OSM Overpass power/hydrants + Mapillary detections) with SWR cache and per-layer status
   - _exports_: `fetchOverpass`, `mapillaryLayer`, `mapillaryToken`, `overpassLayer`, `setMapillaryToken`, `subscribeMapillaryToken`
@@ -337,7 +337,7 @@ _260 source files mapped._
   - _exports_: `backoffMs`, `classifyGisError`, `fetchArcgisJson`, `GIS_FETCH_RETRIES`, `GIS_FETCH_TIMEOUT_MS`, `GIS_MAX_GET_URL`, `gisErrorMessage`, `GisFetchError`, `pLimit`
 - **`src/workspaces/site-planner/lib/gradingRules.js`** — Grading-standards registry (B825): per-surface-class slope limits with provenance (verified/basis/source), override merge, percent/ratio validation seam, chip labels
   - _exports_: `chipLabel`, `GRADING_RULES`, `gradingRuleFor`, `JURISDICTION_OVERRIDES`, `mergeGradeOverride`, `validateSlopeAgainstRule`
-- **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B881, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
+- **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `sampleMaapnextWse`
 - **`src/workspaces/site-planner/lib/history.js`** — Pure undo/redo snapshot stack for the planner canvas: keyOf-based no-op dedup, explicit live-state compare, drop-on-abort drag transactions
   - _exports_: `createHistoryStack`
@@ -359,6 +359,8 @@ _260 source files mapped._
   - _exports_: `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `gisProxyEnabled`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_VINTAGE`, `layerVintage`, `probeService`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
 - **`src/workspaces/site-planner/lib/ledgerBalancer.js`** — Ledger balancer (B830): ranks screening moves that close detention + mitigation together (shrink over-dug, joint berm solve with apply payload, parcel phase-out, building-to-basin, pumped what-if). Exports `rankLedgerMoves`, `solveBermRaise`.
   - _exports_: `BERM_MAX_RAISE_FT`, `overdugAcFt`, `rankLedgerMoves`, `solveBermRaise`
+- **`src/workspaces/site-planner/lib/lineZoom.js`** — B880: dash-period + inset-visibility zoom helpers (the B617 siblings for dashed feet-frame lines) — `dashZoom` scales an SVG dash spec with zoom (floored sub-pixel, capped), `insetRingVisible` suppresses a setback/inset ring when it collapses onto its boundary. Exports: `dashZoom`, `insetRingVisible`, `DASH_ZOOM_FLOOR_PX`, `DASH_ZOOM_CEIL`, `INSET_MIN_VISIBLE_PX`.
+  - _exports_: `DASH_ZOOM_CEIL`, `DASH_ZOOM_FLOOR_PX`, `dashZoom`, `INSET_MIN_VISIBLE_PX`, `insetRingVisible`
 - **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; durable home for the version-history ring and cached rasters
   - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbGet`, `idbPersist`, `idbPut`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
@@ -432,7 +434,7 @@ _260 source files mapped._
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
-  - _exports_: `buildScreenFurnitureSvg`, `buildSheetFurnitureSvg`, `chooseFurnitureCorners`, `furnitureLayout`, `furnitureMetrics`, `northArrowPlate`, `pickScaleBar`, `scaleBarPlate`, `screenFurniturePlates`
+  - _exports_: `buildScreenFurnitureSvg`, `buildSheetFurnitureSvg`, `calibBadgePlacement`, `chooseFurnitureCorners`, `furnitureLayout`, `furnitureMetrics`, `northArrowPlate`, `pickScaleBar`, `scaleBarPlate`, `screenFurniturePlates`
 - **`src/workspaces/site-planner/lib/siteAnalysis.js`** — Registry-driven environmental/regulatory screen of active-parcel rings (flood, wetlands, wells, pipelines, jurisdiction, road, zoning) with silent-error present/absent/unknown/unavailable states over the SWR cache
   - _exports_: `ANALYSIS_SOURCES`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
@@ -455,7 +457,7 @@ _260 source files mapped._
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
   - _exports_: `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`
-- **`src/workspaces/site-planner/lib/wseProviders.js`** — the pluggable estimated-WSE provider registry (B881, pure): per-county precedence (district model → FEMA InFRM EBFE → grade) + provenance labels; `resolveEstimatedWse` picks the winning 1%/0.2% source and reports cross-provider disagreement.
+- **`src/workspaces/site-planner/lib/wseProviders.js`** — the pluggable estimated-WSE provider registry (B882, pure): per-county precedence (district model → FEMA InFRM EBFE → grade) + provenance labels; `resolveEstimatedWse` picks the winning 1%/0.2% source and reports cross-provider disagreement.
   - _exports_: `resolveEstimatedWse`, `WSE_PROVIDERS`, `wseProviderMeta`
 - **`src/workspaces/site-planner/lib/yieldBar.js`** — B862: the shared required-vs-provided bullet-bar geometry + primitive marks for the Yield → Stormwater readout; one source consumed by the on-screen SVG (SitePlanner `BulletBar`) AND the PDF export string (`printSheet.bulletBarSvg`) so they can't drift (PDF-PARITY). `bulletBarLayout`/`stackedBarLayout` (pure geometry), `bulletBarMarks`/`stackedBarMarks` (render primitives), `bulletBarSvg` (PDF string), `stormwaterBarSpecs` (the det/mit bar specs from the drainage object).
   - _exports_: `bulletBarLayout`, `bulletBarMarks`, `bulletBarSvg`, `stackedBarLayout`, `stackedBarMarks`, `stormwaterBarSpecs`

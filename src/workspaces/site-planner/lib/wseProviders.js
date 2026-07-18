@@ -1,4 +1,4 @@
-/* B881 (scope note 2) — the pluggable ESTIMATED-WSE provider registry.
+/* B882 (scope note 2) — the pluggable ESTIMATED-WSE provider registry.
  *
  * For a FEMA Zone A / unstudied "no published BFE" location, several sources can estimate the
  * flood water surface, and they have an explicit PRECEDENCE per location. This module is the

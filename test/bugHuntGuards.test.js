@@ -356,6 +356,19 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).not.toMatch(/el\.type === "road" \? strokeZoom\(/);
   });
 
+  it("B880: the setback ring scales weight+dash with zoom (B617 sibling) and drops when its inset goes sub-pixel", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the pure zoom helpers are imported from the dedicated lib
+    expect(src).toMatch(/import \{ dashZoom, insetRingVisible \} from "\.\/lib\/lineZoom\.js";/);
+    // sub-pixel-inset suppression guards the setback map (kills the garbled double-line on zoom-out)
+    expect(src).toMatch(/if \(!insetRingVisible\(Math\.min\(\.\.\.posSb\), view\.ppf\)\) return null;/);
+    // the visible dashed ring uses strokeZoom + dashZoom — NOT the old fixed 1.25px / "7 6"
+    expect(src).toMatch(/stroke=\{PAL\.setback\} strokeWidth=\{strokeZoom\(1\.25, zk\)\} strokeDasharray=\{dashZoom\("7 6", zk\)\}/);
+    expect(src).not.toMatch(/stroke=\{PAL\.setback\} strokeWidth=\{1\.25\} strokeDasharray="7 6"/);
+    // the B617-sibling dashes fold through dashZoom too (markup source, easement/deed spines)
+    expect(src).toMatch(/da = dashZoom\(dashArray\(m\.dash, sw\), zk\)/);
+  });
+
   it("B619: selecting an object never recolors it to the app accent (handle-based selection)", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // the neutral blue selection chrome + white handle constants exist (real hexes, not var() tokens)

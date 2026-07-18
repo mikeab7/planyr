@@ -1,4 +1,4 @@
-/* B881 — FEMA/USGS InFRM Estimated BFE (Base Level Engineering) point sampler.
+/* B882 — FEMA/USGS InFRM Estimated BFE (Base Level Engineering) point sampler.
  *
  * Plain-English: for a FEMA "Zone A" — a floodplain FEMA mapped but never published a
  * flood elevation for — FEMA/USGS publish an ENGINEERED screening flood surface called

@@ -1,4 +1,4 @@
-/* B881 — "challenge the estimate" layer for the screening estimated BFE.
+/* B882 — "challenge the estimate" layer for the screening estimated BFE.
  *
  * Deal go/no-go decisions ride on the estimated flood elevation, and a screening estimate
  * (FEMA InFRM EBFE or the grade-@-boundary fallback) can be wrong in EITHER direction. This

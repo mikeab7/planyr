@@ -507,7 +507,7 @@ export const GIS_SOURCES = {
       "precedence LAST (never outranks effective-model data). Sampler: site-planner/lib/fbcdWse.js.",
   },
 
-  // B881 — FEMA/USGS InFRM Estimated BFE (Base Level Engineering). The estimated-BFE
+  // B882 — FEMA/USGS InFRM Estimated BFE (Base Level Engineering). The estimated-BFE
   // source for FEMA Zone A / unstudied "no published BFE" areas, REPLACING the old
   // grade-@-Zone-A-boundary heuristic where InFRM has coverage. This is a MapServer whose
   // sublayers are RASTERS, so the sampler reads a point value with the ArcGIS `identify`
@@ -535,26 +535,26 @@ export const GIS_SOURCES = {
     coverage: "FEMA Region 6 / USGS InFRM Base Level Engineering (Gulf-central; TX + neighbors — NOT nationwide)",
     tier: "production",
     // ⚠ Endpoint facts recorded from the owner's authoritative task spec 2026-07-18; a LIVE
-    // reachability + value probe is PENDING (V362) — this sandbox's egress policy blocks
+    // reachability + value probe is PENDING (V363) — this sandbox's egress policy blocks
     // txgeo.usgs.gov (403), so the identify round-trip is verified on the deployed app.
     lastVerified: "2026-07-18",
     sampleFixtures: [
       // Houston/Katy area — expected to be inside InFRM Region-6 coverage (provisional range,
-      // confirmed live in V362). Out-of-region point returns no data → the grade fallback.
+      // confirmed live in V363). Out-of-region point returns no data → the grade fallback.
       { label: "Houston metro (in coverage, provisional)", point: [-95.75, 29.78], expectValueRange: [1, 500], provisional: true },
       { label: "far outside Region 6 (out of coverage)", point: [-110.0, 44.0], expectNoData: true },
     ],
     fixtures: [], // raster — see sampleFixtures (identify probe)
     notes:
-      "B881 — the estimated-BFE source for FEMA Zone A / unstudied 'no published BFE' areas, " +
+      "B882 — the estimated-BFE source for FEMA Zone A / unstudied 'no published BFE' areas, " +
       "replacing the grade-@-Zone-A-boundary heuristic where InFRM covers the site (Region 6 only; " +
       "elsewhere the sampler returns null and the caller falls back to grade). Layer 17 = estimated " +
       "1% BFE, layer 21 = 0.2% (500-yr) WSE. SCREENING ONLY — an estimate, never a regulatory/" +
       "published BFE; a sealed H&H (Atlas-14) study + the reviewing agency set the final value. " +
-      "Read by /identify (not /query). Sampler: site-planner/lib/ebfe.js. Live probe pending V362.",
+      "Read by /identify (not /query). Sampler: site-planner/lib/ebfe.js. Live probe pending V363.",
   },
 
-  // B881 (scope note 2) — HCFCD MAAPnext model WSE (Harris County local-district provider).
+  // B882 (scope note 2) — HCFCD MAAPnext model WSE (Harris County local-district provider).
   // MAAPnext model elevations often run HIGHER than the effective FIRM and Harris-area
   // reviewers ENFORCE them, so in Harris County this WSE OUTRANKS FBCDD-style effective data
   // AND FEMA InFRM EBFE (precedence in site-planner/lib/wseProviders.js). Still a SCREENING
@@ -563,7 +563,7 @@ export const GIS_SOURCES = {
   //   reachable in the recon). The companion 1% / 0.2% WSE rasters live in the same MAAPNext
   //   folder but their exact leaf names must be read from the LIVE services directory — the
   //   build sandbox blocks fximgservices.hcfcd.org (403), so `wseLayers` is PROVISIONAL (null)
-  //   and the sampler (site-planner/lib/hcfcdWse.js) is a no-op until V362 fills the endpoints.
+  //   and the sampler (site-planner/lib/hcfcdWse.js) is a no-op until V363 fills the endpoints.
   hcfcdMaapnext: {
     key: "hcfcdMaapnext",
     label: "HCFCD MAAPnext model WSE — 1% + 0.2% (screening, Harris County)",
@@ -573,7 +573,7 @@ export const GIS_SOURCES = {
     kind: "raster", // ImageServer getSamples (same as FBCDD) — the drift verifier probes serviceUrl
     geometryType: "raster",
     // ⚠ PROVISIONAL — the 1% / 0.2% WSE ImageServer URLs are unconfirmed (sandbox egress blocks
-    // the host). V362 walks the MAAPNext folder, confirms the WSE leaf names, and fills these in;
+    // the host). V363 walks the MAAPNext folder, confirms the WSE leaf names, and fills these in;
     // until then the sampler returns null (provider absent) and the resolver falls through to EBFE.
     wseLayers: { wse1pct: null, wse02: null, provisional: true },
     fields: {},
@@ -581,15 +581,15 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-07-18",
     sampleFixtures: [
-      // GroundElevation is the reachable, confirmed endpoint; a value probe belongs to V362.
+      // GroundElevation is the reachable, confirmed endpoint; a value probe belongs to V363.
       { label: "central Harris (GroundElevation reachable — confirm WSE siblings live)", point: [-95.37, 29.76], provisional: true },
     ],
     fixtures: [],
     notes:
-      "B881 — Harris County local-district estimated-WSE provider; OUTRANKS EBFE + effective-style " +
+      "B882 — Harris County local-district estimated-WSE provider; OUTRANKS EBFE + effective-style " +
       "data in Harris (MAAPnext is enforced there). Screening only. GroundElevation ImageServer " +
       "confirmed; 1% / 0.2% WSE ImageServer endpoints PROVISIONAL (wseLayers null) pending the live " +
-      "directory probe (V362). Sampler: site-planner/lib/hcfcdWse.js; resolver: lib/wseProviders.js.",
+      "directory probe (V363). Sampler: site-planner/lib/hcfcdWse.js; resolver: lib/wseProviders.js.",
   },
 };
 
