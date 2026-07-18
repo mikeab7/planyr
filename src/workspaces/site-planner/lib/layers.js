@@ -146,6 +146,22 @@ export const STATEWIDE = {
     note: "PUC water (blue) + sewer (green) certificate-of-convenience service areas — who is certificated to serve retail water/sewer. A boundary is a retail monopoly to serve, NOT proof a line is in the ground. Houston-region coverage. Screening only — confirm with the utility/PUC.",
     infoCaveat: "A CCN boundary means a utility is CERTIFICATED to serve retail water/sewer here — not that a main is already built to a given parcel. Confirm service, capacity, and tap availability with the utility.",
   },
+  env_lpst: {
+    // Public-data screening PHASE 2 — TCEQ leaking petroleum storage tank (LPST) sites. The
+    // Site Analysis "Leaking petroleum tanks" card drives this overlay (mapLayer: "env_lpst").
+    // Agency /export image (MapServer, CORS-exempt <img>), URL from the registry (no inline).
+    kind: "dynamic", label: "Leaking petroleum tanks (TCEQ LPST)",
+    url: GIS_SOURCES.lpst.serviceUrl, layers: [0], opacity: 0.9,
+    note: "TCEQ Leaking Petroleum Storage Tank sites — documented petroleum-UST releases. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in.",
+  },
+  env_cleanups: {
+    // Public-data screening PHASE 2 — EPA Superfund (NPL) + RCRA cleanup sites (FRS-derived).
+    // FeatureServer point layer → esriFeature (vector markers); gated to zoomed-in (national
+    // dataset). URL from the registry. Drives the "EPA Superfund / RCRA cleanups" card.
+    kind: "esriFeature", label: "EPA Superfund / RCRA cleanups",
+    url: GIS_SOURCES.epaCleanups.serviceUrl, minZoom: 11, color: "#b45309", weight: 2, opacity: 0.95,
+    note: "EPA 'Cleanups in My Community' — Superfund (NPL) + RCRA corrective-action sites. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in (national dataset).",
+  },
 };
 
 /* Utility-evidence layers — power & hydrant evidence from crowd/agency sources,
@@ -374,6 +390,8 @@ export const LAYER_VINTAGE = {
   txrrc_pipe_easement: "Assumed buffer off RRC T-4 routes — not a recorded width",
   txrrc_wells: "RRC permit data — continuously updated",
   ccn_service: "PUC CCN (via Harris County GIS) — Dec 2023 edition",
+  env_lpst: "TCEQ LPST — continuously updated",
+  env_cleanups: "EPA Cleanups in My Community (FRS) — periodically updated",
   // Utility evidence
   osm_power: "OpenStreetMap — community-edited, live",
   osm_hydrants: "OpenStreetMap — community-edited, live",

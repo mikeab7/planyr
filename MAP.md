@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-18 @ `67c303b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-18 @ `0ca117f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_275 source files mapped._
+_276 source files mapped._
 
 ## infra
 
@@ -439,6 +439,8 @@ _275 source files mapped._
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
   - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
+- **`src/workspaces/site-planner/lib/proximityScreen.js`** — Pure proximity-screen core (PHASE 2, reused by later distance screens): projects parcel rings + feature points to EPSG:2278 feet and returns count + nearest-distance + ranked names within a buffer (0 ft = on/under the site), plus the `fmtDistFt` display helper
+  - _exports_: `distPointSegFt`, `distPointToRingsFt`, `fmtDistFt`, `pointInRingFt`, `ringToGridFt`, `screenProximity`, `toGrid`
 - **`src/workspaces/site-planner/lib/receivingWater.js`** — Nearest receiving water for a pond outfall from USGS NHDPlus HR flowlines (NEW-A5): SWR identifySource query, nearest-reach + FCODE-type math, and the off-site-conveyance-easement flag when no water is adjacent. Screening only.
   - _exports_: `fcodeType`, `nearestReceivingWater`, `OUTFALL_ADJACENT_FT`, `RECEIVING_WATER_SOURCE`, `receivingWaterFlag`, `resolveReceivingWater`
 - **`src/workspaces/site-planner/lib/regionalDetention.js`** — Regional-detention / fee-in-lieu cited registry (NEW-C2): per-authority availability (tri-state) + fee basis with citations, and feeInLieuCompare (on-site pond land-take → buildable-SF recovered vs fee cost). Pure.
@@ -454,7 +456,7 @@ _275 source files mapped._
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
   - _exports_: `buildScreenFurnitureSvg`, `buildSheetFurnitureSvg`, `calibBadgePlacement`, `chooseFurnitureCorners`, `furnitureLayout`, `furnitureMetrics`, `northArrowPlate`, `pickScaleBar`, `scaleBarPlate`, `screenFurniturePlates`
 - **`src/workspaces/site-planner/lib/siteAnalysis.js`** — Registry-driven environmental/regulatory screen of active-parcel rings (flood, wetlands, wells, pipelines, jurisdiction, road, zoning) with silent-error present/absent/unknown/unavailable states over the SWR cache
-  - _exports_: `ANALYSIS_SOURCES`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
+  - _exports_: `ANALYSIS_SOURCES`, `analyzeProximitySource`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildProximityParams`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `epaProgram`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
   - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`
 - **`src/workspaces/site-planner/lib/soils.js`** — USDA SSURGO soils via Soil Data Access (NEW-B2): pure SDA SQL query builder + response parser (hydrologic soil group + seasonal-high water table) + bounded-fetch client. SDA proxy-blocked in sandbox → live-verify.

@@ -28,6 +28,7 @@ import { identifyJurisdiction, identifyRoadAuthority } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gisFetch.js";
 import { classifyCcn } from "./ccnClassify.js";
+import { screenProximity, fmtDistFt } from "./proximityScreen.js";
 
 const DAY = 24 * 3600 * 1000;
 
@@ -122,13 +123,28 @@ export const ANALYSIS_SOURCES = [
     detail: (rows) => uniq(rows.map((r) => [r.OPERATOR, r.COMMODITY_DESCRIPTION].filter(Boolean).join(" · "))).slice(0, 6),
   },
   {
-    // Environmental contamination — TCEQ LPST + EPA. No confirmed CORS-clean REST
-    // endpoint wired yet, so this is surfaced honestly as "source not connected"
-    // (the registry seam is in place; wiring a verified source later flips this row).
-    id: "contamination", category: "Environmental contamination",
-    label: "TCEQ LPST / EPA contaminated sites", pending: true,
-    sourceName: "TCEQ LPST / EPA (not yet connected)",
-    caveat: "Leaking petroleum storage tanks (TCEQ LPST) + EPA-listed sites. Source not yet wired — a Phase I ESA is the authoritative screen.",
+    // Environmental contamination pre-screen (PHASE 2) — TCEQ leaking-tank sites near the
+    // parcel, by PROXIMITY (count + nearest distance + names within a 1-mi buffer). Registry
+    // `lpst`. Labeled a Phase I ESA PRE-SCREEN, never a substitute.
+    id: "lpst", category: "Leaking petroleum tanks (TCEQ LPST)", label: "TCEQ LPST sites", kind: "point",
+    mapLayer: "env_lpst",
+    ...reg("lpst"),
+    screenMode: "proximity", bufferMi: 1, ttl: 30 * DAY, verified: true,
+    plural: "LPST site(s)",
+    absentLabel: "No mapped TCEQ LPST (leaking-tank) sites within 1 mi",
+    caveat: "Phase I ESA PRE-SCREEN only — NOT a substitute for a Phase I ESA. TCEQ Leaking Petroleum Storage Tank sites are documented petroleum-UST releases; a records review / environmental consultant is the authoritative check. Historic/closed cases can be inaccurate or unmapped.",
+  },
+  {
+    // Environmental contamination pre-screen (PHASE 2) — EPA Superfund (NPL) + RCRA cleanup
+    // sites near the parcel, by PROXIMITY. Registry `epaCleanups`; MAP_SYMBOL_CODE → program tag.
+    id: "epaCleanups", category: "EPA Superfund / RCRA cleanups", label: "EPA cleanup sites", kind: "point",
+    mapLayer: "env_cleanups",
+    ...reg("epaCleanups"),
+    screenMode: "proximity", bufferMi: 1, ttl: 30 * DAY, verified: true,
+    plural: "EPA cleanup site(s)",
+    absentLabel: "No mapped EPA Superfund/RCRA cleanup sites within 1 mi",
+    proxTag: (a) => epaProgram(a && a.MAP_SYMBOL_CODE),
+    caveat: "Phase I ESA PRE-SCREEN only — NOT a substitute for a Phase I ESA. EPA Superfund (NPL/non-NPL) + RCRA corrective-action sites; a records review / environmental consultant is the authoritative check.",
   },
   {
     // Zoning / entitlement — derived from the jurisdiction result rather than a single
@@ -407,6 +423,125 @@ function pendingFinding(source) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Proximity screen (PHASE 2) — count + nearest-distance + names within a buffer.
+// A distinct query shape (server-side `distance` buffer + returned geometry so the exact
+// nearest distance is measured in EPSG:2278 feet, not degrees) and a distinct finding
+// (present with a count/nearest summary, or a verified "none within N mi"). Used by the
+// contamination pre-screen; the same seam serves later power/rail distance sources.
+// ---------------------------------------------------------------------------
+
+// EPA "Cleanups in My Community" MAP_SYMBOL_CODE → a plain program label. Pure.
+export function epaProgram(code) {
+  const c = String(code == null ? "" : code).trim().toUpperCase();
+  if (!c) return "";
+  if (c === "S") return "Superfund (NPL)";
+  if (c === "SN") return "Superfund (non-NPL)";
+  if (c === "R") return "RCRA cleanup";
+  if (c === "E") return "enforcement";
+  if (c.includes("S") && c.includes("R")) return "Superfund + RCRA";
+  return "";
+}
+
+/* Build a proximity /query: features within `bufferFt` of the parcel footprint. Server-side
+ * buffer (`distance`+`units`) so the count is accurate, plus geometry so we measure the exact
+ * nearest distance client-side. Pure. */
+export function buildProximityParams(source, rings, bufferFt) {
+  const outFields = source.outFields || Object.values(source.fields || {}).filter(Boolean).join(",") || "*";
+  return {
+    f: "json",
+    where: source.where || "1=1",
+    geometry: JSON.stringify({ rings: rings.map((r) => closeRing(simplifyRing(r))), spatialReference: { wkid: 4326 } }),
+    geometryType: "esriGeometryPolygon",
+    spatialRel: "esriSpatialRelIntersects",
+    distance: bufferFt, units: "esriSRUnit_Foot",
+    inSR: 4326, outSR: 4326,
+    outFields, returnGeometry: "true",
+    resultRecordCount: source.proxCap || 100,
+  };
+}
+
+function queryProximity(source, layer, rings, bufferFt, fetchJson) {
+  const params = buildProximityParams(source, rings, bufferFt);
+  const getUrl = buildQueryUrl(source.url, layer, params);
+  const t = source.timeoutMs ? { timeoutMs: source.timeoutMs } : null;
+  if (getUrl.length > GIS_MAX_GET_URL) return fetchJson(buildQueryUrl(source.url, layer, {}), { body: params, ...(t || {}) });
+  return fetchJson(getUrl, t || undefined);
+}
+
+function countProximity(source, layer, rings, bufferFt, fetchJson) {
+  const params = { ...buildProximityParams(source, rings, bufferFt), returnCountOnly: true };
+  delete params.outFields; delete params.resultRecordCount; delete params.returnGeometry;
+  const getUrl = buildQueryUrl(source.url, layer, params);
+  const t = source.timeoutMs ? { timeoutMs: source.timeoutMs } : null;
+  const p = getUrl.length > GIS_MAX_GET_URL
+    ? fetchJson(buildQueryUrl(source.url, layer, {}), { body: params, ...(t || {}) })
+    : fetchJson(getUrl, t || undefined);
+  return Promise.resolve(p).then((j) => (j && typeof j.count === "number" ? j.count : (j && j.features ? j.features.length : 0)));
+}
+
+/* Analyze a PROXIMITY source: features within `bufferMi` of the parcel, reported as count +
+ * nearest distance + names. Rides the SWR cache like analyzeSource; the exact total is a
+ * separate returnCountOnly fetch (the returned features are capped for the nearest/names).
+ * Honest states: present / absent(verified) / unknown / unavailable / stale. Returns a finding. */
+export function analyzeProximitySource(source, rings, opts = {}) {
+  const cache = opts.cache || defaultCache;
+  const fetchJson = opts.fetchJson || defaultFetchJson;
+  const bufferMi = source.bufferMi || 1;
+  const bufferFt = Math.round(bufferMi * 5280);
+  const layer = source.layer != null ? source.layer : (Array.isArray(source.layers) ? source.layers[0] : null);
+  const sig = ringsSignature(rings);
+  const cap = source.proxCap || 100;
+  const nameKey = (source.fields && source.fields.name) || "NAME";
+
+  const featFetcher = async () => {
+    const j = await queryProximity(source, layer, rings, bufferFt, fetchJson);
+    return (j.features || []).map((f) => ({
+      attrs: normalizeAttrs(f.attributes),
+      lngLat: f.geometry && Number.isFinite(f.geometry.x) && Number.isFinite(f.geometry.y) ? [f.geometry.x, f.geometry.y] : null,
+    }));
+  };
+  const { fresh } = cache.swr("proximity:" + source.id + ":" + sig, featFetcher, { ttl: source.ttl || 0 });
+  const countFresh = cache.swr("proximitycount:" + source.id + ":" + sig,
+    async () => countProximity(source, layer, rings, bufferFt, fetchJson), { ttl: source.ttl || 0 }).fresh;
+
+  return Promise.all([fresh, countFresh]).then(([r, rc]) => {
+    if (r.error) logQueryFailure(source.id, r.error);
+    const haveStale = !!(r.error && r.data != null);
+    const hardError = r.error && !haveStale ? gisErrorMessage(r.error) : null;
+    const feats = hardError ? null : (r.data || []);
+    let status, summary = null, detail = [];
+    if (hardError) {
+      status = "unavailable";
+    } else {
+      const scr = screenProximity(rings, feats);
+      const total = (rc && !rc.error && typeof rc.data === "number") ? rc.data : scr.count;
+      if (total > 0) {
+        status = "present";
+        const near = scr.nearest;
+        const nearName = near ? (near.attrs[nameKey] || "unnamed site") : "";
+        const nStr = `${total}${total >= cap ? "+" : ""}`;
+        summary = `${nStr} ${source.plural || "site(s)"} within ${bufferMi} mi` +
+          (near ? ` — nearest ${fmtDistFt(near.distFt)}: ${nearName}` : "");
+        detail = scr.ranked.slice(0, 6).map((f) => {
+          const tag = source.proxTag ? source.proxTag(f.attrs) : "";
+          return `${f.attrs[nameKey] || "unnamed"}${tag ? " (" + tag + ")" : ""} · ${fmtDistFt(f.distFt)}`;
+        });
+      } else {
+        status = source.verified ? "absent" : "unknown";
+        summary = status === "absent" ? (source.absentLabel || `No mapped ${source.plural || "sites"} within ${bufferMi} mi`) : null;
+      }
+    }
+    return {
+      id: source.id, category: source.category, label: source.label,
+      status, summary, detail, rows: null,
+      sourceName: source.sourceName, ageMs: r.ageMs ?? null, ts: r.ts ?? null,
+      error: hardError, stale: haveStale, refreshError: haveStale ? gisErrorMessage(r.error) : null,
+      caveat: source.caveat, verified: !!source.verified, mapLayer: source.mapLayer || null,
+    };
+  });
+}
+
 /* Analyze ONE registry source against the parcel rings. Rides gisCache.swr so a
  * repeat / just-reloaded lookup is instant and survives a source outage. Resilience:
  *   • a registry `fallbacks` mirror is tried if the primary endpoint errors (B369 #6);
@@ -418,6 +553,7 @@ function pendingFinding(source) {
  * The error is surfaced, never thrown. Returns a finding. */
 export function analyzeSource(source, rings, opts = {}) {
   if (source.pending || source.derived) return Promise.resolve(pendingFinding(source));
+  if (source.screenMode === "proximity") return analyzeProximitySource(source, rings, opts); // PHASE 2
   const cache = opts.cache || defaultCache;
   const fetchJson = opts.fetchJson || defaultFetchJson;
   const endpoints = [source, ...(source.fallbacks || [])]; // primary then any same-data mirrors
@@ -589,7 +725,7 @@ export function deriveZoning(j) {
 // Orchestrator
 // ---------------------------------------------------------------------------
 // Display order for the assembled findings.
-const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "contamination", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"];
+const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"];
 
 /* Run the full screen against the active-parcel rings ([[ [lng,lat], ... ], ...]).
  * Returns { findings, generatedAt }. Findings are presence-first and each carries its
