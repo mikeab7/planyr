@@ -137,7 +137,13 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the environment — see
 > "🤖 Self-verification" there), then record the result. **The moment an item fully passes with nothing
 > pending, MOVE it to `VERIFICATION-DONE.md`** (same archiving discipline as the backlog). The session that
-> ships a UI change drives the live app itself rather than defer it. **Michael does NOT self-test — never wait
+> ships a UI change drives the live app itself rather than defer it. **⛔ ATTEMPT-BEFORE-YOU-PARK (owner rule,
+> 2026-07-18): a logged-out, no-external-GIS UI check — draw / reshape / select / toggle / keyboard / export a
+> blank site, the landing page, a dropped LOCAL file, a boot-recovery flow — is Claude-doable HERE and must
+> NEVER be filed as "needs a live pass." Drive it headless and record ✅/❌ THIS session. You may only defer an
+> item that hits a named `Blocker:` — `auth` (proxy CORS-blocks Supabase sign-in), `live-GIS` (external map host
+> the egress blocks), or `real-data` (a signed-in saved project like Tsakiris/Bain); a `V###` with no `Blocker:`
+> wall is a mis-classification, not a to-do (`VERIFICATION.md` rule 4).** **Michael does NOT self-test — never wait
 > on him or hand him a test to-do**; if no browser is reachable, log the item and move on (after CI-green +
 > build-green). Self-tests run **logged-out** (the sandbox blocks sign-in), so auth-only features (cloud sync)
 > still need a signed-in check. **⛔ STANDING RULE — when you ship a UI change with any path you CANNOT verify
@@ -172,6 +178,12 @@ doesn't write code. This is a standing rule, not a one-off.
   server is down; that one only remembers a little 'worked 5 min ago' label").
 - **Plainer, not vaguer.** Simpler words, but stay honest and precise. If you're unsure
   or a thing is risky, say so in plain terms.
+- **NEVER quote measurements or units in chat — describe what I'll SEE, not the numbers
+  behind it (owner rule, 2026-07-18: "I don't ever want to know how many pixels equals
+  anything").** No pixels / "px", no widths, offsets, thresholds, zoom factors, or "X ft of
+  padding" — ever. Say "the little tag hops onto its own line so nothing overlaps," never
+  "below 360px it reflows." The raw numbers belong in code, commits, and the backlog; in
+  chat they're noise. This applies to every reply.
 - If I seem confused, it usually means the explanation had too much jargon — re-explain
   in simpler terms, don't just repeat.
 - **Whenever we discuss merging, shipping, or "making it live," end by stating plainly

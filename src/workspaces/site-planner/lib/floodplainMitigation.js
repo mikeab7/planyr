@@ -1007,8 +1007,24 @@ export const DERIVED_WSE02_DRAFT_NOTE =
   "This 0.2% (500-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: FBCDD's Interim §9 mitigation trigger references the PRE-Atlas-14 0.2% (the effective 2014 FIS profile) — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a 0.2% WSE from the effective FIS to override.";
 export const EST_BOUNDARY_WSE_NOTE =
   "This 1% water surface is ESTIMATED from ground elevation along the mapped Zone A boundary (FEMA's approximate-Zone-A contour method) — screening only. Waller Art. 5 §C(3) requires an Atlas-14 study for developments >50 lots or >5 ac; the County Engineer administers best-available data (Art. 4 §B(8)). Type a BFE to override.";
+export const EST_EBFE_NOTE =
+  "Estimated BFE — FEMA InFRM Base Level Engineering (regional screening estimate), screening only. This is an ESTIMATE for a FEMA Zone A / unstudied area, NOT a regulatory or published BFE: a sealed engineering (H&H / Atlas-14) study and the reviewing agency set the final value. Type a BFE to override.";
+export const EST_MAAPNEXT_NOTE =
+  "Estimated BFE — HCFCD MAAPnext model (Harris County), screening only. MAAPnext model elevations often run higher than the effective FIRM and are enforced by Harris-area reviewers, so this takes precedence over the InFRM / grade estimates here — but it is still an ESTIMATE, not a regulatory or published BFE: a sealed engineering study and the reviewing agency set the final value. Type a BFE to override.";
 export const DERIVED_WSE100_DRAFT_NOTE =
   "This 1% (100-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: Fort Bend's mitigation and FFE rules reference the EFFECTIVE (pre-Atlas-14) floodplain — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a BFE to override.";
+
+/* B882 — the estimated-WSE source tags the accept-gated ghost writes as bfeSrc (one per
+ * provider in the wseProviders registry). Uniform handling downstream: any of these is an
+ * ESTIMATE (screening) — the warn-note + label are chosen by source, not hardcoded to one. */
+export const EST_WSE_SRCS = new Set(["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext"]);
+export const isEstimatedWseSrc = (src) => EST_WSE_SRCS.has(src);
+export const estWseNote = (src) => (
+  src === "est-ebfe" ? EST_EBFE_NOTE
+    : src === "est-maapnext" ? EST_MAAPNEXT_NOTE
+    : src === "est-fbcdd" ? DERIVED_WSE100_DRAFT_NOTE
+    : EST_BOUNDARY_WSE_NOTE
+);
 
 /* B824 — presentation labels for the drainage readout (moved here from the deleted
  * FloodMitigationCard so the Yield surface and print path share one source). */
@@ -1018,6 +1034,11 @@ export const WSE_PROVIDER_LABEL = {
   "xs-wsel-02": "derived (cross-sections)", "fbcdd-wse02-draft": "derived (FBCDD study — DRAFT)",
   "fbcdd-wse100-draft": "derived (FBCDD study — DRAFT)", "derived-wse100": "derived (100-yr raster)",
   "est-boundary-grade": "ESTIMATED (grade @ Zone A boundary)",
+  "est-ebfe": "ESTIMATED (FEMA InFRM Base Level Engineering)", // B882
+  "est-fbcdd": "ESTIMATED (FBCDD Atlas-14 study — DRAFT)", // B882
+  "est-maapnext": "ESTIMATED (HCFCD MAAPnext model)", // B882
+  "ebfe-wse02": "derived (FEMA InFRM EBFE — screening)", "ebfe-1pct": "derived (FEMA InFRM EBFE — screening)",
+  "maapnext-wse02": "derived (HCFCD MAAPnext — screening)", // B882
   "mixed": "mixed",
 };
 export const wseProvLabel = (p) => WSE_PROVIDER_LABEL[p] || p || "—";
