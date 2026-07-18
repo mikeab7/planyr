@@ -172,6 +172,12 @@ doesn't write code. This is a standing rule, not a one-off.
   server is down; that one only remembers a little 'worked 5 min ago' label").
 - **Plainer, not vaguer.** Simpler words, but stay honest and precise. If you're unsure
   or a thing is risky, say so in plain terms.
+- **NEVER quote measurements or units in chat — describe what I'll SEE, not the numbers
+  behind it (owner rule, 2026-07-18: "I don't ever want to know how many pixels equals
+  anything").** No pixels / "px", no widths, offsets, thresholds, zoom factors, or "X ft of
+  padding" — ever. Say "the little tag hops onto its own line so nothing overlaps," never
+  "below 360px it reflows." The raw numbers belong in code, commits, and the backlog; in
+  chat they're noise. This applies to every reply.
 - If I seem confused, it usually means the explanation had too much jargon — re-explain
   in simpler terms, don't just repeat.
 - **Whenever we discuss merging, shipping, or "making it live," end by stating plainly
