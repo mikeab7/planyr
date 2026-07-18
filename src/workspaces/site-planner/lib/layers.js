@@ -170,6 +170,30 @@ export const STATEWIDE = {
     url: GIS_SOURCES.growthFaults.serviceUrl, minZoom: 11, color: "#7c2d12", weight: 2.5, opacity: 0.95,
     note: "Houston-area growth-fault surface traces (USGS SIM 2874, via a University of Houston GIS republication). Aseismic slow-slip faults that damage foundations/pavement. Screening only — get a geotechnical/fault study. Loads zoomed in.",
   },
+  txdot_aadt: {
+    // Public-data screening PHASE 6 (access tier) — TxDOT AADT traffic-count points. The Site
+    // Analysis "Traffic (AADT)" card drives this overlay (mapLayer: "txdot_aadt"). FeatureServer
+    // point layer → esriFeature (vector), zoom-gated. URL from the registry (no inline endpoint).
+    kind: "esriFeature", label: "Traffic counts (TxDOT AADT)",
+    url: GIS_SOURCES.aadt.serviceUrl, minZoom: 11, color: "#0369a1", weight: 2, opacity: 0.95,
+    note: "TxDOT preliminary AADT (average annual daily traffic) count points — an access/visibility proxy. Loads zoomed in.",
+  },
+  bts_rail: {
+    // Public-data screening PHASE 6 (access tier) — BTS/FRA rail-network lines. The Site Analysis
+    // "Rail access" card drives this overlay (mapLayer: "bts_rail"). FeatureServer line layer →
+    // esriFeature (vector), zoom-gated. URL from the registry.
+    kind: "esriFeature", label: "Rail lines (BTS/FRA)",
+    url: GIS_SOURCES.rail.serviceUrl, minZoom: 11, color: "#334155", weight: 2.5, opacity: 0.95,
+    note: "BTS/FRA North American Rail Network lines — a line adjacent/crossing is a potential rail-served siding. Loads zoomed in.",
+  },
+  faa_airports: {
+    // Public-data screening PHASE 6 (access tier) — FAA airports. The Site Analysis "Airport
+    // proximity (FAA Part 77)" card drives this overlay (mapLayer: "faa_airports"). FeatureServer
+    // point layer → esriFeature (vector), zoom-gated. URL from the registry.
+    kind: "esriFeature", label: "Airports (FAA)",
+    url: GIS_SOURCES.airports.serviceUrl, minZoom: 10, color: "#0f766e", weight: 2, opacity: 0.95,
+    note: "FAA airports — a PROXY for FAA Part 77 height-restriction surfaces near a public-use airport (not the computed Part 77 surfaces). Loads zoomed in.",
+  },
 };
 
 /* Utility-evidence layers — power & hydrant evidence from crowd/agency sources,
@@ -410,6 +434,9 @@ export const LAYER_VINTAGE = {
   env_lpst: "TCEQ LPST — continuously updated",
   env_cleanups: "EPA Cleanups in My Community (FRS) — periodically updated",
   faults: "USGS SIM 2874 (Shah & Lanning-Rush) via UH GIS — 2005 study",
+  txdot_aadt: "TxDOT AADT — annual traffic counts (preliminary)",
+  bts_rail: "BTS/FRA North American Rail Network — periodically updated",
+  faa_airports: "FAA airports (AIS) — periodically updated",
   // Utility evidence
   osm_power: "OpenStreetMap — community-edited, live",
   osm_hydrants: "OpenStreetMap — community-edited, live",

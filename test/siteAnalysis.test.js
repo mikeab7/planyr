@@ -495,6 +495,9 @@ describe("runSiteAnalysis — orchestration", () => {
       "Fault_Houston": () => [{ attributes: { Name: "LONG POINT FAULT" }, geometry: { paths: [[[-95.805, 29.785], [-95.785, 29.785]]] } }], // a fault LINE crossing the site
       "US_Electric_Power_Transmission_Lines": () => [{ attributes: { OWNER: "CENTERPOINT ENERGY HOUSTON ELECTRIC, LLC", VOLTAGE: 138 }, geometry: { paths: [[[-95.805, 29.785], [-95.785, 29.785]]] } }], // PHASE 5: a transmission LINE crossing the site (easement)
       "Electric_Substations": () => [{ attributes: { NAME: "T H WHARTON", MAX_VOLTAG: 345 }, geometry: { x: -95.78, y: 29.785 } }], // PHASE 5: a substation ~0.8 mi away (service proxy)
+      "District_and_MPO_AADT": () => [{ attributes: { AADT_PRELIM: 47150, Located_On: "IH 10" }, geometry: { x: -95.792, y: 29.785 } }], // PHASE 6: a traffic count near the site
+      "NTAD_North_American_Rail_Network_Lines": () => [{ attributes: { RROWNER1: "UP" }, geometry: { paths: [[[-95.805, 29.785], [-95.785, 29.785]]] } }], // PHASE 6: a rail LINE crossing the site
+      "US_Airport": () => [{ attributes: { NAME: "WILLIAM P HOBBY", TYPE_CODE: "AD" }, geometry: { x: -95.78, y: 29.785 } }], // PHASE 6: a runway airport ~0.8 mi away (Part 77 caution)
     });
     const identifyJurisdiction = async () => ({
       county: ["Harris"], city: ["Houston"], etj: [], unincorporated: false, straddle: false,
@@ -503,7 +506,7 @@ describe("runSiteAnalysis — orchestration", () => {
     const identifyRoadAuthority = async () => ({ roads: [{ name: "IH 10", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 }], authorities: ["State (TxDOT)"], ageMs: 500, note: "ok" });
     const { findings } = await runSiteAnalysis([SQUARE], { cache, fetchJson, identifyJurisdiction, identifyRoadAuthority });
     const ids = findings.map((f) => f.id);
-    expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "transmission", "substations", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"]);
+    expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "transmission", "substations", "jurisdiction", "road", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"]);
     expect(findings.find((f) => f.id === "flood").status).toBe("present");
     // PHASE 2 proximity: contamination near the site → present with count + nearest + names.
     const lpst = findings.find((f) => f.id === "lpst");
@@ -529,6 +532,20 @@ describe("runSiteAnalysis — orchestration", () => {
     expect(subs.summary).toMatch(/Nearest electric substation/);
     expect(subs.summary).toMatch(/T H WHARTON/);
     expect(subs.mapLayer).toBe("hifld_substations");
+    // PHASE 6 access tier: traffic count, a rail line crossing the site, and a Part-77-caution airport.
+    const aadt = findings.find((f) => f.id === "aadt");
+    expect(aadt.status).toBe("info");
+    expect(aadt.summary).toMatch(/~47,150 vehicles\/day on IH 10/);
+    expect(aadt.mapLayer).toBe("txdot_aadt");
+    const rail = findings.find((f) => f.id === "rail");
+    expect(rail.status).toBe("info");
+    expect(rail.summary).toMatch(/crosses\/abuts the site: Union Pacific/);
+    expect(rail.mapLayer).toBe("bts_rail");
+    const air = findings.find((f) => f.id === "airports");
+    expect(air.status).toBe("info");
+    expect(air.summary).toMatch(/WILLIAM P HOBBY/);
+    expect(air.summary).toMatch(/Part 77/);
+    expect(air.mapLayer).toBe("faa_airports");
     // CCN is a fact (info), never a good/bad constraint: water names the certificated provider,
     // sewer with no polygon reads as an honest well/septic flag (not a green all-clear).
     expect(findings.find((f) => f.id === "ccnWater").summary).toMatch(/CITY OF KATY \(a city\)/);

@@ -363,6 +363,81 @@ export const GIS_SOURCES = {
       "MAX_VOLTAG is 0 where withheld. Screening only — confirm service/capacity with the utility.",
   },
 
+  // ---- Access tier (public-data screening PHASE 6) ----
+  // Three "how good is the access here" datasets, all proximity sources (buffer the parcel,
+  // measure nearest in EPSG:2278 feet). INFO facts for a deal, not pass/fail constraints.
+  aadt: {
+    key: "aadt",
+    label: "TxDOT traffic counts (AADT)",
+    provider: "TxDOT — Annual Average Daily Traffic (AADT)",
+    // TxDOT's public District/MPO AADT review layer — traffic-count POINTS with AADT_PRELIM
+    // (the preliminary annual average daily traffic) + Located_On (the road) + County. The
+    // screen reports the nearest counted road's volume as an access/visibility proxy.
+    serviceUrl: "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/District_and_MPO_AADT_Review_Layer_Public/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { aadt: "AADT_PRELIM", road: "Located_On", county: "County" },
+    coverage: "statewide (Texas)",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // West Houston / Katy — dense count network (≥1 station in any ~1 km envelope; live 2026-07-18,
+      // AADT ~45k on I-10 corridor). A dead/clipped source fails this.
+      { label: "West Houston AADT", point: [-95.75, 29.78], expectMinCount: 1 },
+    ],
+    notes:
+      "TxDOT preliminary AADT count points (AADT_PRELIM). The nearest counted road's volume is an " +
+      "access / visibility proxy — high traffic = good access/exposure but also congestion. Located_On " +
+      "(road name) is blank on some records. Screening only.",
+  },
+  rail: {
+    key: "rail",
+    label: "Rail lines (BTS/FRA North American Rail Network)",
+    provider: "USDOT BTS / FRA — North American Rail Network (NTAD)",
+    // BTS NTAD rail-network LINES (the FRA rail network). RROWNER1 = the owning railroad's
+    // reporting mark (UP, BNSF, PTRA …); accessScreen.js expands the common marks. A line
+    // crossing/adjacent to the site is a potential rail-served siding (an industrial plus).
+    serviceUrl: "https://services.arcgis.com/xOi1kZaI0eWDREZv/ArcGIS/rest/services/NTAD_North_American_Rail_Network_Lines/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { owner: "RROWNER1", owner2: "RROWNER2", net: "NET" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Downtown Houston — dense rail country (90 segments within 2 mi, live 2026-07-18; UP-owned).
+      { label: "Downtown Houston rail", bbox: [-95.40, 29.73, -95.33, 29.79], expectMinCount: 1 },
+    ],
+    notes:
+      "BTS/FRA rail-network lines (RROWNER1 = owning railroad reporting mark). A line adjacent or " +
+      "crossing the site is a potential rail-served siding — confirm service/rates with the railroad. " +
+      "Screening only; not a surveyed alignment or a confirmed spur right.",
+  },
+  airports: {
+    key: "airports",
+    label: "FAA airports (Part 77 proximity proxy)",
+    provider: "FAA — Aeronautical Information Services (airports)",
+    // FAA airport POINTS (NAME / IDENT / TYPE_CODE / SERVCITY). Used as a PROXY for FAA Part 77
+    // height-restriction surfaces — a site near a public-use (AD-type) airport may fall under Part
+    // 77 imaginary surfaces that cap structure height. This is proximity only; the actual Part 77
+    // surfaces are computed from runway geometry (a real determination is an FAA Form 7460 study).
+    serviceUrl: "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/US_Airport/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "NAME", ident: "IDENT", type: "TYPE_CODE", city: "SERVCITY", elev: "ELEVATION" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Hobby Airport (HOU) area — a public-use airport + nearby heliports (live 2026-07-18).
+      { label: "Houston Hobby area airports", point: [-95.28, 29.65], expectMinCount: 1 },
+    ],
+    notes:
+      "FAA airports (TYPE_CODE: AD = airport, HP = heliport …). Distance to the nearest is a PROXY " +
+      "for FAA Part 77 height-restriction surfaces near a public-use airport — NOT the computed Part " +
+      "77 surfaces. A tall structure near an airport may require an FAA Form 7460 determination. Screening only.",
+  },
+
   // ---- Jurisdiction / road identify sources (B93/B94; shared by the screen) ----
   county: {
     key: "county",
