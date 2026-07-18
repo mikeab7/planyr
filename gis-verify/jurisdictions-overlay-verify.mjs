@@ -25,11 +25,14 @@ const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-lin
 
 // Each layer's data host. county vs ETJ both live on services.arcgis.com, so they're
 // told apart by their AGOL org hash. `kind` notes how the layer loads its data.
+// B898: MUD boundaries are now a MEMBER of the consolidated "Water & sewer" row (Utilities
+// group), not their own solo checkbox — toggling "Water & sewer" turns MUD on (alongside the
+// CCN/COH-mains members), so that's the label this probe now checks/toggles/status-reads.
 const PROBES = {
-  county: { label: "County boundaries",     match: "KTcxiTD9dsQw4r7Z",             kind: "feature", hits: [] },
-  city:   { label: "City limits",           match: "feature.geographic.texas.gov", kind: "feature", hits: [] },
-  etj:    { label: "City ETJ",              match: "su8ic9KbA7PYVxPS",             kind: "feature", hits: [] },
-  mud:    { label: "MUD / water districts", match: "harcags.harcresearch.org",     kind: "image",   hits: [] },
+  county: { label: "County boundaries", match: "KTcxiTD9dsQw4r7Z",             kind: "feature", hits: [] },
+  city:   { label: "City limits",       match: "feature.geographic.texas.gov", kind: "feature", hits: [] },
+  etj:    { label: "City ETJ",          match: "su8ic9KbA7PYVxPS",             kind: "feature", hits: [] },
+  mud:    { label: "Water & sewer",     match: "harcags.harcresearch.org",     kind: "image",   hits: [] },
 };
 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
@@ -56,7 +59,7 @@ await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(1800);
 
 // 1) UI wiring present
-const want = ["Jurisdictions", "County boundaries", "City limits", "City ETJ", "MUD / water districts"];
+const want = ["Jurisdictions & authority", "County boundaries", "City limits", "City ETJ", "Water & sewer"];
 const found = {};
 for (const t of want) found[t] = (await page.getByText(t, { exact: false }).count()) > 0;
 

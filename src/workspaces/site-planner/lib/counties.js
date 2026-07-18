@@ -154,51 +154,16 @@ export async function resolveTaxRates(county, attrs) {
  * be re-pointed here. Several are flagged provisional where not live-verified.
  * ----------------------------------------------------------------------- */
 export const JURISDICTION_LAYERS = {
+  // B898: Harris's direct-agency layers (drainage channels, storm sewer, water/wastewater
+  // mains) moved OUT of this per-county nesting into the flat `AHJ_LAYERS` registry in
+  // layers.js (same `county` tag convention as EVIDENCE.coh_hydrants) — they now render
+  // inside the decision-first Flood & drainage / Utilities groups instead of a standalone
+  // "Harris County · City of Houston" provider heading. This entry is kept (empty) so a
+  // future county-specific layer has an obvious home, matching the chambers/waller pattern.
   harris: {
     label: "Harris County · City of Houston",
-    layers: {
-      hcfcd_row: {
-        label: "HCFCD channels & ROW",
-        url: "https://www.gis.hctx.net/arcgishcpid/rest/services/HCFCD/ROW_FC/MapServer",
-        layers: null,
-        note: "Flood-control channel right-of-way (HCFCD).",
-        opacity: 0.8,
-      },
-      // City of Houston water/wastewater/storm. The mycity2/pubgis02 HPW host was
-      // stale (intermittent "service not started"); geogimsprod runs only the
-      // Geocortex viewer (no /arcgis/rest — 404). The real source the City's public
-      // viewer pulls from is geogimstest.houstontx.gov/arcgis/rest — CONFIRMED live,
-      // 200 + metadata, and CORS-open to https://mikeab7.github.io (probe + export
-      // both work). Folders HW (Water_gx, WasteWater_gx) and TDO (UN_Stormwater).
-      // The network sublayers are default-OFF and/or scale-gated, so we pin the
-      // pipe/main sublayer IDs via `layers` (→ export `layers=show:…`) or the export
-      // paints blank. IDs verified from each service's /MapServer/layers. Coverage is
-      // CITY OF HOUSTON ONLY (transparent outside the city — a real boundary, not a
-      // bug). Trunk lines (Gravity Main 2, Pipe 22) are minScale ~1:40k → only at
-      // site-plan zoom. Caveat: it's the *test* host (only confirmed CORS source);
-      // swap to a prod host later if the City exposes one.
-      coh_ww: {
-        label: "Houston wastewater",
-        url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/WasteWater_gx/MapServer",
-        layers: [2, 6], // 2 Gravity Main (≥~1:40k), 6 Force Main
-        note: "City of Houston sanitary sewer (geogimstest). COH only — blank outside the city. Zoom in (~1:40k) to see gravity mains.",
-        opacity: 0.85,
-      },
-      coh_storm: {
-        label: "Houston storm sewer",
-        url: "https://geogimstest.houstontx.gov/arcgis/rest/services/TDO/UN_Stormwater/MapServer",
-        layers: [22, 23, 24, 904], // Pipe (≥~1:40k), Open Channel, Culvert, Linear Drain
-        note: "City of Houston storm drainage (geogimstest). COH only — blank outside the city. Zoom in (~1:40k) to see pipes.",
-        opacity: 0.85,
-      },
-      coh_water: {
-        label: "Houston water lines",
-        url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/Water_gx/MapServer",
-        layers: [0, 1], // 0 Water Lines, 1 Water Main (both draw at any zoom)
-        note: "City of Houston potable water (geogimstest). COH only — blank outside the city.",
-        opacity: 0.85,
-      },
-    },
+    layers: {},
+    note: "No county-specific overlay group — its layers now live in the Flood & drainage and Utilities groups above (auto-scoped, not a standalone Houston heading).",
   },
   fortbend: {
     label: "Fort Bend County",
