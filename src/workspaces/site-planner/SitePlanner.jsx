@@ -135,6 +135,7 @@ import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js"
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
 import { sizePondForTargets, scaleRing, solveTobRaise } from "./lib/pondSizing.js";
+import { optimizePond } from "./lib/pondOptimizer.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt, pondAutoValues,
@@ -14832,6 +14833,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           ? `Pond land take incl. the modeled ${f1(matBerm.maxHeightFt)}′ fill berm (toe ~${f0(bermToeReach)}′ out at ${gsApronRatio}:1): ${f2(landTakeSf / SQFT_PER_ACRE)} ac (water footprint ${f2(polyArea(ring) / SQFT_PER_ACRE)} ac).`
                           : `Pond land take incl. the ${critRule.maintBermWidthFt}′ maintenance berm: ${f2(landTakeSf / SQFT_PER_ACRE)} ac (water footprint ${f2(polyArea(ring) / SQFT_PER_ACRE)} ac).`, "landtake"));
                         if (bermOverlaps.length) out.push(warnLine(`⚠ The ${landIsBerm ? "fill-berm toe" : "maintenance-berm"} ring overlaps ${bermOverlaps.length === 1 ? `a ${TYPE[bermOverlaps[0].type].label.toLowerCase()}` : `${bermOverlaps.length} other elements`} — the ${landIsBerm ? "berm footprint" : "criteria shelf"} runs into your layout.`, "berm-overlap", false));
+                        // NEW-D1 (Phase D) — the pond economics optimizer: if this pond owes a
+                        // known volume, the best deeper-smaller alternative that recovers the most
+                        // buildable land (screening; the owner redraws the winner).
+                        if (detReq && detReq.kind === "point" && detReq.requiredAcFt > 0) {
+                          const opt = optimizePond({
+                            baseRing: ring, det,
+                            requiredCf: detReq.requiredAcFt * 43560,
+                            maintBermFt: critRule && critRule.maintBermWidthFt > 0 ? critRule.maintBermWidthFt : 30,
+                            costs: { earthworkPerCy: Number.isFinite((settings.prices || {}).earthworkCy) ? +settings.prices.earthworkCy : null },
+                          });
+                          if (opt.ok && opt.best && opt.best.buildableSfDelta != null && opt.best.buildableSfDelta > 0) {
+                            const b = opt.best;
+                            out.push(noteLine(`Optimizer (screening): a ${b.depthFt}′-deep basin holds the required volume on ~${f2(b.landTakeAc)} ac — recovering ~${b.buildableSfDelta.toLocaleString()} SF buildable vs the current ${f2(opt.base.landTakeAc)}-ac take${b.earthworkCost != null ? ` (~$${b.earthworkCost.toLocaleString()} earthwork)` : ""}. Deeper-smaller vs shallower-bigger; redraw to adopt.`, "pond-opt"));
+                          }
+                        }
                       }
                       if ((crit.slope || crit.freeboard || landTakeSf != null) && critRule && critRule.verified === false) {
                         out.push(noteLine("Criteria values are unverified placeholders — edit & confirm in settings against the PCPM / county DCM.", "crit-unv"));
