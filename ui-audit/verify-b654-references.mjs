@@ -91,7 +91,7 @@ await page.waitForTimeout(500);
   await page.locator('button:has-text("References")').first().click();
   await page.waitForTimeout(400);
   const txt = await page.evaluate(() => document.body.innerText);
-  log(txt.includes("Add reference (PDF / image)…"), "C: one \"Add reference…\" flow at the top");
+  log(txt.includes("Add reference (PDF / image / CAD)…"), "C: one \"Add reference…\" flow at the top");
   log(txt.includes("Aerial backdrop"), "C: the aerial is listed as \"Aerial backdrop\"");
   // expand the aerial row → NEW opacity + lock controls
   await page.locator('button:has-text("Aerial backdrop")').first().click();
