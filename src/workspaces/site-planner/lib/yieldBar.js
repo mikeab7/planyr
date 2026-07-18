@@ -218,9 +218,11 @@ const _esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/<
 const _r2 = (n) => Number(Number(n).toFixed(2));
 
 /* Render a bar layout as an SVG string fragment anchored at (x,y). Returns { svg, h }.
- * `mono` is the monospace font stack for the delta label; `colors` overrides the print
- * palette. Pure — used by printSheet.js so the export bar matches the screen bar. */
-export function bulletBarSvg(layout, { x = 0, y = 0, w = 200, barH = 12, status = null, unit = "ac-ft", mono = "ui-monospace, monospace", colors = PRINT_BAR_COLORS } = {}) {
+ * `mono` (name kept for the existing call site — B895 repointed the DEFAULT and every
+ * caller to the same Inter/tabular-nums numeric font the screen uses, never monospace)
+ * is the delta label's font-family; `colors` overrides the print palette. Pure — used
+ * by printSheet.js so the export bar matches the screen bar (PDF-PARITY). */
+export function bulletBarSvg(layout, { x = 0, y = 0, w = 200, barH = 12, status = null, unit = "ac-ft", mono = "Inter, system-ui, sans-serif", colors = PRINT_BAR_COLORS } = {}) {
   const C = colors;
   const built = layout && layout.mode === "stacked" ? stackedBarMarks(layout, { w, barH }) : bulletBarMarks(layout, { w, barH, unit });
   let s = "";
@@ -239,7 +241,7 @@ export function bulletBarSvg(layout, { x = 0, y = 0, w = 200, barH = 12, status 
       else s += `<line x1="${_r2(mx)}" y1="${_r2(y + m.y0)}" x2="${_r2(mx)}" y2="${_r2(y + m.y1)}" stroke="${C.tick}" stroke-width="${m.role === "required-edge" ? 1.25 : 2}"/>`;
     } else if (m.t === "text") {
       const fill = m.role === "good" ? C.good : m.role === "danger" ? C.danger : C.muted;
-      s += `<text x="${_r2(mx)}" y="${_r2(y + m.y)}" text-anchor="${m.anchor}" font-size="10" fill="${fill}"${m.mono ? ` font-family="${mono}" font-weight="700"` : ""} font-variant-numeric="tabular-nums">${_esc(m.s)}</text>`;
+      s += `<text x="${_r2(mx)}" y="${_r2(y + m.y)}" text-anchor="${m.anchor}" font-size="10" fill="${fill}"${m.mono ? ` font-family="${mono}" font-weight="700"` : ""} font-variant-numeric="tabular-nums slashed-zero">${_esc(m.s)}</text>`;
     }
   }
   return { svg: s, h: built.h };

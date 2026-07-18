@@ -135,9 +135,9 @@ export function buildBuildingTableSvg({ x, y, w, h, rows = [], pal = {} } = {}) 
     if (ry > maxY) return; // overflow guard (plan area is tall; this is rarely hit)
     if (i % 2 === 1) s += `<rect x="${r2(x + 1)}" y="${r2(ry - 14)}" width="${r2(w - 2)}" height="${r2(rowH)}" fill="#faf8f3"/>`;
     s += `<text x="${r2(xName)}" y="${r2(ry)}" font-size="${rowFs}" fill="${ink}">${esc(fitName(row.name, rowFs))}</text>`;
-    s += `<text x="${r2(xSf)}" y="${r2(ry)}" text-anchor="end" font-size="${rowFs}" fill="${ink}" font-variant-numeric="tabular-nums">${esc(commas(row.sf))}</text>`;
-    s += `<text x="${r2(xClear)}" y="${r2(ry)}" text-anchor="end" font-size="${rowFs}" fill="${ink}" font-variant-numeric="tabular-nums">${esc(row.clearHeight == null ? "—" : row.clearHeight + "'")}</text>`;
-    s += `<text x="${r2(xSlab)}" y="${r2(ry)}" text-anchor="end" font-size="${rowFs}" fill="${ink}" font-variant-numeric="tabular-nums">${esc(row.slab == null ? "—" : row.slab + '"')}</text>`;
+    s += `<text x="${r2(xSf)}" y="${r2(ry)}" text-anchor="end" font-size="${rowFs}" fill="${ink}" font-variant-numeric="tabular-nums slashed-zero">${esc(commas(row.sf))}</text>`;
+    s += `<text x="${r2(xClear)}" y="${r2(ry)}" text-anchor="end" font-size="${rowFs}" fill="${ink}" font-variant-numeric="tabular-nums slashed-zero">${esc(row.clearHeight == null ? "—" : row.clearHeight + "'")}</text>`;
+    s += `<text x="${r2(xSlab)}" y="${r2(ry)}" text-anchor="end" font-size="${rowFs}" fill="${ink}" font-variant-numeric="tabular-nums slashed-zero">${esc(row.slab == null ? "—" : row.slab + '"')}</text>`;
     ry += rowH;
   });
   return s;
@@ -148,7 +148,7 @@ export function buildBuildingTableSvg({ x, y, w, h, rows = [], pal = {} } = {}) 
 // so the export can't drift from the screen (PDF-PARITY). `bars`: [{ label, verdict,
 // status, layout, unit }]. Returns an SVG string anchored at (x,y); its height is
 // stormwaterBandH(bars.length).
-const SW_MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+const SW_MONO = "Inter, system-ui, sans-serif"; // B895 — matches the on-screen NUM_FONT (PDF-PARITY); var() can't survive SVG-export rasterization, so this is a concrete string kept in sync by hand.
 export function buildStormwaterSvg({ x, y, w, bars = [], pal = {} } = {}) {
   const ink = pal.ink || "#26231e";
   const muted = pal.muted || "#8a8473";
@@ -162,7 +162,7 @@ export function buildStormwaterSvg({ x, y, w, bars = [], pal = {} } = {}) {
     const ry = y + SW_HEAD_H + i * SW_ROW_H;
     const midY = ry + 12;
     s += `<text x="${r2(x + padX)}" y="${r2(midY)}" font-size="11.5" font-weight="700" fill="${ink}">${esc(b.label)}</text>`;
-    if (b.verdict != null) s += `<text x="${r2(x + padX + labelW)}" y="${r2(midY)}" font-size="11.5" font-weight="700" font-family="${SW_MONO}" font-variant-numeric="tabular-nums" fill="${ink}">${esc(b.verdict)}</text>`;
+    if (b.verdict != null) s += `<text x="${r2(x + padX + labelW)}" y="${r2(midY)}" font-size="11.5" font-weight="700" font-family="${SW_MONO}" font-variant-numeric="tabular-nums slashed-zero" fill="${ink}">${esc(b.verdict)}</text>`;
     if (b.layout) s += bulletBarSvg(b.layout, { x: barX, y: ry, w: barW, barH: 12, status: b.status || null, unit: b.unit || "ac-ft", mono: SW_MONO }).svg;
   });
   return s;
@@ -193,7 +193,7 @@ function buildMetricsSvg({ x, y, w, h, pairs = [], note = "", pal = {}, stormwat
     const label = `${k}: `;
     const wEst = (label.length + String(v).length) * fs * 0.54;
     if (cx + wEst > maxX && cx > x + padX) { cx = x + padX; cy += lh; }
-    s += `<text x="${r2(cx)}" y="${r2(cy)}" font-size="${fs}"><tspan fill="${muted}">${esc(label)}</tspan><tspan fill="${ink}" font-weight="700" font-variant-numeric="tabular-nums">${esc(v)}</tspan></text>`;
+    s += `<text x="${r2(cx)}" y="${r2(cy)}" font-size="${fs}"><tspan fill="${muted}">${esc(label)}</tspan><tspan fill="${ink}" font-weight="700" font-variant-numeric="tabular-nums slashed-zero">${esc(v)}</tspan></text>`;
     cx += wEst + colGap;
   });
   if (note) s += `<text x="${r2(x + padX)}" y="${r2(y + h - 4)}" font-size="11" font-style="italic" fill="${muted}">${esc(note)}</text>`;

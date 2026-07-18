@@ -55,6 +55,7 @@ import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.j
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
+import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates } from "./lib/counties.js";
@@ -9666,7 +9667,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <rect data-chip-bg x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7 * ls}
           fill="rgba(17,24,39,0.62)" stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
         <text data-chip-text x={c.x} y={c.y - boxH / 2 + padY + fs * 0.82} textAnchor="middle" fontSize={fs}
-          fontFamily="ui-monospace, Menlo, monospace" fill="#e9edf2" pointerEvents="none" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
+          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill="#e9edf2" pointerEvents="none" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
       </g>
     );
   });
@@ -10035,7 +10036,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const { out } = runLabelAnchors(selParcel, run);
       return (
         <text key={`pe${ri}`} x={out.x} y={out.y} dy={3} textAnchor="middle" fontSize="11"
-          fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink} stroke={PAL.paper} strokeWidth={3}
+          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.ink} stroke={PAL.paper} strokeWidth={3}
           paintOrder="stroke" pointerEvents="none" fontWeight="600">{f0(run.lengthFt)}′</text>
       );
     });
@@ -10212,7 +10213,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   // B653: link-styled jump from an inspector's "default" value to its Standards section.
   const linkBtn = { padding: 0, border: "none", background: "transparent", color: PAL.accentText, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
-  const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
+  const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
   // B678/B682 — the per-label style controls (repeat spacing · text size · background halo) shown under an
   // "Inline label" field once the feature actually carries a label. `write(patch, {live})` is the
   // feature-specific, NON-STICKY writer (direct setMarkups / setSelEl, never mkStyle) so a tweak never
@@ -10677,7 +10678,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5.5px 0", borderBottom: "1px solid #f3efe5", gap: 8 }}>
       <span style={{ fontSize: 12, color: PAL.muted }}>{label}</span>
       <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13, color: PAL.ink, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>{value}{sub && <span style={{ color: PAL.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span>}</span>
+        <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: PAL.ink, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{value}{sub && <span style={{ color: PAL.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span>}</span>
         {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
       </span>
     </div>
@@ -11509,7 +11510,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
                           style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
-                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
                         {/* B598 — per-row remove (✕). Undo-able (removeParcelById pushes history); the
                             tombstone keeps it deleted across reload/merge. The most discoverable place
@@ -12010,7 +12011,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {gr.legalClass && <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 800, letterSpacing: "0.05em", color: PAL.danger, border: `1px solid ${PAL.danger}`, borderRadius: 4, padding: "0 4px" }} title="Legal requirement (ADA/TAS) — violations are legal, not stylistic">LEGAL</span>}
                   <span style={{ fontSize: 9.5, color: PAL.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span>
                 </span>
-                <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, color: gr.legalClass ? PAL.danger : PAL.ink, fontWeight: 650, whiteSpace: "nowrap" }}>{gradingChipLabel(gr)}</span>
+                <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 11, color: gr.legalClass ? PAL.danger : PAL.ink, fontWeight: 650, whiteSpace: "nowrap" }}>{gradingChipLabel(gr)}</span>
               </div>
             ))}
             <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
@@ -12162,7 +12163,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {view.ppf > 0.12 && (m.calls || []).map((c, i) => {
                         const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-                        return <text key={i} x={mx} y={my - 3} textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
+                        return <text key={i} x={mx} y={my - 3} textAnchor="middle" fontSize="9" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
                       })}
                       <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="11" fontWeight="700" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
                     </g>
@@ -12585,7 +12586,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const pill = (key, anchor, txt, onEdit) => (
                   <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
                     <rect x={anchor.x - 13} y={anchor.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={PAL.setback} strokeWidth={1} />
-                    <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill={PAL.setback} fontWeight="700">{txt}</text>
+                    <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.setback} fontWeight="700">{txt}</text>
                   </g>
                 );
                 if (sbEditMode === "segment") {
@@ -12752,7 +12753,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const lp = live ? f2p(live) : null, total = pathLen(all);
                 return <>
                   <polyline points={s} fill="none" stroke={PAL.accent} strokeWidth={mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
-                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
+                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
                   {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={PAL.accent} pointerEvents="none" />; })}
                 </>;
               })()}
@@ -12771,7 +12772,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {ghost && <polygon points={ghost.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill={tcol} fillOpacity={0.12} stroke={tcol} strokeWidth={1.4} strokeDasharray="5 4" />}
                   <polyline points={s} fill="none" stroke={tcol} strokeWidth={2} strokeDasharray="5 4" />
                   {easeDraft.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={tcol} />; })}
-                  {lp && all.length >= 2 && easeMode === "centerline" && <text x={lp.x + 8} y={lp.y - 6} fontSize="11" fontFamily="ui-monospace, monospace" fill={tcol} stroke="#fff" strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(pathLen(all))}′ · {easeWidth}′ wide</text>}
+                  {lp && all.length >= 2 && easeMode === "centerline" && <text x={lp.x + 8} y={lp.y - 6} fontSize="11" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={tcol} stroke="#fff" strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(pathLen(all))}′ · {easeWidth}′ wide</text>}
                 </g>;
               })()}
               {/* parcel-edge picker (NEW-3): clickable edge targets, highlighted run, ghost strip */}
@@ -13097,7 +13098,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <text x={p.x} y={p.y + 3.5} fontSize="8.5" textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
                         </g>
                       ))}
-                      <text x={lastPt.x} y={lastPt.y - 14} textAnchor="middle" fontSize="12" fontFamily="ui-monospace, Menlo, monospace"
+                      <text x={lastPt.x} y={lastPt.y - 14} textAnchor="middle" fontSize="12" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
                         fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{countLbl}</text>
                       {/* hit targets — one transparent circle per marker */}
                       {pts.map((p, k) => (
@@ -13141,7 +13142,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       ? <polygon points={ptsStr} fill={mcolor} fillOpacity={isSel ? 0.16 : 0.1} stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
                       : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />}
                     {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
-                    <text x={anchor.x} y={anchor.y - 5} textAnchor="middle" fontSize="12" fontFamily="ui-monospace, Menlo, monospace"
+                    <text x={anchor.x} y={anchor.y - 5} textAnchor="middle" fontSize="12" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
                       fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>
                     {/* wide invisible hit path to select the measurement (select tool only) */}
                     {isArea
@@ -13188,7 +13189,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </g>
                       ); })}
                       {live && <circle cx={lp.x} cy={lp.y} r={8} fill={PAL.accent + "14"} stroke={PAL.accent} strokeWidth={1} strokeDasharray="3 2" />}
-                      <text x={lp.x} y={lp.y - 14} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{measDraft.length} item{measDraft.length !== 1 ? "s" : ""}</text>
+                      <text x={lp.x} y={lp.y - 14} textAnchor="middle" fontSize="11" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{measDraft.length} item{measDraft.length !== 1 ? "s" : ""}</text>
                     </g>
                   );
                 }
@@ -13204,7 +13205,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       ? <polygon points={ptsStr} fill={PAL.accent} fillOpacity={0.1} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
                       : <polyline points={ptsStr} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />}
                     {measDraft.map((p, k) => { const c = f2p(p); return <circle key={k} cx={c.x} cy={c.y} r={k === 0 ? 5 : 3.5} fill={k === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
-                    {lbl && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{lbl}</text>}
+                    {lbl && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{lbl}</text>}
                   </g>
                 );
               })()}
@@ -13220,7 +13221,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const curb = +settings.roadCurb || CURB, dw = draftRect.type === "road" ? Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb) : 0;
                 return (
                 <g pointerEvents="none"><rect x={a.x} y={a.y} width={pw} height={ph} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
-                  {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ travel` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
+                  {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ travel` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
                 </g>
               ); })()}
               {/* centerline road preview (B596/NEW-1): live tessellated centerline + the
@@ -13246,18 +13247,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {ring && ring.length >= 3 && <polygon points={ring.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join(" ")} fill={typeStyle("road", settings).fill} fillOpacity={0.4} stroke={PAL.accent} strokeWidth={1.25} strokeDasharray="5 4" />}
                     <polyline points={centerStr} fill="none" stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 4" />
                     {draftRoadPts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
-                    {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ travel · {f0(total)}′</text>}
+                    {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ travel · {f0(total)}′</text>}
                   </g>
                 );
               })()}
               {/* live dims for the markup rect/ellipse draft */}
               {mkRect && mkRect.kind !== "mline" && (() => {
                 const a = f2p(mkRect.a), b = f2p(mkRect.b), w = Math.abs(mkRect.b.x - mkRect.a.x), h = Math.abs(mkRect.b.y - mkRect.a.y);
-                return <text x={Math.max(a.x, b.x) + 6} y={Math.max(a.y, b.y) + 14} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(w)}′ × {f0(h)}′</text>;
+                return <text x={Math.max(a.x, b.x) + 6} y={Math.max(a.y, b.y) + 14} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(w)}′ × {f0(h)}′</text>;
               })()}
               {mkRect && mkRect.kind === "mline" && (() => {
                 const b = f2p(mkRect.b);
-                return <text x={b.x + 8} y={b.y - 6} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(dist(mkRect.a, mkRect.b))}′</text>;
+                return <text x={b.x + 8} y={b.y - 6} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(dist(mkRect.a, mkRect.b))}′</text>;
               })()}
               {/* draft polygon element (clicking perimeter points) */}
               {draftElPoly && (
@@ -13278,7 +13279,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <g pointerEvents="none">
                     <polyline points={ptsStr} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 5" />
                     {splitPath.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={4} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />; })}
-                    {live && all.length >= 2 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(total)}′ cut</text>}
+                    {live && all.length >= 2 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(total)}′ cut</text>}
                   </g>
                 );
               })()}
@@ -13505,7 +13506,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6, overflow: "hidden" }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, flex: "none", animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 <span ref={calibBadgeRef} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>· {cfg.sub}</span>}
+                  {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>· {cfg.sub}</span>}
                 </span>
               </div>
             );
@@ -13615,7 +13616,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
                               <input value={r.el.name || ""} placeholder={`Building ${r.n}`} onChange={(e) => setBuildingProp(r.id, "name", e.target.value)}
                                 style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 12, padding: "4px 8px" }} />
-                              <span style={{ fontSize: 11, color: PAL.muted, fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{f0(r.sf)} sf</span>
+                              <span style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{f0(r.sf)} sf</span>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                               <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -13711,7 +13712,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
               EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
           {cursorLL && (
-            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums", maxWidth: "calc(100% - 20px)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", boxSizing: "border-box" }}>
+            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: NUM_FONT, fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: TABULAR_NUMS, maxWidth: "calc(100% - 20px)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", boxSizing: "border-box" }}>
               {cursorLL.lat.toFixed(6)}°,&nbsp;{cursorLL.lng.toFixed(6)}°
               {cursorElFt != null && <span data-ground-el> · El ≈ {cursorElFt.toFixed(1)} ft NAVD88</span>}
             </div>
@@ -14340,7 +14341,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: PAL.ink }}>{label}</span>
                         <button disabled={!remOn} title={remTitle} onClick={remOn ? onRem : undefined} style={stepBtn(remOn, true)}>－</button>
-                        <span style={{ minWidth: 14, textAlign: "center", fontSize: 12, fontFamily: "ui-monospace, monospace", color: count ? PAL.ink : PAL.muted }}>{count}</span>
+                        <span style={{ minWidth: 14, textAlign: "center", fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: count ? PAL.ink : PAL.muted }}>{count}</span>
                         <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={stepBtn(addOn, false)}>＋</button>
                       </div>
                     );
@@ -14745,7 +14746,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0", gap: 8 }}>
                     <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
                     <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                      <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5, color: PAL.ink, fontWeight: 650 }}>{val}</span>
+                      <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, color: PAL.ink, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{val}</span>
                       {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
                     </span>
                   </div>
@@ -15306,14 +15307,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 </div>
                               )}
                             {pumped && credit && credit.creditedAcFt != null && (
-                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.info, marginTop: 2 }}><span>− pumped credit</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{f2(credit.creditedAcFt)} ac-ft</span></div>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.info, marginTop: 2 }}><span>− pumped credit</span><span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(credit.creditedAcFt)} ac-ft</span></div>
                             )}
                             {delta != null && (
                               <>
                                 <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
                                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 700, color: delta >= 0 ? PAL.success : PAL.danger }}>
                                   <span>{delta >= 0 ? "Surplus" : "Shortfall"}</span>
-                                  <span style={{ fontFamily: "ui-monospace, monospace" }}>{delta >= 0 ? "+" : "−"}{f2(Math.abs(delta))} ac-ft</span>
+                                  <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{delta >= 0 ? "+" : "−"}{f2(Math.abs(delta))} ac-ft</span>
                                 </div>
                               </>
                             )}
@@ -15449,8 +15450,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 {routed.perStorm.map((s) => (
                                   <React.Fragment key={s.returnPeriodYr}>
                                     <span style={{ fontWeight: 700 }}>{s.returnPeriodYr}-yr</span>
-                                    <span style={{ textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{s.preCfs ?? "—"}</span>
-                                    <span style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", color: s.status === "short" ? PAL.danger : PAL.text }}>{s.routedPeakCfs ?? "—"}</span>
+                                    <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{s.preCfs ?? "—"}</span>
+                                    <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: s.status === "short" ? PAL.danger : PAL.text }}>{s.routedPeakCfs ?? "—"}</span>
                                     <span style={{ textAlign: "right" }}>{s.status === "unknown" ? <span style={{ fontSize: 9.5, color: PAL.muted }}>—</span> : passChip(s.status === "pass")}</span>
                                   </React.Fragment>
                                 ))}
@@ -15608,7 +15609,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
                               <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 700 }}>{inc >= 0 ? "Storage gained" : "Storage lost"}</span>
-                              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, color: inc >= 0 ? PAL.success : PAL.danger, fontWeight: 800 }}>{sign}{f2(mag / 43560)} ac-ft</span>
+                              <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 14, color: inc >= 0 ? PAL.success : PAL.danger, fontWeight: 800 }}>{sign}{f2(mag / 43560)} ac-ft</span>
                             </div>
                             {pondRow("", `${sign}${f0(mag)} cf`)}
                           </div>
@@ -16545,7 +16546,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         dim.push(<line key="t0" x1={A.x - dir.x * tick} y1={A.y - dir.y * tick} x2={A.x + dir.x * tick} y2={A.y + dir.y * tick} stroke={RED} strokeWidth={1.25} />);
         dim.push(<line key="t1" x1={B.x - dir.x * tick} y1={B.y - dir.y * tick} x2={B.x + dir.x * tick} y2={B.y + dir.y * tick} stroke={RED} strokeWidth={1.25} />);
         if (dimSel) dim.push(<line key="grab" x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="transparent" strokeWidth={14} />);
-        dim.push(<text key="tx" x={M.x + dir.x * (fz * 0.9) - tnx} y={M.y + dir.y * (fz * 0.9) - tny} textAnchor="middle" dominantBaseline="middle" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
+        dim.push(<text key="tx" x={M.x + dir.x * (fz * 0.9) - tnx} y={M.y + dir.y * (fz * 0.9) - tny} textAnchor="middle" dominantBaseline="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
         rparts.push(
           <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
             onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
@@ -16753,7 +16754,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<line key="t1" x1={X - tick} y1={Y1} x2={X + tick} y2={Y1} stroke={RED} strokeWidth={1.25} />);
       if (dimSel) dim.push(<line key="grab" x1={X} y1={Y0} x2={X} y2={Y1} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
       // number OUTBOARD of the line (away from the centred label) so it doesn't clutter by default
-      dim.push(<text key="tx" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
+      dim.push(<text key="tx" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
     } else { // short side is horizontal (w)
       const y = tl.y + h * posF, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
       // B592: no leader line — the dimension slides ALONG the length and stays on the footprint
@@ -16763,7 +16764,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<line key="t0" x1={X0} y1={Y - tick} x2={X0} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
       dim.push(<line key="t1" x1={X1} y1={Y - tick} x2={X1} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
       if (dimSel) dim.push(<line key="grab" x1={X0} y1={Y} x2={X1} y2={Y} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
-      dim.push(<text key="tx" x={MX} y={Y - 6} transform={`rotate(${-el.rot} ${MX} ${Y - 6})`} textAnchor="middle" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
+      dim.push(<text key="tx" x={MX} y={Y - 6} transform={`rotate(${-el.rot} ${MX} ${Y - 6})`} textAnchor="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
     }
     // When the element is selected the dimension is grab-to-move (the red line/ticks are the handle);
     // otherwise it ignores pointers so a click falls through to select/move the element itself.
@@ -16913,7 +16914,6 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse 
 // OUTPUTS (coverage %, impervious %, detention %), never from raw geometry. One
 // semantic colour = one meaning across the donut arcs, the legend swatches, and the
 // group dots, so the eye carries the same mapping everywhere.
-const YMONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
 const YIELD_PAL = {
   building: "#C45A32", buildingAccent: "#C0532E", // terracotta — footprint coverage
   paving: "#B6AB9B",                               // warm taupe — paving / parking
@@ -17005,7 +17005,7 @@ function BulletBar({ layout, width = 210, status = null, unit = "ac-ft", Y }) {
         if (m.t === "tick") return m.role === "reference"
           ? <line key={i} x1={m.x} y1={m.y0} x2={m.x} y2={m.y1} style={{ stroke: Y.muted, strokeWidth: 1, strokeDasharray: "2 2", opacity: 0.7 }} />
           : <line key={i} x1={m.x} y1={m.y0} x2={m.x} y2={m.y1} style={{ stroke: Y.rowLabel, strokeWidth: m.role === "required-edge" ? 1.25 : 2 }} />;
-        if (m.t === "text") return <text key={i} x={m.x} y={m.y} textAnchor={m.anchor} style={{ fill: m.role === "good" ? "var(--success-text)" : m.role === "danger" ? "var(--danger-text)" : Y.muted, fontSize: 10, fontWeight: m.role === "good" || m.role === "danger" ? 750 : 400, fontFamily: m.mono ? YMONO : "inherit", fontVariantNumeric: "tabular-nums" }}>{m.s}</text>;
+        if (m.t === "text") return <text key={i} x={m.x} y={m.y} textAnchor={m.anchor} style={{ fill: m.role === "good" ? "var(--success-text)" : m.role === "danger" ? "var(--danger-text)" : Y.muted, fontSize: 10, fontWeight: m.role === "good" || m.role === "danger" ? 750 : 400, fontFamily: m.mono ? NUM_FONT : "inherit", fontVariantNumeric: TABULAR_NUMS }}>{m.s}</text>;
         return null;
       })}
     </svg>
@@ -17078,7 +17078,7 @@ function YieldPanel({
   const kpi = (label, value, unit) => (
     <div style={{ background: Y.cardBg, borderRadius: 11, padding: "9px 10px" }}>
       <div style={{ fontSize: 9.5, color: Y.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>{label}</div>
-      <div style={{ fontFamily: YMONO, fontWeight: 700, color: Y.text, fontSize: 17, lineHeight: 1.05, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>
+      <div style={{ fontFamily: NUM_FONT, fontWeight: 700, color: Y.text, fontSize: 17, lineHeight: 1.05, fontVariantNumeric: TABULAR_NUMS, marginTop: 3 }}>
         {value}<span style={{ fontSize: 10, color: Y.muted, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
       </div>
     </div>
@@ -17095,7 +17095,7 @@ function YieldPanel({
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, gap: 8 }}>
       <span style={{ fontSize: 12, color: muted ? Y.muted : Y.rowLabel }}>{label}</span>
       <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <span style={{ fontFamily: YMONO, fontSize: 13, color: muted ? Y.muted : Y.text, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>
+        <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: muted ? Y.muted : Y.text, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>
           {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
         </span>
         {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
@@ -17148,7 +17148,7 @@ function YieldPanel({
                     strokeLinecap="butt" strokeDasharray={`${a.len} ${C - a.len}`} strokeDashoffset={a.offset} />
                 ))}
               </g>
-              <text x="50" y="46" textAnchor="middle" dominantBaseline="central" style={{ fontFamily: YMONO, fontSize: 16, fontWeight: 700, fill: Y.text, fontVariantNumeric: "tabular-nums" }}>{f2(acres)}</text>
+              <text x="50" y="46" textAnchor="middle" dominantBaseline="central" style={{ fontFamily: NUM_FONT, fontSize: 16, fontWeight: 700, fill: Y.text, fontVariantNumeric: TABULAR_NUMS }}>{f2(acres)}</text>
               <text x="50" y="61" textAnchor="middle" dominantBaseline="central" style={{ fontSize: 8.5, fill: Y.muted, letterSpacing: "0.06em" }}>acres</text>
             </svg>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
@@ -17163,7 +17163,7 @@ function YieldPanel({
                   <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ width: 10, height: 10, borderRadius: 3, flex: "none", ...sw }} />
                     <span style={{ flex: 1, fontSize: 11.5, color: zero ? Y.muted : Y.rowLabel }}>{s.label}</span>
-                    <span style={{ fontFamily: YMONO, fontSize: 12, fontWeight: 650, color: zero ? Y.muted : Y.text, fontVariantNumeric: "tabular-nums" }}>{Math.round(s.pct)}%</span>
+                    <span style={{ fontFamily: NUM_FONT, fontSize: 12, fontWeight: 650, color: zero ? Y.muted : Y.text, fontVariantNumeric: TABULAR_NUMS }}>{Math.round(s.pct)}%</span>
                   </div>
                 );
               })}
@@ -17198,7 +17198,7 @@ function YieldPanel({
               tally (it's neither impervious nor open) — it does NOT count here. */}
           <div key="Impervious" title="What counts as impervious: building footprints (incl. bump-outs) + paving, roads & sidewalks + car parking + trailer storage — each including its derived curbs. Detention pond surface is tallied separately below and is NOT counted as impervious." style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "help" }}>
             <span style={{ fontSize: 12, color: Y.rowLabel, borderBottom: `1px dotted ${Y.muted}` }}>Impervious<span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span></span>
-            <span style={{ fontFamily: YMONO, fontSize: 13, color: Y.text, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>{f0(impPct)}%</span>
+            <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: Y.text, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{f0(impPct)}%</span>
           </div>
           {row("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
           {row("Detention %", `${f0(detPct)}%`)}
@@ -17239,7 +17239,7 @@ function YieldPanel({
                 <div key={key || label} title={info || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: info ? "help" : "default" }}>
                   <span style={{ fontSize: 12, color: Y.rowLabel }}>{label}{info ? <span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span> : null}</span>
                   <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                    <span style={{ fontFamily: YMONO, fontSize: 13, color: vColor, fontWeight: 650, fontVariantNumeric: "tabular-nums", textAlign: "right" }}>
+                    <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: vColor, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS, textAlign: "right" }}>
                       {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
                     </span>
                     {tag ? <span onClick={(e) => e.stopPropagation()}><SourceTag code={tag.code} label={label} basis={tag.basis} /></span> : null}
@@ -17456,7 +17456,7 @@ function YieldPanel({
                       {chip ? <StatusChip label={chip} tone={tone} /> : null}
                       <span style={{ fontSize: 11, fontWeight: 700, color: Y.rowLabel, letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
                     </span>
-                    <span style={{ fontFamily: YMONO, fontSize: 13.5, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: vColor, textAlign: "right", whiteSpace: "nowrap", flex: "none" }}>
+                    <span style={{ fontFamily: NUM_FONT, fontSize: 13.5, fontWeight: 800, fontVariantNumeric: TABULAR_NUMS, color: vColor, textAlign: "right", whiteSpace: "nowrap", flex: "none" }}>
                       <FlashValue token={String(verdict)}>{verdict}</FlashValue>{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10 }}> {sub}</span> : null}
                     </span>
                   </button>
@@ -17658,7 +17658,7 @@ function YieldPanel({
                     mitR.push(
                       <div key="mit-balance" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: Y.rowLabel }}>Balance</span>
-                        <span style={{ fontFamily: YMONO, fontSize: 13, fontWeight: 750, fontVariantNumeric: "tabular-nums", color: balColor }}>{balText}</span>
+                        <span style={{ fontFamily: NUM_FONT, fontSize: 13, fontWeight: 750, fontVariantNumeric: TABULAR_NUMS, color: balColor }}>{balText}</span>
                       </div>
                     );
                     // NEW-2 — surplus cut is a quiet efficiency note (method fold), never a warning:
@@ -17733,7 +17733,7 @@ function YieldPanel({
                 );
                 // NEW-2 / B882 — an accepted estimate (any provider) priced the 1% surface: stamp
                 // the ledger loudly, naming the winning source.
-                if (isEstimatedWseSrc(mit.providers.wse1pct)) mitR.push(warnNote(`1% WSE is ESTIMATED (${wseProvLabel(mit.providers.wse1pct)}) — screening only.`, "mit-est-wse", estWseNote(mit.providers.wse1pct)));
+                if (isEstimatedWseSrc(mit.providers.wse1pct)) mitR.push(warnNote(`1% WSE is ${wseProvLabel(mit.providers.wse1pct)} — screening only.`, "mit-est-wse", estWseNote(mit.providers.wse1pct)));
                 if (mit.flags.includes("rule_unverified")) mitR.push(warnNote("Mitigation rule unverified — edit & confirm in the inputs below.", "mit-unv"));
                 // B824 — sanity/datum flags + the rule and providers lines, migrated from the card.
                 if (mit.flags.includes("wse02-below-1pct")) mitR.push(warnNote("The 0.2% WSE reads BELOW the 1% here — mismatched studies; don't rely on it.", "mit-02below", "A 0.2% (500-yr) surface can never sit below the 1% (100-yr) surface on one reach — the two values come from mismatched studies or vintages. Enter a 0.2% WSE from the effective FIS profile."));
@@ -17799,7 +17799,7 @@ function YieldPanel({
               detR.push(
                 <div key="deficit" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: Y.rowLabel }}>{diff >= 0 ? "Surplus" : "Shortfall"}</span>
-                  <span style={{ fontFamily: YMONO, fontSize: 13, fontWeight: 750, fontVariantNumeric: "tabular-nums", color: diff >= 0 ? Y.green : Y.dangerText }}>
+                  <span style={{ fontFamily: NUM_FONT, fontSize: 13, fontWeight: 750, fontVariantNumeric: TABULAR_NUMS, color: diff >= 0 ? Y.green : Y.dangerText }}>
                     {diff >= 0 ? "+" : "−"}{f2(Math.abs(diff))} ac-ft
                   </span>
                 </div>
@@ -17946,7 +17946,7 @@ function YieldPanel({
                           <button type="button" title={opts.accept.title || ""} onClick={() => { fm.onChange(opts.accept.patch); setDrainEditField(null); }} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.rowLabel }}>{opts.accept.label || "✓ use"}</button>
                         )}
                         <button type="button" onClick={() => setDrainEditField(key)} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "baseline", gap: 5 }}>
-                          <span style={{ fontSize: 11.5, fontFamily: YMONO, color: Y.rowLabel }}>~{f1(autoVal)}′</span>
+                          <span style={{ fontSize: 11.5, fontFamily: NUM_FONT, color: Y.rowLabel }}>~{f1(autoVal)}′</span>
                           <span style={{ fontSize: 10, color: Y.muted }}>· {sourceLabel}</span>
                           <span style={{ fontSize: 10, color: Y.muted, textDecoration: "underline" }}>edit</span>
                         </button>
@@ -18124,7 +18124,7 @@ function YieldPanel({
                   {fm.estWse && !Number.isFinite(fm.settings.bfeFt) && fm.estSensitivity && fm.estSensitivity.sensitive &&
                     warnNote(`⚠ ESTIMATE-SENSITIVE — ${fm.estSensitivity.flips.map((fl) => EST_FLIP_LABEL[fl.key] || fl.key).join(", ")} changes within ±1 ft.`, "fm-est-sensitive", "The mitigation volume, required finished-floor, buildability verdict and/or detention split flip within a ±1-ft band around this screening estimate — exactly the range a sealed H&H / Atlas-14 study resolves. Don't kill or commit the deal on the screening number alone.")}
                   {isEstimatedWseSrc(fm.bfeSrc) && Number.isFinite(fm.settings.bfeFt) &&
-                    warnNote(`BFE is ESTIMATED (${wseProvLabel(fm.bfeSrc)}) — screening only`, "fm-est-bfe", estWseNote(fm.bfeSrc))}
+                    warnNote(`BFE is ${wseProvLabel(fm.bfeSrc)} — screening only`, "fm-est-bfe", estWseNote(fm.bfeSrc))}
                   {/* B794 — the ⓘ names WHERE the number comes from, county-specific: Fort Bend's
                       mitigation basis is the effective FIRM 48157C FIS (2014-04-02, pre-Atlas-14). */}
                   {autoField("0.2% (500-yr) WSE", "wse02Ft",
@@ -18193,13 +18193,13 @@ function YieldPanel({
                 if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft")
                   ffeR.push(warnNote("The 0.2% WSE behind this required FFE is a DRAFT Fort Bend watershed-study value.", "ffe-draft02", "Screening only — confirm before design; enter the effective FIS 0.2% WSE to override."));
                 if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse02pct" && (d.wse02Src === "ebfe-wse02" || d.wse02Src === "maapnext-wse02")) // B882
-                  ffeR.push(warnNote(`The 0.2% WSE behind this required FFE is a screening estimate (${wseProvLabel(d.wse02Src)}).`, "ffe-est02", "Screening only — an estimate, not a published FIS value; confirm before design; enter the effective FIS 0.2% WSE to override."));
+                  ffeR.push(warnNote(`The 0.2% WSE behind this required FFE is ${wseProvLabel(d.wse02Src)}.`, "ffe-est02", "Screening only — an estimate, not a published FIS value; confirm before design; enter the effective FIS 0.2% WSE to override."));
                 if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "atlas14_100yr" && d.wse100Src === "fbcdd-wse100-draft")
                   ffeR.push(warnNote("The Atlas-14 100-yr WSE behind this required FFE is a DRAFT Fort Bend watershed-study value.", "ffe-draft100", "Screening only — confirm before design; enter a BFE to override."));
                 // NEW-2 / B882 — the ESTIMATED stamp rides the FFE verdict when the governing basis
                 // is ANY accepted estimate (never dropped off a consumer), naming the source.
                 if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse1pct" && isEstimatedWseSrc(d.floodMit?.bfeSrc))
-                  ffeR.push(warnNote(`The 1% WSE behind this required FFE is ESTIMATED (${wseProvLabel(d.floodMit.bfeSrc)}).`, "ffe-est-wse", estWseNote(d.floodMit.bfeSrc)));
+                  ffeR.push(warnNote(`The 1% WSE behind this required FFE is ${wseProvLabel(d.floodMit.bfeSrc)}.`, "ffe-est-wse", estWseNote(d.floodMit.bfeSrc)));
                 // NEW-1 (Waller) — "prohibited" is a stronger enum than "restricted": no
                 // structural fill in EITHER band, open foundations only (no fill-to-elevate
                 // / LOMR-F pathway at all). Reads as the loudest warn line.

@@ -9,6 +9,7 @@ import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
+import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import {
   resolveLayerUrl,
   identifyParcelEager,
@@ -1193,7 +1194,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           ) : (
             <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
           )}
-          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}</div>
+          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}</div>
         </div>
         {/* (B168) single-click ✕ delete removed — delete lives in the right-click menu;
             only the non-destructive locate (⊕) stays here. */}
@@ -1228,7 +1229,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             stays EPSG:2278 feet. B706 appends the ground elevation when a reading exists (cached
             terrain grid, else one debounced 3DEP point sample) — suppressed over no-data. */}
         {hoverLL && (
-          <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 900, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.9)", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 9px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+          <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 900, pointerEvents: "none", fontFamily: NUM_FONT, fontSize: 11, color: "rgba(255,255,255,0.9)", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 9px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>
             {hoverLL.lat.toFixed(6)}°,&nbsp;{hoverLL.lng.toFixed(6)}°
             {hoverElFt != null && <span data-ground-el> · El ≈ {hoverElFt.toFixed(1)} ft NAVD88</span>}
           </div>
