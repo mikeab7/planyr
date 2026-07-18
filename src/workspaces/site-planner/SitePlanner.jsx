@@ -139,7 +139,7 @@ import {
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
-import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
+import { buildSheetFurnitureSvg, screenFurniturePlates, calibBadgePlacement } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
 import { printStrokeWidth, sheetFitScale } from "./lib/exportStyle.js";
@@ -1354,7 +1354,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
 
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
-  const [size, setSize] = useState({ w: 800, h: 560 });
+  // `w`/`h` are clamped to a sane minimum for the coordinate math; `rawW` is the TRUE
+  // (unclamped) map-pane width, used only to keep the bottom furniture from overlapping
+  // when a docked left panel narrows the pane below the clamp (NEW-1 / B881).
+  const [size, setSize] = useState({ w: 800, h: 560, rawW: 800 });
+  // NEW-1 (B881): the calibration badge is text-width (not viewport-capped like the scale
+  // bar), so it's the one bottom item that can run into the right-anchored scale bar when
+  // the pane narrows. We measure its natural width and, when it WOULD collide, reflow it up
+  // to its own row above the bar (see the badge block below).
+  const calibBadgeRef = useRef(null);
+  const [calibBadgeW, setCalibBadgeW] = useState(0);
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -2614,7 +2623,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!wrapRef.current) return;
     const ro = new ResizeObserver((ents) => {
       const r = ents[0].contentRect;
-      setSize({ w: Math.max(320, r.width), h: Math.max(360, r.height) });
+      setSize({ w: Math.max(320, r.width), h: Math.max(360, r.height), rawW: r.width });
     });
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
@@ -11973,6 +11982,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
   };
 
+  // Bottom map furniture, computed ONCE and shared by the furniture overlay (scale bar +
+  // north arrow) and the calibration badge below it (NEW-1 / B881). The badge needs the
+  // bar's plate width/height so it can tell whether it would collide and, if so, reflow up
+  // to its own row that clears the bar. `paneW` is the TRUE pane width (see `size.rawW`).
+  const paneW = size.rawW ?? size.w;
+  const furnPlates = screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
+  // Would the calibration badge (anchored at left:56, bottom:40) run into the right-anchored
+  // scale bar on the same row? Pure decision in sheetFurniture.js: when they'd meet the badge
+  // is lifted to its own row above the bar (and its width capped). `calibBadgeW` is measured
+  // below; 0 until then → never raised.
+  const calibPlace = calibBadgePlacement({ paneW, badgeW: calibBadgeW, scaleBarW: furnPlates.scaleBar.plateW, scaleBarH: furnPlates.scaleBar.plateH });
+  // Measure the badge's natural width. The ref sits on the LABEL span, whose `scrollWidth`
+  // reports the FULL text width even after the pill caps + ellipsis-truncates it — so raising
+  // the badge (which applies the cap) can never feed back and shrink this measurement into an
+  // oscillation. Add a fixed chrome allowance (dot + gaps + horizontal padding ≈ 40px) to get
+  // the whole pill's natural width. Re-measures only when the label text changes.
+  useLayoutEffect(() => {
+    const el = calibBadgeRef.current;
+    if (!el) return;
+    const w = el.scrollWidth + 40;
+    setCalibBadgeW((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+  }, [calibrationState, underlay]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--planner-panel)",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
@@ -13049,7 +13081,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               controls, which were nudged to make room). pointerEvents:none so they never
               swallow a click. data-export="skip" — the export draws its own copy. */}
           {(() => {
-            const furn = screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
+            const furn = furnPlates; // computed once in the body; shared with the calibration badge (B881)
             const plate = (p) => (
               <svg width={p.plateW} height={p.plateH} viewBox={`0 0 ${p.plateW} ${p.plateH}`}
                 fontFamily="Inter, system-ui, sans-serif" style={{ display: "block", overflow: "visible" }}
@@ -13193,11 +13225,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               uncalibrated: { bg: "rgba(180,83,9,0.95)", dot: "#fbbf24", text: "▲ Not calibrated", sub: "click to calibrate" },
             }[calibrationState];
             const warn = calibrationState === "uncalibrated";
+            // NEW-1 (B881): when a docked left panel narrows the map pane, the badge (left:56)
+            // would run into the right-anchored scale bar on the same bottom:40 row. Reflow it up
+            // to its own row just above the bar (clearing the bar below AND the bottom-right zoom
+            // controls above, which start at bottom:100), and cap its width so it truncates with
+            // an ellipsis instead of overflowing the pane. Wide panes keep the original layout.
+            const badgeMaxW = calibPlace.maxWidth ?? undefined;
             return (
               <div onClick={warn ? () => { setShowAerial(true); setLeftPanel("references"); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); } : undefined}
-                style={{ position: "absolute", left: 56, bottom: 40, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6 }}>
-                <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
-                {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>· {cfg.sub}</span>}
+                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6, overflow: "hidden" }}>
+                <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, flex: "none", animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+                <span ref={calibBadgeRef} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>· {cfg.sub}</span>}
+                </span>
               </div>
             );
           })()}
@@ -13402,7 +13442,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
               EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
           {cursorLL && (
-            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums" }}>
+            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: "tabular-nums", maxWidth: "calc(100% - 20px)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", boxSizing: "border-box" }}>
               {cursorLL.lat.toFixed(6)}°,&nbsp;{cursorLL.lng.toFixed(6)}°
               {cursorElFt != null && <span data-ground-el> · El ≈ {cursorElFt.toFixed(1)} ft NAVD88</span>}
             </div>
