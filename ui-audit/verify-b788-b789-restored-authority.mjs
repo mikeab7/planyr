@@ -5,10 +5,18 @@
  *   settings.drainage.lastCheck is seeded with the pre-B754 WRONG verdict
  *   (primaryReviewerId:"coh") next to CORRECT raw facts (city Katy · ETJ Houston ·
  *   county Fort Bend), an old sig (→ stale), plus a latent drainsToHcfcdChannel:true.
- *   Expect: reviewer RE-DERIVES to Fort Bend County Drainage District (B788); the stale
- *   banner + ↻ Re-check lead the card and claims read past-tense "checked <date>" (B791);
- *   the "Drains to HCFCD channel" control is ABSENT and the stored channel answer is
- *   visibly ignored (B789 a/c); no HCFCD greater-of candidate prices (B789).
+ *   Expect: reviewer RE-DERIVES to Fort Bend County Drainage District (B788); the remembered
+ *   status line reads PAST-tense with its date + a ↻ Re-check, never present-tense "detected"
+ *   (B791 — note B860 later REMOVED the "site boundary changed" banner in favour of live
+ *   recompute + this merged status line, so the anti-false-freshness contract is what's
+ *   asserted, not the retired banner); the "Drains to HCFCD channel" control is ABSENT and
+ *   the stored channel answer is visibly ignored (B789 a/c); no HCFCD greater-of prices (B789).
+ *
+ * Maintenance (2026-07-18, V294-V297 batch): re-verified against current main. The four
+ * features all render correctly; the harness had gone stale on two counts — (1) its group
+ * expander used a `▸ Detention` text selector that B862 broke, so the collapsed groups' detail
+ * rows were never in the DOM; (2) it asserted the B791 banner that B860 deliberately retired.
+ * Fixed the expander (aria-expanded headers) + repointed the B791 assertion to the live copy.
  *
  * Scenario 2 (explicit COH override on the same Fort Bend site, >20 ac):
  *   settings.drainage.authorityId:"coh" → the engine prices COH's own impervious rate
@@ -73,6 +81,24 @@ const ok = (b) => (b ? "PASS" : "FAIL");
 let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${ok(cond)}] ${label}${extra ? ` — ${extra}` : ""}`); };
 
+// B824 — the Stormwater readout is grouped + COLLAPSED (verdict lines only); a collapsed
+// group's detail rows are NOT in the DOM (React conditional render), so every text
+// assertion below first needs the groups + their "Assumptions & method" sub-folds opened.
+// (The old `button:has-text("▸ Detention")` selector went stale when B862 moved the ▸ into
+// its own span + added a StatusChip — the header button's text no longer starts with "▸".)
+async function expandGroups(page) {
+  for (let pass = 0; pass < 3; pass++) {
+    await page.evaluate(() => {
+      const labels = ["Detention", "Floodplain mitigation", "Buildability / FFE", "Ledger balancer"];
+      document.querySelectorAll('button[aria-expanded="false"]').forEach((btn) => {
+        const tx = btn.textContent || "";
+        if (labels.some((l) => tx.includes(l)) || /Assumptions & method/.test(tx)) btn.click();
+      });
+    }).catch(() => {});
+    await page.waitForTimeout(250);
+  }
+}
+
 async function openYield(browser, drainage, clickCheck, floodMitigation = null, county = "fortbend") {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 860 }, deviceScaleFactor: 2 });
   await ctx.addInitScript(seedFor(drainage, floodMitigation, county));
@@ -94,12 +120,7 @@ async function openYield(browser, drainage, clickCheck, floodMitigation = null, 
   }
   await page.getByText("Detention required", { exact: false }).waitFor({ timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(700);
-  // B824 — the Stormwater readout is grouped + COLLAPSED; expand all three verdict
-  // groups so the detail rows are in the DOM for the text assertions.
-  for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
-    await page.locator(`button:has-text("${g}")`).first().click({ timeout: 4000 }).catch(() => {});
-    await page.waitForTimeout(120);
-  }
+  await expandGroups(page);
   const t = (await page.locator("body").innerText()).replace(/\s+/g, " ");
   return { ctx, page, t };
 }
@@ -107,19 +128,30 @@ async function openYield(browser, drainage, clickCheck, floodMitigation = null, 
 async function run() {
   const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 
+  // autoFacts:false across scenarios 1-3 — these assert the deterministic REMEMBERED view
+  // (the point of V294/V297: the reviewer/copy that renders WITHOUT a fresh check). This
+  // harness mocks the GIS endpoints, so leaving B832 auto-revalidation on would let it
+  // silently re-run a fresh check and repaint "remembered from your last check" → "Facts
+  // as of <time>", racing the remembered-state assertions. (verify-remembered-drainage.mjs
+  // disables it for the same reason.) The B788 re-derive happens at hydration either way.
   console.log("\nScenario 1 — restored stale check with the pre-B754 'coh' verdict + latent channel override:");
   {
-    const { ctx, page, t } = await openYield(browser, { drainsToHcfcdChannel: true, lastCheck }, false);
+    const { ctx, page, t } = await openYield(browser, { drainsToHcfcdChannel: true, lastCheck, autoFacts: false }, false);
     expect("B788: reviewer RE-DERIVED to Fort Bend County Drainage District (stored 'coh' not trusted)",
       /Fort Bend County Drainage District/.test(t));
     expect("B788: reviewer is NOT City of Houston",
       !/Reviewing authority: City of Houston/.test(t));
     expect("B788/B791: no present-tense '(detected from city-limits GIS)' on a remembered check",
       !/\(detected from city-limits GIS\)/.test(t));
-    // B803 (NEW-1(e)) merged the banner into the one status line: "⚠ As of <date> — site
-    // boundary changed since; numbers below reflect the old boundary".
-    expect("B791: the stale status line leads — boundary-changed wording + old-boundary caveat",
-      /site boundary changed since/i.test(t) && /old boundary/.test(t));
+    // B860 (KEY DECISION, chat NEW-1) SUPERSEDED B791's original "⚠ site boundary changed
+    // since; numbers below reflect the old boundary" banner: pure detention/mitigation/FFE
+    // math recomputes LIVE off the cached facts, so a click's worth of staleness never
+    // demotes the numbers — changed verdicts flash instead of a banner. What survives from
+    // B791 is the anti-false-freshness contract this item exists to prove: a remembered
+    // check reads PAST-tense with its date and offers ↻ Re-check; it must never claim
+    // present-tense "detected". The merged B832 status line delivers exactly that.
+    expect("B791/B860: the remembered status line reads past-tense ('remembered from your last check')",
+      /remembered from your last check/i.test(t));
     expect("B791: the status line carries the checked date (past tense)",
       /As of 7\/10\/2026|As of \d/.test(t));
     const recheck = await page.getByRole("button", { name: /Re-check/ }).count();
@@ -135,13 +167,13 @@ async function run() {
     expect("B823: the Assumptions ⓘ carries 'HCFCD n/a outside Harris — saved channel answer ignored'", ignoredInfo);
     expect("B789: no HCFCD greater-of candidate prices on this Fort Bend site",
       !/greater-of/.test(t));
-    if (failures) console.log(`\n  Readout excerpt: ${t.match(/Stormwater[\s\S]{0,500}/)?.[0]?.slice(0, 500) || "(not found)"}`);
+    if (failures) console.log(`\n  Readout excerpt: ${t.match(/STORMWATER[\s\S]{0,500}/i)?.[0]?.slice(0, 500) || "(not found)"}`);
     await ctx.close();
   }
 
   console.log("\nScenario 2 — explicit COH override on the Fort Bend site (>20 ac):");
   {
-    const { ctx, t } = await openYield(browser, { authorityId: "coh", lastCheck }, false);
+    const { ctx, t } = await openYield(browser, { authorityId: "coh", lastCheck, autoFacts: false }, false);
     expect("B789 engine: COH-only pricing with the one-line off-Harris caveat (B823 copy)",
       /outside Harris — Houston's own rate shown alone/.test(t));
     expect("B789 engine: no HCFCD greater-of compare under the off-Harris override",
@@ -151,7 +183,7 @@ async function run() {
 
   console.log("\nScenario 3 — B790: sticky floodMitigation.jurKey:'harris' on the Fort Bend site:");
   {
-    const { ctx, page, t } = await openYield(browser, { lastCheck }, false, { jurKey: "harris" });
+    const { ctx, page, t } = await openYield(browser, { lastCheck, autoFacts: false }, false, { jurKey: "harris" });
     expect("B790: the county-mismatch warning names the contradiction (B823 one-liner)",
       /county map reads Fort Bend/.test(t) && /switch Jurisdiction to Auto/i.test(t));
     const autoOpt = await page.locator('option[value=""]').filter({ hasText: /Auto — detected/ }).count();
@@ -160,12 +192,7 @@ async function run() {
     const fmSelect = page.locator("select").filter({ has: page.locator('option[value=""]', { hasText: /Auto — detected/ }) }).last();
     await fmSelect.selectOption("").catch(() => {});
     await page.waitForTimeout(400);
-    // B824 — the Stormwater readout is grouped + COLLAPSED; expand all three verdict
-    // groups so the detail rows are in the DOM for the text assertions.
-    for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
-      await page.locator(`button:has-text("${g}")`).first().click({ timeout: 4000 }).catch(() => {});
-      await page.waitForTimeout(120);
-    }
+    await expandGroups(page);
     const t2 = (await page.locator("body").innerText()).replace(/\s+/g, " ");
     expect("B790: switching to Auto clears the mismatch warning",
       !/county map reads Fort Bend —/.test(t2));
