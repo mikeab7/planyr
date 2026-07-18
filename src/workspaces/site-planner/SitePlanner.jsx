@@ -2528,17 +2528,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Last-ditch flush of pending element commits during page unload (the supabase-js client can't do
   // keepalive) — hits the commit_elements RPC endpoint directly. Composes with the whole-doc unload
   // flush already registered above; the dirty queue + next-load re-sync remain the guarantee.
+  //
+  // B901 — this used to be wired ONLY through `registerFlush` (flushAll()), which fires solely on an
+  // APP-INITIATED forced reload (chunk-recovery / the ErrorBoundary "Reload" button — see
+  // app/flushRegistry.js). A genuine user-initiated reload/close (F5, the browser's reload button,
+  // closing the tab) never calls flushAll() — it only fires the browser's native `beforeunload` /
+  // `visibilitychange` events, which this effect never listened to. So a per-element edit still
+  // sitting in the engine's ~750ms debounce (e.g. clearing a pond's outlet) could survive a REAL
+  // reload only via the local pending-edit journal's fold-on-boot — a genuine race the keepalive
+  // commit exists specifically to close, per this block's own doc comment, but never actually ran for
+  // a real reload. Now wired directly, mirroring the whole-doc `beforeunload`/`visibilitychange`
+  // flush above: `reconcileElems(false)` first (diff the very latest state into the dirty queue —
+  // it may not have run yet if the debounced autosave effect hasn't ticked) THEN keepalive-commit
+  // whatever is pending. `registerFlush` stays too — it still covers the forced-reload path, which
+  // fires reload navigation differently (location.replace, no natural unload race).
   useEffect(() => {
-    const off = registerFlush(() => {
+    if (!siteId) return;
+    const runFlush = () => {
       const e = elSyncRef.current;
       if (!e || !isCloudActive() || readOnlyRef.current) return;
+      try { reconcileElems(false); } catch (_) {}
       const ops = e.pendingOps();
       if (!ops.length) return;
       const { url, anon } = supabaseRest();
       keepaliveCommit({ url, anon, token: currentAccessToken(), siteId, ops });
-    });
-    return off;
-  }, [siteId]);
+    };
+    const onVis = () => { if (document.visibilityState === "hidden") runFlush(); };
+    window.addEventListener("beforeunload", runFlush);
+    document.addEventListener("visibilitychange", onVis);
+    const off = registerFlush(runFlush);
+    return () => {
+      window.removeEventListener("beforeunload", runFlush);
+      document.removeEventListener("visibilitychange", onVis);
+      off();
+    };
+  }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
   // background storage event never yanks the canvas out from under an active edit.
@@ -11929,7 +11953,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {gsG && (
                   <Field label="Fill shrink/swell (%)">
                     <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <NumInput style={{ ...numInput, width: 70 }} value={gsShrinkPct ?? null} min={0} placeholder="0"
+                      <NumInput allowClear style={{ ...numInput, width: 70 }} value={gsShrinkPct ?? null} min={0} placeholder="0"
                         onCommit={(n) => setGrading({ shrinkPct: Number.isFinite(n) ? n : null })} />
                       <span style={{ fontSize: 11, color: PAL.muted }} title="Compacted fill needs MORE bank dirt than its placed volume (clay placed at 95% Proctor commonly shrinks 10–25%). Blank = none applied — enter your geotech's number.">bank→placed ⓘ</span>
                     </span>
@@ -14646,7 +14670,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ marginTop: 8 }}>
                     <Field label="Pad elev. (ft NAVD88)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput style={{ ...numInput, width: 64 }} value={selEl.padElevFt ?? ""} placeholder={auto != null ? `auto ${f1(auto)}` : "auto"} onCommit={(n) => { pushHistory(); setSelEl({ padElevFt: Number.isFinite(n) ? n : null }); }} />
+                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={selEl.padElevFt ?? ""} placeholder={auto != null ? `auto ${f1(auto)}` : "auto"} onCommit={(n) => { pushHistory(); setSelEl({ padElevFt: Number.isFinite(n) ? n : null }); }} />
                         {selEl.padElevFt != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to automatic (slab FF, dock zones minus the dock drop)" onClick={() => { pushHistory(); setSelEl({ padElevFt: null }); }}>Auto</button>}
                       </span>
                     </Field>
@@ -14676,7 +14700,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     )}
                     <Field label="Grading slope (%)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput style={{ ...numInput, width: 64 }} value={g.slopePct ?? ""} min={0}
+                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={g.slopePct ?? ""} min={0}
                           placeholder={rule ? `auto ${gradingChipLabel(rule).split(" — ")[0]}` : "auto"}
                           onCommit={(n) => setGradingEl({ slopePct: Number.isFinite(n) ? n : null })} />
                         {g.slopePct != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to automatic (the class band)" onClick={() => setGradingEl({ slopePct: null })}>Auto</button>}
@@ -14770,7 +14794,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Detention storage</div>
                     <Field label="Total depth (ft)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput style={numInput} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
+                        <NumInput allowClear style={numInput} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
                         {det.depth != null
                           ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }}>· Planyr screening convention</span>}
@@ -14789,7 +14813,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     )}
                     <Field label="Freeboard (ft)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput style={numInput} value={det.freeboard ?? ""} placeholder={`~${f1(pondAuto.freeboard.value)}`} min={0} onCommit={(n) => setDet({ freeboard: Number.isFinite(n) ? n : null })} />
+                        <NumInput allowClear style={numInput} value={det.freeboard ?? ""} placeholder={`~${f1(pondAuto.freeboard.value)}`} min={0} onCommit={(n) => setDet({ freeboard: Number.isFinite(n) ? n : null })} />
                         {det.freeboard != null
                           ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear — back to auto (${pondAuto.freeboard.source})`} onClick={() => setDet({ freeboard: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.freeboard.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.freeboard.source}</span>}
@@ -14797,7 +14821,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </Field>
                     <Field label="Side slope (n:1 H:V)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput style={numInput} value={det.slope ?? ""} placeholder={`~${f1(pondAuto.slope.value)}`} min={1} onCommit={(n) => setDet({ slope: Number.isFinite(n) ? n : null })} />
+                        <NumInput allowClear style={numInput} value={det.slope ?? ""} placeholder={`~${f1(pondAuto.slope.value)}`} min={1} onCommit={(n) => setDet({ slope: Number.isFinite(n) ? n : null })} />
                         {det.slope != null
                           ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear — back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.slope.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.slope.source}</span>}
@@ -14825,7 +14849,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               </Field>
                               <Field label="Top-of-bank elev. (ft)">
                                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  <NumInput style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "optional"} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
+                                  <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "optional"} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
                                   {det.tobElev != null
                                     ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={pondAuto.tobElev ? `Clear — back to auto (${pondAuto.tobElev.source})` : "Clear — label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>
                                     : pondAuto.tobElev
@@ -14847,20 +14871,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {det.contours === false && (
                       <Field label="Top-of-bank elev. (ft)">
                         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <NumInput style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "optional"} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
+                          <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "optional"} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
                           {det.tobElev == null && pondAuto.tobElev && <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }}>· {pondAuto.tobElev.source}</span>}
                         </span>
                       </Field>
                     )}
                     <Field label="Permanent pool elev. (ft)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput style={{ ...numInput, width: 64 }} value={det.poolElev ?? ""} placeholder="dry bottom" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
+                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.poolElev ?? ""} placeholder="dry bottom" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
                         {det.poolElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — dry-bottom basin" onClick={() => setDet({ poolElev: null })}>Clear</button>}
                       </span>
                     </Field>
                     <Field label="Receiving flowline elev. (ft)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
+                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
                         {det.receivingFlowlineElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear" onClick={() => setDet({ receivingFlowlineElev: null })}>Clear</button>}
                       </span>
                     </Field>
@@ -14990,7 +15014,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <div key="gw-dtw" style={{ marginTop: 6 }}>
                             <Field label="Depth to water (ft)">
                               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                <NumInput style={{ ...numInput, width: 64 }} value={dtw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
+                                <NumInput allowClear style={{ ...numInput, width: 64 }} value={dtw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
                                 <span style={{ fontSize: 10, color: PAL.muted }}>seasonal high (SSURGO / TWDB well)</span>
                               </span>
                             </Field>
@@ -15266,13 +15290,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Required detention (screening)</div>
                           <Field label="Drainage area (ac)">
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <NumInput style={{ ...numInput, width: 64 }} value={Math.round(da * 100) / 100} min={0} onCommit={(n) => setDet({ daAcres: n > 0 ? n : null })} />
+                              <NumInput allowClear style={{ ...numInput, width: 64 }} value={Math.round(da * 100) / 100} min={0} onCommit={(n) => setDet({ daAcres: n > 0 ? n : null })} />
                               {det.daAcres != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the whole site" onClick={() => setDet({ daAcres: null })}>Site</button>}
                             </span>
                           </Field>
                           <Field label="Impervious %">
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <NumInput style={{ ...numInput, width: 64 }} value={Math.round(imp * 10) / 10} min={0} max={100} onCommit={(n) => setDet({ daImpPct: Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null })} />
+                              <NumInput allowClear style={{ ...numInput, width: 64 }} value={Math.round(imp * 10) / 10} min={0} max={100} onCommit={(n) => setDet({ daImpPct: Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null })} />
                               {det.daImpPct != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the plan's auto value" onClick={() => setDet({ daImpPct: null })}>Auto</button>}
                             </span>
                           </Field>
@@ -15284,7 +15308,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </Field>
                           <div id={`pond-release-field-${selEl.id}`}>
                             <Field label="Allowable release (cfs)">
-                              <NumInput style={{ ...numInput, width: 64 }} value={rel ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ releaseRateCfs: Number.isFinite(n) ? n : null })} />
+                              <NumInput allowClear style={{ ...numInput, width: 64 }} value={rel ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ releaseRateCfs: Number.isFinite(n) ? n : null })} />
                             </Field>
                           </div>
                           <Field label="Outfall">
@@ -15296,7 +15320,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {pumped && (
                             <Field label="Pump rate">
                               <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                                <NumInput style={{ ...numInput, width: 58 }} value={pumpRaw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ pumpRateCfs: Number.isFinite(n) ? n : null })} />
+                                <NumInput allowClear style={{ ...numInput, width: 58 }} value={pumpRaw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ pumpRateCfs: Number.isFinite(n) ? n : null })} />
                                 <select style={{ ...numInput, width: 58 }} value={pumpUnit} onChange={(e) => setDet({ pumpRateUnit: e.target.value })}>
                                   <option value="cfs">cfs</option>
                                   <option value="gpm">gpm</option>
@@ -15424,13 +15448,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       );
                       const primEdit = primary && primary.kind === "orifice" ? (
                         <>
-                          <Field label="Orifice ⌀ (in)"><NumInput style={{ ...numInput, width: 64 }} value={primary.diameterIn ?? ""} placeholder="—" min={0} onCommit={(n) => setPrimary({ diameterIn: Number.isFinite(n) && n > 0 ? n : null })} /></Field>
-                          <Field label="Invert elev (ft)"><NumInput style={{ ...numInput, width: 72 }} value={Number.isFinite(primary.invertElevFt) ? primary.invertElevFt : ""} placeholder="—" onCommit={(n) => setPrimary({ invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
+                          <Field label="Orifice ⌀ (in)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={primary.diameterIn ?? ""} placeholder="—" min={0} onCommit={(n) => setPrimary({ diameterIn: Number.isFinite(n) && n > 0 ? n : null })} /></Field>
+                          <Field label="Invert elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(primary.invertElevFt) ? primary.invertElevFt : ""} placeholder="—" onCommit={(n) => setPrimary({ invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
                         </>
                       ) : primary ? (
                         <>
-                          <Field label="Max release (cfs)"><NumInput style={{ ...numInput, width: 64 }} value={primary.maxCfs ?? ""} placeholder="—" min={0} onCommit={(n) => setPrimary({ maxCfs: Number.isFinite(n) && n >= 0 ? n : null })} /></Field>
-                          <Field label="Invert elev (ft)"><NumInput style={{ ...numInput, width: 72 }} value={Number.isFinite(primary.invertElevFt) ? primary.invertElevFt : ""} placeholder="—" onCommit={(n) => setPrimary({ invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
+                          <Field label="Max release (cfs)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={primary.maxCfs ?? ""} placeholder="—" min={0} onCommit={(n) => setPrimary({ maxCfs: Number.isFinite(n) && n >= 0 ? n : null })} /></Field>
+                          <Field label="Invert elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(primary.invertElevFt) ? primary.invertElevFt : ""} placeholder="—" onCommit={(n) => setPrimary({ invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
                         </>
                       ) : null;
 
@@ -15446,7 +15470,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <Field label="Emergency weir">
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                               <button style={{ ...chip, padding: "5px 10px", ...(weirStage ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={toggleWeir}>{weirStage ? "On" : "Off"}</button>
-                              {weirStage && <NumInput style={{ ...numInput, width: 58 }} value={weirStage.lengthFt ?? ""} placeholder="L ft" min={0} onCommit={(n) => setWeir({ lengthFt: Number.isFinite(n) && n > 0 ? n : null })} />}
+                              {weirStage && <NumInput allowClear style={{ ...numInput, width: 58 }} value={weirStage.lengthFt ?? ""} placeholder="L ft" min={0} onCommit={(n) => setWeir({ lengthFt: Number.isFinite(n) && n > 0 ? n : null })} />}
                               {weirStage && <span style={{ fontSize: 10, color: PAL.muted }}>ft @ {r2(weirStage.crestElevFt)}</span>}
                             </span>
                           </Field>
@@ -16852,7 +16876,7 @@ function AlignIcon({ dir }) {
 }
 // A numeric input you can edit freely (clear it, type partial values) — it only
 // commits (parse + clamp) on Enter or blur, never live on each keystroke.
-function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse }) {
+function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, allowClear = false }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   const editing = useRef(false);
   useEffect(() => { if (!editing.current) setDraft(value == null ? "" : String(value)); }, [value]);
@@ -16868,6 +16892,19 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse 
   };
   const commit = () => {
     editing.current = false;
+    // B901 — an intentionally EMPTIED field is a CLEAR, not a typo: for a field whose caller
+    // opted in (allowClear — every call site already null-coalesces its own onCommit), commit
+    // null so the value actually clears. Without this branch an empty draft fell into the
+    // "unparseable" case below, which SILENTLY REVERTS to the last committed value and never
+    // calls onCommit at all — so a field could be typed-into but never cleared via keyboard
+    // (backspace / select-all-delete / Delete all did nothing). Every OTHER field (allowClear
+    // unset) keeps the exact old revert-on-empty behavior — required geometry fields must never
+    // silently go null.
+    if (allowClear && draft.trim() === "") {
+      setDraft("");
+      if (value != null) onCommit(null);
+      return;
+    }
     const v = clampNum(parseFloat(draft));
     if (v == null) { setDraft(value == null ? "" : String(value)); return; }
     setDraft(String(v));
@@ -17924,7 +17961,7 @@ function YieldPanel({
                         style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}
                       >×</button>
                     )}
-                    <NumInput style={fmInputStyle} value={Number.isFinite(fm.settings[key]) ? fm.settings[key] : ""} placeholder={placeholder || "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null })} />
+                    <NumInput allowClear style={fmInputStyle} value={Number.isFinite(fm.settings[key]) ? fm.settings[key] : ""} placeholder={placeholder || "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null })} />
                   </span>
                 </div>
               );
@@ -17979,7 +18016,7 @@ function YieldPanel({
                       {manual == null && hasAuto && (
                         <button type="button" title={`Use the auto value (~${f1(autoVal)}′ · ${sourceLabel})`} onClick={() => setDrainEditField(null)} style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, padding: "2px 7px", borderRadius: 999, border: `1px solid ${Y.border}`, background: "transparent", color: Y.muted }}>auto</button>
                       )}
-                      <NumInput style={fmInputStyle} value={manual != null ? manual : ""} placeholder={hasAuto ? `~${f1(autoVal)}` : "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null, ...srcPatch })} />
+                      <NumInput allowClear style={fmInputStyle} value={manual != null ? manual : ""} placeholder={hasAuto ? `~${f1(autoVal)}` : "—"} onCommit={(n) => fm.onChange({ [key]: Number.isFinite(n) ? n : null, ...srcPatch })} />
                       {manual != null && fieldTag ? <SourceTag code={fieldTag.code} label={label} /> : null}
                     </span>
                   </div>
