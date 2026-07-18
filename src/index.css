@@ -67,6 +67,15 @@
      AA-tuned --danger-text above (small red label on a panel). */
   --danger:       #E24B4A;
 
+  /* Yield-panel PROVENANCE source-tag color (B895 — the CODE tag: an adopted
+     ordinance/criteria value). PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED reuse the
+     success/info/warn/text-secondary/danger tokens above directly; CODE has no
+     existing semantic-text token, so it gets its own rather than repurposing the
+     Schedule module's accent (--accent-schedule-text) for an unrelated meaning —
+     same tuned violet hue, but the two can now diverge without coupling a module
+     accent to a data-provenance color. See lib/provenance.js SOURCE_TAG_COLOR_VAR. */
+  --source-code-text: #534AB7;
+
   /* Project-status palette (B234; re-hued B365; Dead off red B433) as tokens so DOM
      badges theme live. The canonical hexes mirror src/shared/ui/statusTokens.js (map
      pins read those directly — pins sit on the aerial map, a theme-neutral surface).
@@ -173,6 +182,7 @@
   --danger-text:  #F2706F;
   --info-text:    #6FB4F0;
   --danger:       #F2706F;   /* vivid alert/error fill, lightened for dark (B433) */
+  --source-code-text: #AFA9EC;
 
   /* Status — lighter variants so saturated values don't go muddy on dark cards (B320).
      Dead = the same gray as Complete (red lives in --danger now, B433). */
