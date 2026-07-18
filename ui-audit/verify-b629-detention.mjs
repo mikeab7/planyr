@@ -156,7 +156,9 @@ async function run() {
     expect("tract-size trigger folds into the tier ⓘ", await page.locator('div[title*="Tract size"]').count() > 0);
     expect("hydraulic-regime banner renders (A/B/unknown — never absent)", /Regime (A|B|unknown)/i.test(t));
   }
-  expect("screening caveat present", /Screening estimate — confirm with your engineer/.test(t));
+  // B895 — the ~7 inline "screening only — confirm with your engineer" variants collapsed
+  // into ONE persistent Yield-panel footer (YieldFooterDisclaimer.jsx); assert its wording.
+  expect("screening caveat present (panel footer)", /Screening estimates for deal-stage decisions/.test(t));
 
   // ── 5a. NEW-1 verdict-first density redesign: the single status line (date + inline
   // Re-check), the mitigation-inputs 'Advanced' fold, and the datum footnote folded into

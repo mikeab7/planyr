@@ -105,7 +105,9 @@ await page.locator('button[title="Yield"]').first().click();
 await page.waitForTimeout(700);
 const panelTxt = (await menuPanel.innerText()).replace(/\s+/g, " ");
 ok(/Detention storage/.test(panelTxt) && /ac-ft/.test(panelTxt), "B719 Yield shows a 'Detention storage … ac-ft' row");
-ok(/Prismoidal, screening only/.test(panelTxt), "B719 detention-storage caveat note present");
+// B895 — the "Prismoidal, screening only" caveat note was replaced by a PLAN SourceTag on
+// the row (its Basis popover carries the prismoidal-method detail); assert the tag instead.
+ok(/Detention storage[\s\S]{0,60}PLAN/.test(panelTxt), "B719 detention-storage row carries a PLAN source tag");
 ok(!/\bFAR\b/.test(panelTxt), "B722 the FAR row is gone from the Yield panel");
 // Impervious row carries a title tooltip defining what it sums.
 const impTitle = await page.evaluate(() => {

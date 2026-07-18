@@ -111,7 +111,22 @@ const PAIRS = [
   ["--text-secondary", "--planner-raised", "secondary · planner card", T],
   ["--text-tertiary", "--planner-raised", "tertiary · planner card", U],
   ["--warn-text", "--planner-raised", "warn text · planner card", T],
+  ["--warn-text", "--planner-panel", "warn text · planner panel", T],
   ["--danger-text", "--planner-raised", "danger text · planner card", T],
+  ["--danger-text", "--planner-panel", "danger text · planner panel", T],
+  // B895 — the Yield-panel SourceTag colors. Rows (and their tags) sit on the panel's
+  // raised background (Y.panelBg === --planner-raised, SitePlanner.jsx YIELD_PAL) or
+  // the general app card/page surfaces — never directly on --planner-panel (the darker
+  // sunken backdrop reserved for the KPI/inputs cards, which don't carry SourceTags).
+  // --success-text on --planner-panel narrowly misses AA (4.30) — deliberately NOT
+  // audited here because SourceTag never renders on that surface; if a future
+  // consumer wants a PLAN tag there, bump the treatment (bordered pill, not bare
+  // text) rather than adding that pair as a passing exception.
+  ["--source-code-text", "--planner-raised", "source tag CODE · planner card", T],
+  ["--source-code-text", "--surface-raised", "source tag CODE · card", T],
+  ["--source-code-text", "--surface-page", "source tag CODE · page", T],
+  ["--info-text", "--planner-raised", "info text (source tag SURVEY) · planner card", T],
+  ["--success-text", "--planner-raised", "success text (source tag PLAN) · planner card", T],
   // Chrome (top bars, rail, status bar)
   ["--chrome-text", "--chrome-bg", "chrome text · chrome", T],
   ["--chrome-text", "--chrome-bg-elev", "chrome text · chrome-elev", T],

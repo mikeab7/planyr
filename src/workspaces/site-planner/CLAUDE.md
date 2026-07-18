@@ -81,6 +81,14 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (engine-truth cell painter — B809 fill-depth mode AND the B826 cut/fill diverging mode); earthwork
   rows live in Yield → "Earthwork cost (screening)"; mitigation prices fill at the proposed surface
   when it exists (`fp.surfaceAt`, labeled), flat pad as the fallback.
+- Yield-panel provenance (B895): `provenance.js` — the six-word SourceTag vocabulary (CODE/PLAN/
+  SURVEY/ESTIMATE/YOURS/UNVERIFIED) + color-token map + `classifyWseSource`/`classifyVerified`
+  (pure mappings from signals the engine already computes — WSE_PROVIDER_LABEL codes, the
+  `pondAutoValues` `verified` flag — to a tag). Consumed by `components/SourceTag.jsx` (the
+  right-aligned pill + Basis popover), `components/SourcesLegend.jsx` (the one "Sources ⓘ" panel
+  legend), `components/WatchOutChip.jsx` (the one ⚠ item-specific-risk rendering), `components/
+  ActionLink.jsx` (the accent-colored "do something" affordance, distinct from a passive tag), and
+  `components/YieldFooterDisclaimer.jsx` (the ONE persistent screening disclaimer).
 
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.
