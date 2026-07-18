@@ -38,6 +38,23 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft);
   `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
   per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807).
+- Detention outlet / routing / criteria tier (NEW-A, Phase A): `detentionCriteria.js` (the versioned
+  jurisdiction criteria registry — cited outlet/geometry criteria, referencing `detentionRules.js` for
+  the verified release/storm/freeboard facts; audit + overrides), `outletStructure.js` (per-pond
+  orifice/weir/restrictor model + stage→discharge rating curve), `stageStorageDischarge.js` (pairs
+  `pondGeom` storage with the outlet curve), `pondRouting.js` (modified-Puls reservoir routing proving
+  Post ≤ Pre per storm), `receivingWater.js` (nearest NHDPlus HR receiving water for the outfall +
+  easement flag). All pure/Node-tested.
+- Public-data inputs tier (NEW-B, Phase B): `curveNumber.js` (SCS CN runoff), `soils.js` (SSURGO
+  Soil Data Access — HSG + seasonal-high water table; SDA proxy-blocked in sandbox → live-verify),
+  `groundwater.js` (wet-vs-dry pond feasibility from combined SSURGO + TWDB depth-to-water),
+  `subsidence.js` (Harris-Galveston / Fort Bend subsidence-district cited flag registry),
+  `pfdsClient.js` (NOAA Atlas-14 rainfall via the `functions/api/pfds.js` proxy — live-reachable),
+  `twdbWells.js` (TWDB observation-wells interface, endpoint live-verify pending). All pure/Node-tested.
+- Deal-screens tier (NEW-C, Phase C): `upstreamArea.js` (extends `flowField.js` D8 → flow-accumulation
+  over the 3DEP DEM → upstream contributing area + the offsite-drainage "engineer's check" flag) +
+  `regionalDetention.js` (regional-detention / fee-in-lieu cited registry + on-site-vs-fee buildable-SF
+  comparison). Pure/Node-tested.
 - Pond economics optimizer (NEW-D, Phase D): `pondOptimizer.js` — searches depth × placement pond
   configurations (deeper-smaller vs shallower-bigger, pond-cut-as-pad-fill dirt balance) under
   constraints (max depth, Phase-B groundwater ceiling, 30-ft maintenance berm, pipeline-corridor

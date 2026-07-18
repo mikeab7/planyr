@@ -135,6 +135,12 @@ import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js"
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
 import { sizePondForTargets, scaleRing, solveTobRaise } from "./lib/pondSizing.js";
+import { pondGroundwaterScreen } from "./lib/groundwater.js";
+import { subsidenceFlag } from "./lib/subsidence.js";
+import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
+import { defaultOutletForPond, outletProblems } from "./lib/outletStructure.js";
+import { assessRoutedDetention } from "./lib/pondRouting.js";
+import { regionalDetentionFor, feeInLieuCompare } from "./lib/regionalDetention.js";
 import { optimizePond } from "./lib/pondOptimizer.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
@@ -1637,6 +1643,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [floodRules, setFloodRules] = useState(loadFloodplainRules);
   const [pondCriteria] = useState(loadPondCriteria);
   const [buildRules] = useState(loadBuildabilityRules);
+  // NEW-A1 — per-jurisdiction detention-criteria overrides (registry defaults are cited;
+  // an override wins). Loaded once like the criteria/rule files above.
+  const [criteriaOverrides] = useState(loadCriteriaOverrides);
   // Wetlands presence lifted from the Site Analysis screen's own finding (B710's
   // Section-404 cross-flag consumes it — no new fetch).
   const [analysisWetlands, setAnalysisWetlands] = useState(null);
@@ -14833,6 +14842,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           ? `Pond land take incl. the modeled ${f1(matBerm.maxHeightFt)}′ fill berm (toe ~${f0(bermToeReach)}′ out at ${gsApronRatio}:1): ${f2(landTakeSf / SQFT_PER_ACRE)} ac (water footprint ${f2(polyArea(ring) / SQFT_PER_ACRE)} ac).`
                           : `Pond land take incl. the ${critRule.maintBermWidthFt}′ maintenance berm: ${f2(landTakeSf / SQFT_PER_ACRE)} ac (water footprint ${f2(polyArea(ring) / SQFT_PER_ACRE)} ac).`, "landtake"));
                         if (bermOverlaps.length) out.push(warnLine(`⚠ The ${landIsBerm ? "fill-berm toe" : "maintenance-berm"} ring overlaps ${bermOverlaps.length === 1 ? `a ${TYPE[bermOverlaps[0].type].label.toLowerCase()}` : `${bermOverlaps.length} other elements`} — the ${landIsBerm ? "berm footprint" : "criteria shelf"} runs into your layout.`, "berm-overlap", false));
+                        // NEW-C2 (Phase C) — if the jurisdiction has a regional-detention / fee-in-lieu
+                        // program, show the deal trade: paying in lieu of this on-site pond recovers its
+                        // land-take back to buildable ground.
+                        const rdAuthId = ({ harris: "hcfcd", fortbend: "fortbend", coh: "coh" })[floodJurKey] || floodJurKey;
+                        const rd = regionalDetentionFor(rdAuthId);
+                        if (rd && rd.available === true) {
+                          const cmp = feeInLieuCompare({ pondLandTakeAc: landTakeSf / SQFT_PER_ACRE, requiredAcFt: detReq && detReq.kind === "point" ? detReq.requiredAcFt : null, coverageRatio: 0.4 });
+                          if (cmp.buildableSfRecovered != null) {
+                            out.push(noteLine(`Fee-in-lieu may be available (${rd.authorityLabel}): paying in lieu of this on-site pond could recover ~${cmp.buildableSfRecovered.toLocaleString()} SF buildable from its ${f2(cmp.landRecoveredAc)}-ac land take (screening, 40% coverage). ${rd.eligibilityNote} Verify the fee + eligibility with the district.`, "fee-in-lieu"));
+                          }
+                        }
                         // NEW-D1 (Phase D) — the pond economics optimizer: if this pond owes a
                         // known volume, the best deeper-smaller alternative that recovers the most
                         // buildable land (screening; the owner redraws the winner).
@@ -14851,6 +14871,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       }
                       if ((crit.slope || crit.freeboard || landTakeSf != null) && critRule && critRule.verified === false) {
                         out.push(noteLine("Criteria values are unverified placeholders — edit & confirm in settings against the PCPM / county DCM.", "crit-unv"));
+                      }
+                      // NEW-B (Phase B) — soils/groundwater wet-vs-dry pond screen + subsidence-district
+                      // flag. Depth-to-water is manual here (auto-fills from SSURGO once the /api/soils
+                      // proxy is live — SDA is egress-blocked in the sandbox); grade + county come from
+                      // facts the app already holds, so this adds no new fetch.
+                      {
+                        const gwCounties = drainCtxData?.authority?.jurisdiction?.county || [];
+                        const dtw = Number.isFinite(det.depthToWaterFt) ? det.depthToWaterFt : null;
+                        const gw = pondGroundwaterScreen({ depthToWaterFt: dtw, gradeElevFt: fmElev.existGradeFt, tobElevFt: tobEff, pondDepthFt: Number.isFinite(det.depth) ? det.depth : 8 });
+                        out.push(
+                          <div key="gw-dtw" style={{ marginTop: 6 }}>
+                            <Field label="Depth to water (ft)">
+                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <NumInput style={{ ...numInput, width: 64 }} value={dtw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
+                                <span style={{ fontSize: 10, color: PAL.muted }}>seasonal high (SSURGO / TWDB well)</span>
+                              </span>
+                            </Field>
+                          </div>
+                        );
+                        if (gw.known) out.push(gw.wetPond ? warnLine(`⚠ ${gw.message}`, "gw-wet", false) : noteLine(gw.message, "gw-dry"));
+                        else if (dtw != null) out.push(noteLine(gw.message, "gw-note"));
+                        const subs = subsidenceFlag(gwCounties);
+                        if (subs) out.push(noteLine(`Subsidence: ${subs.message}`, "subsidence"));
                       }
                       // NEW-11/B831 — this pond vs drawn easements + the assumed pipeline corridor.
                       {
@@ -15175,6 +15218,149 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {pumped && credit && <div style={{ ...smallNote, color: PAL.warn }}>{credit.assumption}</div>}
                           <div style={smallNote}>Modified Rational screening — confirm with your engineer and the reviewing authority.</div>
                         </div>
+                      );
+                    })()}
+                    {/* NEW-A (Phase A) — RATE control (Post ≤ Pre): route each required storm through
+                        the pond's OUTLET STRUCTURE and prove the routed post-development peak ≤ the
+                        pre-development peak, per storm. This is what a rate-control district (FBCDD,
+                        Brookshire–Katy DD, Waller) actually regulates — the volume band above is a
+                        screening proxy. Criteria come from the cited jurisdiction registry
+                        (detentionCriteria); the outlet is the additive det.outlet, persisted via setDet. */}
+                    {(() => {
+                      const effDet = detWithAuto(selEl.det);
+                      const split = pondSplitFor(selEl);
+                      const criteria = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
+                      const da = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
+                      const imp = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
+                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.45, margin: "2px 0 0" };
+                      const head = (
+                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Rate control · Post ≤ Pre (screening)</div>
+                      );
+                      const wrap = (kids) => (
+                        <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>{head}{kids}</div>
+                      );
+                      const anchored = effDet.tobElev != null && Number.isFinite(effDet.tobElev);
+                      if (!anchored) {
+                        return wrap(<div style={smallNote}>Set the pond's top-of-bank elevation (above) to route storms and prove Post ≤ Pre through an outlet.</div>);
+                      }
+                      const depthEff = Number.isFinite(effDet.depth) ? effDet.depth : 8;
+                      const fbEff = Number.isFinite(effDet.freeboard) ? effDet.freeboard : 1;
+                      const r2 = (n) => Math.round(n * 100) / 100;
+                      const floorApprox = r2(effDet.tobElev - depthEff);
+                      const designWs = r2(effDet.tobElev - fbEff);
+                      // The allowable release the outlet is sized/checked against: a manual release
+                      // rate wins; else the jurisdiction's published cfs/ac cap × drainage area.
+                      const relCap = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs
+                        : criteria.allowableReleaseCfsPerAc && da > 0 ? r2(criteria.allowableReleaseCfsPerAc.value * da) : null;
+                      const tailwaterElevFt = split && split.wseFt != null ? split.wseFt : null; // drowned-outlet regime
+                      const outlet = det.outlet && Array.isArray(det.outlet.stages) && det.outlet.stages.length ? det.outlet : null;
+                      const stages = outlet ? outlet.stages : [];
+                      const primary = stages[0] || null;
+                      const weirStage = stages.find((s) => s.kind === "weir") || null;
+                      const writeOutlet = (next) => setDet({ outlet: next && next.stages && next.stages.length ? next : null });
+                      const setPrimary = (patch) => { const s = [...stages]; s[0] = { ...(s[0] || {}), ...patch }; writeOutlet({ stages: s }); };
+                      const setKind = (kind) => {
+                        const invert = Number.isFinite(primary?.invertElevFt) ? primary.invertElevFt : floorApprox;
+                        const base = kind === "orifice"
+                          ? { kind, invertElevFt: invert, diameterIn: Number.isFinite(primary?.diameterIn) ? primary.diameterIn : 12, count: 1 }
+                          : { kind, invertElevFt: invert, maxCfs: Number.isFinite(primary?.maxCfs) ? primary.maxCfs : (relCap ?? 1) };
+                        const s = [...stages]; s[0] = base; writeOutlet({ stages: s });
+                      };
+                      const toggleWeir = () => {
+                        if (weirStage) writeOutlet({ stages: stages.filter((s) => s.kind !== "weir") });
+                        else writeOutlet({ stages: [...stages, { kind: "weir", crestElevFt: designWs, lengthFt: 20 }] });
+                      };
+                      const setWeir = (patch) => writeOutlet({ stages: stages.map((s) => (s.kind === "weir" ? { ...s, ...patch } : s)) });
+                      const propose = () => {
+                        const d = defaultOutletForPond({ floorElevFt: floorApprox, designWsElevFt: designWs, allowableReleaseCfs: relCap, orificeC: criteria.orificeC.value });
+                        if (d.outlet) writeOutlet(d.outlet);
+                      };
+                      const critLine = (
+                        <div style={smallNote}>
+                          Criteria: {criteria.label}{criteria.governingManual && criteria.governingManual.section ? ` · ${criteria.governingManual.section}` : ""}
+                          {criteria.allowableReleaseCfsPerAc ? ` · release ${criteria.allowableReleaseCfsPerAc.value} cfs/ac${criteria.allowableReleaseCfsPerAc.verified ? "" : " (unverified)"}` : criteria.postLePre ? " · Post ≤ Pre (rate-match)" : ""}
+                          {" · storms "}{criteria.requiredStorms.join("/")}-yr.
+                        </div>
+                      );
+
+                      if (!outlet) {
+                        return wrap(
+                          <>
+                            <div style={smallNote}>Add a screening outlet to route storms through the pond and check Post ≤ Pre.</div>
+                            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                              <button style={{ ...chip, padding: "6px 10px" }} onClick={propose} disabled={relCap == null} title={relCap == null ? "Enter an allowable release (above), or the criteria publish no cfs/ac cap" : "Propose a floor orifice sized to the allowable release"}>+ Propose outlet</button>
+                              <button style={{ ...chip, padding: "6px 10px" }} onClick={() => writeOutlet({ stages: [{ kind: "orifice", invertElevFt: floorApprox, diameterIn: 12, count: 1 }] })}>+ Orifice</button>
+                              <button style={{ ...chip, padding: "6px 10px" }} onClick={() => writeOutlet({ stages: [{ kind: "restrictor", invertElevFt: floorApprox, maxCfs: relCap ?? 1 }] })}>+ Restrictor</button>
+                            </div>
+                            {relCap != null && <div style={smallNote}>Allowable release ≈ {relCap} cfs{criteria.allowableReleaseCfsPerAc ? ` (${criteria.allowableReleaseCfsPerAc.value} cfs/ac × ${r2(da)} ac)` : " (manual)"}.</div>}
+                            {critLine}
+                          </>
+                        );
+                      }
+
+                      const routed = assessRoutedDetention({ ring, det: effDet, outlet, criteria, areaAcres: da, impPct: imp, tailwaterElevFt });
+                      const oProbs = outletProblems(outlet);
+                      const passChip = (ok) => (
+                        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 5, color: "var(--on-accent)", background: ok ? PAL.success : PAL.danger }}>{ok ? "PASS" : "SHORT"}</span>
+                      );
+                      const primEdit = primary && primary.kind === "orifice" ? (
+                        <>
+                          <Field label="Orifice ⌀ (in)"><NumInput style={{ ...numInput, width: 64 }} value={primary.diameterIn ?? ""} placeholder="—" min={0} onCommit={(n) => setPrimary({ diameterIn: Number.isFinite(n) && n > 0 ? n : null })} /></Field>
+                          <Field label="Invert elev (ft)"><NumInput style={{ ...numInput, width: 72 }} value={Number.isFinite(primary.invertElevFt) ? primary.invertElevFt : ""} placeholder="—" onCommit={(n) => setPrimary({ invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
+                        </>
+                      ) : primary ? (
+                        <>
+                          <Field label="Max release (cfs)"><NumInput style={{ ...numInput, width: 64 }} value={primary.maxCfs ?? ""} placeholder="—" min={0} onCommit={(n) => setPrimary({ maxCfs: Number.isFinite(n) && n >= 0 ? n : null })} /></Field>
+                          <Field label="Invert elev (ft)"><NumInput style={{ ...numInput, width: 72 }} value={Number.isFinite(primary.invertElevFt) ? primary.invertElevFt : ""} placeholder="—" onCommit={(n) => setPrimary({ invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
+                        </>
+                      ) : null;
+
+                      return wrap(
+                        <>
+                          <Field label="Primary outlet">
+                            <span style={{ display: "flex", gap: 5, width: 150 }}>
+                              <button style={{ ...chip, flex: 1, padding: "5px 0", textAlign: "center", ...(primary && primary.kind === "orifice" ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={() => setKind("orifice")}>Orifice</button>
+                              <button style={{ ...chip, flex: 1, padding: "5px 0", textAlign: "center", ...(primary && primary.kind === "restrictor" ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={() => setKind("restrictor")}>Restrictor</button>
+                            </span>
+                          </Field>
+                          {primEdit}
+                          <Field label="Emergency weir">
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <button style={{ ...chip, padding: "5px 10px", ...(weirStage ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={toggleWeir}>{weirStage ? "On" : "Off"}</button>
+                              {weirStage && <NumInput style={{ ...numInput, width: 58 }} value={weirStage.lengthFt ?? ""} placeholder="L ft" min={0} onCommit={(n) => setWeir({ lengthFt: Number.isFinite(n) && n > 0 ? n : null })} />}
+                              {weirStage && <span style={{ fontSize: 10, color: PAL.muted }}>ft @ {r2(weirStage.crestElevFt)}</span>}
+                            </span>
+                          </Field>
+                          <div style={{ marginTop: 3 }}>
+                            <button style={{ ...chip, padding: "3px 8px", fontSize: 10 }} onClick={() => writeOutlet(null)} title="Remove the outlet">× Clear outlet</button>
+                          </div>
+                          {oProbs.length > 0 && <div style={{ ...smallNote, color: PAL.warn }}>Outlet incomplete: {oProbs.join("; ")}.</div>}
+                          {routed.kind === "routed" ? (
+                            <div style={{ marginTop: 8, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr auto", gap: "2px 8px", fontSize: 11, alignItems: "center" }}>
+                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700 }}>STORM</span>
+                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>PRE cfs</span>
+                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>ROUTED</span>
+                                <span />
+                                {routed.perStorm.map((s) => (
+                                  <React.Fragment key={s.returnPeriodYr}>
+                                    <span style={{ fontWeight: 700 }}>{s.returnPeriodYr}-yr</span>
+                                    <span style={{ textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{s.preCfs ?? "—"}</span>
+                                    <span style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", color: s.status === "short" ? PAL.danger : PAL.text }}>{s.routedPeakCfs ?? "—"}</span>
+                                    <span style={{ textAlign: "right" }}>{s.status === "unknown" ? <span style={{ fontSize: 9.5, color: PAL.muted }}>—</span> : passChip(s.status === "pass")}</span>
+                                  </React.Fragment>
+                                ))}
+                              </div>
+                              {routed.flags.includes("overtopping") && <div style={{ ...smallNote, color: PAL.danger }}>⚠ Basin overtops before the outlet can pass the storm — routing is at the top-of-bank limit; enlarge the outlet or the basin.</div>}
+                              {routed.flags.includes("impervious-conservative") && <div style={{ ...smallNote, color: PAL.warn }}>Impervious % unknown — post-development runoff taken at the conservative upper bound.</div>}
+                            </div>
+                          ) : (
+                            <div style={{ ...smallNote, color: PAL.warn }}>Can't route yet: {routed.reason || "missing inputs"}.</div>
+                          )}
+                          {routed.kind === "routed" && routed.assumptions.length > 0 && <div style={smallNote}>{routed.assumptions.join(" ")}</div>}
+                          {critLine}
+                          <div style={smallNote}>{routed.caveat}</div>
+                        </>
                       );
                     })()}
                     {/* B139 — Expand this pond: enter mode (auto-baseline + ghost), then steppers
