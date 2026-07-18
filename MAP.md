@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-18 @ `f5dfc99` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-18 @ `39db0c4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_277 source files mapped._
+_278 source files mapped._
 
 ## infra
 
@@ -489,6 +489,8 @@ _277 source files mapped._
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
   - _exports_: `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`
+- **`src/workspaces/site-planner/lib/wellStatus.js`** — Pure RRC well status classifier (PHASE 4): SYMNUM/description → producing/plugged/dry/abandoned/injection, and `summarizeWells` turns a proximity result into a status breakdown + an on-site offset/replug risk flag
+  - _exports_: `classifyWell`, `summarizeWells`
 - **`src/workspaces/site-planner/lib/wseProviders.js`** — the pluggable estimated-WSE provider registry (B882, pure): per-county precedence (district model → FEMA InFRM EBFE → grade) + provenance labels; `resolveEstimatedWse` picks the winning 1%/0.2% source and reports cross-provider disagreement.
   - _exports_: `resolveEstimatedWse`, `WSE_PROVIDERS`, `wseProviderMeta`
 - **`src/workspaces/site-planner/lib/yieldBar.js`** — B862: the shared required-vs-provided bullet-bar geometry + primitive marks for the Yield → Stormwater readout; one source consumed by the on-screen SVG (SitePlanner `BulletBar`) AND the PDF export string (`printSheet.bulletBarSvg`) so they can't drift (PDF-PARITY). `bulletBarLayout`/`stackedBarLayout` (pure geometry), `bulletBarMarks`/`stackedBarMarks` (render primitives), `bulletBarSvg` (PDF string), `stormwaterBarSpecs` (the det/mit bar specs from the drainage object).
