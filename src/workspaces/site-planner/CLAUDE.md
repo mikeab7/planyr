@@ -38,6 +38,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft);
   `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
   per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807).
+- Detention outlet / routing / criteria tier (NEW-A, Phase A): `detentionCriteria.js` (the versioned
+  jurisdiction criteria registry — cited outlet/geometry criteria, referencing `detentionRules.js` for
+  the verified release/storm/freeboard facts; audit + overrides), `outletStructure.js` (per-pond
+  orifice/weir/restrictor model + stage→discharge rating curve), `stageStorageDischarge.js` (pairs
+  `pondGeom` storage with the outlet curve), `pondRouting.js` (modified-Puls reservoir routing proving
+  Post ≤ Pre per storm), `receivingWater.js` (nearest NHDPlus HR receiving water for the outfall +
+  easement flag). All pure/Node-tested.
 - Public-data inputs tier (NEW-B, Phase B): `curveNumber.js` (SCS CN runoff), `soils.js` (SSURGO
   Soil Data Access — HSG + seasonal-high water table; SDA proxy-blocked in sandbox → live-verify),
   `groundwater.js` (wet-vs-dry pond feasibility from combined SSURGO + TWDB depth-to-water),
