@@ -24,6 +24,7 @@
  * The pure helpers (normalizeDeg / parseRotationInput / formatDeg) are exported for unit tests.
  */
 import { useEffect, useRef, useState } from "react";
+import { NUM_FONT, TABULAR_NUMS } from "../theme/typography.js";
 
 /** Wrap any angle into [0, 360). */
 export const normalizeDeg = (n) => (((n % 360) + 360) % 360);
@@ -51,7 +52,7 @@ export function formatDeg(n) {
   return String(canon(n));
 }
 
-const FONT = "ui-monospace, Menlo, monospace";
+const FONT = NUM_FONT;
 
 export default function RotationStepper({
   value, onCommit, onStep, disabled = false, disabledReason,
@@ -107,7 +108,7 @@ export default function RotationStepper({
   };
 
   const baseInput = {
-    width: 52, padding: "6px 8px", fontSize: 12, fontFamily: FONT, borderRadius: 8,
+    width: 52, padding: "6px 8px", fontSize: 12, fontFamily: FONT, fontVariantNumeric: TABULAR_NUMS, borderRadius: 8,
     border: `1px solid ${invalid ? "var(--danger)" : "var(--border-default)"}`,
     color: "var(--text-primary)", background: "var(--surface-raised)",
     opacity: disabled ? 0.5 : 1,

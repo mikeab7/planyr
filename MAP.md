@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-18 @ `4b60690` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-18 @ `1bbc25b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_286 source files mapped._
+_287 source files mapped._
 
 ## infra
 
@@ -166,6 +166,8 @@ _286 source files mapped._
   - _exports_: `default (ThemePicker)`
 - **`src/shared/theme/ThemeProvider.jsx`** — Light/dark/system theme context: persists choice to localStorage, drives data-theme on <html>, live OS-flip listener, usePalette()
   - _exports_: `ThemeProvider`, `usePalette`, `useTheme`
+- **`src/shared/theme/typography.js`** — B895 numeric-value typeface token (NUM_FONT = Inter, never monospace) + TABULAR_NUMS (tabular-nums + slashed-zero), kept in sync with --font by hand (var() can't survive SVG/canvas export)
+  - _exports_: `NUM_FONT`, `TABULAR_NUMS`
 - **`src/shared/thoroughfare/classification.js`** — Canonical thoroughfare classification vocabulary (B720): the normalized road-class enum + labels shared by the DB CHECK, ingestion crosswalks (B721/B722), overlay legend (B723) and analysis (B724); normalizeClassification maps a raw source value through a per-jurisdiction crosswalk (unknown → 'other'), normalizeStatus → existing/proposed
   - _exports_: `CLASSIFICATION_LABELS`, `CLASSIFICATIONS`, `isClassification`, `normalizeClassification`, `normalizeStatus`, `STATUSES`
 - **`src/shared/thoroughfare/houston.js`** — City of Houston MTFP ingestion config (B721): the ArcGIS endpoint, field map, hierarchy→canonical classification crosswalk, and §42-122 ROW standards (major_thoroughfare=100 confirmed, rest provisional pending V274); the one-config-per-jurisdiction shape B722 generalizes

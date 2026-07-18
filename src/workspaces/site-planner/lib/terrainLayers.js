@@ -177,7 +177,7 @@ const labelIcon = (text) => L.divIcon({
   className: "",
   iconSize: [0, 0],
   html: `<span style="display:inline-block;transform:translate(-50%,-50%);white-space:nowrap;pointer-events:none;` +
-    `font:700 10px/1.2 ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:${CONTOUR_INDEX_COL};` +
+    `font:700 10px/1.2 Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums slashed-zero;color:${CONTOUR_INDEX_COL};` +
     `text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff,0 0 4px #fff;">${text}</span>`,
 });
 
