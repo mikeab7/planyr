@@ -372,7 +372,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   it("B755 fix (V268, Bain live-verify 2026-07-18): the BFE-line/cross-section fetch uses a WIDER envelope than the zone/DEM fetch, matching the derivation engine's own search radius", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // the widened pad constant exists and is used to build a second, wider bbox
-    expect(src).toMatch(/const BFE_SEARCH_PAD_DEG = 0\.025;/);
+    expect(src).toMatch(/const BFE_SEARCH_PAD_DEG = 0\.04;/);
     expect(src).toMatch(/const bfeSearchBbox = isFinite\(mnX\) \? floodGeoBbox\(\[\[\[llA\[1\], llA\[0\]\], \[llB\[1\], llB\[0\]\]\]\], BFE_SEARCH_PAD_DEG\) : null;/);
     // the BFE-lines and cross-sections fetches key off the WIDER bbox, not the tight fmBbox
     expect(src).toMatch(/const bfeLinesP = bfeSearchBbox\s*\n\s*\? fetchCached\(VECTOR_SOURCES\.bfeLines, bfeSearchBbox,/);
