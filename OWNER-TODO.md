@@ -7,18 +7,30 @@
 
 _Last updated: 2026-07-18._
 
-## 🔑 A read-only TEST LOGIN would let Claude clear the biggest pile of verification checks itself
-- [ ] **The single highest-leverage thing you can hand over.** The live-app checklist (`VERIFICATION.md`)
-      has a large chunk of items that are stuck only because they need someone **signed in** (a saved site,
-      cloud sync, the account menu). Right now those wait on the Claude cohort using a real browser. If you
-      create a **throwaway, low-privilege test account** (its own email + password, no real project data —
-      just used to click through) and share the credentials, Claude can sign in as that account and clear
-      most of the signed-in checklist itself, instead of parking those items. Nothing sensitive rides on it.
-      **One caveat, in plain terms:** the sandbox Claude runs in here still can't log in even with a password
-      (its network is locked down and blocks the sign-in handshake) — so the test login helps the **cohort on
-      the live site** (planyr.io), and would only help the sandbox too if you also loosen that environment's
-      network rules. Either way, a test account is the piece that unblocks the most work. Tell a Claude
-      session when you've made one and where the credentials live.
+## 🔑 One 2-minute paste finishes the TEST LOGIN you already made — turns on automatic signed-in testing forever
+- [x] ~~Create a throwaway test account~~ — **DONE 2026-07-18.** You made `e2e@planyr.test` and shared it in
+      chat. Thank you — this is exactly the account the project's testing already expects (it even has a
+      name for it: "the B280 seeded account").
+- [ ] **One step left, and it's better than what was originally asked for.** A Claude session tried signing
+      in with it directly today and hit a wall: **this particular sandbox's internet connection is deliberately
+      locked down and refuses to even reach Supabase (the account-login service) at all** — confirmed directly,
+      not just assumed (the connection attempt came back "blocked by policy," immediately, every time). So this
+      session personally can't use the account to click through the site.
+      **But there's a better fix than loosening any sandbox's rules: the project already has a small robot
+      (in GitHub, the code-hosting site — "GitHub Actions") that runs the signed-in checks automatically,
+      on its own ordinary computer with a normal internet connection, no sandbox involved.** It already knew
+      how to use exactly this kind of test account — it was just missing the two settings that hold the
+      username and password (I also fixed a small gap today so it now points at your real live site,
+      planyr.io, by default — one less setting for you to worry about). Once you add the two, it starts
+      running the FULL signed-in checklist automatically every weekday afternoon (and any time on demand),
+      and if anything's ever broken it opens a note for Claude to fix — all without needing a person, or
+      even a Claude chat, to sit down and click through it.
+      **Your part (2 minutes, in GitHub):** open this repo on github.com → **Settings → Secrets and variables
+      → Actions → New repository secret**, and add two: `E2E_EMAIL` (the email you gave me) and
+      `E2E_PASSWORD` (the password you gave me). That's it — nothing else to configure. (If you'd rather
+      paste them straight into a Claude chat that has access to your GitHub settings, that works too — just
+      don't paste them anywhere in this repo's files or a commit, since anyone who can read the code could
+      then read it back.)
 
 ## 🗓 Optional — one Scheduler date to sanity-check on Grand Port (B835)
 - [ ] **Nothing broken; just a judgment call only you can make.** The task you flagged — Grand Port →
