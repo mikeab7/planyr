@@ -132,6 +132,44 @@ export const STATEWIDE = {
     note: "Well symbols show status — active, plugged, dry hole, injection, etc.",
     opacity: 0.9,
   },
+  ccn_service: {
+    // Public-data screening PHASE 1 — water & sewer CCN service areas ("who holds the
+    // certificate to serve this site"). The Site Analysis Water/Sewer CCN cards drive this
+    // overlay (mapLayer: "ccn_service"). Rendered as an agency /export image (like jur_mud) so
+    // the PUCT symbology comes through and it paints via a CORS-exempt <img>. The Harris County
+    // GIS MapServer hosts BOTH water (layer 1) + sewer (layer 2) in EPSG:2278; its URL comes
+    // from the registry (ccnSewer row) so no endpoint is inlined here. Coverage is the Houston
+    // region (see the ccnSewer registry notes); the analysis WATER card reads the statewide TWDB
+    // source, so a site's certificated-provider ANSWER can be more complete than this visual.
+    kind: "dynamic", label: "Water/sewer CCN (Houston region)",
+    url: GIS_SOURCES.ccnSewer.serviceUrl, layers: [1, 2], opacity: 0.5,
+    note: "PUC water (blue) + sewer (green) certificate-of-convenience service areas — who is certificated to serve retail water/sewer. A boundary is a retail monopoly to serve, NOT proof a line is in the ground. Houston-region coverage. Screening only — confirm with the utility/PUC.",
+    infoCaveat: "A CCN boundary means a utility is CERTIFICATED to serve retail water/sewer here — not that a main is already built to a given parcel. Confirm service, capacity, and tap availability with the utility.",
+  },
+  env_lpst: {
+    // Public-data screening PHASE 2 — TCEQ leaking petroleum storage tank (LPST) sites. The
+    // Site Analysis "Leaking petroleum tanks" card drives this overlay (mapLayer: "env_lpst").
+    // Agency /export image (MapServer, CORS-exempt <img>), URL from the registry (no inline).
+    kind: "dynamic", label: "Leaking petroleum tanks (TCEQ LPST)",
+    url: GIS_SOURCES.lpst.serviceUrl, layers: [0], opacity: 0.9,
+    note: "TCEQ Leaking Petroleum Storage Tank sites — documented petroleum-UST releases. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in.",
+  },
+  env_cleanups: {
+    // Public-data screening PHASE 2 — EPA Superfund (NPL) + RCRA cleanup sites (FRS-derived).
+    // FeatureServer point layer → esriFeature (vector markers); gated to zoomed-in (national
+    // dataset). URL from the registry. Drives the "EPA Superfund / RCRA cleanups" card.
+    kind: "esriFeature", label: "EPA Superfund / RCRA cleanups",
+    url: GIS_SOURCES.epaCleanups.serviceUrl, minZoom: 11, color: "#b45309", weight: 2, opacity: 0.95,
+    note: "EPA 'Cleanups in My Community' — Superfund (NPL) + RCRA corrective-action sites. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in (national dataset).",
+  },
+  faults: {
+    // Public-data screening PHASE 3 — Houston-area active surface growth-fault traces. The Site
+    // Analysis "Active surface faults" card drives this overlay (mapLayer: "faults"). FeatureServer
+    // line layer → esriFeature (vector), zoom-gated. URL from the registry (no inline endpoint).
+    kind: "esriFeature", label: "Active surface faults (Houston)",
+    url: GIS_SOURCES.growthFaults.serviceUrl, minZoom: 11, color: "#7c2d12", weight: 2.5, opacity: 0.95,
+    note: "Houston-area growth-fault surface traces (USGS SIM 2874, via a University of Houston GIS republication). Aseismic slow-slip faults that damage foundations/pavement. Screening only — get a geotechnical/fault study. Loads zoomed in.",
+  },
 };
 
 /* Utility-evidence layers — power & hydrant evidence from crowd/agency sources,
@@ -359,6 +397,10 @@ export const LAYER_VINTAGE = {
   txrrc_pipe: "RRC permit data — continuously updated",
   txrrc_pipe_easement: "Assumed buffer off RRC T-4 routes — not a recorded width",
   txrrc_wells: "RRC permit data — continuously updated",
+  ccn_service: "PUC CCN (via Harris County GIS) — Dec 2023 edition",
+  env_lpst: "TCEQ LPST — continuously updated",
+  env_cleanups: "EPA Cleanups in My Community (FRS) — periodically updated",
+  faults: "USGS SIM 2874 (Shah & Lanning-Rush) via UH GIS — 2005 study",
   // Utility evidence
   osm_power: "OpenStreetMap — community-edited, live",
   osm_hydrants: "OpenStreetMap — community-edited, live",

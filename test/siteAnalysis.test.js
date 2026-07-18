@@ -4,6 +4,7 @@ import {
   ringsSignature, buildAnalysisParams, buildQueryUrl, normalizeAttrs, zoneSummary, wetlandSummary,
   pipelineSummary, classifyStatus, classifyFlood, isSFHA, analyzeSource, runSiteAnalysis,
   buildJurisdictionFinding, buildRoadFinding, deriveZoning,
+  buildProximityParams, epaProgram, analyzeProximitySource,
 } from "../src/workspaces/site-planner/lib/siteAnalysis.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
 
@@ -322,9 +323,8 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     const f = await analyzeSource(flood, [SQUARE], { cache, fetchJson });
     expect(f.mapLayer).toBe("fema");
   });
-  it("pending source reads as pending (source not connected), never absent", async () => {
-    const contam = ANALYSIS_SOURCES.find((s) => s.id === "contamination");
-    const f = await analyzeSource(contam, [SQUARE], {});
+  it("a pending source reads as pending (source not connected), never absent", async () => {
+    const f = await analyzeSource({ id: "future", category: "Future", label: "x", pending: true, caveat: "" }, [SQUARE], {});
     expect(f.status).toBe("pending");
   });
 });
@@ -418,6 +418,60 @@ describe("derived jurisdiction findings", () => {
   });
 });
 
+describe("proximity screen (PHASE 2) — count + nearest distance + names", () => {
+  const lpst = ANALYSIS_SOURCES.find((s) => s.id === "lpst");
+  const epa = ANALYSIS_SOURCES.find((s) => s.id === "epaCleanups");
+  const proxFetch = (feats, count) => async (url) =>
+    (/returnCountOnly=true/i.test(url) ? { count } : { features: feats });
+
+  it("buildProximityParams: server-side distance buffer + returned geometry, polygon intersect", () => {
+    const p = buildProximityParams(lpst, [SQUARE], 5280);
+    expect(p.distance).toBe(5280);
+    expect(p.units).toBe("esriSRUnit_Foot");
+    expect(p.returnGeometry).toBe("true");
+    expect(p.geometryType).toBe("esriGeometryPolygon");
+    expect(JSON.parse(p.geometry).spatialReference.wkid).toBe(4326);
+  });
+
+  it("epaProgram maps MAP_SYMBOL_CODE to a plain program label", () => {
+    expect(epaProgram("S")).toBe("Superfund (NPL)");
+    expect(epaProgram("R")).toBe("RCRA cleanup");
+    expect(epaProgram("SN")).toBe("Superfund (non-NPL)");
+    expect(epaProgram("")).toBe("");
+    expect(epaProgram(null)).toBe("");
+  });
+
+  it("present: count + nearest distance + ranked names, with EPA program tags", async () => {
+    const feats = [
+      { attributes: { PRIMARY_NAME: "FARTHER SITE", MAP_SYMBOL_CODE: "R" }, geometry: { x: -95.775, y: 29.785 } },
+      { attributes: { PRIMARY_NAME: "NEAR SITE", MAP_SYMBOL_CODE: "S" }, geometry: { x: -95.78, y: 29.785 } },
+    ];
+    const f = await analyzeProximitySource(epa, [SQUARE], { cache: freshCache(), fetchJson: proxFetch(feats, 2) });
+    expect(f.status).toBe("present");
+    expect(f.summary).toMatch(/^2 EPA cleanup site\(s\) within 1 mi — nearest .*NEAR SITE/);
+    expect(f.detail[0]).toMatch(/NEAR SITE \(Superfund \(NPL\)\)/);
+    expect(f.mapLayer).toBe("env_cleanups");
+  });
+
+  it("an on-site feature reads 'on/under the site'", async () => {
+    const feats = [{ attributes: { SITE_NAME: "ON SITE" }, geometry: { x: -95.795, y: 29.785 } }];
+    const f = await analyzeProximitySource(lpst, [SQUARE], { cache: freshCache(), fetchJson: proxFetch(feats, 1) });
+    expect(f.summary).toMatch(/on\/under the site: ON SITE/);
+  });
+
+  it("verified empty → absent (a real 'none within N mi'), never unknown", async () => {
+    const f = await analyzeProximitySource(lpst, [SQUARE], { cache: freshCache(), fetchJson: proxFetch([], 0) });
+    expect(f.status).toBe("absent");
+    expect(f.summary).toMatch(/No mapped TCEQ LPST/);
+  });
+
+  it("a hard fetch error → unavailable (retryable), never a false clear", async () => {
+    const boom = async () => { throw new Error("Failed to fetch"); };
+    const f = await analyzeProximitySource(lpst, [SQUARE], { cache: freshCache(), fetchJson: boom });
+    expect(f.status).toBe("unavailable");
+  });
+});
+
 describe("runSiteAnalysis — orchestration", () => {
   it("empty rings → empty result, no network", async () => {
     const r = await runSiteAnalysis([], {});
@@ -431,6 +485,11 @@ describe("runSiteAnalysis — orchestration", () => {
       "Wetlands_gdb_split": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/1/query": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/13/query": () => [],
+      "PUC_CCN_2023Dec": () => [{ attributes: { UTILITY: "CITY OF KATY", STATUS: "Commission Approved", CCN_NO: "10001" } }], // water CCN present
+      "PUC_CCN_Sewer_Water": () => [], // no sewer CCN → info well/septic flag
+      "Public/LPST": () => [{ attributes: { SITE_NAME: "PASADENA LPST" }, geometry: { x: -95.795, y: 29.785 } }], // proximity: on-site LPST
+      "Cleanups_in_my_Community": () => [{ attributes: { PRIMARY_NAME: "PASADENA REFINING", MAP_SYMBOL_CODE: "S" }, geometry: { x: -95.78, y: 29.785 } }], // NPL cleanup nearby
+      "Fault_Houston": () => [{ attributes: { Name: "LONG POINT FAULT" }, geometry: { paths: [[[-95.805, 29.785], [-95.785, 29.785]]] } }], // a fault LINE crossing the site
     });
     const identifyJurisdiction = async () => ({
       county: ["Harris"], city: ["Houston"], etj: [], unincorporated: false, straddle: false,
@@ -439,8 +498,24 @@ describe("runSiteAnalysis — orchestration", () => {
     const identifyRoadAuthority = async () => ({ roads: [{ name: "IH 10", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 }], authorities: ["State (TxDOT)"], ageMs: 500, note: "ok" });
     const { findings } = await runSiteAnalysis([SQUARE], { cache, fetchJson, identifyJurisdiction, identifyRoadAuthority });
     const ids = findings.map((f) => f.id);
-    expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "contamination", "jurisdiction", "road", "zoning"]);
+    expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"]);
     expect(findings.find((f) => f.id === "flood").status).toBe("present");
+    // PHASE 2 proximity: contamination near the site → present with count + nearest + names.
+    const lpst = findings.find((f) => f.id === "lpst");
+    expect(lpst.status).toBe("present");
+    expect(lpst.summary).toMatch(/within 1 mi/);
+    expect(lpst.summary).toMatch(/PASADENA LPST/);
+    const epa = findings.find((f) => f.id === "epaCleanups");
+    expect(epa.status).toBe("present");
+    expect(epa.detail.join(" ")).toMatch(/PASADENA REFINING \(Superfund \(NPL\)\)/);
+    // PHASE 3 proximity on a LINE: a fault trace crossing the parcel reads "crosses the site".
+    const faults = findings.find((f) => f.id === "growthFaults");
+    expect(faults.status).toBe("present");
+    expect(faults.summary).toMatch(/crosses the site: LONG POINT FAULT/);
+    // CCN is a fact (info), never a good/bad constraint: water names the certificated provider,
+    // sewer with no polygon reads as an honest well/septic flag (not a green all-clear).
+    expect(findings.find((f) => f.id === "ccnWater").summary).toMatch(/CITY OF KATY \(a city\)/);
+    expect(findings.find((f) => f.id === "ccnSewer").status).toBe("info");
     expect(findings.find((f) => f.id === "zoning").summary).toMatch(/NO zoning/i);
     const road = findings.find((f) => f.id === "road");
     expect(road.rows[0][1]).toMatch(/TxDOT.*all roads/); // single-authority roll-up
@@ -453,6 +528,11 @@ describe("runSiteAnalysis — orchestration", () => {
       "Wetlands_gdb_split": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/1/query": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/13/query": () => [],
+      "PUC_CCN_2023Dec": () => [],
+      "PUC_CCN_Sewer_Water": () => [],
+      "Public/LPST": () => [],
+      "Cleanups_in_my_Community": () => [],
+      "Fault_Houston": () => [],
     });
     const identifyJurisdiction = async () => { throw new Error("down"); };
     const identifyRoadAuthority = async () => { throw new Error("down"); };

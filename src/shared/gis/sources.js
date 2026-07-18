@@ -158,6 +158,155 @@ export const GIS_SOURCES = {
       "alignment. Retired source: www.gis.hctx.net/arcgishcpid/…/TXRRC/Pipelines.",
   },
 
+  // ---- Utility-service CCN screening sources (public-data screening PHASE 1) ----
+  // "Who holds the certificate to serve this site." A CCN (Certificate of Convenience &
+  // Necessity) is the PUC of Texas retail monopoly to provide water / sewer in a bounded
+  // area. A parcel INSIDE a CCN polygon → that utility is the one obligated (and entitled)
+  // to serve it; a parcel in NO CCN → there is no certificated provider (city-served, a
+  // private well/septic, or a petition/new-CCN is needed). Screening only — the STATUS field
+  // distinguishes an approved cert from one still in a pending docket; confirm with the utility
+  // and the PUC. NB: these polygon layers answer POINT-in-polygon via an ENVELOPE / parcel-ring
+  // intersect (how the screen + the drift verifier query them); a bare x,y point /query on the
+  // Harris MapServer can silently return 0 (older ArcMap host quirk) — never query them with a
+  // naked point.
+  ccnWater: {
+    key: "ccnWater",
+    label: "Water CCN service area",
+    provider: "Public Utility Commission of Texas (via TWDB)",
+    // The authoritative STATEWIDE water-CCN polygons, hosted by the Texas Water Development
+    // Board on ArcGIS Online (Dec-2023 PUCT edition; 3,844 polygons statewide, CORS-clean).
+    // Chosen over the Harris-County re-serve (regional, ~301 polys — the B369 clip trap) for the
+    // same reason wells/pipelines use the statewide RRC service, not the Harris republication.
+    serviceUrl: "https://services3.arcgis.com/O0h7Kr4STkhD6uiU/arcgis/rest/services/PUC_CCN_2023Dec_FeatureLayer/FeatureServer/0",
+    layerId: null, // url already includes the layer index (FeatureServer/0)
+    geometryType: "polygon",
+    // No field encodes the utility KIND (city / MUD / WSC …) — that is inferred from the
+    // UTILITY name string in lib/ccnClassify.js. CCN_TYPE is the service-area class
+    // ("Bounded Service Area"), NOT the utility kind.
+    fields: { utility: "UTILITY", ccnType: "CCN_TYPE", status: "STATUS", ccnNo: "CCN_NO" },
+    coverage: "statewide",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Cypress — dense CCN country (same point the `mud` fixture uses); a county-clipped or
+      // dead source fails this. Queried as a ~1 km envelope by the drift verifier.
+      { label: "Cypress-area water CCN", point: [-95.69, 29.97], expectMinCount: 1 },
+    ],
+    notes:
+      "PUCT water-CCN retail monopoly boundaries (TWDB-hosted, Dec 2023). A site inside a polygon " +
+      "has a certificated water provider (obligated to serve); no polygon → well or a new CCN/petition. " +
+      "STATUS separates an approved cert from a pending docket. Screening only — confirm with the utility/PUC.",
+  },
+  ccnSewer: {
+    key: "ccnSewer",
+    label: "Sewer CCN service area",
+    provider: "Public Utility Commission of Texas (via Harris County GIS)",
+    // There is NO statewide sewer-CCN REST endpoint (PUCT publishes sewer CCN only as a
+    // periodic shapefile download; TWDB serves water CCN but not sewer). Harris County GIS
+    // re-serves the PUCT CCN in EPSG:2278 (Planyr's spine) with BOTH water (layer 1) and
+    // sewer (layer 2) — a PRODUCTION host, but its coverage is the Houston metro region, not
+    // statewide. Documented regional here (the target market is the Houston MSA); upgrading to a
+    // statewide/authoritative sewer source is tracked as a live-verify follow-up (VERIFICATION.md).
+    serviceUrl: "https://www.gis.hctx.net/arcgishcpid/rest/services/State/PUC_CCN_Sewer_Water/MapServer",
+    layerId: 2, // 2 = CCN Sewer Service Areas (1 = water, 0 = water facility lines)
+    geometryType: "polygon",
+    fields: { utility: "UTILITY", ccnType: "CCN_TYPE", status: "STATUS", ccnNo: "CCN_NO" },
+    coverage: "Houston metro region (Harris County GIS re-serve of the PUCT CCN; no statewide sewer-CCN REST exists)",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      { label: "Cypress-area sewer CCN", point: [-95.69, 29.97], expectMinCount: 1 },
+    ],
+    notes:
+      "PUCT sewer-CCN retail monopoly boundaries, Harris County GIS re-serve (EPSG:2278). Regional " +
+      "(Houston MSA) coverage — a far-out site reads 'no sewer CCN' because the layer doesn't reach it, " +
+      "so this screen's absent state is an honest INFO note, never a green all-clear. Statewide-source " +
+      "upgrade tracked as a live-verify item. Same MapServer also hosts the water CCN (layer 1). Screening only.",
+  },
+
+  // ---- Environmental contamination pre-screen (public-data screening PHASE 2) ----
+  // Proximity sources: the screen buffers the parcel and reports count + nearest distance
+  // + names. A Phase I ESA PRE-SCREEN — never a substitute for a Phase I ESA.
+  lpst: {
+    key: "lpst",
+    label: "TCEQ leaking petroleum storage tank (LPST) sites",
+    provider: "Texas Commission on Environmental Quality (TCEQ)",
+    // TCEQ's dedicated LEAKING-tank layer (a documented release from a petroleum UST) — NOT the
+    // all-tanks PST layer (whose LPST_ID is unpopulated). Point layer; the screen buffers the
+    // parcel with a server-side `distance` query (supported here) and measures nearest in EPSG:2278.
+    serviceUrl: "https://gisweb.tceq.texas.gov/arcgis/rest/services/Public/LPST/MapServer",
+    layerId: 0,
+    geometryType: "point",
+    fields: { name: "SITE_NAME", program: "REM_PROG", lpstId: "LPST_ID", city: "CITY", county: "COUNTY", addr: "PHYS_ADDR" },
+    coverage: "statewide",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Pasadena / Ship Channel — dense LPST country (24 within a mile, live 2026-07-18).
+      { label: "Pasadena LPST cluster", point: [-95.21, 29.72], expectMinCount: 1 },
+    ],
+    notes:
+      "TCEQ Leaking Petroleum Storage Tank sites (a documented petroleum-UST release; REM_PROG = the " +
+      "remediation-program status). A Phase I ESA PRE-SCREEN — a Phase I ESA / TCEQ records review is the " +
+      "authoritative check. Historic/closed cases can be inaccurate or unmapped.",
+  },
+  epaCleanups: {
+    key: "epaCleanups",
+    label: "EPA Superfund (NPL) + RCRA cleanup sites",
+    provider: "U.S. EPA (Cleanups in My Community — FRS-derived)",
+    // EPA's unified cleanup point layer: Superfund (NPL + non-NPL) AND RCRA corrective-action in
+    // one service; MAP_SYMBOL_CODE splits the program (S = NPL, SN = Superfund non-NPL, R = RCRA,
+    // combinations + E). AGOL-hosted by EPA's official org (CORS-clean); server-side `distance` works.
+    serviceUrl: "https://services.arcgis.com/cJ9YHowT8TU7DUyn/arcgis/rest/services/Cleanups_in_my_Community_Sites/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "PRIMARY_NAME", symbol: "MAP_SYMBOL_CODE", sfName: "SF_SITE_NAME", city: "CITY_NAME", county: "COUNTY_NAME" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Pasadena Refining area — NPL/RCRA sites present (live 2026-07-18).
+      { label: "Pasadena refining cleanups", point: [-95.21, 29.72], expectMinCount: 1 },
+    ],
+    notes:
+      "EPA 'Cleanups in My Community' — Superfund (NPL/non-NPL) + RCRA corrective-action sites, FRS-derived. " +
+      "MAP_SYMBOL_CODE distinguishes the program. A Phase I ESA PRE-SCREEN — a Phase I ESA is the authoritative check.",
+  },
+
+  // ---- Active surface growth faults (public-data screening PHASE 3) ----
+  growthFaults: {
+    key: "growthFaults",
+    label: "Houston-area active surface faults",
+    provider: "USGS (Shah & Lanning-Rush, SIM 2874) — via University of Houston GIS republication",
+    // Houston growth-fault surface traces (slow-slip faults that crack foundations/pavement).
+    serviceUrl: "https://services1.arcgis.com/euMKmvUChvyJxWq2/arcgis/rest/services/Fault_Houston/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { name: "Name", type: "Type", orientation: "Orientatio" },
+    coverage: "Houston metropolitan area (USGS SIM 2874 study extent)",
+    // ACKNOWLEDGED EXCEPTION: the authoritative dataset (USGS SIM 2874, "Principal faults in the
+    // Houston metropolitan area", Shah & Lanning-Rush) is published as a map/shapefile DOWNLOAD
+    // only — there is no authoritative live REST endpoint, and the USGS-derived AGOL republication
+    // is token-gated. This University of Houston GIS republication of that same dataset is the best
+    // anonymously-queryable live service. It is the COMPLETE study dataset (not a clipped subset),
+    // but community-hosted, so it's an acknowledged exception — screening only.
+    tier: "monitored-exception",
+    tierReason:
+      "USGS SIM 2874 (the authoritative Houston fault dataset) publishes as a DOWNLOAD only; no live " +
+      "authoritative REST endpoint exists and the USGS-derived AGOL copy is token-gated. We depend on the " +
+      "University of Houston GIS republication (the full dataset, anonymously queryable) until we ingest the " +
+      "USGS SIM 2874 shapefile to self-host — tracked in VERIFICATION.",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // NW Houston — dense growth-fault country (25 traces in this envelope, live 2026-07-18).
+      { label: "NW Houston fault traces", bbox: [-95.60, 29.75, -95.40, 29.95], expectMinCount: 1 },
+    ],
+    notes:
+      "Houston-area growth-fault surface traces (aseismic slow-slip faults that damage foundations, slabs, " +
+      "and pavement over time). Community-hosted republication of USGS SIM 2874 — screening only; a " +
+      "geotechnical / fault-specific study is the authoritative check. Prefer self-hosting the USGS shapefile.",
+  },
+
   // ---- Jurisdiction / road identify sources (B93/B94; shared by the screen) ----
   county: {
     key: "county",

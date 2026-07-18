@@ -55,6 +55,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   over the 3DEP DEM → upstream contributing area + the offsite-drainage "engineer's check" flag) +
   `regionalDetention.js` (regional-detention / fee-in-lieu cited registry + on-site-vs-fee buildable-SF
   comparison). Pure/Node-tested.
+- Pond economics optimizer (NEW-D, Phase D): `pondOptimizer.js` — searches depth × placement pond
+  configurations (deeper-smaller vs shallower-bigger, pond-cut-as-pad-fill dirt balance) under
+  constraints (max depth, Phase-B groundwater ceiling, 30-ft maintenance berm, pipeline-corridor
+  exclusions) and ranks by earthwork $, land-take acres, and buildable-SF recovered — reusing
+  pondGeom/pondSizing machinery. Pure/Node-tested.
 - `detentionRules.js` — Houston-MSA detention criteria as versioned rule records + the
   drainage-authority resolver, tier/regime assessors, pond auto-size solvers (B636–B642,
   code-labeled B629–B635; pure, injectable fetch/cache — mirror of `jurisdiction.js`). `pondGeom.js` holds

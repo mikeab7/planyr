@@ -141,6 +141,7 @@ import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
 import { defaultOutletForPond, outletProblems } from "./lib/outletStructure.js";
 import { assessRoutedDetention } from "./lib/pondRouting.js";
 import { regionalDetentionFor, feeInLieuCompare } from "./lib/regionalDetention.js";
+import { optimizePond } from "./lib/pondOptimizer.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt, pondAutoValues,
@@ -14850,6 +14851,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           const cmp = feeInLieuCompare({ pondLandTakeAc: landTakeSf / SQFT_PER_ACRE, requiredAcFt: detReq && detReq.kind === "point" ? detReq.requiredAcFt : null, coverageRatio: 0.4 });
                           if (cmp.buildableSfRecovered != null) {
                             out.push(noteLine(`Fee-in-lieu may be available (${rd.authorityLabel}): paying in lieu of this on-site pond could recover ~${cmp.buildableSfRecovered.toLocaleString()} SF buildable from its ${f2(cmp.landRecoveredAc)}-ac land take (screening, 40% coverage). ${rd.eligibilityNote} Verify the fee + eligibility with the district.`, "fee-in-lieu"));
+                          }
+                        }
+                        // NEW-D1 (Phase D) — the pond economics optimizer: if this pond owes a
+                        // known volume, the best deeper-smaller alternative that recovers the most
+                        // buildable land (screening; the owner redraws the winner).
+                        if (detReq && detReq.kind === "point" && detReq.requiredAcFt > 0) {
+                          const opt = optimizePond({
+                            baseRing: ring, det,
+                            requiredCf: detReq.requiredAcFt * 43560,
+                            maintBermFt: critRule && critRule.maintBermWidthFt > 0 ? critRule.maintBermWidthFt : 30,
+                            costs: { earthworkPerCy: Number.isFinite((settings.prices || {}).earthworkCy) ? +settings.prices.earthworkCy : null },
+                          });
+                          if (opt.ok && opt.best && opt.best.buildableSfDelta != null && opt.best.buildableSfDelta > 0) {
+                            const b = opt.best;
+                            out.push(noteLine(`Optimizer (screening): a ${b.depthFt}′-deep basin holds the required volume on ~${f2(b.landTakeAc)} ac — recovering ~${b.buildableSfDelta.toLocaleString()} SF buildable vs the current ${f2(opt.base.landTakeAc)}-ac take${b.earthworkCost != null ? ` (~$${b.earthworkCost.toLocaleString()} earthwork)` : ""}. Deeper-smaller vs shallower-bigger; redraw to adopt.`, "pond-opt"));
                           }
                         }
                       }
