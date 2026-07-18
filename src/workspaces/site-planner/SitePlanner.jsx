@@ -6309,14 +6309,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = els.find((x) => x.id === id);
     if (!el) return;
     if (el.groupId) { setMulti([]); setDrillId(id); setSel({ kind: "el", id }); return; }
-    // B620: double-click a (centerline) road → edit its inline label in place (right-click still opens
-    // the type/actions menu via onElContext). Legacy bonded rect roads keep the type menu.
-    if (isCenterlineRoad(el)) { setSel({ kind: "el", id }); beginEditInline("el", id); return; }
-    // B750: double-click now opens Properties (was the type/actions menu — that stays on right-click via
-    // onElContext). This native path is the raw-dblclick / test-harness fallback; real users hit the
-    // reconstructed double-tap in startMoveEl (pointer capture eats this native dblclick).
+    // B750/NEW-1: double-click opens Properties; an ALREADY-selected centerline road (text-bearing)
+    // edits its inline label instead — same gate as the startMoveEl reconstruction, via dblWasSelRef
+    // (right-click still opens the type/actions menu via onElContext). This native path is the
+    // raw-dblclick / test-harness fallback; real users mostly hit the reconstructed double-tap in
+    // startMoveEl, but this must make the SAME decision — not unconditionally edit inline — in case
+    // pointer capture doesn't suppress the native dblclick (NEW-1: it was overriding a correctly-opened
+    // Properties panel with a forced inline-label editor).
     setSel({ kind: "el", id });
-    setPropsFor({ kind: "el", id });
+    if (dblWasSelRef.current && isCenterlineRoad(el)) beginEditInline("el", id);
+    else setPropsFor({ kind: "el", id });
+  };
+  // NEW-1 — native-dblclick fallback for the markup shapes (easement/line/polyline) whose SVG nodes
+  // still wired a raw onDoubleClick straight to beginEditInline (pre-B750 leftover): same bug as
+  // onElDouble above — it unconditionally forced the inline label editor open, so a plain double-click
+  // on a NOT-yet-selected easement/line/polyline never reached Properties. Mirrors startMoveMarkup's
+  // gate: only an ALREADY-selected text-bearing markup edits its label; otherwise open Properties.
+  const onMarkupDouble = (e, id) => {
+    e.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    if (!m) return;
+    setSel({ kind: "markup", id });
+    const textBearing = m.kind === "line" || m.kind === "polyline" || m.kind === "easement";
+    if (dblWasSelRef.current && textBearing) beginEditInline("markup", id);
+    else setPropsFor({ kind: "markup", id });
   };
   // Right-click an element always opens its actions menu (so a grouped element can still
   // reach Ungroup / Duplicate group / etc). Keeps an active group selection intact so the
@@ -12110,7 +12126,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     ? m.centerline
                     : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
@@ -12129,7 +12145,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "line") {
                   const a = f2p(m.a), b = f2p(m.b);
                   return (
-                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
                       {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
@@ -12140,7 +12156,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "polyline") {
                   const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   return (
-                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
                       <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
                       {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
@@ -12868,7 +12884,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
                       style={{ cursor: tool === "select" ? "move" : "default" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
-                      onDoubleClick={(e) => { e.stopPropagation(); beginEditCallout(c.id); }} />}
+                      onDoubleClick={(e) => {
+                        // NEW-1 — native-dblclick fallback; same B750 gate as startMoveCallout's
+                        // reconstructed double-tap (was unconditionally forcing the text editor open,
+                        // even on a callout that wasn't already selected).
+                        e.stopPropagation();
+                        setSel({ kind: "callout", id: c.id });
+                        if (dblWasSelRef.current) beginEditCallout(c.id);
+                        else setPropsFor({ kind: "callout", id: c.id });
+                      }} />}
                     {editCallout?.id !== c.id && lines.map((ln, i) => (
                       <text key={i} x={tx} y={bp.y - h / 2 + padY + fontPx * 0.82 + i * lineH} textAnchor={anchor}
                         fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
@@ -13892,7 +13916,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               );
             };
             return (
-              <div data-testid="property-panel">
+              // NEW-1 — plain wrapper: the OUTER dock panel (line ~13873) already carries the canonical
+              // data-testid="property-panel"; a second copy here made getByTestId("property-panel")
+              // resolve to 2 elements (a Playwright strict-mode violation) any time a multi-selection's
+              // Properties was open.
+              <div>
               <Section title={`${multi.length} selected`}>
                 {caps.includes("fillOpacity") && (
                   <Field label="Opacity">
@@ -13997,7 +14025,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
-              <div data-testid="property-panel">
+              // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
+              <div>
               <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
                 <Field label="Outline"><input type="color" value={toHex6(selMarkup.stroke)} {...livePick((v) => liveMarkup({ stroke: v }))} style={swatch} /></Field>
                 <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
@@ -14076,7 +14105,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const swatchCap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 3 };
             const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             return (
-              <div data-testid="property-panel">
+              // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
+              <div>
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
                 <button style={{ ...chip, width: "100%", marginBottom: 9 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
                 {/* row 1: size · text color · fill */}
