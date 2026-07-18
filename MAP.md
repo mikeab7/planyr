@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-18 @ `aae19fc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-18 @ `9520925` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -428,7 +428,7 @@ _257 source files mapped._
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
-  - _exports_: `buildScreenFurnitureSvg`, `buildSheetFurnitureSvg`, `chooseFurnitureCorners`, `furnitureLayout`, `furnitureMetrics`, `northArrowPlate`, `pickScaleBar`, `scaleBarPlate`, `screenFurniturePlates`
+  - _exports_: `buildScreenFurnitureSvg`, `buildSheetFurnitureSvg`, `calibBadgePlacement`, `chooseFurnitureCorners`, `furnitureLayout`, `furnitureMetrics`, `northArrowPlate`, `pickScaleBar`, `scaleBarPlate`, `screenFurniturePlates`
 - **`src/workspaces/site-planner/lib/siteAnalysis.js`** — Registry-driven environmental/regulatory screen of active-parcel rings (flood, wetlands, wells, pipelines, jurisdiction, road, zoning) with silent-error present/absent/unknown/unavailable states over the SWR cache
   - _exports_: `ANALYSIS_SOURCES`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs

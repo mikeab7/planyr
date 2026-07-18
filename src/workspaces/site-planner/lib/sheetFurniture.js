@@ -216,6 +216,32 @@ export function furnitureLayout({ x, y, w, h, ftPerUnit, fmtFeet, pal = {}, bear
   };
 }
 
+// ── Bottom on-screen furniture placement (B881 / NEW-1) ────────────────────
+// The live map pins the graphic scale bar bottom-RIGHT (at `sbRight`), the zoom controls
+// bottom-right above it, the north arrow bottom-LEFT, and the calibration badge bottom-LEFT
+// (at `left`), all on the same `bottom:40` band. Every plate except the badge is either tiny
+// (north arrow) or auto-capped to the viewport (the scale bar targets ~130px, max ~vw·0.4),
+// so the ONE item that can run into the right-anchored scale bar when a docked panel narrows
+// the pane is the text-width calibration badge. This decides whether the badge stays on the
+// scale-bar row or lifts to its OWN row just above the bar — which clears the bar below and
+// the zoom controls above (they start at bottom:100) — and, when lifted, caps its width so it
+// truncates with an ellipsis instead of overflowing the pane / colliding with the zoom column.
+// Pure → unit-testable. `badgeW` is the badge's natural (untruncated) width in CSS px; pass 0
+// before it's measured (→ never raised). Returns { raise, left, bottom, maxWidth }.
+export function calibBadgePlacement({
+  paneW, badgeW, scaleBarW, scaleBarH,
+  left = 56, gap = 10, sbRight = 14, zoomRight = 14, zoomW = 30, row = 40,
+}) {
+  const scaleBarLeft = paneW - sbRight - scaleBarW;
+  const raise = badgeW > 0 && left + badgeW + gap > scaleBarLeft;
+  const bottom = raise ? row + scaleBarH + 2 : row;
+  // When raised, keep the right edge clear of the pane edge AND the zoom column (right-anchored
+  // at zoomRight, zoomW wide) — the raised row barely clears the zoom vertically, so leave a
+  // horizontal margin too. Floor so the badge never truncates to an unreadable stub.
+  const maxWidth = raise ? Math.max(150, paneW - (zoomW + zoomRight) - left - 6) : null;
+  return { raise, left, bottom, maxWidth };
+}
+
 export function buildSheetFurnitureSvg(opts) {
   const L = furnitureLayout(opts);
   return translate(L.scaleBar.tx, L.scaleBar.ty, L.scaleBar.markup) +
