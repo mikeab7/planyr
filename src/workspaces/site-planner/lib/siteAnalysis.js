@@ -30,6 +30,7 @@ import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gis
 import { classifyCcn } from "./ccnClassify.js";
 import { screenProximity, fmtDistFt } from "./proximityScreen.js";
 import { summarizeWells } from "./wellStatus.js";
+import { summarizeTransmission, summarizeSubstations } from "./powerScreen.js";
 
 const DAY = 24 * 3600 * 1000;
 
@@ -162,6 +163,32 @@ export const ANALYSIS_SOURCES = [
     plural: "fault trace(s)", onSiteLabel: "crosses the site",
     absentLabel: "No mapped growth-fault traces within a quarter-mile",
     caveat: "Houston-area active growth faults (aseismic slow-slip faults that crack foundations, slabs, and pavement over time). A trace crossing or near the site is a real design constraint — set structures/ponds off the trace and get a geotechnical/fault study. Screening only; a community-hosted republication of the USGS Houston fault map (SIM 2874).",
+  },
+  {
+    // Electric transmission (public-data screening PHASE 5) — HIFLD transmission lines crossing
+    // or near the parcel, by PROXIMITY to the LINES. onSiteLabel makes a 0-ft nearest read
+    // "crosses the site"; classifyProx (powerScreen.js) flags a crossing as a likely easement.
+    id: "transmission", category: "Electric transmission", label: "Transmission lines (HIFLD)", kind: "line",
+    mapLayer: "hifld_tx", // the existing HIFLD transmission overlay (EVIDENCE block) gets the "◍ Map" toggle
+    ...reg("transmission"),
+    screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
+    plural: "transmission line(s)", onSiteLabel: "crosses the site",
+    absentLabel: "No mapped transmission lines within a quarter-mile",
+    classifyProx: (scr, ctx) => summarizeTransmission(scr, ctx),
+    caveat: "HIFLD electric transmission (≥69 kV). A line CROSSING the site is a transmission easement — you can't build under it, and towers/guy-wires take usable area. Routes are schematic and some owners/voltages are withheld. Screening only — the utility and a survey are the real check.",
+  },
+  {
+    // Electric substations (PHASE 5) — distance to the nearest HIFLD substation as a SERVICE /
+    // interconnect proxy (a heavy-power industrial user wants to be near one). An INFO fact,
+    // not a good/bad constraint, so classifyProx returns `info` either way (bufferMi 3 to reliably
+    // capture the nearest in a metro; "none within 3 mi" is itself informative — far from grid).
+    id: "substations", category: "Electric substation (nearest)", label: "Substations (HIFLD)", kind: "point",
+    mapLayer: "hifld_substations",
+    ...reg("substations"),
+    screenMode: "proximity", bufferMi: 3, ttl: 30 * DAY, verified: true,
+    plural: "substation(s)",
+    classifyProx: (scr, ctx) => summarizeSubstations(scr, ctx),
+    caveat: "HIFLD electric substation points — the nearest-distance is a SERVICE / interconnect proxy, not a constraint. NAMEs are anonymized on some records and voltages are withheld (shown as blank). Screening only — confirm service, capacity, and interconnect cost with the utility.",
   },
   {
     // Zoning / entitlement — derived from the jurisdiction result rather than a single
@@ -756,7 +783,7 @@ export function deriveZoning(j) {
 // Orchestrator
 // ---------------------------------------------------------------------------
 // Display order for the assembled findings.
-const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"];
+const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "transmission", "substations", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"];
 
 /* Run the full screen against the active-parcel rings ([[ [lng,lat], ... ], ...]).
  * Returns { findings, generatedAt }. Findings are presence-first and each carries its

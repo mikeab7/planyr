@@ -307,6 +307,62 @@ export const GIS_SOURCES = {
       "geotechnical / fault-specific study is the authoritative check. Prefer self-hosting the USGS shapefile.",
   },
 
+  // ---- Power / grid screening (public-data screening PHASE 5) ----
+  // Two HIFLD (Homeland Infrastructure Foundation-Level Data) electric layers. A transmission
+  // line crossing the parcel is a real easement constraint; the distance to the nearest
+  // substation is a service / interconnect proxy for a heavy-power industrial user. Both are
+  // proximity sources (the screen buffers the parcel + measures nearest in EPSG:2278 feet).
+  transmission: {
+    key: "transmission",
+    label: "Electric transmission lines (HIFLD)",
+    provider: "HIFLD (Homeland Infrastructure Foundation-Level Data) — U.S. electric transmission",
+    // HIFLD national transmission polylines, hosted on Esri's Living Atlas org (services2). Distinct
+    // from the DOE/NETL transmission layer the map overlay renders (hifld_tx) — both are HIFLD-derived
+    // transmission; this one supports a server-side `distance` buffer query for the proximity screen.
+    serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/US_Electric_Power_Transmission_Lines/FeatureServer/0",
+    layerId: null, // url already includes the layer index (FeatureServer/0)
+    geometryType: "line",
+    fields: { owner: "OWNER", voltage: "VOLTAGE", voltClass: "VOLT_CLASS", status: "STATUS", type: "TYPE" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Katy / west Houston — dense transmission country (≥1 line in any ~1 km envelope; live 2026-07-18).
+      { label: "West Houston transmission", bbox: [-95.70, 29.75, -95.55, 29.85], expectMinCount: 1 },
+    ],
+    notes:
+      "HIFLD electric transmission lines (≥69 kV). A line crossing the parcel is a transmission " +
+      "easement — no building under it, and towers/guy-wires eat usable area. Routes are schematic; " +
+      "OWNER/VOLTAGE are withheld (0 / 'NOT AVAILABLE') on some redacted lines. Screening only — the " +
+      "utility and a survey are the authoritative check.",
+  },
+  substations: {
+    key: "substations",
+    label: "Electric substations (HIFLD)",
+    provider: "HIFLD (Homeland Infrastructure Foundation-Level Data) — U.S. electric substations",
+    // HIFLD national substation POINTS. Chosen over the regional subsets some HIFLD republications
+    // carry (one candidate held only ~68 South-Texas points — the B369 clip trap) — this is the full
+    // continental-US layer (extent -130..-67 lon), server-side `distance` query works.
+    serviceUrl: "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/Electric_Substations/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    // NAME is anonymized ("UNKNOWN#####") on redacted records; MAX_VOLTAG is the max voltage (kV),
+    // 0 where withheld. powerScreen.js cleans both for display.
+    fields: { name: "NAME", city: "CITY", state: "STATE", voltage: "MAX_VOLTAG" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Downtown Houston — dense substation country (18 within 3 mi, live 2026-07-18). A regional
+      // subset (e.g. the South-Texas-only republication) reads 0 here and fails immediately.
+      { label: "Downtown Houston substations", point: [-95.36, 29.76], expectMinCount: 1 },
+    ],
+    notes:
+      "HIFLD electric substation points. The distance to the nearest is a SERVICE / interconnect " +
+      "proxy for a heavy-power user, not a constraint. NAME is anonymized on redacted records and " +
+      "MAX_VOLTAG is 0 where withheld. Screening only — confirm service/capacity with the utility.",
+  },
+
   // ---- Jurisdiction / road identify sources (B93/B94; shared by the screen) ----
   county: {
     key: "county",
