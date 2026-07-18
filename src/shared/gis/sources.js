@@ -307,6 +307,137 @@ export const GIS_SOURCES = {
       "geotechnical / fault-specific study is the authoritative check. Prefer self-hosting the USGS shapefile.",
   },
 
+  // ---- Power / grid screening (public-data screening PHASE 5) ----
+  // Two HIFLD (Homeland Infrastructure Foundation-Level Data) electric layers. A transmission
+  // line crossing the parcel is a real easement constraint; the distance to the nearest
+  // substation is a service / interconnect proxy for a heavy-power industrial user. Both are
+  // proximity sources (the screen buffers the parcel + measures nearest in EPSG:2278 feet).
+  transmission: {
+    key: "transmission",
+    label: "Electric transmission lines (HIFLD)",
+    provider: "HIFLD (Homeland Infrastructure Foundation-Level Data) — U.S. electric transmission",
+    // HIFLD national transmission polylines, hosted on Esri's Living Atlas org (services2). Distinct
+    // from the DOE/NETL transmission layer the map overlay renders (hifld_tx) — both are HIFLD-derived
+    // transmission; this one supports a server-side `distance` buffer query for the proximity screen.
+    serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/US_Electric_Power_Transmission_Lines/FeatureServer/0",
+    layerId: null, // url already includes the layer index (FeatureServer/0)
+    geometryType: "line",
+    fields: { owner: "OWNER", voltage: "VOLTAGE", voltClass: "VOLT_CLASS", status: "STATUS", type: "TYPE" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Katy / west Houston — dense transmission country (≥1 line in any ~1 km envelope; live 2026-07-18).
+      { label: "West Houston transmission", bbox: [-95.70, 29.75, -95.55, 29.85], expectMinCount: 1 },
+    ],
+    notes:
+      "HIFLD electric transmission lines (≥69 kV). A line crossing the parcel is a transmission " +
+      "easement — no building under it, and towers/guy-wires eat usable area. Routes are schematic; " +
+      "OWNER/VOLTAGE are withheld (0 / 'NOT AVAILABLE') on some redacted lines. Screening only — the " +
+      "utility and a survey are the authoritative check.",
+  },
+  substations: {
+    key: "substations",
+    label: "Electric substations (HIFLD)",
+    provider: "HIFLD (Homeland Infrastructure Foundation-Level Data) — U.S. electric substations",
+    // HIFLD national substation POINTS. Chosen over the regional subsets some HIFLD republications
+    // carry (one candidate held only ~68 South-Texas points — the B369 clip trap) — this is the full
+    // continental-US layer (extent -130..-67 lon), server-side `distance` query works.
+    serviceUrl: "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/Electric_Substations/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    // NAME is anonymized ("UNKNOWN#####") on redacted records; MAX_VOLTAG is the max voltage (kV),
+    // 0 where withheld. powerScreen.js cleans both for display.
+    fields: { name: "NAME", city: "CITY", state: "STATE", voltage: "MAX_VOLTAG" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Downtown Houston — dense substation country (18 within 3 mi, live 2026-07-18). A regional
+      // subset (e.g. the South-Texas-only republication) reads 0 here and fails immediately.
+      { label: "Downtown Houston substations", point: [-95.36, 29.76], expectMinCount: 1 },
+    ],
+    notes:
+      "HIFLD electric substation points. The distance to the nearest is a SERVICE / interconnect " +
+      "proxy for a heavy-power user, not a constraint. NAME is anonymized on redacted records and " +
+      "MAX_VOLTAG is 0 where withheld. Screening only — confirm service/capacity with the utility.",
+  },
+
+  // ---- Access tier (public-data screening PHASE 6) ----
+  // Three "how good is the access here" datasets, all proximity sources (buffer the parcel,
+  // measure nearest in EPSG:2278 feet). INFO facts for a deal, not pass/fail constraints.
+  aadt: {
+    key: "aadt",
+    label: "TxDOT traffic counts (AADT)",
+    provider: "TxDOT — Annual Average Daily Traffic (AADT)",
+    // TxDOT's public District/MPO AADT review layer — traffic-count POINTS with AADT_PRELIM
+    // (the preliminary annual average daily traffic) + Located_On (the road) + County. The
+    // screen reports the nearest counted road's volume as an access/visibility proxy.
+    serviceUrl: "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/District_and_MPO_AADT_Review_Layer_Public/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { aadt: "AADT_PRELIM", road: "Located_On", county: "County" },
+    coverage: "statewide (Texas)",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // West Houston / Katy — dense count network (≥1 station in any ~1 km envelope; live 2026-07-18,
+      // AADT ~45k on I-10 corridor). A dead/clipped source fails this.
+      { label: "West Houston AADT", point: [-95.75, 29.78], expectMinCount: 1 },
+    ],
+    notes:
+      "TxDOT preliminary AADT count points (AADT_PRELIM). The nearest counted road's volume is an " +
+      "access / visibility proxy — high traffic = good access/exposure but also congestion. Located_On " +
+      "(road name) is blank on some records. Screening only.",
+  },
+  rail: {
+    key: "rail",
+    label: "Rail lines (BTS/FRA North American Rail Network)",
+    provider: "USDOT BTS / FRA — North American Rail Network (NTAD)",
+    // BTS NTAD rail-network LINES (the FRA rail network). RROWNER1 = the owning railroad's
+    // reporting mark (UP, BNSF, PTRA …); accessScreen.js expands the common marks. A line
+    // crossing/adjacent to the site is a potential rail-served siding (an industrial plus).
+    serviceUrl: "https://services.arcgis.com/xOi1kZaI0eWDREZv/ArcGIS/rest/services/NTAD_North_American_Rail_Network_Lines/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { owner: "RROWNER1", owner2: "RROWNER2", net: "NET" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Downtown Houston — dense rail country (90 segments within 2 mi, live 2026-07-18; UP-owned).
+      { label: "Downtown Houston rail", bbox: [-95.40, 29.73, -95.33, 29.79], expectMinCount: 1 },
+    ],
+    notes:
+      "BTS/FRA rail-network lines (RROWNER1 = owning railroad reporting mark). A line adjacent or " +
+      "crossing the site is a potential rail-served siding — confirm service/rates with the railroad. " +
+      "Screening only; not a surveyed alignment or a confirmed spur right.",
+  },
+  airports: {
+    key: "airports",
+    label: "FAA airports (Part 77 proximity proxy)",
+    provider: "FAA — Aeronautical Information Services (airports)",
+    // FAA airport POINTS (NAME / IDENT / TYPE_CODE / SERVCITY). Used as a PROXY for FAA Part 77
+    // height-restriction surfaces — a site near a public-use (AD-type) airport may fall under Part
+    // 77 imaginary surfaces that cap structure height. This is proximity only; the actual Part 77
+    // surfaces are computed from runway geometry (a real determination is an FAA Form 7460 study).
+    serviceUrl: "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/US_Airport/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "NAME", ident: "IDENT", type: "TYPE_CODE", city: "SERVCITY", elev: "ELEVATION" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Hobby Airport (HOU) area — a public-use airport + nearby heliports (live 2026-07-18).
+      { label: "Houston Hobby area airports", point: [-95.28, 29.65], expectMinCount: 1 },
+    ],
+    notes:
+      "FAA airports (TYPE_CODE: AD = airport, HP = heliport …). Distance to the nearest is a PROXY " +
+      "for FAA Part 77 height-restriction surfaces near a public-use airport — NOT the computed Part " +
+      "77 surfaces. A tall structure near an airport may require an FAA Form 7460 determination. Screening only.",
+  },
+
   // ---- Jurisdiction / road identify sources (B93/B94; shared by the screen) ----
   county: {
     key: "county",
