@@ -135,6 +135,7 @@ import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js"
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
 import { sizePondForTargets, scaleRing, solveTobRaise } from "./lib/pondSizing.js";
+import { regionalDetentionFor, feeInLieuCompare } from "./lib/regionalDetention.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt, pondAutoValues,
@@ -14832,6 +14833,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           ? `Pond land take incl. the modeled ${f1(matBerm.maxHeightFt)}′ fill berm (toe ~${f0(bermToeReach)}′ out at ${gsApronRatio}:1): ${f2(landTakeSf / SQFT_PER_ACRE)} ac (water footprint ${f2(polyArea(ring) / SQFT_PER_ACRE)} ac).`
                           : `Pond land take incl. the ${critRule.maintBermWidthFt}′ maintenance berm: ${f2(landTakeSf / SQFT_PER_ACRE)} ac (water footprint ${f2(polyArea(ring) / SQFT_PER_ACRE)} ac).`, "landtake"));
                         if (bermOverlaps.length) out.push(warnLine(`⚠ The ${landIsBerm ? "fill-berm toe" : "maintenance-berm"} ring overlaps ${bermOverlaps.length === 1 ? `a ${TYPE[bermOverlaps[0].type].label.toLowerCase()}` : `${bermOverlaps.length} other elements`} — the ${landIsBerm ? "berm footprint" : "criteria shelf"} runs into your layout.`, "berm-overlap", false));
+                        // NEW-C2 (Phase C) — if the jurisdiction has a regional-detention / fee-in-lieu
+                        // program, show the deal trade: paying in lieu of this on-site pond recovers its
+                        // land-take back to buildable ground.
+                        const rdAuthId = ({ harris: "hcfcd", fortbend: "fortbend", coh: "coh" })[floodJurKey] || floodJurKey;
+                        const rd = regionalDetentionFor(rdAuthId);
+                        if (rd && rd.available === true) {
+                          const cmp = feeInLieuCompare({ pondLandTakeAc: landTakeSf / SQFT_PER_ACRE, requiredAcFt: detReq && detReq.kind === "point" ? detReq.requiredAcFt : null, coverageRatio: 0.4 });
+                          if (cmp.buildableSfRecovered != null) {
+                            out.push(noteLine(`Fee-in-lieu may be available (${rd.authorityLabel}): paying in lieu of this on-site pond could recover ~${cmp.buildableSfRecovered.toLocaleString()} SF buildable from its ${f2(cmp.landRecoveredAc)}-ac land take (screening, 40% coverage). ${rd.eligibilityNote} Verify the fee + eligibility with the district.`, "fee-in-lieu"));
+                          }
+                        }
                       }
                       if ((crit.slope || crit.freeboard || landTakeSf != null) && critRule && critRule.verified === false) {
                         out.push(noteLine("Criteria values are unverified placeholders — edit & confirm in settings against the PCPM / county DCM.", "crit-unv"));
