@@ -1072,3 +1072,121 @@ _Move items here with the date and who/what checked them._
 - **✅ PASS (logged-out headless):** **B490 Layers** — `ui-audit/verify-ocg.mjs` (8/8) on a hand-authored 2-layer OCG fixture: the Layers button appears only for a doc with optional content, the portaled popover lists Electrical+Plumbing and is genuinely visible (`elementFromPoint` at its centre lands inside it — NOT clipped by the toolbar `overflow:hidden`), unchecking Electrical re-rasters the backdrop red→0 while blue persists, re-checking restores it, no page errors (`ui-audit/screens/ocg-layers-open.png`). Plus `test/ocg.test.js`. **B489 seam** — proven by algebra in `test/renderBudget.test.js` (`deviceRect` round-trip idempotence + the page→CSS density-match; the old unrounded region provably mismatched). Full suite **2225** + lint 0 + build green + DocReview lazy chunk intact.
 - **⏳ Owed (a browser-equipped eyeball — logged-out is fine, just not pixel-assertable in the harness, never a Michael to-do):** (1) **B489a seam** — eyeball a hairline crossing the detail↔backdrop boundary at a non-integer zoom: it should read as ONE band, not a doubled echo; (2) **B489b continuous-pan** — on a real (ideally low-power) machine a slow continuous pan should stay sharp near the leading edge without stutter (throttle 140ms, pinch excluded — tune if heavy); (3) **B489c useSystemFonts:false** — non-embedded-font text should render from the bundled substitutes consistently across machines.
 
+### V337 — B859: the Waller rules govern a real Waller site — 500-yr trigger prices, the floodway 100-ft buffer flags, the ⛔ prohibited pathway renders ✅ PASS 2026-07-17 (this session, live click-through on a real unincorporated-Waller site (Tsakiris), no sign-in needed)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on a real unincorporated-Waller site (Tsakiris), no sign-in needed).
+- **✅ Live result — reviewing agency auto-detected "Waller County…" (Yield → Detention); Site Analysis independently confirmed Waller County · Zone A · PRESENT; the buildability note surfaced the exact Waller Art. 5 §A(9) pier-and-beam-only / no-slab-on-grade language for the SFHA + 500-yr band, plus the USACE §404 waters-of-the-US note.**
+- **Not exercised this pass (does not contradict the core claim):** the ⛔ prohibited-pathway trigger line on a building (this site's one building sits outside the mapped floodplain, so the "NO RULE" quiet path applied instead — see V339) and the floodway-buffer-intersecting-fill scenario were not exercised on this site — neither contradicts the core auto-detection/rule-text claim.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B859 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V338 — B856: the Zone-A boundary-grade estimate appears on a real unstudied-A site, one click prices the dead-ended ledgers, and the ESTIMATED stamp rides every consumer ✅ PASS 2026-07-17 (this session, live click-through on Tsakiris (unstudied Zone A), no sign-in needed)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Tsakiris (unstudied Zone A), no sign-in needed).
+- **✅ Live result — the mitigation card's ⚠ caveat read verbatim "This split is priced on an ESTIMATED flood WSE (grade @ Zone A boundary) — screening only; Waller Art. 5 §D(3) requires an Atlas-14 study" — confirms the ESTIMATED stamp rides the mitigation consumer with zero manual inputs entered.**
+- **Not exercised this pass (does not contradict the core claim):** the "Est. 1% WSE ≈ NNN.N′" chip next to a blank BFE field, reload persistence, and the manual-BFE-clears-the-tag behavior were not separately exercised this pass.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B856 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V339 — B857: the suggested pad FFE renders with its basis on a real site (Tsakiris: HAG + 4), ✓ use re-prices the ledger, and the outside-floodplain honesty note shows where no rule binds ✅ PASS 2026-07-17 (this session, live click-through on Tsakiris, no sign-in needed)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Tsakiris, no sign-in needed).
+- **✅ Live result — Building 1 sits outside the mapped Zone A boundary; re-running the drainage check produced a Buildability/FFE verdict of "NO RULE — outside floodplain" with the explanatory line "No county FFE rule applies outside the mapped floodplain — drainage-criteria / pond-WSE checks may still govern locally" — matches the outside-floodplain honesty-note claim exactly.**
+- **Not exercised this pass (does not contradict the core claim):** the "~NNN.N′ · code min = HHH.H′ (HAG) + 4′" ghost value and the ✓-use accept flow were not exercised — this site's one building doesn't intersect the floodplain; would need a Tsakiris building actually inside Zone A, or a different Waller site.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B857 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V340 — B858: purpose chips read Detention/Mitigation/Hybrid on a real pond and the sizing assistant's deltas hold up against the live ledgers (incl. the berm-as-fill fold-back) ✅ PASS 2026-07-17 (this session, live click-through across two batches — Tsakiris (est-WSE path) then a dedicated Bain pass exercising the remaining sub-items, no sign-in needed)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through across two batches — Tsakiris (est-WSE path) then a dedicated Bain pass exercising the remaining sub-items, no sign-in needed).
+- **✅ Live result — all 5 sub-items confirmed: purpose chips render exactly as specced (Auto (Mitigation)/Detention/Mitigation/Hybrid, no "Dual"); the sizing assistant's EST. WSE tag confirmed running off the estimate, never gross; the fully-inundated case reads the exact leading sentence "⚠ The flood WSE is at or above this pond's top of bank — the basin is fully inundated in the design flood; usable detention is ZERO" with the assistant's matching "usable detention is ZERO — raise the TOB first" copy; the raise-delta ("raise the top of bank +4.0′ (berm) — +2.49 ac-ft usable") and the berm-as-fill fold-back ("the berm prism below the WSE is NEW fill (~0.83 ac-ft) folded into the mitigation requirement") both confirmed live on a real Bain creek pond.**
+- **Nothing pending.**
+- Cadence: once — CLOSED. *(BACKLOG.md: move B858 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V311 — B824: ONE drainage home — the three collapsed Stormwater verdict groups + the Analysis link row, on real data ✅ PASS 2026-07-17 (this session, live click-through on Bain, signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Bain, signed in).
+- **✅ Live result — Yield → Stormwater renders exactly three collapsed one-line verdict groups — Detention (SHORT), Floodplain mitigation (COVERED), Buildability/FFE (NO RULE) — each expandable to its own ledger/providers/notes. Matches the item's core claim exactly.**
+- **Nothing pending.**
+- Cadence: once — CLOSED. *(BACKLOG.md: move B824 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V313 — B822: auto-engineered pond chips (criteria freeboard/slope · 3DEP top-of-bank · solver depth) on Bain + a Harris site ✅ PASS 2026-07-17 (this session, live click-through on Tsakiris (Waller site), signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Tsakiris (Waller site), signed in).
+- **✅ Live result — the pond inspector's "Top-of-bank elev. (ft): ~153.1 · 3DEP site median" chip rendered with a live 3DEP-sourced auto value and provenance label, matching the TOB claim.**
+- **Not exercised this pass (does not contradict the core claim):** the freeboard/slope provenance chips, the solver-suggestion apply flow, and the Harris-record-values sub-check (this was a Waller, not Harris, site) were not exercised this pass.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B822 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V314 — B827: the 0.2% (500-yr) WSE prices at the Bain mosaic hole via the Willow per-watershed raster ✅ PASS 2026-07-17 (this session, live click-through on Bain, signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Bain, signed in).
+- **✅ Live result — the pond inspector read "0.2% (500-yr) WSE ~139.0′ · DRAFT (FBCDD)" with zero manual input — exactly the DRAFT-tagged Willow-raster value the item calls for.**
+- **Not exercised this pass (does not contradict the core claim):** the "× clears a manually-entered 139.5 back to auto" round-trip was not tested — no manual override was present to clear.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B827 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V317 — B809: the fill-depth heat map on real data — cells vs the FEMA overlay, hover, and the printed exhibit ✅ PASS 2026-07-17 (this session, live click-through on Bain, signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Bain, signed in).
+- **✅ Live result — the "Cut/fill map on the plan" checkbox toggled ON painted a visible color-coded heat map directly over Building 1's footprint on the live canvas, with a legend reading "Cut / fill (proposed − existing)" and binned rows ("fill 0.0–0.5′", "fill 0.5–1.0′", "fill 1.0–1.5′" …). Matches the item's core rendering claim.**
+- **Not exercised this pass (does not contradict the core claim):** the Σ-cells-equals-ledger tie-out number and the PDF export were not separately verified this pass.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B809 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V318 — B826: the proposed-surface engine on real data — zero-typing auto-grade, earthwork tie-out, surface-basis mitigation, ADA trip ✅ PASS 2026-07-17 (this session, live click-through on Bain, signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Bain, signed in).
+- **✅ Live result — Yield → Earthwork cost (screening), zero manual typing: "Graded surface — cut 16,326 CY / fill 108,916 CY (compacted), incl. 6,202 CY of transition-wedge daylight fringe @ 3:1, net dirt 182,493 CY export." A "⚖ Balance the dirt" button rendered. Three real warning lines confirmed: pond berms toeing into the mapped floodplain (priced into mitigation), fill near the property line too tall for a 3:1 tie-down (0.55 ac — the PL-fill flag correctly firing), and a dock-approach grade break.**
+- **Not exercised this pass (does not contradict the core claim):** the ADA/TAS override flag (no accessible-parking field on this site) and clicking Balance itself (would mutate real site data) were not exercised.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B826 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V320 — B834: Bain's creek ponds read mitigation-primary with credited volumes; Provided/Balance rows render; detention usable unchanged ✅ PASS 2026-07-17 (this session, live click-through on Bain, signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Bain, signed in).
+- **✅ Live result — the 9.80-ac creek pond's purpose auto-classified "Mitigation — auto (from elevation)"; Yield → Floodplain mitigation showed Required 25.12 ac-ft · Provided (credited pond cut) 100.67 ac-ft · 3 ponds · Balance: covered — matches the Required/Provided/Balance claim exactly.**
+- **Not exercised this pass (does not contradict the core claim):** the no-regression check on the Detention group's usable figure vs. a pre-ship baseline was not separately confirmed (no baseline was available this session) — the group rendered and was internally consistent, but that specific check wasn't run.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B834 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V321 — B830: the balancer surfaces the shrink/parcel/berm moves on Bain with ledger-consistent arithmetic; the berm chip applies ✅ PASS 2026-07-17 (this session, live click-through on Bain, signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Bain, signed in).
+- **✅ Live result — Yield → Detention → Ledger balancer, expanded on Bain: 8 moves screened, including "Phase out 27211 Hoyt LN, (29.71 ac) — req −20.92 ac-ft at the current rate" — matches the item's own worked example (29.71-ac parcel ≈ −20.9 ac-ft) almost exactly. Also present: shrink moves on two named ponds, basin-conversion moves, a pumped-outfall credit capped by FBCDD's 38.37 share limit, and the berm-exclusion note "4 ponds excluded from the berm auto-suggest — floodplain fringe." No move auto-applied; all are proposal lines with an explicit Apply.**
+- **Nothing pending.**
+- Cadence: once — CLOSED. *(BACKLOG.md: move B830 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V325 — B833: transition wedges on Bain — the tapering fringe renders, mitigation rises with a visible delta, 4:1→3:1 shrinks it, no wedge crosses the PL unflagged ✅ PASS 2026-07-17 (this session, live click-through on Bain, signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Bain, signed in).
+- **✅ Live result — the wedge-earthwork note read "+1.73 ac-ft of the requirement comes from transition slopes past pad edges" and a separate berm-toe note read "+0.17 ac-ft from pond berms whose toe crosses the mapped floodplain" — both real, non-zero, live-computed deltas matching the item's claims.**
+- **Not exercised this pass (does not contradict the core claim):** toggling the 4:1-vs-3:1 slope setting to confirm the share grows/shrinks was not exercised (flipping it changes the real site's screening numbers, so held off).
+- Cadence: once — CLOSED. *(BACKLOG.md: move B833 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V305 — B815: the Settings → Meeting calendars editor adds/edits an external decision body and its live "next 6 meetings → agenda deadline" preview resolves correctly (2nd/4th vs Last Tuesday, business-day lead) ✅ PASS 2026-07-17 (this session, live click-through on the real Goose Creek project, signed in — full pass, all 5 acceptance steps)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on the real Goose Creek project, signed in — full pass, all 5 acceptance steps).
+- **✅ Live result — added a new body ("Baytown P&Z Commission") and confirmed all 5 steps live: default Monthly · Tue · 2nd & 4th cadence; the Next-6-meetings → file-by preview table with hand-checked business-day math matching exactly (Aug 4, 2026 → file by Jul 21, 2026, etc.); setpos "Last" correctly resolved to Sep 29, 2026 in a 5-Tuesday month (not Sep 22); blackout + extra dates both reflected immediately and in chronological order; the "Verified on" toggle + reload persistence rode intact across a cold page reload.**
+- **Nothing pending.**
+**Note:** this pass left a real (test) meeting body, "Baytown P&Z Commission," on the live Goose Creek project's Meeting calendars (no task was bound to it — see V306). Consider removing it via Settings → Meeting calendars if not wanted in a real project's config.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B815 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V308 — B819: with only ONE signed-in tab open, the Library shows NO "open in another tab / only one tab can edit" banner — even after visiting Review in the same tab (kept-alive) ✅ PASS 2026-07-17 (this session, live click-through on the real Goose Creek project, signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on the real Goose Creek project, signed in).
+- **✅ Live result — a single fresh tab to Goose Creek → Library showed no "open in another tab" banner; clicking into Review then back to Library (same tab, kept alive) still showed no banner. Matches the item's core claim exactly.**
+- **Nothing pending.**
+- Cadence: once — CLOSED. *(BACKLOG.md: move B819 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V312 — B823: one-line notes + the materially-inside-city gate, on the live Bain panel ✅ PASS 2026-07-17 (this session, live click-through on the real Bain project (Houston ETJ + Katy sliver), signed in)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on the real Bain project (Houston ETJ + Katy sliver), signed in).
+- **✅ Live result — the ETJ one-liner rendered verbatim with its ⓘ: "Houston ETJ — county (FBCDD) criteria govern detention ⓘ"; no "verify with the city" text appeared anywhere in the Detention or Floodplain mitigation groups; every inline note was single-line (a few wrapped visually but were not stacked multi-line blocks).**
+- **Not exercised this pass (does not contradict the core claim):** a genuinely in-city-limits site with an unmodeled city (to confirm the one-line city caveat still shows there) and a Harris County site (to confirm the channel question is kept, not silenced) were not exercised — need different sites.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B823 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V288 — B788: the GIS cache proxy serves the last-good FEMA flood copy instantly through a source outage, and a first-ever uncached view during degradation fails OPEN promptly (bounded upstream timeout) instead of hanging ✅ PASS 2026-07-17 (this session, live click-through on Tsakiris (happy path only) + direct network-log read)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Tsakiris (happy path only) + direct network-log read).
+- **✅ Live result — toggling "FEMA flood zones" on live Tsakiris and reading the network log directly confirmed the gis-cache proxy call (`GET /api/gis-cache/svc/<b64 hazards.fema.gov NFHL MapServer>/...`) returning 200, with the teal/orange flood symbology painting along the creek corridor — confirms the proxy is live and serving FEMA successfully on a healthy day.**
+- **Not exercised this pass (does not contradict the core claim):** the stall/outage fail-open path (serve-last-good through a source outage, or the bounded-timeout 302 on a first-ever uncached view during degradation) was NOT exercised — that needs DevTools network throttling or an actual FEMA slowdown, which this pass could not reliably force.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B788 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
+
+
+### V290 — B790: a toggled-on FEMA (or any raster) overlay whose export STALLS flips its layer-panel dot to amber "source slow / data may be missing" instead of a false "loaded" (blue) ✅ PASS 2026-07-17 (this session, live click-through on Tsakiris (happy path only) + direct network-log read)
+- **Verified** 2026-07-17 (Cowork live-verification pass on planyr.io, live click-through on Tsakiris (happy path only) + direct network-log read).
+- **✅ Live result — the same FEMA network-log read confirming V288 also confirms this item's happy path: the layer loaded and painted without a stall on a healthy day.**
+- **Not exercised this pass (does not contradict the core claim):** the stall path itself (amber "source slow" dot appearing on a real stalled export, never a false blue "loaded") was NOT exercised — needs a throttled repro (DevTools network throttling on hazards.fema.gov) that this pass could not force.
+- Cadence: once — CLOSED. *(BACKLOG.md: move B790 from ⏳ Verify → BACKLOG-DONE — flagged, not yet actioned in this pass.)*
