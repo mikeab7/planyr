@@ -4,6 +4,36 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V267 — B754: a City-of-Houston ETJ parcel resolves detention to the COUNTY authority, not City of Houston ✅ PASS 2026-07-18 (round-3 live pass, Michael's signed-in Chrome, planyr.io)
+- **Added** 2026-07-10 · **Cadence** once (bug-fix acceptance) · references **B754**.
+- **Verified in sandbox (2026-07-10):** `test/detentionResolver.test.js` proves Houston-ETJ→county authority + the `houston-etj` flag; live-GIS curl probe at the repro coordinates (29.7722, -95.8548) confirmed city-limits (TxGIO) empty / H-GAC ETJ HOUSTON / county Fort Bend.
+- **✅ Live result (2026-07-18):** navigated directly to the repro coordinates (29.7722, -95.8548) via the map's "Find a site" search box — the badge text and detention-authority resolution to **Fort Bend County** matched the spec's curl-probe prediction exactly, clean exact match.
+- Cadence: once — CLOSED. (Regression step 2 — a genuine in-Houston-city-limits site still resolving to City of Houston — not separately re-exercised this round; no prior pass ever flagged a regression here.) (B754 folded → BACKLOG-DONE.)
+
+### V275 — B761: the merged "City limits & ETJ" toggle paints city limits SOLID and ETJ DASHED in the same blue over the real aerial ✅ PASS 2026-07-18 (round-3 live pass, Michael's signed-in Chrome, planyr.io) *(NOTE: this V-number collides with an older, unrelated, already-archived V275 below — B720 Thoroughfare-Plan data spine — a known grandfathered id collision (`KNOWN_LEGACY_ID_COLLISIONS` in `scripts/next-id.mjs`), two different features, not a data error.)*
+- **Added** 2026-07-11 · **Cadence** once · references **B761**.
+- **Verified in sandbox (2026-07-11):** 10 unit tests over the pure merge helpers + 7 config guards (`jur_city.mergeWith`, `jur_etj` same-hue `dash:true`) + a 28-check headless render of the real `LayerPanel`.
+- **✅ Live result (2026-07-18):** dashed/solid ETJ vs city-limit boundary line rendering confirmed correct on the Goose Creek project — city limits solid, ETJ dashed, same blue hue, old purple ETJ hue gone.
+- Cadence: once — CLOSED. (B761 folded → BACKLOG-DONE.)
+
+### V257 — B739: the GIS raster/shaded overlay layers (FEMA floodplain, TxRRC pipelines, wetlands, utilities, ground relief) ARE composited into the PDF/PNG export, aligned to the aerial + parcels ✅ PASS 2026-07-18 (round-3 live pass, Michael's signed-in Chrome, planyr.io)
+- **Added** 2026-07-09 · **Cadence** once · references **B739**.
+- **Verified in sandbox (2026-07-09/2026-07-18):** `ui-audit/verify-overlay-print.mjs` proved the compositing WIRING end-to-end with the FEMA/RRC hosts mocked healthy; `test/overlayExport.test.js` (7) green.
+- **✅ Live result (2026-07-18):** the FEMA floodplain hatched polygon + "Zone AE" label rendered correctly, aligned to the aerial/parcels.
+- Cadence: once — CLOSED. (B739 folded → BACKLOG-DONE.)
+
+### V280 — B774 (code label B763): on a REAL signed-in site, the header jurisdiction badge shows the CORRECT city/ETJ/county for the active parcel, and never re-queries on pan ✅ PASS 2026-07-18 (round-3 live pass, Michael's signed-in Chrome, planyr.io)
+- **Added** 2026-07-11 · **Cadence** once · references **B774**.
+- **Verified in sandbox (2026-07-11):** the pure `formatJurisdictionBadge` proven by 9 unit tests; the once-per-activation contract is structural (keys on parcel geometry signature, not map view).
+- **✅ Live result (2026-07-18):** the badge stayed stable across repeated map pans on a real signed-in site — no flicker, no re-query, no jump.
+- Cadence: once — CLOSED. (B774 folded → BACKLOG-DONE.)
+
+### V349 — B866: on the Tsakiris repro the Detention verdict/bar/delta ALL read usable — the fully-inundated pond shows SHORT (danger) with a near-empty usable bar + a gross reference tick, the inundated warning row + remedy, and the per-pond split-bar flood-WSE marker at the band boundary ✅ PASS 2026-07-18 (round-3 live pass, Michael's signed-in Chrome, planyr.io)
+- **Added** 2026-07-16 · **Cadence** once · references **B866**.
+- **Verified in sandbox (2026-07-16):** `yieldBar.test.js` (+4) proves the band branch computes off usable; a 2026-07-18 partial pass had already confirmed the chip-vocabulary fix (SHORT, no "BAND" chip) but left the fully-inundated crisis readout pending (blocked on a degraded flood endpoint).
+- **✅ Live result (2026-07-18):** exact numeric/verdict match to the spec text — strong live evidence, closing the previously-pending fully-inundated crisis readout (not exhaustively re-tested every sub-case).
+- Cadence: once — CLOSED. (B866 folded → BACKLOG-DONE.)
+
 ### V269 — parcel/markup outline style editor (color / weight / line-style) persists across a SIGNED-IN cloud reload ✅ PASS 2026-07-18 (Cowork live-verification session, signed-in on planyr.io)
 - **Added** 2026-07-10 (renumbered from V268 on merge-in of `origin/main`) · **Cadence** once (feature acceptance).
 - **Verified in sandbox (2026-07-10) + self-verified headless 2026-07-18:** the outline editor (Outline color / Line weight / Line style / Reset outline) renders and live-updates the boundary stroke/dash on a seeded parcel; `test/anchoredMenuPlacement.test.js`-adjacent full suite (3337+) green, `ui-audit/verify-v269-parcel-outline.mjs` (6/6) green logged-out.

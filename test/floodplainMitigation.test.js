@@ -377,6 +377,26 @@ describe("straddle + pond-side helpers", () => {
     expect(bb.n).toBeCloseTo(29.811, 6);
     expect(floodGeoBbox([])).toBeNull();
   });
+  // B755 fix (V268, Bain live-verify 2026-07-18): the derivation engine
+  // (deriveBfeFromLines/governingCrossSectionWsel) will defend a contour up to 2500 ft
+  // away (two-line interpolation up to 6000 ft combined), but SitePlanner.jsx's default
+  // 0.001° fmBbox pad only reaches ~350-450 ft — far short of the engine's own search
+  // radius. On the real Bain plan, FEMA's usable S_BFE lines sat farther from the fill
+  // footprint than that pad reaches, so the fetch returned zero lines and the "BFE (1%
+  // WSE)" input stayed blank even though FEMA publishes usable lines nearby. This pins
+  // the fix's math: a line ~2000 ft from the site (well within the engine's 2500 ft
+  // ceiling) must fall INSIDE the widened search bbox and OUTSIDE the old tight one.
+  it("a widened bbox pad (B755 fix) reaches a BFE line the tight default pad misses, well within the engine's own 2500 ft search radius", () => {
+    const ring = [[[-95.6, 29.8], [-95.599, 29.801]]]; // a small site near Houston-area latitude
+    const siteMaxLon = -95.599;
+    const lineLat = 29.8005;
+    const nearLineLon = siteMaxLon + 0.00633; // ~2000 ft east of the site's east edge at this latitude
+    const tightBbox = floodGeoBbox(ring, 0.001); // the pre-fix default pad
+    const widenedBbox = floodGeoBbox(ring, 0.025); // the B755-fix pad (BFE_SEARCH_PAD_DEG)
+    const inBbox = (bb, lon, lat) => lon >= bb.w && lon <= bb.e && lat >= bb.s && lat <= bb.n;
+    expect(inBbox(tightBbox, nearLineLon, lineLat)).toBe(false); // the pre-fix bug: fetch never reaches this line
+    expect(inBbox(widenedBbox, nearLineLon, lineLat)).toBe(true); // the fix: fetch now reaches it
+  });
 });
 
 // ---------------------------------------------------------------------------
