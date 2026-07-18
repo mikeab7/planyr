@@ -29,6 +29,7 @@ import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gisFetch.js";
 import { classifyCcn } from "./ccnClassify.js";
 import { screenProximity, fmtDistFt } from "./proximityScreen.js";
+import { summarizeWells } from "./wellStatus.js";
 
 const DAY = 24 * 3600 * 1000;
 
@@ -102,12 +103,16 @@ export const ANALYSIS_SOURCES = [
     // the Harris-County GIS republication that was ~99.8% incomplete outside Harris — a
     // silent false-clean on Chambers-County sites like Mont Belvieu (B368). Fields: the
     // RRC layer-1 columns (API / SYMNUM / GIS_SYMBOL_DESCRIPTION / GIS_WELL_NUMBER).
+    // PHASE 4: proximity screen (wells on/near the site) with a STATUS BREAKDOWN + an
+    // offset/replug RISK flag when a well sits on the footprint. `classifyProx` (wellStatus.js)
+    // reads SYMNUM / GIS_SYMBOL_DESCRIPTION → producing / plugged / dry / injection, and flags
+    // on-site wells. Replaces the old count-only "N wells on/adjacent" summary.
     ...reg("oilgas"),
-    ttl: 30 * DAY, verified: true, countMode: true,
-    absentLabel: "No mapped oil & gas wells on the site",
-    caveat: "RRC well points are schematic and historic locations can be inaccurate or unmapped (orphaned wells). An RRC records search — possibly a survey — is the real check.",
-    summarize: (rows, total) => { const n = total != null ? total : rows.length; return `${n} well${n === 1 ? "" : "s"} on or adjacent to the site`; },
-    detail: (rows) => uniq(rows.map((r) => (r.API ? "API " + r.API : ""))).slice(0, 8),
+    screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
+    plural: "well(s)",
+    absentLabel: "No mapped oil & gas wells within a quarter-mile",
+    classifyProx: (scr, ctx) => summarizeWells(scr, ctx),
+    caveat: "RRC well points are schematic and historic locations can be inaccurate or unmapped (orphaned wells). A well on the pad is an offset/replug risk — an old plug may not meet modern standards, and a producing well forces setbacks. An RRC records search — possibly a survey — is the real check.",
   },
   {
     id: "pipelines", category: "Pipelines", label: "Pipelines (RRC T-4)", kind: "polygon",
@@ -534,7 +539,15 @@ export function analyzeProximitySource(source, rings, opts = {}) {
       // On a line source (faults, rail), a 0-ft nearest means the trace CROSSES the site — a
       // source may override the "on/under the site" wording (e.g. "crosses the site").
       const fmtD = (ft) => (ft != null && ft <= 25 && source.onSiteLabel ? source.onSiteLabel : fmtDistFt(ft));
-      if (total > 0) {
+      if (typeof source.classifyProx === "function") {
+        // A proximity source may supply its own classifier over the screened result (e.g. the
+        // well status breakdown + on-site replug/offset flag). It owns status/summary/detail.
+        const c = source.classifyProx(scr, { total, bufferMi }) || {};
+        status = c.status || (total > 0 ? "present" : source.verified ? "absent" : "unknown");
+        summary = c.summary != null ? c.summary
+          : (status === "absent" ? (source.absentLabel || `No mapped ${source.plural || "sites"} within ${bufferMi} mi`) : null);
+        detail = c.detail || [];
+      } else if (total > 0) {
         status = "present";
         const near = scr.nearest;
         const nearName = near ? (near.attrs[nameKey] || "unnamed") : "";

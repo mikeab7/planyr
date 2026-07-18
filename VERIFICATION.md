@@ -81,6 +81,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V371 — B890: public-data screening PHASE 4 (RRC wells) — on a real well-dense site, the "Oil & gas wells" card shows the count within a quarter-mile + a producing/plugged-abandoned status breakdown, and flags a well on the footprint as an offset/replug risk ⏳ **LIVE APP (planyr.io, OR the branch preview) — open a well-dense site (Chambers County / Mont Belvieu), mark a parcel active, run Site Analysis; no sign-in needed** (GIS-endpoint-behavior + real-well-density class — the status/breakdown/on-site logic is proven headless in `test/wellStatus.test.js`, but the live RRC read + a real on-site well need the edge)  *(minted V371 via `npm run next-id -- --against-main`; references **B890**; branch `site-planner/rrc-wells`; `Cadence: once`)*
+- Confirm the card reads "N wells within a quarter-mile — X plugged/abandoned, Y producing …" with per-well API + status + distance in the expandable detail.
+- Confirm a well ON the parcel footprint raises the **"⚑ K on the site — offset/replug risk"** flag.
+- Confirm a well-free area reads a real **"No mapped oil & gas wells within a quarter-mile"** (green absent), never "unknown".
+- Confirm the `txrrc_wells` overlay still paints with the RRC status symbology (unchanged).
+
 ### V370 — B889: public-data screening PHASE 3 (Houston growth faults) — on a real NW-Houston site over/near a mapped fault, the "Active surface faults" card reads "crosses the site" or "N within a quarter-mile — nearest …", and the `faults` Layers overlay paints ⏳ **LIVE APP (planyr.io, OR the branch preview) — open a georeferenced NW-Houston site (e.g. Long Point / Addicks area), mark a parcel active, run Site Analysis; no sign-in needed** (GIS-endpoint-behavior + zoom-/data-density map-render classes — the line-distance engine is proven headless in `test/proximityScreen.test.js`, but the browser leg reads the live UH-hosted fault service)  *(minted V369, **renumbered → V370 (references B889) on merge-in of `origin/main`** — the pond Phase D took V369 first; branch `site-planner/growth-faults`; `Cadence: once`)*
 - Confirm a site with a fault trace through it reads **"crosses the site: <fault name>"**; a site near (but not on) a trace reads **"N fault trace(s) within a quarter-mile — nearest ~X ft: <name>"**.
 - Confirm a fault-free area reads a real **"No mapped growth-fault traces within a quarter-mile"** (green absent), never "unknown".

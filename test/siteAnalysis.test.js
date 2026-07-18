@@ -346,26 +346,29 @@ describe("exact counts — returnCountOnly bypasses the page cap (count-mode sou
     expect(f.summary).toMatch(/3207 pipeline segments/);
     expect(f.summary).toMatch(/Kinder Morgan/);
   });
-  it("shows the EXACT well count from returnCountOnly", async () => {
+  it("wells (PHASE 4): exact count within the buffer + status breakdown + on-site replug/offset flag", async () => {
     const cache = freshCache();
     const wells = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
-    const fetchJson = async (url) => {
-      if (/returnCountOnly=true/i.test(url)) return { count: 7291 };
-      return { features: [{ attributes: { API: "42-000" } }] };
-    };
-    const f = await analyzeSource(wells, [SQUARE], { cache, fetchJson });
-    expect(f.summary).toMatch(/7291 wells/);
-  });
-  it("falls back to the fetched sample size when the count query fails (never throws)", async () => {
-    const cache = freshCache();
-    const wells = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
-    const fetchJson = async (url) => {
-      if (/returnCountOnly=true/i.test(url)) throw new Error("count failed");
-      return { features: [{ attributes: { API: "1" } }, { attributes: { API: "2" } }] };
-    };
+    const feats = [
+      { attributes: { API: "42-001", SYMNUM: 4, GIS_SYMBOL_DESCRIPTION: "Oil Well" }, geometry: { x: -95.788, y: 29.785 } },        // producing, near
+      { attributes: { API: "42-002", SYMNUM: 7, GIS_SYMBOL_DESCRIPTION: "Plugged Oil Well" }, geometry: { x: -95.795, y: 29.785 } }, // plugged, ON the parcel
+    ];
+    const fetchJson = async (url) => (/returnCountOnly=true/i.test(url) ? { count: 2 } : { features: feats });
     const f = await analyzeSource(wells, [SQUARE], { cache, fetchJson });
     expect(f.status).toBe("present");
-    expect(f.summary).toMatch(/2 wells/);
+    expect(f.summary).toMatch(/2 wells within 0.25 mi/);
+    expect(f.summary).toMatch(/1 plugged\/abandoned/);
+    expect(f.summary).toMatch(/1 producing/);
+    expect(f.summary).toMatch(/on the site — offset\/replug risk/); // the plugged well is on the footprint
+    expect(f.detail.join(" ")).toMatch(/API 42-002 — Plugged Oil Well/);
+  });
+  it("wells: no wells within the buffer → a verified 'none', never unknown", async () => {
+    const cache = freshCache();
+    const wells = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
+    const fetchJson = async (url) => (/returnCountOnly=true/i.test(url) ? { count: 0 } : { features: [] });
+    const f = await analyzeSource(wells, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("absent");
+    expect(f.summary).toMatch(/No mapped oil & gas wells within a quarter-mile/);
   });
 });
 
