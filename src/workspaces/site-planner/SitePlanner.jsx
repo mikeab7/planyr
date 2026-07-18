@@ -89,6 +89,7 @@ import JurisdictionBadge from "./components/JurisdictionBadge.jsx";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx } from "./lib/roadGeometry.js";
+import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
@@ -11833,7 +11834,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const renderMarkupNode = (m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
                 const zk = view.ppf / 0.35; // B617 zoom multiplier (matches the callout scale)
-                const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
+                const sw = (m.weight ?? 2), da = dashZoom(dashArray(m.dash, sw), zk); // B880 — scale the dash period with zoom too (B617 scaled only the weight)
                 // B619: NEVER recolor a markup on select — every markup keeps its own authored stroke
                 // (so a live color-picker change shows instantly instead of hiding under an accent tint);
                 // selection is cued by the blue grips / halo, plus a faint width bump. (Generalizes the
@@ -11870,7 +11871,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
                       {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
-                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? "5 4" : undefined} />
+                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? dashZoom("5 4", zk) : undefined} />
                       <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
                       <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
                       <text x={padC.x} y={padC.y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
@@ -11903,7 +11904,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
                       <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* centerline + per-call bearing/distance labels */}
-                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.12 && (m.calls || []).map((c, i) => {
                         const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
@@ -11929,9 +11930,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
                   return (
                     <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => { e.stopPropagation(); beginEditInline("markup", m.id); }}>
-                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? "7 5" : undefined} />
+                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
-                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
                       {editInline?.id !== m.id && inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
@@ -12286,11 +12287,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* connectors: trace = the measured line; align = each drawing→map pair */}
               {ovCalib && ovCalib.kind === "trace" && ovCalib.pts.length >= 2 && (() => {
                 const a = f2p(ovCalib.pts[0]), b = f2p(ovCalib.pts[1]);
-                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" pointerEvents="none" />;
+                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray={dashZoom("5 4", view.ppf / 0.35)} pointerEvents="none" />;
               })()}
               {ovCalib && ovCalib.kind === "align" && Array.from({ length: Math.floor(ovCalib.pts.length / 2) }, (_, k) => {
                 const a = f2p(ovCalib.pts[2 * k]), b = f2p(ovCalib.pts[2 * k + 1]);
-                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray="4 3" pointerEvents="none" />;
+                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray={dashZoom("4 3", view.ppf / 0.35)} pointerEvents="none" />;
               })}
 
               {/* setback outlines (per-edge) — anchored to the parcel, so an INACTIVE
@@ -12302,12 +12303,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   render later (on top) and keep their own stopPropagation, so editing them is unchanged. */}
               {settings.showSetback && parcels.filter((pc) => pc.active !== false).map((pc) => {
                 const sb = parcelSetbacks(pc);
-                if (!sb.some((v) => v > 0)) return null;
+                const posSb = sb.filter((v) => v > 0);
+                if (!posSb.length) return null;
+                // B880 — when the smallest setback's on-screen inset drops below ~3 px the dashed ring
+                // collapses onto the parcel boundary → the garbled double-line the owner saw on zoom-out.
+                // Suppress it there (it reappears on zoom-in), the same way a sub-pixel 6" curb drops (B719).
+                if (!insetRingVisible(Math.min(...posSb), view.ppf)) return null;
                 const o = offsetPolygon(pc.points, sb);
                 if (!o) return null;
+                const zk = view.ppf / 0.35; // B617/B880 zoom factor — hold the setback weight + dash constant relative to the drawing
                 const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 return <g key={`sb${pc.id}`}>
-                  <polygon points={ring} fill="none" stroke={PAL.setback} strokeWidth={1.25} strokeDasharray="7 6" pointerEvents="none" />
+                  <polygon points={ring} fill="none" stroke={PAL.setback} strokeWidth={strokeZoom(1.25, zk)} strokeDasharray={dashZoom("7 6", zk)} pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
