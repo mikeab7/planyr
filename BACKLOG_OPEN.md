@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _57 open · 129 awaiting live verification._
+> _57 open · 112 awaiting live verification._
 
 ## 🔲 Open
 
@@ -89,10 +89,6 @@
 | B860 | Facts pass auto-recompute: kill the manual Re-check for stale math | [Site Planner / yield · GIS] | #site-planner #yield #gis #perf #persistence | ⏳ live — awaiting |
 | B861 | BKDD: auto-detect the district boundary + transcribe its rate-control rule records | [Site Planner / stormwater · GIS] | #site-planner #floodplain #yield #gis | ⏳ live — awaiting |
 | B862 | Yield readout overhaul: verdict-first hierarchy, required-vs-provided bars, caveat consolidation | [Site Planner / yield] | #site-planner #yield #ui #export #floodplain | ⏳ live — awaiting |
-| B859 | Waller County rule records: 500-yr mitigation trigger, conditioned FFE rules, no-structural-fill hard stop, floodway + 100-ft buffer | [Site Planner / floodplain] | #site-planner #floodplain #yield | ⏳ live — awaiting |
-| B856 | Unstudied Zone A: estimated-WSE provider (grade along the zone boundary) so mitigation, heat map, and pond split stop dead-ending | [Site Planner / floodplain] | #site-planner #floodplain #yield #gis | ⏳ live — awaiting |
-| B857 | Suggested pad FFE: compute the jurisdictional minimum and offer it into the blank Pad/FFE field | [Site Planner / floodplain] | #site-planner #floodplain #yield | ⏳ live — awaiting |
-| B858 | Pond purpose designation (Detention / Mitigation / Hybrid) + band-driven sizing assistant | [Site Planner / stormwater · yield] | #site-planner #pond #yield #floodplain | ⏳ live — awaiting |
 | B851 | Schedule grid diverges from the route: crumb correct, grid stranded on the previously-active schedule (route Goose Creek, grid Grand Port) | [Scheduler / Header-Nav] | #scheduler #ui #persistence | ⏳ live — awaiting |
 | B850 | Scheduler's "open in another tab" banner was oversized, falsely claimed a read-only lock, and turned out to be unnecessary entirely | [Scheduler / Shell] | #scheduler #ui #infra | ⏳ live — awaiting |
 | B846 | Idle second same-account tab makes cascade-derived elements fire false "you (another window) changed X you just edited" toasts | [Site Planner / persistence] | #site-planner #persistence #ui | ⏳ live — awaiting |
@@ -104,25 +100,14 @@
 | B836 | Cascade-drift guard on load: flag non-pinned tasks whose stored dates ≠ engine dates (LOUD-FAILURE) | [Scheduler] | #scheduler #testing #persistence | ⏳ live — awaiting |
 | B835 | Edit-time cascade gate skipped typed-duration & pin edits: a task's own end updated but successors kept stale dates (×2) | [Scheduler] | #scheduler #persistence | ⏳ live — awaiting |
 | B832 | Drainage facts auto-revalidate; the ↻ button becomes an override, not a gate | [Site Planner / yield · GIS] | #site-planner #yield #gis #persistence #perf | ⏳ live — awaiting |
-| B833 | Transition wedges are real fill: daylight slopes join the proposed surface, the mitigation ledger, and the heat map — and the engine daylights ASAP | [Site Planner / grading · yield] | #site-planner #grading #yield #floodplain | ⏳ live — awaiting |
-| B834 | Pond roles + a real mitigation-provided ledger (detention vs mitigation vs dual, credited not footnoted) | [Site Planner / stormwater · yield] | #site-planner #pond #yield #floodplain #ui #export | ⏳ live — awaiting |
 | B829 | Remembered check credits GROSS pond volume as detention (surplus/short verdict flips on reload) | [Site Planner / yield · persistence] | #site-planner #pond #yield #persistence | ⏳ live — awaiting |
-| B830 | Ledger-balancer: rank the moves that close detention + mitigation together (the adversarial pass as a feature) | [Site Planner / stormwater · yield] | #site-planner #pond #yield #floodplain | ⏳ live — awaiting |
 | B831 | Flag ponds and basins inside pipeline easement corridors | [Site Planner / GIS · stormwater] | #site-planner #gis #pond | ⏳ live — awaiting |
 | B808 | Mitigation volumes integrate per-cell 3DEP grade (retire the single centroid-line median) | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #gis | ⏳ live — awaiting |
-| B809 | Fill-depth heat map overlay: render the exact cells the engine priced | [Site Planner / yield · ui] | #site-planner #yield #floodplain #ui #export | ⏳ live — awaiting |
-| B826 | Proposed-surface engine: auto-grade the concept from FFE + rules, then earthwork balance and mitigation priced off the real surface | [Site Planner / grading · yield] | #site-planner #grading #yield #floodplain | ⏳ live — awaiting |
 | B821 | Map flashes/blanks on single- & double-click: docked-panel resize → un-ghosted `setView` tile-wipe | [Site Planner / Map] | #site-planner #ui #perf | ⏳ live — awaiting |
-| B824 | One home for drainage: merge the Analysis "Floodplain mitigation & buildability" card into Yield → Stormwater; Analysis keeps a one-line screening verdict | [Site Planner / yield · analysis] | #site-planner #yield #ui #export | ⏳ live — awaiting |
-| B823 | Left-panel verbiage, completion pass: one-line notes with logic gating (B803 structure shipped; the notes were left as paragraphs) | [Site Planner / yield · ui] | #site-planner #yield #ui | ⏳ live — awaiting |
-| B822 | Detention ponds engineered automatically: criteria records drive freeboard/slopes/constraints, terrain drives top-of-bank, the solver drives depth | [Site Planner / stormwater] | #site-planner #pond #yield #gis | ⏳ live — awaiting |
-| B827 | 0.2% (500-yr) WSE sampler rides the B807 per-watershed multiplex (county mosaic has holes — Willow Fork proven) | [Site Planner / GIS · yield] | #site-planner #gis #yield #floodplain | ⏳ live — awaiting |
 | B691 | Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy (×2) | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B820 | Site Planner element/markup z-order "Arrange": Bring to Front / Forward / Send Backward / to Back via right-click + ⌘/Ctrl+]/[ chords, plus "Send behind buildings" for markups | [Site Planner / markup] | #site-planner #markup #selection #ui | ⏳ live — awaiting |
-| B819 | False "open in another tab" banner on the Library with only ONE tab open | [App Shell / Library] | #ui #infra #persistence | ⏳ live — awaiting |
 | B817 | Float-to-deadline, cost-of-miss, and the cadence view | [Scheduler] | #scheduler #entitlements #gantt #export | ⏳ live — awaiting |
 | B816 | Meeting-bound tasks: snap to cadence, auto-roll on miss, derived agenda deadline | [Scheduler] | #scheduler #entitlements #gantt #perf #export | ⏳ live — awaiting |
-| B815 | Meeting calendars: recurrence + agenda-deadline rules for external decision bodies | [Scheduler] | #scheduler #entitlements #testing | ⏳ live — awaiting |
 | B807 | Fort Bend Zone A finally prices: FBCDD Atlas-14 100-yr WSE raster provider (`derivedWse1pctFt`, DRAFT-labeled) | [Site Planner / GIS · yield] | #site-planner #gis #yield #floodplain | ⏳ live — awaiting |
 | B796 | Rehydrated drainage check must re-derive authority, not trust the stored verdict | [Site Planner / GIS · yield] | #site-planner #gis #yield #persistence | ⏳ live — awaiting |
 | B797 | County-gate the Harris-side detention criteria (HCFCD compare + channel question + `inCityLimits`) | [Site Planner / GIS · yield] | #site-planner #gis #yield | ⏳ live — awaiting |
@@ -134,9 +119,7 @@
 | B791 | File deletes bypass Drive trash: PERMANENT delete with no recovery window | [Doc Review / storage] | #doc-review #drive #persistence | ⏳ live — awaiting |
 | B792 | Review delete-safety: same-name re-upload cross-wires two reviews; delete permanently destroys the markup layer; a network blip renders an empty Library | [Doc Review / Library] | #doc-review #library #persistence #drive #files | ⏳ live — awaiting |
 | B793 | Planner: an edit whose cloud commit failed is silently reverted by the reload refetch | [Site Planner / Persistence] | #site-planner #persistence | ⏳ live — awaiting |
-| B790 | FEMA flood zones showed a healthy "loaded" (blue) dot over a BLANK map during a source slowdown — honest per-layer "source slow / data may be missing" status | [Site Planner / layers panel] | #site-planner #gis #ui #floodplain | ⏳ live — awaiting |
 | B789 | Per-source `timeoutMs` override in the GIS screening-fetch registry (FEMA flood answered at ~9.5 s, past the 9 s default) | [Site Planner / GIS] | #site-planner #gis #floodplain | ⏳ live — awaiting |
-| B788 | Route FEMA flood + other rasters through the same-origin cache proxy with a BOUNDED upstream timeout so a degraded source fails open fast, never blank | [Site Planner / GIS] | #site-planner #gis #infra #floodplain | ⏳ live — awaiting |
 | B787 | Re-point Chambers County parcels at CCAD's own live public service (ChambersCADPublic) | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B784 | Site-plan overlay stuck on "Loading drawing…" forever when its Storage object is missing | [Site Planner / overlay] | #site-planner #persistence #files | ⏳ live — awaiting |
 | B785 | Overlay keeps a dead `storageKey`; the download layer couldn't tell "file gone" from "network blip" | [Site Planner / overlay] | #site-planner #persistence #files | ⏳ live — awaiting |
@@ -209,26 +192,26 @@
 - **#coordinates** — B625, B684
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B791, B792, B750, B746, B687, B685, B667, B659
 - **#drive** — B663, B662, B629, B791, B792, B699, B701, B687
-- **#entitlements** — B818, B725, B726, B868, B869, B817, B816, B815
-- **#export** — B818, B810, B752, B862, B839, B840, B834, B809, B824, B817, B816, B745, B739, B738, B712, B684
+- **#entitlements** — B818, B725, B726, B868, B869, B817, B816
+- **#export** — B818, B810, B752, B862, B839, B840, B817, B816, B745, B739, B738, B712, B684
 - **#files** — B180, B181, B182, B183, B792, B784, B785, B786, B747, B748, B699, B687, B685, B675, B668, B664, B659
 - **#filing** — B411, B364, B273, B699, B687, B685, B664, B659
-- **#floodplain** — B882, B883, B878, B873, B866, B868, B869, B870, B871, B861, B862, B859, B856, B857, B858, B833, B834, B830, B808, B809, B826, B827, B807, B798, B802, B790, B789, B788, B782, B755
+- **#floodplain** — B882, B883, B878, B873, B866, B868, B869, B870, B871, B861, B862, B808, B807, B798, B802, B789, B782, B755
 - **#gantt** — B818, B817, B816
-- **#gis** — B810, B776, B777, B752, B753, B722, B723, B724, B726, B629, B370, B309, B178, B171, B147, B13, B95, B882, B883, B879, B860, B861, B856, B839, B840, B832, B831, B808, B822, B827, B691, B807, B796, B797, B800, B801, B790, B789, B788, B787, B782, B775, B774, B761, B625, B755, B751, B754, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
-- **#grading** — B871, B833, B826
-- **#infra** — B778, B735, B726, B406, B179, B63, B850, B864, B819, B788, B786, B812, B811, B759, B758, B756, B748, B734, B675, B669
+- **#gis** — B810, B776, B777, B752, B753, B722, B723, B724, B726, B629, B370, B309, B178, B171, B147, B13, B95, B882, B883, B879, B860, B861, B839, B840, B832, B831, B808, B691, B807, B796, B797, B800, B801, B789, B787, B782, B775, B774, B761, B625, B755, B751, B754, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
+- **#grading** — B871
+- **#infra** — B778, B735, B726, B406, B179, B63, B850, B864, B786, B812, B811, B759, B758, B756, B748, B734, B675, B669
 - **#library** — B663, B662, B792, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B820, B750, B746, B740, B737
 - **#perf** — B842, B495, B484, B479, B860, B839, B837, B832, B821, B816, B749, B704, B694, B669
-- **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B860, B851, B846, B863, B864, B836, B835, B832, B829, B819, B796, B799, B800, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
-- **#pond** — B883, B866, B869, B870, B871, B858, B834, B829, B830, B831, B822, B707
+- **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B860, B851, B846, B863, B864, B836, B835, B832, B829, B796, B799, B800, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
+- **#pond** — B883, B866, B869, B870, B871, B829, B831, B707
 - **#road** — B742, B719
-- **#scheduler** — B818, B778, B495, B865, B851, B850, B863, B864, B836, B835, B817, B816, B815, B644
+- **#scheduler** — B818, B778, B495, B865, B851, B850, B863, B864, B836, B835, B817, B816, B644
 - **#selection** — B741, B880, B872, B820, B750, B746, B742, B743, B740, B737, B682, B651
-- **#site-planner** — B842, B810, B776, B777, B752, B753, B741, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B882, B883, B881, B880, B879, B878, B873, B872, B866, B868, B869, B870, B871, B860, B861, B862, B859, B856, B857, B858, B846, B839, B840, B837, B832, B833, B834, B829, B830, B831, B808, B809, B826, B821, B824, B823, B822, B827, B691, B820, B807, B796, B797, B798, B799, B800, B801, B802, B793, B790, B789, B788, B787, B784, B785, B786, B782, B812, B811, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B842, B810, B776, B777, B752, B753, B741, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B882, B883, B881, B880, B879, B878, B873, B872, B866, B868, B869, B870, B871, B860, B861, B862, B846, B839, B840, B837, B832, B829, B831, B808, B821, B691, B820, B807, B796, B797, B798, B799, B800, B801, B802, B793, B789, B787, B784, B785, B786, B782, B812, B811, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413, B839
-- **#testing** — B269, B63, B878, B873, B863, B836, B815, B743
+- **#testing** — B269, B63, B878, B873, B863, B836, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B842, B810, B741, B735, B723, B115, B882, B881, B880, B879, B872, B865, B862, B851, B850, B846, B837, B834, B809, B821, B824, B823, B820, B819, B798, B799, B801, B802, B790, B761, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B673, B674
-- **#yield** — B724, B882, B883, B878, B873, B872, B866, B868, B869, B870, B871, B860, B861, B862, B859, B856, B857, B858, B832, B833, B834, B829, B830, B808, B809, B826, B824, B823, B822, B827, B807, B796, B797, B798, B799, B802, B782, B755, B751, B754, B715, B712, B651
+- **#ui** — B842, B810, B741, B735, B723, B115, B882, B881, B880, B879, B872, B865, B862, B851, B850, B846, B837, B821, B820, B798, B799, B801, B802, B761, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B673, B674
+- **#yield** — B724, B882, B883, B878, B873, B872, B866, B868, B869, B870, B871, B860, B861, B862, B832, B829, B808, B807, B796, B797, B798, B799, B802, B782, B755, B751, B754, B715, B712, B651
