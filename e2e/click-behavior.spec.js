@@ -15,12 +15,32 @@ import { test, expect } from "@playwright/test";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 const panel = (p) => p.getByTestId("property-panel");
+// The floating quick-edit overlay (an <input> in an SVG foreignObject) and the Properties panel's
+// OWN "Inline label" field share the identical placeholder text — so a plain getByPlaceholder match
+// can't tell them apart. Scope to the one that is NOT inside the property panel.
+const inlineLabelOverlay = (p) => p.locator('xpath=//input[contains(@placeholder,"SANITARY SEWER") and not(ancestor::*[@data-testid="property-panel"])]');
 
 function buildingCount(page) {
   return page.evaluate(() => {
     const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
     const site = map[Object.keys(map)[0]] || {};
     return (site.els || []).filter((e) => e.type === "building").length;
+  });
+}
+
+function roadCount(page) {
+  return page.evaluate(() => {
+    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const site = map[Object.keys(map)[0]] || {};
+    return (site.els || []).filter((e) => e.type === "road" && Array.isArray(e.pts) && e.pts.length >= 2).length;
+  });
+}
+
+function lineMarkupCount(page) {
+  return page.evaluate(() => {
+    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const site = map[Object.keys(map)[0]] || {};
+    return (site.markups || []).filter((m) => m.kind === "line").length;
   });
 }
 
@@ -42,6 +62,51 @@ async function drawBuilding(page) {
   await page.mouse.up();
   await expect.poll(() => buildingCount(page)).toBeGreaterThanOrEqual(1);
   return { cx: Math.round((x1 + x2) / 2), cy: Math.round((y1 + y2) / 2) };
+}
+
+// Draw a CENTERLINE (preset-width) road: pick a width preset (roadWidth defaults to "free", which
+// is the old drag-a-rectangle road, NOT a centerline road), click two points, Enter to finish. Returns
+// a reliable hit point on the paved strip — OFFSET from the exact midpoint, which the width-dimension
+// label ("24′", its own separately-clickable text) sits directly on top of.
+async function drawCenterlineRoad(page) {
+  const box = await canvas(page).boundingBox();
+  await page.getByRole("button", { name: "Road", exact: true }).click();
+  await page.getByRole("button", { name: "Road presets" }).click();
+  await page.getByRole("button", { name: /travel — click points/i }).first().click();
+  const x1 = box.x + 260, y1 = box.y + 300, x2 = box.x + 560, y2 = y1;
+  await page.mouse.click(x1, y1);
+  await page.mouse.click(x2, y2);
+  await page.keyboard.press("Enter");
+  await expect.poll(() => roadCount(page)).toBeGreaterThanOrEqual(1);
+  return { cx: x1 + 40, cy: y1 };
+}
+
+// Draw a Line markup (drag end-to-end); returns its midpoint.
+async function drawLineMarkup(page) {
+  const box = await canvas(page).boundingBox();
+  await page.getByRole("button", { name: /^Line\s/ }).click();
+  const x1 = box.x + 260, y1 = box.y + 420, x2 = box.x + 560, y2 = box.y + 420;
+  await page.mouse.move(x1, y1);
+  await page.mouse.down();
+  await page.mouse.move(x2, y2, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(() => lineMarkupCount(page)).toBeGreaterThanOrEqual(1);
+  return { cx: Math.round((x1 + x2) / 2), cy: y1 };
+}
+
+// Place a callout (tip click + box click auto-opens the text editor to type into); commit non-blank
+// text with Escape (Escape commits the callout's own editor, a second Escape then globally deselects).
+async function drawCallout(page) {
+  const box = await canvas(page).boundingBox();
+  await page.getByRole("button", { name: /^Callout\s/ }).click();
+  const tipX = box.x + 300, tipY = box.y + 500, boxX = box.x + 420, boxY = box.y + 460;
+  await page.mouse.click(tipX, tipY);
+  await page.mouse.click(boxX, boxY);
+  await page.getByPlaceholder("Type…").waitFor({ state: "visible" });
+  await page.keyboard.type("Test note");
+  await page.keyboard.press("Escape"); // commits the callout's own text editor
+  await page.keyboard.press("Escape"); // global deselect
+  return { cx: boxX, cy: boxY };
 }
 
 test.describe("click behavior — single-click selects, double-click opens Properties (logged out)", () => {
@@ -75,6 +140,112 @@ test.describe("click behavior — single-click selects, double-click opens Prope
     await page.keyboard.press("Escape");
     await page.mouse.click(cx, cy);
     await expect(panel(page)).toHaveCount(0);
+
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  /* NEW-1 — regression guard: a centerline road, a Line markup, and a callout each carried a raw
+   * native `onDoubleClick` (a pre-B750 B620 leftover) that unconditionally forced the inline text/label
+   * editor open, bypassing the "single-click selects; double-click opens Properties; an ALREADY-selected
+   * text-bearing feature's double-click edits its text" gate that B750 wired everywhere else. That raw
+   * handler is a fallback for whenever the browser's native dblclick fires (pointer capture doesn't
+   * always suppress it) — so a fresh double-click on any of these three could open the inline editor
+   * straight away instead of Properties. Fixed by gating the fallback identically to the reconstructed
+   * pointerdown path (onElDouble / the new onMarkupDouble / the callout box handler all now read
+   * dblWasSelRef). This spec drives all three: fresh double-click → Properties; select, then
+   * double-click again → inline editor. */
+  test("Site Planner: double-click a centerline road opens Properties; already-selected double-click edits its inline label", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+    const { cx, cy } = await drawCenterlineRoad(page);
+
+    await expect(panel(page)).toHaveCount(0); // freshly drawn → no auto-open
+
+    // Fresh double-click (not already selected) → Properties, NOT the inline label editor.
+    await page.keyboard.press("Escape");
+    await page.mouse.move(cx, cy);
+    await page.mouse.down(); await page.mouse.up();
+    await page.mouse.down(); await page.mouse.up();
+    await expect(panel(page)).toBeVisible();
+    await expect(inlineLabelOverlay(page)).toHaveCount(0);
+
+    await page.locator('button[aria-label="Close properties"]').click();
+    await expect(panel(page)).toHaveCount(0);
+
+    // Already-selected (single click, then a SEPARATE double-click) → edits the inline label in place.
+    // The wait clears the single click's own tap record (DBLTAP_MS=350ms) so the upcoming double-click's
+    // two presses pair with EACH OTHER, not with this re-select click (which would itself count as the
+    // double-tap's first press and leave only one further press — a single, not a double, click).
+    await page.mouse.click(cx, cy);
+    await expect(panel(page)).toHaveCount(0);
+    await page.waitForTimeout(450);
+    await page.mouse.move(cx, cy);
+    await page.mouse.down(); await page.mouse.up();
+    await page.mouse.down(); await page.mouse.up();
+    await expect(panel(page)).toHaveCount(0);
+    await expect(inlineLabelOverlay(page)).toBeVisible();
+
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("Site Planner: double-click a Line markup opens Properties; already-selected double-click edits its inline label", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+    const { cx, cy } = await drawLineMarkup(page);
+
+    await expect(panel(page)).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await page.mouse.move(cx, cy);
+    await page.mouse.down(); await page.mouse.up();
+    await page.mouse.down(); await page.mouse.up();
+    await expect(panel(page)).toBeVisible();
+    await expect(inlineLabelOverlay(page)).toHaveCount(0);
+
+    await page.locator('button[aria-label="Close properties"]').click();
+    await expect(panel(page)).toHaveCount(0);
+
+    await page.mouse.click(cx, cy);
+    await expect(panel(page)).toHaveCount(0);
+    await page.waitForTimeout(450); // see the road test above for why this wait matters
+    await page.mouse.move(cx, cy);
+    await page.mouse.down(); await page.mouse.up();
+    await page.mouse.down(); await page.mouse.up();
+    await expect(panel(page)).toHaveCount(0);
+    await expect(inlineLabelOverlay(page)).toBeVisible();
+
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("Site Planner: double-click a callout opens Properties; already-selected double-click edits its text", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+    const { cx, cy } = await drawCallout(page);
+
+    await expect(panel(page)).toHaveCount(0); // deselected after the two Escapes in drawCallout
+
+    // Fresh double-click (not already selected) → Properties, NOT the text editor reopening.
+    await page.mouse.move(cx, cy);
+    await page.mouse.down(); await page.mouse.up();
+    await page.mouse.down(); await page.mouse.up();
+    await expect(panel(page)).toBeVisible();
+    await expect(page.getByPlaceholder("Type…")).toHaveCount(0);
+
+    await page.locator('button[aria-label="Close properties"]').click();
+    await expect(panel(page)).toHaveCount(0);
+
+    // Already-selected → double-click reopens the text editor in place.
+    await page.mouse.click(cx, cy);
+    await expect(panel(page)).toHaveCount(0);
+    await page.waitForTimeout(450); // see the road test above for why this wait matters
+    await page.mouse.move(cx, cy);
+    await page.mouse.down(); await page.mouse.up();
+    await page.mouse.down(); await page.mouse.up();
+    await expect(panel(page)).toHaveCount(0);
+    await expect(page.getByPlaceholder("Type…")).toBeVisible();
 
     expect(errors, errors.join("\n")).toEqual([]);
   });
