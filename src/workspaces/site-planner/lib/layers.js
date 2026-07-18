@@ -162,6 +162,14 @@ export const STATEWIDE = {
     url: GIS_SOURCES.epaCleanups.serviceUrl, minZoom: 11, color: "#b45309", weight: 2, opacity: 0.95,
     note: "EPA 'Cleanups in My Community' — Superfund (NPL) + RCRA corrective-action sites. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in (national dataset).",
   },
+  faults: {
+    // Public-data screening PHASE 3 — Houston-area active surface growth-fault traces. The Site
+    // Analysis "Active surface faults" card drives this overlay (mapLayer: "faults"). FeatureServer
+    // line layer → esriFeature (vector), zoom-gated. URL from the registry (no inline endpoint).
+    kind: "esriFeature", label: "Active surface faults (Houston)",
+    url: GIS_SOURCES.growthFaults.serviceUrl, minZoom: 11, color: "#7c2d12", weight: 2.5, opacity: 0.95,
+    note: "Houston-area growth-fault surface traces (USGS SIM 2874, via a University of Houston GIS republication). Aseismic slow-slip faults that damage foundations/pavement. Screening only — get a geotechnical/fault study. Loads zoomed in.",
+  },
 };
 
 /* Utility-evidence layers — power & hydrant evidence from crowd/agency sources,
@@ -392,6 +400,7 @@ export const LAYER_VINTAGE = {
   ccn_service: "PUC CCN (via Harris County GIS) — Dec 2023 edition",
   env_lpst: "TCEQ LPST — continuously updated",
   env_cleanups: "EPA Cleanups in My Community (FRS) — periodically updated",
+  faults: "USGS SIM 2874 (Shah & Lanning-Rush) via UH GIS — 2005 study",
   // Utility evidence
   osm_power: "OpenStreetMap — community-edited, live",
   osm_hydrants: "OpenStreetMap — community-edited, live",
