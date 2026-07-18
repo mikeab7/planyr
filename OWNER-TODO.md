@@ -5,7 +5,20 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-15._
+_Last updated: 2026-07-18._
+
+## 🔑 A read-only TEST LOGIN would let Claude clear the biggest pile of verification checks itself
+- [ ] **The single highest-leverage thing you can hand over.** The live-app checklist (`VERIFICATION.md`)
+      has a large chunk of items that are stuck only because they need someone **signed in** (a saved site,
+      cloud sync, the account menu). Right now those wait on the Claude cohort using a real browser. If you
+      create a **throwaway, low-privilege test account** (its own email + password, no real project data —
+      just used to click through) and share the credentials, Claude can sign in as that account and clear
+      most of the signed-in checklist itself, instead of parking those items. Nothing sensitive rides on it.
+      **One caveat, in plain terms:** the sandbox Claude runs in here still can't log in even with a password
+      (its network is locked down and blocks the sign-in handshake) — so the test login helps the **cohort on
+      the live site** (planyr.io), and would only help the sandbox too if you also loosen that environment's
+      network rules. Either way, a test account is the piece that unblocks the most work. Tell a Claude
+      session when you've made one and where the credentials live.
 
 ## 🗓 Optional — one Scheduler date to sanity-check on Grand Port (B835)
 - [ ] **Nothing broken; just a judgment call only you can make.** The task you flagged — Grand Port →
