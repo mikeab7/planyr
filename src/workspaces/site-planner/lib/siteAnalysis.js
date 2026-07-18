@@ -27,6 +27,7 @@ import { gisCache as defaultCache } from "./gisCache.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gisFetch.js";
+import { classifyCcn } from "./ccnClassify.js";
 
 const DAY = 24 * 3600 * 1000;
 
@@ -137,6 +138,29 @@ export const ANALYSIS_SOURCES = [
     label: "Zoning & entitlement context", derived: true,
     sourceName: "Derived from jurisdiction",
     caveat: "Zoning is jurisdiction-specific (City of Houston has no zoning; ETJ and other cities vary). Confirm platting/entitlement requirements with the jurisdiction.",
+  },
+  {
+    // Water CCN (public-data screening PHASE 1) — WHO holds the PUC certificate to serve
+    // the site with water (a city, MUD, WSC, private utility …), or NONE (well / new CCN).
+    // Statewide authoritative source (TWDB-hosted PUCT CCN) via the registry. CCN is a
+    // FACT not a good/bad constraint, so classifyCcn returns `info` for both outcomes.
+    id: "ccnWater", category: "Water service (CCN)", label: "Water CCN service area", kind: "polygon",
+    mapLayer: "ccn_service", // both CCN cards drive the one Water/sewer CCN overlay (B190 "◍ Map")
+    ...reg("ccnWater"),
+    ttl: 30 * DAY, verified: true,
+    classify: (rows) => classifyCcn(rows, { service: "water" }),
+    caveat: "PUC water CCN — the certificated retail provider for the site (or none → likely city-served / a well). STATUS separates an approved certificate from a pending docket. Screening only; confirm service, capacity, and tap availability with the utility and the PUC.",
+  },
+  {
+    // Sewer CCN (PHASE 1). No statewide sewer-CCN REST endpoint exists, so this rides the
+    // Harris County GIS re-serve (registry `ccnSewer`, EPSG:2278) — REGIONAL (Houston MSA)
+    // coverage, so the empty message is hedged (regional:true), never a green all-clear.
+    id: "ccnSewer", category: "Sewer service (CCN)", label: "Sewer CCN service area", kind: "polygon",
+    mapLayer: "ccn_service",
+    ...reg("ccnSewer"),
+    ttl: 30 * DAY, verified: true,
+    classify: (rows) => classifyCcn(rows, { service: "sewer", regional: true }),
+    caveat: "PUC sewer CCN, Houston-region coverage (no statewide sewer-CCN service exists yet). A site with no sewer CCN likely needs septic / on-site treatment or a new CCN. Screening only — confirm with the utility and the PUC.",
   },
 ];
 
@@ -565,7 +589,7 @@ export function deriveZoning(j) {
 // Orchestrator
 // ---------------------------------------------------------------------------
 // Display order for the assembled findings.
-const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "contamination", "jurisdiction", "road", "zoning"];
+const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "contamination", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"];
 
 /* Run the full screen against the active-parcel rings ([[ [lng,lat], ... ], ...]).
  * Returns { findings, generatedAt }. Findings are presence-first and each carries its

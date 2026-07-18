@@ -158,6 +158,72 @@ export const GIS_SOURCES = {
       "alignment. Retired source: www.gis.hctx.net/arcgishcpid/…/TXRRC/Pipelines.",
   },
 
+  // ---- Utility-service CCN screening sources (public-data screening PHASE 1) ----
+  // "Who holds the certificate to serve this site." A CCN (Certificate of Convenience &
+  // Necessity) is the PUC of Texas retail monopoly to provide water / sewer in a bounded
+  // area. A parcel INSIDE a CCN polygon → that utility is the one obligated (and entitled)
+  // to serve it; a parcel in NO CCN → there is no certificated provider (city-served, a
+  // private well/septic, or a petition/new-CCN is needed). Screening only — the STATUS field
+  // distinguishes an approved cert from one still in a pending docket; confirm with the utility
+  // and the PUC. NB: these polygon layers answer POINT-in-polygon via an ENVELOPE / parcel-ring
+  // intersect (how the screen + the drift verifier query them); a bare x,y point /query on the
+  // Harris MapServer can silently return 0 (older ArcMap host quirk) — never query them with a
+  // naked point.
+  ccnWater: {
+    key: "ccnWater",
+    label: "Water CCN service area",
+    provider: "Public Utility Commission of Texas (via TWDB)",
+    // The authoritative STATEWIDE water-CCN polygons, hosted by the Texas Water Development
+    // Board on ArcGIS Online (Dec-2023 PUCT edition; 3,844 polygons statewide, CORS-clean).
+    // Chosen over the Harris-County re-serve (regional, ~301 polys — the B369 clip trap) for the
+    // same reason wells/pipelines use the statewide RRC service, not the Harris republication.
+    serviceUrl: "https://services3.arcgis.com/O0h7Kr4STkhD6uiU/arcgis/rest/services/PUC_CCN_2023Dec_FeatureLayer/FeatureServer/0",
+    layerId: null, // url already includes the layer index (FeatureServer/0)
+    geometryType: "polygon",
+    // No field encodes the utility KIND (city / MUD / WSC …) — that is inferred from the
+    // UTILITY name string in lib/ccnClassify.js. CCN_TYPE is the service-area class
+    // ("Bounded Service Area"), NOT the utility kind.
+    fields: { utility: "UTILITY", ccnType: "CCN_TYPE", status: "STATUS", ccnNo: "CCN_NO" },
+    coverage: "statewide",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Cypress — dense CCN country (same point the `mud` fixture uses); a county-clipped or
+      // dead source fails this. Queried as a ~1 km envelope by the drift verifier.
+      { label: "Cypress-area water CCN", point: [-95.69, 29.97], expectMinCount: 1 },
+    ],
+    notes:
+      "PUCT water-CCN retail monopoly boundaries (TWDB-hosted, Dec 2023). A site inside a polygon " +
+      "has a certificated water provider (obligated to serve); no polygon → well or a new CCN/petition. " +
+      "STATUS separates an approved cert from a pending docket. Screening only — confirm with the utility/PUC.",
+  },
+  ccnSewer: {
+    key: "ccnSewer",
+    label: "Sewer CCN service area",
+    provider: "Public Utility Commission of Texas (via Harris County GIS)",
+    // There is NO statewide sewer-CCN REST endpoint (PUCT publishes sewer CCN only as a
+    // periodic shapefile download; TWDB serves water CCN but not sewer). Harris County GIS
+    // re-serves the PUCT CCN in EPSG:2278 (Planyr's spine) with BOTH water (layer 1) and
+    // sewer (layer 2) — a PRODUCTION host, but its coverage is the Houston metro region, not
+    // statewide. Documented regional here (the target market is the Houston MSA); upgrading to a
+    // statewide/authoritative sewer source is tracked as a live-verify follow-up (VERIFICATION.md).
+    serviceUrl: "https://www.gis.hctx.net/arcgishcpid/rest/services/State/PUC_CCN_Sewer_Water/MapServer",
+    layerId: 2, // 2 = CCN Sewer Service Areas (1 = water, 0 = water facility lines)
+    geometryType: "polygon",
+    fields: { utility: "UTILITY", ccnType: "CCN_TYPE", status: "STATUS", ccnNo: "CCN_NO" },
+    coverage: "Houston metro region (Harris County GIS re-serve of the PUCT CCN; no statewide sewer-CCN REST exists)",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      { label: "Cypress-area sewer CCN", point: [-95.69, 29.97], expectMinCount: 1 },
+    ],
+    notes:
+      "PUCT sewer-CCN retail monopoly boundaries, Harris County GIS re-serve (EPSG:2278). Regional " +
+      "(Houston MSA) coverage — a far-out site reads 'no sewer CCN' because the layer doesn't reach it, " +
+      "so this screen's absent state is an honest INFO note, never a green all-clear. Statewide-source " +
+      "upgrade tracked as a live-verify item. Same MapServer also hosts the water CCN (layer 1). Screening only.",
+  },
+
   // ---- Jurisdiction / road identify sources (B93/B94; shared by the screen) ----
   county: {
     key: "county",
