@@ -4,6 +4,17 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V268 — B755: auto-DERIVED BFE from FEMA Base Flood Elevation lines on the REAL Bain plan — the Floodplain-mitigation readout stops saying UNKNOWN and shows a derived BFE + priced compensating storage ✅ PASS 2026-07-18 (owner, live on planyr.io, real Bain / Concept A plan)
+- **Added** 2026-07-10 · **Cadence** once · references **B755**.
+- **Verified in sandbox (2026-07-10):** `test/floodplainMitigation.test.js` +24 (distToPolyline, deriveBfeFromLines edge matrix, datum/unit guards, provider precedence); direct FEMA-NFHL queries confirmed the Bain reach has 24 usable S_BFE lines.
+- **Three live-verify rounds, each a real distinct bug, all fixed same day (2026-07-18):**
+  1. **Fetch envelope too tight** — the BFE-line/cross-section fetch reused the same ~350-450 ft `fmBbox` pad as the zone-polygon/DEM fetches, far short of the derivation engine's own 2500-6000 ft search radius. Fixed: a separately widened `bfeSearchBbox` (`BFE_SEARCH_PAD_DEG`).
+  2. **Engine acceptance radius too tight** — even with the wider fetch, the real Bain reach's nearest usable S_BFE line measured ~2980 ft from the site's reference point, just past the engine's old 2500 ft cap (confirmed via a direct live FEMA NFHL query). Fixed: raised `maxLineDistFt`/`maxGapFt`/`maxDistFt` to 5000/10000/5000 ft.
+  3. **Real root cause — the display field never read the cross-section-derived value at all.** Direct Supabase inspection of the real Bain site found its remembered check already had `providers.wse1pct: "xs-wsel"` (cross-section-derived, 138.4 ft) pricing a real mitigation volume — proving that path already worked. The "BFE (1% WSE)" input's own ternary only ever checked `derivedBfe`/`derivedWse100`, never `derivedXsWsel`, even though cross-section outranks both in the engine's real precedence. Fixed by threading `derivedXsWsel` into the field.
+  Also documented an operational gap (not a bug): a plain page reload never re-runs the derivation (`hydrateDrainageContext` deliberately drops geometry-bearing state on a remembered load) — only an explicit "↻ Re-check" click does.
+- **✅ Live result (2026-07-18):** hard-reloaded, opened Concept A → Yield → Stormwater, clicked "↻ Re-check" — ran live ("As of 4:35 PM · live check · manual · flood data just now"). The "BFE (1% WSE)" field showed **~142.8′ · derived (cross-sections)**, tagged ESTIMATE; the "0.2% (500-yr) WSE" field showed **~139.0′ · DRAFT (FBCDD)**, also tagged ESTIMATE; Buildability/FFE picked up a real required value (144.80′, ASSUMED badge) where it was previously blank.
+- Cadence: once — CLOSED. (B755 folded → BACKLOG-DONE.)
+
 ### V267 — B754: a City-of-Houston ETJ parcel resolves detention to the COUNTY authority, not City of Houston ✅ PASS 2026-07-18 (round-3 live pass, Michael's signed-in Chrome, planyr.io)
 - **Added** 2026-07-10 · **Cadence** once (bug-fix acceptance) · references **B754**.
 - **Verified in sandbox (2026-07-10):** `test/detentionResolver.test.js` proves Houston-ETJ→county authority + the `houston-etj` flag; live-GIS curl probe at the repro coordinates (29.7722, -95.8548) confirmed city-limits (TxGIO) empty / H-GAC ETJ HOUSTON / county Fort Bend.
