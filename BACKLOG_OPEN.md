@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _57 open · 111 awaiting live verification._
+> _56 open · 110 awaiting live verification._
 
 ## 🔲 Open
 
@@ -18,7 +18,6 @@
 | B777 | Subsidence district boundaries (HGSD + Fort Bend SD) | [Site Planner / GIS] | #site-planner #gis | live |
 | B752 | Pipeline layer: crisp vector rendering + commodity styling + click-identify (replace raster at working zoom) | [Site Planner / GIS] | #site-planner #gis #export | live |
 | B753 | Pipeline easement screening corridor (assumed buffer off centerline) | [Site Planner / GIS] | #site-planner #gis | live |
-| B741 | Orphaned / misfit selection handles on angled elements | [Site Planner] | #site-planner #selection #ui | live |
 | B735 | AnchoredMenu portal + click-away backdrop can linger over the newly-active workspace when a menu is left open and the user navigates via browser Back/Forward | [App Shell / UI] | #ui #infra | live |
 | B722 | Config-driven ingestion adapters: surrounding jurisdictions (Harris · Fort Bend · Pearland · Montgomery · H-GAC) | [Site Planner / GIS · ingestion] | #thoroughfare #gis | live |
 | B723 | Map layer: "Thoroughfare Plan" overlay | [Site Planner / GIS · map layer] | #thoroughfare #gis #site-planner #ui | live |
@@ -144,7 +143,6 @@
 | B745 | Vector / thin-line GIS map layers (transmission, road-authority, county/city/ETJ boundaries, contours, drainage arrows, OSM/Mapillary) now composite into the PDF/PNG export | [Site Planner / GIS · export] | #site-planner #export #gis | ⏳ live — awaiting |
 | B746 | Ctrl+Z doesn't always work; make it Bluebeam-style when drawing an element | [Site Planner / Doc Review] | #site-planner #doc-review #selection #markup #ui #persistence | ⏳ live — awaiting |
 | B739 | GIS raster/shaded overlay layers (FEMA floodplain, TxRRC pipelines, wetlands, utilities, ground relief) now composite into the PDF/PNG export | [Site Planner / GIS · export] | #site-planner #export #gis | ⏳ live — awaiting |
-| B744 | "Drop site plan" overlay hint sticks after a drag leaves the window; make it non-obscuring | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
 | B742 | Delete on a road silently no-ops for many clicks, then suddenly works | [Site Planner] | #site-planner #road #selection #persistence #ui | ⏳ live — awaiting |
 | B743 | Harden the shared element-delete path so no element type can silently no-op | [Site Planner] | #site-planner #selection #persistence #testing | ⏳ live — awaiting |
 | B740 | Shift-click multi-select + shared property editing (opacity/style) | [Site Planner] | #site-planner #selection #ui #markup | ⏳ live — awaiting |
@@ -207,10 +205,10 @@
 - **#pond** — B888, B884, B883, B866, B869, B870, B871, B829, B831, B707
 - **#road** — B742, B719
 - **#scheduler** — B818, B778, B495, B865, B851, B850, B863, B864, B836, B835, B817, B816, B644
-- **#selection** — B741, B880, B820, B750, B746, B742, B743, B740, B737, B682, B651
-- **#site-planner** — B842, B810, B776, B777, B752, B753, B741, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B889, B887, B888, B886, B885, B884, B882, B883, B881, B880, B879, B878, B866, B868, B869, B870, B871, B860, B861, B862, B846, B839, B840, B837, B832, B829, B831, B808, B821, B691, B820, B807, B800, B801, B802, B793, B789, B787, B784, B785, B786, B782, B812, B811, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#selection** — B880, B820, B750, B746, B742, B743, B740, B737, B682, B651
+- **#site-planner** — B842, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B889, B887, B888, B886, B885, B884, B882, B883, B881, B880, B879, B878, B866, B868, B869, B870, B871, B860, B861, B862, B846, B839, B840, B837, B832, B829, B831, B808, B821, B691, B820, B807, B800, B801, B802, B793, B789, B787, B784, B785, B786, B782, B812, B811, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413, B839
 - **#testing** — B269, B63, B878, B863, B836, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B842, B810, B741, B735, B723, B115, B882, B881, B880, B879, B865, B862, B851, B850, B846, B837, B821, B820, B801, B802, B761, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B673, B674
+- **#ui** — B842, B810, B735, B723, B115, B882, B881, B880, B879, B865, B862, B851, B850, B846, B837, B821, B820, B801, B802, B761, B750, B746, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B673, B674
 - **#yield** — B724, B888, B885, B884, B882, B883, B878, B866, B868, B869, B870, B871, B860, B861, B862, B832, B829, B808, B807, B802, B782, B755, B751, B754, B715, B712, B651

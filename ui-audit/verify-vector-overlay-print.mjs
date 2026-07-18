@@ -1,19 +1,28 @@
-/* B745 verification — the PDF/PNG export must include the VECTOR/client-drawn GIS overlay layers
- * (county/city boundaries, transmission, contours, drainage arrows, OSM/Mapillary points). Drives
- * the built app headlessly: seed a located site, boot the planner, turn boundary + transmission
- * layers ON, enter print mode, confirm the "Print map layers" checkbox appears (now gated for
- * vectors too), Download PDF, and assert the export SVG got `g[data-export-vector]` groups with
- * child path/circle nodes.
+/* B745 / V259 verification — the PDF/PNG export must include the VECTOR/client-drawn GIS overlay
+ * layers (county/city boundaries, transmission, contours, drainage arrows, OSM/Mapillary points).
+ * Drives the built app headlessly: seed a located site, boot the planner, turn the County-boundary
+ * layer ON, enter print mode, confirm the "Print map layers" checkbox appears (gated for vectors
+ * too), Download PDF, and assert the COMPOSED export SVG carries a `data-export-vector` group with
+ * a real child <path>.
  *
- * Unlike the raster verify, a vector <g> is created ONLY when the layer's geometry actually loaded
- * (there's nothing to synthesize before a fetch), so this genuinely exercises the whole
- * fetch → extract → reproject → emit chain. Boundaries (statewide, cached) are the reliable case.
+ * Unlike the raster verify, a vector <g> is emitted ONLY when the layer's geometry actually loaded,
+ * so this genuinely exercises the whole fetch → extract(toGeoJSON) → reproject(lngLatRingToFeet→f2p)
+ * → emit chain with a real Leaflet L.geoJSON layer. Boundaries (statewide, cached) are the reliable
+ * case; the ONE county /query is mocked because the sandbox egress proxy can't reach the live agency
+ * host (the live imagery paint for every layer is the V259 live-app check).
+ *
+ * Ground-truth signal: we intercept the image/svg+xml blob buildPrintSheetSvg hands to
+ * URL.createObjectURL (the exact sheet that gets rasterized into the PDF) and grep it for
+ * data-export-vector. NOTE the export first AWAITS the aerial capture; in the sandbox the Esri host
+ * is TLS-reset, so that capture takes the full ~22s AERIAL_INLINE_TIMEOUT before it drops the aerial
+ * and builds the sheet — hence the long poll below (this is a sandbox-only wait, not a code slowness).
  *
  * Run: npm run build && npx vite preview   (then)  node ui-audit/verify-vector-overlay-print.mjs
  */
 import { chromium } from "playwright";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
+const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-linux64/chrome";
 
 const parcel = { id: "pc1", locked: false, points: [{ x: -440, y: -160 }, { x: 440, y: -160 }, { x: 440, y: 300 }, { x: -440, y: 300 }] };
 const site = {
@@ -27,11 +36,7 @@ const seed = `(() => { try {
   localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(site.id)});
 } catch (e) {} })();`;
 
-// Canned Harris County polygon (esri JSON) so the `vector` boundary layer loads DETERMINISTICALLY —
-// the sandbox can't reach the live TxGIO/agency GIS hosts through the cert-inspection proxy, so we
-// mock the ONE county /query. This proves the real fetch→extract(toGeoJSON)→reproject→emit chain
-// with an actual Leaflet L.geoJSON layer, independent of live-host reachability. (Live imagery-paint
-// for every layer is the V### live check.) Ring drawn around the Katy origin so it's finite + on-frame.
+// Canned Harris County polygon (esri JSON) so the `vector` boundary layer loads DETERMINISTICALLY.
 const countyEsri = {
   features: [{
     attributes: { CNTY_NM: "Harris" },
@@ -41,11 +46,18 @@ const countyEsri = {
 };
 const b64decode = (s) => { try { return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(); } catch (_) { return ""; } };
 
-const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 await ctx.addInitScript(seed);
+// Capture the composed sheet SVG (image/svg+xml blob) the export rasterizes.
+await ctx.addInitScript(() => {
+  window.__svgBlobs = [];
+  const orig = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = (o) => { try { if (o && o.type === "image/svg+xml") o.text().then((t) => window.__svgBlobs.push(t)).catch(() => {}); } catch (_) {} return orig(o); };
+});
 const page = await ctx.newPage();
+const errs = [];
+page.on("pageerror", (e) => errs.push(String(e)));
 // Fulfill the county-boundary query (direct-to-agency OR via the /api/gis-cache proxy) with canned geometry.
 await page.route("**/*", (route) => {
   const u = route.request().url();
@@ -55,60 +67,42 @@ await page.route("**/*", (route) => {
   }
   return route.continue();
 });
-const errs = [];
-page.on("pageerror", (e) => errs.push(String(e)));
 await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(2000);
 
-// Enable a couple of vector layers via native DOM clicks (they sit in scrollable groups).
+// Enable the County-boundary vector layer.
 const turnedOn = await page.evaluate((labels) => {
   const lbls = [...document.querySelectorAll("label")];
   let n = 0;
-  for (const want of labels) {
-    const lbl = lbls.find((l) => l.textContent.includes(want));
-    const cb = lbl && lbl.querySelector('input[type="checkbox"]');
-    if (cb && !cb.checked) cb.click();
-    if (cb && cb.checked) n++;
-  }
+  for (const want of labels) { const lbl = lbls.find((l) => l.textContent.includes(want)); const cb = lbl && lbl.querySelector('input[type="checkbox"]'); if (cb && !cb.checked) cb.click(); if (cb && cb.checked) n++; }
   return n;
 }, ["County boundaries"]);
 console.log("vector layers turned on:", turnedOn);
-// Give the (mocked) county fetch + vector paint time to land.
-await page.waitForTimeout(4000);
+// Wait for the (mocked) county geometry to paint as a Leaflet path.
+let painted = 0;
+for (let i = 0; i < 24; i++) { await page.waitForTimeout(500); painted = await page.evaluate(() => document.querySelectorAll('.leaflet-overlay-pane path, .leaflet-pane path').length); if (painted >= 1) break; }
+console.log("county boundary painted (leaflet paths):", painted);
 
-// Enter print mode.
+// Enter print mode + Download PDF.
 await page.locator('button:has-text("File ▾")').first().click({ timeout: 8000 });
 await page.locator('button:has-text("Download PDF / pick frame")').first().click({ timeout: 8000 });
 await page.waitForTimeout(700);
 const cbVisible = await page.locator('label:has-text("Print map layers")').first().isVisible().catch(() => false);
-
-// Hook: record vector <g>s created during the (synchronous) buildExportSvg pass.
-await page.evaluate(() => {
-  window.__vec = { groups: 0, paths: 0, circles: 0 };
-  const origSA = Element.prototype.setAttribute;
-  Element.prototype.setAttribute = function (name, value) {
-    try {
-      if (name === "data-export-vector") {
-        window.__vec.groups++;
-        // count children shortly after innerHTML is set
-        setTimeout(() => { try { window.__vec.paths += this.querySelectorAll("path").length; window.__vec.circles += this.querySelectorAll("circle").length; } catch (e) {} }, 0);
-      }
-    } catch (e) {}
-    return origSA.apply(this, arguments);
-  };
-});
-
 await page.getByRole("button", { name: "Download PDF", exact: true }).click({ timeout: 8000 });
-await page.waitForTimeout(3500);
 
-const vec = await page.evaluate(() => window.__vec || { groups: 0, paths: 0, circles: 0 });
+// Poll for the composed sheet SVG (blocks on the ~22s sandbox aerial timeout first).
+let sheet = "";
+for (let i = 0; i < 150; i++) { await page.waitForTimeout(500); const blobs = await page.evaluate(() => window.__svgBlobs || []); sheet = blobs.find((t) => /data-export-vector/.test(t)) || ""; if (sheet) break; if (blobs.some((t) => /Site area/.test(t))) { sheet = ""; break; } }
+
+const groups = (sheet.match(/data-export-vector/g) || []).length;
+const firstGroup = (sheet.match(/data-export-vector[\s\S]*?<\/g>/) || [""])[0];
+const pathsInGroup = (firstGroup.match(/<path/g) || []).length;
+const hasCounty = /jur_county/.test(sheet);
 console.log("printMapLayers checkbox visible:", cbVisible);
-console.log("data-export-vector groups composited:", vec.groups, "| child paths:", vec.paths, "| circles:", vec.circles);
+console.log("export SVG data-export-vector groups:", groups, "| child <path> in first group:", pathsInGroup, "| jur_county tag:", hasCounty);
 console.log("page errors:", errs.length ? errs.slice(0, 5) : "none");
 
-// PASS: the checkbox shows for vector layers AND at least one vector <g> with drawn geometry
-// landed in the export (proves the fetch→extract→reproject→emit chain end-to-end).
-const ok = cbVisible && vec.groups >= 1 && (vec.paths + vec.circles) >= 1;
-console.log(ok ? "PASS ✅ — vector layers composited into the PDF export" : "PARTIAL/FAIL — see counts above");
+const ok = cbVisible && painted >= 1 && groups >= 1 && pathsInGroup >= 1 && hasCounty;
+console.log(ok ? "PASS ✅ — vector GIS layer composited into the PDF export SVG (fetch→reproject→emit end-to-end)" : "FAIL ❌ — see counts above");
 await browser.close();
 process.exit(ok ? 0 : 1);
