@@ -167,3 +167,56 @@ describe("buildScreenFurnitureSvg — on-screen furniture anchored to the viewpo
     for (const y of ys) { expect(y).toBeGreaterThan(0); expect(y).toBeLessThan(vh - 40 + 1e-6); }
   });
 });
+
+// ── B881 / NEW-1: bottom furniture never overlaps in a narrowed map pane ──────
+import { calibBadgePlacement } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+
+describe("calibBadgePlacement — badge/scale-bar/zoom never collide at any pane width (B881)", () => {
+  const badgeH = 24;
+  // Boxes in "px from the pane's bottom-left"; y measured UP from the bottom.
+  const box = { badge: (p, badgeW) => ({ x: p.left, w: (p.maxWidth != null ? Math.min(badgeW, p.maxWidth) : badgeW), y: p.bottom, h: badgeH }) };
+  const scaleBarBox = (paneW, sbW, sbH) => ({ x: paneW - 14 - sbW, w: sbW, y: 40, h: sbH });
+  const zoomBox = (paneW) => ({ x: paneW - 44, w: 30, y: 100, h: 90 }); // three 30px zoom buttons
+  const overlap = (a, b) => {
+    const ox = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+    const oy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    return ox * oy;
+  };
+
+  it("keeps the original bottom:40 row layout when the pane is wide", () => {
+    const p = calibBadgePlacement({ paneW: 1200, badgeW: 240, scaleBarW: 160, scaleBarH: 32 });
+    expect(p.raise).toBe(false);
+    expect(p.bottom).toBe(40);
+    expect(p.left).toBe(56);
+    expect(p.maxWidth).toBeNull();
+  });
+
+  it("never raises before the badge is measured (badgeW=0)", () => {
+    const p = calibBadgePlacement({ paneW: 260, badgeW: 0, scaleBarW: 150, scaleBarH: 32 });
+    expect(p.raise).toBe(false);
+  });
+
+  it("lifts the badge to its own row when it would meet the scale bar", () => {
+    const p = calibBadgePlacement({ paneW: 280, badgeW: 240, scaleBarW: 150, scaleBarH: 32 });
+    expect(p.raise).toBe(true);
+    expect(p.bottom).toBe(40 + 32 + 2);         // clears the bar below
+    expect(p.bottom + 24).toBeLessThanOrEqual(100); // clears the zoom controls above (start at 100)
+    expect(p.maxWidth).toBeGreaterThan(0);
+  });
+
+  it("produces ZERO overlap among badge / scale bar / zoom across the whole width range", () => {
+    for (let paneW = 240; paneW <= 1200; paneW += 5) {
+      for (const badgeW of [120, 160, 200, 240, 260]) {
+        for (const sbW of [120, 150, 200, 240]) {
+          const sbH = 32;
+          const p = calibBadgePlacement({ paneW, badgeW, scaleBarW: sbW, scaleBarH: sbH });
+          const b = box.badge(p, badgeW);
+          expect(overlap(b, scaleBarBox(paneW, sbW, sbH))).toBeLessThanOrEqual(1);
+          expect(overlap(b, zoomBox(paneW))).toBeLessThanOrEqual(1);
+          // and the badge stays within the pane's right edge
+          expect(b.x + b.w).toBeLessThanOrEqual(paneW + 1e-6);
+        }
+      }
+    }
+  });
+});
