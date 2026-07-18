@@ -6587,6 +6587,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const llA = feetToLatLng({ x: mnX, y: mnY }, origin.lat, origin.lon);
       const llB = feetToLatLng({ x: mxX, y: mxY }, origin.lat, origin.lon);
       const fmBbox = isFinite(mnX) ? floodGeoBbox([[[llA[1], llA[0]], [llB[1], llB[0]]]]) : null;
+      // B755 fix (Bain live-verify, 2026-07-18): the BFE-line/cross-section derivation
+      // (deriveBfeFromLines / governingCrossSectionWsel) will accept a contour up to
+      // maxLineDistFt=2500 ft away (two-line interpolation up to maxGapFt=6000 ft
+      // combined), but fmBbox's default 0.001° pad (~350-450 ft depending on latitude)
+      // only reaches the immediate site edge — on the real Bain plan the nearest usable
+      // S_BFE lines sit farther from the fill footprint than that pad, so the fetch
+      // returned zero lines and the field stayed "no published BFE" even though FEMA
+      // publishes 24 usable lines a short distance away. Widen JUST the linear-feature
+      // pull to actually cover the engine's own search radius (~2 mi pad — comfortably
+      // over the 6000 ft two-line case plus the site's own footprint size); the zone
+      // polygon (fmBbox, large-area features that don't need this) and the DEM grid
+      // (kept tight on purpose — an oversized elevation pull is wasted bytes) are unchanged.
+      const BFE_SEARCH_PAD_DEG = 0.025;
+      const bfeSearchBbox = isFinite(mnX) ? floodGeoBbox([[[llA[1], llA[0]], [llB[1], llB[0]]]], BFE_SEARCH_PAD_DEG) : null;
       // Failure isolation (the channel-state pattern): a flood-geometry outage
       // must never nuke the whole drainage check — it reads "failed" (an honest
       // UNKNOWN downstream), never a fabricated all-clear.
@@ -6601,20 +6615,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             .catch(() => ({ zones: [], ts: null, truncated: false, state: "failed" }))
         : Promise.resolve({ zones: [], ts: null, truncated: false, state: "empty" });
       // B755: FEMA Base Flood Elevation LINES (S_BFE) — the same explicit click, same
-      // SWR cache, same envelope. On most AE reaches the zone polygon carries no BFE,
-      // so these whole-foot contour lines are the only published source; we interpolate
-      // one at the fill to DERIVE a screening BFE. A failure reads honestly (no lines →
-      // no derived value → the existing "no published BFE" UNKNOWN), never a fake clear.
-      const bfeLinesP = fmBbox
-        ? fetchCached(VECTOR_SOURCES.bfeLines, fmBbox, { cache: gisCache })
+      // SWR cache, a WIDER envelope (bfeSearchBbox, see above). On most AE reaches the
+      // zone polygon carries no BFE, so these whole-foot contour lines are the only
+      // published source; we interpolate one at the fill to DERIVE a screening BFE. A
+      // failure reads honestly (no lines → no derived value → the existing "no published
+      // BFE" UNKNOWN), never a fake clear.
+      const bfeLinesP = bfeSearchBbox
+        ? fetchCached(VECTOR_SOURCES.bfeLines, bfeSearchBbox, { cache: gisCache })
             .then((r) => ({ ...bfeLinesFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }), ts: r.ts ?? null, state: "loaded" }))
             .catch(() => ({ lines: [], excludedDatum: 0, excludedUnit: 0, total: 0, ts: null, state: "failed" }))
         : Promise.resolve({ lines: [], excludedDatum: 0, excludedUnit: 0, total: 0, ts: null, state: "empty" });
       // B762: FEMA regulatory cross-sections (S_XS) — the governing 1% water-surface
-      // elevation (WSEL_REG) at the nearest stream reach. Same explicit click + SWR cache.
-      // A failure/empty reads honest UNKNOWN (no sections → no derived WSEL), never a fake clear.
-      const crossSectionsP = fmBbox
-        ? fetchCached(VECTOR_SOURCES.crossSections, fmBbox, { cache: gisCache })
+      // elevation (WSEL_REG) at the nearest stream reach. Same explicit click + SWR cache,
+      // same widened envelope as the BFE lines (governingCrossSectionWsel's own
+      // maxDistFt=2500 ft has the identical fetch-vs-search-radius mismatch).
+      const crossSectionsP = bfeSearchBbox
+        ? fetchCached(VECTOR_SOURCES.crossSections, bfeSearchBbox, { cache: gisCache })
             .then((r) => ({ ...crossSectionWselFromFeatureCollection(r.data, { lat: origin.lat, lon: origin.lon }), ts: r.ts ?? null, state: "loaded" }))
             .catch(() => ({ sections: [], excludedDatum: 0, total: 0, ts: null, state: "failed" }))
         : Promise.resolve({ sections: [], excludedDatum: 0, total: 0, ts: null, state: "empty" });
