@@ -9,10 +9,13 @@ name: E2E (Playwright)
 # Idempotent — one open "e2e-drift" issue is reused, not duplicated; auto-closed when green
 # again. Same proven pattern as gis-drift.yml.
 #
-# Gated on the seeded account (B280): without the E2E_* secrets the auth-gated specs skip and
-# only the logged-out smoke runs — still a useful signal, never a false alarm. Runs on a
-# schedule + on demand (Actions → Run workflow); a Cloudflare deploy doesn't fire a repo
-# event, so we poll rather than trigger on deploy.
+# Gated on the seeded account (B280): without the E2E_EMAIL/E2E_PASSWORD secrets the auth-gated
+# specs skip and only the logged-out smoke runs — still a useful signal, never a false alarm.
+# BASE_URL defaults to production (planyr.io) when neither the workflow_dispatch input nor the
+# E2E_BASE_URL secret is set, so the two account secrets alone are enough to light up full
+# signed-in coverage — no separate URL secret required. Runs on a schedule + on demand
+# (Actions → Run workflow); a Cloudflare deploy doesn't fire a repo event, so we poll rather
+# than trigger on deploy.
 on:
   schedule:
     - cron: "30 13 * * 1-5" # 13:30 UTC, weekdays
@@ -44,7 +47,7 @@ jobs:
       - name: Run e2e suite
         id: e2e
         env:
-          BASE_URL: ${{ github.event.inputs.base_url || secrets.E2E_BASE_URL }}
+          BASE_URL: ${{ github.event.inputs.base_url || secrets.E2E_BASE_URL || 'https://planyr.io' }}
           E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
           E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
         run: |
