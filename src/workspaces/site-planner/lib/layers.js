@@ -193,6 +193,15 @@ export const EVIDENCE = {
     minZoom: 10, color: "#b91c1c", weight: 2.4, opacity: 0.9,
     note: "HIFLD ≥69 kV electric transmission (US DOE/NETL). Loads at zoom ≥ 10; verify live.",
   },
+  hifld_substations: {
+    // Public-data screening PHASE 5 — HIFLD electric substation points. The Site Analysis
+    // "Electric substation (nearest)" card drives this overlay (mapLayer: "hifld_substations").
+    // FeatureServer point layer → esriFeature (vector markers); gated to zoomed-in (national
+    // dataset). URL from the registry (no inline endpoint).
+    kind: "esriFeature", label: "Electric substations (HIFLD)",
+    url: GIS_SOURCES.substations.serviceUrl, minZoom: 11, color: "#7c3aed", weight: 2, opacity: 0.95,
+    note: "HIFLD electric substations. Distance to the nearest is a service/interconnect proxy for heavy power. Many names are withheld (redacted national dataset). Loads zoomed in.",
+  },
   osm_hydrants: {
     kind: "overpass", label: "Fire hydrants (OSM)", opacity: 0.9,
     query: { hydrants: true },
@@ -406,6 +415,7 @@ export const LAYER_VINTAGE = {
   osm_hydrants: "OpenStreetMap — community-edited, live",
   mapillary: "Capture date varies by street",
   hifld_tx: "HIFLD (US DOE/NETL) — periodically updated",
+  hifld_substations: "HIFLD electric substations — periodically updated",
   coh_hydrants: "City of Houston Public Works — current edition",
   elevation: "LiDAR collection varies by county (USGS 3DEP)",
   contours: "LiDAR collection varies by county (USGS 3DEP)",
