@@ -4,6 +4,25 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V263 — B750: single-click SELECTS, double-click OPENS Properties — the Review (Doc Review) click-through + the Site Planner phone ✎ pill ✅ PASS 2026-07-18 (this session, headless self-verify on the local production build, logged-out — BOTH workspaces)
+- **Added** 2026-07-10 · **Cadence** once (feature acceptance) · references **B750** · earlier: `e2e/click-behavior.spec.js` (Site Planner desktop, 3× stable) + `e2e/element-delete.spec.js` green.
+- **✅ Result — the full B750 gesture model is confirmed in BOTH workspaces, logged-out, on the merged HEAD (0 page errors):**
+  - **Review (Doc Review) — the part the prior 2026-07-18 note marked `Blocker: auth` is now CLEARED** (Review opens an ad-hoc LOCAL PDF via the logged-out "Open PDF…" path — no sign-in, no Library/Drive). `ui-audit/verify-b750-review-click.mjs` (7/7): drawing a rectangle AUTO-SHOWS its Properties in the sheet rail; clicking empty space DESELECTS and blanks Properties; a single-click SELECTS only (Properties stay closed); a double-click OPENS Properties; a single-click on a text note SELECTS only; a **double-click on an already-selected TEXT note opens the INLINE editor, NOT the panel** (edit-text-in-place); no page errors.
+  - **Site Planner — desktop:** `e2e/click-behavior.spec.js` — single-click SELECTS, double-click OPENS Properties, ✕ CLOSES (logged-out).
+  - **Site Planner — phone / narrow viewport** (<760px, `narrow` mode): `ui-audit/verify-b750-phone-pill.mjs` (5/5): the ✎ Tools narrow trigger is present; selecting an element shows the **✎ Properties pill** with the companion CLOSED (tap = select only, no auto-open); tapping the pill OPENS the Properties companion; ✕ closes it back to the pill (the element stays selected).
+- **Expect (met):** in BOTH workspaces a single left-click only SELECTS; a double-click OPENS Properties; a text object = click to select, then double-click to edit the text in place.
+- Cadence: once — CLOSED. (B750 folded → BACKLOG-DONE.)
+
+### V262 — B749: overlay raster crispness at deep zoom + zoom-aware re-raster ✅ PASS 2026-07-18 (this session, headless self-verify on the local production build, logged-out)
+- **Added** 2026-07-10 · **Cadence** once (feature acceptance) · references **B749** · earlier: `test/overlayRaster.test.js` (8, the pure re-raster math) green.
+- **✅ Result — the zoom-aware re-raster mechanism is confirmed live, logged-out, on the merged HEAD.** `ui-audit/verify-b749-overlay-reraster.mjs` (5/5) drops a REAL PDF site-plan overlay (so the in-session PDF proxy is held and the PDF-only hi-res path runs), then drives the view:
+  - dropping the PDF places a BASE raster (a `data:` URL) on the map;
+  - **zooming into detail swaps in a HI-RES raster** (a transient `blob:` URL) — the "linework sharpens instead of softening" mechanism that produces crispness;
+  - **at a fixed zoom the base→hi-res swap keeps ONE on-screen geometry** (captured both base and hi-res frames at the same zoom — identical x/y/w/h → the swap moves/resizes nothing, "anchored to intrinsic PDF points");
+  - **zooming back out drops the overlay back to the BASE raster** (`data:` URL returns → the session-only blob is released, memory doesn't balloon);
+  - the **anchored placement record (world x/y + ftPerPx + intrinsic imgW/imgH) is UNCHANGED across the whole re-raster cycle** — the hi-res is a render-only override that is never persisted (the durable proof that swapping to hi-res does not move or resize the placement).
+- Cadence: once — CLOSED. (B749 folded → BACKLOG-DONE.)
+
 ### V356 — B873 audit / deploy-currency: planyr.io serves CURRENT main (production deploy ≥ the last relevant merge) ✅ PASS 2026-07-18 (this session, sandbox — deploy-liveness / asset-hash verification against a fresh `origin/main` build)
 - **Added** 2026-07-16 · **Verified** 2026-07-18 (this session; no browser needed — a version/asset probe) · references **B873**.
 - **✅ Result — planyr.io is live and serving current `main`.** (1) `curl -I https://planyr.io/` → HTTP/2 200, Cloudflare Pages. (2) The served CSS bundle `assets/index-csXUjXfq.css` is **byte-identical (SHA-256 `0c22202f…`)** to the CSS produced by building current `origin/main` (`d6168d7`) in an isolated worktree — CSS is env-independent, so a byte-match proves planyr.io serves the current-main source, far newer than the #647 (B860) / #652 (B866–B871) merges this item gated on (≥ 2026-07-16). (3) The served entry JS `assets/index-B37DfYrc.js` differs from a bare sandbox build's `index-BL-uMfLL.js` — fully explained: the entry chunk carries `createClient` + 6 `import.meta.env.VITE_SUPABASE_*` reads, so the deployed build (real credentials injected) necessarily differs from an unconfigured build, while the CSS stays identical. No stale-deploy state; no `VITE_` env-var trap (none added in the diff).
