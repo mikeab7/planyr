@@ -24,9 +24,12 @@ describe("registry tier integrity", () => {
     }
   });
 
-  it("the ONLY non-production exception is wetlands (USFWS has no production query endpoint)", () => {
+  it("the only acknowledged exceptions are wetlands + growthFaults (no live authoritative endpoint)", () => {
     const exceptions = Object.values(GIS_SOURCES).filter((s) => s.tier !== "production").map((s) => s.key);
-    expect(exceptions).toEqual(["wetlands"]);
+    // wetlands: USFWS publishes polygon-query only on its Test folder. growthFaults: USGS SIM 2874
+    // is download-only, so we depend on the UH GIS republication until we self-host the shapefile.
+    expect(exceptions).toEqual(["wetlands", "growthFaults"]);
+    for (const key of exceptions) expect(gisSource(key).tierReason, key).toBeTruthy();
   });
 
   it("flags a non-production URL that isn't acknowledged (the NWI-Test / geogimstest class)", () => {

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-18 @ `0ca117f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-18 @ `f5dfc99` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_276 source files mapped._
+_277 source files mapped._
 
 ## infra
 
@@ -427,6 +427,8 @@ _276 source files mapped._
   - _exports_: `accumulatePondLedger`, `effectivePondRole`, `POND_ROLE_LABEL`, `POND_ROLES`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
+- **`src/workspaces/site-planner/lib/pondOptimizer.js`** — Pond economics optimizer (NEW-D / Phase D): searches depth × placement pond configurations under constraints (max depth, groundwater ceiling, maintenance berm, pipeline-corridor exclusions) and ranks by earthwork $, land-take, and buildable-SF recovered. Exports `solveScaleForVolume`, `evaluateCandidate`, `optimizePond`.
+  - _exports_: `evaluateCandidate`, `optimizePond`, `solveScaleForVolume`
 - **`src/workspaces/site-planner/lib/pondRouting.js`** — Screening reservoir routing (modified-Puls / storage-indication) proving Post ≤ Pre peak per storm (NEW-A4): Modified-Rational inflow hydrographs from the transcribed Atlas-14 IDF, level-pool routing over the stage-storage-discharge curve, per-storm PASS/SHORT verdict vs the pre-development Rational peak. Pure.
   - _exports_: `assessRoutedDetention`, `modifiedRationalHydrograph`, `rationalPeakCfs`, `routeHydrograph`, `routeStorm`
 - **`src/workspaces/site-planner/lib/pondSizing.js`** — NEW-4 pond sizing assistant: solves an anchored pond's two banded targets (below-WSE mitigation depth/footprint growth, above-WSE usable via TOB raise) through the same pondGeom bands the audit reads, with the berm-as-fill fixed-point feedback and honest pinch-off/inundated/estimated states
@@ -440,7 +442,7 @@ _276 source files mapped._
 - **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
   - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
 - **`src/workspaces/site-planner/lib/proximityScreen.js`** — Pure proximity-screen core (PHASE 2, reused by later distance screens): projects parcel rings + feature points to EPSG:2278 feet and returns count + nearest-distance + ranked names within a buffer (0 ft = on/under the site), plus the `fmtDistFt` display helper
-  - _exports_: `distPointSegFt`, `distPointToRingsFt`, `fmtDistFt`, `pointInRingFt`, `ringToGridFt`, `screenProximity`, `toGrid`
+  - _exports_: `distPathToRingsFt`, `distPointSegFt`, `distPointToRingsFt`, `distSegSegFt`, `featureDistFt`, `fmtDistFt`, `pointInRingFt`, `ringToGridFt`, `screenProximity`, `segmentsIntersectFt`, `toGrid`
 - **`src/workspaces/site-planner/lib/receivingWater.js`** — Nearest receiving water for a pond outfall from USGS NHDPlus HR flowlines (NEW-A5): SWR identifySource query, nearest-reach + FCODE-type math, and the off-site-conveyance-easement flag when no water is adjacent. Screening only.
   - _exports_: `fcodeType`, `nearestReceivingWater`, `OUTFALL_ADJACENT_FT`, `RECEIVING_WATER_SOURCE`, `receivingWaterFlag`, `resolveReceivingWater`
 - **`src/workspaces/site-planner/lib/regionalDetention.js`** — Regional-detention / fee-in-lieu cited registry (NEW-C2): per-authority availability (tri-state) + fee basis with citations, and feeInLieuCompare (on-site pond land-take → buildable-SF recovered vs fee cost). Pure.
