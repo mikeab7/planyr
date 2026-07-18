@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-18 @ `0e7662d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-18 @ `8f66d14` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_261 source files mapped._
+_266 source files mapped._
 
 ## infra
 
@@ -273,6 +273,8 @@ _261 source files mapped._
   - _exports_: `CONFIDENT_FRAC`, `describeRotation`, `gridConvergenceDeg`, `MAX_ALIGN_ROT_DEG`, `openRing`, `ringCentroid`, `rotatePointsAbout`, `solveDeedAlignment`
 - **`src/workspaces/site-planner/lib/demGrid.js`** — Pure DEM grid plumbing (B704/B706): deterministic snapped-tile exportImage requests, LERC sniff/decode to survey-feet with validity mask, masked gaussian smooth, cell-center pixel/mercator/WGS84 transforms, mask-aware bilinear sampling
   - _exports_: `CELL_PX`, `decodeGrid`, `exportUrl`, `gridRequest`, `groundScale`, `latToMercY`, `lngToMercX`, `looksLikeLerc`, `MARGIN_CELLS`, `maskedSmooth`, `MAX_GRID`, `mercPerPx`, `mercToPixel`, `mercXToLng`, `mercYToLat`, `pixelToLatLng`, `pixelToMerc`, `sampleAtLatLng`, `WEB_MERC_R`
+- **`src/workspaces/site-planner/lib/detentionCriteria.js`** — Versioned jurisdiction detention-criteria registry (NEW-A1): cited per-district outlet-hydraulics + pond-geometry criteria (release, storms, freeboard, slope, berm, orifice/weir C, drawdown), referencing DETENTION_RULES for the verified release/storm/freeboard facts; audit guard + user overrides.
+  - _exports_: `CRITERIA_JUR_KEYS`, `criteriaAuthorityShort`, `criteriaFor`, `DETENTION_CRITERIA`, `jurKeyForAuthority`, `loadCriteriaOverrides`, `problems`, `requiredStormsFor`, `saveCriteriaOverrides`
 - **`src/workspaces/site-planner/lib/detentionRules.js`** — Houston-MSA detention criteria as versioned rule-records + drainage-authority resolver, analysis-tier / hydraulic-regime assessors, and pond auto-size solvers; no volume ships without its rule record
   - _exports_: `assessAnalysisTier`, `assessHydraulicRegime`, `AUTHORITY_SHORT`, `authorityForJurisdiction`, `BKDD_OVERLAY_DETAIL`, `BKDD_OVERLAY_SHORT`, `computePumpedCredit`, `computeRateBasedDetention`, `computeRequiredDetention`, `COUNTY_AUTHORITY`, `deadStoragePoolDepthFt`, `DESIGN_STORM_PERIODS`, `DESIGN_STORMS`, `DETENTION_AUTHORITY_CHOICES`, `DETENTION_RULES`, `DETENTION_SOURCES`, `effectiveChannelDischarge`, `effectiveReviewer`, `governingRequirement`, `hydrateDrainageContext`, `interpolateCurve`, `MUNICIPAL_OVERLAYS`, `PARCEL_DISTRICT_TYPES`, `pondAutoValues`, `pondDefaultsFor`, `rateFromImpervious`, `resolveDrainageAuthority`, `resolveDrainageContext`, `ruleBadge`, `ruleFor`, `runoffCoefficient`, `SCREENING_CAVEAT`, `screenOutfall`, `slimDrainageContext`, `solvePondDepth`, `solvePondExpansion`, `SQFT_PER_ACRE`, `stormIntensity`, `TIER_THRESHOLDS`, `WATERSHED_OVERLAYS`
 - **`src/workspaces/site-planner/lib/dimSlide.js`** — Pure geometry constraining a footprint dimension callout to slide along the long axis, off dog-ear bumps, with collision AABB
@@ -373,6 +375,8 @@ _261 source files mapped._
   - _exports_: `commonStyleState`, `selectionRingFeet`, `styleCapsOf`
 - **`src/workspaces/site-planner/lib/multiwriter.js`** — the B674 multi-writer switch: default-ON code constant + the `planyr.multiwriter=off` localStorage escape hatch (no build-time env var)
   - _exports_: `MULTIWRITER_DEFAULT`, `MULTIWRITER_KEY`, `multiwriterEnabled`
+- **`src/workspaces/site-planner/lib/outletStructure.js`** — Pond OUTLET STRUCTURE model + stage→discharge rating curve (NEW-A2): orifice / weir / restrictor / multistage discharge (with tailwater submergence), inverse orifice sizing, default-outlet proposal, validation. Pure hydraulics.
+  - _exports_: `defaultOutletForPond`, `orificeAreaSf`, `OUTLET_KINDS`, `outletDischarge`, `outletLowestElev`, `outletProblems`, `sizeOrificeForRelease`, `stageDischarge`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
   - _exports_: `alignOverlaySimilarity`, `applySimilarityToOverlay`, `calibrateUnderlayScale`, `imagePointToWorld`, `scaleOverlayAbout`, `similarityTransform`, `solveSimilarityLSQ`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
@@ -415,6 +419,8 @@ _261 source files mapped._
   - _exports_: `accumulatePondLedger`, `effectivePondRole`, `POND_ROLE_LABEL`, `POND_ROLES`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
+- **`src/workspaces/site-planner/lib/pondRouting.js`** — Screening reservoir routing (modified-Puls / storage-indication) proving Post ≤ Pre peak per storm (NEW-A4): Modified-Rational inflow hydrographs from the transcribed Atlas-14 IDF, level-pool routing over the stage-storage-discharge curve, per-storm PASS/SHORT verdict vs the pre-development Rational peak. Pure.
+  - _exports_: `assessRoutedDetention`, `modifiedRationalHydrograph`, `rationalPeakCfs`, `routeHydrograph`, `routeStorm`
 - **`src/workspaces/site-planner/lib/pondSizing.js`** — NEW-4 pond sizing assistant: solves an anchored pond's two banded targets (below-WSE mitigation depth/footprint growth, above-WSE usable via TOB raise) through the same pondGeom bands the audit reads, with the berm-as-fill fixed-point feedback and honest pinch-off/inundated/estimated states
   - _exports_: `scaleRing`, `sizePondForTargets`, `solveMitigationDepth`, `solveMitigationGrow`, `solveTobRaise`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
@@ -425,6 +431,8 @@ _261 source files mapped._
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
   - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
+- **`src/workspaces/site-planner/lib/receivingWater.js`** — Nearest receiving water for a pond outfall from USGS NHDPlus HR flowlines (NEW-A5): SWR identifySource query, nearest-reach + FCODE-type math, and the off-site-conveyance-easement flag when no water is adjacent. Screening only.
+  - _exports_: `fcodeType`, `nearestReceivingWater`, `OUTFALL_ADJACENT_FT`, `RECEIVING_WATER_SOURCE`, `receivingWaterFlag`, `resolveReceivingWater`
 - **`src/workspaces/site-planner/lib/registerGisSw.js`** — Boot-time unregister of the retired browser GIS imagery service worker (superseded by server-side Drive cache), fail-safe
   - _exports_: `retireGisSw`
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)
@@ -441,6 +449,8 @@ _261 source files mapped._
   - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`
 - **`src/workspaces/site-planner/lib/sourceHealth.js`** — Per-source circuit breaker for county parcel servers: track consecutive failures, open/cooldown/half-open, filter healthy candidates, and decide the honest statewide-backup badge
   - _exports_: `filterHealthyCandidates`, `isSourceOpen`, `isStatewideBackup`, `recordSourceResult`, `resetSourceHealth`, `SOURCE_COOLDOWN_MS`, `SOURCE_FAIL_THRESHOLD`, `sourceCooldownMs`
+- **`src/workspaces/site-planner/lib/stageStorageDischarge.js`** — Stage-storage-discharge curve (NEW-A3): pairs pondGeom storage (volumeBetween) with the outlet rating curve over the basin's stage range; interpolation helpers feed the reservoir routing. Anchored ponds only. Pure.
+  - _exports_: `buildStageStorageDischarge`, `dischargeAtElev`, `dischargeAtStorage`, `elevAtStorage`, `storageAtElev`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
   - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
 - **`src/workspaces/site-planner/lib/supabase.js`** — Supabase anon client factory from build-time env, connection/health test, and synchronous access-token read for the keepalive cloud push

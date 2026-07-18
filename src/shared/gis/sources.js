@@ -433,6 +433,37 @@ export const GIS_SOURCES = {
       "per-watershed fallback where the mosaic has a hole. Sampler: site-planner/lib/fbcdWse.js.",
   },
 
+  // ---- Receiving-water / outfall screen (NEW-A5) ----
+  nhdFlowline: {
+    key: "nhdFlowline",
+    label: "USGS NHDPlus HR flowlines (receiving waters)",
+    provider: "USGS / EPA National Hydrography Dataset Plus High Resolution",
+    // The National Map's NHDPlus HR MapServer. Layer 3 = NetworkNHDFlowline — the routed
+    // stream network (the actual receiving waters an outfall discharges to), each carrying
+    // GNIS_NAME + an FCODE (stream/river vs canal/ditch vs artificial path). Queried near the
+    // pond's outfall point for the nearest named receiving water + distance; NO receiving
+    // water within the adjacency threshold is surfaced as an outfall-easement risk (the
+    // pond has to convey its release somewhere — an off-site conveyance easement). Screening
+    // only — never a surveyed alignment or a confirmed drainage right. CORS clean from the
+    // browser (public federal service; re-verify live). Consumed via /query (feature layer),
+    // the identifySource pattern; sampler is site-planner/lib/receivingWater.js.
+    serviceUrl: "https://hydro.nationalmap.gov/arcgis/rest/services/NHDPlus_HR/MapServer",
+    layerId: 3, // NetworkNHDFlowline
+    geometryType: "line",
+    fields: { name: "GNIS_NAME", fcode: "FCODE", lengthKm: "LENGTHKM" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Willow Fork / Cane Island near Katy — dense named flowlines in any ~1 km envelope.
+      { label: "Willow Fork (Katy)", point: [-95.83, 29.78], expectMinCount: 1 },
+    ],
+    notes:
+      "NetworkNHDFlowline (routed network). GNIS_NAME may be empty on unnamed reaches / artificial " +
+      "paths — the sampler keeps the nearest with a name AND the nearest overall. Screening adjacency, " +
+      "never a surveyed outfall alignment or a legal drainage easement.",
+  },
+
   fbcddWse100: {
     key: "fbcddWse100",
     label: "FBCDD Atlas-14 watershed-study 1% (100-yr) WSE — DRAFT",

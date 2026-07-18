@@ -38,6 +38,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft);
   `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
   per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807).
+- Detention outlet / routing / criteria tier (NEW-A, Phase A): `detentionCriteria.js` (the versioned
+  jurisdiction criteria registry — cited outlet/geometry criteria, referencing `detentionRules.js` for
+  the verified release/storm/freeboard facts; audit + overrides), `outletStructure.js` (per-pond
+  orifice/weir/restrictor model + stage→discharge rating curve), `stageStorageDischarge.js` (pairs
+  `pondGeom` storage with the outlet curve), `pondRouting.js` (modified-Puls reservoir routing proving
+  Post ≤ Pre per storm), `receivingWater.js` (nearest NHDPlus HR receiving water for the outfall +
+  easement flag). All pure/Node-tested.
 - `detentionRules.js` — Houston-MSA detention criteria as versioned rule records + the
   drainage-authority resolver, tier/regime assessors, pond auto-size solvers (B636–B642,
   code-labeled B629–B635; pure, injectable fetch/cache — mirror of `jurisdiction.js`). `pondGeom.js` holds
