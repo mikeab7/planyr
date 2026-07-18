@@ -45,6 +45,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `pondGeom` storage with the outlet curve), `pondRouting.js` (modified-Puls reservoir routing proving
   Post ≤ Pre per storm), `receivingWater.js` (nearest NHDPlus HR receiving water for the outfall +
   easement flag). All pure/Node-tested.
+- Public-data inputs tier (NEW-B, Phase B): `curveNumber.js` (SCS CN runoff), `soils.js` (SSURGO
+  Soil Data Access — HSG + seasonal-high water table; SDA proxy-blocked in sandbox → live-verify),
+  `groundwater.js` (wet-vs-dry pond feasibility from combined SSURGO + TWDB depth-to-water),
+  `subsidence.js` (Harris-Galveston / Fort Bend subsidence-district cited flag registry),
+  `pfdsClient.js` (NOAA Atlas-14 rainfall via the `functions/api/pfds.js` proxy — live-reachable),
+  `twdbWells.js` (TWDB observation-wells interface, endpoint live-verify pending). All pure/Node-tested.
 - `detentionRules.js` — Houston-MSA detention criteria as versioned rule records + the
   drainage-authority resolver, tier/regime assessors, pond auto-size solvers (B636–B642,
   code-labeled B629–B635; pure, injectable fetch/cache — mirror of `jurisdiction.js`). `pondGeom.js` holds

@@ -123,10 +123,14 @@ export const WSE02_PROVIDER_NOTES = {
   },
   noaaPfds: {
     name: "NOAA Atlas 14 Precipitation Frequency Data Server (PFDS)",
-    status: "live text endpoint — NO CORS (needs a same-origin proxy: functions/api/pfds.js)",
+    status: "LIVE — wired via functions/api/pfds.js proxy + lib/pfdsClient.js (NO CORS in the browser)",
+    // B-A/NEW-B: the old `/cgi-bin/hdsc/new/` path now 301-redirects to `/cgi-bin/new/`
+    // (verified live 2026-07-18 — the redirect target returns the parseable text; a browser
+    // XHR to the old path fails the CORS preflight on the 301). Point the proxy at the
+    // resolved path so there is no redirect leg.
     endpoint:
-      "https://hdsc.nws.noaa.gov/cgi-bin/hdsc/new/fe_text_mean.csv?lat=&lon=&data=depth&units=english&series=pds",
+      "https://hdsc.nws.noaa.gov/cgi-bin/new/fe_text_mean.csv?lat=&lon=&data=depth&units=english&series=pds",
     note:
-      "Point precipitation-frequency depths (inches), parsed by parsePfdsText here. Do NOT wire a browser fetch (no CORS) — route through the production proxy.",
+      "Point precipitation-frequency depths (inches), parsed by parsePfdsText here. Do NOT wire a browser fetch (no CORS) — route through the production proxy functions/api/pfds.js (lib/pfdsClient.js is the client). Validated live 2026-07-18: Houston (29.76,-95.37) 100-yr 24-hr = 17.0 in.",
   },
 };

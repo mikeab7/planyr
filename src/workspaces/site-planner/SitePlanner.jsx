@@ -135,6 +135,8 @@ import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js"
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
 import { sizePondForTargets, scaleRing, solveTobRaise } from "./lib/pondSizing.js";
+import { pondGroundwaterScreen } from "./lib/groundwater.js";
+import { subsidenceFlag } from "./lib/subsidence.js";
 import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
 import { defaultOutletForPond, outletProblems } from "./lib/outletStructure.js";
 import { assessRoutedDetention } from "./lib/pondRouting.js";
@@ -14841,6 +14843,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       }
                       if ((crit.slope || crit.freeboard || landTakeSf != null) && critRule && critRule.verified === false) {
                         out.push(noteLine("Criteria values are unverified placeholders — edit & confirm in settings against the PCPM / county DCM.", "crit-unv"));
+                      }
+                      // NEW-B (Phase B) — soils/groundwater wet-vs-dry pond screen + subsidence-district
+                      // flag. Depth-to-water is manual here (auto-fills from SSURGO once the /api/soils
+                      // proxy is live — SDA is egress-blocked in the sandbox); grade + county come from
+                      // facts the app already holds, so this adds no new fetch.
+                      {
+                        const gwCounties = drainCtxData?.authority?.jurisdiction?.county || [];
+                        const dtw = Number.isFinite(det.depthToWaterFt) ? det.depthToWaterFt : null;
+                        const gw = pondGroundwaterScreen({ depthToWaterFt: dtw, gradeElevFt: fmElev.existGradeFt, tobElevFt: tobEff, pondDepthFt: Number.isFinite(det.depth) ? det.depth : 8 });
+                        out.push(
+                          <div key="gw-dtw" style={{ marginTop: 6 }}>
+                            <Field label="Depth to water (ft)">
+                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <NumInput style={{ ...numInput, width: 64 }} value={dtw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
+                                <span style={{ fontSize: 10, color: PAL.muted }}>seasonal high (SSURGO / TWDB well)</span>
+                              </span>
+                            </Field>
+                          </div>
+                        );
+                        if (gw.known) out.push(gw.wetPond ? warnLine(`⚠ ${gw.message}`, "gw-wet", false) : noteLine(gw.message, "gw-dry"));
+                        else if (dtw != null) out.push(noteLine(gw.message, "gw-note"));
+                        const subs = subsidenceFlag(gwCounties);
+                        if (subs) out.push(noteLine(`Subsidence: ${subs.message}`, "subsidence"));
                       }
                       // NEW-11/B831 — this pond vs drawn easements + the assumed pipeline corridor.
                       {

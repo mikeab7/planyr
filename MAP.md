@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-18 @ `8f66d14` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-18 @ `8869628` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_266 source files mapped._
+_272 source files mapped._
 
 ## infra
 
@@ -269,6 +269,8 @@ _266 source files mapped._
   - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyKeyForName`, `detectField`, `FEET_WKID`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `SNAPSHOT_COUNTIES`, `STATEWIDE_KEYS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
   - _exports_: `_resetCoverageCache`, `_resetRelevancePrefs`, `boundsFromLeaflet`, `boundsIntersect`, `bufferBounds`, `computeCoverage`, `COVERAGE_STATE`, `DEFAULT_RADIUS_MI`, `DEFAULT_RELEVANCE`, `displayCoverage`, `esriExtentToBounds`, `getCachedExtent`, `getNearbyRadiusMiles`, `getRelevanceMode`, `isRegional`, `LAYER_SCOPE`, `layerScope`, `normalizeMode`, `normalizeRadius`, `prefetchExtents`, `regionCoverage`, `RELEVANCE_MODES`, `setLayerExtent`, `setNearbyRadiusMiles`, `setRelevanceMode`, `srPointToLatLon`, `subscribeRelevance`
+- **`src/workspaces/site-planner/lib/curveNumber.js`** — SCS/NRCS Curve-Number runoff method (NEW-B1): composite CN from hydrologic soil group + impervious %, runoff depth/volume from an Atlas-14 rainfall depth, post-minus-pre increase. Pure TR-55.
+  - _exports_: `compositeCn`, `COVER_CN`, `HSG`, `IMPERVIOUS_CN`, `normalizeHsg`, `perviousCn`, `runoffDepthIn`, `screenRunoff`
 - **`src/workspaces/site-planner/lib/deedAlign.js`** — Deed-to-parcel basis-of-bearings fix: rigid rotate+translate best-fit overlay plus theoretical grid-convergence fallback
   - _exports_: `CONFIDENT_FRAC`, `describeRotation`, `gridConvergenceDeg`, `MAX_ALIGN_ROT_DEG`, `openRing`, `ringCentroid`, `rotatePointsAbout`, `solveDeedAlignment`
 - **`src/workspaces/site-planner/lib/demGrid.js`** — Pure DEM grid plumbing (B704/B706): deterministic snapped-tile exportImage requests, LERC sniff/decode to survey-feet with validity mask, masked gaussian smooth, cell-center pixel/mercator/WGS84 transforms, mask-aware bilinear sampling
@@ -339,6 +341,8 @@ _266 source files mapped._
   - _exports_: `backoffMs`, `classifyGisError`, `fetchArcgisJson`, `GIS_FETCH_RETRIES`, `GIS_FETCH_TIMEOUT_MS`, `GIS_MAX_GET_URL`, `gisErrorMessage`, `GisFetchError`, `pLimit`
 - **`src/workspaces/site-planner/lib/gradingRules.js`** — Grading-standards registry (B825): per-surface-class slope limits with provenance (verified/basis/source), override merge, percent/ratio validation seam, chip labels
   - _exports_: `chipLabel`, `GRADING_RULES`, `gradingRuleFor`, `JURISDICTION_OVERRIDES`, `mergeGradeOverride`, `validateSlopeAgainstRule`
+- **`src/workspaces/site-planner/lib/groundwater.js`** — Depth-to-water screen for pond feasibility (NEW-B3): combines SSURGO seasonal-high water table + TWDB well signals (provenanced), screens wet-vs-dry pond (permanent-pool depth, suggested pool elev). Pure.
+  - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `sampleMaapnextWse`
 - **`src/workspaces/site-planner/lib/history.js`** — Pure undo/redo snapshot stack for the planner canvas: keyOf-based no-op dedup, explicit live-state compare, drop-on-abort drag transactions
@@ -401,6 +405,8 @@ _266 source files mapped._
   - _exports_: `edgeAbutsPaving`, `explodeParkingBands`, `parkDepthForRows`, `parkRowsForDepth`, `PAVED_NEIGHBOR_TYPES`, `splitParkingPieces`
 - **`src/workspaces/site-planner/lib/pfds.js`** — Pure NOAA Atlas-14 PFDS text parser (0.2%/500-yr + 100-yr design-storm depths) + the wse02pct-provider documentation notes (FBCDD candidate endpoint / MAAPnext / M3 pointers). B763; honest-null on out-of-coverage
   - _exports_: `parsePfdsText`, `pfdsDepthFor`, `WSE02_PROVIDER_NOTES`
+- **`src/workspaces/site-planner/lib/pfdsClient.js`** — NOAA Atlas-14 PFDS client (NEW-B5): bounded-fetch (via the same-origin proxy functions/api/pfds.js) → parse → design-storm rainfall depth. Endpoint live-verified reachable. Pure client (injectable fetch).
+  - _exports_: `buildPfdsUrl`, `designStormDepthIn`, `PFDS_PROXY_PATH`, `resolvePfds`
 - **`src/workspaces/site-planner/lib/pipelineCommodity.js`** — Pure RRC pipeline commodity crosswalk + fixed map symbology (B751): free-text COMMODITY_DESCRIPTION → six hazard-ranked buckets (color/weight/dash), high-hazard outliers routed to the red HVL style, Leaflet style + panel legend
   - _exports_: `COMMODITY_BUCKETS`, `commodityBucket`, `commodityBucketRecord`, `isHazardOutlier`, `PIPELINE_LEGEND`, `pipelineStyleFor`
 - **`src/workspaces/site-planner/lib/pipelineCorridor.js`** — Pure pipeline easement screening-corridor geometry (B752): buffers a WGS84 [lon,lat] centerline into an ASSUMED band via the shared bufferPolyline (local feet frame), plus the editable default/min/max width constants
@@ -447,12 +453,16 @@ _266 source files mapped._
   - _exports_: `ANALYSIS_SOURCES`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
   - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`
+- **`src/workspaces/site-planner/lib/soils.js`** — USDA SSURGO soils via Soil Data Access (NEW-B2): pure SDA SQL query builder + response parser (hydrologic soil group + seasonal-high water table) + bounded-fetch client. SDA proxy-blocked in sandbox → live-verify.
+  - _exports_: `buildSdaRequest`, `buildSoilQuery`, `parseSoilResponse`, `resolveSoils`, `SDA_ENDPOINT`, `SDA_PROXY_PATH`
 - **`src/workspaces/site-planner/lib/sourceHealth.js`** — Per-source circuit breaker for county parcel servers: track consecutive failures, open/cooldown/half-open, filter healthy candidates, and decide the honest statewide-backup badge
   - _exports_: `filterHealthyCandidates`, `isSourceOpen`, `isStatewideBackup`, `recordSourceResult`, `resetSourceHealth`, `SOURCE_COOLDOWN_MS`, `SOURCE_FAIL_THRESHOLD`, `sourceCooldownMs`
 - **`src/workspaces/site-planner/lib/stageStorageDischarge.js`** — Stage-storage-discharge curve (NEW-A3): pairs pondGeom storage (volumeBetween) with the outlet rating curve over the basin's stage range; interpolation helpers feed the reservoir routing. Anchored ponds only. Pure.
   - _exports_: `buildStageStorageDischarge`, `dischargeAtElev`, `dischargeAtStorage`, `elevAtStorage`, `storageAtElev`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
   - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
+- **`src/workspaces/site-planner/lib/subsidence.js`** — Harris-Galveston / Fort Bend subsidence-district cited registry (NEW-B4): county→district flag (groundwater-pumping permit + surface-water-conversion context) with citations + audit. Pure.
+  - _exports_: `problems`, `SUBSIDENCE_DISTRICTS`, `subsidenceFlag`, `subsidenceFor`
 - **`src/workspaces/site-planner/lib/supabase.js`** — Supabase anon client factory from build-time env, connection/health test, and synchronous access-token read for the keepalive cloud push
   - _exports_: `connectionInfo`, `currentAccessToken`, `supabase`, `supabaseConfigured`, `supabaseRest`, `testConnection`
 - **`src/workspaces/site-planner/lib/teams.js`** — Team-workspace I/O over the anon Supabase client: create/list teams, roster + role management, email invites and claim, all RLS-scoped with SECURITY DEFINER RPC preferred paths
@@ -463,6 +473,8 @@ _266 source files mapped._
   - _exports_: _(none)_
 - **`src/workspaces/site-planner/lib/titleReader.js`** — Client-side title-commitment reader: sends an uploaded PDF to the Claude API with a Schedule-B JSON schema to extract exceptions plus the metes-and-bounds legal description
   - _exports_: `fileToBase64`, `getKey`, `KEY_LS`, `readTitlePDF`, `setKey`
+- **`src/workspaces/site-planner/lib/twdbWells.js`** — TWDB Groundwater Database observation-wells interface (NEW-B6): field-map-driven nearest-well depth-to-water parser + bounded-fetch client; endpoint pending live confirmation (honest "pending", never fabricated). Pure parser.
+  - _exports_: `parseNearestWell`, `resolveNearestWell`, `TWDB_WELLS_SOURCE`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
