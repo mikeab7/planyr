@@ -164,8 +164,33 @@ async function checkMultiplexCatalog(key, s) {
   return { problems, notes };
 }
 
+/* B882 — reachability + layer-presence check for a MapServer whose sublayers are RASTERS
+ * read via /identify (FEMA InFRM EBFE): confirm the service root answers and that each
+ * identifyLayer id still exists in the live layer list (a renamed/renumbered raster would
+ * silently break the point sampler). A live value probe belongs to the app + V363; this
+ * weekly check guards the endpoint shape. */
+async function checkIdentifySource(key, s) {
+  const problems = [];
+  const notes = [];
+  let meta;
+  try {
+    meta = await getJson(`${s.serviceUrl}?f=json`);
+  } catch (e) {
+    return { problems: [`${key}: identify MapServer UNREACHABLE — ${e.message}`], notes };
+  }
+  const liveIds = new Set((meta.layers || []).map((l) => l.id));
+  for (const [role, id] of Object.entries(s.identifyLayers || {})) {
+    if (!liveIds.has(id)) {
+      problems.push(`${key}: identify layer ${id} (${role}) not in the live service — renamed/renumbered? (re-map identifyLayers)`);
+    }
+  }
+  if (!problems.length) notes.push(`${key}: identify MapServer reachable; layers ${Object.values(s.identifyLayers || {}).join(", ")} present ✓`);
+  return { problems, notes };
+}
+
 async function checkSource(key, s) {
   if (s.kind === "raster") return checkRasterSource(key, s);
+  if (s.kind === "raster-identify") return checkIdentifySource(key, s);
   const problems = [];
   const notes = [];
   const eps = layerEndpoints(s);

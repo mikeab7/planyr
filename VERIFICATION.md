@@ -81,6 +81,15 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V363 — B882: FEMA InFRM EBFE + HCFCD MAAPnext estimated-BFE providers price live on a real Zone A site 🌐/⏳ **LIVE APP (planyr.io), SIGNED IN — a site in a FEMA Zone A / unstudied "no published BFE" area (Region 6)** (GIS-endpoint-behavior class — the sandbox egress proxy 403s BOTH `txgeo.usgs.gov` and `fximgservices.hcfcd.org`, so the identify/getSamples round-trips can only be confirmed on the live edge)  *(minted V362, **renumbered → V363 (references B882) on merge-in of `origin/main`** — a concurrent session's V362/B881 (bottom map furniture) merged first; branch `claude/fema-infirm-ebfe-zone-a-bg1vkd`; `Cadence: once`)*
+- **Verified here (sandbox, 2026-07-18):** the pure resolver precedence + provenance, the EBFE `/identify` parse + no-coverage/timeout→null + throw contracts, the MAAPnext getSamples contract, and the challenge engine (sanity / sensitivity band / disagreement) — 52 new unit tests (`test/ebfe.test.js`, `test/wseProviders.test.js`, `test/hcfcdWse.test.js`, `test/estimateChallenge.test.js`, `test/estimatedWseLabels.test.js`); full suite 4308 green; lint 0 errors; build green. The live endpoints are unreachable from the sandbox by design.
+- **Pending live steps (on planyr.io, signed in):**
+  1. Open a site in an unstudied FEMA Zone A within InFRM Region-6 coverage (a Katy/Waller-area parcel with no published BFE) and run the drainage check. Confirm the estimated-BFE ghost reads **"Est. BFE ≈ N′ — FEMA InFRM BLE (screening estimate)"** and the 0.2% field fills from EBFE (labeled "InFRM BLE (screening)"), NOT the old grade-@-boundary line.
+  2. Accept the estimate (✓ use) → confirm the mitigation ledger, pond split, and FFE verdict all stamp **ESTIMATED (FEMA InFRM Base Level Engineering)** and the map-legend + yield-sheet carry the same stamp (PDF-PARITY).
+  3. Move the site OUT of InFRM coverage (or force the endpoint down) → confirm it falls back to the grade estimate ("grade estimate (Zone A boundary)") with no hang/spinner (B874 watchdog).
+  4. **Challenge layer:** verify the SUSPECT flag on an implausible value, the ESTIMATE-SENSITIVE flag when a verdict/cost flips within ±1 ft, and the "Estimates disagree — … vs … (Δ …)" line when EBFE and grade differ >1 ft.
+  5. **HCFCD MAAPnext (Harris) — CONFIG STEP:** from a machine with reach to `https://fximgservices.hcfcd.org/arcgis/rest/services/MAAPNext?f=json`, walk the folder for the 1% and 0.2% WSE ImageServer leaf names, fill them into `sources.js` `hcfcdMaapnext.wseLayers` (clear `provisional`), then confirm a Harris Zone A site prices from **"HCFCD MAAPnext model"** and it outranks EBFE.
+- On pass: move B882 from ⏳ Verify → BACKLOG-DONE, and this entry → VERIFICATION-DONE.
 
 > **📋 Whole-backlog code audit — 2026-07-18 (verification handoff, expanded scope).** Every pending
 > Verify item (167 V#/B# pairs) was audited AGAINST THE CODE + existing tests (AUDIT-FIRST), on a green
