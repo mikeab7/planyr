@@ -161,7 +161,9 @@ console.log("B — Yield overlap banner fires for two overlapping ACTIVE parcels
   await openYield(page);
   const txt = await bodyText(page);
   ok(/Active parcels overlap/i.test(txt), "the overlap warning banner is shown");
-  ok(/double-counted/i.test(txt), "banner explains the acreage may be double-counted");
+  // B715 updated the copy: area is now DISSOLVED (correct, counted once), so the banner no
+  // longer claims inflation — it flags the duplicate/stray outline to review instead.
+  ok(/counts the shared ground once/i.test(txt), "banner explains site area counts the shared ground once (post-B715 copy)");
   await page.screenshot({ path: OUT + "b652-overlap-banner.png", clip: { x: 0, y: 96, width: 380, height: 520 } });
   const ae = appErrors(errors); ok(ae.length === 0, `no app console/page errors (saw ${ae.length}; ${errors.length - ae.length} env GIS lines ignored)`);
   if (ae.length) console.log("    app errors:", ae.slice(0, 5));
