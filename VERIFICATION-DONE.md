@@ -4,6 +4,24 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V263 — B750: single-click SELECTS, double-click OPENS Properties — the Review (Doc Review) click-through + the Site Planner phone ✎ pill ✅ PASS 2026-07-18 (this session, headless self-verify on the local production build, logged-out — BOTH workspaces)
+- **Added** 2026-07-10 · **Cadence** once (feature acceptance) · references **B750** · earlier: `e2e/click-behavior.spec.js` (Site Planner desktop, 3× stable) + `e2e/element-delete.spec.js` green.
+- **✅ Result — the full B750 gesture model is confirmed in BOTH workspaces, logged-out, on the merged HEAD (0 page errors):**
+  - **Review (Doc Review) — the part the prior 2026-07-18 note marked `Blocker: auth` is now CLEARED** (Review opens an ad-hoc LOCAL PDF via the logged-out "Open PDF…" path — no sign-in, no Library/Drive). `ui-audit/verify-b750-review-click.mjs` (7/7): drawing a rectangle AUTO-SHOWS its Properties in the sheet rail; clicking empty space DESELECTS and blanks Properties; a single-click SELECTS only (Properties stay closed); a double-click OPENS Properties; a single-click on a text note SELECTS only; a **double-click on an already-selected TEXT note opens the INLINE editor, NOT the panel** (edit-text-in-place); no page errors.
+  - **Site Planner — desktop:** `e2e/click-behavior.spec.js` — single-click SELECTS, double-click OPENS Properties, ✕ CLOSES (logged-out).
+  - **Site Planner — phone / narrow viewport** (<760px, `narrow` mode): `ui-audit/verify-b750-phone-pill.mjs` (5/5): the ✎ Tools narrow trigger is present; selecting an element shows the **✎ Properties pill** with the companion CLOSED (tap = select only, no auto-open); tapping the pill OPENS the Properties companion; ✕ closes it back to the pill (the element stays selected).
+- **Expect (met):** in BOTH workspaces a single left-click only SELECTS; a double-click OPENS Properties; a text object = click to select, then double-click to edit the text in place.
+- Cadence: once — CLOSED. (B750 folded → BACKLOG-DONE.)
+
+### V262 — B749: overlay raster crispness at deep zoom + zoom-aware re-raster ✅ PASS 2026-07-18 (this session, headless self-verify on the local production build, logged-out)
+- **Added** 2026-07-10 · **Cadence** once (feature acceptance) · references **B749** · earlier: `test/overlayRaster.test.js` (8, the pure re-raster math) green.
+- **✅ Result — the zoom-aware re-raster mechanism is confirmed live, logged-out, on the merged HEAD.** `ui-audit/verify-b749-overlay-reraster.mjs` (5/5) drops a REAL PDF site-plan overlay (so the in-session PDF proxy is held and the PDF-only hi-res path runs), then drives the view:
+  - dropping the PDF places a BASE raster (a `data:` URL) on the map;
+  - **zooming into detail swaps in a HI-RES raster** (a transient `blob:` URL) — the "linework sharpens instead of softening" mechanism that produces crispness;
+  - **at a fixed zoom the base→hi-res swap keeps ONE on-screen geometry** (captured both base and hi-res frames at the same zoom — identical x/y/w/h → the swap moves/resizes nothing, "anchored to intrinsic PDF points");
+  - **zooming back out drops the overlay back to the BASE raster** (`data:` URL returns → the session-only blob is released, memory doesn't balloon);
+  - the **anchored placement record (world x/y + ftPerPx + intrinsic imgW/imgH) is UNCHANGED across the whole re-raster cycle** — the hi-res is a render-only override that is never persisted (the durable proof that swapping to hi-res does not move or resize the placement).
+- Cadence: once — CLOSED. (B749 folded → BACKLOG-DONE.)
 ### V249 — B731 (code label B722): the FAR row is gone from the PRINTED metrics band (PDF/export parity) ✅ PASS 2026-07-18 (this session, headless Chromium, logged-out preview build)
 - **Added** 2026-07-08 · **Verified** 2026-07-18 (this session) · Cadence once (bug-fix acceptance) — CLOSED.
 - **✅ PASS (running app):** drove the REAL export path — File ▾ → "Download PDF / pick frame…" → print preview → Download PDF — on a seeded site with a building + parking. Intercepted the composed print-sheet SVG (`buildPrintSheetSvg`, fed by the shared `printMetricPairs()`) that the export rasterizes into the PDF, and confirmed the printed metrics band lists **Site area, Lot coverage, Car stalls, Impervious** — and carries **NO "FAR" row** (nor the "FAR (1-story)" variant). New harness `ui-audit/verify-v249-far-print.mjs` (**8/8**).
