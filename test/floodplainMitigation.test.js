@@ -377,25 +377,41 @@ describe("straddle + pond-side helpers", () => {
     expect(bb.n).toBeCloseTo(29.811, 6);
     expect(floodGeoBbox([])).toBeNull();
   });
-  // B755 fix (V268, Bain live-verify 2026-07-18): the derivation engine
-  // (deriveBfeFromLines/governingCrossSectionWsel) will defend a contour up to 2500 ft
-  // away (two-line interpolation up to 6000 ft combined), but SitePlanner.jsx's default
-  // 0.001° fmBbox pad only reaches ~350-450 ft — far short of the engine's own search
-  // radius. On the real Bain plan, FEMA's usable S_BFE lines sat farther from the fill
-  // footprint than that pad reaches, so the fetch returned zero lines and the "BFE (1%
-  // WSE)" input stayed blank even though FEMA publishes usable lines nearby. This pins
-  // the fix's math: a line ~2000 ft from the site (well within the engine's 2500 ft
-  // ceiling) must fall INSIDE the widened search bbox and OUTSIDE the old tight one.
-  it("a widened bbox pad (B755 fix) reaches a BFE line the tight default pad misses, well within the engine's own 2500 ft search radius", () => {
+  // B755 fix, round 1 (V268, Bain live-verify 2026-07-18): SitePlanner.jsx's default
+  // 0.001° fmBbox pad only reaches ~350-450 ft — far short of the derivation engine's own
+  // search radius. On the real Bain plan, FEMA's usable S_BFE lines sat farther from the
+  // fill footprint than that pad reaches, so the fetch returned zero lines and the "BFE
+  // (1% WSE)" input stayed blank even though FEMA publishes usable lines nearby. This pins
+  // the fix's math: a line ~2000 ft from the site must fall INSIDE the widened search
+  // bbox (0.04° — round 2's value, see below) and OUTSIDE the old tight one.
+  it("a widened bbox pad (B755 fix) reaches a BFE line the tight default pad misses", () => {
     const ring = [[[-95.6, 29.8], [-95.599, 29.801]]]; // a small site near Houston-area latitude
     const siteMaxLon = -95.599;
     const lineLat = 29.8005;
     const nearLineLon = siteMaxLon + 0.00633; // ~2000 ft east of the site's east edge at this latitude
     const tightBbox = floodGeoBbox(ring, 0.001); // the pre-fix default pad
-    const widenedBbox = floodGeoBbox(ring, 0.025); // the B755-fix pad (BFE_SEARCH_PAD_DEG)
+    const widenedBbox = floodGeoBbox(ring, 0.04); // the B755-fix pad (BFE_SEARCH_PAD_DEG, round 2)
     const inBbox = (bb, lon, lat) => lon >= bb.w && lon <= bb.e && lat >= bb.s && lat <= bb.n;
     expect(inBbox(tightBbox, nearLineLon, lineLat)).toBe(false); // the pre-fix bug: fetch never reaches this line
     expect(inBbox(widenedBbox, nearLineLon, lineLat)).toBe(true); // the fix: fetch now reaches it
+  });
+  // B755 fix, round 2 (Bain live-verify re-attempt, 2026-07-18): round 1 alone was NOT
+  // enough — Michael re-tested the real Bain plan after round 1 shipped and the field was
+  // STILL blank. A live FEMA NFHL query at the Bain reach's reference point found the
+  // nearest usable S_BFE line sits ~2980 ft away — inside round 1's widened FETCH, but
+  // just past deriveBfeFromLines' OLD 2500 ft acceptance radius (maxLineDistFt), so the
+  // engine kept rejecting it even once the data was fetched. This pins that the real,
+  // measured Bain distance (2980 ft) is now ACCEPTED by the raised default (5000 ft) and
+  // would have been REJECTED by the old default (2500 ft) — the exact regression.
+  it("deriveBfeFromLines' raised default radius (B755 round 2) accepts the real Bain distance (~2980 ft) that the old default rejected", () => {
+    const bainNearestLineFt = 2980; // measured live against the real FEMA NFHL S_BFE layer
+    const line = { elevFt: 140.6, pts: [{ x: bainNearestLineFt, y: -5000 }, { x: bainNearestLineFt, y: 5000 }] };
+    // the OLD default (2500 ft) — what shipped in round 1 — rejects this real distance
+    expect(deriveBfeFromLines({ point: { x: 0, y: 0 }, lines: [line], maxLineDistFt: 2500 })).toBeNull();
+    // the RAISED default (round 2, no override — exercises the actual shipped default)
+    const r = deriveBfeFromLines({ point: { x: 0, y: 0 }, lines: [line] });
+    expect(r).not.toBeNull();
+    expect(r.bfeFt).toBeCloseTo(140.6, 6);
   });
 });
 

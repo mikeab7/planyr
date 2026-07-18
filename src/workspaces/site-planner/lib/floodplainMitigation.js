@@ -295,8 +295,19 @@ export function crossSectionWselFromFeatureCollection(fc, origin) {
  *          implausible gap: snap to it (±~0.5 ft), flagged lower-confidence.
  * Returns null when no usable line sits within maxLineDistFt (honest UNKNOWN, never a
  * guess). detail carries loElev/hiElev (so the UI can show the conservative upper
- * bracket) and the distances used. Pure. */
-export function deriveBfeFromLines({ point, lines, maxLineDistFt = 2500, maxGapFt = 6000 } = {}) {
+ * bracket) and the distances used. Pure.
+ * B755 live-verify fix (Bain, 2026-07-18, second pass): the fill/pond representative
+ * point on a real industrial tract can legitimately sit farther from the nearest S_BFE
+ * contour than a small in-town lot — the Bain reach's own nearest usable line measured
+ * ~2980 ft from the site's reference point (confirmed live against FEMA NFHL), just past
+ * the OLD 2500 ft cap, so the derivation kept returning null even after the fetch-radius
+ * fix (widening the FETCH alone doesn't help if the ENGINE still rejects a line that far
+ * out). BFE contours change slowly over distance on the flat Gulf-Coast reaches this tool
+ * screens (a few tenths of a foot per thousand feet is typical), so a wider "close enough
+ * to defend" radius is still a defensible screening estimate, not a guess — raised to
+ * 5000 ft (nearest-line) / 10000 ft (two-line interpolation combined), roughly double the
+ * original bounds, with real Bain data now comfortably inside them. */
+export function deriveBfeFromLines({ point, lines, maxLineDistFt = 5000, maxGapFt = 10000 } = {}) {
   if (!point || !Array.isArray(lines) || !lines.length) return null;
   // Distance to each line, keeping the NEAREST occurrence per DISTINCT elevation (a
   // meander can put the same contour on both banks — that's not a bracketing pair).
@@ -344,7 +355,10 @@ export function deriveBfeFromLines({ point, lines, maxLineDistFt = 2500, maxGapF
  * screening pick along a reach). Returns { wselFt, provider:"xs-wsel",
  * method:"nearest-reach", detail } or null (honest UNKNOWN) when no reach has a section
  * within maxDistFt. Pure. */
-export function governingCrossSectionWsel({ point, sections, maxDistFt = 2500 } = {}) {
+// B755 live-verify fix (Bain, 2026-07-18): same real-world gap as deriveBfeFromLines'
+// maxLineDistFt above — raised in step with it so the cross-section fallback isn't the
+// new bottleneck once the BFE-line path is widened.
+export function governingCrossSectionWsel({ point, sections, maxDistFt = 5000 } = {}) {
   if (!point || !Array.isArray(sections) || !sections.length) return null;
   // Group sections by reach (WTR_NM), keeping each section's distance to the point.
   // A BLANK/missing WTR_NM can't be assumed to be the same reach as another blank one, so
