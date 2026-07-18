@@ -72,7 +72,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B886 | Pond economics optimizer: ranked deeper-smaller vs shallower-bigger configurations (earthwork $ / land-take / buildable-SF) | [Site Planner] | #site-planner #yield #pond #cost | ⏳ live — awaiting |
+| B886 | Pond economics optimizer: ranked deeper-smaller vs shallower-bigger configurations (earthwork $ / land-take / buildable-SF) | [Site Planner] | #site-planner #yield #pond #grading | ⏳ live — awaiting |
 | B882 | Estimated BFE for FEMA Zone A / unstudied areas from FEMA InFRM EBFE + HCFCD MAAPnext (pluggable provider registry) + a "challenge the estimate" layer | [Site Planner / GIS · floodplain] | #site-planner #gis #floodplain #yield #ui | ⏳ live — awaiting |
 | B881 | Bottom map furniture overlaps when a docked panel narrows the map pane (scale bar ↔ "● Scaled" badge ↔ coordinate chip) | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
 | B880 | Setback offset line "messes up" on zoom-out: scale its dash + stroke with zoom and drop it when the inset goes sub-pixel | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
@@ -207,7 +207,6 @@
 - **#auth** — B778, B483, B676, B714
 - **#compare** — B471
 - **#coordinates** — B625, B684
-- **#cost** — B886
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B791, B792, B750, B746, B687, B685, B667, B659
 - **#drive** — B663, B662, B629, B791, B792, B699, B701, B687
 - **#entitlements** — B818, B725, B726, B868, B869, B817, B816, B815
@@ -217,7 +216,7 @@
 - **#floodplain** — B882, B878, B873, B866, B868, B869, B870, B871, B861, B862, B859, B856, B857, B858, B833, B834, B830, B808, B809, B826, B827, B807, B798, B802, B790, B789, B788, B782, B755
 - **#gantt** — B818, B817, B816
 - **#gis** — B810, B776, B777, B752, B753, B722, B723, B724, B726, B629, B370, B309, B178, B171, B147, B13, B95, B882, B879, B860, B861, B856, B839, B840, B832, B831, B808, B822, B827, B691, B807, B796, B797, B800, B801, B790, B789, B788, B787, B782, B775, B774, B761, B625, B755, B751, B754, B745, B739, B738, B707, B712, B703, B704, B705, B706, B695, B694, B693
-- **#grading** — B871, B833, B826
+- **#grading** — B886, B871, B833, B826
 - **#infra** — B778, B735, B726, B406, B179, B63, B850, B864, B819, B788, B786, B812, B811, B759, B758, B756, B748, B734, B675, B669
 - **#library** — B663, B662, B792, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B820, B750, B746, B740, B737
