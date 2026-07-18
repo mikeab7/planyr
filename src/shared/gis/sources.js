@@ -224,6 +224,55 @@ export const GIS_SOURCES = {
       "upgrade tracked as a live-verify item. Same MapServer also hosts the water CCN (layer 1). Screening only.",
   },
 
+  // ---- Environmental contamination pre-screen (public-data screening PHASE 2) ----
+  // Proximity sources: the screen buffers the parcel and reports count + nearest distance
+  // + names. A Phase I ESA PRE-SCREEN — never a substitute for a Phase I ESA.
+  lpst: {
+    key: "lpst",
+    label: "TCEQ leaking petroleum storage tank (LPST) sites",
+    provider: "Texas Commission on Environmental Quality (TCEQ)",
+    // TCEQ's dedicated LEAKING-tank layer (a documented release from a petroleum UST) — NOT the
+    // all-tanks PST layer (whose LPST_ID is unpopulated). Point layer; the screen buffers the
+    // parcel with a server-side `distance` query (supported here) and measures nearest in EPSG:2278.
+    serviceUrl: "https://gisweb.tceq.texas.gov/arcgis/rest/services/Public/LPST/MapServer",
+    layerId: 0,
+    geometryType: "point",
+    fields: { name: "SITE_NAME", program: "REM_PROG", lpstId: "LPST_ID", city: "CITY", county: "COUNTY", addr: "PHYS_ADDR" },
+    coverage: "statewide",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Pasadena / Ship Channel — dense LPST country (24 within a mile, live 2026-07-18).
+      { label: "Pasadena LPST cluster", point: [-95.21, 29.72], expectMinCount: 1 },
+    ],
+    notes:
+      "TCEQ Leaking Petroleum Storage Tank sites (a documented petroleum-UST release; REM_PROG = the " +
+      "remediation-program status). A Phase I ESA PRE-SCREEN — a Phase I ESA / TCEQ records review is the " +
+      "authoritative check. Historic/closed cases can be inaccurate or unmapped.",
+  },
+  epaCleanups: {
+    key: "epaCleanups",
+    label: "EPA Superfund (NPL) + RCRA cleanup sites",
+    provider: "U.S. EPA (Cleanups in My Community — FRS-derived)",
+    // EPA's unified cleanup point layer: Superfund (NPL + non-NPL) AND RCRA corrective-action in
+    // one service; MAP_SYMBOL_CODE splits the program (S = NPL, SN = Superfund non-NPL, R = RCRA,
+    // combinations + E). AGOL-hosted by EPA's official org (CORS-clean); server-side `distance` works.
+    serviceUrl: "https://services.arcgis.com/cJ9YHowT8TU7DUyn/arcgis/rest/services/Cleanups_in_my_Community_Sites/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "PRIMARY_NAME", symbol: "MAP_SYMBOL_CODE", sfName: "SF_SITE_NAME", city: "CITY_NAME", county: "COUNTY_NAME" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // Pasadena Refining area — NPL/RCRA sites present (live 2026-07-18).
+      { label: "Pasadena refining cleanups", point: [-95.21, 29.72], expectMinCount: 1 },
+    ],
+    notes:
+      "EPA 'Cleanups in My Community' — Superfund (NPL/non-NPL) + RCRA corrective-action sites, FRS-derived. " +
+      "MAP_SYMBOL_CODE distinguishes the program. A Phase I ESA PRE-SCREEN — a Phase I ESA is the authoritative check.",
+  },
+
   // ---- Jurisdiction / road identify sources (B93/B94; shared by the screen) ----
   county: {
     key: "county",
