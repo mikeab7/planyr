@@ -273,6 +273,40 @@ export const GIS_SOURCES = {
       "MAP_SYMBOL_CODE distinguishes the program. A Phase I ESA PRE-SCREEN — a Phase I ESA is the authoritative check.",
   },
 
+  // ---- Active surface growth faults (public-data screening PHASE 3) ----
+  growthFaults: {
+    key: "growthFaults",
+    label: "Houston-area active surface faults",
+    provider: "USGS (Shah & Lanning-Rush, SIM 2874) — via University of Houston GIS republication",
+    // Houston growth-fault surface traces (slow-slip faults that crack foundations/pavement).
+    serviceUrl: "https://services1.arcgis.com/euMKmvUChvyJxWq2/arcgis/rest/services/Fault_Houston/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { name: "Name", type: "Type", orientation: "Orientatio" },
+    coverage: "Houston metropolitan area (USGS SIM 2874 study extent)",
+    // ACKNOWLEDGED EXCEPTION: the authoritative dataset (USGS SIM 2874, "Principal faults in the
+    // Houston metropolitan area", Shah & Lanning-Rush) is published as a map/shapefile DOWNLOAD
+    // only — there is no authoritative live REST endpoint, and the USGS-derived AGOL republication
+    // is token-gated. This University of Houston GIS republication of that same dataset is the best
+    // anonymously-queryable live service. It is the COMPLETE study dataset (not a clipped subset),
+    // but community-hosted, so it's an acknowledged exception — screening only.
+    tier: "monitored-exception",
+    tierReason:
+      "USGS SIM 2874 (the authoritative Houston fault dataset) publishes as a DOWNLOAD only; no live " +
+      "authoritative REST endpoint exists and the USGS-derived AGOL copy is token-gated. We depend on the " +
+      "University of Houston GIS republication (the full dataset, anonymously queryable) until we ingest the " +
+      "USGS SIM 2874 shapefile to self-host — tracked in VERIFICATION.",
+    lastVerified: "2026-07-18",
+    fixtures: [
+      // NW Houston — dense growth-fault country (25 traces in this envelope, live 2026-07-18).
+      { label: "NW Houston fault traces", bbox: [-95.60, 29.75, -95.40, 29.95], expectMinCount: 1 },
+    ],
+    notes:
+      "Houston-area growth-fault surface traces (aseismic slow-slip faults that damage foundations, slabs, " +
+      "and pavement over time). Community-hosted republication of USGS SIM 2874 — screening only; a " +
+      "geotechnical / fault-specific study is the authoritative check. Prefer self-hosting the USGS shapefile.",
+  },
+
   // ---- Jurisdiction / road identify sources (B93/B94; shared by the screen) ----
   county: {
     key: "county",

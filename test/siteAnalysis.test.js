@@ -489,6 +489,7 @@ describe("runSiteAnalysis — orchestration", () => {
       "PUC_CCN_Sewer_Water": () => [], // no sewer CCN → info well/septic flag
       "Public/LPST": () => [{ attributes: { SITE_NAME: "PASADENA LPST" }, geometry: { x: -95.795, y: 29.785 } }], // proximity: on-site LPST
       "Cleanups_in_my_Community": () => [{ attributes: { PRIMARY_NAME: "PASADENA REFINING", MAP_SYMBOL_CODE: "S" }, geometry: { x: -95.78, y: 29.785 } }], // NPL cleanup nearby
+      "Fault_Houston": () => [{ attributes: { Name: "LONG POINT FAULT" }, geometry: { paths: [[[-95.805, 29.785], [-95.785, 29.785]]] } }], // a fault LINE crossing the site
     });
     const identifyJurisdiction = async () => ({
       county: ["Harris"], city: ["Houston"], etj: [], unincorporated: false, straddle: false,
@@ -497,7 +498,7 @@ describe("runSiteAnalysis — orchestration", () => {
     const identifyRoadAuthority = async () => ({ roads: [{ name: "IH 10", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 }], authorities: ["State (TxDOT)"], ageMs: 500, note: "ok" });
     const { findings } = await runSiteAnalysis([SQUARE], { cache, fetchJson, identifyJurisdiction, identifyRoadAuthority });
     const ids = findings.map((f) => f.id);
-    expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"]);
+    expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"]);
     expect(findings.find((f) => f.id === "flood").status).toBe("present");
     // PHASE 2 proximity: contamination near the site → present with count + nearest + names.
     const lpst = findings.find((f) => f.id === "lpst");
@@ -507,6 +508,10 @@ describe("runSiteAnalysis — orchestration", () => {
     const epa = findings.find((f) => f.id === "epaCleanups");
     expect(epa.status).toBe("present");
     expect(epa.detail.join(" ")).toMatch(/PASADENA REFINING \(Superfund \(NPL\)\)/);
+    // PHASE 3 proximity on a LINE: a fault trace crossing the parcel reads "crosses the site".
+    const faults = findings.find((f) => f.id === "growthFaults");
+    expect(faults.status).toBe("present");
+    expect(faults.summary).toMatch(/crosses the site: LONG POINT FAULT/);
     // CCN is a fact (info), never a good/bad constraint: water names the certificated provider,
     // sewer with no polygon reads as an honest well/septic flag (not a green all-clear).
     expect(findings.find((f) => f.id === "ccnWater").summary).toMatch(/CITY OF KATY \(a city\)/);
@@ -527,6 +532,7 @@ describe("runSiteAnalysis — orchestration", () => {
       "PUC_CCN_Sewer_Water": () => [],
       "Public/LPST": () => [],
       "Cleanups_in_my_Community": () => [],
+      "Fault_Houston": () => [],
     });
     const identifyJurisdiction = async () => { throw new Error("down"); };
     const identifyRoadAuthority = async () => { throw new Error("down"); };

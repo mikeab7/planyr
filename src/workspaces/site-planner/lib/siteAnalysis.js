@@ -147,6 +147,18 @@ export const ANALYSIS_SOURCES = [
     caveat: "Phase I ESA PRE-SCREEN only — NOT a substitute for a Phase I ESA. EPA Superfund (NPL/non-NPL) + RCRA corrective-action sites; a records review / environmental consultant is the authoritative check.",
   },
   {
+    // Active surface faults (PHASE 3) — Houston growth-fault traces crossing or near the parcel,
+    // by PROXIMITY to the fault LINES (the proximity engine handles line geometry). onSiteLabel
+    // makes a 0-ft nearest read "crosses the site" (a fault through the footprint is a real flag).
+    id: "growthFaults", category: "Active surface faults", label: "Houston-area growth faults", kind: "line",
+    mapLayer: "faults",
+    ...reg("growthFaults"),
+    screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
+    plural: "fault trace(s)", onSiteLabel: "crosses the site",
+    absentLabel: "No mapped growth-fault traces within a quarter-mile",
+    caveat: "Houston-area active growth faults (aseismic slow-slip faults that crack foundations, slabs, and pavement over time). A trace crossing or near the site is a real design constraint — set structures/ponds off the trace and get a geotechnical/fault study. Screening only; a community-hosted republication of the USGS Houston fault map (SIM 2874).",
+  },
+  {
     // Zoning / entitlement — derived from the jurisdiction result rather than a single
     // statewide layer (zoning is per-city, and City of Houston has NONE). Filled in by
     // deriveZoning() from the jurisdiction finding; left here so it always appears.
@@ -496,10 +508,13 @@ export function analyzeProximitySource(source, rings, opts = {}) {
 
   const featFetcher = async () => {
     const j = await queryProximity(source, layer, rings, bufferFt, fetchJson);
-    return (j.features || []).map((f) => ({
-      attrs: normalizeAttrs(f.attributes),
-      lngLat: f.geometry && Number.isFinite(f.geometry.x) && Number.isFinite(f.geometry.y) ? [f.geometry.x, f.geometry.y] : null,
-    }));
+    return (j.features || []).map((f) => {
+      const g = f.geometry || {};
+      const rec = { attrs: normalizeAttrs(f.attributes) };
+      if (Array.isArray(g.paths)) rec.paths = g.paths;                        // polyline (faults, rail)
+      else if (Number.isFinite(g.x) && Number.isFinite(g.y)) rec.lngLat = [g.x, g.y]; // point
+      return rec;
+    });
   };
   const { fresh } = cache.swr("proximity:" + source.id + ":" + sig, featFetcher, { ttl: source.ttl || 0 });
   const countFresh = cache.swr("proximitycount:" + source.id + ":" + sig,
@@ -516,16 +531,19 @@ export function analyzeProximitySource(source, rings, opts = {}) {
     } else {
       const scr = screenProximity(rings, feats);
       const total = (rc && !rc.error && typeof rc.data === "number") ? rc.data : scr.count;
+      // On a line source (faults, rail), a 0-ft nearest means the trace CROSSES the site — a
+      // source may override the "on/under the site" wording (e.g. "crosses the site").
+      const fmtD = (ft) => (ft != null && ft <= 25 && source.onSiteLabel ? source.onSiteLabel : fmtDistFt(ft));
       if (total > 0) {
         status = "present";
         const near = scr.nearest;
-        const nearName = near ? (near.attrs[nameKey] || "unnamed site") : "";
+        const nearName = near ? (near.attrs[nameKey] || "unnamed") : "";
         const nStr = `${total}${total >= cap ? "+" : ""}`;
         summary = `${nStr} ${source.plural || "site(s)"} within ${bufferMi} mi` +
-          (near ? ` — nearest ${fmtDistFt(near.distFt)}: ${nearName}` : "");
+          (near ? ` — nearest ${fmtD(near.distFt)}: ${nearName}` : "");
         detail = scr.ranked.slice(0, 6).map((f) => {
           const tag = source.proxTag ? source.proxTag(f.attrs) : "";
-          return `${f.attrs[nameKey] || "unnamed"}${tag ? " (" + tag + ")" : ""} · ${fmtDistFt(f.distFt)}`;
+          return `${f.attrs[nameKey] || "unnamed"}${tag ? " (" + tag + ")" : ""} · ${fmtD(f.distFt)}`;
         });
       } else {
         status = source.verified ? "absent" : "unknown";
@@ -725,7 +743,7 @@ export function deriveZoning(j) {
 // Orchestrator
 // ---------------------------------------------------------------------------
 // Display order for the assembled findings.
-const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"];
+const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "jurisdiction", "road", "zoning", "ccnWater", "ccnSewer"];
 
 /* Run the full screen against the active-parcel rings ([[ [lng,lat], ... ], ...]).
  * Returns { findings, generatedAt }. Findings are presence-first and each carries its

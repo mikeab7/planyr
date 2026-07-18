@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   pointInRingFt, distPointSegFt, distPointToRingsFt, screenProximity, fmtDistFt, ringToGridFt,
+  segmentsIntersectFt, distSegSegFt, distPathToRingsFt, featureDistFt,
 } from "../src/workspaces/site-planner/lib/proximityScreen.js";
 
 // ~0.01° square parcel near Katy, TX (same corner the siteAnalysis test uses).
@@ -65,6 +66,34 @@ describe("screenProximity — real projection distances", () => {
     const r = screenProximity([], [{ lngLat: [-95.78, 29.785], attrs: {} }]);
     expect(r.count).toBe(1);
     expect(r.nearestFt).toBe(Infinity);
+  });
+});
+
+describe("line geometry (PHASE 3 faults / PHASE 6 rail)", () => {
+  const ring = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+  it("segmentsIntersectFt: crossing vs parallel", () => {
+    expect(segmentsIntersectFt({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 5, y: -5 }, { x: 5, y: 5 })).toBe(true);
+    expect(segmentsIntersectFt({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 5 }, { x: 10, y: 5 })).toBe(false);
+  });
+  it("distSegSegFt: 0 when crossing, else the gap", () => {
+    expect(distSegSegFt({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 5, y: -5 }, { x: 5, y: 5 })).toBe(0);
+    expect(distSegSegFt({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 5 }, { x: 10, y: 5 })).toBeCloseTo(5, 6);
+  });
+  it("distPathToRingsFt: a line crossing the parcel is 0; a line outside is the gap", () => {
+    expect(distPathToRingsFt([{ x: -10, y: 50 }, { x: 50, y: 50 }], [ring])).toBe(0); // enters the ring
+    expect(distPathToRingsFt([{ x: 200, y: 50 }, { x: 300, y: 50 }], [ring])).toBeCloseTo(100, 6);
+  });
+  it("screenProximity ranks a fault LINE crossing the site at 0 ft; a nearby line by its gap", () => {
+    const crossing = { paths: [[[-95.805, 29.785], [-95.785, 29.785]]], attrs: { Name: "LONG POINT FAULT" } }; // spans the parcel
+    const nearby = { paths: [[[-95.785, 29.785], [-95.778, 29.785]]], attrs: { Name: "OTHER FAULT" } };          // east of the parcel
+    const r = screenProximity(SQUARE, [nearby, crossing]);
+    expect(r.count).toBe(2);
+    expect(r.ranked[0].attrs.Name).toBe("LONG POINT FAULT");
+    expect(r.nearestFt).toBe(0); // crosses the site
+    expect(r.ranked[1].distFt).toBeGreaterThan(500); // the nearby one is offset
+  });
+  it("featureDistFt returns null for a feature with no usable geometry", () => {
+    expect(featureDistFt({ attrs: {} }, [ringToGridFt(SQUARE[0])])).toBe(null);
   });
 });
 

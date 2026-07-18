@@ -57,6 +57,72 @@ export function distPointToRingsFt(p, ringsFt) {
   return best;
 }
 
+// Do segments a1a2 and b1b2 intersect? Orientation test (feet coords). Pure.
+export function segmentsIntersectFt(a1, a2, b1, b2) {
+  const o = (p, q, r) => Math.sign((q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y));
+  const on = (p, q, r) => Math.min(p.x, r.x) <= q.x && q.x <= Math.max(p.x, r.x) &&
+    Math.min(p.y, r.y) <= q.y && q.y <= Math.max(p.y, r.y);
+  const o1 = o(a1, a2, b1), o2 = o(a1, a2, b2), o3 = o(b1, b2, a1), o4 = o(b1, b2, a2);
+  if (o1 !== o2 && o3 !== o4) return true;
+  if (o1 === 0 && on(a1, b1, a2)) return true;
+  if (o2 === 0 && on(a1, b2, a2)) return true;
+  if (o3 === 0 && on(b1, a1, b2)) return true;
+  if (o4 === 0 && on(b1, a2, b2)) return true;
+  return false;
+}
+
+// Min distance (feet) between two segments; 0 if they intersect. Pure.
+export function distSegSegFt(a1, a2, b1, b2) {
+  if (segmentsIntersectFt(a1, a2, b1, b2)) return 0;
+  return Math.min(
+    distPointSegFt(a1, b1, b2), distPointSegFt(a2, b1, b2),
+    distPointSegFt(b1, a1, a2), distPointSegFt(b2, a1, a2),
+  );
+}
+
+// Min distance (feet) from a polyline path (feet points) to a set of feet-rings; 0 if the
+// line crosses/touches the parcel (a vertex inside, or a segment crossing an edge). Pure.
+export function distPathToRingsFt(pathFt, ringsFt) {
+  if (!pathFt || pathFt.length === 0) return Infinity;
+  for (const p of pathFt) for (const ring of ringsFt) if (ring.length >= 3 && pointInRingFt(p, ring)) return 0;
+  let best = Infinity;
+  for (let k = 0; k < pathFt.length - 1; k++) {
+    const a = pathFt[k], b = pathFt[k + 1];
+    for (const ring of ringsFt) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const d = distSegSegFt(a, b, ring[i], ring[j]);
+        if (d < best) best = d;
+        if (best === 0) return 0;
+      }
+    }
+  }
+  // A single-vertex "path" (degenerate) falls back to point distance.
+  if (pathFt.length === 1) return distPointToRingsFt(pathFt[0], ringsFt);
+  return best;
+}
+
+// Feet distance from one feature to the parcel: point (lngLat) OR polyline (paths). Null if no
+// usable geometry. Pure — projection via toGrid (guards non-finite / throws).
+export function featureDistFt(f, ringsFt) {
+  if (!ringsFt.length) return Infinity;
+  const finite2 = (a) => Array.isArray(a) && Number.isFinite(a[0]) && Number.isFinite(a[1]);
+  try {
+    if (Array.isArray(f && f.paths) && f.paths.length) {
+      let best = Infinity;
+      for (const path of f.paths) {
+        const pf = (path || []).filter(finite2).map(toGrid).filter((g) => Number.isFinite(g.x) && Number.isFinite(g.y));
+        if (pf.length) best = Math.min(best, distPathToRingsFt(pf, ringsFt));
+      }
+      return Number.isFinite(best) ? best : null;
+    }
+    if (finite2(f && f.lngLat)) {
+      const g = toGrid(f.lngLat);
+      return Number.isFinite(g.x) && Number.isFinite(g.y) ? distPointToRingsFt(g, ringsFt) : null;
+    }
+  } catch (_) { return null; }
+  return null;
+}
+
 /* Nearest-feature screen. `rings` = parcel WGS84 rings; `features` = [{ lngLat:[lng,lat],
  * attrs }]. Returns { count, nearestFt, nearest, ranked } where `ranked` is the features
  * sorted nearest-first with a `distFt` each (bad/missing coords are skipped, never 0). Pure. */
@@ -64,12 +130,8 @@ export function screenProximity(rings, features = []) {
   const ringsFt = (rings || []).map(ringToGridFt).filter((r) => r.length >= 3);
   const ranked = [];
   for (const f of features) {
-    const ll = f && f.lngLat;
-    if (!Array.isArray(ll) || !Number.isFinite(ll[0]) || !Number.isFinite(ll[1])) continue;
-    let g;
-    try { g = toGrid(ll); } catch (_) { continue; }
-    if (!Number.isFinite(g.x) || !Number.isFinite(g.y)) continue;
-    const distFt = ringsFt.length ? distPointToRingsFt(g, ringsFt) : Infinity;
+    const distFt = featureDistFt(f, ringsFt); // point OR polyline; null = no usable geometry
+    if (distFt == null) continue;
     ranked.push({ ...f, distFt });
   }
   ranked.sort((a, b) => a.distFt - b.distFt);
