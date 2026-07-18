@@ -382,6 +382,16 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const siteGridP = fmBbox\s*\n\s*\? fetchSiteGrid\(/);
   });
 
+  it("B755 fix, round 3 (Bain live-verify 2026-07-18): the 'BFE (1% WSE)' input's auto-value ternary reads the cross-section-derived estimate (derivedXsWsel), which the field omitted entirely even though it's a real, already-priced provider", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the floodMit props object threads the cross-section estimate through to the panel
+    expect(src).toMatch(/derivedXsWsel: fmDerivedXsWsel, \/\/ B755 round 3/);
+    // the input's auto-value + label check derivedXsWsel FIRST — same precedence order as
+    // the engine's own zoneWaterSurface (cross-section beats BFE-line beats FBCDD DRAFT)
+    expect(src).toMatch(/fm\.derivedXsWsel && Number\.isFinite\(fm\.derivedXsWsel\.wselFt\) \? fm\.derivedXsWsel\.wselFt\s*\n\s*: fm\.derivedBfe && Number\.isFinite\(fm\.derivedBfe\.bfeFt\) \? fm\.derivedBfe\.bfeFt/);
+    expect(src).toMatch(/fm\.derivedXsWsel && Number\.isFinite\(fm\.derivedXsWsel\.wselFt\) \? wseProvLabel\("xs-wsel"\)/);
+  });
+
   it("B619: selecting an object never recolors it to the app accent (handle-based selection)", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // the neutral blue selection chrome + white handle constants exist (real hexes, not var() tokens)

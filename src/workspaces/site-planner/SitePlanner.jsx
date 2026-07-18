@@ -7938,6 +7938,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       identifyCounties: drainCtxData?.authority?.jurisdiction?.county || [],
       siteCounty: restored?.county || null, // B794 — county-specific FIS pointer on the 0.2% input
       rules: floodRules,
+      // B755 fix, round 3 (Bain live-verify, 2026-07-18): the input placeholder ONLY ever
+      // read derivedBfe (BFE-line interp) / derivedWse100 (FBCDD Atlas-14 DRAFT) — it never
+      // received the cross-section-derived value (derivedXsWsel) at all, even though that's
+      // a real, already-computed provider that OUTRANKS both in the engine's own precedence
+      // (zoneWaterSurface checks derivedXsWsel before derivedBfe before derived1pct) and is
+      // already what's silently pricing this exact Bain plan's mitigation (confirmed via the
+      // stored remembered check: providers.wse1pct === "xs-wsel", 138.4 ft). So the FIELD
+      // stayed blank while the number was already being used under the hood. Wiring it here
+      // — rounds 1/2 fixed derivedBfe's OWN data pipeline, which was a real but secondary bug.
+      derivedXsWsel: fmDerivedXsWsel, // B755 round 3 — the FEMA cross-section (S_XS WSEL_REG) estimate
       derivedBfe: fmDerivedBfe, // B755 — the FEMA-BFE-line estimate, for the input placeholder
       autoFfe: fmAutoFfe, // NEW-3 — the code-min required FFE, for the greyed pad placeholder
       padIsAuto: fmPadIsAuto, // NEW-3 — pad currently defaulted to the code minimum
@@ -18091,11 +18101,16 @@ function YieldPanel({
                       DRAFT; the FEMA-lines derivation still wins when it exists (engine
                       precedence: the draft raster is the LAST rung). */}
                   {autoField("BFE (1% WSE)", "bfeFt",
-                    fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? fm.derivedBfe.bfeFt
+                    // B755 round 3 — same auto-tier precedence as the engine's own
+                    // zoneWaterSurface: cross-section (studied, most authoritative) beats
+                    // BFE-line interpolation beats the FBCDD DRAFT raster fallback.
+                    fm.derivedXsWsel && Number.isFinite(fm.derivedXsWsel.wselFt) ? fm.derivedXsWsel.wselFt
+                      : fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? fm.derivedBfe.bfeFt
                       : fm.derivedWse100 && Number.isFinite(fm.derivedWse100.wseFt) ? fm.derivedWse100.wseFt : null,
-                    fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? "derived (FEMA lines)" : "DRAFT (FBCDD 100-yr)",
-                    "Many AE reaches publish NO static BFE — the tool derives one from FEMA's BFE lines when it can (a screening estimate); on unstudied Zone A in Fort Bend it falls back to the county's DRAFT Atlas-14 100-yr raster. Tap edit to override with the FIRM panel / effective model.",
-                    { srcKey: "bfeSrc", srcIsWseProvider: true, tag: { code: "estimate", basis: "Derived from FEMA's published BFE lines, or (if unstudied) the FBCDD DRAFT Atlas-14 100-yr raster — not a published BFE." } })}
+                    fm.derivedXsWsel && Number.isFinite(fm.derivedXsWsel.wselFt) ? wseProvLabel("xs-wsel")
+                      : fm.derivedBfe && Number.isFinite(fm.derivedBfe.bfeFt) ? "derived (FEMA lines)" : "DRAFT (FBCDD 100-yr)",
+                    "Many AE reaches publish NO static BFE — the tool derives the 1% water surface from FEMA's regulatory cross-sections or BFE lines when it can (a screening estimate); on unstudied Zone A in Fort Bend it falls back to the county's DRAFT Atlas-14 100-yr raster. Tap edit to override with the FIRM panel / effective model.",
+                    { srcKey: "bfeSrc", srcIsWseProvider: true, tag: { code: "estimate", basis: "Derived from FEMA's regulatory cross-sections or published BFE lines, or (if unstudied) the FBCDD DRAFT Atlas-14 100-yr raster — not a published BFE." } })}
                   {/* NEW-2 / B882 — unstudied Zone A with NO other 1% surface: offer the estimated
                       BFE as an ACCEPT-GATED chip (never auto-committed), sourced by the provider
                       REGISTRY (district model → FEMA InFRM EBFE → grade-@-boundary) and NAMED. */}
