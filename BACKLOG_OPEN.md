@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _57 open · 129 awaiting live verification._
+> _57 open · 126 awaiting live verification._
 
 ## 🔲 Open
 
@@ -74,7 +74,6 @@
 |---|---|---|---|---|
 | B880 | Setback offset line "messes up" on zoom-out: scale its dash + stroke with zoom and drop it when the inset goes sub-pixel | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
 | B879 | Header: drop the school district (ISD) from the jurisdiction badge + fix the Row-1 breadcrumb/badge overlap at narrow widths | [Site Planner] | #site-planner #ui #gis | ⏳ live — awaiting |
-| B876 | Single-occupancy left dock: element inspector REPLACES the docked panel, never stacks above it | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
 | B878 | Re-verify buildability-quiet-state (B868) + site-based-FFE (B869) AFTER B874 lands live — do NOT patch blind | [Site Planner] | #site-planner #yield #floodplain #testing | ⏳ live — awaiting |
 | B873 | Verification-targeting audit: reconcile today's three ship blocks against tonight's nine-step live pass | [Site Planner] | #site-planner #yield #floodplain #testing | ⏳ live — awaiting |
 | B872 | Reshape a placed rectangular building: convert-to-polygon + constrained (dock-frame) vertex editing | [Site Planner] | #site-planner #selection #ui #yield | ⏳ live — awaiting |
@@ -107,7 +106,6 @@
 | B829 | Remembered check credits GROSS pond volume as detention (surplus/short verdict flips on reload) | [Site Planner / yield · persistence] | #site-planner #pond #yield #persistence | ⏳ live — awaiting |
 | B830 | Ledger-balancer: rank the moves that close detention + mitigation together (the adversarial pass as a feature) | [Site Planner / stormwater · yield] | #site-planner #pond #yield #floodplain | ⏳ live — awaiting |
 | B831 | Flag ponds and basins inside pipeline easement corridors | [Site Planner / GIS · stormwater] | #site-planner #gis #pond | ⏳ live — awaiting |
-| B828 | Undo records + reverts edits that previously slipped the history stack (four "undo doesn't work" gaps) | [Site Planner / Review] | #site-planner #doc-review #ui | ⏳ live — awaiting |
 | B808 | Mitigation volumes integrate per-cell 3DEP grade (retire the single centroid-line median) | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #gis | ⏳ live — awaiting |
 | B809 | Fill-depth heat map overlay: render the exact cells the engine priced | [Site Planner / yield · ui] | #site-planner #yield #floodplain #ui #export | ⏳ live — awaiting |
 | B826 | Proposed-surface engine: auto-grade the concept from FFE + rules, then earthwork balance and mitigation priced off the real surface | [Site Planner / grading · yield] | #site-planner #grading #yield #floodplain | ⏳ live — awaiting |
@@ -194,7 +192,6 @@
 | B668 | Library Home: pinned folders/files + recent drawings + project cards | [Library] | #library #ui #files | ⏳ live — awaiting |
 | B667 | Review remembers the last document PER PROJECT (+ the resume self-clobber fix) | [Doc Review] | #doc-review #persistence | ⏳ live — awaiting |
 | B664 | Drag a whole FOLDER onto the Library and it auto-files every PDF inside it | [Library / storage] | #library #files #filing | ⏳ live — awaiting |
-| B658 | Replace landing-page copy with the approved buyer-voice deck | [Landing / marketing] | #ui | ⏳ live — awaiting |
 | B651 | Parcel split double-counts acreage; make split REPLACE the parent (parent + children can never both be active) | [Site Planner] | #site-planner #yield #selection | ⏳ live — awaiting |
 | B659 | Sheet reader + file organizer revamp: rotated/offset pages, set-aware titles, left-edge & vertical title blocks, title-first grouping, date-first names | [Doc Review / Library] | #doc-review #library #files #filing | ⏳ live — awaiting |
 | B644 | Scheduler embed: first COLD boot throws `Cannot read properties of null (reading 'projects')` + the loader overlay exceeds the 6s backstop (self-recovers) (×2) | [Scheduler / robustness] | #scheduler | ⏳ live — awaiting |
@@ -207,7 +204,7 @@
 - **#auth** — B778, B483, B676, B714
 - **#compare** — B471
 - **#coordinates** — B625, B684
-- **#doc-review** — B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B828, B791, B792, B750, B746, B687, B685, B667, B659
+- **#doc-review** — B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B791, B792, B750, B746, B687, B685, B667, B659
 - **#drive** — B663, B662, B629, B791, B792, B699, B701, B687
 - **#entitlements** — B818, B725, B726, B868, B869, B817, B816, B815
 - **#export** — B818, B810, B752, B862, B839, B840, B834, B809, B824, B817, B816, B745, B739, B738, B712, B684
@@ -225,10 +222,10 @@
 - **#pond** — B866, B869, B870, B871, B858, B834, B829, B830, B831, B822, B707
 - **#road** — B742, B719
 - **#scheduler** — B818, B778, B495, B865, B851, B850, B863, B864, B836, B835, B817, B816, B815, B644
-- **#selection** — B741, B880, B876, B872, B820, B750, B746, B742, B743, B740, B737, B682, B651
-- **#site-planner** — B842, B810, B776, B777, B752, B753, B741, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B880, B879, B876, B878, B873, B872, B866, B868, B869, B870, B871, B860, B861, B862, B859, B856, B857, B858, B846, B839, B840, B837, B832, B833, B834, B829, B830, B831, B828, B808, B809, B826, B821, B824, B823, B822, B827, B691, B820, B807, B796, B797, B798, B799, B800, B801, B802, B793, B790, B789, B788, B787, B784, B785, B786, B782, B812, B811, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#selection** — B741, B880, B872, B820, B750, B746, B742, B743, B740, B737, B682, B651
+- **#site-planner** — B842, B810, B776, B777, B752, B753, B741, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B880, B879, B878, B873, B872, B866, B868, B869, B870, B871, B860, B861, B862, B859, B856, B857, B858, B846, B839, B840, B837, B832, B833, B834, B829, B830, B831, B808, B809, B826, B821, B824, B823, B822, B827, B691, B820, B807, B796, B797, B798, B799, B800, B801, B802, B793, B790, B789, B788, B787, B784, B785, B786, B782, B812, B811, B775, B774, B761, B759, B757, B756, B625, B755, B751, B754, B747, B748, B749, B750, B745, B746, B739, B744, B742, B743, B740, B738, B737, B719, B717, B715, B716, B707, B712, B703, B704, B705, B706, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413, B839
 - **#testing** — B269, B63, B878, B873, B863, B836, B815, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B842, B810, B741, B735, B723, B115, B880, B879, B876, B872, B865, B862, B851, B850, B846, B837, B834, B828, B809, B821, B824, B823, B820, B819, B798, B799, B801, B802, B790, B761, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B658, B673, B674
+- **#ui** — B842, B810, B741, B735, B723, B115, B880, B879, B872, B865, B862, B851, B850, B846, B837, B834, B809, B821, B824, B823, B820, B819, B798, B799, B801, B802, B790, B761, B758, B750, B746, B744, B742, B740, B719, B734, B717, B712, B706, B695, B693, B669, B668, B673, B674
 - **#yield** — B724, B878, B873, B872, B866, B868, B869, B870, B871, B860, B861, B862, B859, B856, B857, B858, B832, B833, B834, B829, B830, B808, B809, B826, B824, B823, B822, B827, B807, B796, B797, B798, B799, B802, B782, B755, B751, B754, B715, B712, B651

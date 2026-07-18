@@ -137,7 +137,13 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the environment — see
 > "🤖 Self-verification" there), then record the result. **The moment an item fully passes with nothing
 > pending, MOVE it to `VERIFICATION-DONE.md`** (same archiving discipline as the backlog). The session that
-> ships a UI change drives the live app itself rather than defer it. **Michael does NOT self-test — never wait
+> ships a UI change drives the live app itself rather than defer it. **⛔ ATTEMPT-BEFORE-YOU-PARK (owner rule,
+> 2026-07-18): a logged-out, no-external-GIS UI check — draw / reshape / select / toggle / keyboard / export a
+> blank site, the landing page, a dropped LOCAL file, a boot-recovery flow — is Claude-doable HERE and must
+> NEVER be filed as "needs a live pass." Drive it headless and record ✅/❌ THIS session. You may only defer an
+> item that hits a named `Blocker:` — `auth` (proxy CORS-blocks Supabase sign-in), `live-GIS` (external map host
+> the egress blocks), or `real-data` (a signed-in saved project like Tsakiris/Bain); a `V###` with no `Blocker:`
+> wall is a mis-classification, not a to-do (`VERIFICATION.md` rule 4).** **Michael does NOT self-test — never wait
 > on him or hand him a test to-do**; if no browser is reachable, log the item and move on (after CI-green +
 > build-green). Self-tests run **logged-out** (the sandbox blocks sign-in), so auth-only features (cloud sync)
 > still need a signed-in check. **⛔ STANDING RULE — when you ship a UI change with any path you CANNOT verify
