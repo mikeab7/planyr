@@ -6587,19 +6587,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const llA = feetToLatLng({ x: mnX, y: mnY }, origin.lat, origin.lon);
       const llB = feetToLatLng({ x: mxX, y: mxY }, origin.lat, origin.lon);
       const fmBbox = isFinite(mnX) ? floodGeoBbox([[[llA[1], llA[0]], [llB[1], llB[0]]]]) : null;
-      // B755 fix (Bain live-verify, 2026-07-18): the BFE-line/cross-section derivation
-      // (deriveBfeFromLines / governingCrossSectionWsel) will accept a contour up to
-      // maxLineDistFt=2500 ft away (two-line interpolation up to maxGapFt=6000 ft
-      // combined), but fmBbox's default 0.001° pad (~350-450 ft depending on latitude)
-      // only reaches the immediate site edge — on the real Bain plan the nearest usable
-      // S_BFE lines sit farther from the fill footprint than that pad, so the fetch
-      // returned zero lines and the field stayed "no published BFE" even though FEMA
-      // publishes 24 usable lines a short distance away. Widen JUST the linear-feature
-      // pull to actually cover the engine's own search radius (~2 mi pad — comfortably
-      // over the 6000 ft two-line case plus the site's own footprint size); the zone
-      // polygon (fmBbox, large-area features that don't need this) and the DEM grid
+      // B755 fix (Bain live-verify, 2026-07-18) — TWO rounds:
+      // (1) The BFE-line/cross-section derivation (deriveBfeFromLines /
+      // governingCrossSectionWsel) will accept a contour within its own search radius, but
+      // fmBbox's default 0.001° pad (~350-450 ft depending on latitude) only reaches the
+      // immediate site edge — on the real Bain plan the nearest usable S_BFE lines sit
+      // farther from the fill footprint than that pad, so the fetch returned zero lines and
+      // the field stayed "no published BFE" even though FEMA publishes usable lines nearby.
+      // Widen JUST the linear-feature pull to actually cover the engine's own search radius;
+      // the zone polygon (fmBbox, large-area features that don't need this) and the DEM grid
       // (kept tight on purpose — an oversized elevation pull is wasted bytes) are unchanged.
-      const BFE_SEARCH_PAD_DEG = 0.025;
+      // (2) Confirmed live: even with round (1) deployed, the Bain reach's nearest usable
+      // line measured ~2980 ft from the site's reference point — past the derivation
+      // engine's OLD 2500 ft cap, so the fetch now succeeded but the engine still rejected
+      // the result. Round (2) raised the engine's own maxLineDistFt/maxGapFt/maxDistFt (see
+      // floodplainMitigation.js) to 5000/10000/5000 ft; this pad is bumped in step so the
+      // fetch stays ahead of the engine's new ceiling (never the bottleneck again).
+      const BFE_SEARCH_PAD_DEG = 0.04;
       const bfeSearchBbox = isFinite(mnX) ? floodGeoBbox([[[llA[1], llA[0]], [llB[1], llB[0]]]], BFE_SEARCH_PAD_DEG) : null;
       // Failure isolation (the channel-state pattern): a flood-geometry outage
       // must never nuke the whole drainage check — it reads "failed" (an honest
