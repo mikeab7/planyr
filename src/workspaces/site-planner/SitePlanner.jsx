@@ -1926,10 +1926,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // isDoubleTap(...) returns true.
   const dblWasSelRef = useRef(false);
   const DBLTAP_MS = 350, DBLTAP_PX = 14;
+  // NEW-1 — a THIRD rapid press on the same spot (a real "click to select, then immediately
+  // double-click to edit" gesture done fast, all three landing inside one DBLTAP_MS window) used to
+  // read as select+Properties+a harmless dangling single tap, never edit: a matched pair used to WIPE
+  // lastTapRef to the empty record, so press 3 had nothing to pair with. Re-arm it to press 2 instead —
+  // wasSel:true, since every matched pair just selected the feature — so a press 3 within the window
+  // pairs with press 2 and correctly reads "already selected" → edits. A press 3 that arrives outside
+  // the window just starts its own fresh (unpaired) tap, same as today. Because the re-armed record
+  // now survives past a completed pair, anything that clearly ends the gesture (Escape, the Properties
+  // ✕) explicitly clears lastTapRef too — otherwise an unrelated LATER single click landing inside that
+  // window would still misread as "press 3" of a gesture the user never intended to continue.
   const isDoubleTap = (e, id, wasSel) => {
     const now = Date.now(), p = lastTapRef.current;
     const near = Math.abs(e.clientX - p.x) <= DBLTAP_PX && Math.abs(e.clientY - p.y) <= DBLTAP_PX;
-    if (p.id === id && now - p.t < DBLTAP_MS && near) { dblWasSelRef.current = !!p.wasSel; lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; return true; }
+    if (p.id === id && now - p.t < DBLTAP_MS && near) { dblWasSelRef.current = !!p.wasSel; lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY, wasSel: true }; return true; }
     lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY, wasSel: !!wasSel };
     return false;
   };
@@ -2988,7 +2998,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
       // B875 — Enter on a selected pond opens its inspector (keyboard peer of double-click).
       if (e.key === "Enter" && tool === "select" && sel?.kind === "el") { const se = els.find((x) => x.id === sel.id); if (se && se.type === "pond") { e.preventDefault(); revealPondInspector(se.id); return; } }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -13882,8 +13892,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 takeover effect above hands the dock back to whatever panel the inspector replaced. On
                 NARROW it closes the ✎-pill overlay / drops the companion marker (as before). Shown on
                 desktop (the docked inspector) and the narrow companion; hidden only in the narrow
-                Properties TAB, where the rail is how you close it. */}
-            {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); }}>✕</button>}
+                Properties TAB, where the rail is how you close it. NEW-1 — also drops the pending tap
+                history: without this, a plain single click on the same feature shortly after closing
+                could still pair with the double-click that just opened this panel (the fast-3-click
+                re-arm in isDoubleTap is deliberately generous) and misfire as another double-tap. */}
+            {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }}>✕</button>}
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>

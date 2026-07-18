@@ -249,4 +249,32 @@ test.describe("click behavior — single-click selects, double-click opens Prope
 
     expect(errors, errors.join("\n")).toEqual([]);
   });
+
+  /* NEW-1 — regression guard: "click to select, then immediately double-click to edit" done FAST (all
+   * three presses landing inside one ~350ms double-tap window, a completely natural way to do this
+   * gesture) used to silently swallow the third press. `isDoubleTap`'s matched branch wiped its tap
+   * history to an empty record, so press 3 had nothing to pair with and fell through as an unrelated
+   * lone click — the callout ended up selected with Properties open (from presses 1+2), never editing.
+   * Fixed by re-arming the tap history to press 2 (marked "already selected", since a matched pair
+   * always selects) instead of clearing it, so press 3 pairs with press 2 and correctly edits. */
+  test("Site Planner: a fast 3-click select-then-double-click on a callout edits its text (not just Properties)", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+    const { cx, cy } = await drawCallout(page);
+
+    // ~100ms between presses — a genuinely fast triple-click by human standards (a real mouse can't
+    // produce a truly zero-gap press anyway), and enough for the Properties panel's own reflow (opening
+    // it narrows the canvas) to settle before the next press, so the press lands on the callout and not
+    // on whatever the reflow left behind at that fixed viewport coordinate.
+    await page.mouse.move(cx, cy);
+    await page.mouse.down(); await page.mouse.up(); // press 1: selects
+    await page.waitForTimeout(100);
+    await page.mouse.down(); await page.mouse.up(); // press 2: pairs with 1 → Properties
+    await page.waitForTimeout(100);
+    await page.mouse.down(); await page.mouse.up(); // press 3: pairs with 2 → edit
+    await expect(page.getByPlaceholder("Type…")).toBeVisible();
+
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
 });
