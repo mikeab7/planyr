@@ -2954,7 +2954,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const onKey = (e) => {
       if (!active) return; // keep-alive: a hidden planner must never eat keys (or Delete markups) while another module is on screen
       const t = document.activeElement;
-      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // don't hijack keys while typing in a field
+      // B746/V258 — a range/slider (e.g. the Properties panel's Fill-opacity drag) has no native
+      // browser undo to protect and doesn't consume Ctrl/Cmd+Z or +Y, so it must not trip the
+      // "don't hijack keys while typing" guard for that one chord — otherwise Ctrl-Z silently
+      // no-ops while an element with an opacity slider stays selected post-drag. Every OTHER
+      // shortcut (arrows, Delete, letter tools) still respects the guard while a slider has focus,
+      // since those DO have real native slider behavior (or would nudge/delete the still-selected
+      // element out from under the user).
+      const isSliderFocus = t && t.tagName === "INPUT" && t.type === "range";
+      const isUndoRedoChord = (e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y");
+      if (t && !(isSliderFocus && isUndoRedoChord) && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // don't hijack keys while typing in a field
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // Bluebeam: mid-draw Ctrl-Z peels the last placed vertex; only a no-draft Ctrl-Z does a global undo (matches Doc Review / Stitcher)
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } else if (selOverlay) { e.preventDefault(); copyOverlay(selOverlay); } return; }
