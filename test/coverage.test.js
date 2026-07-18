@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   LAYER_SCOPE, layerScope, isRegional,
   srPointToLatLon, esriExtentToBounds, bufferBounds, boundsIntersect,
@@ -7,7 +7,16 @@ import {
   normalizeMode, normalizeRadius, RELEVANCE_MODES, DEFAULT_RELEVANCE, DEFAULT_RADIUS_MI,
 } from "../src/workspaces/site-planner/lib/coverage.js";
 import { dynamicLayerOptions } from "../src/workspaces/site-planner/lib/layerRequest.js";
-import { JURISDICTION_LAYERS } from "../src/workspaces/site-planner/lib/counties.js";
+
+// layers.js pulls in Leaflet-facing modules that need a DOM — stub the four offenders
+// (values unused by ALL_LAYERS, a pure config object) so the module loads in the node test
+// environment. Same pattern as test/probeNoCors.test.js.
+vi.mock("esri-leaflet", () => ({ dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), featureLayer: vi.fn(), tiledMapLayer: vi.fn() }));
+vi.mock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
+vi.mock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourLayer: vi.fn(), flowLayer: vi.fn(), TERRAIN_MIN_ZOOM: 13 }));
+vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn() }));
+
+import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 
 // Real ArcGIS extents (verified live 2026-06-20): HCFCD publishes its fullExtent in
 // EPSG:2278 (Texas State-Plane, US ft); the TxDOT county layer publishes in Web Mercator.
@@ -197,7 +206,7 @@ describe("prefetchExtents — read regional extents from the health probe only",
 // THE HARD RULE (NEW-1): coverage is picker-only — it can NEVER change a layer's map
 // request. A turned-on layer always renders everything its source returns for the view.
 describe("HARD RULE — coverage never alters a layer's request", () => {
-  const coh = JURISDICTION_LAYERS.harris.layers.coh_water; // real config, pinned sublayers [0,1]
+  const coh = ALL_LAYERS.coh_water; // real config, pinned sublayers [0,1] (B898: now in AHJ_LAYERS)
   it("the COH request carries its FULL sublayer set and no where/bbox/extent", () => {
     const spec = dynamicLayerOptions(coh, 0.85, "envpane");
     expect(spec.layers).toEqual([0, 1]);     // full pinned set, never trimmed by coverage

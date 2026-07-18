@@ -19,8 +19,14 @@
  */
 import { useEffect, useState } from "react";
 import RowInfo from "./RowInfo.jsx";
-import { rowInfoSections, combineLayerStatus } from "../lib/layerPanelInfo.js";
-import { STATEWIDE, JURISDICTIONS, EVIDENCE, TERRAIN, jurisdictionFor, layerVintage } from "../lib/layers.js";
+import {
+  rowInfoSections, combineLayerStatus,
+  buildGroupSlots, mergeSlotAnyOn, mergeSlotOpacity, mergeGroupInfoSections,
+} from "../lib/layerPanelInfo.js";
+import {
+  ALL_LAYERS, JURISDICTIONS, TERRAIN, MERGE_GROUPS, LAYER_GROUP_LABEL,
+  jurisdictionFor, layerVintage,
+} from "../lib/layers.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT, MIN_CORRIDOR_WIDTH_FT, MAX_CORRIDOR_WIDTH_FT } from "../lib/pipelineCorridor.js";
 import { PLANNER_BASEMAP_CHOICES } from "../lib/basemaps.js";
 import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
@@ -234,19 +240,78 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
 
   const renderEntry = ([k, cfg], opts) => (cfg.mergeWith ? compositeRow(k, cfg, opts) : row(k, cfg, opts));
 
+  // The consolidated-layer row (B898) — ONE checkbox + opacity slider + ⓘ driving EVERY
+  // member of a `mergeGroup` (Water & sewer / Electric / Fire hydrants). Generalizes
+  // compositeRow above (pairwise City-limits-&-ETJ) to N members via the pure
+  // mergeSlotAnyOn/mergeSlotOpacity/mergeGroupInfoSections helpers. INCLUSIVE, never
+  // AHJ-exclusive: every member toggles together and renders whatever its own source
+  // returns for the current view — nothing here re-filters by the parcel's jurisdiction
+  // (see the MERGE_GROUPS comment in layers.js).
+  const mergeGroupRow = (mergeGroupKey, members, { dim = false } = {}) => {
+    const meta = MERGE_GROUPS[mergeGroupKey] || {};
+    const label = meta.label || mergeGroupKey;
+    const anyOn = mergeSlotAnyOn(members, overlays);
+    const opacity = mergeSlotOpacity(members, overlays);
+    const combined = anyOn ? combineLayerStatus(...members.map(([id]) => (overlays[id]?.on ? layerStatus[id] : null))) : null;
+    const statusMeta = combined && STATUS[combined.state];
+    const setAll = (patch) => members.forEach(([id]) => set(id, patch));
+    const sections = mergeGroupInfoSections(members, { groupNote: meta.note });
+    return (
+      <div key={mergeGroupKey} style={{ marginBottom: 5, opacity: dim ? 0.55 : 1 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
+            <input type="checkbox" checked={anyOn} onChange={(e) => setAll({ on: e.target.checked })} />
+            <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{label}</span>
+          </label>
+          <RowInfo label={label} sections={sections} />
+          {statusMeta && (
+            <span title={statusMeta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: statusMeta.color,
+              animation: combined.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+          )}
+        </div>
+        {anyOn && (
+          <input type="range" min={0.1} max={1} step={0.05} value={opacity}
+            title="Layer opacity" aria-label={`${label} opacity`}
+            onChange={(e) => setAll({ opacity: +e.target.value })}
+            style={{ width: "100%", marginTop: 2 }} />
+        )}
+        {statusMeta && (combined.state === "failed" || combined.state === "slow" || combined.state === "empty") && (
+          <div style={{ fontSize: 10, color: statusMeta.color, lineHeight: 1.35, marginTop: 1 }}>{combined.msg || statusMeta.label}</div>
+        )}
+        {dim && (
+          <div style={{ fontSize: 10, color: MUTED, fontStyle: "italic", marginTop: 1 }}>No data in this area from any source.</div>
+        )}
+      </div>
+    );
+  };
+
+  // One RENDER SLOT per panel row: either a solo entry (which may itself be a legacy
+  // pairwise mergeWith pair, handled inside renderEntry) or an N-ary `mergeGroup` bundle
+  // (B898). slotAnyOn/slotLowRel/renderSlot are the slot-level equivalents of the old
+  // per-entry lowRel/renderEntry, so groupRows works unchanged for either shape.
+  const slotAnyOn = (slot) => (slot.kind === "merge"
+    ? mergeSlotAnyOn(slot.members, overlays)
+    : (() => { const [id, cfg] = slot.entry; return cfg.mergeWith ? !!(overlays[id]?.on || overlays[cfg.mergeWith]?.on) : !!overlays[id]?.on; })());
+  const slotLowRel = (slot) => (slot.kind === "merge"
+    ? slot.members.every(([id, cfg]) => lowRel(id, cfg))
+    : lowRel(slot.entry[0], slot.entry[1]));
+  const renderSlot = (slot, opts) => (slot.kind === "merge" ? mergeGroupRow(slot.mergeGroup, slot.members, opts) : renderEntry(slot.entry, opts));
+
   // Render a group's rows with the relevance treatment applied (NEW-2). Ordering /
   // visibility ONLY — the map is never touched. Merge secondaries (jur_etj) are dropped —
-  // they render folded into their primary's composite row (B761).
+  // they render folded into their primary's composite row (B761); `buildGroupSlots` (B898)
+  // additionally folds any `mergeGroup` members (Water & sewer / Electric / Fire hydrants)
+  // into one slot each.
   const groupRows = (entries, groupKey) => {
-    const ents = entries.filter(([k]) => !mergeSecondaries.has(k));
-    if (mode === "all") return ents.map((e) => renderEntry(e));
+    const slots = buildGroupSlots(entries.filter(([k]) => !mergeSecondaries.has(k)));
+    if (mode === "all") return slots.map((sl) => renderSlot(sl));
     const hi = [], lo = [];
-    for (const e of ents) (lowRel(e[0], e[1]) ? lo : hi).push(e);
+    for (const sl of slots) (slotLowRel(sl) ? lo : hi).push(sl);
     return (
       <>
-        {hi.map((e) => renderEntry(e))}
+        {hi.map((sl) => renderSlot(sl))}
         {lo.length > 0 && (mode === "dim"
-          ? lo.map((e) => renderEntry(e, { dim: true }))
+          ? lo.map((sl) => renderSlot(sl, { dim: true }))
           : (
             <>
               <button onClick={() => setRevealHidden((s) => ({ ...s, [groupKey]: !s[groupKey] }))}
@@ -254,23 +319,22 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
                 style={{ background: "transparent", border: "none", color: MUTED, fontSize: 10.5, cursor: "pointer", padding: "2px 0", textAlign: "left", width: "100%" }}>
                 {revealHidden[groupKey] ? "▾ Hide" : "▸ Show"} {lo.length} layer{lo.length > 1 ? "s" : ""} with no local data here
               </button>
-              {revealHidden[groupKey] && lo.map((e) => renderEntry(e, { dim: true }))}
+              {revealHidden[groupKey] && lo.map((sl) => renderSlot(sl, { dim: true }))}
             </>
           ))}
       </>
     );
   };
 
-  // B761: count the merged City/ETJ pair as ONE toward the Jurisdictions "N on" chip.
-  const jurOnCount = () => {
-    let n = 0;
-    for (const [k, cfg] of Object.entries(JURISDICTIONS)) {
-      if (mergeSecondaries.has(k)) continue; // counted via its primary
-      if (cfg.mergeWith) { if (overlays[k]?.on || overlays[cfg.mergeWith]?.on) n++; }
-      else if (overlays[k]?.on) n++;
-    }
-    return n;
-  };
+  // B898: entries from the flat ALL_LAYERS registry tagged for one panel GROUP — the
+  // data-driven replacement for hard-coding which JS object renders where. `order`
+  // decides position within the group (buildGroupSlots sorts by it); a merge-group's
+  // members share one slot regardless of which underlying object (STATEWIDE/EVIDENCE/
+  // JURISDICTIONS/AHJ_LAYERS) they live in.
+  const groupEntries = (groupKey) => Object.entries(ALL_LAYERS).filter(([, cfg]) => cfg.group === groupKey);
+  // "N on" group-header count: a merged row counts once if ANY member is on (generalizes
+  // the old pairwise jurOnCount to N-ary merge groups too).
+  const groupOnCount = (groupKey) => buildGroupSlots(groupEntries(groupKey).filter(([k]) => !mergeSecondaries.has(k))).filter(slotAnyOn).length;
 
   // B762: a single-layer county folds its ONE local layer into the Basemap group (right
   // after the USGS contour row) instead of getting its own dropdown; the "This jurisdiction"
@@ -336,32 +400,46 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     );
   }
 
+  // B898 — decision-first group order (deal-killer first, reference last), replacing the old
+  // data-PROVIDER order (a Houston-specific group used to sit above the generic ones). Each
+  // group below pulls its rows from the flat ALL_LAYERS registry via `groupEntries`/`groupRows`
+  // — purely data-driven off each layer's `group`/`order` (see LAYER_GROUP_ORDER in layers.js).
   return (
     <div>
-      {/* ——— Basemap (B693) + terrain (B696) + any single-layer county fold (B762) ——— */}
-      {groupHead("basemap", "Basemap", onCount(TERRAIN) + (foldEntry && overlays[foldEntry[0]]?.on ? 1 : 0) + (basemap && basemap.value !== "off" && !basemap.disabledReason ? 1 : 0))}
+      {/* 1) Base & terrain — the planner's aerial source (B693) + terrain (B696) + any
+             single-layer county fold (B762, e.g. Fort Bend contours). Kept as its own
+             special-cased section (the segmented Off/Aerial/USGS control isn't a layer row). */}
+      {groupHead("basemap", LAYER_GROUP_LABEL.base, onCount(TERRAIN) + (foldEntry && overlays[foldEntry[0]]?.on ? 1 : 0) + (basemap && basemap.value !== "off" && !basemap.disabledReason ? 1 : 0))}
       {!collapsed.basemap && <>
         {basemapControl}
         {groupRows(basemapEntries(), "basemap")}
       </>}
 
-      {/* ——— The current county's local layers — rendered ONLY when the county contributes ≥2
-             layers (B762); a lone layer (Fort Bend contours) folds into Basemap above, and a
-             county with no public GIS renders nothing (absence is the honest signal). ——— */}
+      {/* A county contributing ≥2 layers of its OWN gets a labeled group (B762) — none do
+          today (Harris's local layers moved into Flood/Utilities below, B898); kept so a
+          future county publishing several layers of its own has an obvious home. A lone
+          layer (Fort Bend contours) folds into Base & terrain above instead. */}
       {jur && Object.keys(jur.layers || {}).length >= 2 && <>
         {groupHead("jurisdiction", jur.label, onCount(jur.layers || {}))}
         {!collapsed.jurisdiction && groupRows(Object.entries(jur.layers), "jurisdiction")}
       </>}
 
-      {groupHead("jurbounds", "Jurisdictions", jurOnCount())}
-      {!collapsed.jurbounds && groupRows(Object.entries(JURISDICTIONS), "jurbounds")}
+      {/* 2) Flood & drainage — deal-killer first: FEMA zones, drainage channels & ROW, storm
+             sewer (auto-scoped by AHJ — no hard-coded "Houston" label; today's only adapter is
+             Harris/COH, more can be added incrementally per layers.js AHJ_LAYERS). */}
+      {groupHead("flood", LAYER_GROUP_LABEL.flood, groupOnCount("flood"))}
+      {!collapsed.flood && groupRows(groupEntries("flood"), "flood")}
 
-      {groupHead("evidence", "Utility evidence", onCount(EVIDENCE))}
-      {!collapsed.evidence && groupRows(Object.entries(EVIDENCE), "evidence")}
+      {/* 3) Utilities serving the site — the THREE consolidations (B898): Water & sewer
+             (mains + who's entitled to serve, every provider that reaches here — never just
+             the parcel's own AHJ), Electric (lines/substations/poles), Fire hydrants
+             (best-available across sources). Each is ONE row driving several source adapters. */}
+      {groupHead("utilities", LAYER_GROUP_LABEL.utilities, groupOnCount("utilities"))}
+      {!collapsed.utilities && groupRows(groupEntries("utilities"), "utilities")}
       {/* B308: the layer works for everyone via the same-origin proxy (no token needed).
           The box is now an OPTIONAL power-user override — paste your own token to query
           Mapillary directly from this device instead of going through Planyr. */}
-      {!collapsed.evidence && overlays.mapillary?.on && (
+      {!collapsed.utilities && overlays.mapillary?.on && (
         <div style={{ marginBottom: 5 }}>
           <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginBottom: 3 }}>
             Works automatically — no token needed. <i>(Advanced)</i> use your own Mapillary token instead:
@@ -375,9 +453,20 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
         </div>
       )}
 
-      {/* Renamed from "Map layers" (B696) — these are the environmental/hazard screens. */}
-      {groupHead("statewide", "Environmental & hazards", onCount(STATEWIDE))}
-      {!collapsed.statewide && groupRows(Object.entries(STATEWIDE), "statewide")}
+      {/* 4) Environmental & hazards — wetlands, pipelines (+ assumed easement corridor
+             sub-toggle), oil & gas wells, faults, LPST, EPA Superfund/RCRA. */}
+      {groupHead("environmental", LAYER_GROUP_LABEL.environmental, groupOnCount("environmental"))}
+      {!collapsed.environmental && groupRows(groupEntries("environmental"), "environmental")}
+
+      {/* 5) Access & infrastructure — traffic counts, rail, airports. */}
+      {groupHead("access", LAYER_GROUP_LABEL.access, groupOnCount("access"))}
+      {!collapsed.access && groupRows(groupEntries("access"), "access")}
+
+      {/* 6) Jurisdictions & authority — reference, lowest decision impact: county/city&ETJ/
+             road authority/ISD (default-hidden last). MUD moved into Water & sewer above
+             (B898) — `groupEntries` naturally excludes it via its retagged `group`. */}
+      {groupHead("jurbounds", LAYER_GROUP_LABEL.jurisdiction, groupOnCount("jurisdiction"))}
+      {!collapsed.jurbounds && groupRows(groupEntries("jurisdiction"), "jurbounds")}
 
       {/* Relevance control (NEW-2): a meta-filter over the LIST above (ordering/visibility
           only; never the map) — so it sits below the layers, not as the panel's lead (B696). */}

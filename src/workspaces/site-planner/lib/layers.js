@@ -29,6 +29,55 @@ import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 
 export { JURISDICTION_LAYERS };
 
+/* Layers-panel GROUP taxonomy (B898 redesign) — decision-impact order, not data-provider
+ * order. Every layer config below carries a `group` (one of the keys here) + an `order`
+ * (its position within that group); LayerPanel.jsx is purely data-driven off these two
+ * fields instead of hard-coding which JS object renders where. Provider names (OSM/HIFLD/
+ * TxRRC/COH/HCFCD/…) are never the group name and never the row label — they live in each
+ * config's `source` field, surfaced only in the per-row ⓘ ("Source: …"), reusing the same
+ * provenance pattern the Yield panel's SourceTag system shipped (B895). */
+export const LAYER_GROUP_ORDER = ["base", "flood", "utilities", "environmental", "access", "jurisdiction"];
+export const LAYER_GROUP_LABEL = {
+  base: "Base & terrain",
+  flood: "Flood & drainage",
+  utilities: "Utilities serving the site",
+  environmental: "Environmental & hazards",
+  access: "Access & infrastructure",
+  jurisdiction: "Jurisdictions & authority",
+};
+
+/* Consolidated-layer registry — ONE panel row drives SEVERAL underlying source adapters
+ * (`cfg.mergeGroup` tags the members). This is the Water & sewer / Electric / Fire-hydrants
+ * consolidation: today's provider-named rows (Houston water lines, Houston wastewater, MUD /
+ * water districts, Water/sewer CCN, …) become members of one id here, each keeping its own
+ * fetch untouched (see layerPanelInfo.js buildGroupSlots + LayerPanel.jsx mergeGroupRow).
+ *
+ * ⛔ INCLUSIVE BY DESIGN — never AHJ-exclusive (owner rule, chat NEW-2). Near a jurisdiction
+ * boundary or inside an ETJ, a site can realistically be served by a NEIGHBORING provider (CCN
+ * extension, wholesale supply, annexation, a nearby main) — so a merge group must never filter
+ * down to "the one jurisdiction the parcel sits in." Every member always toggles together and
+ * renders whatever its own source returns for the current map view (each adapter already scopes
+ * itself geographically — a City-of-Houston export simply paints nothing far from Houston); nothing
+ * here re-filters by the parcel's AHJ. The existing coverage/Relevance system (coverage.js) is the
+ * ONLY dimming/hiding mechanism, is buffered (default ~2.5 mi, user-adjustable), and defaults to
+ * "Dim" (never hides) — so a provider just across a boundary stays visible, never suppressed. The
+ * per-row ⓘ lists every contributing provider by name so a user can tell whose main/territory each
+ * feature belongs to. Applies to ALL THREE merge groups below, not just Water & sewer. */
+export const MERGE_GROUPS = {
+  water_sewer: {
+    label: "Water & sewer",
+    note: "Mains AND service territory (who is entitled to serve — CCN/MUD) from every provider whose data reaches this area — not just the parcel's own jurisdiction, so a neighboring provider's main or territory still shows.",
+  },
+  electric: {
+    label: "Electric (lines, substations & poles)",
+    note: "Overhead lines, substations and poles from every source that reaches this area.",
+  },
+  fire_hydrants: {
+    label: "Fire hydrants",
+    note: "Best-available hydrant locations from every source that reaches this area. Overlapping points from different sources are shown as each source reports them — not yet merged into one marker (follow-up: NEW-2, needs coh_hydrants converted from a raster export to a queryable vector layer before points can be compared).",
+  },
+};
+
 /* Should raster (export-image) layers go through the same-origin Drive-backed cache proxy
  * (B445)? Default ON; an explicit VITE_GIS_PROXY=0/false/off is the kill switch. Safe to leave
  * on everywhere: the proxy fails open (302 → agency) and the client also one-shot falls back to
@@ -71,9 +120,11 @@ export const STATEWIDE = {
     layers: [27, 28],
     note: "Flood zones appear once you zoom in to about street level — hidden at city-wide zoom.",
     opacity: 0.55,
+    group: "flood", order: 1,
   },
   wetlands: {
-    kind: "dynamic", label: "Wetlands (NWI)",
+    kind: "dynamic", label: "Wetlands",
+    source: "National Wetlands Inventory (USFWS)",
     // CRISP VECTOR NWI — the look of the official USFWS Wetlands Mapper (true polygon outlines +
     // Cowardin class labels like PFO1A / PSS1A / PUBH), NOT a coarse raster. History: the old vector
     // host (fwspublicservices.wim.usgs.gov/wetlandsmapservice/…/Wetlands/MapServer) went down 2026-06
@@ -96,13 +147,15 @@ export const STATEWIDE = {
     layers: [1, 2],
     note: "NWI is for screening only — not a jurisdictional determination.",
     opacity: 0.55,
+    group: "environmental", order: 1,
   },
   txrrc_pipe: {
     // B751: now a VECTOR LINE layer — crisp polylines colored by commodity at working zoom,
     // falling back to the agency raster (imageFallback below) only when zoomed far out. The
     // VECTOR_SOURCES.txrrc_pipe row (vectorLayers.js) owns the /query pull + commodity styling;
     // this config is the panel/legend/fallback glue. Registry drives it — one source of truth.
-    kind: "vectorLine", label: "Pipelines (TxRRC)",
+    kind: "vectorLine", label: "Pipelines",
+    source: "Texas Railroad Commission (RRC)",
     legend: PIPELINE_LEGEND, // six commodity classes, named under the row while on
     // B517: the AUTHORITATIVE statewide RRC service — matches the GIS source registry
     // (sources.js `pipelines`) and the Site Analysis count path. The old Harris-County
@@ -114,6 +167,7 @@ export const STATEWIDE = {
     },
     note: "RRC T-4 permit routes — schematic, not surveyed locations.",
     opacity: 0.9,
+    group: "environmental", order: 2,
   },
   txrrc_pipe_easement: {
     // B752: ASSUMED easement screening corridor — a translucent band off the B751 pipeline
@@ -123,14 +177,17 @@ export const STATEWIDE = {
     pipelineSource: "txrrc_pipe", corridorWidth: true, // corridorWidth → LayerPanel shows the inline width control
     opacity: 0.9,
     note: "ASSUMED screening corridor drawn off a SCHEMATIC centerline — NOT a surveyed easement. Doubly approximate (schematic line × assumed width). Confirm via title commitment / recorded easement instrument + an 811 one-call before relying on it.",
+    group: "environmental", order: 3,
   },
   txrrc_wells: {
-    label: "Oil & gas wells (TxRRC)",
+    label: "Oil & gas wells",
+    source: "Texas Railroad Commission (RRC)",
     // B517: authoritative statewide RRC service (see txrrc_pipe). Was the Harris-clipped host.
     url: "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer",
     layers: [1], // Well Locations (point); RRC symbology shows status
     note: "Well symbols show status — active, plugged, dry hole, injection, etc.",
     opacity: 0.9,
+    group: "environmental", order: 4,
   },
   ccn_service: {
     // Public-data screening PHASE 1 — water & sewer CCN service areas ("who holds the
@@ -141,58 +198,75 @@ export const STATEWIDE = {
     // from the registry (ccnSewer row) so no endpoint is inlined here. Coverage is the Houston
     // region (see the ccnSewer registry notes); the analysis WATER card reads the statewide TWDB
     // source, so a site's certificated-provider ANSWER can be more complete than this visual.
-    kind: "dynamic", label: "Water/sewer CCN (Houston region)",
+    // B898: this is now a MEMBER of the "Water & sewer" consolidated layer (mergeGroup
+    // water_sewer, alongside coh_water/coh_ww/jur_mud below) — its own row/label no longer
+    // shows solo; `label` here is the per-provider line the merged row's ⓘ lists.
+    kind: "dynamic", label: "Water/sewer service territory (CCN)",
+    source: "PUC CCN, via Harris County GIS",
     url: GIS_SOURCES.ccnSewer.serviceUrl, layers: [1, 2], opacity: 0.5,
     note: "PUC water (blue) + sewer (green) certificate-of-convenience service areas — who is certificated to serve retail water/sewer. A boundary is a retail monopoly to serve, NOT proof a line is in the ground. Houston-region coverage. Screening only — confirm with the utility/PUC.",
     infoCaveat: "A CCN boundary means a utility is CERTIFICATED to serve retail water/sewer here — not that a main is already built to a given parcel. Confirm service, capacity, and tap availability with the utility.",
+    group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
   env_lpst: {
     // Public-data screening PHASE 2 — TCEQ leaking petroleum storage tank (LPST) sites. The
     // Site Analysis "Leaking petroleum tanks" card drives this overlay (mapLayer: "env_lpst").
     // Agency /export image (MapServer, CORS-exempt <img>), URL from the registry (no inline).
-    kind: "dynamic", label: "Leaking petroleum tanks (TCEQ LPST)",
+    kind: "dynamic", label: "Leaking petroleum tanks (LPST)",
+    source: "Texas Commission on Environmental Quality (TCEQ)",
     url: GIS_SOURCES.lpst.serviceUrl, layers: [0], opacity: 0.9,
     note: "TCEQ Leaking Petroleum Storage Tank sites — documented petroleum-UST releases. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in.",
+    group: "environmental", order: 6,
   },
   env_cleanups: {
     // Public-data screening PHASE 2 — EPA Superfund (NPL) + RCRA cleanup sites (FRS-derived).
     // FeatureServer point layer → esriFeature (vector markers); gated to zoomed-in (national
     // dataset). URL from the registry. Drives the "EPA Superfund / RCRA cleanups" card.
     kind: "esriFeature", label: "EPA Superfund / RCRA cleanups",
+    source: "US EPA",
     url: GIS_SOURCES.epaCleanups.serviceUrl, minZoom: 11, color: "#b45309", weight: 2, opacity: 0.95,
     note: "EPA 'Cleanups in My Community' — Superfund (NPL) + RCRA corrective-action sites. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in (national dataset).",
+    group: "environmental", order: 7,
   },
   faults: {
     // Public-data screening PHASE 3 — Houston-area active surface growth-fault traces. The Site
     // Analysis "Active surface faults" card drives this overlay (mapLayer: "faults"). FeatureServer
     // line layer → esriFeature (vector), zoom-gated. URL from the registry (no inline endpoint).
-    kind: "esriFeature", label: "Active surface faults (Houston)",
+    kind: "esriFeature", label: "Active surface faults",
+    source: "USGS SIM 2874, via University of Houston GIS",
     url: GIS_SOURCES.growthFaults.serviceUrl, minZoom: 11, color: "#7c2d12", weight: 2.5, opacity: 0.95,
     note: "Houston-area growth-fault surface traces (USGS SIM 2874, via a University of Houston GIS republication). Aseismic slow-slip faults that damage foundations/pavement. Screening only — get a geotechnical/fault study. Loads zoomed in.",
+    group: "environmental", order: 5,
   },
   txdot_aadt: {
     // Public-data screening PHASE 6 (access tier) — TxDOT AADT traffic-count points. The Site
     // Analysis "Traffic (AADT)" card drives this overlay (mapLayer: "txdot_aadt"). FeatureServer
     // point layer → esriFeature (vector), zoom-gated. URL from the registry (no inline endpoint).
-    kind: "esriFeature", label: "Traffic counts (TxDOT AADT)",
+    kind: "esriFeature", label: "Traffic counts (AADT)",
+    source: "TxDOT",
     url: GIS_SOURCES.aadt.serviceUrl, minZoom: 11, color: "#0369a1", weight: 2, opacity: 0.95,
     note: "TxDOT preliminary AADT (average annual daily traffic) count points — an access/visibility proxy. Loads zoomed in.",
+    group: "access", order: 1,
   },
   bts_rail: {
     // Public-data screening PHASE 6 (access tier) — BTS/FRA rail-network lines. The Site Analysis
     // "Rail access" card drives this overlay (mapLayer: "bts_rail"). FeatureServer line layer →
     // esriFeature (vector), zoom-gated. URL from the registry.
-    kind: "esriFeature", label: "Rail lines (BTS/FRA)",
+    kind: "esriFeature", label: "Rail lines",
+    source: "BTS/FRA North American Rail Network",
     url: GIS_SOURCES.rail.serviceUrl, minZoom: 11, color: "#334155", weight: 2.5, opacity: 0.95,
     note: "BTS/FRA North American Rail Network lines — a line adjacent/crossing is a potential rail-served siding. Loads zoomed in.",
+    group: "access", order: 2,
   },
   faa_airports: {
     // Public-data screening PHASE 6 (access tier) — FAA airports. The Site Analysis "Airport
     // proximity (FAA Part 77)" card drives this overlay (mapLayer: "faa_airports"). FeatureServer
     // point layer → esriFeature (vector), zoom-gated. URL from the registry.
-    kind: "esriFeature", label: "Airports (FAA)",
+    kind: "esriFeature", label: "Airports (Part 77/FAA)",
+    source: "FAA",
     url: GIS_SOURCES.airports.serviceUrl, minZoom: 10, color: "#0f766e", weight: 2, opacity: 0.95,
     note: "FAA airports — a PROXY for FAA Part 77 height-restriction surfaces near a public-use airport (not the computed Part 77 surfaces). Loads zoomed in.",
+    group: "access", order: 3,
   },
 };
 
@@ -205,37 +279,46 @@ export const STATEWIDE = {
  * detections) — so related evidence reads together in the panel. */
 export const EVIDENCE = {
   osm_power: {
-    kind: "overpass", label: "Power lines & poles (OSM)", opacity: 0.9,
+    // B898: MEMBER of the consolidated "Electric" layer (mergeGroup electric, alongside
+    // hifld_tx/hifld_substations below) — `label` is the per-provider ⓘ line, not a solo row.
+    kind: "overpass", label: "Power lines & poles", source: "OpenStreetMap", opacity: 0.9,
     query: { lines: true, poles: true, substations: true },
     note: "OpenStreetMap — transmission solid, distribution dashed; poles/towers as dots. Loads at zoom ≥ 14.",
+    group: "utilities", mergeGroup: "electric", order: 2,
   },
   hifld_tx: {
-    kind: "esriFeature", label: "Transmission lines (HIFLD)",
+    kind: "esriFeature", label: "Transmission lines", source: "HIFLD (US DOE/NETL)",
     // US DOE / NETL hosted HIFLD transmission lines (layer 18) — vector, crisp at
     // any zoom, on a federal-government server. Loads zoomed in (national dataset).
     url: "https://arcgis.netl.doe.gov/server/rest/services/Hosted/Energy_Transition_Atlas_493d6/FeatureServer/18",
     minZoom: 10, color: "#b91c1c", weight: 2.4, opacity: 0.9,
     note: "HIFLD ≥69 kV electric transmission (US DOE/NETL). Loads at zoom ≥ 10; verify live.",
+    group: "utilities", mergeGroup: "electric", order: 2,
   },
   hifld_substations: {
     // Public-data screening PHASE 5 — HIFLD electric substation points. The Site Analysis
     // "Electric substation (nearest)" card drives this overlay (mapLayer: "hifld_substations").
     // FeatureServer point layer → esriFeature (vector markers); gated to zoomed-in (national
     // dataset). URL from the registry (no inline endpoint).
-    kind: "esriFeature", label: "Electric substations (HIFLD)",
+    kind: "esriFeature", label: "Substations", source: "HIFLD",
     url: GIS_SOURCES.substations.serviceUrl, minZoom: 11, color: "#7c3aed", weight: 2, opacity: 0.95,
     note: "HIFLD electric substations. Distance to the nearest is a service/interconnect proxy for heavy power. Many names are withheld (redacted national dataset). Loads zoomed in.",
+    group: "utilities", mergeGroup: "electric", order: 2,
   },
   osm_hydrants: {
-    kind: "overpass", label: "Fire hydrants (OSM)", opacity: 0.9,
+    // B898: MEMBER of the consolidated "Fire hydrants" layer (mergeGroup fire_hydrants,
+    // alongside coh_hydrants/mapillary below).
+    kind: "overpass", label: "Fire hydrants", source: "OpenStreetMap", opacity: 0.9,
     query: { hydrants: true },
     note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
+    group: "utilities", mergeGroup: "fire_hydrants", order: 3,
   },
   coh_hydrants: {
-    kind: "dynamic", label: "Fire hydrants (City of Houston)",
+    kind: "dynamic", label: "Fire hydrants", source: "City of Houston Public Works",
     url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HoustonMap/Public_safety/MapServer",
     layers: [9], opacity: 0.95, county: "harris",
     note: "City of Houston Public Works fire hydrants.",
+    group: "utilities", mergeGroup: "fire_hydrants", order: 3,
   },
   mapillary: {
     // NEW-3/B285: plain-language name; the "Mapillary" brand is demoted to a small
@@ -243,10 +326,14 @@ export const EVIDENCE = {
     // B308: served for every visitor via the same-origin /api/mapillary proxy (token
     // held server-side), so it works with NO per-user token — `needsSetup` is gone.
     // If the proxy has no token (e.g. a preview deploy) the layer degrades gracefully.
+    // B898: also a MEMBER of "Fire hydrants" (its detections include hydrants AND nearby
+    // poles — the note is honest about both; it surfaces under Fire hydrants since that's
+    // its primary siting use, per the brief's explicit "3 hydrant layers" grouping).
     kind: "mapillary", label: "Poles & hydrants from street imagery",
     sublabel: "Detected in crowdsourced street-level photos.",
     source: "Mapillary", opacity: 0.95,
     note: "Pole & fire-hydrant detections from crowdsourced street-level photos. Loads at zoom ≥ 16.",
+    group: "utilities", mergeGroup: "fire_hydrants", order: 3,
   },
 };
 
@@ -295,6 +382,7 @@ export const TERRAIN = {
     },
     opacity: 0.55, source: "USGS 3DEP",
     note: "Low = blue, high = red. Colors are RELATIVE TO THE CURRENT VIEW — the ramp re-stretches to the lowest/highest ground on screen, so blue here ≠ blue after panning. LiDAR bare-earth (NAVD88); screening only — verify with survey. The cross-section tool samples the same data. Loads at site/neighborhood zoom.",
+    group: "base", order: 1,
   },
   /* B704: labeled 1-ft contour lines generated CLIENT-SIDE from the raw 3DEP grid
    * (the public service's canned contour renderings are raster-only and unlabeled —
@@ -305,6 +393,7 @@ export const TERRAIN = {
     kind: "contours", label: "Contour lines (1 ft)",
     source: "USGS 3DEP", opacity: 0.9,
     note: `1-ft lines traced from LiDAR bare-earth ground heights (NAVD88), heavier line every 5 ft. Lines BREAK where the LiDAR has no data (water). Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — verify with survey; agrees with the cross-section tool (same data).`,
+    group: "base", order: 2,
   },
   /* B705: downhill drainage-direction arrows from the same worker grid — which way
    * the tract sheets. Flat/ambiguous ground gets NO arrow (never invent a direction).
@@ -313,6 +402,7 @@ export const TERRAIN = {
     kind: "flowdir", label: "Water flow direction", // B760: plain label; arrow semantics live in the ⓘ note
     source: "USGS 3DEP", opacity: 0.9,
     note: `Downhill direction of the ground surface — bolder/longer arrow = steeper fall. Flat or unclear spots get no arrow rather than a guess. Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — confirm drainage with your civil engineer.`,
+    group: "base", order: 3,
   },
 };
 
@@ -338,6 +428,7 @@ export const JURISDICTIONS = {
     kind: "vector", label: "County boundaries",
     url: JURISDICTION_SOURCES.county.url, minZoom: 6, color: "#374151", weight: 2.4, opacity: 0.85,
     note: "Texas county lines (TxDOT). A has-jurisdiction boundary, not a service area.",
+    group: "jurisdiction", order: 1,
   },
   // B761: city limits + ETJ are presented as ONE panel row ("City limits & ETJ") that
   // drives BOTH of these layers. They stay two separate data pipelines / cache keys /
@@ -350,11 +441,13 @@ export const JURISDICTIONS = {
     note: "Texas city limits (TxGIO). Inside = in the city; a parcel in no city is unincorporated. NOT proof of utility service.",
     mergeWith: "jur_etj", mergeLabel: "City limits & ETJ", // B761: the composite panel row
     infoCaveat: "A boundary means the city HAS JURISDICTION here (it can tax / regulate) — not that it serves or connects utilities to a parcel.",
+    group: "jurisdiction", order: 2,
   },
   jur_etj: {
     kind: "vector", label: "City ETJ (Houston region)",
     url: HGAC_ETJ.url, minZoom: 9, color: "#1d4ed8", dash: true, weight: 1.6, opacity: 0.85, // B761: same hue as city, dashed
     note: "City ETJ across the H-GAC 13-county region — blank elsewhere (there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
+    group: "jurisdiction", order: 2,
   },
   jur_isd: {
     // B764: statewide school-district boundaries (TEA). ISD is usually the biggest single
@@ -365,6 +458,7 @@ export const JURISDICTIONS = {
     url: JURISDICTION_SOURCES.isd.url, minZoom: 8, color: "#7c3aed", weight: 1.6, opacity: 0.85,
     note: "Texas school-district boundaries (TEA, SY 2022-23). A taxing/attendance boundary — NOT a service network. Verify with the district.",
     infoCaveat: "ISD lines are TAXING / attendance boundaries (usually the biggest line on a Texas tax bill) — not a utility service area.",
+    group: "jurisdiction", order: 4, // last — reference-only, default-hidden like every layer
   },
   jur_mud: {
     // Statewide MUD / WCID / water-district boundaries from TCEQ (the agency with
@@ -376,12 +470,18 @@ export const JURISDICTIONS = {
     // status still flag a genuine outage honestly. (harcresearch.org on the env egress
     // allowlist since 2026-06-19; MUD tile paint verified headless from a fresh session
     // 2026-06-19 — V44 PASS, see VERIFICATION.md.)
-    kind: "dynamic", label: "MUD / water districts", // B760: plain label; TCEQ/statewide provenance lives in the ⓘ
+    // B898: MEMBER of the consolidated "Water & sewer" layer (mergeGroup water_sewer) — it
+    // shows the "who is entitled to serve" service-territory half alongside the mains
+    // (coh_water/coh_ww) and the CCN half (ccn_service). No longer a standalone Jurisdictions
+    // boundary row; `label` is now the per-provider ⓘ line.
+    kind: "dynamic", label: "Water district boundaries (MUD)",
+    source: "TCEQ, via HARC",
     url: GIS_SOURCES.mud.serviceUrl, layers: null, opacity: 0.55, // registry row (B629) — render + identify share one source of truth
     note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. Verify against the district / tax statement.",
     // B760: the has-jurisdiction caveat that used to be the Jurisdictions group paragraph now
     // survives ONLY here (and on the merged limits/ETJ row), where a district outline is a real trap.
     infoCaveat: "A boundary means the district HAS JURISDICTION here (it can tax / regulate) — not that it serves or connects water/sewer to a parcel.",
+    group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
   jur_road_authority: {
     // NEW-2/B571 — the road-authority overlay: the actual fronting roads drawn and
@@ -399,6 +499,69 @@ export const JURISDICTIONS = {
     fields: ["OBJECTID", "RDWAY_MAINT_AGCY", "HSYS"],
     styleFn: roadAuthorityStyle, legend: ROAD_AUTHORITY_LEGEND,
     note: "Who maintains each road, from the TxDOT Roadway Inventory — City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Verify access/ROW with the jurisdiction.",
+    group: "jurisdiction", order: 3,
+  },
+};
+
+/* Direct-agency layers that only exist inside one AHJ (Authority Having Jurisdiction),
+ * flat like EVIDENCE.coh_hydrants (same `county` tag convention) rather than nested under
+ * JURISDICTION_LAYERS — B898 moved these out of the old per-county "Harris County · City of
+ * Houston" group (which read as a data-PROVIDER heading) so they render under the same
+ * decision-first groups as everything else (Flood & drainage / Utilities serving the site).
+ * The `county` tag is documentation only (matches the pre-existing coh_hydrants convention) —
+ * nothing filters visibility by it; each adapter's own export already only paints where its
+ * data exists, and the coverage/Relevance system (never AHJ-exclusive) handles dimming. */
+export const AHJ_LAYERS = {
+  hcfcd_row: {
+    kind: "dynamic", label: "Drainage channels & ROW",
+    source: "Harris County Flood Control District (HCFCD)",
+    url: "https://www.gis.hctx.net/arcgishcpid/rest/services/HCFCD/ROW_FC/MapServer",
+    layers: null,
+    note: "Flood-control channel right-of-way (HCFCD).",
+    opacity: 0.8, county: "harris",
+    group: "flood", order: 2,
+  },
+  // City of Houston water/wastewater/storm. The mycity2/pubgis02 HPW host was
+  // stale (intermittent "service not started"); geogimsprod runs only the
+  // Geocortex viewer (no /arcgis/rest — 404). The real source the City's public
+  // viewer pulls from is geogimstest.houstontx.gov/arcgis/rest — CONFIRMED live,
+  // 200 + metadata, and CORS-open to https://mikeab7.github.io (probe + export
+  // both work). Folders HW (Water_gx, WasteWater_gx) and TDO (UN_Stormwater).
+  // The network sublayers are default-OFF and/or scale-gated, so we pin the
+  // pipe/main sublayer IDs via `layers` (→ export `layers=show:…`) or the export
+  // paints blank. IDs verified from each service's /MapServer/layers. Coverage is
+  // CITY OF HOUSTON ONLY (transparent outside the city — a real boundary, not a
+  // bug). Trunk lines (Gravity Main 2, Pipe 22) are minScale ~1:40k → only at
+  // site-plan zoom. Caveat: it's the *test* host (only confirmed CORS source);
+  // swap to a prod host later if the City exposes one.
+  coh_ww: {
+    // B898: MEMBER of the consolidated "Water & sewer" layer (mergeGroup water_sewer).
+    kind: "dynamic", label: "Wastewater mains",
+    source: "City of Houston (test GIS host)",
+    url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/WasteWater_gx/MapServer",
+    layers: [2, 6], // 2 Gravity Main (≥~1:40k), 6 Force Main
+    note: "City of Houston sanitary sewer (geogimstest). COH only — blank outside the city. Zoom in (~1:40k) to see gravity mains.",
+    opacity: 0.85, county: "harris",
+    group: "utilities", mergeGroup: "water_sewer", order: 1,
+  },
+  coh_storm: {
+    kind: "dynamic", label: "Storm sewer",
+    source: "City of Houston (test GIS host)",
+    url: "https://geogimstest.houstontx.gov/arcgis/rest/services/TDO/UN_Stormwater/MapServer",
+    layers: [22, 23, 24, 904], // Pipe (≥~1:40k), Open Channel, Culvert, Linear Drain
+    note: "City of Houston storm drainage (geogimstest). COH only — blank outside the city. Zoom in (~1:40k) to see pipes.",
+    opacity: 0.85, county: "harris",
+    group: "flood", order: 3,
+  },
+  coh_water: {
+    // B898: MEMBER of the consolidated "Water & sewer" layer (mergeGroup water_sewer).
+    kind: "dynamic", label: "Water mains",
+    source: "City of Houston (test GIS host)",
+    url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/Water_gx/MapServer",
+    layers: [0, 1], // 0 Water Lines, 1 Water Main (both draw at any zoom)
+    note: "City of Houston potable water (geogimstest). COH only — blank outside the city.",
+    opacity: 0.85, county: "harris",
+    group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
 };
 
@@ -410,7 +573,7 @@ export const JLAYERS = {};
 Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...JLAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS };
 
 /* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
  * date or maintenance cadence, as documented by the provider. This is the

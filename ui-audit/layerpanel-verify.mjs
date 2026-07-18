@@ -47,8 +47,39 @@ try {
   ok("old 'Ground relief' label gone", !harris.includes("Ground relief"));
   ok("label 'Water flow direction'", harris.includes("Water flow direction"));
   ok("old 'Drainage direction' label gone", !harris.includes("Drainage direction"));
-  ok("label 'MUD / water districts' (no jargon suffix)", harris.includes("MUD / water districts") && !harris.includes("(TCEQ, statewide)"));
   ok("kept 'Contour lines (1 ft)'", harris.includes("Contour lines (1 ft)"));
+
+  // ── B898: decision-first group order + consolidated layers ──
+  const groupOrder = ["Base & terrain", "Flood & drainage", "Utilities serving the site", "Environmental & hazards", "Access & infrastructure", "Jurisdictions & authority"];
+  ok("all six decision-first group headers present, in order", (() => {
+    const idxs = groupOrder.map((g) => harris.toUpperCase().indexOf(g.toUpperCase()));
+    return idxs.every((i) => i >= 0) && idxs.every((i, k) => k === 0 || i > idxs[k - 1]);
+  })(), harris.slice(0, 800));
+  ok("no provider-specific top-level group ('Harris County · City of Houston') survives", !harris.includes("Harris County · City of Houston"));
+  ok("ONE consolidated 'Water & sewer' row", harris.includes("Water & sewer"));
+  ok("old provider-named water/sewer rows are gone", !harris.includes("Houston water lines") && !harris.includes("Houston wastewater")
+    && !harris.includes("MUD / water districts") && !harris.includes("Water/sewer CCN (Houston region)"));
+  ok("ONE consolidated 'Electric' row", harris.includes("Electric (lines, substations & poles)"));
+  ok("old provider-named electric rows are gone", !harris.includes("Power lines & poles (OSM)") && !harris.includes("Transmission lines (HIFLD)") && !harris.includes("Electric substations (HIFLD)"));
+  ok("Fire hydrants row present, only ONCE", (harris.match(/Fire hydrants(?! \()/g) || []).length >= 1
+    && !harris.includes("Fire hydrants (OSM)") && !harris.includes("Fire hydrants (City of Houston)"));
+  ok("Storm sewer renamed (was 'Houston storm sewer')", harris.includes("Storm sewer") && !harris.includes("Houston storm sewer"));
+  ok("Drainage channels & ROW renamed (was 'HCFCD channels & ROW')", harris.includes("Drainage channels & ROW") && !harris.includes("HCFCD channels & ROW"));
+
+  // ── B898: the merged Water & sewer row's ⓘ lists every contributing provider ──
+  {
+    const wsInfo = page.locator('#panel-harris button[aria-label="About Water & sewer"]');
+    await wsInfo.click();
+    const wsNote = page.locator('[role="note"]');
+    await wsNote.waitFor({ state: "visible", timeout: 5000 });
+    const wsText = (await wsNote.innerText()).replace(/\s+/g, " ");
+    ok("Water & sewer ⓘ lists the CCN provenance", wsText.includes("PUC CCN") || wsText.includes("CCN"));
+    ok("Water & sewer ⓘ lists the MUD/TCEQ provenance", wsText.includes("TCEQ"));
+    ok("Water & sewer ⓘ lists the City of Houston mains provenance", wsText.includes("City of Houston"));
+    await page.mouse.move(2, 2);
+    await page.keyboard.press("Escape");
+    await wsNote.waitFor({ state: "detached", timeout: 3000 }).catch(() => {});
+  }
 
   // ── A4: one merged 'City limits & ETJ' toggle; the two old rows are gone ──
   ok("merged 'City limits & ETJ' row present", harris.includes("City limits & ETJ"));
@@ -61,9 +92,10 @@ try {
   ok("merged toggle ON when jur_etj was on", await mergedEtjOn.isChecked());
   ok("merged ON shows solid/ETJ legend key", /ETJ/.test(etjon));
 
-  // ── A5: fold single-layer county groups ──
-  // group headers are CSS-uppercased (text-transform), so innerText returns them upper-cased.
-  ok("Harris keeps its ≥2-layer group", /HARRIS COUNTY/i.test(harris));
+  // ── A5 / B898: fold single-layer county groups; Harris's 4 layers moved into the
+  // decision-first Flood & drainage / Utilities groups (B898), so it no longer gets its
+  // own provider-named group either — group headers are CSS-uppercased (text-transform).
+  ok("Harris has NO standalone provider group", !/HARRIS COUNTY · CITY OF HOUSTON/i.test(harris));
   ok("Fort Bend contours folded (relabeled)", fortbend.includes("1-ft contours (Fort Bend DD)"));
   ok("Fort Bend has NO lonely county group", !fortbend.includes("Fort Bend County"));
   ok("Chambers note-only group removed", !chambers.includes("Chambers County") && !/No public/i.test(chambers));

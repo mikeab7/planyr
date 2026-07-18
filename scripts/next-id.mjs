@@ -141,11 +141,24 @@ export function newCrossFileCollisions(repo, files, letter, baseline = KNOWN_LEG
 /* Read a file as it exists on origin/main (not the local branch) — so `--against-main` sees ids
  * that other sessions merged AFTER we branched (the concurrent-mint case next-id can't otherwise
  * see). Never throws: no git / no origin/main / missing file → null, and the caller falls back to
- * the local-only max. `git show` only, read-only. */
-function readOriginMain(repo, file) {
+ * the local-only max. `git show` only, read-only.
+ *
+ * maxBuffer is set well above BACKLOG-DONE.md's size (1.4 MB and growing) — the default 1 MB
+ * execSync buffer throws ENOBUFS on that file, which this function's catch then swallowed
+ * SILENTLY, degrading `--against-main` to a stale local-only max with no indication anything
+ * was wrong (a real collision from this: two sessions both minted B896 on 2026-07-18, one for
+ * this redesign, one already shipped on main for an unrelated feature). LOUD-FAILURE: a genuine
+ * read failure (as opposed to "no origin/main configured") now prints a visible warning instead
+ * of failing open unnoticed. */
+export function readOriginMain(repo, file) {
   try {
-    return execSync(`git show origin/main:${file}`, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch { return null; }
+    return execSync(`git show origin/main:${file}`, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 32 * 1024 * 1024 });
+  } catch (e) {
+    if (e && e.code !== "ENOENT" && !/unknown revision|not a git repository/i.test(String(e.stderr || e.message || ""))) {
+      process.stderr.write(`⚠ next-id: couldn't read origin/main:${file} (${e.code || e.message}) — --against-main is degraded to the local-only max for this file.\n`);
+    }
+    return null;
+  }
 }
 
 /** Max id across BOTH the local files AND their origin/main versions. */
