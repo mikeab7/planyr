@@ -18243,8 +18243,39 @@ function YieldPanel({
                 // NEW-3 — outside the mapped floodplain, show the honest no-rule note (never a
                 // phantom "need one of …" input demand); an unknown INSIDE the floodplain still names
                 // the missing input. §A(9)-class pathway copy renders below either way.
-                if (b.ffe.status === "no_rule" && b.ffe.outsideFloodplain) ffeR.push(keyedNote(b.ffe.note || OUTSIDE_FLOODPLAIN_FFE_NOTE, "ffe-outside"));
-                else if (b.ffe.status === "unknown" || b.ffe.status === "no_rule") ffeR.push(keyedNote(`Required FFE unknown — ${b.ffe.unknownReason || "no FFE rule modeled for this jurisdiction — verify locally"}.`, "ffe-unk"));
+                if (b.ffe.status === "no_rule" && b.ffe.outsideFloodplain) {
+                  ffeR.push(keyedNote(b.ffe.note || OUTSIDE_FLOODPLAIN_FFE_NOTE, "ffe-outside"));
+                  // B869/V352 fix (2026-07-19) — no ordinance FFE rule binds outside the mapped
+                  // floodplain, but the site-based good-practice screening tier (pond design WSE +
+                  // freeboard, or HAG + margin) may still be on offer via suggestedFfe(). That
+                  // computation already runs (d.floodMit.suggestFfe) — this panel just never READ
+                  // it, so the SITE-BASED chip only ever surfaced inside the Mitigation group's
+                  // input editor, never here in Buildability / FFE where the B869 spec (and every
+                  // "Expect" step in V352) says it belongs. Reuses the existing derivation
+                  // (DEDUPE-FIRST) — no new pure logic, just the missing render.
+                  const sf = d.floodMit && d.floodMit.suggestFfe;
+                  if (sf && sf.applies && sf.basisKind === "site" && Number.isFinite(sf.requiredFfeFt)) {
+                    const estTag = sf.estimated ? " · ESTIMATED" : "";
+                    const basisLabel = sf.governingBasis ? sf.governingBasis.label : "site basis";
+                    const alreadyAccepted = d.floodMit.padSrc === "suggested-accepted" && Number.isFinite(d.floodMit.settings.padFfeFt);
+                    ffeR.push(
+                      <div key="ffe-site-suggest" style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", margin: "4px 0 0" }} title={SITE_BASED_FFE_NOTE}>
+                        <span style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 10.5, color: Y.muted, lineHeight: 1.45, flex: 1, minWidth: 0 }}>
+                          <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.05em", color: "var(--on-accent)", background: "var(--accent)", borderRadius: 4, padding: "1px 5px", whiteSpace: "nowrap", flex: "none" }}>SITE-BASED</span>
+                          <span>Suggested pad ~{f1(sf.requiredFfeFt)}′ ({basisLabel}){estTag} — {SITE_BASED_FFE_NOTE}</span>
+                        </span>
+                        {!alreadyAccepted && (
+                          <ActionLink onClick={() => d.floodMit.onChange({ padFfeFt: Math.round(sf.requiredFfeFt * 10) / 10, padSrc: "suggested-accepted" })}>✓ use →</ActionLink>
+                        )}
+                      </div>
+                    );
+                    if (alreadyAccepted) ffeR.push(keyedNote(`pad = accepted SITE-BASED suggestion (${basisLabel}${estTag}) — clear it in Floodplain mitigation → Pad / finished floor to restore auto`, "ffe-site-accepted"));
+                  } else if (sf && sf.applies === false && sf.unknownReason) {
+                    // Outside the floodplain but no usable site basis yet (e.g. an unanchored pond) —
+                    // name why, never a silent absence (LOUD-FAILURE).
+                    ffeR.push(keyedNote(`No site-based screening pad yet — ${sf.unknownReason}.`, "ffe-site-unavailable"));
+                  }
+                } else if (b.ffe.status === "unknown" || b.ffe.status === "no_rule") ffeR.push(keyedNote(`Required FFE unknown — ${b.ffe.unknownReason || "no FFE rule modeled for this jurisdiction — verify locally"}.`, "ffe-unk"));
                 if (b.ffe.pendingBases && b.ffe.pendingBases.length > 0) ffeR.push(keyedNote(`The finished floor must clear the HIGHEST of several bases (more-restrictive controls governs). Not computed here yet — enter or confirm: ${b.ffe.pendingBases.map((pb) => `${pb.label || pb.basis} +${pb.plusFt}′`).join(" · ")}.`, "ffe-pending"));
                 if ((b.ffe.status === "pass" || b.ffe.status === "short" || b.ffe.status === "assumed") && b.ffe.basis === "wse02pct" && d.wse02Src === "fbcdd-wse02-draft")
                   ffeR.push(warnNote("The 0.2% WSE behind this required FFE is a DRAFT Fort Bend watershed-study value.", "ffe-draft02", "Screening only — confirm before design; enter the effective FIS 0.2% WSE to override."));
