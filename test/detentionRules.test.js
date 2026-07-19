@@ -15,6 +15,7 @@ import {
   runoffCoefficient,
   DESIGN_STORMS,
   stormIntensity,
+  designStorm24hrDepthIn,
   computeRateBasedDetention,
   computePumpedCredit,
   effectiveChannelDischarge,
@@ -478,6 +479,20 @@ describe("DESIGN_STORMS + stormIntensity", () => {
     expect(mid).toBeGreaterThan(3.9);
     expect(stormIntensity(500, 60)).toBe(null); // not a modeled return period
     expect(stormIntensity(100, 60).secondarySource).toBe(true);
+  });
+  // B904 — the 24-hr (1440-min) row each period now carries, feeding the Type III hyetograph.
+  it("designStorm24hrDepthIn reads the 1440-min row as a DEPTH (intensity × 24 hr), ascending by return period", () => {
+    expect(designStorm24hrDepthIn(100)).toBeCloseTo(0.54 * 24, 2);
+    const depths = [2, 10, 25, 100].map(designStorm24hrDepthIn);
+    for (let i = 0; i + 1 < depths.length; i++) expect(depths[i + 1]).toBeGreaterThan(depths[i]);
+    expect(designStorm24hrDepthIn(500)).toBeNull(); // unmodeled return period
+  });
+  it("the 1440-min row is still the lowest intensity per period (rain rate falls as duration grows)", () => {
+    for (const rows of Object.values(DESIGN_STORMS.periods)) {
+      const last = rows[rows.length - 1];
+      expect(last[0]).toBe(1440);
+      expect(last[1]).toBeLessThan(rows[rows.length - 2][1]);
+    }
   });
 });
 

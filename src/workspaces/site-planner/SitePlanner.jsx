@@ -145,6 +145,7 @@ import { sizePondForTargets, scaleRing, solveTobRaise } from "./lib/pondSizing.j
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
 import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
+import { selectDetentionMethod } from "./lib/detentionMethod.js";
 import { outletProblems } from "./lib/outletStructure.js";
 import { assessRoutedDetention, suggestedPreDevReleaseCfs, autoSizeCompoundOutlet } from "./lib/pondRouting.js";
 import { regionalDetentionFor, feeInLieuCompare } from "./lib/regionalDetention.js";
@@ -15467,6 +15468,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {" · storms "}{criteria.requiredStorms.join("/")}-yr.
                         </div>
                       );
+                      // B904 — CE roadmap #2's method-by-area guardrail: the Rational method
+                      // (what routes above) is only valid for a small, quick-responding tributary
+                      // area. Past the jurisdiction's screening ceiling, flag it loudly — the
+                      // routed numbers above still ride the Rational proxy until a real NRCS
+                      // unit-hydrograph inflow is wired into the routing pass (a follow-on).
+                      const methodInfo = selectDetentionMethod({ areaAcres: da, criteria });
+                      const methodLine = methodInfo.method === "nrcs" ? (
+                        <WatchOutChip info={`NRCS Type III unit-hydrograph analysis is the correct method past this size (curve number + a design-storm hyetograph, convolved into a runoff hydrograph) — the Modified Rational method (Q=C·i·A) this pond's routing still uses is a peak-flow-only screening tool meant for small, quick-responding areas. The routed PRE/ROUTED numbers above are NOT yet re-derived from a true NRCS hydrograph — confirm this pond's detention with an HEC-HMS model.`}>
+                          Tributary area ({r2(da)} ac) exceeds the Rational method's screening range (≤{methodInfo.ceilingAcres} ac) — NRCS unit-hydrograph indicated; the routing above still uses the Rational-method proxy.
+                        </WatchOutChip>
+                      ) : methodInfo.method === "rational" ? (
+                        <div style={smallNote}>Method: Modified Rational (tributary area {r2(da)} ac, within the {methodInfo.ceilingAcres}-ac screening range for this criteria).</div>
+                      ) : null;
 
                       if (!outlet) {
                         const primaryLabel = relSource === "suggested" ? "⚡ Auto-size detention" : "+ Propose outlet";
@@ -15494,6 +15508,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               </div>
                             )}
                             {critLine}
+                            {methodLine}
                           </>
                         );
                       }
@@ -15589,6 +15604,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           )}
                           {routed.kind === "routed" && routed.assumptions.length > 0 && <div style={smallNote}>{routed.assumptions.join(" ")}</div>}
                           {critLine}
+                          {methodLine}
                           <div style={smallNote}>{routed.caveat}</div>
                         </>
                       );
