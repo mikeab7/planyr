@@ -4,6 +4,12 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V336 — B851: route id ↔ crumb ↔ grid all name the same project on the Scheduler, and the grid follows the route even on a slow cold load ✅ PASS 2026-07-19 (round-3 live pass, signed in on planyr.io, `smqfy48tlk9j`)
+- **Added** 2026-07-15 · **Cadence** once · references **B851**.
+- **Verified in sandbox (2026-07-15):** 5 unit tests for `needsScheduleCarryIn` (`test/schedulerNavState.test.js`) prove the re-drive decision — adopted→stop, diverged→drive, embed-not-loaded→keep driving until data lands, no-routed-site→false, unlinked-site→inert. Full suite (4042) + lint 0 errors + build green.
+- **✅ Live result (2026-07-19):** on `#/project/smqfy48tlk9j/schedule` (Goose Creek) the route id, breadcrumb, and the painted grid ALL converged on Goose Creek on a cold hard-reload — the ready-before-data race resolved correctly, closing B851's stranded-grid bug. From the switcher, picking a genuinely different project ("8 South") moved the grid AND the route/crumb together, and switching back was a correct no-op with the right label. Picking the cross-cutting unlinked "Pursuits" schedule stayed selected for 25+ seconds without the self-heal yanking it back to the routed site's own schedule (confirms the `carriedRef` stop-condition). Steps 1–3 of the spec verified live signed-in; step 4 (confirm no `schedule-route-grid-divergence` telemetry event fires during normal navigation) was not attempted this round — not a blocking gap, since the on-screen convergence across all three checks directly confirms the fixed behavior the telemetry event exists only to catch a non-converging failure of.
+- Cadence: once — CLOSED. (B851 folded → BACKLOG-DONE.)
+
 ### V268 — B755: auto-DERIVED BFE from FEMA Base Flood Elevation lines on the REAL Bain plan — the Floodplain-mitigation readout stops saying UNKNOWN and shows a derived BFE + priced compensating storage ✅ PASS 2026-07-18 (owner, live on planyr.io, real Bain / Concept A plan)
 - **Added** 2026-07-10 · **Cadence** once · references **B755**.
 - **Verified in sandbox (2026-07-10):** `test/floodplainMitigation.test.js` +24 (distToPolyline, deriveBfeFromLines edge matrix, datum/unit guards, provider precedence); direct FEMA-NFHL queries confirmed the Bain reach has 24 usable S_BFE lines.

@@ -713,3 +713,30 @@ describe("B850 (2026-07-15, owner: \"i dont need this large pop up\" then \"shou
     expect(src).toMatch(/window\.dispatchEvent\(new CustomEvent\("planar:stale"/);
   });
 });
+
+describe("B869/V352 (2026-07-19 verification handoff): the SITE-BASED suggested FFE chip renders in the Buildability / FFE panel, not only the Mitigation inputs editor", () => {
+  it("the Buildability / FFE block (ffeR) reads d.floodMit.suggestFfe and renders a SITE-BASED chip + accept action when no ordinance rule binds", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // Isolate the B824 "Buildability / FFE detail" block (ffeR construction) so this guard can't
+    // accidentally pass off the pre-existing mitR copy of the same UI (the original bug).
+    const start = src.indexOf("// B824 — Buildability / FFE detail, migrated from the deleted FloodMitigationCard.");
+    expect(start).toBeGreaterThan(-1);
+    const ffeBlock = src.slice(start, start + 6000);
+    // The site-basis suggestion is read from the SAME derivation already computed upstream
+    // (suggestedFfe() in lib/buildability.js) — DEDUPE-FIRST, no parallel logic.
+    expect(ffeBlock).toMatch(/const sf = d\.floodMit && d\.floodMit\.suggestFfe;/);
+    expect(ffeBlock).toMatch(/sf\.applies && sf\.basisKind === "site"/);
+    expect(ffeBlock).toMatch(/>SITE-BASED<\/span>/);
+    // The accept action writes the real Pad/FFE field with the same provenance tag the
+    // Mitigation-group editor uses, so acceptance is consistent everywhere it can happen.
+    expect(ffeBlock).toMatch(/d\.floodMit\.onChange\(\{ padFfeFt: Math\.round\(sf\.requiredFfeFt \* 10\) \/ 10, padSrc: "suggested-accepted" \}\)/);
+    // An unanchored pond (no usable site basis yet) still says so — never a silent absence.
+    expect(ffeBlock).toMatch(/No site-based screening pad yet — \$\{sf\.unknownReason\}/);
+  });
+
+  it("suggestedFfe's site tier still only returns a site-based suggestion when NO ordinance rule binds (the pure logic B869 already shipped)", () => {
+    const src = read("../src/workspaces/site-planner/lib/buildability.js");
+    expect(src).toMatch(/export function siteBasisFfe\(/);
+    expect(src).toMatch(/basisKind: "site"/);
+  });
+});
