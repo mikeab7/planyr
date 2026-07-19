@@ -4,12 +4,13 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _57 open · 85 awaiting live verification._
+> _58 open · 85 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B908 | Scheduler indent→outdent round-trip leaves the task's Start/Finish shifted by one business day | [Scheduler] | #scheduler | live |
 | B906 | Floodplain-mitigation "anchored pond, WSE unknown" warning may not clear after a fresh Re-check (or may name a different pond) | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #pond | live |
 | B842 | Keep-alive tab-return may fire an un-ghosted `invalidateSize` on the Site map / MapFinder (possible one-frame tile flash on workspace switch) | [Site Planner / Map] | #site-planner #ui #perf | live |
 | B818 | Meeting-cadence Gantt view + loud row-state banners (the visual half of NEW-3) | [Scheduler] | #scheduler #entitlements #gantt #export | live |
@@ -180,7 +181,7 @@
 - **#persistence** — B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B860, B846, B863, B864, B836, B832, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
 - **#pond** — B906, B907, B905, B904, B903, B902, B901, B900, B888, B884, B883, B870, B871, B707
 - **#road** — B742
-- **#scheduler** — B818, B778, B495, B865, B863, B864, B836, B816
+- **#scheduler** — B908, B818, B778, B495, B865, B863, B864, B836, B816
 - **#selection** — B880, B820, B746, B742, B743, B737, B682, B651
 - **#site-planner** — B906, B842, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B881, B880, B879, B878, B868, B870, B871, B860, B861, B862, B846, B839, B840, B837, B832, B821, B691, B820, B802, B793, B789, B787, B784, B785, B786, B782, B812, B811, B775, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B738, B737, B716, B707, B712, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413, B839
