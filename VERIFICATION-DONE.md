@@ -4,6 +4,13 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V298 — B800: the Bain site row heals `county:"waller"` → `"fortbend"` on a signed-in load, and STAYS healed ✅ CONFIRMED PASS 2026-07-19 (live, planyr.io, signed in, the real Bain row)
+- **Added** 2026-07-12 · **Cadence** once · references **B800** (code label B792).
+- **Verified here (sandbox, 2026-07-12):** headless scenario seeds `county:"waller"` on the Fort Bend-origin site → the persisted row reads `"fortbend"` after load + the `[B792] Site county healed` console line; `countyKeyForName` never returns an unconfigured key (unit-proven), so the heal can't corrupt a row.
+- **✅ Live result (2026-07-19):** confirmed via three separate fresh hard-reloads this session that Bain's header consistently reads "Fort Bend County" — the jurisdiction stayed healed (waller → fortbend) and never reverted across any of the three reloads.
+- **Not separately re-tested live this round:** the one-shot heal console line firing exactly once on the first signed-in load (vs. already-healed silence on repeat loads) and the downstream consumer spot-checks (parcel-tax panel / FBCAD identify-mode add, easement + floodplain jurisdiction defaults) — this pass exercised the persistence/stays-healed half, which is the item's headline claim.
+- Cadence: once — CLOSED.
+
 ### V347 — B864(b): two tabs editing DIFFERENT things both survive — a sibling's just-created calendar is no longer clobbered by the other tab's save ✅ CONFIRMED PASS 2026-07-19 (two signed-in tabs, live on planyr.io, Goose Creek schedule)
 - **Added** 2026-07-16 · **Cadence** once · references **B864**.
 - **Verified in sandbox (2026-07-16):** 14 unit tests for `mergeCloudDoc` (the exact election-calendar repro — a stale tab's save preserves the sibling's calendar + #88 binding + its own task edit; keyed-array add/delete/same-element-conflict; nested project add; missing-base fail-safe) + a full node simulation of the two-tab flow (base→merge→App-reconcile) proving an edit made DURING the save round-trip also survives. Full suite (4188) + lint 0 + build green.
