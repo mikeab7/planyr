@@ -146,6 +146,7 @@ import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
 import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
 import { selectDetentionMethod } from "./lib/detentionMethod.js";
+import { computeTimeOfConcentration } from "./lib/timeOfConcentration.js";
 import { outletProblems } from "./lib/outletStructure.js";
 import { assessRoutedDetention, suggestedPreDevReleaseCfs, autoSizeCompoundOutlet } from "./lib/pondRouting.js";
 import { regionalDetentionFor, feeInLieuCompare } from "./lib/regionalDetention.js";
@@ -15264,7 +15265,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // screening estimate), offered as a placeholder + one-click "Use" for districts
                       // (Waller, BKDD) that publish no cfs/ac cap. Never overrides a stored release.
                       const detCriteria = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
-                      const suggested = rel == null ? suggestedPreDevReleaseCfs({ requiredStorms: detCriteria.requiredStorms, areaAcres: da }) : null;
+                      // B905 — COMPUTED time of concentration (Kirpich) — see the RATE CONTROL
+                      // section below for the full explanation; used here so this card's suggested
+                      // release agrees with the one the outlet solver actually targets.
+                      const detTc = rel == null ? computeTimeOfConcentration({ areaAcres: da, impPct: imp, criteria: detCriteria }) : null;
+                      const suggested = rel == null ? suggestedPreDevReleaseCfs({ requiredStorms: detCriteria.requiredStorms, areaAcres: da, tcMin: detTc?.tcMin }) : null;
                       const pumped = det.outfallMode === "pumped";
                       const pumpUnit = det.pumpRateUnit === "gpm" ? "gpm" : "cfs";
                       const pumpRaw = Number.isFinite(det.pumpRateCfs) ? det.pumpRateCfs : null;
@@ -15391,6 +15396,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const criteria = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
                       const da = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
                       const imp = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
+                      // B905 — COMPUTED time of concentration (Kirpich), replacing the flat 15-min
+                      // screening assumption everywhere Tc feeds this pond's routing below — the
+                      // Rational intensity, the suggested pre-dev release, and the outlet solver.
+                      const tc = computeTimeOfConcentration({ areaAcres: da, impPct: imp, criteria });
                       const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.45, margin: "2px 0 0" };
                       const head = (
                         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Rate control · Post ≤ Pre (screening)</div>
@@ -15413,7 +15422,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // own pre-development peak discharge (a screening estimate), so a Post ≤ Pre
                       // district that publishes NO cfs/ac cap (Waller, BKDD) never leaves the button
                       // dead — the allowable release IS the site's pre-development peak in that regime.
-                      const suggested = suggestedPreDevReleaseCfs({ requiredStorms: criteria.requiredStorms, areaAcres: da });
+                      const suggested = suggestedPreDevReleaseCfs({ requiredStorms: criteria.requiredStorms, areaAcres: da, tcMin: tc?.tcMin });
                       const relCap = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs
                         : criteria.allowableReleaseCfsPerAc && da > 0 ? r2(criteria.allowableReleaseCfsPerAc.value * da)
                         : suggested ? suggested.cfs : null;
@@ -15452,7 +15461,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // for every storm, since that's the same check the routed table below proves.
                       const autosize = () => {
                         const overrideCfs = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs : null;
-                        const r = autoSizeCompoundOutlet({ ring, det: effDet, criteria, areaAcres: da, impPct: imp, tailwaterElevFt, overrideCfs });
+                        const r = autoSizeCompoundOutlet({ ring, det: effDet, criteria, areaAcres: da, impPct: imp, tailwaterElevFt, overrideCfs, tcMin: tc?.tcMin });
                         if (!r.outlet) { flashWarn(r.reason || "Could not size an outlet — check the drainage area and top-of-bank elevation.", 6000); return; }
                         // Same one-setDet-call rule as B902: setDet rebuilds `det` from this
                         // render's closure, so a second synchronous call would clobber the first.
@@ -15480,6 +15489,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </WatchOutChip>
                       ) : methodInfo.method === "rational" ? (
                         <div style={smallNote}>Method: Modified Rational (tributary area {r2(da)} ac, within the {methodInfo.ceilingAcres}-ac screening range for this criteria).</div>
+                      ) : null;
+                      // B905 — computed Tc provenance: replaces the old flat "Time of concentration
+                      // = 15 min" text with the actual Kirpich inputs, tagged ESTIMATE while the flow
+                      // path / grade are still screening estimates (not yet traced from real
+                      // geometry / a DEM sample — a future wire-up; the tag flips to CODE on its own
+                      // once real inputs are supplied, no caller change needed).
+                      const tcLine = tc ? (
+                        <div style={smallNote}>
+                          Time of concentration: {tc.tcMin} min
+                          <SourceTag code={tc.lengthEstimated || tc.slopeEstimated ? "estimate" : "code"} label="Time of concentration" basis={tc.basis} />
+                        </div>
                       ) : null;
 
                       if (!outlet) {
@@ -15509,11 +15529,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             )}
                             {critLine}
                             {methodLine}
+                            {tcLine}
                           </>
                         );
                       }
 
-                      const routed = assessRoutedDetention({ ring, det: effDet, outlet, criteria, areaAcres: da, impPct: imp, tailwaterElevFt });
+                      const routed = assessRoutedDetention({ ring, det: effDet, outlet, criteria, areaAcres: da, impPct: imp, tailwaterElevFt, tcMin: tc?.tcMin });
                       const oProbs = outletProblems(outlet);
                       const passChip = (ok) => (
                         <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 5, color: "var(--on-accent)", background: ok ? PAL.success : PAL.danger }}>{ok ? "PASS" : "SHORT"}</span>
@@ -15605,6 +15626,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {routed.kind === "routed" && routed.assumptions.length > 0 && <div style={smallNote}>{routed.assumptions.join(" ")}</div>}
                           {critLine}
                           {methodLine}
+                          {tcLine}
                           <div style={smallNote}>{routed.caveat}</div>
                         </>
                       );
