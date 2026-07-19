@@ -109,7 +109,7 @@ import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDep
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
-import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, excavationVolume, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
+import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
 import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
@@ -7194,12 +7194,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pondLedgerEntries = [];
   for (const e of els) {
     if (e.type !== "pond") continue;
+    // B907 — INCREMENTAL excavation when this basin reuses an existing pond/depression
+    // (the "Expand this pond" flow's det.baseline): prices only the added cut, not a
+    // from-scratch re-dig of ground already excavated once.
+    const exc = incrementalExcavationCf(ringOf(e), detWithAuto(e.det));
     pondLedgerEntries.push({
       id: e.id,
       ...pondSplitFor(e),
       anchoredTob: detWithAuto(e.det).tobElev != null,
       autoAnchored: (e.det?.tobElev == null) && !!pondAuto.tobElev, // B822 — riding the auto anchor
-      excavationCf: excavationVolume(ringOf(e), detWithAuto(e.det)),
+      excavationCf: exc.cf,
+      excavationIncremental: exc.incremental,
       role: e.det?.role ?? null,
       // NEW-10/B830 — the balancer consumes the same entries (name for move labels,
       // ring + effective det for the berm/shrink volume probes).
@@ -7906,6 +7911,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     acres: acresActive,
     providedCf: providedDetCf, providedUsableCf, deadCf: siteDeadCf, pondCount,
     req: detReq, reqCandidates: detReqCandidates,
+    // B907 — the typical screening pond depth used ONLY to ESTIMATE additional land take
+    // from a detention shortfall (never to size a pond) — criteria-configurable.
+    screeningPondDepthFt: criteriaFor(floodJurKey, { overrides: criteriaOverrides }).screeningPondDepthFt?.value ?? 8,
     tier: detTier, regime: detRegime, outfall: outfallNote,
     // B707/B708/B710/B712 — the floodplain-mitigation ledger + pond split + buildability.
     // NEW-2 — the DISPLAY ledger holds last-known-good while the fetch is stale (never a fresh
@@ -11846,6 +11854,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // UNKNOWN — NEVER a silent 0 CY in a priced takeoff.
             const prices = settings.prices || {};
             const pondCy = pondExcavationCf / 27;
+            // B907 — when a basin reuses an existing pond/depression (det.baseline, the
+            // "Expand this pond" flow), pondExcavationCf is already the INCREMENTAL cut
+            // (incrementalExcavationCf, wired at the ledger build) — flag it here so the
+            // line reads honestly, not as a from-scratch dig.
+            const anyIncrementalExc = pondLedger.perPond.some((p) => p.excavationIncremental);
             const drainageChecked = !!drainCtxData;
             // NEW-2 — fmResultView carries the remembered mitigation summary on a restored check
             // (fmResult is null then), so the earthwork cut line survives a reload too.
@@ -11880,7 +11893,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const earthPriceCell = (cy) => pEarth != null ? usd(cy * pEarth) : <ActionLink onClick={jumpToEarthPrice}>Set $/CY →</ActionLink>;
             return (
               <Section title="Earthwork cost (screening)" accent="#0e7490" collapsed>
-                {pondCy > 0 && metricRow("Pond excavation", `${f0(pondCy)} CY`, earthPriceCell(pondCy), { code: "plan" })}
+                {pondCy > 0 && metricRow(anyIncrementalExc ? "Pond excavation (incremental)" : "Pond excavation", `${f0(pondCy)} CY`, earthPriceCell(pondCy),
+                  { code: "plan", basis: anyIncrementalExc ? "One or more basins reuse an existing pond/depression (Expand this pond) — this nets out the pre-expansion basin's own cut, pricing only the ADDED dirt, not a from-scratch re-dig." : undefined })}
                 {bermCy > 0 && metricRow("Pond berms — fill", `${f0(bermCy)} CY`, `modeled embankment · ${gsApronRatio}:1 face`, { code: "plan" })}
                 {bermCy > 0 && <WatchOutChip style={{ margin: "0 0 3px" }}>Netted against basin cut below — the berm can be built from basin spoil (haul/compaction math is your engineer's).</WatchOutChip>}
                 {mitRelevant && (mitKnown
@@ -11968,7 +11982,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 )}
                 <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
-                  Pond excavation is the full basin cut (top of bank → achievable floor). Pond + mitigation cut count as on-site borrow in the net-dirt line — the same dirt raises the pad; volumes stay separate ledgers.
+                  Pond excavation is the full basin cut (top of bank → achievable floor){anyIncrementalExc ? " — except a basin reusing an existing pond/depression, which nets to only its ADDED cut" : ""}. Pond + mitigation cut count as on-site borrow in the net-dirt line — the same dirt raises the pad; volumes stay separate ledgers.
                 </div>
               </Section>
             );
@@ -17226,6 +17240,14 @@ function YieldPanel({
   const Y = YIELD_PAL;
   const acres = siteSqft / SQFT_PER_ACRE;
   const hasSite = siteSqft > 0;
+  // B907 — a FORWARD-LOOKING land-take advisory: how much MORE land a detention
+  // shortfall (required > provided, the SAME figures the site's "raise TOB" berm-apply
+  // screen reads) would consume, at a typical screening pond depth. Advisory only —
+  // never folded into the pie below, which stays 100%-consistent reflecting only what's
+  // actually drawn.
+  const detentionLandTake = drainage && drainage.req && drainage.req.kind === "point" && drainage.req.requiredAcFt > 0
+    ? detentionLandTakeEstimate({ requiredAcFt: drainage.req.requiredAcFt, providedUsableCf: drainage.providedUsableCf, avgDepthFt: drainage.screeningPondDepthFt })
+    : null;
 
   // Composition — read engine OUTPUTS, never re-derive geometry. The four shares sum
   // to 100 by construction (open is the clamped remainder), so the ring always closes.
@@ -17345,6 +17367,18 @@ function YieldPanel({
               })}
             </div>
           </div>
+
+          {/* B907 — a detention shortfall's estimated additional land take: advisory only,
+              never folded into the pie above (which stays 100%-consistent, reflecting only
+              what's actually drawn). Shows nothing when required ≤ provided. */}
+          {detentionLandTake && (
+            <WatchOutChip
+              style={{ margin: "6px 2px 0" }}
+              info={`Detention is short ${f2(detentionLandTake.deficitAcFt)} ac-ft against the required volume (site total). At a typical ${detentionLandTake.avgDepthFt}-ft screening pond depth, that shortfall would take roughly ${f2(detentionLandTake.footprintAc)} more acres of land than this plan currently shows drawn — a screening estimate (footprint ≈ volume / assumed depth), not a sized or placed pond. Size/expand a basin to confirm the real footprint.`}
+            >
+              Detention shortfall ≈ +{f2(detentionLandTake.footprintAc)} ac more land (screening estimate)
+            </WatchOutChip>
+          )}
 
           {/* hairline divider */}
           <div style={{ height: 1, background: Y.hairline, margin: "8px 0 0" }} />
