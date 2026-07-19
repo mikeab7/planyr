@@ -25,8 +25,8 @@ import { stormIntensity, runoffCoefficient, DESIGN_STORMS } from "./detentionRul
 import { buildStageStorageDischarge } from "./stageStorageDischarge.js";
 import { outletProblems } from "./outletStructure.js";
 
-const DEFAULT_TC_MIN = 15;           // screening time of concentration (small industrial site)
-const DEFAULT_PRE_RUNOFF_C = 0.3;    // undeveloped Houston-area pasture, screening assumption
+export const DEFAULT_TC_MIN = 15;           // screening time of concentration (small industrial site)
+export const DEFAULT_PRE_RUNOFF_C = 0.3;    // undeveloped Houston-area pasture, screening assumption
 const PASS_TOL = 1e-6;
 // Candidate storm durations to route (minutes) — the critical duration is the one whose
 // routed peak outflow governs. Bounded by the transcribed IDF's range.
@@ -44,6 +44,38 @@ export function rationalPeakCfs({ runoffC, returnPeriodYr, tcMin = DEFAULT_TC_MI
   const si = stormIntensity(returnPeriodYr, tc);
   if (!si) return null;
   return C * si.inPerHr * A;
+}
+
+/* B902 — AUTO-SUGGEST the allowable release: the pre-development peak discharge across a
+ * jurisdiction's required design storms, at the standard screening pre-development runoff
+ * coefficient (undeveloped/pasture, DEFAULT_PRE_RUNOFF_C). This is what makes "Propose outlet"
+ * self-sufficient in a Post ≤ Pre district that publishes no cfs/ac cap (Waller, BKDD): the
+ * allowable release IS the site's own pre-development peak, which this app can already compute
+ * with the SAME rationalPeakCfs() the routing pass itself uses for the pre-dev side of every
+ * PASS/SHORT check — so a suggested release can never disagree with what routing later verifies
+ * against.
+ *
+ * Sized to the MOST RESTRICTIVE (smallest) governing storm's peak — a defensible, conservative
+ * screening seed for the initial orifice; Post ≤ Pre is a PER-STORM check (10-yr AND 100-yr, not
+ * one number), so the routing step this feeds into re-verifies every required storm regardless of
+ * which one seeded the sizing. Returns null when nothing to compute from (no required storms / no
+ * drainage area) — never a fabricated release. Pure. */
+export function suggestedPreDevReleaseCfs({ requiredStorms, areaAcres, runoffC = DEFAULT_PRE_RUNOFF_C, tcMin = DEFAULT_TC_MIN } = {}) {
+  const storms = Array.isArray(requiredStorms) ? requiredStorms : [];
+  const A = num(areaAcres);
+  if (!storms.length || A == null || A <= 0) return null;
+  const perStorm = storms
+    .map((T) => ({ returnPeriodYr: T, peakCfs: rationalPeakCfs({ runoffC, returnPeriodYr: T, tcMin, areaAcres: A }) }))
+    .filter((p) => Number.isFinite(p.peakCfs) && p.peakCfs > 0);
+  if (!perStorm.length) return null;
+  const governing = perStorm.reduce((min, p) => (p.peakCfs < min.peakCfs ? p : min));
+  return {
+    cfs: round(governing.peakCfs, 2),
+    governingStormYr: governing.returnPeriodYr,
+    runoffC,
+    tcMin,
+    perStorm: perStorm.map((p) => ({ returnPeriodYr: p.returnPeriodYr, peakCfs: round(p.peakCfs, 2) })),
+  };
 }
 
 /* Modified-Rational trapezoidal inflow hydrograph for one storm+duration. Returns

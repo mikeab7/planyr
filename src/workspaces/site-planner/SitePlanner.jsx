@@ -146,7 +146,7 @@ import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
 import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
 import { defaultOutletForPond, outletProblems } from "./lib/outletStructure.js";
-import { assessRoutedDetention } from "./lib/pondRouting.js";
+import { assessRoutedDetention, suggestedPreDevReleaseCfs } from "./lib/pondRouting.js";
 import { regionalDetentionFor, feeInLieuCompare } from "./lib/regionalDetention.js";
 import { optimizePond } from "./lib/pondOptimizer.js";
 import {
@@ -15259,6 +15259,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const imp = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
                       const storm = det.designStorm || 100;
                       const rel = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs : null;
+                      // B902 — AUTO-SUGGEST: the site's own pre-development peak discharge (a
+                      // screening estimate), offered as a placeholder + one-click "Use" for districts
+                      // (Waller, BKDD) that publish no cfs/ac cap. Never overrides a stored release.
+                      const detCriteria = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
+                      const suggested = rel == null ? suggestedPreDevReleaseCfs({ requiredStorms: detCriteria.requiredStorms, areaAcres: da }) : null;
                       const pumped = det.outfallMode === "pumped";
                       const pumpUnit = det.pumpRateUnit === "gpm" ? "gpm" : "cfs";
                       const pumpRaw = Number.isFinite(det.pumpRateCfs) ? det.pumpRateCfs : null;
@@ -15308,9 +15313,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </Field>
                           <div id={`pond-release-field-${selEl.id}`}>
                             <Field label="Allowable release (cfs)">
-                              <NumInput allowClear style={{ ...numInput, width: 64 }} value={rel ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ releaseRateCfs: Number.isFinite(n) ? n : null })} />
+                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <NumInput allowClear style={{ ...numInput, width: 64 }} value={rel ?? ""} placeholder={suggested ? `≈${suggested.cfs}` : "—"} min={0} onCommit={(n) => setDet({ releaseRateCfs: Number.isFinite(n) ? n : null })} />
+                                {suggested && (
+                                  <SourceTag code="estimate" label="Allowable release (cfs)" basis={`Suggested — pre-development (undeveloped/pasture) peak discharge, Modified Rational method (runoff coefficient ${suggested.runoffC}, ${suggested.tcMin}-min time of concentration), evaluated at each of ${detCriteria.label}'s required design storms (${detCriteria.requiredStorms.join("/")}-yr) — the smallest (most restrictive), the ${suggested.governingStormYr}-yr storm, governs. ${detCriteria.label} publishes no cfs/ac release cap, so Post ≤ Pre screens the outlet against the site's own computed pre-development peak. A screening estimate — type your own release to override.`} />
+                                )}
+                              </span>
                             </Field>
                           </div>
+                          {suggested && (
+                            <div style={smallNote}>
+                              ≈ {suggested.cfs} cfs — suggested (pre-development peak) · <ActionLink onClick={() => setDet({ releaseRateCfs: suggested.cfs })}>Use this →</ActionLink>
+                            </div>
+                          )}
                           <Field label="Outfall">
                             <span style={{ display: "flex", gap: 5, width: 150 }}>
                               <button style={{ ...chip, flex: 1, padding: "6px 0", textAlign: "center", ...(!pumped ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={() => setDet({ outfallMode: "gravity" })}>Gravity</button>
@@ -15391,10 +15406,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const r2 = (n) => Math.round(n * 100) / 100;
                       const floorApprox = r2(effDet.tobElev - depthEff);
                       const designWs = r2(effDet.tobElev - fbEff);
-                      // The allowable release the outlet is sized/checked against: a manual release
-                      // rate wins; else the jurisdiction's published cfs/ac cap × drainage area.
+                      // The allowable release the outlet is sized/checked against, in priority order:
+                      // (1) a manual release rate the user typed; (2) the jurisdiction's published
+                      // cfs/ac cap × drainage area, when one exists; (3) B902 AUTO-SUGGEST — the site's
+                      // own pre-development peak discharge (a screening estimate), so a Post ≤ Pre
+                      // district that publishes NO cfs/ac cap (Waller, BKDD) never leaves the button
+                      // dead — the allowable release IS the site's pre-development peak in that regime.
+                      const suggested = suggestedPreDevReleaseCfs({ requiredStorms: criteria.requiredStorms, areaAcres: da });
                       const relCap = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs
-                        : criteria.allowableReleaseCfsPerAc && da > 0 ? r2(criteria.allowableReleaseCfsPerAc.value * da) : null;
+                        : criteria.allowableReleaseCfsPerAc && da > 0 ? r2(criteria.allowableReleaseCfsPerAc.value * da)
+                        : suggested ? suggested.cfs : null;
+                      const relSource = Number.isFinite(det.releaseRateCfs) ? "manual"
+                        : criteria.allowableReleaseCfsPerAc && da > 0 ? "code"
+                        : suggested ? "suggested" : null;
                       const tailwaterElevFt = split && split.wseFt != null ? split.wseFt : null; // drowned-outlet regime
                       const outlet = det.outlet && Array.isArray(det.outlet.stages) && det.outlet.stages.length ? det.outlet : null;
                       const stages = outlet ? outlet.stages : [];
@@ -15416,7 +15440,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const setWeir = (patch) => writeOutlet({ stages: stages.map((s) => (s.kind === "weir" ? { ...s, ...patch } : s)) });
                       const propose = () => {
                         const d = defaultOutletForPond({ floorElevFt: floorApprox, designWsElevFt: designWs, allowableReleaseCfs: relCap, orificeC: criteria.orificeC.value });
-                        if (d.outlet) writeOutlet(d.outlet);
+                        if (!d.outlet) return;
+                        // B902 — one setDet call, not two: setDet rebuilds `det` from this render's
+                        // closure, so a second synchronous call would silently clobber the first
+                        // (it doesn't merge against the just-applied outlet). A one-click auto-size
+                        // that resolved to the SUGGESTED release also leaves an auditable, editable
+                        // number behind in the real field — still fully overridable/clearable.
+                        const patch = { outlet: d.outlet };
+                        if (relSource === "suggested") patch.releaseRateCfs = relCap;
+                        setDet(patch);
                       };
                       const critLine = (
                         <div style={smallNote}>
@@ -15427,15 +15459,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       );
 
                       if (!outlet) {
+                        const primaryLabel = relSource === "suggested" ? "⚡ Auto-size detention" : "+ Propose outlet";
+                        const primaryTitle = relCap == null
+                          ? "Enter a drainage area (above) so a pre-development release can be estimated"
+                          : relSource === "suggested"
+                            ? `One click: sizes a floor orifice to the site's suggested pre-development release (≈ ${relCap} cfs) and routes the ${criteria.requiredStorms.join("/")}-yr storms to check Post ≤ Pre`
+                            : "Propose a floor orifice sized to the allowable release";
                         return wrap(
                           <>
                             <div style={smallNote}>Add a screening outlet to route storms through the pond and check Post ≤ Pre.</div>
                             <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                              <button style={{ ...chip, padding: "6px 10px" }} onClick={propose} disabled={relCap == null} title={relCap == null ? "Enter an allowable release (above), or the criteria publish no cfs/ac cap" : "Propose a floor orifice sized to the allowable release"}>+ Propose outlet</button>
+                              <button style={{ ...chip, padding: "6px 10px", ...(relSource === "suggested" ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent, fontWeight: 700 } : null) }} onClick={propose} disabled={relCap == null} title={primaryTitle}>{primaryLabel}</button>
                               <button style={{ ...chip, padding: "6px 10px" }} onClick={() => writeOutlet({ stages: [{ kind: "orifice", invertElevFt: floorApprox, diameterIn: 12, count: 1 }] })}>+ Orifice</button>
                               <button style={{ ...chip, padding: "6px 10px" }} onClick={() => writeOutlet({ stages: [{ kind: "restrictor", invertElevFt: floorApprox, maxCfs: relCap ?? 1 }] })}>+ Restrictor</button>
                             </div>
-                            {relCap != null && <div style={smallNote}>Allowable release ≈ {relCap} cfs{criteria.allowableReleaseCfsPerAc ? ` (${criteria.allowableReleaseCfsPerAc.value} cfs/ac × ${r2(da)} ac)` : " (manual)"}.</div>}
+                            {relCap != null && (
+                              <div style={smallNote}>
+                                Allowable release ≈ {relCap} cfs
+                                {relSource === "code" ? ` (${criteria.allowableReleaseCfsPerAc.value} cfs/ac × ${r2(da)} ac)`
+                                  : relSource === "suggested" ? ` — suggested (pre-development peak, ${suggested.governingStormYr}-yr governing)` : " (manual)"}.
+                                {relSource === "suggested" && (
+                                  <SourceTag code="estimate" label="Allowable release" basis={`Suggested — pre-development (undeveloped/pasture) peak discharge, Modified Rational method (runoff coefficient ${suggested.runoffC}, ${suggested.tcMin}-min time of concentration), evaluated at each required design storm (${criteria.requiredStorms.join("/")}-yr); the smallest (${suggested.governingStormYr}-yr) governs. ${criteria.label} publishes no cfs/ac release cap. A screening estimate — click Auto-size detention to accept it, or type your own release to override.`} />
+                                )}
+                              </div>
+                            )}
                             {critLine}
                           </>
                         );

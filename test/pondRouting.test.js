@@ -7,6 +7,9 @@ import {
   routeHydrograph,
   routeStorm,
   assessRoutedDetention,
+  suggestedPreDevReleaseCfs,
+  DEFAULT_PRE_RUNOFF_C,
+  DEFAULT_TC_MIN,
 } from "../src/workspaces/site-planner/lib/pondRouting.js";
 import { buildStageStorageDischarge } from "../src/workspaces/site-planner/lib/stageStorageDischarge.js";
 
@@ -101,5 +104,46 @@ describe("assessRoutedDetention — Post ≤ Pre PASS/SHORT per storm", () => {
     const res = assessRoutedDetention({ ring: SQ, det: DET, outlet, criteria, areaAcres: 10, impPct: 90, preRunoffC: 0.3, tcMin: 15 });
     expect(res.assumptions.join(" ")).toMatch(/Pre-development runoff coefficient/);
     expect(res.assumptions.join(" ")).toMatch(/Time of concentration/);
+  });
+});
+
+// B902 — AUTO-SUGGEST the allowable release: in a Post ≤ Pre district that publishes no
+// cfs/ac cap (Waller, BKDD), the allowable release IS the site's own pre-development peak.
+// This reuses rationalPeakCfs (the SAME engine assessRoutedDetention's pre-dev side already
+// calls), so a suggested release can never disagree with what routing later verifies against.
+describe("suggestedPreDevReleaseCfs — pre-dev peak as the auto-suggested release", () => {
+  it("computes the pre-dev peak at the DEFAULT screening runoff coefficient/Tc", () => {
+    // 10-yr, Tc 15 min, C=0.3 (undeveloped/pasture default): from the transcribed IDF used
+    // elsewhere in this suite, matches rationalPeakCfs directly — no reimplementation.
+    const tenYr = rationalPeakCfs({ runoffC: DEFAULT_PRE_RUNOFF_C, returnPeriodYr: 10, tcMin: DEFAULT_TC_MIN, areaAcres: 52.04 });
+    const hundredYr = rationalPeakCfs({ runoffC: DEFAULT_PRE_RUNOFF_C, returnPeriodYr: 100, tcMin: DEFAULT_TC_MIN, areaAcres: 52.04 });
+    const s = suggestedPreDevReleaseCfs({ requiredStorms: [10, 100], areaAcres: 52.04 });
+    expect(s).not.toBeNull();
+    expect(s.runoffC).toBe(DEFAULT_PRE_RUNOFF_C);
+    expect(s.tcMin).toBe(DEFAULT_TC_MIN);
+    expect(s.perStorm.find((p) => p.returnPeriodYr === 10).peakCfs).toBeCloseTo(tenYr, 2);
+    expect(s.perStorm.find((p) => p.returnPeriodYr === 100).peakCfs).toBeCloseTo(hundredYr, 2);
+  });
+
+  it("governs on the MOST RESTRICTIVE (smallest) required storm's peak — a conservative seed", () => {
+    const s = suggestedPreDevReleaseCfs({ requiredStorms: [10, 100], areaAcres: 52.04 });
+    const min = Math.min(...s.perStorm.map((p) => p.peakCfs));
+    expect(s.cfs).toBeCloseTo(min, 2);
+    // 10-yr rainfall intensity is always < 100-yr at the same Tc, so it's always governing here.
+    expect(s.governingStormYr).toBe(10);
+  });
+
+  it("an explicit runoff coefficient / Tc override is honored (still editable, not hardcoded)", () => {
+    const s = suggestedPreDevReleaseCfs({ requiredStorms: [100], areaAcres: 20, runoffC: 0.2, tcMin: 20 });
+    expect(s.runoffC).toBe(0.2);
+    expect(s.tcMin).toBe(20);
+    expect(s.cfs).toBeCloseTo(rationalPeakCfs({ runoffC: 0.2, returnPeriodYr: 100, tcMin: 20, areaAcres: 20 }), 2);
+  });
+
+  it("LOUD-FAILURE: never a fabricated number — null with no required storms / no area / non-positive area", () => {
+    expect(suggestedPreDevReleaseCfs({ requiredStorms: [], areaAcres: 52.04 })).toBeNull();
+    expect(suggestedPreDevReleaseCfs({ requiredStorms: [10, 100], areaAcres: null })).toBeNull();
+    expect(suggestedPreDevReleaseCfs({ requiredStorms: [10, 100], areaAcres: 0 })).toBeNull();
+    expect(suggestedPreDevReleaseCfs()).toBeNull();
   });
 });
