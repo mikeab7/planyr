@@ -145,8 +145,8 @@ import { sizePondForTargets, scaleRing, solveTobRaise } from "./lib/pondSizing.j
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
 import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
-import { defaultOutletForPond, outletProblems } from "./lib/outletStructure.js";
-import { assessRoutedDetention, suggestedPreDevReleaseCfs } from "./lib/pondRouting.js";
+import { outletProblems } from "./lib/outletStructure.js";
+import { assessRoutedDetention, suggestedPreDevReleaseCfs, autoSizeCompoundOutlet } from "./lib/pondRouting.js";
 import { regionalDetentionFor, feeInLieuCompare } from "./lib/regionalDetention.js";
 import { optimizePond } from "./lib/pondOptimizer.js";
 import {
@@ -15422,33 +15422,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const tailwaterElevFt = split && split.wseFt != null ? split.wseFt : null; // drowned-outlet regime
                       const outlet = det.outlet && Array.isArray(det.outlet.stages) && det.outlet.stages.length ? det.outlet : null;
                       const stages = outlet ? outlet.stages : [];
-                      const primary = stages[0] || null;
-                      const weirStage = stages.find((s) => s.kind === "weir") || null;
                       const writeOutlet = (next) => setDet({ outlet: next && next.stages && next.stages.length ? next : null });
-                      const setPrimary = (patch) => { const s = [...stages]; s[0] = { ...(s[0] || {}), ...patch }; writeOutlet({ stages: s }); };
-                      const setKind = (kind) => {
-                        const invert = Number.isFinite(primary?.invertElevFt) ? primary.invertElevFt : floorApprox;
-                        const base = kind === "orifice"
-                          ? { kind, invertElevFt: invert, diameterIn: Number.isFinite(primary?.diameterIn) ? primary.diameterIn : 12, count: 1 }
-                          : { kind, invertElevFt: invert, maxCfs: Number.isFinite(primary?.maxCfs) ? primary.maxCfs : (relCap ?? 1) };
-                        const s = [...stages]; s[0] = base; writeOutlet({ stages: s });
+                      // B903 — MULTI-STAGE OUTLET: a genuine editable LIST of stages (any mix of
+                      // orifice/weir/restrictor, any length) rather than a fixed "primary + one
+                      // optional weir" pair — real compound structures stack a low-flow orifice, a
+                      // control weir, and an emergency spillway, and the auto-size solver below can
+                      // produce exactly that.
+                      const updateStage = (idx, patch) => { const s = [...stages]; s[idx] = { ...s[idx], ...patch }; writeOutlet({ stages: s }); };
+                      const removeStage = (idx) => writeOutlet({ stages: stages.filter((_, i) => i !== idx) });
+                      const addStage = (kind) => writeOutlet({
+                        stages: [...stages, kind === "orifice"
+                          ? { kind: "orifice", invertElevFt: floorApprox, diameterIn: 6, count: 1 }
+                          : { kind: "weir", crestElevFt: designWs, lengthFt: 5 }],
+                      });
+                      const roleLabel = (s, i) => {
+                        if (s.role === "primary") return "Low-flow orifice";
+                        if (s.role === "control") return "Control weir";
+                        if (s.role === "spillway") return "Emergency spillway";
+                        const kindLabel = s.kind === "orifice" ? "Orifice" : s.kind === "weir" ? "Weir" : "Restrictor";
+                        return i === 0 ? `Primary ${kindLabel.toLowerCase()}` : `${kindLabel} #${i + 1}`;
                       };
-                      const toggleWeir = () => {
-                        if (weirStage) writeOutlet({ stages: stages.filter((s) => s.kind !== "weir") });
-                        else writeOutlet({ stages: [...stages, { kind: "weir", crestElevFt: designWs, lengthFt: 20 }] });
-                      };
-                      const setWeir = (patch) => writeOutlet({ stages: stages.map((s) => (s.kind === "weir" ? { ...s, ...patch } : s)) });
-                      const propose = () => {
-                        const d = defaultOutletForPond({ floorElevFt: floorApprox, designWsElevFt: designWs, allowableReleaseCfs: relCap, orificeC: criteria.orificeC.value });
-                        if (!d.outlet) return;
-                        // B902 — one setDet call, not two: setDet rebuilds `det` from this render's
-                        // closure, so a second synchronous call would silently clobber the first
-                        // (it doesn't merge against the just-applied outlet). A one-click auto-size
-                        // that resolved to the SUGGESTED release also leaves an auditable, editable
-                        // number behind in the real field — still fully overridable/clearable.
-                        const patch = { outlet: d.outlet };
+                      // B903 — "Auto-size" now solves the WHOLE compound structure (orifice + a
+                      // control weir when needed + an emergency spillway) so EVERY required storm
+                      // passes at once, reusing autoSizeCompoundOutlet (lib/pondRouting.js) — never a
+                      // single orifice sized to one governing storm that can silently fail another.
+                      // A manual "Allowable release" seeds the solve (still meaningfully honored)
+                      // but the solver still iterates toward whatever ACTUALLY satisfies Post ≤ Pre
+                      // for every storm, since that's the same check the routed table below proves.
+                      const autosize = () => {
+                        const overrideCfs = Number.isFinite(det.releaseRateCfs) ? det.releaseRateCfs : null;
+                        const r = autoSizeCompoundOutlet({ ring, det: effDet, criteria, areaAcres: da, impPct: imp, tailwaterElevFt, overrideCfs });
+                        if (!r.outlet) { flashWarn(r.reason || "Could not size an outlet — check the drainage area and top-of-bank elevation.", 6000); return; }
+                        // Same one-setDet-call rule as B902: setDet rebuilds `det` from this
+                        // render's closure, so a second synchronous call would clobber the first.
+                        const patch = { outlet: r.outlet };
                         if (relSource === "suggested") patch.releaseRateCfs = relCap;
                         setDet(patch);
+                        if (!r.ok) flashWarn(r.reason, 8000); // honest partial result — outlet still written, best attempt
                       };
                       const critLine = (
                         <div style={smallNote}>
@@ -15463,13 +15473,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const primaryTitle = relCap == null
                           ? "Enter a drainage area (above) so a pre-development release can be estimated"
                           : relSource === "suggested"
-                            ? `One click: sizes a floor orifice to the site's suggested pre-development release (≈ ${relCap} cfs) and routes the ${criteria.requiredStorms.join("/")}-yr storms to check Post ≤ Pre`
-                            : "Propose a floor orifice sized to the allowable release";
+                            ? `One click: solves a compound outlet (orifice, plus a control weir if needed) so EVERY required storm (${criteria.requiredStorms.join("/")}-yr) passes Post ≤ Pre against the site's own pre-development peaks`
+                            : `One click: solves a compound outlet so every required storm (${criteria.requiredStorms.join("/")}-yr) passes, seeded from the ${relCap} cfs allowable release`;
                         return wrap(
                           <>
                             <div style={smallNote}>Add a screening outlet to route storms through the pond and check Post ≤ Pre.</div>
                             <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                              <button style={{ ...chip, padding: "6px 10px", ...(relSource === "suggested" ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent, fontWeight: 700 } : null) }} onClick={propose} disabled={relCap == null} title={primaryTitle}>{primaryLabel}</button>
+                              <button style={{ ...chip, padding: "6px 10px", ...(relSource === "suggested" ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent, fontWeight: 700 } : null) }} onClick={autosize} disabled={relCap == null} title={primaryTitle}>{primaryLabel}</button>
                               <button style={{ ...chip, padding: "6px 10px" }} onClick={() => writeOutlet({ stages: [{ kind: "orifice", invertElevFt: floorApprox, diameterIn: 12, count: 1 }] })}>+ Orifice</button>
                               <button style={{ ...chip, padding: "6px 10px" }} onClick={() => writeOutlet({ stages: [{ kind: "restrictor", invertElevFt: floorApprox, maxCfs: relCap ?? 1 }] })}>+ Restrictor</button>
                             </div>
@@ -15493,55 +15503,85 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const passChip = (ok) => (
                         <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 5, color: "var(--on-accent)", background: ok ? PAL.success : PAL.danger }}>{ok ? "PASS" : "SHORT"}</span>
                       );
-                      const primEdit = primary && primary.kind === "orifice" ? (
-                        <>
-                          <Field label="Orifice ⌀ (in)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={primary.diameterIn ?? ""} placeholder="—" min={0} onCommit={(n) => setPrimary({ diameterIn: Number.isFinite(n) && n > 0 ? n : null })} /></Field>
-                          <Field label="Invert elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(primary.invertElevFt) ? primary.invertElevFt : ""} placeholder="—" onCommit={(n) => setPrimary({ invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
-                        </>
-                      ) : primary ? (
-                        <>
-                          <Field label="Max release (cfs)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={primary.maxCfs ?? ""} placeholder="—" min={0} onCommit={(n) => setPrimary({ maxCfs: Number.isFinite(n) && n >= 0 ? n : null })} /></Field>
-                          <Field label="Invert elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(primary.invertElevFt) ? primary.invertElevFt : ""} placeholder="—" onCommit={(n) => setPrimary({ invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
-                        </>
-                      ) : null;
+                      // B903 — an OVERTOPPED storm is a different failure than a plain rate
+                      // exceedance (too little storage vs. too much outflow) — say which, honestly.
+                      const statusChip = (s) => {
+                        if (s.status === "unknown") return <span style={{ fontSize: 9.5, color: PAL.muted }}>—</span>;
+                        if (s.status === "pass") return passChip(true);
+                        return s.overtopped
+                          ? <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 5, color: "var(--on-accent)", background: PAL.danger }}>OVERTOPS</span>
+                          : passChip(false);
+                      };
 
                       return wrap(
                         <>
-                          <Field label="Primary outlet">
-                            <span style={{ display: "flex", gap: 5, width: 150 }}>
-                              <button style={{ ...chip, flex: 1, padding: "5px 0", textAlign: "center", ...(primary && primary.kind === "orifice" ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={() => setKind("orifice")}>Orifice</button>
-                              <button style={{ ...chip, flex: 1, padding: "5px 0", textAlign: "center", ...(primary && primary.kind === "restrictor" ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={() => setKind("restrictor")}>Restrictor</button>
-                            </span>
-                          </Field>
-                          {primEdit}
-                          <Field label="Emergency weir">
-                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <button style={{ ...chip, padding: "5px 10px", ...(weirStage ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={toggleWeir}>{weirStage ? "On" : "Off"}</button>
-                              {weirStage && <NumInput allowClear style={{ ...numInput, width: 58 }} value={weirStage.lengthFt ?? ""} placeholder="L ft" min={0} onCommit={(n) => setWeir({ lengthFt: Number.isFinite(n) && n > 0 ? n : null })} />}
-                              {weirStage && <span style={{ fontSize: 10, color: PAL.muted }}>ft @ {r2(weirStage.crestElevFt)}</span>}
-                            </span>
-                          </Field>
-                          <div style={{ marginTop: 3 }}>
-                            <button style={{ ...chip, padding: "3px 8px", fontSize: 10 }} onClick={() => writeOutlet(null)} title="Remove the outlet">× Clear outlet</button>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                            <span style={{ fontSize: 10.5, color: PAL.muted }}>{stages.length} outlet stage{stages.length === 1 ? "" : "s"}</span>
+                            <button style={{ ...chip, padding: "3px 8px", fontSize: 10, fontWeight: 700 }} onClick={autosize} title="Re-solve a compound outlet so every required storm passes">⚡ Auto-size</button>
+                          </div>
+                          {stages.map((s, i) => (
+                            <div key={i} style={{ marginTop: i > 0 ? 10 : 0, paddingTop: i > 0 ? 8 : 0, borderTop: i > 0 ? `1px solid ${PAL.panelLine}` : "none" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                                <span style={{ fontSize: 10.5, fontWeight: 700, color: PAL.text }}>{roleLabel(s, i)}</span>
+                                <button style={{ ...chip, padding: "1px 6px", fontSize: 9.5 }} onClick={() => removeStage(i)} title="Remove this stage">× Remove</button>
+                              </div>
+                              {s.kind === "orifice" && (
+                                <>
+                                  <Field label="Orifice ⌀ (in)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={s.diameterIn ?? ""} placeholder="—" min={0} onCommit={(n) => updateStage(i, { diameterIn: Number.isFinite(n) && n > 0 ? n : null })} /></Field>
+                                  <Field label="Invert elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(s.invertElevFt) ? s.invertElevFt : ""} placeholder="—" onCommit={(n) => updateStage(i, { invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
+                                </>
+                              )}
+                              {s.kind === "weir" && (
+                                <>
+                                  <Field label="Weir length (ft)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={s.lengthFt ?? ""} placeholder="—" min={0} onCommit={(n) => updateStage(i, { lengthFt: Number.isFinite(n) && n > 0 ? n : null })} /></Field>
+                                  <Field label="Crest elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(s.crestElevFt) ? s.crestElevFt : ""} placeholder="—" onCommit={(n) => updateStage(i, { crestElevFt: Number.isFinite(n) ? n : null })} /></Field>
+                                </>
+                              )}
+                              {s.kind === "restrictor" && (
+                                <>
+                                  <Field label="Max release (cfs)"><NumInput allowClear style={{ ...numInput, width: 64 }} value={s.maxCfs ?? ""} placeholder="—" min={0} onCommit={(n) => updateStage(i, { maxCfs: Number.isFinite(n) && n >= 0 ? n : null })} /></Field>
+                                  <Field label="Invert elev (ft)"><NumInput allowClear style={{ ...numInput, width: 72 }} value={Number.isFinite(s.invertElevFt) ? s.invertElevFt : ""} placeholder="—" onCommit={(n) => updateStage(i, { invertElevFt: Number.isFinite(n) ? n : null })} /></Field>
+                                </>
+                              )}
+                            </div>
+                          ))}
+                          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                            <button style={{ ...chip, padding: "4px 8px", fontSize: 10.5 }} onClick={() => addStage("orifice")}>+ Add orifice</button>
+                            <button style={{ ...chip, padding: "4px 8px", fontSize: 10.5 }} onClick={() => addStage("weir")}>+ Add weir</button>
+                            <button style={{ ...chip, padding: "4px 8px", fontSize: 10.5 }} onClick={() => writeOutlet(null)} title="Remove the outlet">× Clear outlet</button>
                           </div>
                           {oProbs.length > 0 && <div style={{ ...smallNote, color: PAL.warn }}>Outlet incomplete: {oProbs.join("; ")}.</div>}
                           {routed.kind === "routed" ? (
                             <div style={{ marginTop: 8, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
-                              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr auto", gap: "2px 8px", fontSize: 11, alignItems: "center" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Overall — Post ≤ Pre</span>
+                                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 5, color: "var(--on-accent)", background: routed.allPass ? PAL.success : PAL.danger }}>{routed.allPass ? "PASS — every storm" : "FAIL"}</span>
+                              </div>
+                              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr 1fr auto", gap: "2px 8px", fontSize: 11, alignItems: "center" }}>
                                 <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700 }}>STORM</span>
-                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>PRE cfs</span>
+                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>ALLOWABLE</span>
                                 <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>ROUTED</span>
+                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>PEAK WSE</span>
+                                <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textAlign: "right" }}>STORAGE</span>
                                 <span />
                                 {routed.perStorm.map((s) => (
                                   <Fragment key={s.returnPeriodYr}>
                                     <span style={{ fontWeight: 700 }}>{s.returnPeriodYr}-yr</span>
                                     <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{s.preCfs ?? "—"}</span>
                                     <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: s.status === "short" ? PAL.danger : PAL.text }}>{s.routedPeakCfs ?? "—"}</span>
-                                    <span style={{ textAlign: "right" }}>{s.status === "unknown" ? <span style={{ fontSize: 9.5, color: PAL.muted }}>—</span> : passChip(s.status === "pass")}</span>
+                                    <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{s.maxElevFt ?? "—"}</span>
+                                    <span style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{s.peakStorageAcFt != null ? `${f2(s.peakStorageAcFt)} ac-ft` : "—"}</span>
+                                    <span style={{ textAlign: "right" }}>{statusChip(s)}</span>
                                   </Fragment>
                                 ))}
                               </div>
-                              {routed.flags.includes("overtopping") && <div style={{ ...smallNote, color: PAL.danger }}>⚠ Basin overtops before the outlet can pass the storm — routing is at the top-of-bank limit; enlarge the outlet or the basin.</div>}
+                              {!routed.allPass && (
+                                <div style={{ ...smallNote, color: PAL.danger, marginTop: 4 }}>
+                                  {routed.perStorm.filter((s) => s.status !== "pass").map((s) => (
+                                    <div key={s.returnPeriodYr}>{s.returnPeriodYr}-yr {s.overtopped ? "overtops the basin before the outlet can pass it" : `is short by ${s.shortByCfs} cfs`} — click ⚡ Auto-size above, or deepen/enlarge this pond ("Expand this pond" below).</div>
+                                  ))}
+                                </div>
+                              )}
                               {routed.flags.includes("impervious-conservative") && <div style={{ ...smallNote, color: PAL.warn }}>Impervious % unknown — post-development runoff taken at the conservative upper bound.</div>}
                             </div>
                           ) : (

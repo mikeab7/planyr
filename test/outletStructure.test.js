@@ -6,6 +6,7 @@ import {
   stageDischarge,
   outletDischarge,
   sizeOrificeForRelease,
+  sizeWeirForRelease,
   defaultOutletForPond,
   outletProblems,
   outletLowestElev,
@@ -97,6 +98,52 @@ describe("outletDischarge — multistage sum + problem surfacing", () => {
     const withCrit = outletDischarge(100, noCoeff, { criteria: { orificeC: { value: 0.8 } } });
     const with06 = outletDischarge(100, noCoeff, { criteria: { orificeC: { value: 0.6 } } });
     expect(withCrit.cfs).toBeCloseTo((0.8 / 0.6) * with06.cfs, 4);
+  });
+});
+
+// B903 — a genuine THREE-stage compound outlet (low-flow orifice + control weir + emergency
+// spillway at three different elevations): the rating curve must be the SUM of whichever
+// stages are engaged at a given water surface, transitioning cleanly at each invert/crest.
+describe("outletDischarge — a 3-stage COMPOUND structure sums + transitions correctly (B903)", () => {
+  const outlet = { stages: [
+    { kind: "orifice", invertElevFt: 90, diameterIn: 12, count: 1, coeff: 0.6, role: "primary" },
+    { kind: "weir", crestElevFt: 93, lengthFt: 4, coeff: 3.33, role: "control" },
+    { kind: "weir", crestElevFt: 98, lengthFt: 20, coeff: 3.33, role: "spillway" },
+  ] };
+  it("below the control crest: only the orifice is engaged", () => {
+    const d = outletDischarge(92, outlet);
+    expect(d.cfs).toBeCloseTo(stageDischarge(outlet.stages[0], 92), 6);
+  });
+  it("between the control crest and the spillway crest: orifice + control weir sum", () => {
+    const d = outletDischarge(95, outlet);
+    const expected = stageDischarge(outlet.stages[0], 95) + stageDischarge(outlet.stages[1], 95);
+    expect(d.cfs).toBeCloseTo(expected, 6);
+    // and the spillway (not yet engaged) contributes nothing
+    expect(stageDischarge(outlet.stages[2], 95)).toBe(0);
+  });
+  it("above the spillway crest: ALL THREE stages sum together", () => {
+    const d = outletDischarge(99, outlet);
+    const expected = stageDischarge(outlet.stages[0], 99) + stageDischarge(outlet.stages[1], 99) + stageDischarge(outlet.stages[2], 99);
+    expect(d.cfs).toBeCloseTo(expected, 6);
+    expect(d.problems).toHaveLength(0);
+  });
+  it("discharge is monotonically non-decreasing across the transitions (no discontinuous drop)", () => {
+    const elevs = [91, 92.9, 93, 93.1, 95, 97.9, 98, 98.1, 99];
+    const cfs = elevs.map((e) => outletDischarge(e, outlet).cfs);
+    for (let i = 1; i < cfs.length; i++) expect(cfs[i]).toBeGreaterThanOrEqual(cfs[i - 1] - 1e-9);
+  });
+});
+
+describe("sizeWeirForRelease — inverse round-trips (B903)", () => {
+  it("sizing to 50 cfs at 2 ft head, then discharging at 2 ft head, returns ~50 cfs", () => {
+    const L = sizeWeirForRelease({ targetCfs: 50, headFt: 2, coeff: 3.33 });
+    expect(L).not.toBeNull();
+    const weir = { kind: "weir", crestElevFt: 90, lengthFt: L, coeff: 3.33 };
+    expect(stageDischarge(weir, 92)).toBeCloseTo(50, 1);
+  });
+  it("bad inputs → null", () => {
+    expect(sizeWeirForRelease({ targetCfs: 0, headFt: 2 })).toBeNull();
+    expect(sizeWeirForRelease({ targetCfs: 50, headFt: 0 })).toBeNull();
   });
 });
 

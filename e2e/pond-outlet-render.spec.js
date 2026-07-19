@@ -78,7 +78,7 @@ test.describe("Pond outlet render — proposing an outlet must never crash the w
     // The routed per-storm table (the crashing render path) must appear, not the error boundary.
     await expect(page.getByText("RATE CONTROL", { exact: false })).toBeVisible();
     await expect(page.getByText("Site Planyr hit an error", { exact: false })).toHaveCount(0);
-    await expect(page.getByText(/PASS|SHORT/)).not.toHaveCount(0);
+    await expect(page.getByText(/PASS|SHORT|OVERTOPS/)).not.toHaveCount(0);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });
@@ -92,16 +92,17 @@ test.describe("Pond outlet render — proposing an outlet must never crash the w
     await fillField(page, "Top-of-bank elev. (ft)", 100);
     await fillField(page, "Drainage area (ac)", 10);
     await fillField(page, "Allowable release (cfs)", 15);
-    await page.getByRole("button", { name: /Propose outlet/i }).click();
-    await expect(page.getByText("RATE CONTROL", { exact: false })).toBeVisible();
 
-    // Switch the primary outlet to Restrictor (the report's "+ Restrictor" path) — re-renders
-    // the same routed.perStorm.map(...) Fragment block against the new outlet kind.
-    await page.getByRole("button", { name: "Restrictor", exact: true }).click();
+    // B903 — the outlet is now a genuine editable STAGE LIST (no more in-place "switch this
+    // stage's kind" toggle), so the report's Restrictor path is exercised via the "+ Restrictor"
+    // manual-start button directly — still the same routed.perStorm.map(...) Fragment block
+    // that originally crashed, now rendered against a restrictor-kind outlet.
+    await page.getByRole("button", { name: "+ Restrictor", exact: true }).click();
+    await expect(page.getByText("RATE CONTROL", { exact: false })).toBeVisible();
     await page.waitForTimeout(150);
 
     await expect(page.getByText("Site Planyr hit an error", { exact: false })).toHaveCount(0);
-    await expect(page.getByText(/PASS|SHORT/)).not.toHaveCount(0);
+    await expect(page.getByText(/PASS|SHORT|OVERTOPS/)).not.toHaveCount(0);
     expect(errors, errors.join("\n")).toEqual([]);
   });
 

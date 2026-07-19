@@ -23,7 +23,7 @@
  * Pure + Node-testable; no DOM/network. */
 import { stormIntensity, runoffCoefficient, DESIGN_STORMS } from "./detentionRules.js";
 import { buildStageStorageDischarge } from "./stageStorageDischarge.js";
-import { outletProblems } from "./outletStructure.js";
+import { outletProblems, sizeOrificeForRelease, sizeWeirForRelease, DEFAULT_ORIFICE_C, DEFAULT_WEIR_C } from "./outletStructure.js";
 
 export const DEFAULT_TC_MIN = 15;           // screening time of concentration (small industrial site)
 export const DEFAULT_PRE_RUNOFF_C = 0.3;    // undeveloped Houston-area pasture, screening assumption
@@ -34,6 +34,7 @@ const ROUTE_DURATIONS_MIN = [15, 30, 60, 120, 180];
 
 const num = (v) => (Number.isFinite(v) ? v : null);
 const round = (n, p = 2) => (n == null ? null : Math.round(n * 10 ** p) / 10 ** p);
+const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 
 /* Rational-method peak (cfs): Q = C·i·A, i at the time of concentration (the max-intensity
  * duration for a Rational peak), A in acres (the 1.008 ≈ 1 unit convention). Null on bad
@@ -243,7 +244,14 @@ export function assessRoutedDetention({
     const postUnrouted = rationalPeakCfs({ runoffC: effPostC, returnPeriodYr: T, tcMin, areaAcres: A });
     const routed = routeStorm({ returnPeriodYr: T, ssdCurve: built.curve, runoffC: effPostC, areaAcres: A, tcMin });
     if (preCfs == null || !routed) { perStorm.push({ returnPeriodYr: T, status: "unknown" }); allPass = false; continue; }
-    const pass = routed.routedPeakCfs <= preCfs + PASS_TOL;
+    // B903 — an OVERTOPPED storm can never be a PASS, even when the routed peak (clamped to
+    // the top of the stage-storage-discharge curve, since the model has no data above top of
+    // bank) happens to compare ≤ the pre-development peak. A too-small outlet throttles
+    // outflow so hard that the clamped comparison can look like a pass while the pond is
+    // actually filling past its top of bank — a real correctness bug (confirmed empirically:
+    // a tiny orifice on an undersized basin reported PASS at every storm while overtopping
+    // every one of them). The `overtopped` flag already carries the honest "why" below.
+    const pass = routed.routedPeakCfs <= preCfs + PASS_TOL && !routed.overtopped;
     if (!pass) allPass = false;
     if (routed.overtopped) flags.push("overtopping");
     perStorm.push({
@@ -251,7 +259,10 @@ export function assessRoutedDetention({
       preCfs: round(preCfs),
       postUnroutedCfs: round(postUnrouted),
       routedPeakCfs: round(routed.routedPeakCfs),
-      shortByCfs: pass ? 0 : round(routed.routedPeakCfs - preCfs),
+      // A meaningful cfs shortfall only exists when the comparison itself is meaningful — once
+      // the routing model clamps at the top of bank, "routed − pre" no longer means what it
+      // looks like it means, so LOUD-FAILURE: null, not a fabricated number, for that case.
+      shortByCfs: pass ? 0 : (routed.overtopped ? null : round(routed.routedPeakCfs - preCfs)),
       attenuationPct: postUnrouted > 0 ? round((1 - routed.routedPeakCfs / postUnrouted) * 100, 0) : null,
       criticalDurationMin: routed.criticalDurationMin,
       maxElevFt: round(routed.maxElevFt),
@@ -270,5 +281,137 @@ export function assessRoutedDetention({
     flags: [...new Set(flags)],
     assumptions,
     caveat,
+  };
+}
+
+/* B903 — MULTI-STAGE OUTLET + ALL-STORMS-AT-ONCE Post ≤ Pre. A single orifice sized to one
+ * governing storm can silently fail a DIFFERENT required storm — passing the small, frequent
+ * event while overtopping the rare, large one (confirmed: a too-small orifice throttles
+ * outflow so hard the clamped comparison used to read PASS at every storm while the basin
+ * overtopped every one of them — see the `overtopped` fix above). A real detention pond
+ * answers this with a COMPOUND (stacked) structure: a low-flow orifice governs the small/
+ * frequent storms, a control weir engages higher up to add capacity for the larger storms
+ * without the pond overtopping, and an emergency spillway sits at the design water surface
+ * (the freeboard line) as a safety overflow that isn't itself part of the Post ≤ Pre proof.
+ *
+ * This solver iterates: build the 2–3 stage structure → route EVERY required storm (reusing
+ * assessRoutedDetention, not a parallel routing path) → if any storm fails, enlarge the stage
+ * responsible (the orifice for the smallest/most-restrictive storm, the control weir for a
+ * larger one) → re-route. Converges when ALL required storms pass, or reports the WORST
+ * still-failing storm honestly (by how much, or that it overtops) after a bounded number of
+ * attempts — never a fabricated pass. `criteria.requiredStorms` drives the storm set for
+ * WHATEVER jurisdiction is active (2/10/100, 10/100, a single 100-yr, …) — nothing hardcoded
+ * to one district. Pure — no DOM/network, bounded iteration (default 12 passes). */
+export function autoSizeCompoundOutlet({
+  ring = null, det = null, criteria = null, areaAcres = null, impPct = null,
+  preRunoffC = DEFAULT_PRE_RUNOFF_C, tcMin = DEFAULT_TC_MIN, tailwaterElevFt = null,
+  maxIterations = 12,
+} = {}) {
+  const probe = buildStageStorageDischarge({ ring, det, outlet: null, criteria, tailwaterElevFt });
+  if (!probe.ok) return { ok: false, reason: probe.reason, perStorm: [], outlet: null, iterations: 0 };
+  const A = num(areaAcres);
+  if (A == null || A <= 0) return { ok: false, reason: "no contributing drainage area", perStorm: [], outlet: null, iterations: 0 };
+  const storms = [...new Set((criteria && Array.isArray(criteria.requiredStorms) ? criteria.requiredStorms : []).filter((n) => DESIGN_STORMS.periods[n]))].sort((a, b) => a - b);
+  if (!storms.length) return { ok: false, reason: "no modeled required storms for this jurisdiction", perStorm: [], outlet: null, iterations: 0 };
+
+  const orificeC = criteria?.orificeC?.value ?? DEFAULT_ORIFICE_C;
+  const weirC = criteria?.weirC?.value ?? DEFAULT_WEIR_C;
+  const { floorElevFt: floor, designWsElevFt: designWs } = probe;
+  const columnFt = Math.max(0.5, designWs - floor);
+
+  const pre = storms.map((T) => ({ T, cfs: rationalPeakCfs({ runoffC: preRunoffC, returnPeriodYr: T, tcMin, areaAcres: A }) }));
+  if (pre.some((p) => p.cfs == null || p.cfs <= 0)) {
+    return { ok: false, reason: "could not compute a pre-development peak for a required storm", perStorm: [], outlet: null, iterations: 0 };
+  }
+  const smallest = pre[0], largest = pre[pre.length - 1];
+
+  // The control weir engages a third of the way up the design column — early enough to add
+  // capacity well before the pond nears top of bank under the largest storm. Introduced ONLY
+  // if the orifice alone (even after growing) can't pass every storm — see the loop below; a
+  // pond a single well-sized orifice already satisfies gets exactly that, not an over-built
+  // structure for its own sake.
+  const controlCrest = round(floor + Math.max(1, 0.34 * columnFt), 2);
+  const spillwayCrest = round(designWs, 2); // the freeboard line — a safety overflow, not a Post ≤ Pre stage
+
+  // Seed the orifice the SAME way the proven single-stage auto-size does (B902): target the
+  // smallest (most restrictive) storm's allowable release at HALF the full design-column head
+  // — a defensible screening midpoint, not a fraction of the (much shorter) control-crest
+  // offset, which under-heads the sizing math and comes out badly oversized.
+  let orificeDiamIn = sizeOrificeForRelease({ targetCfs: smallest.cfs, headFt: Math.max(0.5, columnFt / 2), coeff: orificeC })?.diameterIn ?? 6;
+  let weirLenFt = 0; // absent until the loop below finds the orifice alone can't clear a larger storm
+  // A generous, fixed screening default — a safety net sized off the largest required storm's
+  // UNROUTED post-development peak, never iterated (it isn't part of the Post ≤ Pre proof).
+  const spillwayLenFt = Math.max(5, round((2 * (largest.cfs / Math.max(0.05, preRunoffC))) / (weirC * Math.pow(0.5, 1.5)), 1));
+
+  const buildOutlet = () => ({
+    stages: [
+      // Capped at 48 in (4 ft) — a "low-flow orifice" that outgrows this should really be a
+      // weir/riser instead. This also sidesteps a real hydraulics limitation of the simple
+      // submerged-orifice equation (stageDischarge measures head to the CENTROID, invert +
+      // half the diameter): an oversized "orifice" reports ZERO flow until the water surface
+      // clears its own centroid, which for an 8-ft-diameter hole is 4 ft of head — a model
+      // artifact that once sent this solver chasing a phantom capacity shortfall. Past this
+      // cap, the compound structure relies on the control weir for additional capacity instead.
+      { kind: "orifice", invertElevFt: round(floor, 2), diameterIn: round(clamp(orificeDiamIn, 0.5, 48), 2), count: 1, coeff: orificeC, role: "primary" },
+      ...(weirLenFt > 0 ? [{ kind: "weir", crestElevFt: controlCrest, lengthFt: round(clamp(weirLenFt, 0.25, 300), 2), coeff: weirC, role: "control" }] : []),
+      { kind: "weir", crestElevFt: spillwayCrest, lengthFt: spillwayLenFt, coeff: weirC, role: "spillway" },
+    ],
+  });
+
+  let lastAssessed = null;
+  let iterations = 0;
+  for (; iterations < maxIterations; iterations++) {
+    const outlet = buildOutlet();
+    const assessed = assessRoutedDetention({ ring, det, outlet, criteria, ssd: null, areaAcres: A, impPct, preRunoffC, tcMin, requiredStorms: storms, tailwaterElevFt });
+    lastAssessed = { ...assessed, outlet };
+    if (assessed.kind !== "routed") return { ok: false, reason: assessed.reason, perStorm: [], outlet, iterations: iterations + 1 };
+    if (assessed.allPass) {
+      return { ok: true, outlet, perStorm: assessed.perStorm, allPass: true, assumptions: assessed.assumptions, caveat: assessed.caveat, flags: assessed.flags, iterations: iterations + 1 };
+    }
+    // Correct the stage responsible for the WORST-missing storm. The smallest required storm
+    // is the orifice's job alone; a LARGER storm failing while the smallest already passes is
+    // the control weir's job (introducing it at a sensible starting size the first time it's
+    // needed). Direction matters as much as magnitude: overtopping means that stage is too
+    // RESTRICTIVE (not enough capacity — grow it); a routed peak that exceeds the allowable
+    // WITHOUT overtopping means it's too PERMISSIVE (passing the post-dev peak through with too
+    // little attenuation — shrink it). Getting this backwards is exactly what made an earlier
+    // version of this solver diverge instead of converge.
+    const worst = [...assessed.perStorm].filter((s) => s.status !== "pass")
+      .sort((a, b) => (b.overtopped ? 1 : 0) - (a.overtopped ? 1 : 0) || (b.shortByCfs ?? 0) - (a.shortByCfs ?? 0))[0];
+    if (!worst) break; // defensive — allPass was false but nothing failed (shouldn't happen)
+    const targetsOrifice = worst.returnPeriodYr === storms[0];
+    const factor = worst.overtopped
+      ? 1.5
+      : clamp((worst.routedPeakCfs ?? worst.preCfs * 1.3) / Math.max(0.01, worst.preCfs), 1.05, 2.5);
+    const grow = worst.overtopped; // overtop → not enough capacity; short-without-overtop → too much
+    if (targetsOrifice) {
+      orificeDiamIn *= grow ? Math.sqrt(factor) : 1 / Math.sqrt(factor); // Q ∝ A ∝ d² at a given head
+    } else if (weirLenFt > 0) {
+      weirLenFt *= grow ? factor : 1 / factor; // Q ∝ L at a given head
+    } else {
+      // First time a larger storm has failed with the orifice alone — introduce the control
+      // weir sized to add roughly the shortfall at a modest head above its own crest.
+      const neededCfs = Math.max(0.5, (worst.routedPeakCfs ?? worst.preCfs) - worst.preCfs) + worst.preCfs * 0.15;
+      weirLenFt = sizeWeirForRelease({ targetCfs: neededCfs, headFt: Math.max(0.5, designWs - controlCrest), coeff: weirC }) ?? 2;
+    }
+  }
+
+  // Did not converge within the iteration budget — report the WORST still-failing storm
+  // honestly (never a fabricated pass) so the user knows exactly what's still wrong and why.
+  const stillFailing = (lastAssessed?.perStorm || []).filter((s) => s.status !== "pass");
+  const worst = stillFailing.sort((a, b) => (b.shortByCfs ?? Infinity) - (a.shortByCfs ?? Infinity))[0] || null;
+  const reason = worst
+    ? `${worst.returnPeriodYr}-yr storm still ${worst.overtopped ? "overtops the basin" : `short by ${worst.shortByCfs} cfs`} after ${iterations} sizing attempts — this pond likely needs more depth or footprint ("Expand this pond" below), or a higher allowable release if the criteria permit one.`
+    : "could not converge on a compound outlet that passes every required storm.";
+  return {
+    ok: false,
+    outlet: lastAssessed?.outlet || null,
+    perStorm: lastAssessed?.perStorm || [],
+    allPass: false,
+    worstStorm: worst,
+    reason,
+    assumptions: lastAssessed?.assumptions || [],
+    caveat: lastAssessed?.caveat || null,
+    iterations,
   };
 }
