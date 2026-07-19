@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-19 @ `180c0b6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-19 @ `d3a0584` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_287 source files mapped._
+_289 source files mapped._
 
 ## infra
 
@@ -286,15 +286,17 @@ _287 source files mapped._
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
   - _exports_: `_resetCoverageCache`, `_resetRelevancePrefs`, `boundsFromLeaflet`, `boundsIntersect`, `bufferBounds`, `computeCoverage`, `COVERAGE_STATE`, `DEFAULT_RADIUS_MI`, `DEFAULT_RELEVANCE`, `displayCoverage`, `esriExtentToBounds`, `getCachedExtent`, `getNearbyRadiusMiles`, `getRelevanceMode`, `isRegional`, `LAYER_SCOPE`, `layerScope`, `normalizeMode`, `normalizeRadius`, `prefetchExtents`, `regionCoverage`, `RELEVANCE_MODES`, `setLayerExtent`, `setNearbyRadiusMiles`, `setRelevanceMode`, `srPointToLatLon`, `subscribeRelevance`
 - **`src/workspaces/site-planner/lib/curveNumber.js`** — SCS/NRCS Curve-Number runoff method (NEW-B1): composite CN from hydrologic soil group + impervious %, runoff depth/volume from an Atlas-14 rainfall depth, post-minus-pre increase. Pure TR-55.
-  - _exports_: `compositeCn`, `COVER_CN`, `HSG`, `IMPERVIOUS_CN`, `normalizeHsg`, `perviousCn`, `runoffDepthIn`, `screenRunoff`
+  - _exports_: `compositeCn`, `COVER_CN`, `excessRainfallSeries`, `HSG`, `IMPERVIOUS_CN`, `normalizeHsg`, `perviousCn`, `runoffDepthIn`, `screenRunoff`
 - **`src/workspaces/site-planner/lib/deedAlign.js`** — Deed-to-parcel basis-of-bearings fix: rigid rotate+translate best-fit overlay plus theoretical grid-convergence fallback
   - _exports_: `CONFIDENT_FRAC`, `describeRotation`, `gridConvergenceDeg`, `MAX_ALIGN_ROT_DEG`, `openRing`, `ringCentroid`, `rotatePointsAbout`, `solveDeedAlignment`
 - **`src/workspaces/site-planner/lib/demGrid.js`** — Pure DEM grid plumbing (B704/B706): deterministic snapped-tile exportImage requests, LERC sniff/decode to survey-feet with validity mask, masked gaussian smooth, cell-center pixel/mercator/WGS84 transforms, mask-aware bilinear sampling
   - _exports_: `CELL_PX`, `decodeGrid`, `exportUrl`, `gridRequest`, `groundScale`, `latToMercY`, `lngToMercX`, `looksLikeLerc`, `MARGIN_CELLS`, `maskedSmooth`, `MAX_GRID`, `mercPerPx`, `mercToPixel`, `mercXToLng`, `mercYToLat`, `pixelToLatLng`, `pixelToMerc`, `sampleAtLatLng`, `WEB_MERC_R`
 - **`src/workspaces/site-planner/lib/detentionCriteria.js`** — Versioned jurisdiction detention-criteria registry (NEW-A1): cited per-district outlet-hydraulics + pond-geometry criteria (release, storms, freeboard, slope, berm, orifice/weir C, drawdown), referencing DETENTION_RULES for the verified release/storm/freeboard facts; audit guard + user overrides.
   - _exports_: `CRITERIA_JUR_KEYS`, `criteriaAuthorityShort`, `criteriaFor`, `DETENTION_CRITERIA`, `jurKeyForAuthority`, `loadCriteriaOverrides`, `problems`, `requiredStormsFor`, `saveCriteriaOverrides`
+- **`src/workspaces/site-planner/lib/detentionMethod.js`** — Rational-vs-NRCS method-by-area guardrail (B904): picks the runoff method by tributary area against a criteria-configurable ceiling (default 200 ac) and flags when NRCS is indicated but the routing pass still rides the Rational proxy.
+  - _exports_: `DEFAULT_RATIONAL_METHOD_MAX_ACRES`, `selectDetentionMethod`
 - **`src/workspaces/site-planner/lib/detentionRules.js`** — Houston-MSA detention criteria as versioned rule-records + drainage-authority resolver, analysis-tier / hydraulic-regime assessors, and pond auto-size solvers; no volume ships without its rule record
-  - _exports_: `assessAnalysisTier`, `assessHydraulicRegime`, `AUTHORITY_SHORT`, `authorityForJurisdiction`, `BKDD_OVERLAY_DETAIL`, `BKDD_OVERLAY_SHORT`, `computePumpedCredit`, `computeRateBasedDetention`, `computeRequiredDetention`, `COUNTY_AUTHORITY`, `deadStoragePoolDepthFt`, `DESIGN_STORM_PERIODS`, `DESIGN_STORMS`, `DETENTION_AUTHORITY_CHOICES`, `DETENTION_RULES`, `DETENTION_SOURCES`, `effectiveChannelDischarge`, `effectiveReviewer`, `governingRequirement`, `hydrateDrainageContext`, `interpolateCurve`, `MUNICIPAL_OVERLAYS`, `PARCEL_DISTRICT_TYPES`, `pondAutoValues`, `pondDefaultsFor`, `rateFromImpervious`, `resolveDrainageAuthority`, `resolveDrainageContext`, `ruleBadge`, `ruleFor`, `runoffCoefficient`, `SCREENING_CAVEAT`, `screenOutfall`, `slimDrainageContext`, `solvePondDepth`, `solvePondExpansion`, `SQFT_PER_ACRE`, `stormIntensity`, `TIER_THRESHOLDS`, `WATERSHED_OVERLAYS`
+  - _exports_: `assessAnalysisTier`, `assessHydraulicRegime`, `AUTHORITY_SHORT`, `authorityForJurisdiction`, `BKDD_OVERLAY_DETAIL`, `BKDD_OVERLAY_SHORT`, `computePumpedCredit`, `computeRateBasedDetention`, `computeRequiredDetention`, `COUNTY_AUTHORITY`, `deadStoragePoolDepthFt`, `DESIGN_STORM_PERIODS`, `DESIGN_STORMS`, `designStorm24hrDepthIn`, `DETENTION_AUTHORITY_CHOICES`, `DETENTION_RULES`, `DETENTION_SOURCES`, `effectiveChannelDischarge`, `effectiveReviewer`, `governingRequirement`, `hydrateDrainageContext`, `interpolateCurve`, `MUNICIPAL_OVERLAYS`, `PARCEL_DISTRICT_TYPES`, `pondAutoValues`, `pondDefaultsFor`, `rateFromImpervious`, `resolveDrainageAuthority`, `resolveDrainageContext`, `ruleBadge`, `ruleFor`, `runoffCoefficient`, `SCREENING_CAVEAT`, `screenOutfall`, `slimDrainageContext`, `solvePondDepth`, `solvePondExpansion`, `SQFT_PER_ACRE`, `stormIntensity`, `TIER_THRESHOLDS`, `WATERSHED_OVERLAYS`
 - **`src/workspaces/site-planner/lib/dimSlide.js`** — Pure geometry constraining a footprint dimension callout to slide along the long axis, off dog-ear bumps, with collision AABB
   - _exports_: `clampDimOffset`, `DIM_POS_F_DEFAULT`, `DIM_POS_F_ROAD`, `dimNumberBox`, `dimSlideRange`
 - **`src/workspaces/site-planner/lib/dockZones.js`** — Building-anchored dock-zone stack geometry: outward court/trailer/buffer chain, catalog layers, dock-side axes, stranded-zone pruning
@@ -363,6 +365,8 @@ _287 source files mapped._
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `sampleMaapnextWse`
 - **`src/workspaces/site-planner/lib/history.js`** — Pure undo/redo snapshot stack for the planner canvas: keyOf-based no-op dedup, explicit live-state compare, drop-on-abort drag transactions
   - _exports_: `createHistoryStack`
+- **`src/workspaces/site-planner/lib/hyetograph.js`** — NRCS Type III design-storm hyetograph (B904, CE roadmap #2 stage 1): dimensionless Gulf Coast 24-hr mass-curve lookup, scaled to a total design-storm depth + duration to produce a time-distributed rainfall series feeding the pond routing pass.
+  - _exports_: `buildTypeIIIHyetograph`, `TYPE_III_MASS_CURVE`, `typeIIIFraction`
 - **`src/workspaces/site-planner/lib/image.js`** — Read an image File to a data URL with natural dimensions, downscaling large screenshots to JPEG to fit the localStorage scenario budget
   - _exports_: `loadAndDownscaleImage`
 - **`src/workspaces/site-planner/lib/imagePdf.js`** — Pure dependency-free JPEG-to-one-page-PDF wrapper at an exact physical page size, so exports carry no browser print-dialog chrome

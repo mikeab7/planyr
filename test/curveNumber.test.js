@@ -1,6 +1,6 @@
 // NEW-B1 — SCS Curve-Number runoff method. Pure — no browser. Hand-checked TR-55 values.
 import { describe, it, expect } from "vitest";
-import { normalizeHsg, perviousCn, compositeCn, runoffDepthIn, screenRunoff, IMPERVIOUS_CN } from "../src/workspaces/site-planner/lib/curveNumber.js";
+import { normalizeHsg, perviousCn, compositeCn, runoffDepthIn, screenRunoff, excessRainfallSeries, IMPERVIOUS_CN } from "../src/workspaces/site-planner/lib/curveNumber.js";
 
 describe("normalizeHsg", () => {
   it("accepts A-D and drained dual groups; rejects junk", () => {
@@ -60,5 +60,51 @@ describe("screenRunoff — composite CN → depth → volume", () => {
     expect(r.runoffVolumeCf).toBeNull();
     expect(screenRunoff({ group: "C", impPct: 90, rainfallIn: null, areaAcres: 10 }).flags).toContain("rainfall-unknown");
     expect(screenRunoff({ group: "C", impPct: 90, rainfallIn: 12, areaAcres: 0 }).flags).toContain("area-unknown");
+  });
+});
+
+// B904 — a rainfall hyetograph → a runoff (rainfall-excess) hyetograph: the standard NRCS
+// input to a unit-hydrograph convolution.
+describe("excessRainfallSeries — cumulative CN applied per timestep, then differenced", () => {
+  const series = [
+    { tMin: 0, cumulativeIn: 0 },
+    { tMin: 60, cumulativeIn: 1 },
+    { tMin: 120, cumulativeIn: 3 },
+    { tMin: 180, cumulativeIn: 5 },
+  ];
+
+  it("cumulative excess at each step matches runoffDepthIn(cumulativeIn, cn) directly", () => {
+    const r = excessRainfallSeries({ series, cn: 80 });
+    expect(r).not.toBeNull();
+    for (const pt of r.series) {
+      const src = series.find((s) => s.tMin === pt.tMin);
+      expect(pt.cumulativeExcessIn).toBeCloseTo(runoffDepthIn(src.cumulativeIn, 80), 3);
+    }
+  });
+
+  it("incremental excess sums back to the total cumulative excess", () => {
+    const r = excessRainfallSeries({ series, cn: 80 });
+    const sum = r.series.reduce((s, p) => s + p.incrementalExcessIn, 0);
+    expect(sum).toBeCloseTo(r.totalExcessIn, 2);
+  });
+
+  it("no runoff below the initial abstraction — early increments are 0 while cumulative rainfall is small", () => {
+    // CN 80 → S=2.5, 0.2S=0.5 — 0.3 in of cumulative rainfall hasn't cleared it yet.
+    const belowAbstraction = [{ tMin: 0, cumulativeIn: 0 }, { tMin: 30, cumulativeIn: 0.3 }, { tMin: 60, cumulativeIn: 1 }];
+    const r = excessRainfallSeries({ series: belowAbstraction, cn: 80 });
+    expect(r.series[1].cumulativeExcessIn).toBe(0);
+    expect(r.series[1].incrementalExcessIn).toBe(0);
+    expect(r.series[2].cumulativeExcessIn).toBeGreaterThan(0); // 1 in clears the 0.5-in abstraction
+  });
+
+  it("incremental excess is never negative even though the underlying curve is convex", () => {
+    const r = excessRainfallSeries({ series, cn: 60 });
+    expect(r.series.every((p) => p.incrementalExcessIn >= 0)).toBe(true);
+  });
+
+  it("LOUD-FAILURE: missing series / bad CN → null", () => {
+    expect(excessRainfallSeries({ series: [], cn: 80 })).toBeNull();
+    expect(excessRainfallSeries({ series, cn: 0 })).toBeNull();
+    expect(excessRainfallSeries({ series, cn: null })).toBeNull();
   });
 });

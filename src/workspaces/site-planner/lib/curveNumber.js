@@ -105,3 +105,32 @@ export function screenRunoff({ group, impPct, cover = "openSpaceGood", rainfallI
     caveat: "SCS Curve-Number screening — single-storm runoff depth, not a routed detention volume. Confirm with your engineer.",
   };
 }
+
+/* B904 — a time-distributed RAINFALL hyetograph (e.g. lib/hyetograph.js's Type III curve,
+ * or any {tMin, cumulativeIn} series) → a time-distributed RUNOFF (rainfall-EXCESS)
+ * hyetograph, the standard NRCS input to a unit-hydrograph convolution: apply the SAME
+ * TR-55 cumulative equation (runoffDepthIn) at every timestep's CUMULATIVE rainfall (not
+ * per-increment — the CN equation is inherently cumulative, since the initial-abstraction
+ * term 0.2S must be satisfied once before any runoff begins), then difference consecutive
+ * cumulative-excess values to get the INCREMENTAL excess each timestep contributes. This
+ * is the excess-rainfall step; turning it into a runoff HYDROGRAPH (unit-hydrograph
+ * convolution) is a separate, not-yet-built stage — see hyetograph.js's module doc.
+ *
+ * Returns { series:[{tMin, cumulativeExcessIn, incrementalExcessIn}], cn, totalExcessIn }
+ * or null when the CN/rainfall series is missing (LOUD-FAILURE — never a fabricated
+ * runoff). Pure. */
+export function excessRainfallSeries({ series, cn } = {}) {
+  const n = Number(cn);
+  if (!Array.isArray(series) || !series.length || !Number.isFinite(n) || n <= 0 || n > 100) return null;
+  let prevExcess = 0;
+  const out = [];
+  for (const pt of series) {
+    const cumIn = Number(pt.cumulativeIn);
+    if (!Number.isFinite(cumIn) || cumIn < 0) return null;
+    const cumExcess = runoffDepthIn(cumIn, n) ?? 0;
+    const incrementalExcessIn = Math.round(Math.max(0, cumExcess - prevExcess) * 10000) / 10000;
+    out.push({ tMin: pt.tMin, cumulativeExcessIn: Math.round(cumExcess * 10000) / 10000, incrementalExcessIn });
+    prevExcess = cumExcess;
+  }
+  return { series: out, cn: n, totalExcessIn: out.length ? out[out.length - 1].cumulativeExcessIn : 0 };
+}

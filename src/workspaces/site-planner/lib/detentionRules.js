@@ -1128,12 +1128,26 @@ export const DESIGN_STORMS = {
   transcribed: true,
   secondarySource: true, // area-representative — confirm against the official grid for the site
   periods: {
-    2: [[5, 5.5], [10, 4.6], [15, 4.0], [30, 2.9], [60, 1.9], [120, 1.2], [180, 0.9]],
-    10: [[5, 7.2], [10, 6.1], [15, 5.3], [30, 3.9], [60, 2.6], [120, 1.7], [180, 1.3]],
-    25: [[5, 8.3], [10, 7.0], [15, 6.2], [30, 4.6], [60, 3.1], [120, 2.0], [180, 1.5]],
-    100: [[5, 9.8], [10, 8.4], [15, 7.4], [30, 5.6], [60, 3.9], [120, 2.6], [180, 2.0]],
+    // B904 — a 1440-min (24-hr) row added to each period: the TOTAL 24-hr depth an NRCS
+    // Type III hyetograph distributes over the storm (lib/hyetograph.js). Same
+    // area-representative / secondarySource transcription as every other duration here —
+    // 2/10/25/100-yr 24-hr depths ≈ 4.3/6.9/8.4/13.0 in, consistent with the existing
+    // shorter-duration rows' intensity trend (verify against the official Atlas-14 grid).
+    2: [[5, 5.5], [10, 4.6], [15, 4.0], [30, 2.9], [60, 1.9], [120, 1.2], [180, 0.9], [1440, 0.18]],
+    10: [[5, 7.2], [10, 6.1], [15, 5.3], [30, 3.9], [60, 2.6], [120, 1.7], [180, 1.3], [1440, 0.29]],
+    25: [[5, 8.3], [10, 7.0], [15, 6.2], [30, 4.6], [60, 3.1], [120, 2.0], [180, 1.5], [1440, 0.35]],
+    100: [[5, 9.8], [10, 8.4], [15, 7.4], [30, 5.6], [60, 3.9], [120, 2.6], [180, 2.0], [1440, 0.54]],
   },
 };
+
+/* Total 24-hr design-storm DEPTH (inches) for a return period — reads the 1440-min row of
+ * the SAME transcribed Atlas-14 IDF table `stormIntensity` uses (depth = intensity ×
+ * duration), so this can never disagree with the shorter-duration intensities. Feeds the
+ * NRCS Type III hyetograph (lib/hyetograph.js). Null for an unmodeled return period. Pure. */
+export function designStorm24hrDepthIn(returnPeriodYr) {
+  const si = stormIntensity(returnPeriodYr, 1440);
+  return si ? Math.round(si.inPerHr * 24 * 100) / 100 : null;
+}
 
 /* Picker order, loudest storm first. */
 export const DESIGN_STORM_PERIODS = [100, 25, 10, 2];
