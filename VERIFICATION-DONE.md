@@ -1439,3 +1439,76 @@ _Move items here with the date and who/what checked them._
 - **Nothing pending.**
 - Cadence: once — CLOSED.
 
+### V315 — B691(×2): zero FLOODZONE CORS console errors on a fresh Fort Bend session; contours row healthy via the proxy ✅ CONFIRMED PASS 2026-07-19 (live, planyr.io, hard-reloaded Bain — a real Fort Bend site)
+- **Added** 2026-07-14 · **Cadence** once · references **B691**.
+- **Verified here (sandbox, 2026-07-14):** probeService's noCors path never touches the host directly (URL-recording fetch mock), a proxy 404/throw/kill-switch degrades to the optimistic add, an ArcGIS error body stays an honest failure — 8 unit tests.
+- **✅ Live result (2026-07-19):** hard-reloaded Bain (real Fort Bend site) and watched the browser console from page load — zero FLOODZONE or CORS errors of any kind.
+- **Nothing pending.**
+- Cadence: once — CLOSED.
+
+### V323 — B829: reload Bain → the detention verdict matches the live check, never a gross-credited surplus ✅ CONFIRMED PASS 2026-07-19 (live, planyr.io, signed in, Bain)
+- **Added** 2026-07-14 · **Cadence** once · references **B829**.
+- **Verified here (sandbox, 2026-07-14):** `test/pondLedger.test.js` — slim→restore round-trip exactness across a WSE sweep, the invariant *restored usable is never a number > live usable*, null poisoning with even one unknown pond, gross unaffected; headless `verify-remembered-drainage.mjs` cases C + D.
+- **✅ Live result (2026-07-19):** Bain's live Yield panel Detention verdict currently reads "SHORT −54.28 ac-ft req 76.74" — the exact figure has drifted slightly from the −54.73 in the original spec (presumably real data changed since the item was written), but the qualitative behavior the item guards is intact: a SHORT verdict, never a gross-credited surplus.
+- **Nothing pending.**
+- Cadence: once — CLOSED.
+
+### V367 — B886: public-data screening PHASE 1 (water & sewer CCN) — Site Analysis names the certificated water/sewer provider or an honest "none" flag ✅ CONFIRMED PASS 2026-07-19 (live, planyr.io, Bain, Site Analysis screening pass)
+- **Added** 2026-07-18 · **Cadence** once · references **B886**.
+- **Verified here (sandbox, 2026-07-18):** `test/ccnClassify.test.js` (utility-kind inference, info-both-outcomes, pending/straddle, registry coverage guards) + the `runSiteAnalysis` orchestration test.
+- **✅ Live result (2026-07-19):** live Site Analysis screening pass on Bain — CCN water and sewer cards both correctly read "no certificated provider on file."
+- **Not separately re-tested live this round:** a site WITH a named certificated provider (city/MUD/WSC kind inference), the pending-docket flag, and the Layers-panel overlay paint — this pass exercised the "none" honest-flag path on Bain, which is the sibling half.
+- Cadence: once — CLOSED.
+
+### V368 — B887: public-data screening PHASE 2 (environmental contamination pre-screen) — TCEQ LPST + EPA Superfund/RCRA cards ✅ CONFIRMED PASS 2026-07-19 (live, planyr.io, Bain, Site Analysis screening pass)
+- **Added** 2026-07-18 · **Cadence** once · references **B887**.
+- **Verified here (sandbox, 2026-07-18):** `test/proximityScreen.test.js` (10) + the `siteAnalysis.js` proximity block + orchestration test.
+- **✅ Live result (2026-07-19):** live Site Analysis screening pass on Bain — LPST card read "1 LPST site within 1 mi"; EPA Superfund/RCRA card read "no mapped Superfund/RCRA."
+- **Not separately re-tested live this round:** an on-site/adjacent source reading "on/under the site," and the `env_lpst`/`env_cleanups` Layers overlays painting — Bain's result exercised the present + absent honest-count paths, not the on-site case.
+- Cadence: once — CLOSED.
+
+### V370 — B889: public-data screening PHASE 3 (Houston-area active surface growth faults) ✅ CONFIRMED PASS 2026-07-19 (live, planyr.io, Bain, Site Analysis screening pass)
+- **Added** 2026-07-18 · **Cadence** once · references **B889**.
+- **Verified here (sandbox, 2026-07-18):** `test/proximityScreen.test.js` line-distance block (segment intersect/distance, path-crosses-ring = 0) + `siteAnalysis.js` orchestration.
+- **✅ Live result (2026-07-19):** live Site Analysis screening pass on Bain — "Active surface faults" card read "none found."
+- **Not separately re-tested live this round:** a site with a fault trace crossing/near the parcel (the "crosses the site" / "N within a quarter-mile" copy) and the `faults` Layers overlay paint, plus the B888-scoped per-element straddle follow-up.
+- Cadence: once — CLOSED.
+
+### V371 — B890: public-data screening PHASE 4 (RRC oil & gas wells) — status breakdown + offset/replug risk flag ✅ CONFIRMED PASS 2026-07-19 (live, planyr.io, Bain, Site Analysis screening pass)
+- **Added** 2026-07-18 · **Cadence** once · references **B890**.
+- **Verified here (sandbox, 2026-07-18):** `test/wellStatus.test.js` (classifyWell crosswalk + `summarizeWells` breakdown/on-site risk/capped-sample note) + rewritten `siteAnalysis.js` well tests.
+- **✅ Live result (2026-07-19):** live Site Analysis screening pass on Bain — "Oil & gas wells" card rendered in detail: "7 wells within 0.25 mi — 3 plugged/abandoned, 2 producing, 2 on-site flagged as offset/replug risk."
+- **Nothing pending** — this live result exercises the on-site offset/replug flag directly, the item's headline claim.
+- Cadence: once — CLOSED.
+
+### V372 — B891: public-data screening PHASE 5 (electric power) — transmission-line easement + nearest-substation cards ✅ CONFIRMED PASS 2026-07-19 (live, planyr.io, Bain, Site Analysis screening pass)
+- **Added** 2026-07-18 · **Cadence** once · references **B891**.
+- **Verified here (sandbox, 2026-07-18):** `test/powerScreen.test.js` (voltage/owner/name cleaners + transmission crossing-vs-nearby + substation service-proxy) + orchestration test.
+- **✅ Live result (2026-07-19):** live Site Analysis screening pass on Bain — "Electric transmission" card read "no transmission lines within a quarter mile"; "Electric substation (nearest)" card read "nearest substation ~5250 ft."
+- **Not separately re-tested live this round:** a site with a transmission line actually crossing the parcel (the "likely a transmission easement" flag) and the `hifld_tx`/`hifld_substations` Layers overlays painting.
+- Cadence: once — CLOSED.
+
+### V373 — B892: public-data screening PHASE 6 (access tier) — traffic (AADT), rail access, airport proximity (FAA Part 77) ✅ CONFIRMED PASS 2026-07-19 (live, planyr.io, Bain, Site Analysis screening pass)
+- **Added** 2026-07-18 · **Cadence** once · references **B892**.
+- **Verified here (sandbox, 2026-07-18):** `test/accessScreen.test.js` (mark/type labels + AADT/rail/airport summaries) + orchestration route in `test/siteAnalysis.test.js`.
+- **✅ Live result (2026-07-19):** live Site Analysis screening pass on Bain — all three cards rendered plausibly: "~7,060 vehicles/day on FM1463" (Traffic AADT), "no rail within 0.5 mi" (Rail access), "no airport within 3 mi" (Airport proximity, no Part 77 caution raised — correct, Bain is not near Hobby/IAH).
+- **Not separately re-tested live this round:** a rail-crossing site (the "rail line crosses/abuts the site" flag) and a Hobby/IAH-adjacent site (the Part-77 caution), plus the `txdot_aadt`/`bts_rail`/`faa_airports` Layers overlays painting.
+- Cadence: once — CLOSED.
+
+### V335 — B850: the Scheduler shows NO "open in another tab" banner at all (it's genuinely safe for two tabs) ✅ CONFIRMED PASS 2026-07-19 (two signed-in tabs, live on planyr.io, Goose Creek schedule)
+- **Added** 2026-07-15 · **Cadence** once · references **B850**.
+- **Verified here (sandbox, 2026-07-15, two passes):** the Scheduler's own 20s + on-focus multi-device live-refresh poll + save-time concurrency guard (blocks, never silently applies, a stale write) makes the outer cross-tab banner unnecessary; `Scheduler.jsx` passes `multiEditOk` for full suppression. 3 source-guard tests in `test/bugHuntGuards.test.js`.
+- **Live partial result (2026-07-17, Goose Creek):** two fresh signed-in tabs — neither showed a cross-tab banner.
+- **✅ Live result (2026-07-19):** opened the same Goose Creek schedule in two signed-in tabs simultaneously — no "open in another tab" banner appeared in either tab, confirmed via both the page text and an accessibility-tree check for any banner element.
+- **Not separately re-tested live this round:** the real-conflict path (editing in both tabs within a few seconds, confirming the losing tab's "unsaved changes" wording + Version History recovery) and the Doc Review banner-unchanged comparison (avoided to not touch real markup data).
+- Cadence: once — CLOSED.
+
+### V299 — B801: the header badge reads "…· Fort Bend County · Katy ISD" on Bain (no ⚑) ⚠️ SUPERSEDED by V360 / B879
+- **Added** 2026-07-12 · **Cadence** once · references **B801** (superseded by **B879**).
+- ⚠️ **Superseded, investigated 2026-07-19 as a "likely real bug" report — found to be a stale spec, not a bug.** B801 (2026-07-12) originally shipped the passive header badge appending the school district, which is what this item's expected text (above) still reflects. Five days later **B879 (2026-07-17)** made a deliberate, LATER owner decision to drop the school district from the always-on passive badge entirely — owner asked to "stop showing the school district… in the passive jurisdiction badge" because it "clutters the one-line summary" on what's meant to be an industrial-development screen. Confirmed in the current code: `SitePlanner.jsx`'s badge-building effect (`SitePlanner.jsx:8216-8221`) now requests only `roles: ["county","city","etj"]` — ISD is deliberately excluded from the identify call that feeds the badge, for every site, not just ones lacking a district. `formatJurisdictionBadge` itself is untouched and still supports an ISD segment (`lib/jurisdiction.js:472`) — it's simply never asked for one by this call site anymore.
+- **This explains the reporter's exact observation, and it isn't a bug:** the Site Analysis "Jurisdiction" card and the opt-in "⚖︎ Jurisdiction & road authority" detail panel both still resolve and display "School district: Katy ISD" correctly (B879 only touched the always-on header badge, per its own text: "Site Analysis STILL lists the school district — only the always-on badge drops it") — exactly matching what was reported. The badge renderer isn't failing to read a resolved field or hitting a stray suppression condition; it never queries the field at all anymore, by design.
+- **No code change made** — reverting the badge to show ISD again would undo a deliberate, later owner decision (B879); that would need an explicit new ask, not a "bug fix."
+- **The current, correct live-check for the badge is V360** (open in `VERIFICATION.md`): confirms the badge reads "City · County" with NO school district, and that narrowing the window never overlaps the badge with the breadcrumb.
+- Kept here as the honest record of what the badge originally shipped to look like (B801, 2026-07-12) before B879 (2026-07-17) revised the decision.
+- Cadence: once — CLOSED (superseded, not passed).
+
