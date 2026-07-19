@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-19 @ `d3a0584` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-19 @ `532f38a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_289 source files mapped._
+_290 source files mapped._
 
 ## infra
 
@@ -501,6 +501,8 @@ _289 source files mapped._
   - _exports_: `contourLayer`, `fetchSiteGrid`, `flowLayer`, `sampleTerrainGrids`, `siteGridZoom`, `TERRAIN_MIN_ZOOM`
 - **`src/workspaces/site-planner/lib/terrainWorker.js`** — Terrain Web Worker (B704/B705): LERC decode -> masked smooth -> contours + flow arrows off the main thread; imports pure modules only (guarded by test/terrainWorker.test.js)
   - _exports_: _(none)_
+- **`src/workspaces/site-planner/lib/timeOfConcentration.js`** — Computed time of concentration (B905, CE roadmap #3): Kirpich formula + a criteria-configurable urban adjustment/floor, with an area-based flow-path-length fallback and a default-slope fallback when real geometry/grade aren't resolved — replaces the flat 15-min screening assumption everywhere Tc feeds the routing chain.
+  - _exports_: `computeTimeOfConcentration`, `DEFAULT_FLOW_PATH_K_FACTOR`, `DEFAULT_KIRPICH_URBAN_ADJUSTMENT`, `DEFAULT_TC_DEFAULT_SLOPE_PCT`, `DEFAULT_TC_FLOOR_MIN`, `estimateFlowPathLengthFt`, `kirpichTcMin`
 - **`src/workspaces/site-planner/lib/titleReader.js`** — Client-side title-commitment reader: sends an uploaded PDF to the Claude API with a Schedule-B JSON schema to extract exceptions plus the metes-and-bounds legal description
   - _exports_: `fileToBase64`, `getKey`, `KEY_LS`, `readTitlePDF`, `setKey`
 - **`src/workspaces/site-planner/lib/twdbWells.js`** — TWDB Groundwater Database observation-wells interface (NEW-B6): field-map-driven nearest-well depth-to-water parser + bounded-fetch client; endpoint pending live confirmation (honest "pending", never fabricated). Pure parser.
