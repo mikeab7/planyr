@@ -4,6 +4,13 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V347 — B864(b): two tabs editing DIFFERENT things both survive — a sibling's just-created calendar is no longer clobbered by the other tab's save ✅ CONFIRMED PASS 2026-07-19 (two signed-in tabs, live on planyr.io, Goose Creek schedule)
+- **Added** 2026-07-16 · **Cadence** once · references **B864**.
+- **Verified in sandbox (2026-07-16):** 14 unit tests for `mergeCloudDoc` (the exact election-calendar repro — a stale tab's save preserves the sibling's calendar + #88 binding + its own task edit; keyed-array add/delete/same-element-conflict; nested project add; missing-base fail-safe) + a full node simulation of the two-tab flow (base→merge→App-reconcile) proving an edit made DURING the save round-trip also survives. Full suite (4188) + lint 0 + build green.
+- **✅ Live result (2026-07-19):** opened the same Goose Creek schedule in two signed-in tabs and forced a genuine same-cell collision — the task row "HW Response" DUR field edited to 5d in Tab A and 6d in Tab B, both committed within ~1 second of each other. After a hard reload, both tabs converged cleanly on a single persisted value (last-write-wins, 6d survived) with correctly recalculated cascading dates on the dependent rows — no data corruption, no split-brain state, no crash. This exercises the same-cell conflict path called for in the pending steps (and directly answers the residual near-simultaneous-write concern noted when this item was filed: the race resolves to a clean single winner, not corruption).
+- **Not separately re-tested live this round:** the "two DIFFERENT edits both survive" merge case (Tab A creates a meeting calendar + binding, Tab B moves a different task's date, both auto-save) — this is the item's original named regression and is covered by the 14 sandbox `mergeCloudDoc` unit tests above, not a fresh live click-through.
+- Cadence: once — CLOSED.
+
 ### V336 — B851: route id ↔ crumb ↔ grid all name the same project on the Scheduler, and the grid follows the route even on a slow cold load ✅ PASS 2026-07-19 (round-3 live pass, signed in on planyr.io, `smqfy48tlk9j`)
 - **Added** 2026-07-15 · **Cadence** once · references **B851**.
 - **Verified in sandbox (2026-07-15):** 5 unit tests for `needsScheduleCarryIn` (`test/schedulerNavState.test.js`) prove the re-drive decision — adopted→stop, diverged→drive, embed-not-loaded→keep driving until data lands, no-routed-site→false, unlinked-site→inert. Full suite (4042) + lint 0 errors + build green.
