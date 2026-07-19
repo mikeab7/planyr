@@ -8,6 +8,7 @@ import {
   routeStorm,
   assessRoutedDetention,
   suggestedPreDevReleaseCfs,
+  autoSizeCompoundOutlet,
   DEFAULT_PRE_RUNOFF_C,
   DEFAULT_TC_MIN,
 } from "../src/workspaces/site-planner/lib/pondRouting.js";
@@ -145,5 +146,134 @@ describe("suggestedPreDevReleaseCfs — pre-dev peak as the auto-suggested relea
     expect(suggestedPreDevReleaseCfs({ requiredStorms: [10, 100], areaAcres: null })).toBeNull();
     expect(suggestedPreDevReleaseCfs({ requiredStorms: [10, 100], areaAcres: 0 })).toBeNull();
     expect(suggestedPreDevReleaseCfs()).toBeNull();
+  });
+});
+
+// B903 — a too-small outlet throttles outflow so hard that the CLAMPED routed peak (the
+// routing model has no data above top of bank) can compare ≤ the pre-development peak even
+// while the basin is actively overtopping. That used to read PASS; it must read SHORT — the
+// exact "a pond that passes the small storm but fails a larger one" bug the compound-outlet
+// solver exists to fix. A 300x300 ft, 8-ft-deep pond (small footprint, ~2 ac) draining a
+// realistic 45-ac watershed with only a single 10-in floor orifice: the 10-yr storm passes
+// cleanly (plenty of headroom), the 100-yr storm overtops the basin — confirmed empirically
+// against the real routing engine before locking in this fixture.
+describe("assessRoutedDetention — overtopping forces a FAIL, even when the clamped peak compares low", () => {
+  const SQ2 = [{ x: 0, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 300 }, { x: 0, y: 300 }];
+  const DET2 = { depth: 8, freeboard: 1, slope: 3, tobElev: 100 }; // floor 92, design WS 99
+  const criteria = { requiredStorms: [10, 100], orificeC: { value: 0.6 }, weirC: { value: 3.33 } };
+  const outlet = { stages: [{ kind: "orifice", invertElevFt: 92, diameterIn: 10, count: 1, coeff: 0.6 }] };
+
+  it("the smaller storm passes without overtopping", () => {
+    const res = assessRoutedDetention({ ring: SQ2, det: DET2, outlet, criteria, areaAcres: 45, impPct: 90, preRunoffC: 0.3, tcMin: 15 });
+    const s10 = res.perStorm.find((s) => s.returnPeriodYr === 10);
+    expect(s10.status).toBe("pass");
+    expect(s10.overtopped).toBe(false);
+  });
+
+  it("the larger storm overtops and is correctly flagged SHORT, not PASS, despite a low routed cfs", () => {
+    const res = assessRoutedDetention({ ring: SQ2, det: DET2, outlet, criteria, areaAcres: 45, impPct: 90, preRunoffC: 0.3, tcMin: 15 });
+    const s100 = res.perStorm.find((s) => s.returnPeriodYr === 100);
+    expect(s100.overtopped).toBe(true);
+    expect(s100.routedPeakCfs).toBeLessThan(s100.preCfs); // the naive comparison alone would say PASS
+    expect(s100.status).toBe("short"); // the fix: overtopping overrides that naive comparison
+    expect(s100.shortByCfs).toBeNull(); // LOUD-FAILURE: no fabricated cfs number once clamped
+  });
+
+  it("the OVERALL verdict is FAIL when only the larger storm overtops — one bad storm can't hide behind one that passed", () => {
+    const res = assessRoutedDetention({ ring: SQ2, det: DET2, outlet, criteria, areaAcres: 45, impPct: 90, preRunoffC: 0.3, tcMin: 15 });
+    expect(res.allPass).toBe(false);
+    expect(res.flags).toContain("overtopping");
+  });
+});
+
+// B903 — MULTI-STAGE OUTLET + ALL-STORMS-AT-ONCE auto-size solver.
+describe("autoSizeCompoundOutlet — solves a compound outlet so ALL required storms pass at once", () => {
+  const SQ2 = [{ x: 0, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 300 }, { x: 0, y: 300 }];
+  const DET2 = { depth: 8, freeboard: 1, slope: 3, tobElev: 100 };
+  const criteria2 = { requiredStorms: [10, 100], orificeC: { value: 0.6 }, weirC: { value: 3.33 } };
+
+  it("a feasible pond converges to a structure that passes EVERY required storm", () => {
+    const r = autoSizeCompoundOutlet({ ring: SQ2, det: DET2, criteria: criteria2, areaAcres: 45, impPct: 90, preRunoffC: 0.3, tcMin: 15 });
+    expect(r.ok).toBe(true);
+    expect(r.allPass).toBe(true);
+    expect(r.perStorm.length).toBe(2);
+    expect(r.perStorm.every((s) => s.status === "pass")).toBe(true);
+    // The single-orifice B900/B902 fixture at this same target (10 in) overtopped the 100-yr —
+    // the solver must have sized something different (bigger) to actually pass both.
+    expect(r.outlet.stages[0].kind).toBe("orifice");
+    expect(r.outlet.stages[0].diameterIn).toBeGreaterThan(10);
+    // An emergency spillway is always present, at the design water surface (freeboard line).
+    const spillway = r.outlet.stages.find((s) => s.role === "spillway");
+    expect(spillway).toBeTruthy();
+    expect(spillway.crestElevFt).toBeCloseTo(99, 3);
+  });
+
+  it("introduces a genuine SECOND (control) stage when a single orifice alone can't clear every storm", () => {
+    // A 2/10/100-yr criteria (BKDD-like — the 2-yr allowable is far more restrictive than the
+    // 100-yr's) over a big enough watershed that the orifice sized for the 2-yr storm needs a
+    // control weir's help to also clear the 100-yr without overtopping.
+    const criteria3 = { requiredStorms: [2, 10, 100], orificeC: { value: 0.6 }, weirC: { value: 3.33 } };
+    const SQ3 = [{ x: 0, y: 0 }, { x: 250, y: 0 }, { x: 250, y: 250 }, { x: 0, y: 250 }];
+    const DET3 = { depth: 6, freeboard: 1, slope: 3, tobElev: 100 };
+    const r = autoSizeCompoundOutlet({ ring: SQ3, det: DET3, criteria: criteria3, areaAcres: 35, impPct: 90, preRunoffC: 0.3, tcMin: 15 });
+    expect(r.ok).toBe(true);
+    expect(r.allPass).toBe(true);
+    expect(r.perStorm.length).toBe(3);
+    const control = r.outlet.stages.find((s) => s.role === "control");
+    expect(control).toBeTruthy();
+    expect(control.kind).toBe("weir");
+    expect(control.crestElevFt).toBeGreaterThan(r.outlet.stages[0].invertElevFt);
+  });
+
+  it("respects WHATEVER jurisdiction's required storms are passed in — a single-storm criteria needs no control stage", () => {
+    const oneStorm = { requiredStorms: [100], orificeC: { value: 0.6 }, weirC: { value: 3.33 } };
+    const r = autoSizeCompoundOutlet({ ring: SQ2, det: DET2, criteria: oneStorm, areaAcres: 20, impPct: 90, preRunoffC: 0.3, tcMin: 15 });
+    expect(r.ok).toBe(true);
+    expect(r.perStorm.length).toBe(1);
+    expect(r.outlet.stages.find((s) => s.role === "control")).toBeFalsy();
+  });
+
+  it("LOUD-FAILURE: a genuinely infeasible pond (tiny footprint, huge watershed) reports honest failure, never a fabricated pass", () => {
+    const r = autoSizeCompoundOutlet({ ring: SQ2, det: DET2, criteria: criteria2, areaAcres: 400, impPct: 90, preRunoffC: 0.3, tcMin: 15 });
+    expect(r.ok).toBe(false);
+    expect(r.allPass).toBe(false);
+    expect(r.worstStorm).toBeTruthy();
+    expect(r.worstStorm.status).not.toBe("pass");
+    expect(r.reason).toMatch(/storm still/);
+    expect(r.reason.toLowerCase()).toMatch(/expand this pond|deeper|footprint/);
+    // Even on failure, the best attempt is returned (never null) so the UI can show it.
+    expect(r.outlet).toBeTruthy();
+    expect(r.perStorm.length).toBe(2);
+  });
+
+  it("LOUD-FAILURE: an unanchored pond / missing drainage area / no required storms refuse cleanly", () => {
+    expect(autoSizeCompoundOutlet({ ring: SQ2, det: { depth: 8, freeboard: 1, slope: 3 }, criteria: criteria2, areaAcres: 20, impPct: 90 }).ok).toBe(false);
+    expect(autoSizeCompoundOutlet({ ring: SQ2, det: DET2, criteria: criteria2, areaAcres: null, impPct: 90 }).ok).toBe(false);
+    expect(autoSizeCompoundOutlet({ ring: SQ2, det: DET2, criteria: { requiredStorms: [] }, areaAcres: 20, impPct: 90 }).ok).toBe(false);
+  });
+
+  // B903 — the orifice equation measures head to the CENTROID (invert + half the diameter),
+  // so an unrealistically large "orifice" reports ZERO flow until the water surface clears
+  // its own centroid (an 8-ft-diameter hole needs 4 ft of head before this simplified model
+  // shows any discharge at all) — a real bug this solver hit while chasing a huge target
+  // release on a small pond: it grew the orifice past the point where the model behaves
+  // sensibly, producing a nonsensical near-zero routed peak that (wrongly) read as PASS.
+  // Fixed by capping the orifice role at a physically sane 48 in — past that, the compound
+  // structure leans on the control weir instead of an ever-growing single "orifice."
+  it("never proposes a physically nonsensical oversized orifice (LOUD-FAILURE over a model artifact)", () => {
+    // A huge drainage area with almost no impervious cover relative to a modest pond: a real,
+    // if unusual, screening input that this solver has actually hit live.
+    const SQ4 = [{ x: 0, y: 0 }, { x: 580, y: 0 }, { x: 580, y: 580 }, { x: 0, y: 580 } ];
+    const DET4 = { depth: 7, freeboard: 1, slope: 3, tobElev: 100 };
+    const criteria4 = { requiredStorms: [10, 100], orificeC: { value: 0.6 }, weirC: { value: 3.33 } };
+    const r = autoSizeCompoundOutlet({ ring: SQ4, det: DET4, criteria: criteria4, areaAcres: 900, impPct: 0 });
+    const orifice = r.outlet.stages.find((s) => s.role === "primary");
+    expect(orifice.diameterIn).toBeLessThanOrEqual(48);
+    // Whatever the verdict, every reported figure must be internally consistent — a claimed
+    // PASS can never ride on a routed peak that's suspiciously exactly zero against a real
+    // nonzero post-development peak (the tell for this exact model artifact).
+    for (const s of r.perStorm) {
+      if (s.postUnroutedCfs > 1 && s.status === "pass") expect(s.routedPeakCfs).toBeGreaterThan(0);
+    }
   });
 });

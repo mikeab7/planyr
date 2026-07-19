@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-19 @ `ff4fd15` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-19 @ `180c0b6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -396,7 +396,7 @@ _287 source files mapped._
 - **`src/workspaces/site-planner/lib/multiwriter.js`** — the B674 multi-writer switch: default-ON code constant + the `planyr.multiwriter=off` localStorage escape hatch (no build-time env var)
   - _exports_: `MULTIWRITER_DEFAULT`, `MULTIWRITER_KEY`, `multiwriterEnabled`
 - **`src/workspaces/site-planner/lib/outletStructure.js`** — Pond OUTLET STRUCTURE model + stage→discharge rating curve (NEW-A2): orifice / weir / restrictor / multistage discharge (with tailwater submergence), inverse orifice sizing, default-outlet proposal, validation. Pure hydraulics.
-  - _exports_: `defaultOutletForPond`, `orificeAreaSf`, `OUTLET_KINDS`, `outletDischarge`, `outletLowestElev`, `outletProblems`, `sizeOrificeForRelease`, `stageDischarge`
+  - _exports_: `DEFAULT_ORIFICE_C`, `DEFAULT_WEIR_C`, `defaultOutletForPond`, `orificeAreaSf`, `OUTLET_KINDS`, `outletDischarge`, `outletLowestElev`, `outletProblems`, `sizeOrificeForRelease`, `sizeWeirForRelease`, `stageDischarge`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
   - _exports_: `alignOverlaySimilarity`, `applySimilarityToOverlay`, `calibrateUnderlayScale`, `imagePointToWorld`, `scaleOverlayAbout`, `similarityTransform`, `solveSimilarityLSQ`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
@@ -444,7 +444,7 @@ _287 source files mapped._
 - **`src/workspaces/site-planner/lib/pondOptimizer.js`** — Pond economics optimizer (NEW-D / Phase D): searches depth × placement pond configurations under constraints (max depth, groundwater ceiling, maintenance berm, pipeline-corridor exclusions) and ranks by earthwork $, land-take, and buildable-SF recovered. Exports `solveScaleForVolume`, `evaluateCandidate`, `optimizePond`.
   - _exports_: `evaluateCandidate`, `optimizePond`, `solveScaleForVolume`
 - **`src/workspaces/site-planner/lib/pondRouting.js`** — Screening reservoir routing (modified-Puls / storage-indication) proving Post ≤ Pre peak per storm (NEW-A4): Modified-Rational inflow hydrographs from the transcribed Atlas-14 IDF, level-pool routing over the stage-storage-discharge curve, per-storm PASS/SHORT verdict vs the pre-development Rational peak. Pure.
-  - _exports_: `assessRoutedDetention`, `DEFAULT_PRE_RUNOFF_C`, `DEFAULT_TC_MIN`, `modifiedRationalHydrograph`, `rationalPeakCfs`, `routeHydrograph`, `routeStorm`, `suggestedPreDevReleaseCfs`
+  - _exports_: `assessRoutedDetention`, `autoSizeCompoundOutlet`, `DEFAULT_PRE_RUNOFF_C`, `DEFAULT_TC_MIN`, `modifiedRationalHydrograph`, `rationalPeakCfs`, `routeHydrograph`, `routeStorm`, `suggestedPreDevReleaseCfs`
 - **`src/workspaces/site-planner/lib/pondSizing.js`** — NEW-4 pond sizing assistant: solves an anchored pond's two banded targets (below-WSE mitigation depth/footprint growth, above-WSE usable via TOB raise) through the same pondGeom bands the audit reads, with the berm-as-fill fixed-point feedback and honest pinch-off/inundated/estimated states
   - _exports_: `scaleRing`, `sizePondForTargets`, `solveMitigationDepth`, `solveMitigationGrow`, `solveTobRaise`
 - **`src/workspaces/site-planner/lib/powerScreen.js`** — PHASE 5 power screening (pure): turns HIFLD transmission lines + substations near the parcel into findings — a line crossing the footprint flags a likely transmission easement (present), the nearest substation is a service/interconnect proxy (info); cleans the dataset's withheld voltages and anonymized ("UNKNOWN…") substation names

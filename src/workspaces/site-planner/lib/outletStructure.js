@@ -29,8 +29,8 @@ export const OUTLET_KINDS = ["orifice", "weir", "restrictor"];
 
 const G_FT_S2 = 32.174;
 const SQRT_2G = Math.sqrt(2 * G_FT_S2); // ≈ 8.0217
-const DEFAULT_ORIFICE_C = 0.6;
-const DEFAULT_WEIR_C = 3.33;
+export const DEFAULT_ORIFICE_C = 0.6;
+export const DEFAULT_WEIR_C = 3.33;
 
 const num = (v) => (Number.isFinite(v) ? v : null);
 const clampCount = (n) => (Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1);
@@ -130,6 +130,16 @@ export function sizeOrificeForRelease({ targetCfs, headFt, coeff = DEFAULT_ORIFI
   const areaSf = q / (C * SQRT_2G * Math.sqrt(h));
   const dFt = 2 * Math.sqrt(areaSf / Math.PI);
   return { diameterIn: Math.round(dFt * 12 * 100) / 100, areaSf: Math.round(areaSf * 1000) / 1000 };
+}
+
+/* B903 — size a rectangular weir's LENGTH to pass `targetCfs` at head `headFt`. Inverse of
+ * the weir equation: L = Q/(C·h^1.5). Returns the length in feet, or null on bad inputs
+ * (never a fabricated length). The compound-outlet solver's control-weir/emergency-spillway
+ * sizing counterpart to sizeOrificeForRelease. Pure. */
+export function sizeWeirForRelease({ targetCfs, headFt, coeff = DEFAULT_WEIR_C } = {}) {
+  const q = num(targetCfs), h = num(headFt), C = num(coeff) ?? DEFAULT_WEIR_C;
+  if (q == null || q <= 0 || h == null || h <= 0 || !(C > 0)) return null;
+  return Math.round((q / (C * Math.pow(h, 1.5))) * 100) / 100;
 }
 
 /* Propose a default single-orifice outlet for a pond: a low-flow orifice at the basin
