@@ -490,3 +490,59 @@ export function bermFillCells(ring, det = {}, { gradeAt = null, wseFt = null, ra
   const landTakeSf = toeRing ? Math.max(0, ringsArea([toeRing]) - polyArea(ring)) : bermSf;
   return { cells, heatCells, volCf, floodCf, toeRing, landTakeSf, maxHeightFt: maxH, crestElevFt: tob, cellFt: size };
 }
+
+/* B907 — CE roadmap #7: tie detention SIZING to LAND TAKE + EARTHWORK $. Two gaps closed:
+ *
+ * (1) INCREMENTAL excavation for an ENLARGED pond. excavationVolume() above always prices
+ *     the FULL basin cut (top of bank → floor) off the pond's CURRENT geometry — correct
+ *     for a from-scratch pond, but wrong for the "Expand this pond" case (B139/B902): a
+ *     basin that reuses an EXISTING depression (the Tsakiris case) should only cost the
+ *     ADDED dirt, not a full re-dig of ground it already excavated once. The expand flow
+ *     already snapshots a `det.baseline` ({ring, depth, freeboard, slope}) purely for its
+ *     "+X ac added" label (SitePlanner.jsx) — reused here as the pre-expansion geometry to
+ *     net against. Falls back to the FULL cut when there's no baseline (never assumes an
+ *     incremental history that isn't there). Pure.
+ *
+ * (2) A FORWARD-LOOKING land-take ESTIMATE. The Yield land pie's "Detention" slice
+ *     (detPct, computed elsewhere from real drawn pond footprints) is honest but reactive —
+ *     it can only show acreage a pond ALREADY consumes. Before a pond is drawn/enlarged to
+ *     meet the site's required volume, there's no signal of how much MORE land that
+ *     shortfall will eventually take. detentionLandTakeEstimate() answers that from the
+ *     SAME required-vs-provided figures the site's "raise TOB" berm-apply screen already
+ *     reads, via a simple prismatic screening approximation (footprint = volume / a typical
+ *     pond depth) — advisory only, never folded into the pie's real percentages (which stay
+ *     100%-consistent, reflecting only what's actually drawn). LOUD-FAILURE: null with no
+ *     resolvable shortfall — never a fabricated estimate. */
+export function incrementalExcavationCf(ring, det = {}) {
+  const totalCf = excavationVolume(ring, det);
+  const base = det && det.baseline;
+  if (!base || !Array.isArray(base.ring) || base.ring.length < 3) {
+    return { cf: totalCf, totalCf, baselineCf: 0, incremental: false };
+  }
+  const baselineCf = excavationVolume(base.ring, { depth: base.depth, freeboard: base.freeboard, slope: base.slope });
+  return { cf: Math.max(0, totalCf - baselineCf), totalCf, baselineCf, incremental: true };
+}
+
+/* Screening-estimate a footprint (sf) from a volume + a typical average depth — a simple
+ * prismatic approximation, never a substitute for a drawn/sized pond. Null on bad inputs. */
+export function estimateFootprintSf({ volumeCf, avgDepthFt } = {}) {
+  const v = Number(volumeCf), d = Number(avgDepthFt);
+  if (!Number.isFinite(v) || v <= 0 || !Number.isFinite(d) || d <= 0) return null;
+  return v / d;
+}
+
+/* The top-level site land-take advisory: required vs. provided (the SAME figures the
+ * "raise TOB" berm-apply screen reads) → the shortfall's estimated additional footprint,
+ * at `avgDepthFt` (criteria-configurable — detentionCriteria.js's screeningPondDepthFt,
+ * default 8 ft — the same screening default depth already used elsewhere for an
+ * unanchored pond). Null when there's no positive shortfall (or the inputs aren't
+ * resolvable) — never a fabricated estimate. Pure. */
+export function detentionLandTakeEstimate({ requiredAcFt, providedUsableCf, avgDepthFt = 8 } = {}) {
+  const req = Number(requiredAcFt);
+  if (!Number.isFinite(req) || req <= 0 || providedUsableCf == null || !Number.isFinite(providedUsableCf)) return null;
+  const deficitCf = req * 43560 - providedUsableCf;
+  if (!(deficitCf > 0)) return null;
+  const footprintSf = estimateFootprintSf({ volumeCf: deficitCf, avgDepthFt });
+  if (footprintSf == null) return null;
+  return { deficitCf, deficitAcFt: deficitCf / 43560, footprintSf, footprintAc: footprintSf / 43560, avgDepthFt };
+}
