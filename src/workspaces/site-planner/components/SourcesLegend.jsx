@@ -36,7 +36,7 @@ export default function SourcesLegend({ style }) {
         title=""
       >Sources ⓘ</button>
       <AnchoredMenu
-        open={open} onClose={() => setOpen(false)} anchorRef={ref}
+        open={open} onClose={() => setOpen(false)} anchorRef={ref} hoverSafe
         placement="below-right" width={272} gap={6}
         panelStyle={{ ...menuPanelStyle, padding: "10px 12px", cursor: "default" }}
         className=""

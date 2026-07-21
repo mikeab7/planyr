@@ -50,7 +50,7 @@ export default function RowInfo({ label, sections = [] }) {
         title="" /* suppress any inherited native tooltip — the popover is the affordance */
       >ⓘ</button>
       <AnchoredMenu
-        open={open} onClose={() => setOpen(false)} anchorRef={ref}
+        open={open} onClose={() => setOpen(false)} anchorRef={ref} hoverSafe
         placement="below-left" width={248} gap={6}
         panelStyle={{ ...menuPanelStyle, padding: "9px 11px", cursor: "default" }}
         className=""
