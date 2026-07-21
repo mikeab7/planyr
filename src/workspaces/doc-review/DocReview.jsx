@@ -6,7 +6,6 @@
  * zoom. Lazy-loaded by the shell.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
 import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
 import { reorderWithinPage, arrangeFlags } from "./lib/arrange.js";
@@ -32,6 +31,7 @@ import { listProjects as listLocalProjects } from "../../shared/projects/project
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
+import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
@@ -2298,17 +2298,14 @@ export default function DocReview({
           { label: "Send Backward", hint: `${K}[`, disabled: st.atBottom, on: () => arrange("backward") },
           { label: "Send to Back", hint: `${SH}[`, disabled: st.atBottom, on: () => arrange("back") },
         ];
-        const VW = typeof window !== "undefined" ? window.innerWidth : 1200;
-        const VH = typeof window !== "undefined" ? window.innerHeight : 800;
-        const W = 216, H = m.kind === "text" ? 268 : 232;
-        const left = Math.max(8, Math.min(ctxMenu.x, VW - W - 8));
-        const top = Math.max(8, Math.min(ctxMenu.y, VH - H - 8));
         const row = (extra = {}) => ({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, width: "100%", textAlign: "left", padding: "7px 12px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 500, color: PAL.ink, ...extra });
-        return createPortal(
-          <div onPointerDown={close} onContextMenu={(e) => { e.preventDefault(); close(); }}
-            style={{ position: "fixed", inset: 0, zIndex: 4000 }}>
-            <div onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()} role="menu"
-              style={{ position: "fixed", left, top, width: W, background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0", fontFamily: "system-ui, sans-serif", zIndex: 4001 }}>
+        // Shared viewport-aware ContextMenu (B915) — measures + flips/clamps instead of the old
+        // assumed-height clamp that could run the Delete row off the bottom edge.
+        return (
+          <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={close} width={216} zIndex={4000}
+            className="" role="menu" ariaLabel="Arrange"
+            panelStyle={{ background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", padding: "4px 0", fontFamily: "system-ui, sans-serif" }}>
+            <>
               <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px" }}>Arrange</div>
               {ops.map((it) => (
                 <button key={it.label} role="menuitem" disabled={it.disabled} onClick={run(it.on)}
@@ -2328,9 +2325,8 @@ export default function DocReview({
                 <span>Delete</span>
                 <span style={{ color: "var(--text-tertiary)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>Del</span>
               </button>
-            </div>
-          </div>,
-          document.body,
+            </>
+          </ContextMenu>
         );
       })()}
       {/* Always-mounted so both the toolbar and empty-state "Compare" buttons can trigger it (B471). */}
