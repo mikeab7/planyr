@@ -980,6 +980,12 @@ export default function DocReview({
   // when the project change came FROM opening a doc (meta already matches the new project).
   const booted = useRef(false);
   const prevProjectRef = useRef(projectId);
+  // Live mirror of the route project (B914 round-2). The boot-resume effect below has `[]` deps,
+  // so its closure captures whatever `projectId` was at MOUNT — which on a deep link is still null
+  // for a beat before the route resolves. Reading this ref (updated every render) instead lets the
+  // resume guard see the CURRENT route when a slow candidate's loadReview() finally settles.
+  const routeIdRef = useRef(projectId);
+  routeIdRef.current = projectId;
   useEffect(() => {
     const prev = prevProjectRef.current;
     prevProjectRef.current = projectId;
@@ -1037,8 +1043,18 @@ export default function DocReview({
       // project's last loose PDF (and its stuck upload banner) onto every other project's
       // Review tab. No URL project → resume freely (it reflects into the URL).
       for (const c of candidates) {
+        // B914 round-2 — a route-driven open (the project-switch effect above, once the URL's
+        // project resolves) is AUTHORITATIVE. If one is in flight, stand down: otherwise a slow
+        // legacy-global candidate could finish LAST and supersede the correct per-project doc it
+        // already opened, re-leaking the very "Goose Creek…" banner B914 killed.
+        if (openInFlightRef.current) return;
         const rec = reconcile(await loadReview(c.id), readDraft(uid, c.id));
-        if (!rec || !resumeAllowedForRoute(projectId, rec.projectId || null)) continue;
+        if (openInFlightRef.current) return; // re-check: the open may have started during the await
+        // Guard on the LIVE route (routeIdRef), never this effect's mount-time `projectId` closure.
+        // On a deep link the projectId prop lands a beat after mount, so the closed-over value can
+        // still be null while loadReview() is in flight — guarding on that stale null waved a
+        // projectId-less orphan through resumeAllowedForRoute() and let it clobber the right doc.
+        if (!rec || !resumeAllowedForRoute(routeIdRef.current, rec.projectId || null)) continue;
         // Route by the RECORD's kind (an entry's stored mode could be stale if re-filed).
         if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
         if (rec.kind === "single") { await loadSingleReview(rec); return; }
