@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-21 @ `32058a4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-21 @ `351108d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -572,7 +572,7 @@ _293 source files mapped._
 - **`src/workspaces/doc-review/lib/fileIndex.js`** — Pure auto-filing file-facts view-model: filing decision to Postgres index row, and merge stored placement/needs-filing facts onto review rows
   - _exports_: `factsRowToPatch`, `mergeFactsIntoReviews`, `toFactsRow`
 - **`src/workspaces/doc-review/lib/lastDoc.js`** — Per-PROJECT last-document map for Review resume ({projectId: {id,mode}}) + legacy-global fallback and resolveResume boot-candidate ordering
-  - _exports_: `readLastDoc`, `readLastDocMap`, `readLegacyPointers`, `resolveResume`, `writeLastDoc`
+  - _exports_: `readLastDoc`, `readLastDocMap`, `readLegacyPointers`, `resolveResume`, `resumeAllowedForRoute`, `writeLastDoc`
 - **`src/workspaces/doc-review/lib/localRead.js`** — Tier-1 free local title-block read: extract every page text (OCR scanned pages), classify per-page, pick majority discipline, emit multi-discipline filing decision
   - _exports_: `localTitleBlockRead`
 - **`src/workspaces/doc-review/lib/matchLineRefine.js`** — Stitcher raster match-line refinement: fit true seam line in pixels, remap neighbor placement onto anchor line and slide to connect crossing linework
