@@ -10,7 +10,7 @@
 // Widths are stored in FEET (the drawing frame) so the box is zoom-invariant, exactly like the
 // auto-sized box: every pixel term below scales with `ppf`, so `w/ppf` is constant across zoom.
 //
-// B929 — the box now measures REAL glyph widths, not a flat monospace `length * charW` guess. That
+// B931 — the box now measures REAL glyph widths, not a flat monospace `length * charW` guess. That
 // guess under-sized any line whose characters run wider than the average (all-caps, M/W-heavy text
 // like "COULD ADD VOLUME TO ADJACENT MASON BASIN"), so the committed <text> drew straight past the
 // rect — the exact overflow B913 was thought to have cured. We reuse the shared, purpose-built
@@ -23,7 +23,7 @@ import { bestMeasurer, wrapText } from "../../../shared/markup/textWrap.js";
 // Greedy CHAR-COUNT word-wrap `text` to at most `maxChars` per line, preserving hard "\n" breaks.
 // A single word longer than `maxChars` is hard-broken into `maxChars`-sized chunks so it can never
 // spill past the box. Returns at least one line (possibly ""). Pure. (Standalone helper retained for
-// its tests; `calloutLayout` itself now wraps by real measured WIDTH via `wrapText`, B929.)
+// its tests; `calloutLayout` itself now wraps by real measured WIDTH via `wrapText`, B931.)
 export function wrapLines(text, maxChars) {
   const paras = String(text == null ? "" : text).split("\n");
   if (!(maxChars >= 1)) return paras.length ? paras : [""]; // can't wrap → keep the hard lines
@@ -59,7 +59,7 @@ export function calloutLayout(c, st, ppf) {
   const charW = fontPx * 0.56 * (st.bold ? 1.05 : 1);     // coarse per-char floor, only for minCalloutWidthFt
   const lineH = fontPx * st.lineHeight;
   const padX = st.padX * zk, padY = st.padY * zk;
-  // Real glyph measurement (B929) — matches the Inter face the <text> renders in, so the box can't
+  // Real glyph measurement (B931) — matches the Inter face the <text> renders in, so the box can't
   // be narrower than what actually draws. Bold/italic widen the glyphs, so feed them to the measurer.
   const measure = bestMeasurer({ bold: !!st.bold, italic: !!st.italic });
   const hasExplicitW = c && c.boxW != null && c.boxW > 0;

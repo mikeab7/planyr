@@ -203,7 +203,7 @@ test.describe("B913 — resizable text box / callout", () => {
   });
 });
 
-test.describe("B929 — the committed callout box encloses its text (no overflow)", () => {
+test.describe("B931 — the committed callout box encloses its text (no overflow)", () => {
   test("a long all-caps text box renders its text INSIDE the box rect", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -239,7 +239,7 @@ test.describe("B929 — the committed callout box encloses its text (no overflow
   });
 });
 
-test.describe("B930 — Alt+Z autosizes the selected text box to fit (Bluebeam parity)", () => {
+test.describe("B932 — Alt+Z autosizes the selected text box to fit (Bluebeam parity)", () => {
   test("drag a side handle to set a fixed width, then Alt+Z clears it back to auto", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -269,7 +269,7 @@ test.describe("B930 — Alt+Z autosizes the selected text box to fit (Bluebeam p
       return c && c.boxW != null && c.boxW > 0;
     }, { timeout: 6000 }).toBe(true);
 
-    // THE B930 ASSERTION: with the box still selected, Alt+Z clears the fixed width (autosize to fit),
+    // THE B932 ASSERTION: with the box still selected, Alt+Z clears the fixed width (autosize to fit),
     // exactly like the "Fit to text" button — no Properties panel needed.
     await page.keyboard.press("Alt+z");
     await expect.poll(async () => (await firstCallout(page)).boxW == null, { timeout: 6000 }).toBe(true);
