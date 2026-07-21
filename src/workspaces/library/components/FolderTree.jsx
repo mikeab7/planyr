@@ -8,7 +8,6 @@
  * removed from Drive (folders + files), which then mirrors as a recoverable Drive-trash move.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   treeify, childrenOf, subtreeIds, wouldCreateCycle,
   validateFolderName, suggestNextNumberedName, liveRows, displayLabel,
@@ -19,6 +18,7 @@ import {
 } from "../lib/folders.js";
 import { loadIdSet, saveIdSet, pruneSet } from "../../../shared/ui/persistedSet.js";
 import { relTime } from "../../../shared/projects/projectModel.js";
+import ContextMenu from "../../../shared/ui/ContextMenu.jsx";
 
 /* Per-project remembered expansion (B-item: tree opens collapsed, not with every
  * category flung open). One key per project so switching projects can't bleed state. */
@@ -470,9 +470,6 @@ export default function FolderTree({
 function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRename, onMove, onDelete }) {
   const node = menu.node; // null = empty-space menu
   const pinned = !!(node && pinnedIds && pinnedIds.has(node.id));
-  const W = 210, H = 232; // approx footprint for edge clamping
-  const left = Math.max(6, Math.min(menu.x, window.innerWidth - W - 8));
-  const top = Math.max(6, Math.min(menu.y, window.innerHeight - H - 8));
   const item = (extra) => ({
     display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
     padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer",
@@ -482,18 +479,17 @@ function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRen
   const hoverOff = (e) => { e.currentTarget.style.background = "transparent"; };
   const run = (fn) => () => { onClose(); fn(); };
   const glyph = { flex: "none", width: 16, textAlign: "center", fontSize: 13 };
-  return createPortal(
-    <>
-      <div role="presentation" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }}
-        style={{ position: "fixed", inset: 0, zIndex: 5000 }} />
-      <div data-testid="folder-context-menu" role="menu" aria-label="Folder actions"
-        style={{
-          // OPAQUE surface (not --surface-overlay, which is translucent "frosted" — folder names
-          // behind the menu would bleed through it): a context menu over a text list must be solid.
-          position: "fixed", zIndex: 5001, left, top, minWidth: W, padding: 5,
-          background: T.raised, color: T.text, border: `1px solid ${T.borderStrong}`,
-          borderRadius: 10, boxShadow: "0 12px 40px rgba(0,0,0,.35)",
-        }}>
+  return (
+    <ContextMenu
+      x={menu.x} y={menu.y} onClose={onClose} minWidth={210} zIndex={5000}
+      className="" role="menu" ariaLabel="Folder actions" testId="folder-context-menu"
+      panelStyle={{
+        // OPAQUE surface (not --surface-overlay, which is translucent "frosted" — folder names
+        // behind the menu would bleed through it): a context menu over a text list must be solid.
+        padding: 5, background: T.raised, color: T.text, border: `1px solid ${T.borderStrong}`,
+        borderRadius: 10, boxShadow: "0 12px 40px rgba(0,0,0,.35)",
+      }}>
+      <>
         <div style={{ padding: "4px 10px 6px", fontSize: 11, fontWeight: 700, color: T.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node ? node.name : "Folders"}</div>
         {node && onTogglePin && (
           <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onTogglePin(node))} style={item()}>
@@ -513,9 +509,8 @@ function FolderContextMenu({ menu, onClose, pinnedIds, onTogglePin, onAdd, onRen
         {node && <button role="menuitem" onMouseEnter={hoverOn} onMouseLeave={hoverOff} onClick={run(() => onDelete(node))} style={item({ color: T.dangerText })}>
           <span aria-hidden style={glyph}>🗑</span>Delete
         </button>}
-      </div>
-    </>,
-    document.body,
+      </>
+    </ContextMenu>
   );
 }
 

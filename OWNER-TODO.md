@@ -5,7 +5,30 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-18._
+_Last updated: 2026-07-21._
+
+## 🤝 Project sharing (the new "share a project, viewer-only" feature) — two things from you before it can go live
+> This is the big one from your last message (items 2 and 3). The right-click-menu fix (item 1) is **done and
+> live** — nothing needed from you there. The sharing feature itself is built up to the point where it's safe
+> to hand you the rest, because the one thing it absolutely must get right — **"when I take someone's access
+> away, are they REALLY locked out the same instant?"** — can only be proven with a second, separate login,
+> and this testing sandbox has neither a second login nor a way to reach the login service. Shipping that kind
+> of "who can see whose projects" change without watching it actually lock someone out would be reckless, so
+> I've stopped exactly there rather than guess.
+- [ ] **Give me a second test login.** You already made one throwaway test account (`e2e@planyr.test`) —
+      sharing needs a SECOND one so we can watch account A share a project TO account B, then take it back and
+      confirm B instantly loses it. Any spare email works; just tell a Claude session the two so it (or the
+      GitHub robot) can run the check.
+- [ ] **Run one database file when you're ready.** I've written the database setup for sharing as a single
+      file and will hand it to you directly. It is deliberately **not switched on yet** — running it just
+      *creates* the sharing plumbing without changing anything you'd notice (every existing project stays
+      exactly as private as it is today). We flip it on together, one module at a time, while watching the
+      lock-out test above pass. **Don't run it blind before then.** (File: `db/project_shares.sql`.)
+
+_(Everything about how it'll look and work — the Share button on every project, the viewer-only mode, the
+"shared with you" tag — is fully written up and waiting; it just can't be finished-and-proven until those two
+are in hand. Details for the next Claude session: BACKLOG.md B916/B917, VERIFICATION.md V387/V388.)_
+
 
 ## 🔑 One 2-minute paste finishes the TEST LOGIN you already made — turns on automatic signed-in testing forever
 - [x] ~~Create a throwaway test account~~ — **DONE 2026-07-18.** You made `e2e@planyr.test` and shared it in
