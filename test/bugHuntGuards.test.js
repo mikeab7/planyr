@@ -306,11 +306,13 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // unchanged — they still push one frame per picking session.
     expect(src).toMatch(/const livePick = \(apply, hist = true\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // all 16 native color controls still spread livePick instead of a bare onChange
+    // all 18 native color controls still spread livePick instead of a bare onChange
     // (B740 added the shared multi-selection Fill/Outline pickers — one colorField reused twice;
     //  the parcel Boundary panel added a per-parcel Outline-color picker → 14th;
-    //  B929 added the Standards → Parcels default Outline-color + Fill-color swatches → 15th/16th)
-    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(16);
+    //  B929 added the Standards → Parcels default Outline-color + Fill-color swatches → 15th/16th;
+    //  FINAL UI SPEC A1.6 moved the pond Properties into the inspector's "Appearance" group —
+    //  its Fill + Outline pickers are a second copy alongside the non-pond Properties section → 17th/18th)
+    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(18);
     // the two Standards element-Colors swatches opt out of history (settings-only, RC-6)
     expect((src.match(/\{\.\.\.livePick\(\(v\) => liveTypeStyle\([^)]*\), false\)\}/g) || []).length).toBe(2);
     // B929: the two Standards → Parcels default swatches are settings-only too (hist=false)

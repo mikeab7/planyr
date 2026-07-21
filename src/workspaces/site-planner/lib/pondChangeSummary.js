@@ -115,6 +115,30 @@ export function buildChangeSummaryRows({
   return rows;
 }
 
+/* FINAL UI SPEC A5 — the schematic cross-section's two elevation labels ("flood level",
+ * "pond rim") used to sit at the same left edge and could overlap when the flood WSE and
+ * the rim landed at nearly the same height. The fix: anchor "flood level" at the RIGHT end
+ * of its dashed line and "pond rim" at the LEFT rim edge (opposite ends), so they no longer
+ * collide; as a belt-and-suspenders safety, if their estimated bounding boxes still
+ * intersect, "pond rim" is nudged down. The width estimate is a pure heuristic (no DOM /
+ * canvas), so the collision math unit-tests without a browser. */
+const LABEL_FONT_PX = 9.5;      // wseLabel / rimLabel render at this size in PondCrossSection
+const LABEL_CHAR_PX = 5.2;      // ~0.55em per glyph at 9.5px — a screening width estimate
+const LABEL_COLLISION_SHIFT = 12;
+
+// Estimated bounding box of a text mark, honoring its anchor. SVG text sits ON its baseline
+// (y), with glyphs ascending above it and a small descender below — enough for a collision
+// screen. Exported so the A5 unit test can assert the two labels never overlap.
+export function pondLabelBBox({ x, y, s, anchor = "start", fontPx = LABEL_FONT_PX }) {
+  const w = (s ? String(s).length : 0) * LABEL_CHAR_PX;
+  const x0 = anchor === "end" ? x - w : anchor === "middle" ? x - w / 2 : x;
+  return { x0, x1: x0 + w, y0: y - fontPx, y1: y + fontPx * 0.25 };
+}
+
+export function boxesIntersect(a, b) {
+  return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+}
+
 /* A schematic (explicitly not-to-scale) side-view cross-section: grade line, the flood
  * WSE line, the OLD profile (dashed) and NEW profile (solid), the usable-detention band
  * shaded between the WSE (or grade, when no flood) and the new rim, and the berm ring at
@@ -142,9 +166,13 @@ export function pondCrossSectionMarks({
 
   marks.push({ t: "rect", role: "sky", x: 0, y: 0, w, h });
   if (gradeFt != null) marks.push({ t: "line", role: "grade", x1: 0, y1: yOf(gradeFt), x2: w, y2: yOf(gradeFt) });
+  // A5 — "flood level" anchors at the RIGHT end of its dashed line (text-anchor:end), so it
+  // no longer shares the left edge with "pond rim". Kept as a variable for the collision screen.
+  let wseLabelMark = null;
   if (wseFt != null) {
     marks.push({ t: "line", role: "wse", x1: 0, y1: yOf(wseFt), x2: w, y2: yOf(wseFt) });
-    marks.push({ t: "text", role: "wseLabel", x: 4, y: yOf(wseFt) - 4, s: "flood level" });
+    wseLabelMark = { t: "text", role: "wseLabel", x: w - 4, y: yOf(wseFt) - 4, s: "flood level", anchor: "end" };
+    marks.push(wseLabelMark);
   }
 
   const profile = (rimFt, floorFt, dashed) => {
@@ -178,7 +206,15 @@ export function pondCrossSectionMarks({
 
   if (oldP) marks.push(oldP);
   marks.push(newP);
-  if (newP) marks.push({ t: "text", role: "rimLabel", x: midX - halfBerm - 2, y: newP.yRim - 4, s: "pond rim" });
+  if (newP) {
+    // A5 — "pond rim" anchors at the LEFT rim edge of the new profile (opposite end from
+    // "flood level"). If the two labels' estimated boxes still intersect, nudge this one down.
+    const rimLabelMark = { t: "text", role: "rimLabel", x: newP.points[0].x, y: newP.yRim - 4, s: "pond rim", anchor: "start" };
+    if (wseLabelMark && boxesIntersect(pondLabelBBox(wseLabelMark), pondLabelBBox(rimLabelMark))) {
+      rimLabelMark.y += LABEL_COLLISION_SHIFT;
+    }
+    marks.push(rimLabelMark);
+  }
   marks.push({ t: "text", role: "label", x: 4, y: 12, s: "schematic — not to scale" });
   return { marks: marks.filter(Boolean), w, h };
 }
