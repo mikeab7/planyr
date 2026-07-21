@@ -3,7 +3,7 @@
  * existing devices resume on day one; corrupt storage boots clean (clear + empty). */
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  readLastDocMap, writeLastDoc, readLastDoc, readLegacyPointers, resolveResume,
+  readLastDocMap, writeLastDoc, readLastDoc, readLegacyPointers, resolveResume, resumeAllowedForRoute,
 } from "../src/workspaces/doc-review/lib/lastDoc.js";
 
 const KEY = "planyr:docreview:lastDoc:v1";
@@ -115,5 +115,26 @@ describe("lastDoc — resolveResume precedence", () => {
   it("nothing anywhere → no candidates", () => {
     expect(resolveResume({ routeProjectId: null, map: {}, legacy: { mode: "review", singleId: null, stitchId: null } }))
       .toEqual([]);
+  });
+});
+
+describe("resumeAllowedForRoute — the B914 cross-project leak guard", () => {
+  it("no route project → resume anything (unfiled orphan included)", () => {
+    expect(resumeAllowedForRoute(null, null)).toBe(true);
+    expect(resumeAllowedForRoute(null, "pA")).toBe(true);
+    expect(resumeAllowedForRoute("", "pA")).toBe(true);
+  });
+
+  it("named route resumes ONLY its own project's review (exact match)", () => {
+    expect(resumeAllowedForRoute("pA", "pA")).toBe(true);
+    expect(resumeAllowedForRoute("pA", "pB")).toBe(false);
+  });
+
+  it("named route BLOCKS an unfiled (projectId-less) legacy orphan — the leak fix", () => {
+    // The exact bug: a loose "Open"-ed PDF (recProjectId null) used to leak onto every
+    // project's Review tab via the legacy-global fallback. A named route must reject it.
+    expect(resumeAllowedForRoute("pMesa", null)).toBe(false);
+    expect(resumeAllowedForRoute("pZZ", null)).toBe(false);
+    expect(resumeAllowedForRoute("pMesa", undefined)).toBe(false);
   });
 });

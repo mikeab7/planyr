@@ -22,7 +22,7 @@ import CompareView from "./CompareView.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, driveStreamSource, MAX_BYTES, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
-import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveResume } from "./lib/lastDoc.js";
+import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveResume, resumeAllowedForRoute } from "./lib/lastDoc.js";
 import { recordOpen } from "../../shared/recents/recentDocs.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
@@ -225,10 +225,14 @@ export default function DocReview({
   const [compareFiles, setCompareFiles] = useState(null); // B471: { a:{name,source}, b:{name,source} } ad-hoc revision compare, or null
   // Open the ad-hoc revision compare from a two-PDF pick (older first, newer second).
   const onPickCompare = useCallback((e) => {
-    const fs = [...(e.target.files || [])].filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf").slice(0, 2);
+    const picked = [...(e.target.files || [])];
+    const fs = picked.filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf").slice(0, 2);
     e.target.value = "";
     if (fs.length === 2) { setErr(""); setCompareFiles({ a: { name: fs[0].name, source: fs[0] }, b: { name: fs[1].name, source: fs[1] } }); }
-    else setErr("Pick exactly two PDFs to compare (older revision first, newer second).");
+    // B914: only complain when the user actually chose files but not a valid pair — a
+    // CANCELLED picker (0 files) must not leave a "Pick exactly two…" hint stuck on the
+    // empty state (it used to persist across project switches, reading as a phantom error).
+    else if (picked.length) setErr("Pick exactly two PDFs to compare (older revision first, newer second).");
   }, []);
   const [fileName, setFileName] = useState("");
   const [numPages, setNumPages] = useState(0);
@@ -917,7 +921,9 @@ export default function DocReview({
     setMeta(newMeta());
     // Keep the current project context: "New" starts a fresh blank review still filed
     // under the project you're in (it does NOT drop you back to "Select a project").
-    setSource(null); setRedrop("");
+    // Clear the empty-state hint too (B914): switching to a project's clean empty state must
+    // not inherit a stale "Pick exactly two PDFs…" / bad-drop message from the last one.
+    setSource(null); setRedrop(""); setErr("");
     setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1);
     setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); clearSelection(); setTool("select"); setCalInput(null);
     clearHistory();
@@ -1023,13 +1029,15 @@ export default function DocReview({
       });
       if (!candidates.length) return;
       const uid = await currentUid();
-      // Respect an explicit deep link (Work Item A): if the URL named a project, don't
-      // auto-resume a review that belongs to a DIFFERENT project — try the next candidate,
-      // else the empty state. No URL project → resume freely (it reflects into the URL).
-      const wrongProject = (rec) => projectId && rec && rec.projectId && rec.projectId !== projectId;
+      // Respect an explicit deep link (Work Item A): if the URL named a project, only
+      // auto-resume a review that belongs to THAT project — try the next candidate, else the
+      // empty state. B914: the match must be EXACT (see resumeAllowedForRoute) — the old
+      // `rec.projectId && …` guard let an UNFILED legacy-global orphan through, leaking one
+      // project's last loose PDF (and its stuck upload banner) onto every other project's
+      // Review tab. No URL project → resume freely (it reflects into the URL).
       for (const c of candidates) {
         const rec = reconcile(await loadReview(c.id), readDraft(uid, c.id));
-        if (!rec || wrongProject(rec)) continue;
+        if (!rec || !resumeAllowedForRoute(projectId, rec.projectId || null)) continue;
         // Route by the RECORD's kind (an entry's stored mode could be stale if re-filed).
         if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
         if (rec.kind === "single") { await loadSingleReview(rec); return; }
@@ -1954,7 +1962,7 @@ export default function DocReview({
                 style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 8, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
                 Open PDF…
               </button>
-              <button data-testid="empty-compare" onClick={() => compareInputRef.current?.click()}
+              <button data-testid="empty-compare" onClick={() => { setErr(""); compareInputRef.current?.click(); }}
                 style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 8, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
                 ⇄ Compare revisions…
               </button>
