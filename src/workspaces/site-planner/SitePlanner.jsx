@@ -501,19 +501,14 @@ const pathLen = (pts) => { let t = 0; for (let i = 1; i < pts.length; i++) t += 
 // line is small and wants MANY references, a road is big and wants FAR FEWER, an easement is in
 // between (owner rule, 2026-07-02). Spacing is tunable.
 const INLINE_LABEL_SPACING = { line: 150, polyline: 150, easement: 350, road: 700 };
-// Longest-segment midpoint (feet) — the primary anchor for the in-place editor.
-function inlineLabelAnchorFeet(ptsFeet) {
-  if (!ptsFeet || ptsFeet.length < 2) return null;
-  let bi = 1, bl = -1;
-  for (let i = 1; i < ptsFeet.length; i++) { const d = dist(ptsFeet[i - 1], ptsFeet[i]); if (d > bl) { bl = d; bi = i; } }
-  const A = ptsFeet[bi - 1], B = ptsFeet[bi];
-  return { fx: (A.x + B.x) / 2, fy: (A.y + B.y) / 2 };
-}
 // Repeat placements along a feet-space OPEN path every `spacingFt` (always ≥1, centered, when the
 // path is shorter than the spacing). Returns SCREEN anchors with an auto-flipped rotation (never
 // upside-down) + a perpendicular offset to the visual "up" side + the segment's on-screen px length
 // (for the fit/LOD gate). Mirrors the centerline dir/nrm walk + the strip-label flip math.
-function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p) {
+// B935 — when `interiorScreen` (a projected point) is given, the perpendicular offset aims TOWARD it
+// (into a closed easement ring's body) instead of the screen-"up" side, so an "Inside" label tucks
+// within the boundary rather than riding on top of it.
+function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p, interiorScreen) {
   if (!ptsFeet || ptsFeet.length < 2) return [];
   const segs = []; let total = 0;
   for (let i = 1; i < ptsFeet.length; i++) {
@@ -536,7 +531,10 @@ function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p) {
     let ang = Math.atan2(dir.y, dir.x) * 180 / Math.PI;
     ang = ((ang % 180) + 180) % 180; if (ang > 90) ang -= 180;      // never upside-down → [-90,90]
     let nrm = { x: -dir.y, y: dir.x };                              // perpendicular
-    if (nrm.y > 0) nrm = { x: -nrm.x, y: -nrm.y };                  // force screen-"up" (y grows down)
+    if (interiorScreen) {                                          // B935 — aim into the feature's body (closed ring → centroid)
+      const tx = interiorScreen.x - P.x, ty = interiorScreen.y - P.y;
+      if (nrm.x * tx + nrm.y * ty < 0) nrm = { x: -nrm.x, y: -nrm.y };
+    } else if (nrm.y > 0) nrm = { x: -nrm.x, y: -nrm.y };           // force screen-"up" (y grows down)
     else if (nrm.y === 0 && nrm.x < 0) nrm = { x: 1, y: 0 };        // vertical → one consistent side
     out.push({ x: P.x + nrm.x * offsetPx, y: P.y + nrm.y * offsetPx, angle: ang, segLenPx: len });
   }
@@ -556,7 +554,19 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
   const baseSize = (opts && Number.isFinite(opts.size) && opts.size > 0) ? opts.size : 11; // default matches the pre-B678 look
   const halo = !(opts && opts.halo === false);                     // background on by default (existing lines unchanged)
   const k = Math.max(0.34, Math.min(1, ppf / 0.45));               // gentle, capped at 1 (matches the road-dim clamp)
-  const fs = baseSize * k, haloW = Math.max(2, fs * 0.3), offsetPx = fs * 1.05;
+  const fs = baseSize * k, haloW = Math.max(2, fs * 0.3);
+  // B935 — "Inside" placement: push the label perpendicular into the body of the road/easement by a
+  // per-feature FEET inset (so it scales with zoom and stays within the band), on top of the base
+  // font clearance. `interiorFeet` (a closed easement ring's centroid) aims that push toward the
+  // interior; without it (roads / strip easements) it rides the consistent screen-"up" side. Zero
+  // inset = the classic on-the-line ride, byte-for-byte unchanged.
+  const insetFt = (opts && Number.isFinite(opts.insetFt) && opts.insetFt > 0) ? opts.insetFt : 0;
+  // On the line: a ~1-font perpendicular clearance so the text sits just off the stroke (unchanged).
+  // Inside: use the feet inset ALONE (a midway-into-the-body distance that scales with zoom) — it
+  // already clears the line, and stacking the font clearance on top could shove a narrow feature's
+  // label past its own edge.
+  const offsetPx = insetFt > 0 ? insetFt * Math.max(ppf, 0) : fs * 1.05;
+  const interiorScreen = (opts && opts.interiorFeet) ? f2p(opts.interiorFeet) : null;
   const minSegPx = label.length * fs * 0.6;                        // LOD: the on-screen segment must fit the text (CW_RATIO 0.6)
   // B678 — screen-space self-thinning is an ANTI-OVERLAP floor, nothing more: keep restamps at least
   // the label's own on-screen width + ~50% breathing room apart (`len·fs·0.9` ≈ width·1.5), converted
@@ -568,7 +578,7 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
   const minGapPx = label.length * fs * 0.85;  // B682 — just above the label's real rendered width (all-caps Inter ≈ 0.78/char), so it ONLY prevents literal overlap and the spacing control stays responsive across the rest of its range (the live slider is the main responsiveness fix)
   const effSpacingFt = Math.max(Math.max(1, spacingFt || 0), minGapPx / Math.max(ppf, 1e-4));
   const out = [];
-  inlineLabelPlaces(ptsFeet, effSpacingFt, offsetPx, f2p).forEach((pl, i) => {
+  inlineLabelPlaces(ptsFeet, effSpacingFt, offsetPx, f2p, interiorScreen).forEach((pl, i) => {
     if (pl.segLenPx < minSegPx) return;
     out.push(
       <text key={`${keyPrefix}${i}`} x={pl.x} y={pl.y} textAnchor="middle" dominantBaseline="middle"
@@ -578,6 +588,29 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
     );
   });
   return out;
+}
+
+// B935 — perpendicular inset (feet) that tucks a closed easement ring's inline label just INSIDE its
+// boundary: a fraction of the ring's smaller bbox dimension (so it scales with the shape and never
+// overshoots the middle), aimed at the centroid by the caller.
+function ringLabelInsetFt(ptsFeet) {
+  if (!ptsFeet || ptsFeet.length < 3) return 0;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of ptsFeet) {
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+  }
+  return Math.max(0, Math.min(maxX - minX, maxY - minY) * 0.2);
+}
+// B935 — the { insetFt, interiorFeet } an easement passes to inlineLabelEls when its inline label is
+// set to "Inside" placement. A STRIP (open centerline) tucks toward one side by a quarter of its
+// width; a BOUNDARY ring aims at its centroid, inset a fraction of its smaller extent. Returns {} for
+// the classic on-the-line ride (labelInside off).
+function easementInsetOpts(m) {
+  if (!m || !m.labelInside) return {};
+  const strip = m.centerline && m.mode !== "boundary" && m.centerline.length >= 2;
+  if (strip) return { insetFt: Math.max(0, (+m.width || 0) / 4) };
+  return { insetFt: ringLabelInsetFt(m.pts), interiorFeet: centroid(m.pts) };
 }
 
 function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
@@ -1254,7 +1287,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
   const [addLeaderFor, setAddLeaderFor] = useState(null); // B919: callout id armed by "Add Leader" — the NEXT map click drops the new leader's tip there (feet)
-  const [editInline, setEditInline] = useState(null);     // B620: {kind:'markup'|'el', id, text} while typing a feature's inline label in place
   const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit} — inline numeric edit, NEVER a dialog box
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
   const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
@@ -2634,7 +2666,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // background storage event never yanks the canvas out from under an active edit.
   const busyRef = useRef(false);
   useEffect(() => {
-    busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || editInline || calloutDraft || numEdit);
+    busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft || numEdit);
     // NEW-1 — stamp the CURRENT interaction/selection targets as directly-touched (feeds the
     // engine's isDirectEdit; see directTouchRef above). Runs every render — during a drag each
     // move re-renders, so the stamp stays fresh through the gesture and the flush at gesture end.
@@ -3122,7 +3154,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
       // B875 — Enter on a selected pond opens its inspector (keyboard peer of double-click).
       if (e.key === "Enter" && tool === "select" && sel?.kind === "el") { const se = els.find((x) => x.id === sel.id); if (se && se.type === "pond") { e.preventDefault(); revealPondInspector(se.id); return; } }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -3754,28 +3786,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEditCallout(null);
   };
   const cancelEditCallout = () => { if (editCallout?.isNew) setCallouts((a) => a.filter((c) => c.id !== editCallout.id)); setEditCallout(null); };
-  // B620 — inline-label editor: double-click a line/polyline/road/easement to type its rides-along
-  // label in place. Writes `inlineLabel` DIRECTLY onto the ONE feature (non-sticky — never through
-  // mkStyle/typeStyles, so a typed label can't bleed into the next drawn shape).
-  const beginEditInline = (kind, id) => {
-    const feat = kind === "el" ? els.find((x) => x.id === id) : markups.find((x) => x.id === id);
-    if (!feat) return;
-    setSel({ kind, id });
-    setEditInline({ kind, id, text: feat.inlineLabel || "" });
-  };
-  const commitEditInline = () => {
-    if (!editInline) return;
-    const { kind, id, text } = editInline;
-    const cur = (kind === "el" ? els : markups).find((x) => x.id === id);
-    const orig = (cur && cur.inlineLabel) || "";
-    if (cur && text.trim() !== orig.trim()) {
-      pushHistory();
-      const patch = (x) => (x.id === id ? { ...x, inlineLabel: text.trim() } : x);
-      if (kind === "el") setEls((a) => a.map(patch)); else setMarkups((a) => a.map(patch));
-    }
-    setEditInline(null);
-  };
-  const cancelEditInline = () => setEditInline(null);
+  // B935 — the inline label (the text that rides ALONG a line/road/easement, B620) is now edited ONLY
+  // in the Properties panel's "Inline label" field; the old on-canvas double-click text editor was
+  // removed per the owner rule ("in no circumstance should double-clicking … go into a text editor …
+  // that should be reserved for the properties").
   // Click 1 sets the tip (what it points at); click 2 drops the box and starts typing.
   const placeCallout = (fp) => {
     if (!calloutDraft) { setCalloutDraft({ tip: fp }); return; }
@@ -3842,15 +3856,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
-    // B750 — double-click an UNLOCKED markup opens its Properties. Exception: an ALREADY-selected
-    // text-bearing markup (line / polyline / easement — the ones with an inline label) edits its label
-    // instead ("click to select, then double-click to edit text"). Pointer capture eats the DOM dblclick,
-    // so we reconstruct the double-tap here. Locked features stay select-only.
+    // B750/B935 — double-click an UNLOCKED markup ALWAYS opens its Properties (never an on-canvas text
+    // editor — the inline label is edited only in the Properties panel's "Inline label" field, per the
+    // owner rule). Pointer capture eats the DOM dblclick, so we reconstruct the double-tap here. Locked
+    // features stay select-only.
     if (m && !m.locked && isDoubleTap(e, id, sel?.kind === "markup" && sel.id === id)) {
       setSel({ kind: "markup", id });
-      const textBearing = m.kind === "line" || m.kind === "polyline" || m.kind === "easement";
-      if (dblWasSelRef.current && textBearing) beginEditInline("markup", id);
-      else { setPropsFor({ kind: "markup", id }); if (narrow) setNarrowProps(true); }
+      setPropsFor({ kind: "markup", id }); if (narrow) setNarrowProps(true);
       return;
     }
     // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
@@ -6180,14 +6192,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
-    // B750 — double-click a non-grouped, UNLOCKED element opens its Properties. Exception: an ALREADY-
-    // selected centerline road (the only text-bearing element) edits its inline label instead ("click to
-    // select, then double-click to edit text"). Pointer capture eats the DOM dblclick, so we reconstruct
-    // the double-tap here. Groups keep single-click = select-whole-group (drill-in stays in onElDouble).
+    // B750/B935 — double-click a non-grouped, UNLOCKED element ALWAYS opens its Properties (never an
+    // on-canvas text editor — a road's inline label is edited only in the Properties panel's "Inline
+    // label" field, per the owner rule). Pointer capture eats the DOM dblclick, so we reconstruct the
+    // double-tap here. Groups keep single-click = select-whole-group (drill-in stays in onElDouble).
     if (!el.groupId && !el.locked && isDoubleTap(e, id, sel?.kind === "el" && sel.id === id)) {
       setSel({ kind: "el", id });
-      if (dblWasSelRef.current && isCenterlineRoad(el)) beginEditInline("el", id);
-      else { setPropsFor({ kind: "el", id }); if (narrow) setNarrowProps(true); }
+      setPropsFor({ kind: "el", id }); if (narrow) setNarrowProps(true);
       return;
     }
     const fp = p2f(e.clientX, e.clientY);
@@ -6528,30 +6539,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = els.find((x) => x.id === id);
     if (!el) return;
     if (el.groupId) { setMulti([]); setDrillId(id); setSel({ kind: "el", id }); return; }
-    // B750/NEW-1: double-click opens Properties; an ALREADY-selected centerline road (text-bearing)
-    // edits its inline label instead — same gate as the startMoveEl reconstruction, via dblWasSelRef
-    // (right-click still opens the type/actions menu via onElContext). This native path is the
-    // raw-dblclick / test-harness fallback; real users mostly hit the reconstructed double-tap in
-    // startMoveEl, but this must make the SAME decision — not unconditionally edit inline — in case
-    // pointer capture doesn't suppress the native dblclick (NEW-1: it was overriding a correctly-opened
-    // Properties panel with a forced inline-label editor).
+    // B750/B935: double-click ALWAYS opens Properties (never an on-canvas inline-label editor — that is
+    // reserved for the Properties panel's "Inline label" field, per the owner rule). Right-click still
+    // opens the type/actions menu via onElContext. This native path is the raw-dblclick / test-harness
+    // fallback for when pointer capture doesn't suppress the native dblclick; it makes the SAME decision
+    // as the reconstructed double-tap in startMoveEl.
     setSel({ kind: "el", id });
-    if (dblWasSelRef.current && isCenterlineRoad(el)) beginEditInline("el", id);
-    else setPropsFor({ kind: "el", id });
+    setPropsFor({ kind: "el", id });
   };
-  // NEW-1 — native-dblclick fallback for the markup shapes (easement/line/polyline) whose SVG nodes
-  // still wired a raw onDoubleClick straight to beginEditInline (pre-B750 leftover): same bug as
-  // onElDouble above — it unconditionally forced the inline label editor open, so a plain double-click
-  // on a NOT-yet-selected easement/line/polyline never reached Properties. Mirrors startMoveMarkup's
-  // gate: only an ALREADY-selected text-bearing markup edits its label; otherwise open Properties.
+  // B935 — native-dblclick fallback for the markup shapes (easement/line/polyline), mirroring
+  // startMoveMarkup: a double-click always opens Properties (never the old on-canvas inline-label
+  // editor). The raw path exists for when pointer capture doesn't suppress the native dblclick.
   const onMarkupDouble = (e, id) => {
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
     if (!m) return;
     setSel({ kind: "markup", id });
-    const textBearing = m.kind === "line" || m.kind === "polyline" || m.kind === "easement";
-    if (dblWasSelRef.current && textBearing) beginEditInline("markup", id);
-    else setPropsFor({ kind: "markup", id });
+    setPropsFor({ kind: "markup", id });
   };
   // Right-click an element always opens its actions menu (so a grouped element can still
   // reach Ungroup / Duplicate group / etc). Keeps an active group selection intact so the
@@ -10887,6 +10891,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </span></Field>
       <Field label="Label text size"><NumInput style={{ ...numInput, width: 70 }} value={feat.labelSize ?? 11} min={5} max={48} step={1} coarse={4} onCommit={(n) => write({ labelSize: n })} /></Field>
       <Field label="Label background"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={haloOn} onChange={(e) => write({ labelHalo: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{haloOn ? "Halo (legible over aerial)" : "None"}</span></label></Field>
+      {/* B935 — a road / easement has a body (a paved width, a strip, a bounded area), so its inline
+          label can either ride the centerline (default) or tuck INSIDE that body — off the drawn line
+          so it doesn't sit on top of the feature. A plain line/polyline has no interior, so this
+          control only shows for road + easement. */}
+      {(typeKey === "road" || typeKey === "easement") && (
+        <Field label="Label position"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={!!feat.labelInside} onChange={(e) => write({ labelInside: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{feat.labelInside ? `Inside the ${typeKey} (off the line)` : "On the line"}</span></label></Field>
+      )}
     </>);
   };
   // B682 — build a NON-STICKY label writer that coalesces a live slider drag into one undo frame:
@@ -12944,7 +12955,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
-                      {editInline?.id !== m.id && inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                      {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, ...easementInsetOpts(m) })}
                     </g>
                   );
                 }
@@ -12961,7 +12972,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
                       {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
-                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
                     </g>
                   );
                 }
@@ -12971,7 +12982,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
                       <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
-                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
                     </g>
                   );
                 }
@@ -13449,7 +13460,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
               {markupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, editInline && editInline.kind === "el" ? editInline.id : null))}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {markupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
@@ -13869,31 +13880,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
               })()}
 
-              {/* B620 — inline-label editor (double-click a line/road/easement → type in place). NEVER a dialog box. */}
-              {editInline && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitEditInline(); }} />}
-              {editInline && (() => {
-                const feat = editInline.kind === "el" ? els.find((x) => x.id === editInline.id) : markups.find((x) => x.id === editInline.id);
-                if (!feat) return null;
-                const ptsFeet = editInline.kind === "el"
-                  ? (isCenterlineRoad(feat) ? feat.pts : rectRoadEndpoints(feat))
-                  : (feat.kind === "easement" ? ((feat.centerline && feat.mode !== "boundary" && feat.centerline.length >= 2) ? feat.centerline : feat.pts) : mkPts(feat));
-                const anchor = inlineLabelAnchorFeet(ptsFeet);
-                if (!anchor) return null;
-                const bp = f2p({ x: anchor.fx, y: anchor.fy });
-                const W = 220, H = 30;
-                return (
-                  <foreignObject x={bp.x - W / 2} y={bp.y - H - 8} width={W} height={H} style={{ overflow: "visible" }}>
-                    <input autoFocus value={editInline.text}
-                      onChange={(e) => setEditInline((s) => ({ ...s, text: e.target.value }))}
-                      onBlur={commitEditInline}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitEditInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelEditInline(); } }}
-                      placeholder={'e.g. 18" SANITARY SEWER'}
-                      maxLength={120}
-                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 8px", fontSize: 13, fontFamily: "Inter, system-ui, sans-serif", fontWeight: 600, color: PAL.ink, background: "var(--surface-raised)", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
-                  </foreignObject>
-                );
-              })()}
+              {/* B935 — the old on-canvas inline-label editor was removed; the inline label is now edited
+                  only in the Properties panel's "Inline label" field. */}
 
               {/* measurements — line (distance), polyline (path length), area, count */}
               {measures.map((m, i) => {
@@ -17409,7 +17397,7 @@ function dimSlideFor(el, allEls) {
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed, editInlineId) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed) {
   // B617 — zoom multiplier (px/ft ÷ the default 0.35) so a road's curb/edge stroke holds constant
   // relative to the drawing across zoom, exactly like the in-component markup/utility strokes.
   const zk = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x) / 0.35;
@@ -17604,7 +17592,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       }
     }
     // B620 — inline label riding the road centerline (own color + white halo; sparse spacing).
-    if (editInlineId !== el.id) rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo }));
+    // B935 — "Inside" placement tucks it a quarter of the travel-width off the centerline (into clear
+    // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
+    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, insetFt: el.labelInside ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
