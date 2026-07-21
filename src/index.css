@@ -67,6 +67,16 @@
      AA-tuned --danger-text above (small red label on a panel). */
   --danger:       #E24B4A;
 
+  /* Inline notice/banner SURFACES (B926) — a tinted panel that sits BEHIND --warn-text /
+     --danger-text so a top-of-canvas notice (Doc Review's re-drop / open-error banners,
+     the Library holding-area notes) THEMES instead of baking a light amber/red hex. Before
+     B926 those banners hardcoded #fef3c7 / #fee2e2 and stayed light in dark mode, bypassing
+     the contrast audit. Opaque per-theme tints so the audit can score the text on them. */
+  --warn-bg:       #FBEFD5;
+  --warn-border:   #E0BC7A;
+  --danger-bg:     #FBE4E0;
+  --danger-border: #E4AFA9;
+
   /* Yield-panel PROVENANCE source-tag color (B895 — the CODE tag: an adopted
      ordinance/criteria value). PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED reuse the
      success/info/warn/text-secondary/danger tokens above directly; CODE has no
@@ -182,6 +192,12 @@
   --danger-text:  #F2706F;
   --info-text:    #6FB4F0;
   --danger:       #F2706F;   /* vivid alert/error fill, lightened for dark (B433) */
+  /* Inline notice/banner surfaces (B926) — dark tints so the notice reads as a recessed
+     amber/red panel, not a light slab, with --warn-text / --danger-text staying AA on it. */
+  --warn-bg:       #33280F;
+  --warn-border:   #6B531F;
+  --danger-bg:     #331917;
+  --danger-border: #6B2F2C;
   --source-code-text: #AFA9EC;
 
   /* Status — lighter variants so saturated values don't go muddy on dark cards (B320).
@@ -272,13 +288,27 @@ input, select, button, textarea { font-family: inherit; }
    gray fails AA on the white panel, so pin it to a token that clears 4.5:1 in both themes. */
 [role="dialog"] input::placeholder { color: var(--text-tertiary); opacity: 1; }
 
-/* ---- interaction states (inline styles can't express these) ---- */
+/* ---- interaction states — ONE shared definition for every rail / toolbar / menu control
+   (B927). Hover (brightness dip), pressed (0.5px nudge), disabled (dim + no pointer), and a
+   visible keyboard focus ring are defined here ONCE against the chrome tokens so the four chrome
+   families — the 54px left rail, the right-rail `.rbtn` rows, header `.dbtn` icon buttons, and
+   `.menu` items — read as one design language instead of each hand-rolling its own. Per-family
+   HOVER tints (which token to wash with) stay below; the shared skeleton lives here. Inline
+   styles can't express :hover/:active/:focus-visible, which is why this is CSS, not a JS helper. */
 button { transition: filter .12s ease, background-color .12s ease, border-color .12s ease, box-shadow .12s ease, color .12s ease, transform .05s ease; }
 button:hover:not(:disabled) { filter: brightness(.97); }
 button:active:not(:disabled) { transform: translateY(0.5px); }
 button:disabled { opacity: .45; cursor: default; }
+/* Menu items express "disabled" through a muted TEXT TOKEN (set inline), never a fade — the
+   house rule forbids opacity-as-hierarchy (B925). Reset the global disabled fade for menu rows
+   so the token color isn't double-dimmed into illegibility. */
+.menu button:disabled { opacity: 1; }
 
-button:focus-visible, input:focus-visible, select:focus-visible {
+/* Visible keyboard focus ring on EVERY interactive control — including div-based ones
+   (role="button" / role="menuitem" that carry their own tabindex), so a keyboard-tab walk of
+   any rail lands a ring on every stop (B927). */
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible,
+[role="button"]:focus-visible, [role="menuitem"]:focus-visible, [role="tab"]:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
