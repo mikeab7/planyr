@@ -1693,7 +1693,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
     geoCommitRef.current = null; // fresh map → no committed view yet (forces a snap on first sync)
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; };
+    // E2E-only hook (never runs in production): expose the backdrop map so the panel-toggle
+    // flash spec can count Leaflet `viewreset` events — a tile-wipe fires one, a panBy doesn't.
+    if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__geoMap = map;
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; if (typeof window !== "undefined" && window.__geoMap === map) window.__geoMap = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
@@ -1780,17 +1783,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
      Anti-flash (B65): a real `map.setView` fires Leaflet's `viewreset`, whose
      GridLayer handler wipes & reloads ALL tiles — so calling it on every wheel
-     step blanks the aerial for a frame each time (the white/dim flash). Two
+     step blanks the aerial for a frame each time (the white/dim flash). Three
      defenses:
      1. During a live gesture we hold Leaflet at a committed view and just
         CSS-`transform` the whole map container (tiles AND the shared overlay
         layers together, so they stay mutually aligned) to track the gesture with
         the pixels already on screen — no reload, no flash.
-     2. When we DO re-render crisp (`commit`), we first clone the current tiles
-        into a frozen "ghost" overlay that stays on top until the fresh tiles
-        finish loading, THEN remove it — so the `setView` wipe never shows the
-        backdrop. This kills the "whole screen flashes to black on zoom-out"
-        (the wipe used to blank even already-loaded tiles).
+     2. (B931) When we re-render crisp AND the zoom is UNCHANGED — every panel /
+        left-rail toggle and every pure-pan settle — `commit` moves with `map.panBy`
+        instead of `setView`. A pan never fires `viewreset`, so no tile is wiped and
+        NO ghost is needed. This is what kills the "screen flashes every time I click
+        between elements / parcels / menus" report (each of those resizes the in-flow
+        canvas → a same-zoom re-center that used to setView-wipe).
+     3. When we re-render crisp AND the zoom genuinely CHANGES (a zoom gesture
+        settle, or the mid-gesture >0.75-level re-base), `setView` is unavoidable, so
+        `commit` first clones the current tiles into a frozen "ghost" overlay that
+        stays on top until the fresh tiles finish loading, THEN removes it — so the
+        wipe never shows the backdrop. This kills the "whole screen flashes to black
+        on zoom-out" (the wipe used to blank even already-loaded tiles).
      The crisp re-render is debounced (gesture settles) and also forced once the
      accumulated zoom delta passes ~0.75 levels, so the transform never scales the
      aerial into a blurry mess — but because the commit is ghost-buffered, that
@@ -1833,7 +1843,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } catch (_) { /* snapshot is best-effort; commit still proceeds */ }
     };
 
+    // THE ANTI-FLASH CORE (B931). A plain `map.setView` ALWAYS fires Leaflet's
+    // `viewprereset`, whose GridLayer handler REMOVES and reloads every tile — the
+    // one-frame wipe/blink that reads as "the screen flashes." But `viewprereset`
+    // only actually needs to fire when the ZOOM changes; a same-zoom re-center is
+    // just a pan. So when the target zoom equals the map's current zoom — which is
+    // EVERY panel/rail toggle (a resize re-centers but never zooms) and every
+    // pure-pan settle — we move with `map.panBy`, which translates the map pane and
+    // lazy-loads only the newly exposed edge tiles, never wiping. No wipe → no flash,
+    // and no ghost clone is needed. Only a genuine zoom change takes the old ghosted
+    // `setView` path (B65's snapshot still masks that unavoidable wipe). This
+    // supersedes the B821/B837 approach of wiping-then-masking the toggle flash.
     const commit = (c, zoom, ghost) => {
+      const cur = map.getZoom();
+      if (Math.abs(zoom - cur) < 1e-3) {
+        wrap.style.transform = "";
+        try {
+          const target = map.latLngToContainerPoint(c);
+          const half = map.getSize().divideBy(2);
+          map.panBy(target.subtract(half), { animate: false, noMoveStart: true });
+        } catch (_) { try { map.setView(c, zoom, { animate: false }); } catch (_) {} }
+        // Store the map's ACTUAL settled center (panBy rounds to whole pixels), so the
+        // next sizeChanged test compares against reality, not the pre-round target.
+        try { geoCommitRef.current = { center: map.getCenter(), zoom: cur, w: size.w, h: size.h }; } catch (_) { geoCommitRef.current = { center: c, zoom: cur, w: size.w, h: size.h }; }
+        return;
+      }
       if (ghost) spawnGhost();
       wrap.style.transform = "";
       try { map.setView(c, zoom, { animate: false }); } catch (_) {}
@@ -1842,20 +1876,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
     const prev = geoCommitRef.current;
     const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
-    // First paint (no prior tiles on screen to clone) → plain commit. But a RESIZE while a prior
-    // view IS on screen — e.g. a docked panel opening/closing shrinks the in-flow canvas — needs
-    // Leaflet's size re-synced (invalidateSize) AND fires setView→viewreset→tile-wipe. Do BOTH under
-    // one ghost of the current tiles so the reflow + reload are never seen. (B837 folds the formerly
-    // separate, un-ghosted invalidateSize into this ghosted commit; reuses B65's spawnGhost. `prev`
-    // is null only on first paint → no ghost, no invalidateSize needed then.)
+    // First paint (`prev` null) → a plain commit; nothing on screen yet. A RESIZE while a prior view
+    // IS on screen — a docked panel / left-rail opening/closing shrinks or grows the in-flow canvas —
+    // needs Leaflet's cached size re-synced, then a same-zoom re-center. B931 does that WITHOUT a
+    // tile-wipe or a ghost (see the sizeChanged branch below).
     if (sizeChanged) {
       clearTimeout(geoCommitTimer.current);
       if (prev) {
-        spawnGhost();
-        try { map.invalidateSize(false); } catch (_) {}
+        // A resize while a view is already on screen — a docked panel / left-rail
+        // opening or closing shrinks or grows the in-flow canvas. Update Leaflet's
+        // cached size WITHOUT panning or wiping (`invalidateSize` with pan:false
+        // fires only `move`/`resize`, never `viewreset`), then re-center through
+        // `commit`, which pans (no wipe) because a toggle never changes the zoom.
+        // Net: opening/closing/switching a panel no longer flashes the aerial at
+        // all — the residual tile-wipe B821/B837 masked with a ghost is now gone
+        // at the source, so no ghost is spawned for a toggle. (B931)
         wrap.style.transform = "";
-        try { map.setView(center, z, { animate: false }); } catch (_) {}
-        geoCommitRef.current = { center, zoom: z, w: size.w, h: size.h };
+        try { map.invalidateSize({ animate: false, pan: false }); } catch (_) {}
+        commit(center, z, false);
       } else {
         commit(center, z, false); // first paint: plain commit, nothing on screen to ghost
       }
