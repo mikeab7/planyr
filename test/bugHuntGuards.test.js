@@ -286,8 +286,17 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
     expect(sp).toMatch(/padX: c\.padX \?\? 14, padY: c\.padY \?\? 8/);             // Site Planner default
     const mr = read("../src/shared/markup/MarkupRenderer.jsx");
-    expect(mr).toMatch(/const padX = 8, padY = 4;/);                              // Doc Review parity
-    expect(mr).toMatch(/text\.length \* fs \* 0\.58 \+ padX \* 2/);
+    expect(mr).toMatch(/const padX = 8, padY = 4;/);                              // Doc Review parity — constant unchanged
+    // Callout overflow fix (Doc Review): the char-count guess (`text.length * fs * 0.58 + padX*2`)
+    // that let a callout's text render past its box was replaced with the real wrap-and-measure
+    // box-fit (textWrap.calloutBoxMetrics) — assert the box is sized from that, not a flat guess.
+    expect(mr).not.toMatch(/text\.length \* fs \* 0\.58 \+ padX \* 2/);
+    expect(mr).toMatch(/calloutBoxMetrics\(text, fs, \{ padX, padY, measure \}\)/);
+    // The Site Planner map's OWN callout system already got box-fit + wrapping via B913's
+    // calloutLayout (auto-size / wrap-to-boxW), NOT this shared helper — assert it sizes from
+    // calloutLayout and no longer uses the old flat char-count guess.
+    expect(sp).toMatch(/calloutLayout\(c, st, view\.ppf\)/);
+    expect(sp).not.toMatch(/tw = Math\.max\(fontPx, \.\.\.lines\.map\(\(l\) => l\.length \* charW\)\)/);
   });
 
   it("B567: every Site Planner color input picks live via livePick (onInput), with one-frame undo", () => {
@@ -512,7 +521,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   it("B680: callout editor hides the committed box + chrome while editing (no doubling), keeps a typeable min", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // the committed box + selection chrome are hidden while THIS callout's editor is open → only ONE box
-    expect(src).toMatch(/editCallout\?\.id !== c\.id && <rect x=\{bp\.x - w \/ 2\}/);
+    expect(src).toMatch(/editCallout\?\.id !== c\.id && <rect data-testid=\{`callout-box-\$\{c\.id\}`\} x=\{boxRect\.x\}/);
     expect(src).toMatch(/isSel && tool === "select" && editCallout\?\.id !== c\.id/);
     // a screen-px minimum is kept ONLY for typeability — safe now the box is hidden (can't double it).
     // B913 — geometry now comes from calloutLayout (auto-size OR wrap-to-boxW); the 64/30 min is kept

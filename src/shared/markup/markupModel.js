@@ -17,6 +17,13 @@ import { isClosedTool } from "./tools.matrix.js";
 const usesAB = (m) => m && m.kind === "line" && m.a && m.b && !Array.isArray(m.pts);
 /* A Site Planner box persists as a centre + size (+ optional rotation). */
 const isCentreBox = (m) => m && Number.isFinite(m.cx) && Number.isFinite(m.w) && !Array.isArray(m.pts) && !m.a;
+/* A Site Planner callout persists as { tip|tips, box, noLeader? } rather than a `pts` array —
+ * `tip` is the legacy single-leader field, `tips` an array for N leaders (B919 multi-leader map port).
+ * Recognized regardless of `kind` so Site Planner's own `callouts` collection (which never sets
+ * a `.kind` field) can flow through the same accessors as Document Review's callout markups. */
+const usesTipBox = (m) => m && !Array.isArray(m.pts) && !usesAB(m) && !isCentreBox(m) &&
+  m.box && Number.isFinite(m.box.x) && Number.isFinite(m.box.y) &&
+  (m.tip || Array.isArray(m.tips) || m.noLeader === true);
 
 /** The four rotated corners of a centre-box markup, world coordinates. */
 export function boxCorners(m) {
@@ -33,6 +40,10 @@ export function ptsOf(m) {
   if (usesAB(m)) return [m.a, m.b];
   if (Array.isArray(m.pts)) return m.pts;
   if (isCentreBox(m)) return boxCorners(m);
+  if (usesTipBox(m)) {
+    const tips = Array.isArray(m.tips) ? m.tips : (m.tip ? [m.tip] : []);
+    return [...tips, m.box];
+  }
   return [];
 }
 
@@ -41,7 +52,46 @@ export function ptsOf(m) {
 export function setPts(m, pts) {
   if (usesAB(m)) return { ...m, a: pts[0], b: pts[1] };
   if (isCentreBox(m)) return m;
+  if (usesTipBox(m)) {
+    const tips = pts.slice(0, -1);
+    const box = pts[pts.length - 1];
+    const out = { ...m, box, noLeader: tips.length === 0 };
+    delete out.tip;
+    delete out.tips;
+    if (tips.length === 1) out.tip = tips[0];
+    else if (tips.length > 1) out.tips = tips;
+    return out;
+  }
   return { ...m, pts };
+}
+
+/* Callout N-LEADER model (B909/NEW-2): pts = [...tips, box] — every point but the last is a
+ * leader's target ("tip"), the last point is the text-box anchor. A single point (no leader,
+ * a plain text label — Bluebeam's behaviour once the last leader is removed) and the legacy
+ * exactly-2-point [tip, box] shape are both just N=0 and N=1 of this SAME shape, so no data
+ * migration is needed: every callout ever saved already fits this model unchanged. */
+export function calloutParts(m) {
+  const pts = ptsOf(m);
+  if (!pts.length) return { tips: [], box: null };
+  if (pts.length === 1) return { tips: [], box: pts[0] };
+  return { tips: pts.slice(0, -1), box: pts[pts.length - 1] };
+}
+
+/** Add a new leader at `pt`, targeting the box from a new direction. Box stays the last point. */
+export function addCalloutLeader(m, pt) {
+  const pts = ptsOf(m);
+  if (!pts.length) return setPts(m, [pt]);
+  const box = pts[pts.length - 1];
+  return setPts(m, [...pts.slice(0, -1), pt, box]);
+}
+
+/** Remove leader `tipIndex` (0-based, into the tips-only list). Removing the last remaining
+ *  leader is allowed and leaves a plain box-only text label (Bluebeam default). A no-op for an
+ *  out-of-range index (including the box's own index — the box is never removable this way). */
+export function removeCalloutLeader(m, tipIndex) {
+  const pts = ptsOf(m);
+  if (tipIndex < 0 || tipIndex >= pts.length - 1) return m;
+  return setPts(m, [...pts.slice(0, tipIndex), ...pts.slice(tipIndex + 1)]);
 }
 
 /* Minimum vertices a kind needs to be a valid shape. Closed rings need 3; everything
@@ -67,6 +117,12 @@ export function translate(m, dx, dy) {
   if (usesAB(m)) { out.a = { x: m.a.x + dx, y: m.a.y + dy }; out.b = { x: m.b.x + dx, y: m.b.y + dy }; return out; }
   if (Array.isArray(m.pts)) { out.pts = m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })); return out; }
   if (isCentreBox(m)) { out.cx = (m.cx || 0) + dx; out.cy = (m.cy || 0) + dy; return out; }
+  if (usesTipBox(m)) {
+    out.box = { x: m.box.x + dx, y: m.box.y + dy };
+    if (m.tip) out.tip = { x: m.tip.x + dx, y: m.tip.y + dy };
+    if (Array.isArray(m.tips)) out.tips = m.tips.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    return out;
+  }
   return out;
 }
 

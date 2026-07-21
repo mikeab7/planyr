@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-21 @ `198856b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-21 @ `c1ccb62` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_295 source files mapped._
+_296 source files mapped._
 
 ## infra
 
@@ -113,11 +113,11 @@ _295 source files mapped._
 - **`src/shared/ids.js`** — Collision-resistant element-id minter: per-tab random letter salt + seedAbove counter so no two tabs mint a tombstoned id (B591)
   - _exports_: `createIdMinter`, `randomIdSalt`
 - **`src/shared/markup/geometry.js`** — Pure unit-agnostic point math for all markup surfaces: length, shoelace area, arc-midpoint, point-in-poly, clamped centroid, snap45, projToSeg, bbox
-  - _exports_: `bboxOf`, `centroidOf`, `dist`, `midOfPath`, `pathLength`, `pointInPoly`, `polyArea`, `projToSeg`, `rot2`, `snap45`
+  - _exports_: `bboxOf`, `centroidOf`, `dist`, `midOfPath`, `nearestRectPerimeterPoint`, `pathLength`, `pointInPoly`, `polyArea`, `projToSeg`, `rot2`, `snap45`
 - **`src/shared/markup/hitTest.js`** — Shared JS-picker hit-testing: pickMarkup click selection (nearest, smallest-interior-wins) and hitEditPath vertex/edge grab for the selected markup
-  - _exports_: `hitEditPath`, `hitMarkup`, `pickMarkup`, `pickMarkupIndex`, `scoreMarkup`
+  - _exports_: `hitCalloutLeaderIndex`, `hitEditPath`, `hitMarkup`, `pickMarkup`, `pickMarkupIndex`, `scoreMarkup`
 - **`src/shared/markup/markupModel.js`** — Cross-host markup accessors reconciling Site Planner a/b + centre-box vs Document Review pts list: ptsOf/setPts/translate/bbox + load-path sanitize
-  - _exports_: `bboxOfMarkup`, `boxCorners`, `isClosed`, `minPtsOf`, `ptsOf`, `sanitizeMarkup`, `sanitizeMarkups`, `setPts`, `translate`
+  - _exports_: `addCalloutLeader`, `bboxOfMarkup`, `boxCorners`, `calloutParts`, `isClosed`, `minPtsOf`, `ptsOf`, `removeCalloutLeader`, `sanitizeMarkup`, `sanitizeMarkups`, `setPts`, `translate`
 - **`src/shared/markup/MarkupRenderer.jsx`** — Pure SVG renderer for one markup of any kind (measures, shapes, text, callout, cloud, dimension, arrows) given viewport scale + ftPerUnit
   - _exports_: `default (MarkupRenderer)`
 - **`src/shared/markup/markupStyle.js`** — Shared per-object style resolver: turns a markup's stored fields into display style with a kind-keyed fallback (measures teal, annotations orange); used by MarkupRenderer + the DocReview draft preview so preview + commit can't drift
@@ -132,6 +132,8 @@ _295 source files mapped._
   - _exports_: `boxContains`, `boxesIntersect`, `cornerGrips`, `hasSelMod`, `marqueeHits`, `nextSelection`, `normBox`, `pickInMarquee`, `SEL`, `selMods`
 - **`src/shared/markup/SelectionChrome.jsx`** — Neutral hue-free selection chrome SVG: light-casing-under-dark-line outline plus solid corner grips or faint marquee fill, legible on aerial imagery
   - _exports_: `default (SelectionChrome)`
+- **`src/shared/markup/textWrap.js`** — Shared callout text-wrap + box-fit: greedy word-wrap (force-breaks an unbroken long word, honors explicit newlines) and calloutBoxMetrics sizes the box to the longest wrapped line + line count, so the renderer and hit-test box agree by construction; pluggable heuristic + real-canvas measurers
+  - _exports_: `bestMeasurer`, `calloutBoxMetrics`, `canvasWidth`, `heuristicCharWidth`, `heuristicWidth`, `wrapText`
 - **`src/shared/markup/toolRegistry.js`** — Post-commit arm policy (site reverts to Select, doc/stitch reuse) + Site Planner mline/mrect tool-id alias mapping to canonical matrix ids
   - _exports_: `ARM_POLICY`, `canonicalToolId`, `hostToolId`, `nextToolAfterCommit`, `SITE_TOOL_ALIAS`
 - **`src/shared/markup/tools.matrix.js`** — Single-source-of-truth tool matrix: property columns, draw modes, per-workspace tool rows + pure accessors; drives the panel and generates tool tests

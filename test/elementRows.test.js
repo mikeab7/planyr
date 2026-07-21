@@ -96,6 +96,28 @@ describe("rowsToModel — rows → model (mirror of site_elements_down.sql)", ()
     expect(back.settings).toEqual(m.settings); // header fields ride through
   });
 
+  // Multi-leader map callouts — a callout's leader data (`tip` | `tips[]` | `noLeader`) rides as
+  // opaque JSON in the row's `data` column (no per-field callout schema here), so a multi-leader
+  // callout must round-trip byte-for-byte with no special-casing needed.
+  it("round-trips a multi-leader callout's tips[] / noLeader fields verbatim (no callout-specific row schema)", () => {
+    const m = {
+      id: "site-b",
+      callouts: [
+        { id: "co1", box: { x: 10, y: 10 }, tips: [{ x: 0, y: 0 }, { x: 20, y: -5 }, { x: 30, y: 15 }], text: "3 leaders", noLeader: false },
+        { id: "co2", box: { x: 50, y: 50 }, text: "plain label", noLeader: true },
+      ],
+      deletedIds: [],
+    };
+    const { rows, problems } = explodeModel(m);
+    expect(problems).toEqual([]);
+    const header = { id: m.id, deletedIds: [] };
+    const back = rowsToModel(header, rows);
+    expect(back.callouts).toEqual(m.callouts);
+    const co1 = back.callouts.find((c) => c.id === "co1");
+    expect(co1.tips).toHaveLength(3);
+    expect(co1.tip).toBeUndefined(); // N>1 leaders never carries the legacy singular field
+  });
+
   it("orders a collection by (z_index, id) — z gaps from reorders still rebuild deterministically", () => {
     const rows = [
       { site_id: "s", id: "b", kind: "el", data: { id: "b" }, z_index: 512, rev: 3 },
