@@ -23,6 +23,7 @@ import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
+import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale } from "./lib/overlayPdf.js";
@@ -2651,20 +2652,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // a no-op / end-of-stack); undo rides pushHistory + the setter like every other edit.
   const arrangeSel = (mode, target) => {
     const s = target || selRef.current;
-    if (s?.kind === "el") {
-      const target = els.find((e) => e.id === s.id);
-      if (!target) return;
-      const band = zOrder(target);
-      const patch = reorderByZ(els.filter((e) => zOrder(e) === band), s.id, mode);
-      if (!patch) return;
-      pushHistory();
-      setEls((a) => a.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e)));
-    } else if (s?.kind === "markup") {
-      const patch = reorderByZ(markups, s.id, mode);
-      if (!patch) return;
-      pushHistory();
-      setMarkups((a) => a.map((m) => (patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
+    // Resolve the peer set once (a building reorders within its type-layer band; a markup within the
+    // markup layer) so the patch AND the B916/NEW-2 no-op cue read the same list.
+    let peers = null;
+    if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return; const band = zOrder(t); peers = els.filter((e) => zOrder(e) === band); }
+    else if (s?.kind === "markup") { peers = markups; }
+    else return;
+    const patch = reorderByZ(peers, s.id, mode);
+    if (!patch) {
+      // B916/NEW-2 — a no-op arrange (already at that end of a real stack) used to be dead silence;
+      // via a keyboard chord that read as "nothing works." Flash a brief cue instead. Skip a lone
+      // item (nothing to reorder) so we don't cry "already at back" when there's no stack at all.
+      const af = arrangeFlags(peers, s.id);
+      if (af && af.count > 1) flashWarn(`Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`, 2500);
+      return;
     }
+    pushHistory();
+    if (s.kind === "el") setEls((a) => a.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e)));
+    else setMarkups((a) => a.map((m) => (patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
   };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
@@ -3787,11 +3792,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (multi.length) setMulti([]);
-    if (!m || m.locked) { setSel({ kind: "markup", id }); return; }
-    setSel({ kind: "markup", id });
+    // B916/NEW-2 — repeat-click OR Alt-click CYCLES the selection DOWN through the markups stacked
+    // under the pointer (smaller-area-first), so a shape covered by another is always reachable — the
+    // escape hatch for "I can't get to the one underneath." A FRESH click (nothing under this point is
+    // selected yet) keeps the DOM-topmost hit the browser already resolved. Mirrors the B910 measure
+    // cycle (selectMeasure + measureHit.js); the under-point stack honours the B915 fill-aware rule, so
+    // an unfilled boundary only joins the cycle when you click near its stroke.
+    let selId = id, selM = m;
+    {
+      const cp = p2f(e.clientX, e.clientY);
+      const visible = markups.filter((x) => !(x.kind === "easement" && x.parcelId && inactiveParcelIds.has(x.parcelId)));
+      const order = markupsUnderPoint(visible, cp, MK_HIT_PX / view.ppf);
+      if (order.length > 1) {
+        const cur = selRef.current?.kind === "markup" ? selRef.current.id : null;
+        const anchored = cur != null && order.includes(cur);
+        if ((e.altKey && !hasSelMod(e)) || anchored) {
+          const nxt = nextMarkupSelection(order, anchored ? cur : id);
+          if (nxt != null) { selId = nxt; selM = markups.find((x) => x.id === nxt) || m; }
+        }
+      }
+    }
+    if (!selM || selM.locked) { setSel({ kind: "markup", id: selId }); return; }
+    setSel({ kind: "markup", id: selId });
     pushHistory();
     const fp = p2f(e.clientX, e.clientY);
-    drag.current = { mode: "mkMove", id, fx: fp.x, fy: fp.y, orig: m };
+    drag.current = { mode: "mkMove", id: selId, fx: fp.x, fy: fp.y, orig: selM };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   // Start moving a set of items together (respecting building assemblies). Uses an
@@ -12540,16 +12565,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const nStroke = m.stroke;
                 const nsw = sw + (isSel ? 1 : 0);
                 const vsw = strokeZoom(nsw, zk); // B617: on-screen weight held constant relative to the drawing
-                const common = { stroke: nStroke, strokeWidth: vsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id), onContextMenu: (e) => onMarkupContext(e, m.id) };
-                // Closed shapes (rect/ellipse/polygon) get an always-on pointer target so the WHOLE
-                // body selects + drags, not just the painted border. pointerEvents:"all" makes the
-                // interior a hit target even when the shape is UNFILLED (fill:"none" is otherwise dead
-                // to clicks, so you'd have to land exactly on the 2px stroke). Mirrors Doc Review's
-                // B33 hit-test and Bluebeam/Figma behaviour (B155). Open paths (line/polyline) don't
-                // get fillProps, so their hit area is unchanged — see B155 for their forgiving buffer.
-                const fillProps = (m.fillOpacity > 0)
-                  ? { fill: m.fill, fillOpacity: m.fillOpacity, pointerEvents: "all" }
-                  : { pointerEvents: "all" };
+                // B917/NEW-3 — a LOCKED markup can't be moved or reshaped, so it must NOT wear the
+                // four-arrow "move" cursor (that false affordance is exactly what the owner hit: a
+                // locked shape shows "move" but nothing happens). It stays selectable (click → Unlock),
+                // so a plain "pointer" reads honestly.
+                const mkCursor = { cursor: tool === "select" ? (m.locked ? "pointer" : "move") : "crosshair" };
+                const common = { stroke: nStroke, strokeWidth: vsw, strokeDasharray: da, fill: "none", style: mkCursor, onPointerDown: (e) => startMoveMarkup(e, m.id), onContextMenu: (e) => onMarkupContext(e, m.id) };
+                // B915/NEW-1 — a closed shape (rect/ellipse/polygon) grabs by its whole INTERIOR only
+                // when it is FILLED. An UNFILLED one (fillOpacity 0) grabs on its stroke + a forgiving
+                // buffer ONLY, via a fat transparent hit companion (the line/polyline technique) — so a
+                // big invisible boundary stops blanketing everything under it (the reported bug: an
+                // unfilled ~5,000-ft polygon swallowed every off-road click, and "Send to Back" was
+                // powerless because it's a hit-AREA problem, not paint order). Small FILLED annotations
+                // still select by interior (B155/B156 preserved). markupPick.js reads the SAME
+                // fillOpacity>0 rule, so the JS cycle (B916) and this declarative hit area never diverge.
+                const closedFill = (m.fillOpacity ?? 0) > 0;
+                const visFill = closedFill ? { fill: m.fill, fillOpacity: m.fillOpacity } : { fill: "none" };
+                const closedHitPE = closedFill ? "all" : "stroke"; // whole-body vs stroke-only grab (B915)
+                // Top-centre screen anchor for the selected-locked 🔒 cue (B917/NEW-3), per markup kind.
+                const mkLockAnchor = () => {
+                  const pts = m.kind === "line" ? [m.a, m.b]
+                    : MK_BOX_KINDS.includes(m.kind) ? boxCorners(m)
+                    : m.kind === "utilRoute" ? (m.corridor || m.pts)
+                    : (mkPts(m).length ? mkPts(m) : (m.pts || []));
+                  if (!pts || !pts.length) return null;
+                  let minX = Infinity, maxX = -Infinity, minY = Infinity;
+                  pts.forEach((p) => { const q = f2p(p); minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x); minY = Math.min(minY, q.y); });
+                  return { x: (minX + maxX) / 2, y: minY - 6 };
+                };
                 // B156: render the markup exactly as before, then wrap the whole subtree so it
                 // carries its own pointer enter/leave. Because that rides the markup's OWN hit
                 // geometry (the browser decides what the pointer is over — the same pointerEvents
@@ -12565,7 +12608,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const clW = strokeZoom(2.2, zk); // B617
                   const padC = f2p(centroid(m.pad)), mid = { x: (cl[0].x + cl[cl.length - 1].x) / 2, y: (cl[0].y + cl[cl.length - 1].y) / 2 };
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
+                    <g key={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
                       {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
                       <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? dashZoom("5 4", zk) : undefined} />
@@ -12583,7 +12626,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const col = m.stroke; // B619: keep the traced line's own color when selected
                   const tw = strokeZoom(m.weight ?? 2.4, zk); // B617
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
+                    <g key={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polyline points={s} fill="none" stroke={SEL_BLUE} strokeWidth={tw + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
                       <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
                       {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
@@ -12597,7 +12640,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const cen = (m.centerline || []).map(f2p);
                   const ctr = centroid(m.pts), cp = f2p(ctr);
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
+                    <g key={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
                       <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* centerline + per-call bearing/distance labels */}
@@ -12626,7 +12669,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     ? m.centerline
                     : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
                   return (
-                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
+                    <g key={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
@@ -12663,19 +12706,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
-                if (m.kind === "polygon") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polygon key={m.id} points={s} {...common} {...fillProps} />; }
+                // B915/NEW-1 — each closed shape is a fat TRANSPARENT hit companion (carries the
+                // grab: whole-body when filled, stroke-only when unfilled) UNDER a pointer-inert
+                // VISIBLE shape. Same declarative pattern the line/polyline already use, so hover
+                // and click share one hit geometry (B156). No double-paint: the companion is fill:none.
+                if (m.kind === "polygon") {
+                  const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  return (
+                    <g key={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
+                      <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
+                      <polygon points={s} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visFill} pointerEvents="none" />
+                    </g>
+                  );
+                }
                 const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
-                if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
-                return <rect key={m.id} x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
+                const rotTf = `rotate(${m.rot || 0} ${c.x} ${c.y})`;
+                if (m.kind === "ellipse") return (
+                  <g key={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
+                    <ellipse cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={rotTf} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} pointerEvents={closedHitPE} />
+                    <ellipse cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={rotTf} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visFill} pointerEvents="none" />
+                  </g>
+                );
+                return (
+                  <g key={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
+                    <rect x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={rotTf} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} pointerEvents={closedHitPE} />
+                    <rect x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={rotTf} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visFill} pointerEvents="none" />
+                  </g>
+                );
                 })();
                 if (!node) return null; // e.g. an easement hidden with its inactive parcel (B213)
                 const isHov = hoverMkId === m.id && !isSel && tool === "select"; // never glow the already-selected markup, and Select mode only
                 return (
                   <g key={m.id}
                      className={isHov ? "mk-hover" : undefined} data-hover={isHov ? "1" : undefined}
+                     data-testid={isSel && tool === "select" ? "markup-selected" : undefined} data-mk-id={m.id} data-mk-kind={m.kind} data-mk-locked={m.locked ? "1" : "0"}
                      onPointerEnter={() => { if (tool === "select") setHoverMkId(m.id); }}
                      onPointerLeave={() => setHoverMkId((h) => (h === m.id ? null : h))}>
                     {node}
+                    {/* B917/NEW-3 — a small 🔒 on the SELECTED locked markup (mirrors the element lock
+                        glyph), so it's obvious WHY dragging does nothing: it's locked, not stuck. */}
+                    {isSel && m.locked && tool === "select" && (() => { const a = mkLockAnchor(); return a ? <text x={a.x} y={a.y} textAnchor="middle" fontSize={13} pointerEvents="none" data-export="skip">🔒</text> : null; })()}
                   </g>
                 );
   };
@@ -14596,7 +14666,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   );
                 })()}
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
-                  {MK_BOX_KINDS.includes(selMarkup.kind)
+                  {/* B917/NEW-3 — a locked markup renders no reshape dots (editablePath returns null
+                      when locked), so the "drag a dot" instruction was a lie. Tell the truth instead. */}
+                  {selMarkup.locked
+                    ? "Locked — click 🔓 Unlock below to move or reshape it."
+                    : MK_BOX_KINDS.includes(selMarkup.kind)
                     ? "Drag the corner/edge grips to resize, the top handle to rotate."
                     : selMarkup.kind === "encumbrance"
                       ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
@@ -17051,7 +17125,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       return out.length ? out : null;
     })() : null;
     return (
-      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
+      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>
         <path d={dPath} fill={ghostPath ? addF : waterFill} fillOpacity={waterOp} stroke="none" />
@@ -17144,7 +17218,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // B620 — inline label riding the road centerline (own color + white halo; sparse spacing).
     if (editInlineId !== el.id) rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo }));
     return (
-      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
+      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{rparts}</g>
     );
@@ -17372,7 +17446,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       </g>,
     );
   }
-  return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
+  return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
     onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{parts}</g>;
 }
