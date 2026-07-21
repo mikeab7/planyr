@@ -23,6 +23,11 @@ const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
 const _f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const CF_PER_ACFT = 43560;
+// Display-precision epsilon (2-decimal ac-ft, same as _f2): a requirement or shortfall this
+// small is floating-point residue (e.g. a berm-fill credit computed to a near-zero remainder),
+// never a real obligation — treat it as met/none-required so a badge never reads "SHORT -0.00
+// ac-ft req 0.00" (B909 round 3 polish).
+export const ACFT_EPS = 0.005;
 
 /* Bullet layout: where the provided bar ends, where the required tick / span sits, and the
  * signed delta — all as fractions of a shared scale (max of provided & required + headroom),
@@ -146,18 +151,19 @@ export function stormwaterBarSpecs(d) {
   // (providedUsableCf → usableAcFt); GROSS never drives the fill or the delta — it rides
   // only as the de-emphasized `reference` tick. A null usable is honestly "unknown" (never a
   // silent gross fallback). Point AND band both compute a covered/short verdict off usable.
-  if (req && req.kind === "point" && req.requiredAcFt > 0 && usableAcFt == null) {
+  if (req && req.kind === "point" && req.requiredAcFt > ACFT_EPS && usableAcFt == null) {
     out.det = { label: "Detention", layout: bulletBarLayout({ unknown: true }), status: "unknown", verdict: "usable unknown" };
-  } else if (req && req.kind === "point" && req.requiredAcFt > 0) {
+  } else if (req && req.kind === "point" && req.requiredAcFt > ACFT_EPS) {
     const dv = usableAcFt - req.requiredAcFt;
-    out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt, required: req.requiredAcFt, reference: providedAcFt }), status: dv >= 0 ? "covered" : "short", verdict: `${dv >= 0 ? "+" : "−"}${_f2(Math.abs(dv))} ac-ft` };
+    const short = dv < -ACFT_EPS;
+    out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt, required: req.requiredAcFt, reference: providedAcFt }), status: short ? "short" : "covered", verdict: `${short ? "−" : "+"}${_f2(Math.abs(dv))} ac-ft` };
   } else if (req && req.kind === "point") {
     out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt ?? providedAcFt, required: 0 }), status: null, verdict: "none required" };
   } else if (req && req.kind === "band" && usableAcFt == null) {
     out.det = { label: "Detention", layout: bulletBarLayout({ unknown: true }), status: "unknown", verdict: "usable unknown" };
   } else if (req && req.kind === "band") {
     const prov = usableAcFt; // never gross — gross rides the reference tick only
-    const status = prov >= req.bandAcFt[1] ? "covered" : prov < req.bandAcFt[0] ? "short" : "needs-input";
+    const status = prov >= req.bandAcFt[1] - ACFT_EPS ? "covered" : prov < req.bandAcFt[0] - ACFT_EPS ? "short" : "needs-input";
     out.det = { label: "Detention", layout: bulletBarLayout({ provided: prov, bandLo: req.bandAcFt[0], bandHi: req.bandAcFt[1], reference: providedAcFt }), status, verdict: `${_f2(req.bandAcFt[0])}–${_f2(req.bandAcFt[1])} ac-ft` };
   } else if (req && req.kind === "unknown") {
     out.det = { label: "Detention", layout: bulletBarLayout({ unknown: true }), status: "unknown", verdict: "required unknown" };
@@ -168,17 +174,22 @@ export function stormwaterBarSpecs(d) {
       const provCf = d.mitProvided ? d.mitProvided.creditedCf : 0;
       if (provCf == null) {
         out.mit = { label: "Mitigation", layout: bulletBarLayout({ unknown: true }), status: "unknown", verdict: "provided unknown" };
+      } else if (!(mit.volumeAcFt > ACFT_EPS)) {
+        // B909 round 3 — a requirement that rounds to zero (e.g. floating-point residue from
+        // the berm-fill credit math) is nothing to offset: never a false "SHORT -0.00 ac-ft".
+        out.mit = { label: "Mitigation", layout: bulletBarLayout({ provided: provCf / CF_PER_ACFT, required: 0 }), status: null, verdict: "not required" };
       } else {
         const provAcFt = provCf / CF_PER_ACFT;
         const bal = provAcFt - mit.volumeAcFt;
+        const short = bal < -ACFT_EPS;
         // NEW-2 — the "OVER-DUG" state is retired: an over-provided cut simply reads COVERED
         // (a zero-requirement surplus must never out-shout a real shortfall). Only a genuine
         // shortfall is loud; a surplus is quiet good.
         out.mit = {
           label: "Mitigation",
           layout: bulletBarLayout({ provided: provAcFt, required: mit.volumeAcFt }),
-          status: bal < 0 ? "short" : "covered",
-          verdict: bal < 0 ? `−${_f2(Math.abs(bal))} ac-ft` : "covered",
+          status: short ? "short" : "covered",
+          verdict: short ? `−${_f2(Math.abs(bal))} ac-ft` : "covered",
         };
       }
     } else {

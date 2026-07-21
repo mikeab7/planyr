@@ -156,3 +156,34 @@ describe("stormwaterBarSpecs — the ONE shared derivation (screen == PDF)", () 
     expect(stormwaterBarSpecs({}).det).toBeNull();
   });
 });
+
+describe("B909 round 3 polish — a shortfall/requirement inside display-precision epsilon reads as MET, never a false SHORT", () => {
+  it("mitigation: an epsilon requirement (1e-9 ac-ft) with zero provided is NOT SHORT — it's not required", () => {
+    const d = { mitigation: { intersectAcres: 2, volumeCf: 1e-9 * AF, volumeAcFt: 1e-9 }, mitProvided: { creditedCf: 0 } };
+    const { mit } = stormwaterBarSpecs(d);
+    expect(mit.status).not.toBe("short");
+    expect(mit.verdict).not.toMatch(/short/i);
+    expect(mit.verdict).not.toMatch(/-0\.00/i);
+  });
+  it("mitigation: a real requirement met within epsilon (rounding residue) reads COVERED, not SHORT -0.00", () => {
+    const d = { mitigation: { intersectAcres: 2, volumeCf: 4 * AF, volumeAcFt: 4 }, mitProvided: { creditedCf: (4 - 1e-9) * AF } };
+    const { mit } = stormwaterBarSpecs(d);
+    expect(mit.status).toBe("covered");
+  });
+  it("mitigation: a genuine shortfall beyond epsilon still reads SHORT (guardrail: epsilon isn't a loophole)", () => {
+    const d = { mitigation: { intersectAcres: 2, volumeCf: 4 * AF, volumeAcFt: 4 }, mitProvided: { creditedCf: 3 * AF } };
+    const { mit } = stormwaterBarSpecs(d);
+    expect(mit.status).toBe("short");
+  });
+  it("detention point: an epsilon requirement (1e-9 ac-ft) with zero usable is NOT SHORT — none required", () => {
+    const d = { req: { kind: "point", requiredAcFt: 1e-9 }, providedUsableCf: 0, providedCf: 0 };
+    const { det } = stormwaterBarSpecs(d);
+    expect(det.status).not.toBe("short");
+    expect(det.verdict).toBe("none required");
+  });
+  it("detention band: usable inside epsilon of the band's low end reads covered/needs-input, never SHORT", () => {
+    const d = { req: { kind: "band", bandAcFt: [10, 12] }, providedUsableCf: (10 - 1e-9) * AF, providedCf: (10 - 1e-9) * AF };
+    const { det } = stormwaterBarSpecs(d);
+    expect(det.status).not.toBe("short");
+  });
+});
