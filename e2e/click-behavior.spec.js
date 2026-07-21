@@ -144,7 +144,7 @@ test.describe("click behavior — single-click selects, double-click opens Prope
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  /* B934 — the owner rule: "in no circumstance should double-clicking an easement or a road go into a
+  /* B935 — the owner rule: "in no circumstance should double-clicking an easement or a road go into a
    * text editor to add the inline label; that's reserved for the properties." So EVERY double-click on
    * a centerline road (or an easement / Line markup) opens Properties — a fresh one AND one that is
    * already selected — and the old on-canvas inline-label editor never appears. The inline label is

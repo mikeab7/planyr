@@ -122,7 +122,7 @@ await page.waitForTimeout(400);
 const zoomedBack = (await readLabels()).length;
 log(zoomedBack >= labels.length - 1, `LOD: zooming back in restores the labels (${zoomedOut} → ${zoomedBack})`);
 
-// B934 — double-clicking a line now opens the PROPERTIES panel (never an on-canvas inline-label editor);
+// B935 — double-clicking a line now opens the PROPERTIES panel (never an on-canvas inline-label editor);
 // the label is edited only in the panel's own "Inline label" field. Dispatch a native dblclick on the
 // line's <g> (React onDoubleClick → onMarkupDouble → Properties). Playwright's synthetic mouse-dblclick
 // is unreliable here because startMoveMarkup captures the pointer.
@@ -136,7 +136,7 @@ const opened = await page.evaluate(() => {
 });
 await page.waitForTimeout(300);
 const noCanvasEditor = await page.evaluate(() => !document.querySelector("foreignObject input"));
-log(opened && noCanvasEditor, `double-click a line opens Properties, NOT an on-canvas inline-label editor (B934)`);
+log(opened && noCanvasEditor, `double-click a line opens Properties, NOT an on-canvas inline-label editor (B935)`);
 const panelSel = '[data-testid="property-panel"] input[placeholder*="SANITARY"]';
 const hasPanelField = await page.evaluate((s) => !!document.querySelector(s), panelSel);
 log(hasPanelField, `the Properties panel exposes the "Inline label" field`);

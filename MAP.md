@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-21 @ `7c2eec2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-21 @ `b6cf251` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_297 source files mapped._
+_300 source files mapped._
 
 ## infra
 
@@ -225,6 +225,10 @@ _297 source files mapped._
   - _exports_: `default (ActionLink)`
 - **`src/workspaces/site-planner/components/AuthPanel.jsx`** — Account modal: signed-out sign-in/sign-up/reset + set-new-password, signed-in Profile/Team/Settings tabs, focus-trapped
   - _exports_: `default (AuthPanel)`
+- **`src/workspaces/site-planner/components/Chip.jsx`** — FINAL UI SPEC compact one-line status chip (≤6 words, amber/neutral tone) whose ⓘ opens a RowInfo popover carrying the full original sentence
+  - _exports_: `default (Chip)`
+- **`src/workspaces/site-planner/components/Collapse.jsx`** — FINAL UI SPEC collapsible section primitive (title · count · closed-state summary · chevron) with per-sectionId localStorage open/closed persistence; header is a keyboard-toggleable button
+  - _exports_: `collapseStorageKey`, `default (Collapse)`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
@@ -450,11 +454,13 @@ _297 source files mapped._
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
   - _exports_: `nearestPointOnSeg`, `polyArea`, `segLineIntersect`, `splitPolygonByLine`, `splitPolygonByPath`
 - **`src/workspaces/site-planner/lib/pondChangeSummary.js`** — Pure "what changed" support for ⚡ Design pond (B909 round 4): plain-English before/after delta rows, the atomic infeasibility gap-proposal sentence, and schematic (not-to-scale) cross-section marks
-  - _exports_: `buildChangeSummaryRows`, `gapProposalNote`, `pondCrossSectionMarks`
+  - _exports_: `boxesIntersect`, `buildChangeSummaryRows`, `gapProposalNote`, `pondCrossSectionMarks`, `pondLabelBBox`
 - **`src/workspaces/site-planner/lib/pondCriteriaRules.js`** — B709 editable per-jurisdiction pond design criteria (max side slope, min freeboard, maintenance-berm width; all verified:false) + drawn-input conformance checks
   - _exports_: `checkPondCriteria`, `DEFAULT_POND_CRITERIA`, `loadPondCriteria`, `savePondCriteria`
 - **`src/workspaces/site-planner/lib/pondGeom.js`** — Pond expansion label placement (deepest added-ground point) and stage contour rings with elevation/depth labels
   - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `bandedStorage`, `bermAsFillHeight`, `bermFillCells`, `bermFillVolume`, `contourLabelPoint`, `detentionLandTakeEstimate`, `detentionStorage`, `drawdownWarning`, `estimateFootprintSf`, `excavationVolume`, `incrementalExcavationCf`, `pointInRing`, `pondContours`, `pondPlacementCandidates`, `usablePondVolume`, `volumeBetween`
+- **`src/workspaces/site-planner/lib/pondInspectorCopy.js`** — FINAL UI SPEC Part A pond-inspector visible copy as pure data (chip vocabulary A3, collapsed-group titles/summaries, at-a-glance labels, purpose tooltips) so the chip set and word budget unit-test without a browser
+  - _exports_: `POND_AT_A_GLANCE_LABELS`, `POND_CHIP_DEFS`, `POND_GROUPS`, `POND_PURPOSE_TOOLTIPS`, `pondGroupSummary`, `pondInspectorChips`
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
   - _exports_: `accumulatePondLedger`, `effectivePondRole`, `POND_ROLE_LABEL`, `POND_ROLES`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
