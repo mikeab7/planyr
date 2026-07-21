@@ -686,8 +686,8 @@ export default function FileBrowser({
           {/* Needs filing — separate + loud (a to-do; a stuck one is a silent failure) */}
           <button onClick={() => { setSearchQ(""); setShowHolding((v) => !v); }} title="Files that couldn't be confidently classified — one click each to confirm"
             style={{ fontSize: 11.5, fontFamily: "inherit", fontWeight: 800, cursor: "pointer", borderRadius: 999, padding: "4px 12px", whiteSpace: "nowrap",
-              border: `1px solid ${holdingCount ? "var(--warn-border, #d6a64a)" : "var(--border-default)"}`,
-              background: showHolding ? "var(--warn-text)" : (holdingCount ? "var(--warn-bg, #fef3c7)" : "var(--surface-raised)"),
+              border: `1px solid ${holdingCount ? "var(--warn-border)" : "var(--border-default)"}`,
+              background: showHolding ? "var(--warn-text)" : (holdingCount ? "var(--warn-bg)" : "var(--surface-raised)"),
               color: showHolding ? "var(--on-accent)" : (holdingCount ? "var(--warn-text)" : "var(--text-tertiary)") }}>
             ⚑ Needs filing{holdingCount ? ` · ${holdingCount}` : ""}
           </button>
@@ -709,10 +709,10 @@ export default function FileBrowser({
         {/* a refresh failed — keep showing the last loaded list, loudly (NEW-F5) */}
         {loadNotice && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
-            border: "1px solid var(--warn-border, #d6a64a)", background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
+            border: "1px solid var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
             <span style={{ flex: 1 }}>Couldn’t refresh your files — showing the last loaded list. Your files are safe; this is a connection hiccup.</span>
             <button onClick={refresh} title="Try again"
-              style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 7, border: "1px solid var(--warn-border, #d6a64a)", background: "transparent", color: "var(--warn-text)", padding: "2px 10px" }}>Retry</button>
+              style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 7, border: "1px solid var(--warn-border)", background: "transparent", color: "var(--warn-text)", padding: "2px 10px" }}>Retry</button>
             <button onClick={() => setLoadNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
           </div>
         )}
@@ -720,7 +720,7 @@ export default function FileBrowser({
         {/* refile moved the metadata but not the Drive copy — surface it (LOUD-FAILURE) */}
         {moveNotice && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
-            border: "1px solid var(--warn-border, #d6a64a)", background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
+            border: "1px solid var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
             <span style={{ flex: 1 }}>{moveNotice}</span>
             <button onClick={() => setMoveNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
           </div>
@@ -745,8 +745,8 @@ export default function FileBrowser({
         {/* non-PDF download — in-flight + honest failure (B685; never a dead click) */}
         {dlNotice && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
-            border: `1px solid ${dlNotice.error ? "var(--warn-border, #d6a64a)" : "var(--border-default)"}`,
-            background: dlNotice.error ? "var(--warn-bg, #fef3c7)" : "var(--surface-raised)",
+            border: `1px solid ${dlNotice.error ? "var(--warn-border)" : "var(--border-default)"}`,
+            background: dlNotice.error ? "var(--warn-bg)" : "var(--surface-raised)",
             color: dlNotice.error ? "var(--warn-text)" : "var(--text-secondary)", fontSize: 11.5, lineHeight: 1.45 }}>
             <span style={{ flex: 1 }}>{dlNotice.error ? `${dlNotice.name}: ${dlNotice.error}` : `Downloading “${dlNotice.name}”…`}</span>
             <button onClick={() => setDlNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: dlNotice.error ? "var(--warn-text)" : "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
@@ -756,7 +756,7 @@ export default function FileBrowser({
         {/* delete/restore/purge hiccups — surface them (never a silent cleanup failure, NEW-4) */}
         {delNotice && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
-            border: "1px solid var(--warn-border, #d6a64a)", background: "var(--warn-bg, #fef3c7)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
+            border: "1px solid var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
             <span style={{ flex: 1 }}>
               {delNotice.restoreFailed ? "Couldn’t restore that file — check your connection and try again from Recently deleted."
                 : delNotice.deleteFailed ? "Couldn’t delete that file — it may already be deleted, or the cloud is unreachable. Refresh and try again."

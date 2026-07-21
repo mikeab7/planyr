@@ -1212,6 +1212,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     panelLine: themePal.borderDefault, muted: themePal.textSecondary,
     chrome: themePal.chromeBg, chromeLine: themePal.chromeDivider, chromeInk: themePal.chromeText,
     chromeMuted: themePal.chromeMuted, ember: themePal.accent, onAccent: themePal.onAccent,
+    disabled: themePal.textTertiary, // muted-but-legible text token for a disabled menu row (B925 — never an opacity fade)
     accentText: themePal.accentStrong, // AA accent for text on the soft-accent fill
     selCasing: themePal.selCasing, selLine: themePal.selLine, // neutral multi-select / marquee chrome (B569)
     // Semantic text colors — theme-aware so colored labels stay AA on dark panels too.
@@ -10785,6 +10786,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     fontWeight: active ? 650 : 500,
     boxShadow: active ? "0 2px 8px rgba(0,0,0,0.28)" : "none", // neutral shadow (was the retired ember glow)
   });
+  // B925 — the trailing keyboard-shortcut / dropdown-caret on a tool-rail row. De-emphasized vs
+  // the tool LABEL through a muted chrome TOKEN + lighter weight, never an opacity fade (the house
+  // "louder = more important, never fade" rule). On an active row (ember fill) it rides --on-accent
+  // so it stays legible; the label's heavier weight keeps the hierarchy.
+  const railHint = (active) => ({ marginLeft: "auto", flex: "none", fontSize: 10.5, fontWeight: 500, letterSpacing: "0.02em", color: active ? PAL.onAccent : PAL.chromeMuted });
   // ghost buttons on the DARK top bar
   const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
   const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
@@ -11602,7 +11608,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onClick={() => setPlanMenu((o) => !o)}
         title="Switch or rename plan"
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ color: "var(--chrome-muted)", fontSize: 11, flex: "none" }}>▾</span>
       </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
@@ -12037,7 +12043,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   aria-haspopup="menu" aria-expanded={addParcelMenu}
                   style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
                   onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — draw a boundary, identify from county GIS, or add by address">
-                  ＋ Add <span style={{ opacity: 0.8, fontSize: 11 }}>▾</span>
+                  ＋ Add <span style={{ fontSize: 11 }}>▾</span>
                 </button>
                 <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
                   {/* Identify from the county's parcel map — the headline path (needs a georeferenced frame). */}
@@ -12047,8 +12053,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Property lines from the county appraisal district light up on the aerial — click one lot or several.</div>
                     </button>
                   ) : (
-                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
-                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>🔍 Click a lot on the map</div>
+                    <div style={{ padding: "7px 10px" }}>
+                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.disabled }}>🔍 Click a lot on the map</div>
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add a parcel from the map first to turn this on.</div>
                     </div>
                   )}
@@ -12074,8 +12080,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </div>
                     </div>
                   ) : (
-                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
-                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>📍 Add by address</div>
+                    <div style={{ padding: "7px 10px" }}>
+                      <div style={{ fontWeight: 650, fontSize: 13, color: PAL.disabled }}>📍 Add by address</div>
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add a parcel from the map first to turn this on.</div>
                     </div>
                   )}
@@ -14461,13 +14467,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           transform: narrow && !mobileTools ? "translateX(100%)" : "none", transition: "transform 0.2s ease",
           boxShadow: narrow ? "-10px 0 28px rgba(0,0,0,0.45)" : "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
           {railHdr("Tools")}
-          <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")}><ToolIcon id="select" /> Select <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>V</span></button>
-          <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")} title="Hand tool — or hold Space to pan temporarily"><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>H</span></button>
-          <button className={`rbtn${tool === "marquee" ? " on" : ""}`} style={rbtn(tool === "marquee")} onClick={() => selectTool("marquee")} aria-pressed={tool === "marquee"} data-testid="tool-marquee" title={TOOLS.find((t) => t.id === "marquee").hint}><ToolIcon id="marquee" /> Marquee <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>M</span></button>
+          <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")} aria-pressed={tool === "select"}><ToolIcon id="select" /> Select <span style={railHint(tool === "select")}>V</span></button>
+          <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")} aria-pressed={tool === "pan"} title="Hand tool — or hold Space to pan temporarily"><ToolIcon id="pan" /> Pan <span style={railHint(tool === "pan")}>H</span></button>
+          <button className={`rbtn${tool === "marquee" ? " on" : ""}`} style={rbtn(tool === "marquee")} onClick={() => selectTool("marquee")} aria-pressed={tool === "marquee"} data-testid="tool-marquee" title={TOOLS.find((t) => t.id === "marquee").hint}><ToolIcon id="marquee" /> Marquee <span style={railHint(tool === "marquee")}>M</span></button>
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div ref={boundaryAnchor} style={{ position: "relative" }}>
-            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw, plot from a deed, or split a parcel"><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} title="Draw, plot from a deed, or split a parcel"><ToolIcon id="parcel" /> Parcel <span style={railHint(["parcel", "split"].includes(tool))}>▾</span></button>
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
               <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
               {/* B570 — the Deed / Title (metes & bounds) tool lives HERE in the Parcel
@@ -14489,10 +14495,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* measure with line / polyline / area / count modes — promoted to sit just below Tools (B605) */}
           <div ref={measureAnchor} style={{ position: "relative" }}>
             <div style={{ display: "flex", gap: 2 }}>
-              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), flex: 1 }} onClick={() => selectTool("measure")}>
+              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), flex: 1 }} onClick={() => selectTool("measure")} aria-pressed={tool === "measure"}>
                 <ToolIcon id="measure" /> Measure
               </button>
-              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-label="Measure modes">▾</button>
+              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button>
             </div>
             <AnchoredMenu open={measureMenu} onClose={() => setMeasureMenu(false)} anchorRef={measureAnchor} placement="left" width={230} panelStyle={menuPanel}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
@@ -14510,10 +14516,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={id} ref={buildingAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), flex: 1 }} onClick={() => selectTool("building")}>
+                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), flex: 1 }} onClick={() => selectTool("building")} aria-pressed={tool === "building"}>
                       <ToolIcon id="building" /> Building
                     </button>
-                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-label="Dock layout">▾</button>
+                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={buildingMenu} aria-label="Dock layout">▾</button>
                   </div>
                   <AnchoredMenu open={buildingMenu} onClose={() => setBuildingMenu(false)} anchorRef={buildingAnchor} placement="left" width={200} panelStyle={menuPanel}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
@@ -14529,10 +14535,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={id} ref={parkingAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1 }} onClick={() => selectTool("parking")}>
+                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1 }} onClick={() => selectTool("parking")} aria-pressed={tool === "parking"}>
                       <ToolIcon id="parking" /> Car Parking
                     </button>
-                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-label="Parking presets">▾</button>
+                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={parkingMenu} aria-label="Parking presets">▾</button>
                   </div>
                   <AnchoredMenu open={parkingMenu} onClose={() => setParkingMenu(false)} anchorRef={parkingAnchor} placement="left" width={248} panelStyle={menuPanel}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Parking rows</div>
@@ -14547,10 +14553,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={id} ref={roadAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), flex: 1 }} onClick={() => selectTool("road")}>
+                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), flex: 1 }} onClick={() => selectTool("road")} aria-pressed={tool === "road"}>
                       <ToolIcon id="road" /> Road
                     </button>
-                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-label="Road presets">▾</button>
+                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-haspopup="menu" aria-expanded={roadMenu} aria-label="Road presets">▾</button>
                   </div>
                   <AnchoredMenu open={roadMenu} onClose={() => setRoadMenu(false)} anchorRef={roadAnchor} placement="left" width={230} panelStyle={menuPanel}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
@@ -14565,7 +14571,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // paving / trailer / pond — single-line buttons; sub-label in tooltip (B604)
             const sub = { paving: "Drive / Court", trailer: "Back-in Storage", pond: "Detention Pond" }[id];
             return (
-              <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} title={sub || undefined}>
+              <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} aria-pressed={tool === id} title={sub || undefined}>
                 <ToolIcon id={id} /> {t.label}
               </button>
             );
@@ -14574,10 +14580,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* Easement — folded into Site elements (B606); was its own section */}
           <div ref={easeAnchor} style={{ position: "relative" }}>
             <div style={{ display: "flex", gap: 2 }}>
-              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement"), flex: 1 }} onClick={() => selectTool("easement")}>
+              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement"), flex: 1 }} onClick={() => selectTool("easement")} aria-pressed={tool === "easement"}>
                 <ToolIcon id="easement" /> Easement
               </button>
-              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setEaseMenu((o) => !o)} aria-label="Easement options">▾</button>
+              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setEaseMenu((o) => !o)} aria-haspopup="menu" aria-expanded={easeMenu} aria-label="Easement options">▾</button>
             </div>
             <AnchoredMenu open={easeMenu} onClose={() => setEaseMenu(false)} anchorRef={easeAnchor} placement="left" width={248} panelStyle={menuPanel}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Input mode</div>
@@ -14609,10 +14615,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {MARKUP_TOOLS.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
             const sc = { mline: "L", mrect: "R", mellipse: "E", mpolygon: "⇧P", mpolyline: "⇧N" }[id];
-            return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)}><ToolIcon id={id} /> {t.label} <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>{sc}</span></button>;
+            return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)} aria-pressed={tool === id}><ToolIcon id={id} /> {t.label} <span style={railHint(tool === id)}>{sc}</span></button>;
           })}
-          <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")}><ToolIcon id="callout" /> Callout <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>Q</span></button>
-          <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")}><ToolIcon id="text" /> Text <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>T</span></button>
+          <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")} aria-pressed={tool === "callout"}><ToolIcon id="callout" /> Callout <span style={railHint(tool === "callout")}>Q</span></button>
+          <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")} aria-pressed={tool === "text"}><ToolIcon id="text" /> Text <span style={railHint(tool === "text")}>T</span></button>
 
           <div style={{ flex: 1 }} />
           {tool === "measure" && calibrationState === "uncalibrated" && (
@@ -14762,7 +14768,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* Type — shared portal popover so it never hides behind the rail / zoom rail */}
                 <Field label="Type">
                   <button ref={easeTypeAnchor} style={{ ...chip, display: "flex", alignItems: "center", gap: 6 }} onClick={() => setEaseTypeMenu((o) => !o)}>
-                    <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color }} /> {t.label} <span style={{ opacity: 0.6 }}>▾</span>
+                    <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color }} /> {t.label} <span style={{ color: PAL.muted }}>▾</span>
                   </button>
                   <AnchoredMenu open={easeTypeMenu} onClose={() => setEaseTypeMenu(false)} anchorRef={easeTypeAnchor} placement="below-right" width={224} panelStyle={menuPanel}>
                     {EASEMENT_TYPES.map((ty) => (
@@ -16919,9 +16925,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const close = () => setMapMenu(null);
         const row = ({ text, on, danger, dis, hint, title }) => (
           <button title={title} disabled={!!dis}
-            style={{ ...menuItem(false), ...(danger ? { color: PAL.danger } : {}), opacity: dis ? 0.45 : 1, cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+            style={{ ...menuItem(false), ...(dis ? { color: PAL.disabled } : danger ? { color: PAL.danger } : {}), cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
             onClick={dis ? undefined : on}>
-            <span>{text}</span>{hint && <span style={{ fontSize: 11, color: PAL.muted, fontWeight: 400 }}>{hint}</span>}
+            <span>{text}</span>{hint && <span style={{ fontSize: 11, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400 }}>{hint}</span>}
           </button>
         );
         let header = "", body = null;
@@ -16997,9 +17003,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               const af = arrangeFlags(els.filter((e) => zOrder(e) === band), t.id);
               const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
               const arrRow = (text, mode, dis, hint) => (
-                <button disabled={dis} style={{ ...menuItem(false), opacity: dis ? 0.45 : 1, cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                <button disabled={dis} style={{ ...menuItem(false), ...(dis ? { color: PAL.disabled } : {}), cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
                   onClick={dis ? undefined : () => { arrangeSel(mode, { kind: "el", id: t.id }); setTypeMenu(null); }}>
-                  <span>{text}</span><span style={{ fontSize: 11, color: PAL.muted, fontWeight: 400 }}>{hint}</span>
+                  <span>{text}</span><span style={{ fontSize: 11, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400 }}>{hint}</span>
                 </button>
               );
               return (
@@ -17102,9 +17108,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
         const item = ({ text, hint, on, dis, danger, title }) => (
           <button title={title} disabled={!!dis}
-            style={{ ...menuItem(false), ...(danger ? { color: PAL.danger } : {}), opacity: dis ? 0.45 : 1, cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+            style={{ ...menuItem(false), ...(dis ? { color: PAL.disabled } : danger ? { color: PAL.danger } : {}), cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
             onClick={dis ? undefined : on}>
-            <span>{text}</span>{hint && <span style={{ fontSize: 11, color: PAL.muted, fontWeight: 400 }}>{hint}</span>}
+            <span>{text}</span>{hint && <span style={{ fontSize: 11, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400 }}>{hint}</span>}
           </button>
         );
         return (

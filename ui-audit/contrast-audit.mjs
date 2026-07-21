@@ -114,6 +114,13 @@ const PAIRS = [
   ["--warn-text", "--planner-panel", "warn text · planner panel", T],
   ["--danger-text", "--planner-raised", "danger text · planner card", T],
   ["--danger-text", "--planner-panel", "danger text · planner panel", T],
+  // B926 — inline notice/banner SURFACES (Doc Review re-drop / open-error banners, Library
+  // holding-area notes). The tinted panel sits behind --warn-text / --danger-text; both must
+  // clear AA on their own tint in both themes so a themed banner stays legible.
+  ["--warn-text", "--warn-bg", "warn text · warn banner", T],
+  ["--danger-text", "--danger-bg", "danger text · danger banner", T],
+  // (The banner --*-border tokens edge their own tint — decorative separation, deliberately
+  //  low-contrast per the owner "subtle grays are fine for borders" rule; not audited.)
   // B895 — the Yield-panel SourceTag colors. Rows (and their tags) sit on the panel's
   // raised background (Y.panelBg === --planner-raised, SitePlanner.jsx YIELD_PAL) or
   // the general app card/page surfaces — never directly on --planner-panel (the darker
