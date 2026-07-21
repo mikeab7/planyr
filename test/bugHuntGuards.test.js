@@ -306,11 +306,13 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // unchanged — they still push one frame per picking session.
     expect(src).toMatch(/const livePick = \(apply, hist = true\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // all 16 native color controls still spread livePick instead of a bare onChange
+    // all 18 native color controls still spread livePick instead of a bare onChange
     // (B740 added the shared multi-selection Fill/Outline pickers — one colorField reused twice;
     //  the parcel Boundary panel added a per-parcel Outline-color picker → 14th;
-    //  B929 added the Standards → Parcels default Outline-color + Fill-color swatches → 15th/16th)
-    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(16);
+    //  B929 added the Standards → Parcels default Outline-color + Fill-color swatches → 15th/16th;
+    //  FINAL UI SPEC A1.6 moved the pond Properties into the inspector's "Appearance" group —
+    //  its Fill + Outline pickers are a second copy alongside the non-pond Properties section → 17th/18th)
+    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(18);
     // the two Standards element-Colors swatches opt out of history (settings-only, RC-6)
     expect((src.match(/\{\.\.\.livePick\(\(v\) => liveTypeStyle\([^)]*\), false\)\}/g) || []).length).toBe(2);
     // B929: the two Standards → Parcels default swatches are settings-only too (hist=false)
@@ -432,9 +434,12 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // mkStyle and would bleed the typed text into the next drawn shape)
     expect(src).not.toMatch(/setSelMarkup\(\{ inlineLabel/);
     expect(src).not.toMatch(/liveMarkup\(\{ inlineLabel/);
-    // panel fields push ONE undo frame per edit (onFocus), not one per keystroke; the in-place editor commits once
+    // panel fields push ONE undo frame per edit (onFocus), not one per keystroke
     expect(src).toMatch(/onFocus=\{\(\) => pushHistory\(\)\}[\s\S]{0,180}inlineLabel: e\.target\.value/);
-    expect(src).toMatch(/const commitEditInline = \(\) => \{/);
+    // B935 — the inline label is edited ONLY in the Properties panel now; the on-canvas double-click
+    // text editor was removed (double-click always opens Properties), so its handlers must be gone.
+    expect(src).not.toMatch(/const commitEditInline\b/);
+    expect(src).not.toMatch(/beginEditInline\(/);
     // all three render sites are wired: markup line/polyline, easement (centerline/ring), road centerline
     expect(src).toMatch(/inlineLabelEls\(mkPts\(m\), m\.inlineLabel/);
     expect(src).toMatch(/inlineLabelEls\(easePathFeet, m\.inlineLabel/);
@@ -454,9 +459,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const minGapPx = label\.length \* fs \* 0\.85;/);
     expect(src).not.toMatch(/const minGapPx = Math\.max\(150,/);
     expect(src).toMatch(/const effSpacingFt = Math\.max\([\s\S]{0,80}minGapPx \/ Math\.max\(ppf/);
-    // every render site threads the feature's own spacing override + { size, halo } opts
+    // every render site threads the feature's own spacing override + { size, halo } opts (the road also
+    // carries the B935 `insetFt` for "Inside" placement, so don't require the object to close right after)
     expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,80}\{ size: m\.labelSize, halo: m\.labelHalo \}/);
-    expect(src).toMatch(/el\.labelSpacing \|\| INLINE_LABEL_SPACING\.road[\s\S]{0,80}\{ size: el\.labelSize, halo: el\.labelHalo \}/);
+    expect(src).toMatch(/el\.labelSpacing \|\| INLINE_LABEL_SPACING\.road[\s\S]{0,80}\{ size: el\.labelSize, halo: el\.labelHalo/);
     // the panel controls exist and their writers stay NON-STICKY (direct setMarkups / setSelEl, never mkStyle)
     expect(src).toMatch(/const inlineLabelControls = \(feat, typeKey, write\) =>/);
     expect(src).not.toMatch(/setSelMarkup\(\{ labelSpacing/);
@@ -475,7 +481,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/inlineLabelControls\(selEl, "road", coalesceLabelWrite\(selEl\.id/);
   });
 
-  it("B750: single-click selects only; a double-tap opens Properties, an ALREADY-selected text feature edits its text", () => {
+  it("B750/B935: single-click selects only; a double-tap opens Properties (only a callout still edits its text)", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // isDoubleTap now also carries whether the feature was ALREADY selected at the FIRST press (wasSel);
     // it reconstructs the browser's own double-click test (pointer capture eats the DOM dblclick) and
@@ -483,22 +489,21 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const isDoubleTap = \(e, id, wasSel\) => \{/);
     expect(src).toMatch(/const near = Math\.abs\(e\.clientX - p\.x\) <= DBLTAP_PX/);
     expect(src).toMatch(/dblWasSelRef\.current = !!p\.wasSel;/);
-    // callout: already-selected → edit text in place; otherwise open Properties
+    // callout: already-selected → edit text in place; otherwise open Properties (a callout IS a text box)
     expect(src).toMatch(/if \(part === "box" && isDoubleTap\(e, id, [\s\S]{0,90}if \(dblWasSelRef\.current\) beginEditCallout\(id\);[\s\S]{0,90}setPropsFor\(\{ kind: "callout", id \}\)/);
-    // markup line/polyline/easement: already-selected text-bearing → edit label; otherwise open Properties
-    expect(src).toMatch(/const textBearing = m\.kind === "line" \|\| m\.kind === "polyline" \|\| m\.kind === "easement";/);
-    expect(src).toMatch(/if \(dblWasSelRef\.current && textBearing\) beginEditInline\("markup", id\);[\s\S]{0,90}setPropsFor\(\{ kind: "markup", id \}\)/);
-    // element (centerline road is the only text-bearing el): already-selected road → edit label; else Properties
-    expect(src).toMatch(/if \(!el\.groupId && !el\.locked && isDoubleTap\(e, id, /);
-    expect(src).toMatch(/if \(dblWasSelRef\.current && isCenterlineRoad\(el\)\) beginEditInline\("el", id\);[\s\S]{0,90}setPropsFor\(\{ kind: "el", id \}\)/);
+    // B935 — a markup (line/polyline/easement) double-tap ALWAYS opens Properties, never an inline editor
+    expect(src).toMatch(/if \(m && !m\.locked && isDoubleTap\(e, id, sel\?\.kind === "markup" && sel\.id === id\)\) \{[\s\S]{0,120}setPropsFor\(\{ kind: "markup", id \}\)/);
+    // B935 — an element (centerline road) double-tap ALWAYS opens Properties, never an inline editor
+    expect(src).toMatch(/if \(!el\.groupId && !el\.locked && isDoubleTap\(e, id, sel\?\.kind === "el" && sel\.id === id\)\) \{[\s\S]{0,120}setPropsFor\(\{ kind: "el", id \}\)/);
     // NEW-1 supersedes the B656 stacking: on DESKTOP the inspector is the docked "properties" panel
     // (leftPanel === "properties"), never a companion riding above another panel; NARROW keeps the ✎
     // pill (narrowProps) + companion overlay. propsMatches stays for the double-click explicit-open path.
     expect(src).toMatch(/const propsMatches = propsFor === "multi"/);
     expect(src).toMatch(/const companionOpen = companionSel && \(narrow \? \(!!leftPanel \|\| narrowProps\) : leftPanel === "properties"\)/);
-    // onElDouble (the native/raw-dblclick fallback) now OPENS PROPERTIES; the type/actions menu moved
-    // off double-click and stays on right-click via onElContext.
+    // onElDouble AND onMarkupDouble (the native/raw-dblclick fallbacks) now OPEN PROPERTIES; the
+    // type/actions menu moved off double-click and stays on right-click via onElContext.
     expect(src).toMatch(/const onElDouble = \(e, id\) => \{[\s\S]*?setPropsFor\(\{ kind: "el", id \}\);\s*\n\s*\};/);
+    expect(src).toMatch(/const onMarkupDouble = \(e, id\) => \{[\s\S]*?setPropsFor\(\{ kind: "markup", id \}\);\s*\n\s*\};/);
     expect(src).toMatch(/const onElContext = \(e, id\) => \{[\s\S]*?setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY \}\);/);
   });
 

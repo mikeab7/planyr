@@ -122,9 +122,10 @@ await page.waitForTimeout(400);
 const zoomedBack = (await readLabels()).length;
 log(zoomedBack >= labels.length - 1, `LOD: zooming back in restores the labels (${zoomedOut} → ${zoomedBack})`);
 
-// double-click editor: dispatch a native dblclick on the line's <g> (React onDoubleClick → beginEditInline).
-// This exercises the SAME handler a physical double-click fires — Playwright's synthetic mouse-dblclick is
-// unreliable here because startMoveMarkup captures the pointer (the shipped callout dblclick shares this).
+// B935 — double-clicking a line now opens the PROPERTIES panel (never an on-canvas inline-label editor);
+// the label is edited only in the panel's own "Inline label" field. Dispatch a native dblclick on the
+// line's <g> (React onDoubleClick → onMarkupDouble → Properties). Playwright's synthetic mouse-dblclick
+// is unreliable here because startMoveMarkup captures the pointer.
 const opened = await page.evaluate(() => {
   const lines = [...document.querySelectorAll("svg line")].filter((l) => (l.getAttribute("stroke") || "").toLowerCase() === "#0a7d22");
   let best = null, bl = -1;
@@ -134,17 +135,19 @@ const opened = await page.evaluate(() => {
   return true;
 });
 await page.waitForTimeout(300);
-const hasEditor = opened && await page.evaluate(() => !!document.querySelector("foreignObject input"));
-log(hasEditor, `double-click a line opens the in-place inline-label editor`);
-if (hasEditor) {
-  // clear the field first (the long line already carries "SEWERA"), then type + commit
-  await page.evaluate(() => { const i = document.querySelector("foreignObject input"); i.focus(); i.select(); });
-  await page.keyboard.press("Delete");
-  await page.keyboard.type("EDITEDINPLACE");
-  await page.keyboard.press("Enter");
+const noCanvasEditor = await page.evaluate(() => !document.querySelector("foreignObject input"));
+log(opened && noCanvasEditor, `double-click a line opens Properties, NOT an on-canvas inline-label editor (B935)`);
+const panelSel = '[data-testid="property-panel"] input[placeholder*="SANITARY"]';
+const hasPanelField = await page.evaluate((s) => !!document.querySelector(s), panelSel);
+log(hasPanelField, `the Properties panel exposes the "Inline label" field`);
+if (hasPanelField) {
+  // edit the label via the PANEL field, then confirm the on-canvas label updates
+  await page.locator(panelSel).click();
+  await page.locator(panelSel).fill("EDITEDINPANEL");
+  await page.locator(panelSel).blur();
   await page.waitForTimeout(300);
-  const edited = await page.evaluate(() => [...document.querySelectorAll("svg text")].some((t) => (t.textContent || "").includes("EDITEDINPLACE")));
-  log(edited, `typing in the editor + Enter updates the on-canvas label`);
+  const edited = await page.evaluate(() => [...document.querySelectorAll("svg text")].some((t) => (t.textContent || "").includes("EDITEDINPANEL")));
+  log(edited, `editing the panel "Inline label" field updates the on-canvas label`);
   // draw a NEW line via the Line tool (L → drag) — it must NOT inherit any label (the sticky trap).
   await page.keyboard.press("l");
   await page.waitForTimeout(150);

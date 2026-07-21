@@ -101,6 +101,10 @@ import SourcesLegend from "./components/SourcesLegend.jsx";
 import ActionLink from "./components/ActionLink.jsx";
 import WatchOutChip from "./components/WatchOutChip.jsx";
 import YieldFooterDisclaimer from "./components/YieldFooterDisclaimer.jsx";
+import Collapse from "./components/Collapse.jsx";
+import Chip from "./components/Chip.jsx";
+import RowInfo from "./components/RowInfo.jsx";
+import { pondInspectorChips, pondGroupSummary, POND_PURPOSE_TOOLTIPS } from "./lib/pondInspectorCopy.js";
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
@@ -121,6 +125,7 @@ import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
 import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
+import { yieldVerdictStrip } from "./lib/yieldVerdicts.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote } from "./lib/pondChangeSummary.js";
@@ -501,19 +506,14 @@ const pathLen = (pts) => { let t = 0; for (let i = 1; i < pts.length; i++) t += 
 // line is small and wants MANY references, a road is big and wants FAR FEWER, an easement is in
 // between (owner rule, 2026-07-02). Spacing is tunable.
 const INLINE_LABEL_SPACING = { line: 150, polyline: 150, easement: 350, road: 700 };
-// Longest-segment midpoint (feet) — the primary anchor for the in-place editor.
-function inlineLabelAnchorFeet(ptsFeet) {
-  if (!ptsFeet || ptsFeet.length < 2) return null;
-  let bi = 1, bl = -1;
-  for (let i = 1; i < ptsFeet.length; i++) { const d = dist(ptsFeet[i - 1], ptsFeet[i]); if (d > bl) { bl = d; bi = i; } }
-  const A = ptsFeet[bi - 1], B = ptsFeet[bi];
-  return { fx: (A.x + B.x) / 2, fy: (A.y + B.y) / 2 };
-}
 // Repeat placements along a feet-space OPEN path every `spacingFt` (always ≥1, centered, when the
 // path is shorter than the spacing). Returns SCREEN anchors with an auto-flipped rotation (never
 // upside-down) + a perpendicular offset to the visual "up" side + the segment's on-screen px length
 // (for the fit/LOD gate). Mirrors the centerline dir/nrm walk + the strip-label flip math.
-function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p) {
+// B935 — when `interiorScreen` (a projected point) is given, the perpendicular offset aims TOWARD it
+// (into a closed easement ring's body) instead of the screen-"up" side, so an "Inside" label tucks
+// within the boundary rather than riding on top of it.
+function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p, interiorScreen) {
   if (!ptsFeet || ptsFeet.length < 2) return [];
   const segs = []; let total = 0;
   for (let i = 1; i < ptsFeet.length; i++) {
@@ -536,7 +536,10 @@ function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p) {
     let ang = Math.atan2(dir.y, dir.x) * 180 / Math.PI;
     ang = ((ang % 180) + 180) % 180; if (ang > 90) ang -= 180;      // never upside-down → [-90,90]
     let nrm = { x: -dir.y, y: dir.x };                              // perpendicular
-    if (nrm.y > 0) nrm = { x: -nrm.x, y: -nrm.y };                  // force screen-"up" (y grows down)
+    if (interiorScreen) {                                          // B935 — aim into the feature's body (closed ring → centroid)
+      const tx = interiorScreen.x - P.x, ty = interiorScreen.y - P.y;
+      if (nrm.x * tx + nrm.y * ty < 0) nrm = { x: -nrm.x, y: -nrm.y };
+    } else if (nrm.y > 0) nrm = { x: -nrm.x, y: -nrm.y };           // force screen-"up" (y grows down)
     else if (nrm.y === 0 && nrm.x < 0) nrm = { x: 1, y: 0 };        // vertical → one consistent side
     out.push({ x: P.x + nrm.x * offsetPx, y: P.y + nrm.y * offsetPx, angle: ang, segLenPx: len });
   }
@@ -556,7 +559,19 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
   const baseSize = (opts && Number.isFinite(opts.size) && opts.size > 0) ? opts.size : 11; // default matches the pre-B678 look
   const halo = !(opts && opts.halo === false);                     // background on by default (existing lines unchanged)
   const k = Math.max(0.34, Math.min(1, ppf / 0.45));               // gentle, capped at 1 (matches the road-dim clamp)
-  const fs = baseSize * k, haloW = Math.max(2, fs * 0.3), offsetPx = fs * 1.05;
+  const fs = baseSize * k, haloW = Math.max(2, fs * 0.3);
+  // B935 — "Inside" placement: push the label perpendicular into the body of the road/easement by a
+  // per-feature FEET inset (so it scales with zoom and stays within the band), on top of the base
+  // font clearance. `interiorFeet` (a closed easement ring's centroid) aims that push toward the
+  // interior; without it (roads / strip easements) it rides the consistent screen-"up" side. Zero
+  // inset = the classic on-the-line ride, byte-for-byte unchanged.
+  const insetFt = (opts && Number.isFinite(opts.insetFt) && opts.insetFt > 0) ? opts.insetFt : 0;
+  // On the line: a ~1-font perpendicular clearance so the text sits just off the stroke (unchanged).
+  // Inside: use the feet inset ALONE (a midway-into-the-body distance that scales with zoom) — it
+  // already clears the line, and stacking the font clearance on top could shove a narrow feature's
+  // label past its own edge.
+  const offsetPx = insetFt > 0 ? insetFt * Math.max(ppf, 0) : fs * 1.05;
+  const interiorScreen = (opts && opts.interiorFeet) ? f2p(opts.interiorFeet) : null;
   const minSegPx = label.length * fs * 0.6;                        // LOD: the on-screen segment must fit the text (CW_RATIO 0.6)
   // B678 — screen-space self-thinning is an ANTI-OVERLAP floor, nothing more: keep restamps at least
   // the label's own on-screen width + ~50% breathing room apart (`len·fs·0.9` ≈ width·1.5), converted
@@ -568,7 +583,7 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
   const minGapPx = label.length * fs * 0.85;  // B682 — just above the label's real rendered width (all-caps Inter ≈ 0.78/char), so it ONLY prevents literal overlap and the spacing control stays responsive across the rest of its range (the live slider is the main responsiveness fix)
   const effSpacingFt = Math.max(Math.max(1, spacingFt || 0), minGapPx / Math.max(ppf, 1e-4));
   const out = [];
-  inlineLabelPlaces(ptsFeet, effSpacingFt, offsetPx, f2p).forEach((pl, i) => {
+  inlineLabelPlaces(ptsFeet, effSpacingFt, offsetPx, f2p, interiorScreen).forEach((pl, i) => {
     if (pl.segLenPx < minSegPx) return;
     out.push(
       <text key={`${keyPrefix}${i}`} x={pl.x} y={pl.y} textAnchor="middle" dominantBaseline="middle"
@@ -578,6 +593,29 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
     );
   });
   return out;
+}
+
+// B935 — perpendicular inset (feet) that tucks a closed easement ring's inline label just INSIDE its
+// boundary: a fraction of the ring's smaller bbox dimension (so it scales with the shape and never
+// overshoots the middle), aimed at the centroid by the caller.
+function ringLabelInsetFt(ptsFeet) {
+  if (!ptsFeet || ptsFeet.length < 3) return 0;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of ptsFeet) {
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+  }
+  return Math.max(0, Math.min(maxX - minX, maxY - minY) * 0.2);
+}
+// B935 — the { insetFt, interiorFeet } an easement passes to inlineLabelEls when its inline label is
+// set to "Inside" placement. A STRIP (open centerline) tucks toward one side by a quarter of its
+// width; a BOUNDARY ring aims at its centroid, inset a fraction of its smaller extent. Returns {} for
+// the classic on-the-line ride (labelInside off).
+function easementInsetOpts(m) {
+  if (!m || !m.labelInside) return {};
+  const strip = m.centerline && m.mode !== "boundary" && m.centerline.length >= 2;
+  if (strip) return { insetFt: Math.max(0, (+m.width || 0) / 4) };
+  return { insetFt: ringLabelInsetFt(m.pts), interiorFeet: centroid(m.pts) };
 }
 
 function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
@@ -1254,7 +1292,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
   const [addLeaderFor, setAddLeaderFor] = useState(null); // B919: callout id armed by "Add Leader" — the NEXT map click drops the new leader's tip there (feet)
-  const [editInline, setEditInline] = useState(null);     // B620: {kind:'markup'|'el', id, text} while typing a feature's inline label in place
   const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit} — inline numeric edit, NEVER a dialog box
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
   const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
@@ -2635,7 +2672,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // background storage event never yanks the canvas out from under an active edit.
   const busyRef = useRef(false);
   useEffect(() => {
-    busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || editInline || calloutDraft || numEdit);
+    busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft || numEdit);
     // NEW-1 — stamp the CURRENT interaction/selection targets as directly-touched (feeds the
     // engine's isDirectEdit; see directTouchRef above). Runs every render — during a drag each
     // move re-renders, so the stamp stays fresh through the gesture and the flush at gesture end.
@@ -3153,7 +3190,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
       // B875 — Enter on a selected pond opens its inspector (keyboard peer of double-click).
       if (e.key === "Enter" && tool === "select" && sel?.kind === "el") { const se = els.find((x) => x.id === sel.id); if (se && se.type === "pond") { e.preventDefault(); revealPondInspector(se.id); return; } }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -3822,28 +3859,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEditCallout(null);
   };
   const cancelEditCallout = () => { if (editCallout?.isNew) setCallouts((a) => a.filter((c) => c.id !== editCallout.id)); setEditCallout(null); };
-  // B620 — inline-label editor: double-click a line/polyline/road/easement to type its rides-along
-  // label in place. Writes `inlineLabel` DIRECTLY onto the ONE feature (non-sticky — never through
-  // mkStyle/typeStyles, so a typed label can't bleed into the next drawn shape).
-  const beginEditInline = (kind, id) => {
-    const feat = kind === "el" ? els.find((x) => x.id === id) : markups.find((x) => x.id === id);
-    if (!feat) return;
-    setSel({ kind, id });
-    setEditInline({ kind, id, text: feat.inlineLabel || "" });
-  };
-  const commitEditInline = () => {
-    if (!editInline) return;
-    const { kind, id, text } = editInline;
-    const cur = (kind === "el" ? els : markups).find((x) => x.id === id);
-    const orig = (cur && cur.inlineLabel) || "";
-    if (cur && text.trim() !== orig.trim()) {
-      pushHistory();
-      const patch = (x) => (x.id === id ? { ...x, inlineLabel: text.trim() } : x);
-      if (kind === "el") setEls((a) => a.map(patch)); else setMarkups((a) => a.map(patch));
-    }
-    setEditInline(null);
-  };
-  const cancelEditInline = () => setEditInline(null);
+  // B935 — the inline label (the text that rides ALONG a line/road/easement, B620) is now edited ONLY
+  // in the Properties panel's "Inline label" field; the old on-canvas double-click text editor was
+  // removed per the owner rule ("in no circumstance should double-clicking … go into a text editor …
+  // that should be reserved for the properties").
   // Click 1 sets the tip (what it points at); click 2 drops the box and starts typing.
   const placeCallout = (fp) => {
     if (!calloutDraft) { setCalloutDraft({ tip: fp }); return; }
@@ -3910,15 +3929,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
-    // B750 — double-click an UNLOCKED markup opens its Properties. Exception: an ALREADY-selected
-    // text-bearing markup (line / polyline / easement — the ones with an inline label) edits its label
-    // instead ("click to select, then double-click to edit text"). Pointer capture eats the DOM dblclick,
-    // so we reconstruct the double-tap here. Locked features stay select-only.
+    // B750/B935 — double-click an UNLOCKED markup ALWAYS opens its Properties (never an on-canvas text
+    // editor — the inline label is edited only in the Properties panel's "Inline label" field, per the
+    // owner rule). Pointer capture eats the DOM dblclick, so we reconstruct the double-tap here. Locked
+    // features stay select-only.
     if (m && !m.locked && isDoubleTap(e, id, sel?.kind === "markup" && sel.id === id)) {
       setSel({ kind: "markup", id });
-      const textBearing = m.kind === "line" || m.kind === "polyline" || m.kind === "easement";
-      if (dblWasSelRef.current && textBearing) beginEditInline("markup", id);
-      else { setPropsFor({ kind: "markup", id }); if (narrow) setNarrowProps(true); }
+      setPropsFor({ kind: "markup", id }); if (narrow) setNarrowProps(true);
       return;
     }
     // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
@@ -6256,14 +6273,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
-    // B750 — double-click a non-grouped, UNLOCKED element opens its Properties. Exception: an ALREADY-
-    // selected centerline road (the only text-bearing element) edits its inline label instead ("click to
-    // select, then double-click to edit text"). Pointer capture eats the DOM dblclick, so we reconstruct
-    // the double-tap here. Groups keep single-click = select-whole-group (drill-in stays in onElDouble).
+    // B750/B935 — double-click a non-grouped, UNLOCKED element ALWAYS opens its Properties (never an
+    // on-canvas text editor — a road's inline label is edited only in the Properties panel's "Inline
+    // label" field, per the owner rule). Pointer capture eats the DOM dblclick, so we reconstruct the
+    // double-tap here. Groups keep single-click = select-whole-group (drill-in stays in onElDouble).
     if (!el.groupId && !el.locked && isDoubleTap(e, id, sel?.kind === "el" && sel.id === id)) {
       setSel({ kind: "el", id });
-      if (dblWasSelRef.current && isCenterlineRoad(el)) beginEditInline("el", id);
-      else { setPropsFor({ kind: "el", id }); if (narrow) setNarrowProps(true); }
+      setPropsFor({ kind: "el", id }); if (narrow) setNarrowProps(true);
       return;
     }
     const fp = p2f(e.clientX, e.clientY);
@@ -6604,30 +6620,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = els.find((x) => x.id === id);
     if (!el) return;
     if (el.groupId) { setMulti([]); setDrillId(id); setSel({ kind: "el", id }); return; }
-    // B750/NEW-1: double-click opens Properties; an ALREADY-selected centerline road (text-bearing)
-    // edits its inline label instead — same gate as the startMoveEl reconstruction, via dblWasSelRef
-    // (right-click still opens the type/actions menu via onElContext). This native path is the
-    // raw-dblclick / test-harness fallback; real users mostly hit the reconstructed double-tap in
-    // startMoveEl, but this must make the SAME decision — not unconditionally edit inline — in case
-    // pointer capture doesn't suppress the native dblclick (NEW-1: it was overriding a correctly-opened
-    // Properties panel with a forced inline-label editor).
+    // B750/B935: double-click ALWAYS opens Properties (never an on-canvas inline-label editor — that is
+    // reserved for the Properties panel's "Inline label" field, per the owner rule). Right-click still
+    // opens the type/actions menu via onElContext. This native path is the raw-dblclick / test-harness
+    // fallback for when pointer capture doesn't suppress the native dblclick; it makes the SAME decision
+    // as the reconstructed double-tap in startMoveEl.
     setSel({ kind: "el", id });
-    if (dblWasSelRef.current && isCenterlineRoad(el)) beginEditInline("el", id);
-    else setPropsFor({ kind: "el", id });
+    setPropsFor({ kind: "el", id });
   };
-  // NEW-1 — native-dblclick fallback for the markup shapes (easement/line/polyline) whose SVG nodes
-  // still wired a raw onDoubleClick straight to beginEditInline (pre-B750 leftover): same bug as
-  // onElDouble above — it unconditionally forced the inline label editor open, so a plain double-click
-  // on a NOT-yet-selected easement/line/polyline never reached Properties. Mirrors startMoveMarkup's
-  // gate: only an ALREADY-selected text-bearing markup edits its label; otherwise open Properties.
+  // B935 — native-dblclick fallback for the markup shapes (easement/line/polyline), mirroring
+  // startMoveMarkup: a double-click always opens Properties (never the old on-canvas inline-label
+  // editor). The raw path exists for when pointer capture doesn't suppress the native dblclick.
   const onMarkupDouble = (e, id) => {
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
     if (!m) return;
     setSel({ kind: "markup", id });
-    const textBearing = m.kind === "line" || m.kind === "polyline" || m.kind === "easement";
-    if (dblWasSelRef.current && textBearing) beginEditInline("markup", id);
-    else setPropsFor({ kind: "markup", id });
+    setPropsFor({ kind: "markup", id });
   };
   // Right-click an element always opens its actions menu (so a grouped element can still
   // reach Ungroup / Duplicate group / etc). Keeps an active group selection intact so the
@@ -10963,6 +10972,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </span></Field>
       <Field label="Label text size"><NumInput style={{ ...numInput, width: 70 }} value={feat.labelSize ?? 11} min={5} max={48} step={1} coarse={4} onCommit={(n) => write({ labelSize: n })} /></Field>
       <Field label="Label background"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={haloOn} onChange={(e) => write({ labelHalo: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{haloOn ? "Halo (legible over aerial)" : "None"}</span></label></Field>
+      {/* B935 — a road / easement has a body (a paved width, a strip, a bounded area), so its inline
+          label can either ride the centerline (default) or tuck INSIDE that body — off the drawn line
+          so it doesn't sit on top of the feature. A plain line/polyline has no interior, so this
+          control only shows for road + easement. */}
+      {(typeKey === "road" || typeKey === "easement") && (
+        <Field label="Label position"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={!!feat.labelInside} onChange={(e) => write({ labelInside: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{feat.labelInside ? `Inside the ${typeKey} (off the line)` : "On the line"}</span></label></Field>
+      )}
     </>);
   };
   // B682 — build a NON-STICKY label writer that coalesces a live slider drag into one undo frame:
@@ -13020,7 +13036,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
-                      {editInline?.id !== m.id && inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                      {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, ...easementInsetOpts(m) })}
                     </g>
                   );
                 }
@@ -13037,7 +13053,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
                       {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
-                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
                     </g>
                   );
                 }
@@ -13047,7 +13063,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
                       <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
-                      {editInline?.id !== m.id && inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
                     </g>
                   );
                 }
@@ -13525,7 +13541,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
               {markupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, editInline && editInline.kind === "el" ? editInline.id : null))}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {markupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
@@ -13945,31 +13961,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
               })()}
 
-              {/* B620 — inline-label editor (double-click a line/road/easement → type in place). NEVER a dialog box. */}
-              {editInline && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitEditInline(); }} />}
-              {editInline && (() => {
-                const feat = editInline.kind === "el" ? els.find((x) => x.id === editInline.id) : markups.find((x) => x.id === editInline.id);
-                if (!feat) return null;
-                const ptsFeet = editInline.kind === "el"
-                  ? (isCenterlineRoad(feat) ? feat.pts : rectRoadEndpoints(feat))
-                  : (feat.kind === "easement" ? ((feat.centerline && feat.mode !== "boundary" && feat.centerline.length >= 2) ? feat.centerline : feat.pts) : mkPts(feat));
-                const anchor = inlineLabelAnchorFeet(ptsFeet);
-                if (!anchor) return null;
-                const bp = f2p({ x: anchor.fx, y: anchor.fy });
-                const W = 220, H = 30;
-                return (
-                  <foreignObject x={bp.x - W / 2} y={bp.y - H - 8} width={W} height={H} style={{ overflow: "visible" }}>
-                    <input autoFocus value={editInline.text}
-                      onChange={(e) => setEditInline((s) => ({ ...s, text: e.target.value }))}
-                      onBlur={commitEditInline}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitEditInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelEditInline(); } }}
-                      placeholder={'e.g. 18" SANITARY SEWER'}
-                      maxLength={120}
-                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 8px", fontSize: 13, fontFamily: "Inter, system-ui, sans-serif", fontWeight: 600, color: PAL.ink, background: "var(--surface-raised)", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
-                  </foreignObject>
-                );
-              })()}
+              {/* B935 — the old on-canvas inline-label editor was removed; the inline label is now edited
+                  only in the Properties panel's "Inline label" field. */}
 
               {/* measurements — line (distance), polyline (path length), area, count */}
               {measures.map((m, i) => {
@@ -13980,7 +13973,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const isSel = sel?.kind === "measure" && sel.i === i;
                 // B910 — a finished measurement is grabbable from BOTH the Select tool and the
                 // Measure tool (the tool you're still in right after drawing it); startMoveMeasure
-                // drops you back to Select on the click so the grips/×/highlight show (B936: it also
+                // drops you back to Select on the click so the grips/×/highlight show (B940: it also
                 // arms a whole-measurement drag on the same press).
                 const canGrab = tool === "select" || tool === "measure";
                 const warn = calibrationState === "uncalibrated";
@@ -15549,7 +15542,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </div>
                   )}
                 </>
-              ) : (
+              ) : selEl.type === "pond" ? null : (
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon · {selEl.points.length} points. Drag the body to move. Drag a <b>dot</b> to move a corner, click a <b>＋</b> on an edge to add one, <b>Shift-click</b> a dot to delete. Double-click to change type.</div>
               )}
               {(() => {
@@ -15751,6 +15744,92 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   }
                   return out;
                 })();
+                // FINAL UI SPEC Part A — the condensed inspector's top-of-panel facts (the
+                // "At a glance" table + the watch-out chips) come off ONE computation, reusing
+                // the SAME pure helpers the detailed groups below use, so nothing can disagree.
+                // Presentation only — no value / threshold / solver change.
+                const g_split = pondSplitFor(selEl);
+                const g_critRule = pondCriteria[floodJurKey] || pondCriteria.generic;
+                const g_matBerm = pondBermById.get(selEl.id) || null;
+                const g_bermToeReach = g_matBerm && g_matBerm.maxHeightFt > 0 ? g_matBerm.maxHeightFt * gsApronRatio : 0;
+                const g_maintW = g_critRule && g_critRule.maintBermWidthFt > 0 ? g_critRule.maintBermWidthFt : 0;
+                const g_landReach = Math.max(g_maintW, g_bermToeReach);
+                const g_bermRing = g_landReach > 0 ? (offsetOutward(ring, g_landReach)[0] || null) : null;
+                const g_landTakeSf = g_bermRing ? ringsArea([g_bermRing]) : null;
+                const g_waterSf = polyArea(ring);
+                const g_holdsAcFt = r.vol / 43560;
+                const g_usableAcFt = g_split.usableCf != null ? g_split.usableCf / 43560 : null;
+                const g_roleInfo = effectivePondRole(det, g_split);
+                const g_facts = {
+                  floodEstimated: g_split.mode === "anchored" && isEstimatedWseSrc(g_split.wseSrc),
+                  rimBelowFlood: !!(g_split.mode === "anchored" && g_split.bands && g_split.bands.fullyInundated),
+                  criteriaUnverified: !!(g_critRule && g_critRule.verified === false),
+                  inFloodway: !!g_split.inTrigger,
+                };
+                const g_chips = pondInspectorChips(g_facts);
+                const g_chipRow = g_chips.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "10px 0 2px" }}>
+                    {g_chips.map((c) => <Chip key={c.id} tone={c.tone} text={c.text} popover={c.popover} />)}
+                  </div>
+                );
+                // At-a-glance table (label left / value right; provenance ⓘ kept). Its user
+                // VALUES/labels are excluded from the A4 word budget.
+                const g_glanceRow = (label, value, info) => (
+                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: `1px solid ${PAL.panelLine}`, minHeight: 26 }}>
+                    <span style={{ fontSize: 11.5, color: PAL.muted, display: "inline-flex", alignItems: "center", gap: 3 }}>{label}{info ? <RowInfo label={label} sections={[{ text: info }]} /> : null}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>{value}</span>
+                  </div>
+                );
+                const g_glanceNum = (s) => <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, color: PAL.ink, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{s}</span>;
+                const g_purposeBtn = (v, label, tip) => {
+                  const active = v === null ? g_roleInfo.source === "auto" : g_roleInfo.source === "owner" && det.role === v;
+                  return (
+                    <button key={String(v)} title={tip} style={{ ...chip, flex: "0 0 auto", padding: "3px 7px", fontSize: 10, ...(active ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }}
+                      onClick={() => setDet({ role: v })}>{label}</button>
+                  );
+                };
+                const g_atAGlance = (
+                  <div style={{ marginBottom: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
+                      <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>At a glance</span>
+                      <RowInfo label="Detention Pond" sections={[{ text: `Polygon · ${selEl.points ? selEl.points.length : elCorners(selEl).length} points. Drag the body to move. Drag a dot to move a corner, click a ＋ on an edge to add one, Shift-click a dot to delete. Double-click to change type.` }]} />
+                    </div>
+                    {g_glanceRow("Water footprint", g_glanceNum(`${f2(g_waterSf / SQFT_PER_ACRE)} ac · ${f0(g_waterSf)} sf`))}
+                    {g_landTakeSf != null && g_glanceRow("Land take (incl. berm)", g_glanceNum(`${f2(g_landTakeSf / SQFT_PER_ACRE)} ac`),
+                      `Pond land take includes the ${g_bermToeReach > g_maintW + 1e-6 ? `modeled ${f1(g_matBerm.maxHeightFt)}′ fill berm` : `${g_maintW}′ maintenance berm`} ring around the water footprint (water footprint ${f2(g_waterSf / SQFT_PER_ACRE)} ac).`)}
+                    {g_glanceRow("Total depth",
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
+                        {det.depth != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>}
+                      </span>)}
+                    {g_glanceRow("Rim (top of bank)",
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "optional"} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
+                        {det.tobElev != null
+                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={pondAuto.tobElev ? `Clear — back to auto (${pondAuto.tobElev.source})` : "Clear — label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>
+                          : null}
+                      </span>,
+                      "Set the top-of-bank elevation to label rings as real elevations (e.g. 96.0) instead of depths (−2′).")}
+                    {g_glanceRow("Holds", g_glanceNum(`${f2(g_holdsAcFt)} ac-ft (${f2(g_usableAcFt ?? 0)} usable above flood)`))}
+                    {g_glanceRow("Purpose",
+                      <span style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {g_purposeBtn(null, `Auto (${POND_ROLE_LABEL[g_roleInfo.suggested.role]})`, POND_PURPOSE_TOOLTIPS.auto)}
+                        {g_purposeBtn("detention", POND_ROLE_LABEL.detention, POND_PURPOSE_TOOLTIPS.detention)}
+                        {g_purposeBtn("mitigation", POND_ROLE_LABEL.mitigation, POND_PURPOSE_TOOLTIPS.mitigation)}
+                        {g_purposeBtn("dual", POND_ROLE_LABEL.dual, POND_PURPOSE_TOOLTIPS.hybrid)}
+                      </span>)}
+                  </div>
+                );
+                // Closed-state one-line summaries for the four collapsed groups (A1.6).
+                const g_sizingSummary = pondGroupSummary.sizing({
+                  reqLo: detReq && detReq.kind === "band" ? f2(detReq.bandAcFt[0]) : null,
+                  reqHi: detReq && detReq.kind === "band" ? f2(detReq.bandAcFt[1]) : null,
+                  req: detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? f2(detReq.requiredAcFt) : null,
+                  drainageAc: Number.isFinite(det.daAcres) ? f2(det.daAcres) : (Number.isFinite(acresActive) ? f2(acresActive) : null),
+                });
+                const g_outletStages = det.outlet && Array.isArray(det.outlet.stages) ? det.outlet.stages.length : 0;
+                const g_outletSummary = pondGroupSummary.outlet({ hasOutlet: g_outletStages > 0, stages: g_outletStages, allPass: null });
+                const g_floodSummary = pondGroupSummary.flood({ wse: g_split.mode === "anchored" && g_split.wseFt != null ? f1(g_split.wseFt) : null, estimated: g_facts.floodEstimated });
                 return (
                   <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
                     {statusLines.length > 0 && (
@@ -15769,15 +15848,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         onUndo={() => { undo(); setDesignChangeSummary(null); }}
                       />
                     )}
+                    {g_atAGlance}
+                    {g_chipRow}
+                    <Collapse sectionId="pond-sizing" title="Sizing & criteria" defaultOpen={false} summary={g_sizingSummary}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Detention storage</div>
-                    <Field label="Total depth (ft)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput allowClear style={numInput} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
-                        {det.depth != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>
-                          : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }}>· Planyr screening convention</span>}
-                      </span>
-                    </Field>
                     {depthSolve && depthSolve.ok && Math.abs(depthSolve.depthFt - depth) > 0.05 && (
                       <div style={{ fontSize: 10.5, color: PAL.info, lineHeight: 1.45, margin: "1px 0 3px" }}>
                         Solver: ≈{f1(depthSolve.depthFt)}′ deep closes the site's remaining deficit.
@@ -15825,17 +15899,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                   )}
                                 </span>
                               </Field>
-                              <Field label="Top-of-bank elev. (ft)">
-                                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "optional"} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
-                                  {det.tobElev != null
-                                    ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={pondAuto.tobElev ? `Clear — back to auto (${pondAuto.tobElev.source})` : "Clear — label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>
-                                    : pondAuto.tobElev
-                                      ? <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title="Excavated-pond convention: top of bank ≈ existing grade (site 3DEP median — B808's per-ring grid will refine this). Type to override.">· {pondAuto.tobElev.source}</span>
-                                      : null}
-                                </span>
-                              </Field>
-                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Set the top-of-bank elevation to label rings as real elevations (e.g. 96.0) instead of depths (−2′).</div>
                             </div>
                           )}
                         </div>
@@ -15843,16 +15906,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     })()}
                     {det.availDepth != null && (
                       <div style={{ fontSize: 10.5, color: PAL.info, marginTop: 2, lineHeight: 1.4 }}>LiDAR available depth ≈ {f1(det.availDepth)}′.</div>
-                    )}
-                    {/* B708 — NAVD88 anchors (manual v1; named LiDAR/HCFCD flowline hooks —
-                        the det.availDepth precedent). null-discipline: never undefined. */}
-                    {det.contours === false && (
-                      <Field label="Top-of-bank elev. (ft)">
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "optional"} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
-                          {det.tobElev == null && pondAuto.tobElev && <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }}>· {pondAuto.tobElev.source}</span>}
-                        </span>
-                      </Field>
                     )}
                     <Field label="Permanent pool elev. (ft)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -15866,7 +15919,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         {det.receivingFlowlineElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear" onClick={() => setDet({ receivingFlowlineElev: null })}>Clear</button>}
                       </span>
                     </Field>
-                    <WatchOutChip style={{ margin: "2px 0 0" }}>Elevations are feet NAVD88 — older documents may cite NGVD29; convert before entering (Houston subsidence makes mixed datums a multi-foot silent error).</WatchOutChip>
                     <div style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
                       {pondRow("Top-of-bank area", `${f0(r.aTop)} sf`)}
                       {pondRow("Water-surface area", `${f0(r.aWater)} sf`)}
@@ -15921,11 +15973,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             {split.bands.poolDeadCf > 0 && pondRow("Permanent pool (dead)", `${f2(split.bands.poolDeadCf / 43560)} ac-ft`)}
                           </div>
                         );
-                        // NEW-4 — both bands captioned with what they are and why (plain language).
-                        out.push(noteLine(`Flood WSE ${f1(split.wseFt)}′ NAVD88. ABOVE the WSE the basin is empty when the design storm arrives — that volume counts toward detention. BELOW the WSE the flood already occupies the volume at design stage — no detention credit, but it's your candidate compensating storage for fill (hydraulic connection + stage distribution: engineer confirms).`, "split-note"));
-                        // NEW-2 / B882 — an estimated water surface (any provider) stamps the split it shaped.
-                        if (isEstimatedWseSrc(split.wseSrc)) out.push(warnLine(`This split is priced off an ESTIMATED flood WSE (${wseProvLabel(split.wseSrc)}) — confirm with a sealed H&H / Atlas-14 study.`, "split-est", false));
-                        if (split.bands.fullyInundated) out.push(warnLine("The flood WSE is at or above this pond's top of bank — the basin is fully inundated in the design flood; usable detention is ZERO. Fix: click ⚡ Design pond in the Yield panel to raise the rim above the flood level in one click.", "inund", true));
+                        // FINAL UI SPEC A2 — the flood-WSE caption, the ESTIMATE warning, and the
+                        // fully-inundated warning move OUT of visible prose: their text now rides the
+                        // "Flood level is estimated" / "Rim below flood level" chip popovers (A3) and
+                        // the Flood & datum group. The value rows above stay.
                       } else if (split.mode === "unknown") {
                         // NEW-9 — a restored check without this pond's persisted facts: the split is
                         // unknown, and the gross figure above must not read as usable.
@@ -15940,15 +15991,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           ? "This pond sits in the mapped floodplain and its top of bank is anchored, but the reach's flood elevation is unknown — enter the BFE (drainage inputs in Yield) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention."
                           : "This pond sits in the mapped floodplain but isn't anchored — set the pond's top-of-bank elevation (and the reach's flood elevation) to split usable storage from flood-occupied volume. The gross number above OVERSTATES usable detention.", "unanchored", false));
                       }
-                      if (split.inTrigger) {
-                        out.push(noteLine("Cut outside or above the trigger floodplain earns no screening mitigation credit — compensating storage must be hydraulically connected at flood stages.", "credit-loc"));
-                      }
                       if (crit.slope) out.push(warnLine(`${crit.slope.slope}:1 interior side slopes are steeper than the ${crit.slope.maxSideSlope}:1 criteria cap (${critRule.label}).`, "crit-slope", false));
                       if (crit.freeboard) out.push(warnLine(`${f1(crit.freeboard.freeboard)}′ freeboard is under the ${f1(crit.freeboard.minFreeboardFt)}′ criteria minimum (${critRule.label}).`, "crit-fb", false));
                       if (landTakeSf != null) {
-                        out.push(noteLine(landIsBerm
-                          ? `Pond land take incl. the modeled ${f1(matBerm.maxHeightFt)}′ fill berm (toe ~${f0(bermToeReach)}′ out at ${gsApronRatio}:1): ${f2(landTakeSf / SQFT_PER_ACRE)} ac (water footprint ${f2(polyArea(ring) / SQFT_PER_ACRE)} ac).`
-                          : `Pond land take incl. the ${critRule.maintBermWidthFt}′ maintenance berm: ${f2(landTakeSf / SQFT_PER_ACRE)} ac (water footprint ${f2(polyArea(ring) / SQFT_PER_ACRE)} ac).`, "landtake"));
+                        // FINAL UI SPEC A1.4 — the land-take value moved to the At-a-glance table
+                        // (its berm explanation rides that row's ⓘ); the overlap / fee-in-lieu /
+                        // optimizer notes below stay.
                         if (bermOverlaps.length) out.push(warnLine(`The ${landIsBerm ? "fill-berm toe" : "maintenance-berm"} ring overlaps ${bermOverlaps.length === 1 ? `a ${TYPE[bermOverlaps[0].type].label.toLowerCase()}` : `${bermOverlaps.length} other elements`} — the ${landIsBerm ? "berm footprint" : "criteria shelf"} runs into your layout.`, "berm-overlap", false));
                         // NEW-C2 (Phase C) — if the jurisdiction has a regional-detention / fee-in-lieu
                         // program, show the deal trade: paying in lieu of this on-site pond recovers its
@@ -15993,7 +16041,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <Field label="Depth to water (ft)">
                               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                 <NumInput allowClear style={{ ...numInput, width: 64 }} value={dtw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
-                                <span style={{ fontSize: 10, color: PAL.muted }}>seasonal high (SSURGO / TWDB well)</span>
+                                <RowInfo label="Depth to water (ft)" sections={[{ text: "Seasonal high water table (SSURGO / TWDB well)." }]} />
                               </span>
                             </Field>
                           </div>
@@ -16025,63 +16073,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       } else if (berm != null) {
                         out.push(warnLine(`Bermed basin — the top of bank sits ${f1(berm)}′ above existing grade. The berm itself is fill${split.inTrigger ? " requiring mitigation" : ""} and may block conveyance.`, "berm-fill", false));
                       }
-                      if (split.inTrigger) {
-                        out.push(noteLine("Floodway note: fill/structures in the regulatory floodway are prohibited outright; pond CUT in the floodway can be permissible with a no-rise review — informational, never a green light.", "fw-note"));
-                      }
                       return out.length ? <>{out}</> : null;
                     })()}
-                    {/* NEW-8 — pond role: which ledger this pond's volume serves. Auto-suggested
-                        from the elevation split (share below the flood WSE); the owner's pick
-                        wins and × (Auto) restores. Role only gates which ponds' below-WSE cut
-                        is CREDITED to the mitigation Provided ledger — the detention usable
-                        split (B708) is untouched, so no acre-foot ever counts twice. */}
-                    {(() => {
-                      const split = pondSplitFor(selEl);
-                      const { role: effRole, source: roleSource, suggested } = effectivePondRole(det, split);
-                      const pct = suggested.belowShare != null ? Math.round(suggested.belowShare * 100) : null;
-                      const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.4, margin: "3px 0 0" };
-                      const roleBtn = (v, label) => {
-                        const active = v === null ? roleSource === "auto" : roleSource === "owner" && det.role === v;
-                        return (
-                          <button key={String(v)} style={{ ...chip, flex: "0 0 auto", padding: "5px 9px", fontSize: 10.5, ...(active ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }}
-                            onClick={() => setDet({ role: v })}>{label}</button>
-                        );
-                      };
-                      return (
-                        <div data-pond-card="purpose" style={{ marginTop: 10 }}>
-                          {/* NEW-4 — owner naming: the user-facing concept is the pond's PURPOSE
-                              (Detention / Mitigation / Hybrid); "dual" stays the stored enum. */}
-                          {/* B875 — the effective purpose reads prominently ("Hybrid — auto"), so a
-                              selected pond immediately shows what ledger its cut serves + why. */}
-                          <div style={{ fontSize: 12, fontWeight: 800, color: PAL.ink, marginBottom: 4 }}>
-                            Purpose: {POND_ROLE_LABEL[effRole]} <span style={{ fontWeight: 400, color: PAL.muted, fontSize: 10.5 }}>— {roleSource === "auto" ? "auto (from elevation)" : "you set this"}</span>
-                          </div>
-                          {effRole === "dual" && !hybridHintSeen && (
-                            <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "0 0 6px", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
-                              <span><strong>Hybrid</strong> = this pond serves BOTH ledgers: usable detention above the flood water surface, and compensating-storage mitigation for the cut below it. Set it to Detention or Mitigation to force one.</span>
-                              <button type="button" onClick={dismissHybridHint} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 999, border: `1px solid ${PAL.border}`, background: "transparent", color: PAL.muted, whiteSpace: "nowrap" }}>Got it</button>
-                            </div>
-                          )}
-                          <Field label="Pond purpose">
-                            <span style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                              {roleBtn(null, `Auto (${POND_ROLE_LABEL[suggested.role]})`)}
-                              {roleBtn("detention", POND_ROLE_LABEL.detention)}
-                              {roleBtn("mitigation", POND_ROLE_LABEL.mitigation)}
-                              {roleBtn("dual", POND_ROLE_LABEL.dual)}
-                            </span>
-                          </Field>
-                          {roleSource === "owner" && det.role !== suggested.role && (
-                            <div style={smallNote}>Overrides the elevation suggestion ({POND_ROLE_LABEL[suggested.role]}{pct != null ? ` — ~${pct}% of volume sits below the flood WSE` : ""}).</div>
-                          )}
-                          {roleSource === "auto" && pct == null && (
-                            <div style={smallNote}>No flood WSE at this pond — the auto role defaults to detention until a check anchors it.</div>
-                          )}
-                          {roleSource === "auto" && pct != null && (
-                            <div style={smallNote}>Auto from elevation: ~{pct}% of volume sits below the flood WSE. Mitigation/Hybrid credits the below-WSE cut to the compensating-storage ledger.</div>
-                          )}
-                        </div>
-                      );
-                    })()}
+                    {/* FINAL UI SPEC A1.4 — the Purpose 4-way toggle moved to the At-a-glance
+                        table (with per-option tooltips); the "Auto from elevation ~X%…" explanation
+                        paragraph is deleted. The one-time Hybrid teaching hint is preserved here. */}
+                    {g_roleInfo.role === "dual" && !hybridHintSeen && (
+                      <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "8px 0 0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                        <span><strong>Hybrid</strong> = this pond serves BOTH ledgers: usable detention above the flood water surface, and compensating-storage mitigation for the cut below it. Set it to Detention or Mitigation to force one.</span>
+                        <button type="button" onClick={dismissHybridHint} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 999, border: `1px solid ${PAL.border}`, background: "transparent", color: PAL.muted, whiteSpace: "nowrap" }}>Got it</button>
+                      </div>
+                    )}
                     {/* NEW-13/B830 — the one-click berm: when the site is SHORT and this pond is
                         part of the solved joint berm, offer the apply chip right here (and in the
                         Yield balancer card — same payload, same click). Fringe ponds render the
@@ -16157,13 +16159,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       if (!assist.ok) {
                         body.push(actLine(`Assistant unavailable: ${assist.reason}.`, "assist-refuse", true));
                       } else {
-                        const mitTxt = mitTargetCf > 0 || mitReqCf != null
-                          ? `mitigation ${assist.mitigation.covered ? "covered ✓" : `short ${f2(assist.mitigation.shortCf / 43560)} ac-ft`}`
-                          : null;
+                        // FINAL UI SPEC A2 — the "mitigation covered ✓" status is redundant with the
+                        // status card at the top of the inspector; keep only the detention status.
                         const detTxt = detTargetCf > 0 || detReqCf != null
                           ? `detention ${assist.detention.covered ? "covered ✓" : `short ${f2(assist.detention.shortCf / 43560)} ac-ft`}`
                           : null;
-                        body.push(actLine([mitTxt, detTxt].filter(Boolean).join(" · ") || "no targets", "assist-status", !(assist.mitigation.covered && assist.detention.covered)));
+                        body.push(actLine(detTxt || "no targets", "assist-status", !(assist.mitigation.covered && assist.detention.covered)));
                         // NEW-5 — the remedies are one-click APPLICABLE (apply-gated, never auto):
                         // each Apply writes the real element fields through the normal element-sync
                         // path (setDet = pushHistory + setSelEl → ONE atomic undo), auto-recompute
@@ -16215,11 +16216,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         if (mitTargetCf > 0 && eff.role === "detention") {
                           body.push(actLine("This pond's purpose is Detention — its below-WSE cut is NOT credited to mitigation. Switch the purpose to Mitigation or Hybrid to count it.", "assist-role", true));
                         }
-                        if (assist.estimated) body.push(<div key="assist-est" style={smallNote}>Solved off the ESTIMATED water surface (grade @ Zone A boundary) — never off gross.</div>);
                         if (split.inTrigger && floodJurKey === "waller" && assist.actions.some((a) => a.kind === "raise-tob")) {
                           body.push(<div key="assist-waller" style={smallNote}>Unincorporated Waller: berms are fill — the 1:1 offset applies; the no-structural-fill rule (Art. 5 §A(9)) targets structures, but confirm berm treatment with the County Engineer.</div>);
                         }
-                        body.push(<div key="assist-caveat" style={smallNote}>Targets = the site requirement minus what the OTHER ponds already provide (this pond closes the remainder). Proposals only — redraw the pond to take one; volumes come from the same banded split as the rows above.</div>);
                       }
                       return (
                         <div data-pond-card="assistant" style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
@@ -16360,6 +16359,175 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </div>
                       );
                     })()}
+                    {/* B139 — Expand this pond: enter mode (auto-baseline + ghost), then steppers
+                        (push banks out / dig deeper) or free drag feed one Existing→Proposed delta. */}
+                    {!inMode ? (
+                      <div style={{ marginTop: 11 }}>
+                        <button style={{ ...chip, width: "100%", padding: "8px 10px", fontWeight: 700 }} onClick={startExpand} title="See how much more detention you'd gain by enlarging this pond — it snapshots today's size, then you push the banks out or dig deeper.">Expand this pond</button>
+                        {/* B633 — auto-size: solve the expand offset that closes the SITE's
+                            detention shortfall (B630's required-vs-provided), then land the
+                            user in the normal expand mode (baseline + ghost + overlap /
+                            property-line warnings) to review and press Done. */}
+                        {(() => {
+                          if (!detReq || detReq.kind !== "point" || !(detReq.requiredAcFt > 0)) return null;
+                          const requiredCf = detReq.requiredAcFt * 43560;
+                          // Regime B (B632): the permanent pool below the static water surface
+                          // stores nothing — and it GROWS with the footprint (fixed water
+                          // surface, bigger basin), so the solver must target USABLE volume =
+                          // gross − dead AT EACH candidate size, not subtract a frozen constant.
+                          // Missing elevations → poolDepthFt null → REFUSE (never a fabricated pool).
+                          const regimeB = detRegime && detRegime.regime === "B";
+                          const poolDepthFt = regimeB
+                            ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: depth, freeboardFt: fb })
+                            : 0;
+                          // B708: current usable via the ONE shared helper (anchored split when
+                          // the pond carries a real WSE; the Regime-B estimate otherwise) — the
+                          // same number the metrics loop and the B655 card show.
+                          const thisSplit = pondSplitFor(selEl);
+                          const anchoredThis = thisSplit.mode === "anchored";
+                          const thisDeadCf = thisSplit.deadCf;
+                          const thisUsableCf = thisSplit.usableCf;
+                          // NEW-9 — a restored view without the per-pond split facts has an UNKNOWN
+                          // usable (null, not zero): refuse to auto-size against it (the readout
+                          // already says "re-check"); manual expand stays available.
+                          if (providedUsableCf == null || thisUsableCf == null) return null;
+                          // Target THIS pond's usable so the SITE meets required: other ponds'
+                          // usable is the site total minus this pond's current usable.
+                          const otherUsableCf = Math.max(0, providedUsableCf - thisUsableCf);
+                          const targetUsableCf = requiredCf - otherUsableCf;
+                          if (targetUsableCf <= thisUsableCf) return null; // this pond already covers its share
+                          const regimeUnsure = !detRegime || detRegime.regime === "unknown" || drainage?.floodFailed;
+                          const authDefaults = drainAuthorityId ? pondDefaultsFor(drainAuthorityId) : null;
+                          const defaultsDiffer = authDefaults && (authDefaults.sideSlope !== slope || authDefaults.freeboardFt !== fb);
+                          const sizeForRequired = () => {
+                            // An ANCHORED pond needs no estimated pool — its split is real.
+                            if (!anchoredThis && regimeB && poolDepthFt == null) {
+                              flashWarn("In this floodplain the permanent-pool depth can't be established (missing BFE or ground elevation) — refusing to size against an unknown usable volume.", 7500);
+                              return;
+                            }
+                            // volumeAt returns USABLE volume (gross − permanent pool) at the candidate footprint.
+                            const grossAt = (N) => {
+                              if (selEl.points) {
+                                const g = N > 0 ? expandPolygon(ring, N) : ring;
+                                if (!g || polySelfIntersects(g)) return null;
+                                return { g, res: detentionStorage(g, depth, fb, slope) };
+                              }
+                              const g = elCorners({ ...selEl, w: selEl.w + 2 * N, h: selEl.h + 2 * N });
+                              return { g, res: detentionStorage(g, depth, fb, slope) };
+                            };
+                            const volumeAt = (N) => {
+                              const gr = grossAt(N);
+                              if (!gr) return null;
+                              // Same shared split at the CANDIDATE footprint: anchored ponds keep
+                              // their real WSE (screening: the current reach's governing WSE), the
+                              // rest subtract the Regime-B pool that grows with the footprint.
+                              const u = usablePondVolume(gr.g, { ...det, depth, freeboard: fb, slope }, { wseFt: thisSplit.wseFt, estimatePoolDepthFt: poolDepthFt });
+                              return { ...gr.res, vol: u.usableCf };
+                            };
+                            const s = solvePondExpansion({ requiredCf: targetUsableCf, volumeAt });
+                            if (s.ok) {
+                              pushHistory();
+                              const baseline = { ring: ring.map((p) => ({ x: p.x, y: p.y })), geom: snapshotGeom(), depth, freeboard: fb, slope };
+                              const detNext = { ...det, depth, freeboard: fb, slope, expandFt: s.expandFt, baseline };
+                              if (selEl.points) setSelEl({ points: expandPolygon(ring, s.expandFt), det: detNext });
+                              else setSelEl({ w: selEl.w + 2 * s.expandFt, h: selEl.h + 2 * s.expandFt, det: detNext });
+                              flashWarn(`Sized for required detention: banks pushed out ${s.expandFt}′ (+${f2((s.achievedCf - thisUsableCf) / 43560)} ac-ft usable). Review the ghost, then press Done to keep it.`, 7000);
+                            } else if (s.reason === "already-sufficient") {
+                              flashWarn("This pond already covers the site's required detention.", 4000);
+                            } else {
+                              // Depth fallback: as you dig deeper the floor drops below the fixed
+                              // water surface, so the permanent pool grows with depth too.
+                              const poolAt = (dd) => (regimeB ? Math.max(0, Math.min(detRegime.elevations.bfeFt - (detRegime.elevations.groundFt - dd), dd - fb)) : 0);
+                              const usableAtDepth = (dd) => {
+                                const g = detentionStorage(ring, dd, fb, slope);
+                                const u = usablePondVolume(ring, { ...det, depth: dd, freeboard: fb, slope }, { wseFt: thisSplit.wseFt, estimatePoolDepthFt: poolAt(dd) });
+                                return { ...g, vol: u.usableCf };
+                              };
+                              const dAlt = solvePondDepth({ requiredCf: targetUsableCf, volumeAtDepth: usableAtDepth, startDepthFt: depth });
+                              flashWarn(
+                                s.reason === "geometry-failed"
+                                  ? `Can't push the banks out cleanly past ${s.atFt}′ on this shape.${dAlt.ok ? ` Alternative: dig to ${f1(dAlt.depthFt)}′ deep (now ${f1(depth)}′).` : ""}`
+                                  : dAlt.ok
+                                    ? `Pushing the banks out isn't enough — but digging to ${f1(dAlt.depthFt)}′ deep (now ${f1(depth)}′) gets there. Use "Expand this pond" → Dig deeper.`
+                                    : `This pond can't reach the required volume: at ${slope}:1 the side slopes meet at ${f1(dAlt.maxUsableDepthFt ?? r.maxDepth)}′ before enough storage exists. Enlarge the footprint or flatten the slopes.`,
+                                8500
+                              );
+                            }
+                          };
+                          const shortfallUsableCf = targetUsableCf - thisUsableCf;
+                          return (
+                            <div style={{ marginTop: 8 }}>
+                              <button style={{ width: "100%", padding: "8px 10px", border: `1.5px solid ${PAL.accent}`, borderRadius: 8, background: "transparent", color: PAL.accent, fontWeight: 700, fontSize: 12, cursor: "pointer" }} onClick={sizeForRequired}>
+                                ⇱ Size for required detention ({f2(shortfallUsableCf / 43560)} ac-ft short)
+                              </button>
+                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
+                                Solves how far to push the banks out so the site meets its required volume{thisDeadCf > 0 ? ` (the ${f2(thisDeadCf / 43560)} ac-ft permanent pool grows with the footprint and stays uncredited — Regime B)` : ""}, then lets you review before keeping it.
+                              </div>
+                              {regimeUnsure && (
+                                <div style={{ fontSize: 10, color: PAL.warn || PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
+                                  ⚠ Flood facts aren't established (regime unknown) — this sizes for a dry (Regime-A) outfall. If the site is in a floodplain, usable storage could be less; check the drainage criteria.
+                                </div>
+                              )}
+                              {defaultsDiffer && (
+                                <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                  <span>{(detReq.rule?.authorityLabel || "Authority")} defaults: {authDefaults.sideSlope}:1 slopes · {authDefaults.freeboardFt}′ freeboard.</span>
+                                  <button style={{ ...chip, padding: "1px 8px", fontSize: 10 }} onClick={() => setDet({ slope: authDefaults.sideSlope, freeboard: authDefaults.freeboardFt })}>Apply</button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : (() => {
+                      const baseVol = detentionStorage(base.ring, base.depth, base.freeboard, base.slope).vol;
+                      const inc = r.vol - baseVol, sign = inc >= 0 ? "+" : "−", mag = Math.abs(inc);
+                      const digVal = Math.max(0, Math.round(depth - base.depth));
+                      const expandVal = Math.max(0, Math.round(det.expandFt || 0));
+                      const warns = [];
+                      const overlaps = els.filter((e) => e.id !== selEl.id && ["building", "parking", "trailer"].includes(e.type) && ringsOverlap(ring, ringOf(e)));
+                      if (overlaps.length) warns.push(overlaps.length === 1 ? `Overlaps a ${TYPE[overlaps[0].type].label.toLowerCase()} — the expanded pond runs into your layout.` : `Overlaps ${overlaps.length} other elements — the expanded pond runs into your layout.`);
+                      if (parcels.length && ring.some((p) => !parcels.some((pc) => pc.points && pc.points.length >= 3 && pointInRing(p, pc.points)))) warns.push("Extends past the property line.");
+                      return (
+                        <div style={{ marginTop: 11, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                          <div style={{ fontSize: 10.5, color: PAL.accent, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 800, marginBottom: 7 }}>Expanding · existing locked</div>
+                          {stepRow("Push banks out (ft)", expandVal, 5, pushBanksOut)}
+                          {stepRow("Dig deeper (ft)", digVal, 1, digDeeper)}
+                          <div style={{ fontSize: 10, color: PAL.muted, marginTop: 3 }}>Or drag the pond's edges on the map.</div>
+                          <div style={{ marginTop: 8, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
+                            {pondRow("Existing storage", `${f2(baseVol / 43560)} ac-ft`, { code: "plan" })}
+                            {pondRow("Proposed storage", `${f2(r.vol / 43560)} ac-ft`, { code: "plan" })}
+                            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
+                              <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 700 }}>{inc >= 0 ? "Storage gained" : "Storage lost"}</span>
+                              <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 14, color: inc >= 0 ? PAL.success : PAL.danger, fontWeight: 800 }}>{sign}{f2(mag / 43560)} ac-ft</span>
+                            </div>
+                            {pondRow("", `${sign}${f0(mag)} cf`)}
+                          </div>
+                          {warns.map((w, i) => <WatchOutChip key={i} style={{ marginTop: 5 }}>{w}</WatchOutChip>)}
+                          <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 7 }}>
+                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 5 }}>Fill colors</div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
+                              <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")}
+                                {...livePick((v) => setDetLive({ existFill: v }))}
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
+                              <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
+                                {...livePick((v) => setDetLive({ addFill: v }))}
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
+                            <button style={{ ...chip, flex: 1 }} onClick={resetExisting}>Reset to existing</button>
+                            <button style={{ ...chip, flex: 1, borderColor: PAL.accent, color: PAL.accent, fontWeight: 700 }} onClick={doneExpand}>Done</button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    </Collapse>
+                    <Collapse sectionId="pond-outlet" title="Outlet & storms" defaultOpen={false} summary={g_outletSummary}>
                     {/* NEW-A (Phase A) — RATE control (Post ≤ Pre): route each required storm through
                         the pond's OUTLET STRUCTURE and prove the routed post-development peak ≤ the
                         pre-development peak, per storm. This is what a rate-control district (FBCDD,
@@ -16599,190 +16767,68 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           ) : (
                             <div style={{ ...smallNote, color: PAL.warn }}>Can't route yet: {routed.reason || "missing inputs"}.</div>
                           )}
-                          {routed.kind === "routed" && routed.assumptions.length > 0 && <div style={smallNote}>{routed.assumptions.join(" ")}</div>}
-                          {critLine}
+                          {/* FINAL UI SPEC A1.6 — the assumption sentences (pre-development runoff
+                              coefficient, criteria, screening reservoir-routing caveat, time of
+                              concentration) collapse into ONE Basis ⓘ; the actionable NRCS
+                              method-by-area warning stays inline. */}
                           {methodLine}
-                          {tcLine}
-                          <div style={smallNote}>{routed.caveat}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 5 }}>
+                            <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>Basis &amp; assumptions</span>
+                            <RowInfo label="Rate control — basis & assumptions" sections={[
+                              ...(routed.kind === "routed" && routed.assumptions.length > 0 ? [{ text: routed.assumptions.join(" ") }] : []),
+                              { text: `Criteria: ${criteria.label}${criteria.governingManual && criteria.governingManual.section ? ` · ${criteria.governingManual.section}` : ""}${criteria.allowableReleaseCfsPerAc ? ` · release ${criteria.allowableReleaseCfsPerAc.value} cfs/ac${criteria.allowableReleaseCfsPerAc.verified ? "" : " (unverified)"}` : criteria.postLePre ? " · Post ≤ Pre (rate-match)" : ""} · storms ${criteria.requiredStorms.join("/")}-yr.` },
+                              ...(tc ? [{ text: `Time of concentration: ${tc.tcMin} min.${tc.basis ? ` ${tc.basis}` : ""}` }] : []),
+                              ...(routed.caveat ? [{ text: routed.caveat }] : []),
+                            ]} />
+                          </div>
                         </>
                       );
                     })()}
-                    {/* B139 — Expand this pond: enter mode (auto-baseline + ghost), then steppers
-                        (push banks out / dig deeper) or free drag feed one Existing→Proposed delta. */}
-                    {!inMode ? (
-                      <div style={{ marginTop: 11 }}>
-                        <button style={{ width: "100%", padding: "9px 10px", border: "none", borderRadius: 8, background: PAL.accent, color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }} onClick={startExpand}>Expand this pond</button>
-                        <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>See how much more detention you'd gain by enlarging this pond — it snapshots today's size, then you push the banks out or dig deeper.</div>
-                        {/* B633 — auto-size: solve the expand offset that closes the SITE's
-                            detention shortfall (B630's required-vs-provided), then land the
-                            user in the normal expand mode (baseline + ghost + overlap /
-                            property-line warnings) to review and press Done. */}
-                        {(() => {
-                          if (!detReq || detReq.kind !== "point" || !(detReq.requiredAcFt > 0)) return null;
-                          const requiredCf = detReq.requiredAcFt * 43560;
-                          // Regime B (B632): the permanent pool below the static water surface
-                          // stores nothing — and it GROWS with the footprint (fixed water
-                          // surface, bigger basin), so the solver must target USABLE volume =
-                          // gross − dead AT EACH candidate size, not subtract a frozen constant.
-                          // Missing elevations → poolDepthFt null → REFUSE (never a fabricated pool).
-                          const regimeB = detRegime && detRegime.regime === "B";
-                          const poolDepthFt = regimeB
-                            ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: depth, freeboardFt: fb })
-                            : 0;
-                          // B708: current usable via the ONE shared helper (anchored split when
-                          // the pond carries a real WSE; the Regime-B estimate otherwise) — the
-                          // same number the metrics loop and the B655 card show.
-                          const thisSplit = pondSplitFor(selEl);
-                          const anchoredThis = thisSplit.mode === "anchored";
-                          const thisDeadCf = thisSplit.deadCf;
-                          const thisUsableCf = thisSplit.usableCf;
-                          // NEW-9 — a restored view without the per-pond split facts has an UNKNOWN
-                          // usable (null, not zero): refuse to auto-size against it (the readout
-                          // already says "re-check"); manual expand stays available.
-                          if (providedUsableCf == null || thisUsableCf == null) return null;
-                          // Target THIS pond's usable so the SITE meets required: other ponds'
-                          // usable is the site total minus this pond's current usable.
-                          const otherUsableCf = Math.max(0, providedUsableCf - thisUsableCf);
-                          const targetUsableCf = requiredCf - otherUsableCf;
-                          if (targetUsableCf <= thisUsableCf) return null; // this pond already covers its share
-                          const regimeUnsure = !detRegime || detRegime.regime === "unknown" || drainage?.floodFailed;
-                          const authDefaults = drainAuthorityId ? pondDefaultsFor(drainAuthorityId) : null;
-                          const defaultsDiffer = authDefaults && (authDefaults.sideSlope !== slope || authDefaults.freeboardFt !== fb);
-                          const sizeForRequired = () => {
-                            // An ANCHORED pond needs no estimated pool — its split is real.
-                            if (!anchoredThis && regimeB && poolDepthFt == null) {
-                              flashWarn("In this floodplain the permanent-pool depth can't be established (missing BFE or ground elevation) — refusing to size against an unknown usable volume.", 7500);
-                              return;
-                            }
-                            // volumeAt returns USABLE volume (gross − permanent pool) at the candidate footprint.
-                            const grossAt = (N) => {
-                              if (selEl.points) {
-                                const g = N > 0 ? expandPolygon(ring, N) : ring;
-                                if (!g || polySelfIntersects(g)) return null;
-                                return { g, res: detentionStorage(g, depth, fb, slope) };
-                              }
-                              const g = elCorners({ ...selEl, w: selEl.w + 2 * N, h: selEl.h + 2 * N });
-                              return { g, res: detentionStorage(g, depth, fb, slope) };
-                            };
-                            const volumeAt = (N) => {
-                              const gr = grossAt(N);
-                              if (!gr) return null;
-                              // Same shared split at the CANDIDATE footprint: anchored ponds keep
-                              // their real WSE (screening: the current reach's governing WSE), the
-                              // rest subtract the Regime-B pool that grows with the footprint.
-                              const u = usablePondVolume(gr.g, { ...det, depth, freeboard: fb, slope }, { wseFt: thisSplit.wseFt, estimatePoolDepthFt: poolDepthFt });
-                              return { ...gr.res, vol: u.usableCf };
-                            };
-                            const s = solvePondExpansion({ requiredCf: targetUsableCf, volumeAt });
-                            if (s.ok) {
-                              pushHistory();
-                              const baseline = { ring: ring.map((p) => ({ x: p.x, y: p.y })), geom: snapshotGeom(), depth, freeboard: fb, slope };
-                              const detNext = { ...det, depth, freeboard: fb, slope, expandFt: s.expandFt, baseline };
-                              if (selEl.points) setSelEl({ points: expandPolygon(ring, s.expandFt), det: detNext });
-                              else setSelEl({ w: selEl.w + 2 * s.expandFt, h: selEl.h + 2 * s.expandFt, det: detNext });
-                              flashWarn(`Sized for required detention: banks pushed out ${s.expandFt}′ (+${f2((s.achievedCf - thisUsableCf) / 43560)} ac-ft usable). Review the ghost, then press Done to keep it.`, 7000);
-                            } else if (s.reason === "already-sufficient") {
-                              flashWarn("This pond already covers the site's required detention.", 4000);
-                            } else {
-                              // Depth fallback: as you dig deeper the floor drops below the fixed
-                              // water surface, so the permanent pool grows with depth too.
-                              const poolAt = (dd) => (regimeB ? Math.max(0, Math.min(detRegime.elevations.bfeFt - (detRegime.elevations.groundFt - dd), dd - fb)) : 0);
-                              const usableAtDepth = (dd) => {
-                                const g = detentionStorage(ring, dd, fb, slope);
-                                const u = usablePondVolume(ring, { ...det, depth: dd, freeboard: fb, slope }, { wseFt: thisSplit.wseFt, estimatePoolDepthFt: poolAt(dd) });
-                                return { ...g, vol: u.usableCf };
-                              };
-                              const dAlt = solvePondDepth({ requiredCf: targetUsableCf, volumeAtDepth: usableAtDepth, startDepthFt: depth });
-                              flashWarn(
-                                s.reason === "geometry-failed"
-                                  ? `Can't push the banks out cleanly past ${s.atFt}′ on this shape.${dAlt.ok ? ` Alternative: dig to ${f1(dAlt.depthFt)}′ deep (now ${f1(depth)}′).` : ""}`
-                                  : dAlt.ok
-                                    ? `Pushing the banks out isn't enough — but digging to ${f1(dAlt.depthFt)}′ deep (now ${f1(depth)}′) gets there. Use "Expand this pond" → Dig deeper.`
-                                    : `This pond can't reach the required volume: at ${slope}:1 the side slopes meet at ${f1(dAlt.maxUsableDepthFt ?? r.maxDepth)}′ before enough storage exists. Enlarge the footprint or flatten the slopes.`,
-                                8500
-                              );
-                            }
-                          };
-                          const shortfallUsableCf = targetUsableCf - thisUsableCf;
-                          return (
-                            <div style={{ marginTop: 8 }}>
-                              <button style={{ width: "100%", padding: "8px 10px", border: `1.5px solid ${PAL.accent}`, borderRadius: 8, background: "transparent", color: PAL.accent, fontWeight: 700, fontSize: 12, cursor: "pointer" }} onClick={sizeForRequired}>
-                                ⇱ Size for required detention ({f2(shortfallUsableCf / 43560)} ac-ft short)
-                              </button>
-                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
-                                Solves how far to push the banks out so the site meets its required volume{thisDeadCf > 0 ? ` (the ${f2(thisDeadCf / 43560)} ac-ft permanent pool grows with the footprint and stays uncredited — Regime B)` : ""}, then lets you review before keeping it.
-                              </div>
-                              {regimeUnsure && (
-                                <div style={{ fontSize: 10, color: PAL.warn || PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
-                                  ⚠ Flood facts aren't established (regime unknown) — this sizes for a dry (Regime-A) outfall. If the site is in a floodplain, usable storage could be less; check the drainage criteria.
-                                </div>
-                              )}
-                              {defaultsDiffer && (
-                                <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                                  <span>{(detReq.rule?.authorityLabel || "Authority")} defaults: {authDefaults.sideSlope}:1 slopes · {authDefaults.freeboardFt}′ freeboard.</span>
-                                  <button style={{ ...chip, padding: "1px 8px", fontSize: 10 }} onClick={() => setDet({ slope: authDefaults.sideSlope, freeboard: authDefaults.freeboardFt })}>Apply</button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
+                    </Collapse>
+                    {/* FINAL UI SPEC A1.6 — Flood & datum notes: no visible paragraphs; the flood/
+                        datum watch-outs read as chips whose ⓘ carries the full original text. */}
+                    <Collapse sectionId="pond-flood" title="Flood & datum notes" defaultOpen={false} summary={g_floodSummary}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "2px 0" }}>
+                        {g_chips.filter((c) => c.id !== "crit-unv").map((c) => <Chip key={c.id} tone={c.tone} text={c.text} popover={c.popover} />)}
+                        {g_split.mode === "anchored" && g_split.bands && g_split.wseFt != null && (
+                          <Chip tone="neutral" text="Detention split" popover={`Flood WSE ${f1(g_split.wseFt)}′ NAVD88. ABOVE the WSE the basin is empty when the design storm arrives — that volume counts toward detention. BELOW the WSE the flood already occupies the volume at design stage — no detention credit, but it's your candidate compensating storage for fill (hydraulic connection + stage distribution: engineer confirms).`} />
+                        )}
                       </div>
-                    ) : (() => {
-                      const baseVol = detentionStorage(base.ring, base.depth, base.freeboard, base.slope).vol;
-                      const inc = r.vol - baseVol, sign = inc >= 0 ? "+" : "−", mag = Math.abs(inc);
-                      const digVal = Math.max(0, Math.round(depth - base.depth));
-                      const expandVal = Math.max(0, Math.round(det.expandFt || 0));
-                      const warns = [];
-                      const overlaps = els.filter((e) => e.id !== selEl.id && ["building", "parking", "trailer"].includes(e.type) && ringsOverlap(ring, ringOf(e)));
-                      if (overlaps.length) warns.push(overlaps.length === 1 ? `Overlaps a ${TYPE[overlaps[0].type].label.toLowerCase()} — the expanded pond runs into your layout.` : `Overlaps ${overlaps.length} other elements — the expanded pond runs into your layout.`);
-                      if (parcels.length && ring.some((p) => !parcels.some((pc) => pc.points && pc.points.length >= 3 && pointInRing(p, pc.points)))) warns.push("Extends past the property line.");
-                      return (
-                        <div style={{ marginTop: 11, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                          <div style={{ fontSize: 10.5, color: PAL.accent, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 800, marginBottom: 7 }}>Expanding · existing locked</div>
-                          {stepRow("Push banks out (ft)", expandVal, 5, pushBanksOut)}
-                          {stepRow("Dig deeper (ft)", digVal, 1, digDeeper)}
-                          <div style={{ fontSize: 10, color: PAL.muted, marginTop: 3 }}>Or drag the pond's edges on the map.</div>
-                          <div style={{ marginTop: 8, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
-                            {pondRow("Existing storage", `${f2(baseVol / 43560)} ac-ft`, { code: "plan" })}
-                            {pondRow("Proposed storage", `${f2(r.vol / 43560)} ac-ft`, { code: "plan" })}
-                            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
-                              <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 700 }}>{inc >= 0 ? "Storage gained" : "Storage lost"}</span>
-                              <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 14, color: inc >= 0 ? PAL.success : PAL.danger, fontWeight: 800 }}>{sign}{f2(mag / 43560)} ac-ft</span>
-                            </div>
-                            {pondRow("", `${sign}${f0(mag)} cf`)}
-                          </div>
-                          {warns.map((w, i) => <WatchOutChip key={i} style={{ marginTop: 5 }}>{w}</WatchOutChip>)}
-                          <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 7 }}>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 5 }}>Fill colors</div>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
-                              <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")}
-                                {...livePick((v) => setDetLive({ existFill: v }))}
-                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
-                              <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
-                                {...livePick((v) => setDetLive({ addFill: v }))}
-                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
-                            </div>
-                          </div>
-                          <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
-                            <button style={{ ...chip, flex: 1 }} onClick={resetExisting}>Reset to existing</button>
-                            <button style={{ ...chip, flex: 1, borderColor: PAL.accent, color: PAL.accent, fontWeight: 700 }} onClick={doneExpand}>Done</button>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                    </Collapse>
+                    {curStyle && (
+                    <Collapse sectionId="pond-appearance" title="Appearance" defaultOpen={false} summary="fill · outline · opacity">
+                      <Field label="Fill">
+                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <input type="color" value={toHex6(curStyle.fill)} {...livePick((v) => setSelEl({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                        </span>
+                      </Field>
+                      <Field label="Outline">
+                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <input type="color" value={toHex6(curStyle.stroke)} {...livePick((v) => setSelEl({ stroke: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                        </span>
+                      </Field>
+                      <Field label="Fill opacity">
+                        <input type="range" min={0.1} max={1} step={0.05} value={curStyle.fillOpacity}
+                          {...sliderHistory((e) => setSelEl({ fillOpacity: +e.target.value }))} />
+                      </Field>
+                      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${TYPE[selEl.type].label}`}>Set as default</button>
+                        <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
+                        <button style={linkBtn} onClick={() => jumpToStandards("colors")} title="New detention pond elements start from Standards → Colors">Standards → Colors ↗</button>
+                        <RowInfo label="New pond defaults" sections={[{ text: "New detention pond elements start from Standards → Colors." }]} />
+                      </div>
+                    </Collapse>
+                    )}
                   </div>
                 );
               })()}
             </Section>
           )}
 
-          {/* Bluebeam-style Properties — colors for the selected element + set defaults */}
-          {!multiStyleable && selEl && curStyle && (
+          {/* Bluebeam-style Properties — colors for the selected element + set defaults.
+              Ponds render this inside their inspector's "Appearance" group (FINAL UI SPEC A1.6),
+              so the standalone Properties section is suppressed for them. */}
+          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && (
             <Section title="Properties">
               <Field label="Fill">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -17492,7 +17538,7 @@ function dimSlideFor(el, allEls) {
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed, editInlineId) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed) {
   // B617 — zoom multiplier (px/ft ÷ the default 0.35) so a road's curb/edge stroke holds constant
   // relative to the drawing across zoom, exactly like the in-component markup/utility strokes.
   const zk = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x) / 0.35;
@@ -17687,7 +17733,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       }
     }
     // B620 — inline label riding the road centerline (own color + white halo; sparse spacing).
-    if (editInlineId !== el.id) rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo }));
+    // B935 — "Inside" placement tucks it a quarter of the travel-width off the centerline (into clear
+    // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
+    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, insetFt: el.labelInside ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
@@ -18177,7 +18225,13 @@ function PondCrossSection({ before, after, gradeFt, wseFt, width = 280 }) {
         if (m.t === "profile") return <path key={i} d={pathOf(m.points)} fill="none" style={{ stroke: m.dashed ? "var(--text-tertiary)" : "var(--accent)", strokeWidth: m.dashed ? 1.5 : 2.5, strokeDasharray: m.dashed ? "5 4" : "none", strokeLinejoin: "round" }} />;
         if (m.t === "text") {
           const fill = m.role === "wseLabel" ? "var(--info-text)" : m.role === "usableLabel" ? "var(--success-text)" : m.role === "rimLabel" ? "var(--accent)" : "var(--text-tertiary)";
-          return <text key={i} x={m.x} y={m.y} style={{ fill, fontSize: m.role === "label" ? 9 : 9.5, fontStyle: m.role === "label" ? "italic" : "normal", fontWeight: m.role === "label" ? 400 : 600 }}>{m.s}</text>;
+          // A5 — the two elevation labels get a halo (matched to the card surface the diagram
+          // sits on, so it reads as a "white" outline in light / slate in dark) via paint-order,
+          // so the text stays legible where it crosses the grade / profile / WSE lines.
+          const halo = m.role === "wseLabel" || m.role === "rimLabel"
+            ? { paintOrder: "stroke", stroke: "var(--planner-raised)", strokeWidth: 2, strokeLinejoin: "round" }
+            : null;
+          return <text key={i} x={m.x} y={m.y} textAnchor={m.anchor || "start"} style={{ fill, fontSize: m.role === "label" ? 9 : 9.5, fontStyle: m.role === "label" ? "italic" : "normal", fontWeight: m.role === "label" ? 400 : 600, ...halo }}>{m.s}</text>;
         }
         return null;
       })}
@@ -18361,6 +18415,36 @@ function YieldPanel({
               <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac of overlap). Site area counts the shared ground once — but if one is a duplicate or stray outline, make it inactive in the Parcel panel.</div>
             </div>
           )}
+          {/* FINAL UI SPEC B1.1 — the verdict strip: up to four one-line verdicts (colored
+              dot + never-truncated sentence) that lead the panel, read off the SAME drainage
+              object the detailed groups below expand on. A detention/mitigation shortfall
+              hangs a compact ⚡ Design pond button off its line; the data's age reads on a
+              single quiet line (SWR house rule — always show the age). */}
+          {drainage && (() => {
+            const strip = yieldVerdictStrip(drainage);
+            if (!strip.length) return null;
+            const dotColor = (t) => t === "good" ? "var(--success-text)" : t === "danger" ? "var(--danger-text)" : t === "warn" ? Y.warnText : Y.muted;
+            const ageMs = drainage.floodAgeMs;
+            return (
+              <div style={{ margin: "10px 0 4px" }} data-testid="yield-verdict-strip">
+                {strip.map((v) => (
+                  <div key={v.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                    <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: dotColor(v.tone) }} />
+                    <span style={{ fontSize: 12, fontWeight: 650, color: Y.text, lineHeight: 1.4, flex: 1 }}>{v.text}</span>
+                    {v.short && drainage.onDesignPond ? (
+                      <button type="button" onClick={drainage.onDesignPond} title="Draws (or grows) a right-sized pond and solves its outlet — one click, no map skill required." style={{ flex: "none", padding: "3px 9px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Design pond</button>
+                    ) : null}
+                  </div>
+                ))}
+                {ageMs != null && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10.5, color: Y.muted }}>
+                    <span>Flood data {formatAge(ageMs)}</span>
+                    {drainage.onCheck ? <button type="button" onClick={drainage.onCheck} title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", padding: 0 }}>· ↻ Re-check</button> : null}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {/* KPI cards */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 13 }}>
             {kpi("Site", f2(acres), "ac")}
