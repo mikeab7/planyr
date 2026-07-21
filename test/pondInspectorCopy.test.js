@@ -1,108 +1,104 @@
-// FINAL UI SPEC Part A — the condensed pond inspector's chip vocabulary (A3, exact copy +
-// conditions) and word budget (A4). Pure-data tests (the repo's vitest config is DOM-free):
-// the visible copy lives in lib/pondInspectorCopy.js so both the inspector and this guard read
-// one source, and the word count is computed off that source rather than a live render.
+// v3 UI SPEC Part B — the pond inspector's chip vocabulary (B4), the collapsed-group
+// titles/summaries (B5), Dimensions labels (B3), and Purpose descriptors (B3.6). Pure-data
+// tests (the repo's vitest config is DOM-free): the visible copy lives in
+// lib/pondInspectorCopy.js so both the inspector and this guard read one source.
 import { describe, it, expect } from "vitest";
 import {
   POND_CHIP_DEFS, pondInspectorChips, POND_GROUPS, pondGroupSummary,
-  POND_PURPOSE_TOOLTIPS,
+  POND_DIMENSION_LABELS, POND_PURPOSE_DESCRIPTOR, POND_PURPOSE_TOOLTIP, POND_FLOOD_NOTES,
 } from "../src/workspaces/site-planner/lib/pondInspectorCopy.js";
 
 const words = (s) => String(s).trim().split(/\s+/).filter(Boolean).length;
+const EM_DASH = "—";
 
-describe("A3 — chip vocabulary (exact copy + gating)", () => {
-  it("has exactly the five specified chips, each ≤6 visible words with a non-empty ⓘ popover", () => {
+describe("B4 — top warning chips (exact copy + gating)", () => {
+  it("has exactly the three watch-out chips, each ≤6 visible words with a non-empty ⓘ popover", () => {
     expect(POND_CHIP_DEFS.map((c) => c.text)).toEqual([
-      "Flood level is estimated",
-      "Rim below flood level",
+      "Flood level estimated",
       "Criteria unverified",
-      "Elevations: NAVD88",
       "In floodway: no fill",
     ]);
     for (const c of POND_CHIP_DEFS) {
       expect(words(c.text), c.text).toBeLessThanOrEqual(6);
-      expect(c.popover && c.popover.length, c.text).toBeGreaterThan(20); // full sentence moved here
+      expect(c.popover && c.popover.length, c.text).toBeGreaterThan(20);
+      expect(c.tone, c.text).toBe("amber");
     }
   });
 
-  it("tones: NAVD88 is neutral, the four watch-outs are amber", () => {
-    const tone = Object.fromEntries(POND_CHIP_DEFS.map((c) => [c.id, c.tone]));
-    expect(tone.navd88).toBe("neutral");
-    for (const id of ["flood-est", "rim-below", "crit-unv", "floodway"]) expect(tone[id]).toBe("amber");
+  it("the deleted 'Rim below flood level' and 'Elevations: NAVD88' chips are gone from the top set", () => {
+    const texts = POND_CHIP_DEFS.map((c) => c.text);
+    expect(texts).not.toContain("Rim below flood level");
+    expect(texts.some((t) => /NAVD88/.test(t))).toBe(false);
   });
 
-  it("only true conditions render; NAVD88 always renders", () => {
-    // Nothing flagged → only the always-on datum chip.
-    expect(pondInspectorChips({}).map((c) => c.id)).toEqual(["navd88"]);
-    // Everything flagged → all five, in spec order.
-    const all = pondInspectorChips({ floodEstimated: true, rimBelowFlood: true, criteriaUnverified: true, inFloodway: true });
-    expect(all.map((c) => c.id)).toEqual(["flood-est", "rim-below", "crit-unv", "navd88", "floodway"]);
-    // A single flag toggles exactly its chip.
-    expect(pondInspectorChips({ inFloodway: true }).map((c) => c.id)).toEqual(["navd88", "floodway"]);
+  it("only true conditions render; nothing flagged → no chips", () => {
+    expect(pondInspectorChips({})).toEqual([]);
+    const all = pondInspectorChips({ floodEstimated: true, criteriaUnverified: true, inFloodway: true });
+    expect(all.map((c) => c.id)).toEqual(["flood-est", "crit-unv", "floodway"]);
+    expect(pondInspectorChips({ inFloodway: true }).map((c) => c.id)).toEqual(["floodway"]);
   });
 
-  it("the deleted flood/datum sentences survive verbatim-ish inside chip popovers (nothing lost)", () => {
-    const pop = Object.fromEntries(POND_CHIP_DEFS.map((c) => [c.id, c.popover]));
-    expect(pop["flood-est"]).toContain("ESTIMATED flood WSE");
-    expect(pop["rim-below"]).toContain("usable detention is ZERO");
-    expect(pop["crit-unv"]).toContain("unverified placeholders");
-    expect(pop["navd88"]).toContain("NGVD29");
-    expect(pop["floodway"]).toContain("regulatory floodway");
+  it("no em dash in any chip text or popover (G2)", () => {
+    for (const c of POND_CHIP_DEFS) {
+      expect(c.text.includes(EM_DASH), c.text).toBe(false);
+      expect(c.popover.includes(EM_DASH), c.text).toBe(false);
+    }
   });
 });
 
-describe("A1.4 — purpose tooltips (exact copy)", () => {
+describe("B5.3 — the NAVD88 datum note relocates into the FLOOD & DATUM group", () => {
+  it("keeps the NGVD29 warning verbatim-ish (nothing lost)", () => {
+    expect(POND_FLOOD_NOTES.datum).toContain("NGVD29");
+    expect(POND_FLOOD_NOTES.datum).toContain("NAVD88");
+    expect(POND_FLOOD_NOTES.split).toContain("counts toward detention");
+  });
+});
+
+describe("B3.6 — purpose descriptors + tooltip (exact copy)", () => {
   it("matches the spec strings", () => {
-    expect(POND_PURPOSE_TOOLTIPS).toEqual({
-      auto: "Pick by site needs",
-      detention: "Rate-control storage only",
-      mitigation: "Flood-fill offset only",
-      hybrid: "Both, split by elevation",
+    expect(POND_PURPOSE_DESCRIPTOR).toEqual({
+      auto: "picks by site needs",
+      detention: "rate-control storage only",
+      mitigation: "flood-fill offset only",
+      hybrid: "both, split by elevation",
     });
+    expect(POND_PURPOSE_TOOLTIP).toBe(
+      "Auto: serve whatever the site needs. Detention: rate-control storage only. Mitigation: flood-fill offset only. Hybrid: both, split by elevation."
+    );
   });
 });
 
-describe("A1.6 — the four collapsed groups + summaries", () => {
-  it("exactly four groups, in fixed order", () => {
+describe("B3 — Dimensions labels", () => {
+  it("carries the six spec labels in order", () => {
+    expect(POND_DIMENSION_LABELS).toEqual(["Water area", "Land take", "Depth", "Rim", "Holds", "Purpose"]);
+  });
+});
+
+describe("B5 — the four collapsed groups + summaries", () => {
+  it("exactly four groups, in fixed order, with the v3 titles", () => {
     expect(POND_GROUPS.map((g) => g.id)).toEqual(["sizing", "outlet", "flood", "appearance"]);
     expect(POND_GROUPS.map((g) => g.title)).toEqual([
-      "Sizing & criteria", "Outlet & storms", "Flood & datum notes", "Appearance",
+      "Sizing & criteria", "Outlet & storms", "Flood & datum", "Appearance",
     ]);
   });
 
-  it("summaries render the specified shapes (short — no-truncation, owner live-check)", () => {
-    // 1-decimal ac-ft, no drainage tail (would ellipsize next to the long title at panel width)
-    expect(pondGroupSummary.sizing({ reqLo: "28.6", reqHi: "33.8" })).toBe("req 28.6–33.8 ac-ft");
-    expect(pondGroupSummary.sizing({ req: "30.0" })).toBe("req 30.0 ac-ft");
-    expect(pondGroupSummary.outlet({ hasOutlet: false })).toBe("no outlet");
-    expect(pondGroupSummary.outlet({ hasOutlet: true, stages: 2, allPass: true })).toBe("2 stages · all storms PASS");
-    expect(pondGroupSummary.outlet({ hasOutlet: true, stages: 2, allPass: null })).toBe("2 stages");
-    expect(pondGroupSummary.flood({ wse: "153.1", estimated: true })).toBe("flood 153.1′ est.");
-    expect(pondGroupSummary.flood({ wse: "153.1", estimated: false })).toBe("flood 153.1′");
-    expect(pondGroupSummary.flood({ wse: null })).toBe("no flood data");
-    expect(pondGroupSummary.appearance({})).toBe("fill · outline · opacity");
-  });
-});
-
-describe("A4 — visible word budget (default state, all groups closed)", () => {
-  it("stays under 200 words (and comfortably under the 120 target excluding values)", () => {
-    // The default-visible copy = every chip (worst case: all conditions true) + the four group
-    // titles + their closed-state summaries + the two fixed sub-headings. At-a-glance/status-card
-    // VALUES are excluded per the spec.
-    const chipWords = pondInspectorChips({ floodEstimated: true, rimBelowFlood: true, criteriaUnverified: true, inFloodway: true })
-      .reduce((n, c) => n + words(c.text), 0);
-    const titleWords = POND_GROUPS.reduce((n, g) => n + words(g.title), 0);
-    const summaryWords = [
-      pondGroupSummary.sizing({ reqLo: "28.6", reqHi: "33.8" }),
-      pondGroupSummary.outlet({ hasOutlet: true, stages: 2, allPass: null }),
+  it("summaries describe contents and carry NO ac-ft number (G6)", () => {
+    const summaries = [
+      pondGroupSummary.sizing({}),
+      pondGroupSummary.outlet({ hasOutlet: false }),
+      pondGroupSummary.outlet({ hasOutlet: true, stages: 2, fails: 0 }),
+      pondGroupSummary.outlet({ hasOutlet: true, stages: 3, fails: 1 }),
       pondGroupSummary.flood({ wse: "153.1", estimated: true }),
+      pondGroupSummary.flood({ wse: null }),
       pondGroupSummary.appearance({}),
-    ].reduce((n, s) => n + words(s), 0);
-    const fixed = words("At a glance") + words("Detention storage");
-
-    const total = chipWords + titleWords + summaryWords + fixed;
-    expect(total).toBeLessThan(200);
-    // The chips + titles + fixed headings (no summary values) are the "excluding values" set.
-    expect(chipWords + titleWords + fixed).toBeLessThan(120);
+    ];
+    expect(summaries[0]).toBe("criteria & drainage");
+    expect(summaries[1]).toBe("no outlet yet");
+    expect(summaries[2]).toBe("2 stages · all storms PASS");
+    expect(summaries[3]).toBe("3 stages · 1 FAIL");
+    expect(summaries[4]).toBe("flood 153.1′ est. · NAVD88");
+    expect(summaries[5]).toBe("NAVD88");
+    expect(summaries[6]).toBe("fill · outline · opacity");
+    for (const s of summaries) expect(/ac-ft/.test(s), s).toBe(false);
   });
 });
