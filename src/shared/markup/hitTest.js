@@ -19,9 +19,10 @@
  * the browser's hit-testing + DOM paint order, so it is deliberately NOT re-routed through this
  * imperative picker; see B155 in BACKLOG-DONE.)
  */
-import { dist, projToSeg, pointInPoly, bboxOf } from "./geometry.js";
-import { ptsOf, isClosed } from "./markupModel.js";
+import { dist, projToSeg, pointInPoly, bboxOf, nearestRectPerimeterPoint } from "./geometry.js";
+import { ptsOf, isClosed, calloutParts } from "./markupModel.js";
 import { readProp } from "./propertySchema.js";
+import { calloutBoxMetrics, bestMeasurer } from "./textWrap.js";
 
 const VTX_TOL_PX = 9;    // grab radius for an existing vertex
 const EDGE_TOL_PX = 11;  // grab radius for an edge (to insert a vertex)
@@ -66,19 +67,37 @@ export function scoreMarkup(m, p, tol, markerTol, scale = 0) {
   }
 
   if (kind === "callout") {
-    const tip = pts[0], box = pts[1];
-    const anchor = box || tip;
+    // N-leader model (B909/NEW-2) — see markupModel.calloutParts. The box test mirrors the
+    // renderer's wrap-based sizing (textWrap.calloutBoxMetrics) so a click "inside the visible
+    // box" always selects it, at any zoom; each leader is tested against its OWN nearest-edge
+    // origin, not a single shared anchor.
+    const { tips, box } = calloutParts(m);
+    if (!box) return null;
     if (scale) {
-      const fs = (readProp(m, "fontSize") || 14) / scale;
-      const textW = Math.max(60 / scale, (m.text || "").length * fs * 0.58 + 8 / scale);
-      const textH = fs + 8 / scale;
-      if (p.x >= anchor.x && p.x <= anchor.x + textW && p.y >= anchor.y && p.y <= anchor.y + textH) return { d: 0, interior: true };
+      // world-space font size is scale-INDEPENDENT (a real annotation has a fixed size on the
+      // page); fontSize/16 mirrors the renderer's fs_screen = fontSize*scale/16 converted back
+      // to world units (÷scale) — matches at every zoom level.
+      const fsWorld = Math.max(6 / scale, (readProp(m, "fontSize") || 14) / 16);
+      const measure = bestMeasurer({ bold: !!readProp(m, "bold"), italic: !!readProp(m, "italic") });
+      const { boxW, boxH } = calloutBoxMetrics(m.text || "", fsWorld, { padX: 8 / scale, padY: 4 / scale, measure });
+      if (p.x >= box.x && p.x <= box.x + boxW && p.y >= box.y && p.y <= box.y + boxH) return { d: 0, interior: true };
+      if (tips.length) {
+        let d = Infinity;
+        for (const tip of tips) {
+          const origin = nearestRectPerimeterPoint({ x: box.x, y: box.y, w: boxW, h: boxH }, tip);
+          d = Math.min(d, dist(p, tip), projToSeg(p, tip, origin).d);
+        }
+        return d <= tol ? { d, interior: false } : null;
+      }
+      const dd = dist(p, box);
+      return dd <= markerTol ? { d: dd, interior: false } : null;
     }
-    if (box) {
-      const d = Math.min(dist(p, tip), dist(p, box), projToSeg(p, tip, box).d);
+    if (tips.length) {
+      let d = Infinity;
+      for (const tip of tips) d = Math.min(d, dist(p, tip), dist(p, box), projToSeg(p, tip, box).d);
       return d <= tol ? { d, interior: false } : null;
     }
-    const d = dist(p, tip);
+    const d = dist(p, box);
     return d <= markerTol ? { d, interior: false } : null;
   }
 
@@ -170,4 +189,28 @@ export function hitEditPath(m, p, view, opts = {}) {
     if (pr.d <= etol && (!best || pr.d < best.d)) best = { type: "edge", index: i, point: { x: pr.x, y: pr.y }, d: pr.d };
   }
   return best ? { type: best.type, index: best.index, point: best.point } : null;
+}
+
+/* Which of a callout's leaders (if any) is under point `p`, within tolerance — powers the
+ * right-click "Delete Leader" affordance (B909/NEW-2). Returns the leader's index (matching
+ * `removeCalloutLeader`'s `tipIndex`), or -1 for no hit / not a callout / no leaders. */
+export function hitCalloutLeaderIndex(m, p, view, opts = {}) {
+  if (!m || m.kind !== "callout") return -1;
+  const { tips, box } = calloutParts(m);
+  if (!box || !tips.length) return -1;
+  const scale = (view && view.scale) || 0;
+  const tol = tolWorld(opts.tolPx ?? EDGE_TOL_PX, view);
+  let boxW = 0, boxH = 0;
+  if (scale) {
+    const fsWorld = Math.max(6 / scale, (readProp(m, "fontSize") || 14) / 16);
+    const measure = bestMeasurer({ bold: !!readProp(m, "bold"), italic: !!readProp(m, "italic") });
+    ({ boxW, boxH } = calloutBoxMetrics(m.text || "", fsWorld, { padX: 8 / scale, padY: 4 / scale, measure }));
+  }
+  let best = -1, bd = Infinity;
+  tips.forEach((tip, i) => {
+    const origin = scale ? nearestRectPerimeterPoint({ x: box.x, y: box.y, w: boxW, h: boxH }, tip) : box;
+    const d = Math.min(dist(p, tip), projToSeg(p, tip, origin).d);
+    if (d < bd) { bd = d; best = i; }
+  });
+  return bd <= tol ? best : -1;
 }

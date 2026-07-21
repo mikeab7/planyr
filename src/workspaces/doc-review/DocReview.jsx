@@ -40,9 +40,9 @@ import PropertyPanel from "../../shared/markup/PropertyPanel.jsx";
 import { propsForTool, columnMeta, toolById } from "../../shared/markup/tools.matrix.js";
 import { writeProp, readProp } from "../../shared/markup/propertySchema.js";
 import { kindDefaults } from "../../shared/markup/markupStyle.js";
-import { bboxOfMarkup } from "../../shared/markup/markupModel.js";
+import { bboxOfMarkup, calloutParts, addCalloutLeader, removeCalloutLeader } from "../../shared/markup/markupModel.js";
 import { pickInMarquee, selMods, nextSelection, hasSelMod } from "../../shared/markup/selection.js";
-import { pickMarkup } from "../../shared/markup/hitTest.js";
+import { pickMarkup, hitCalloutLeaderIndex } from "../../shared/markup/hitTest.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
@@ -301,6 +301,7 @@ export default function DocReview({
   const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
   const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
   const [ctxMenu, setCtxMenu] = useState(null);     // right-click Arrange menu { x, y (client px), id } | null (B421)
+  const [addLeaderFor, setAddLeaderFor] = useState(null); // callout id armed by "Add Leader" — the NEXT click drops the new leader's tip there (B909/NEW-2)
   const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B329)
   const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
   const pageRef = useRef(page); pageRef.current = page; // live page for the ref-driven render callbacks (B415)
@@ -1187,6 +1188,16 @@ export default function DocReview({
       }
     }
     if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
+    // "Add Leader" armed (B909/NEW-2): the NEXT click anywhere drops the new leader's tip there,
+    // regardless of the current tool — takes priority over every other pointer-down branch below.
+    if (addLeaderFor && e.button === 0) {
+      e.preventDefault();
+      const p = toPage(e);
+      pushHistory();
+      setMarkups((a) => a.map((x) => (x.id === addLeaderFor ? addCalloutLeader(x, p) : x)));
+      setAddLeaderFor(null);
+      return;
+    }
     setHoverId(null);     // B156: a press starts a click/drag/draw — drop the hover glow until the pointer idles again
     const p = toPage(e);
     // Vertex grip hit check — when select tool + a SINGLE markup selected, a click within 8
@@ -1494,7 +1505,7 @@ export default function DocReview({
       if (!m) return;
       const wasSel = dblRef.current.id === m.id ? dblRef.current.wasSel : false;
       if (wasSel && m.kind === "text") openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
-      else if (wasSel && m.kind === "callout") openEditor({ id: m.id, page, pt: (m.pts && m.pts[1]) || (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
+      else if (wasSel && m.kind === "callout") openEditor({ id: m.id, page, pt: calloutParts(m).box || { x: 0, y: 0 }, text: m.text || "" });
       else setPropsForId(m.id); // not-already-selected (→ props) or a non-text markup (→ props)
       return;
     }
@@ -1594,11 +1605,17 @@ export default function DocReview({
   // is not called, so the native browser menu shows over blank canvas (no empty custom menu).
   const onContextMenu = (e) => {
     if (!pageBase || !view || editing || calInput) return; // not while an inline editor / calibrate entry is open
-    const hitId = hitTest(toPage(e));
+    const p = toPage(e);
+    const hitId = hitTest(p);
     if (!hitId) return; // empty canvas → let the default context menu through
     e.preventDefault();
     if (selSet.includes(hitId)) setSel(hitId); else selectOne(hitId); // keep a multi-selection if right-clicking a member (B569)
-    setCtxMenu({ x: e.clientX, y: e.clientY, id: hitId });
+    // B909/NEW-2: a right-click landing on ONE of a callout's own leader LINES offers "Delete
+    // Leader" for that specific leader; any other right-click on the callout offers "Add Leader"
+    // at the cursor. `pt` is the page-space click point — both menu actions use it directly.
+    const hitM = pageMarks.find((mm) => mm.id === hitId);
+    const leaderIndex = hitM && hitM.kind === "callout" ? hitCalloutLeaderIndex(hitM, p, view, { tolPx: 10 }) : -1;
+    setCtxMenu({ x: e.clientX, y: e.clientY, id: hitId, pt: p, leaderIndex });
   };
 
   // keyboard: Enter finishes a poly/count draft; Esc cancels; Delete removes selection.
@@ -1628,6 +1645,7 @@ export default function DocReview({
     if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
     else if (e.key === "Escape") {
       if (ctxMenu) { setCtxMenu(null); return; } // close the Arrange menu first, keeping the selection (B421)
+      if (addLeaderFor) { setAddLeaderFor(null); return; } // cancel "Add Leader" without dropping a tip (B909/NEW-2)
       setDraft(null); clearSelection(); setDragPreview(null); dragRef.current = null; setCalInput(null); setMarquee(null); marqueeRef.current = null;
     }
     else if (e.key === "Delete" || e.key === "Backspace") {
@@ -2173,7 +2191,7 @@ export default function DocReview({
                 let rx = -Infinity, ty = Infinity;
                 for (const q of sp) { rx = Math.max(rx, q.x); ty = Math.min(ty, q.y); }
                 if (m.kind === "text") { rx = sp[0].x + ((m.text || "").length * 6.5 + 6); ty = sp[0].y - 12; }
-                if (m.kind === "callout") { const bp = sp[1] || sp[0]; rx = bp.x + ((m.text || "").length * 6.5 + 6); ty = bp.y - 12; }
+                if (m.kind === "callout") { const bp = sp[sp.length - 1]; rx = bp.x + ((m.text || "").length * 6.5 + 6); ty = bp.y - 12; }
                 return (
                   <button title="Delete this markup (Del)" aria-label="Delete this markup"
                     onPointerDown={(e) => e.stopPropagation()}
@@ -2181,16 +2199,61 @@ export default function DocReview({
                     style={{ position: "absolute", left: rx + 6, top: ty - 2, width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%", border: "none", background: "var(--danger-text)", color: "var(--on-accent)", cursor: "pointer", fontSize: 15, fontWeight: 800, lineHeight: 1, boxShadow: "0 2px 8px rgba(0,0,0,0.35)", zIndex: 7, padding: 0, fontFamily: "inherit" }}>×</button>
                 );
               })()}
-              {editing && (
-                <input autoFocus value={editing.text}
-                  onChange={(ev) => setEditing((ed) => (ed ? { ...ed, text: ev.target.value } : ed))}
-                  onPointerDown={(ev) => ev.stopPropagation()}
-                  onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); closeEditor(true); } else if (ev.key === "Escape") { ev.preventDefault(); closeEditor(false); } }}
-                  onBlur={() => closeEditor(true)} placeholder="Text note…"
-                  style={{ position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff",
-                    // Match the committed text color (B734): an existing note's fontColor, else the pending sticky default.
-                    color: editing.id ? (readProp(markups.find((m) => m.id === editing.id) || {}, "fontColor") || "#1a1a1a") : (propStyle.fontColor ?? columnMeta("fontColor")?.default ?? "#1a1a1a"), minWidth: 90, zIndex: 5 }} />
-              )}
+              {/* Per-LEADER delete affordance (B909/NEW-2): a small × at each leader's midpoint,
+                  visible whenever the callout is selected — click removes just that one leader
+                  (down to zero leaves a plain box-only label, Bluebeam's behaviour). Same
+                  OUTSIDE-the-svg placement as the whole-markup × above (the overlay svg is
+                  pointerEvents:none). */}
+              {sel && selSet.length <= 1 && !editing && !calInput && (() => {
+                const m = pageMarks.find((mm) => mm.id === sel);
+                if (!m || m.kind !== "callout") return null;
+                const src = (vtxPreview?.id === sel ? vtxPreview.pts : dragPreview?.id === sel ? dragPreview.pts : m.pts) || [];
+                const { tips, box } = calloutParts({ ...m, pts: src });
+                if (!box || !tips.length) return null;
+                return tips.map((tip, i) => {
+                  const mx = ((box.x + tip.x) / 2) * view.scale, my = ((box.y + tip.y) / 2) * view.scale;
+                  return (
+                    <button key={i} title="Delete this leader" aria-label="Delete this leader"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); pushHistory(); setMarkups((a) => a.map((x) => (x.id === sel ? removeCalloutLeader(x, i) : x))); }}
+                      style={{ position: "absolute", left: mx - 8, top: my - 8, width: 16, height: 16, display: "grid", placeItems: "center", borderRadius: "50%", border: "1px solid var(--danger-text)", background: "var(--surface-raised)", color: "var(--danger-text)", cursor: "pointer", fontSize: 10, fontWeight: 800, lineHeight: 1, padding: 0, zIndex: 6, fontFamily: "inherit" }}>×</button>
+                  );
+                });
+              })()}
+              {editing && (() => {
+                // A callout's text may span multiple explicit lines (B909/NEW-1, repro case (c) —
+                // the wrapped-text box-fit only matters if multi-line text is actually reachable
+                // from the UI); a plain text note stays single-line. Enter alone commits either
+                // way; Shift+Enter inserts a real newline in the callout editor (default textarea
+                // behaviour — no preventDefault needed).
+                const isCallout = !!editing.calloutTip || (editing.id && markups.find((m) => m.id === editing.id)?.kind === "callout");
+                const color = editing.id ? (readProp(markups.find((m) => m.id === editing.id) || {}, "fontColor") || "#1a1a1a") : (propStyle.fontColor ?? columnMeta("fontColor")?.default ?? "#1a1a1a");
+                const commonStyle = { position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", color, zIndex: 5 };
+                const onKeyDown = (ev) => {
+                  ev.stopPropagation();
+                  if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); closeEditor(true); }
+                  else if (ev.key === "Escape") { ev.preventDefault(); closeEditor(false); }
+                };
+                if (isCallout) {
+                  const rows = Math.min(6, (editing.text.match(/\n/g) || []).length + 1);
+                  return (
+                    <textarea autoFocus value={editing.text} rows={rows}
+                      onChange={(ev) => setEditing((ed) => (ed ? { ...ed, text: ev.target.value } : ed))}
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onKeyDown={onKeyDown}
+                      onBlur={() => closeEditor(true)} placeholder="Callout text… (Shift+Enter for a new line)"
+                      style={{ ...commonStyle, minWidth: 140, resize: "none", fontFamily: "inherit" }} />
+                  );
+                }
+                return (
+                  <input autoFocus value={editing.text}
+                    onChange={(ev) => setEditing((ed) => (ed ? { ...ed, text: ev.target.value } : ed))}
+                    onPointerDown={(ev) => ev.stopPropagation()}
+                    onKeyDown={onKeyDown}
+                    onBlur={() => closeEditor(true)} placeholder="Text note…"
+                    style={{ ...commonStyle, minWidth: 90 }} />
+                );
+              })()}
               {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
               {calInput && (
                 <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
@@ -2273,7 +2336,11 @@ export default function DocReview({
       )}
 
       {/* tool hint */}
-      {pdfRef.current && curTool && (
+      {pdfRef.current && addLeaderFor ? (
+        <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
+          <b style={{ color: PAL.ember }}>Add Leader:</b> click where the new leader should point — Esc to cancel.
+        </div>
+      ) : pdfRef.current && curTool && (
         <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
           <b style={{ color: PAL.ember }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
         </div>
@@ -2298,9 +2365,12 @@ export default function DocReview({
           { label: "Send Backward", hint: `${K}[`, disabled: st.atBottom, on: () => arrange("backward") },
           { label: "Send to Back", hint: `${SH}[`, disabled: st.atBottom, on: () => arrange("back") },
         ];
+        // B909/NEW-2: a selected callout gets "Add Leader" (always) + "Delete Leader" (only when
+        // the right-click actually landed on one of its leader lines — ctxMenu.leaderIndex >= 0).
+        const calloutRows = m.kind === "callout" ? 1 + (ctxMenu.leaderIndex >= 0 ? 1 : 0) : 0;
         const VW = typeof window !== "undefined" ? window.innerWidth : 1200;
         const VH = typeof window !== "undefined" ? window.innerHeight : 800;
-        const W = 216, H = m.kind === "text" ? 268 : 232;
+        const W = 216, H = (m.kind === "text" ? 268 : 232) + calloutRows * 34;
         const left = Math.max(8, Math.min(ctxMenu.x, VW - W - 8));
         const top = Math.max(8, Math.min(ctxMenu.y, VH - H - 8));
         const row = (extra = {}) => ({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, width: "100%", textAlign: "left", padding: "7px 12px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 500, color: PAL.ink, ...extra });
@@ -2322,6 +2392,22 @@ export default function DocReview({
                 <button role="menuitem" onClick={run(() => openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" }))} style={row()}>
                   <span>Edit text…</span>
                 </button>
+              )}
+              {m.kind === "callout" && (
+                <>
+                  <button role="menuitem" onClick={run(() => setAddLeaderFor(m.id))} style={row()}>
+                    <span>Add Leader</span>
+                  </button>
+                  {ctxMenu.leaderIndex >= 0 && (
+                    <button role="menuitem" onClick={run(() => {
+                      pushHistory();
+                      setMarkups((a) => a.map((x) => (x.id === m.id ? removeCalloutLeader(x, ctxMenu.leaderIndex) : x)));
+                    })} style={row()}>
+                      <span>Delete Leader</span>
+                    </button>
+                  )}
+                  <div style={{ borderTop: "1px solid var(--border-default)", margin: "4px 0" }} />
+                </>
               )}
               <button role="menuitem" onClick={run(() => { pushHistory(); setMarkups((a) => a.filter((x) => x.id !== m.id)); setSel(null); })}
                 style={row({ color: "var(--danger-text)", fontWeight: 600 })}>

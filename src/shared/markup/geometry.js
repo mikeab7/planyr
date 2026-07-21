@@ -124,6 +124,25 @@ export const projToSeg = (p, a, b) => {
   return { x, y, d: Math.hypot(p.x - x, p.y - y) };
 };
 
+/* Nearest point ON A RECT'S PERIMETER (never its interior) to `p` — where a multi-leader
+ * callout's Nth arrow should leave the box (B909/NEW-2): each leader attaches at whatever
+ * edge/corner point on the box is closest to its own target, Bluebeam-style, rather than
+ * every leader fanning out from one fixed corner. `p` outside the rect clamps straight to the
+ * boundary; `p` inside picks the nearest of the 4 edges. */
+export function nearestRectPerimeterPoint(rect, p) {
+  const { x, y, w, h } = rect;
+  const inside = p.x > x && p.x < x + w && p.y > y && p.y < y + h;
+  if (!inside) {
+    return { x: Math.min(Math.max(p.x, x), x + w), y: Math.min(Math.max(p.y, y), y + h) };
+  }
+  const dl = p.x - x, dr = x + w - p.x, dt = p.y - y, db = y + h - p.y;
+  const m = Math.min(dl, dr, dt, db);
+  if (m === dl) return { x, y: p.y };
+  if (m === dr) return { x: x + w, y: p.y };
+  if (m === dt) return { x: p.x, y };
+  return { x: p.x, y: y + h };
+}
+
 /** Axis-aligned bounding box of a point set → { x, y, w, h } (zero box for empty input). */
 export function bboxOf(pts) {
   if (!pts || !pts.length) return { x: 0, y: 0, w: 0, h: 0 };
