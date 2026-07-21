@@ -306,12 +306,15 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // unchanged — they still push one frame per picking session.
     expect(src).toMatch(/const livePick = \(apply, hist = true\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // all 14 native color controls still spread livePick instead of a bare onChange
+    // all 16 native color controls still spread livePick instead of a bare onChange
     // (B740 added the shared multi-selection Fill/Outline pickers — one colorField reused twice;
-    //  the parcel Boundary panel added a per-parcel Outline-color picker → 14th)
-    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(14);
-    // the two Standards color swatches opt out of history (settings-only, RC-6)
+    //  the parcel Boundary panel added a per-parcel Outline-color picker → 14th;
+    //  B929 added the Standards → Parcels default Outline-color + Fill-color swatches → 15th/16th)
+    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(16);
+    // the two Standards element-Colors swatches opt out of history (settings-only, RC-6)
     expect((src.match(/\{\.\.\.livePick\(\(v\) => liveTypeStyle\([^)]*\), false\)\}/g) || []).length).toBe(2);
+    // B929: the two Standards → Parcels default swatches are settings-only too (hist=false)
+    expect((src.match(/\{\.\.\.livePick\(\(v\) => setParcelStd\([^)]*\), false\)\}/g) || []).length).toBe(2);
     // the per-pixel undo floods are gone: the OLD color-input handlers (inline pushHistory) no
     // longer exist (discrete controls like the "Fill the parcel" checkbox keep their pushHistory)
     expect(src).not.toMatch(/onChange=\{\(e\) => \{ pushHistory\(\); setSelEl\(\{ fill: e\.target\.value/);
