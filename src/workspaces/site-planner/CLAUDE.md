@@ -31,7 +31,9 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
   a markup can also be sent behind the elements). Wired via `arrangeSel` + the right-click menus + the
   ⌘/Ctrl+]/[ chords in `SitePlanner.jsx`.
-- `labelLayout.js` — LOD label tiering. `roadGeometry.js` — centerline road curves (pure).
+- `labelLayout.js` — LOD label tiering + the shared dimension-number zoom→font scale (`dimFontPx`, B911).
+  `calloutLayout.js` — pure text-box/callout box geometry: auto-size or wrap-to-width (B913).
+  `roadGeometry.js` — centerline road curves (pure).
 - Terrain pipeline (B703–B706): `demGrid.js` / `contours.js` / `flowField.js` (pure math,
   worker-safe) + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
   + `terrainLayers.js` (Leaflet glue, grid LRU for the hover elevation readout);

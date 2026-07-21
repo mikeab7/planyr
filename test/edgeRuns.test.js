@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { segBearing, bearingDelta, edgeRuns, runOfEdge, runSetbackValue } from "../src/workspaces/site-planner/lib/edgeRuns.js";
+import { segBearing, bearingDelta, edgeRuns, runOfEdge, runSetbackValue, resizeRunLength } from "../src/workspaces/site-planner/lib/edgeRuns.js";
 
 describe("segBearing / bearingDelta", () => {
   it("reports directed bearings in [0,360)", () => {
@@ -130,5 +130,58 @@ describe("runSetbackValue", () => {
   it("guards bad input", () => {
     expect(runSetbackValue(null, [1, 2])).toBeNull();
     expect(runSetbackValue(bottom, null)).toBeNull();
+  });
+});
+
+describe("resizeRunLength (B912)", () => {
+  const sq = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+
+  it("single-edge run: moves the far endpoint along the edge bearing to the typed length", () => {
+    const runs = edgeRuns(sq);
+    const bottom = runs.find((r) => r.edges.includes(0)); // edge 0: (0,0)->(100,0)
+    const out = resizeRunLength(sq, bottom, 150);
+    expect(out[0]).toEqual({ x: 0, y: 0 });        // anchor (start of the edge) stays put
+    expect(out[1]).toEqual({ x: 150, y: 0 });      // far endpoint moved along +x to length 150
+    expect(out[2]).toEqual({ x: 100, y: 100 });    // rest of the ring untouched
+    expect(out[3]).toEqual({ x: 0, y: 100 });
+    // The whole ring is a NEW array (no in-place mutation of the input).
+    expect(out).not.toBe(sq);
+    expect(sq[1]).toEqual({ x: 100, y: 0 });
+  });
+
+  it("shrinking works the same way", () => {
+    const runs = edgeRuns(sq);
+    const left = runs.find((r) => r.edges.includes(3)); // edge 3: (0,100)->(0,0)
+    const out = resizeRunLength(sq, left, 40);
+    expect(out[3]).toEqual({ x: 0, y: 100 });      // anchor (start of edge 3) fixed
+    expect(out[0].x).toBeCloseTo(0);               // far end (0,0) slides toward the anchor
+    expect(out[0].y).toBeCloseTo(60);              // 100 -> 40 long, so y from 100 down to 60
+  });
+
+  it("multi-segment run: scales the side uniformly, preserving its internal shape", () => {
+    // A bottom side digitized as two near-collinear segments (edges 0 and 1), total length 100.
+    const poly = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 80 }, { x: 0, y: 80 }];
+    const runs = edgeRuns(poly);
+    const bottom = runs.find((r) => r.edges.includes(0));
+    expect(bottom.edges).toEqual([0, 1]);          // one logical side of two segments
+    const out = resizeRunLength(poly, bottom, 200); // double it
+    expect(out[0]).toEqual({ x: 0, y: 0 });        // anchor fixed
+    expect(out[1]).toEqual({ x: 100, y: 0 });      // interior vertex scaled ×2 about the anchor
+    expect(out[2]).toEqual({ x: 200, y: 0 });      // far corner scaled ×2
+    expect(out[3]).toEqual({ x: 100, y: 80 });     // vertices NOT in the run stay put
+    expect(out[4]).toEqual({ x: 0, y: 80 });
+    const newLen = edgeRuns(out).find((r) => r.edges.includes(0)).lengthFt;
+    expect(newLen).toBeCloseTo(200);
+  });
+
+  it("guards bad input (no run, zero/negative/non-finite target, no-op ratio)", () => {
+    const runs = edgeRuns(sq);
+    const bottom = runs.find((r) => r.edges.includes(0));
+    expect(resizeRunLength(sq, null, 150)).toBe(sq);
+    expect(resizeRunLength(sq, bottom, 0)).toBe(sq);
+    expect(resizeRunLength(sq, bottom, -5)).toBe(sq);
+    expect(resizeRunLength(sq, bottom, NaN)).toBe(sq);
+    expect(resizeRunLength(sq, bottom, 100)).toBe(sq); // ratio 1 → unchanged input reference
+    expect(resizeRunLength(null, bottom, 150)).toBe(null);
   });
 });

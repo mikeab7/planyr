@@ -151,3 +151,23 @@ export const dimCalloutVisible = (ppf) => ppf >= DIM_CALLOUT_MIN_PPF;
 export const DETAIL_LABEL_MIN_PX = 30; // min on-screen length (px) of the measured feature
 export const detailLabelVisible = (featureFt, ppf) =>
   dimCalloutVisible(ppf) && featureFt * ppf >= DETAIL_LABEL_MIN_PX;
+
+// B911 — shared zoom-scaled font size (px) for on-canvas dimension NUMBERS: the building / paving /
+// road footprint dims AND the selected parcel's per-edge length labels. ONE formula so both layers
+// shrink together on zoom-out. Before B911 the parcel-edge length labels were a FIXED 11px with no
+// zoom gate, so zooming the site fully out shrank the parcels to nothing while the red length boxes
+// stayed large and dominated the view (owner report: "I can see nothing on my site but I can still
+// see the dimensions"). Now the parcel-edge labels ride detailLabelVisible (keyed off each edge's
+// on-screen length) AND this font scale, exactly like the building-dim layer.
+//
+// Base 11px at working zoom (ppf ~0.45+); scales linearly DOWN with zoom toward DIM_FONT_MIN_SCALE.
+// The floor is deliberately LOW — the old inline 0.34 parked the number relatively-huge as the map
+// kept shrinking — so the number keeps scaling right up to the point where its declutter gate
+// (dimCalloutVisible / detailLabelVisible) hides it, never a fixed-size number over a pinhead shape.
+// (For the building-dim layer, which is hidden below ppf 0.18, the practical range is ~0.4→1.0, so
+// this reproduces the prior building behaviour exactly; the lower floor only ever matters for a
+// still-visible long parcel edge near its own drop point.)
+export const DIM_FONT_BASE_PX = 11;
+export const DIM_FONT_MIN_SCALE = 0.26;
+export const dimFontScale = (ppf) => Math.max(DIM_FONT_MIN_SCALE, Math.min(1, ppf / 0.45));
+export const dimFontPx = (ppf) => DIM_FONT_BASE_PX * dimFontScale(ppf);

@@ -111,6 +111,31 @@ export function runOfEdge(runs, edgeIndex) {
   return (runs || []).find((r) => r.edges.includes(edgeIndex)) || null;
 }
 
+/* B912 — resize a run (logical side) to a target TOTAL length, keeping its shape and the rest of
+ * the ring fixed. Anchor the run's FIRST vertex (start of its first edge) and scale every other run
+ * vertex about that anchor by target/current. For a single-edge run this is exactly "move the far
+ * endpoint along the edge bearing until the edge equals the typed length"; for a multi-segment side
+ * it scales the whole side uniformly (preserving its internal angles) and slides the shared far
+ * corner. Every vertex NOT in the run stays put. Returns a NEW points array; returns the input array
+ * unchanged when there's nothing sensible to do (bad target, zero-length run, or a no-op ratio).
+ * Pure — planar feet, same {x,y} ring convention as edgeRuns. */
+export function resizeRunLength(points, run, targetFt) {
+  const n = points ? points.length : 0;
+  if (!run || !Array.isArray(run.edges) || !run.edges.length || n < 2) return points;
+  const cur = run.lengthFt;
+  if (!(cur > 0) || !(targetFt > 0) || !Number.isFinite(targetFt)) return points;
+  const r = targetFt / cur;
+  if (!Number.isFinite(r) || r === 1) return points;
+  const anchorIdx = run.edges[0];
+  const anchor = points[anchorIdx];
+  if (!anchor) return points;
+  const moveIdx = new Set(run.edges.map((e) => (e + 1) % n));
+  moveIdx.delete(anchorIdx); // never scale the anchor itself (guards a whole-ring degenerate run)
+  return points.map((p, i) =>
+    moveIdx.has(i) ? { ...p, x: anchor.x + (p.x - anchor.x) * r, y: anchor.y + (p.y - anchor.y) * r } : p,
+  );
+}
+
 /* The single setback value shared across a run, or null if its edges disagree
  * ("mixed" — a per-segment override is in play). `sb` is the per-edge setback
  * array (one value per edge); `eps` is the feet tolerance for "equal". */
