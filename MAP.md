@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-21 @ `c1ccb62` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-21 @ `15cf387` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_296 source files mapped._
+_297 source files mapped._
 
 ## infra
 
@@ -449,6 +449,8 @@ _296 source files mapped._
   - _exports_: `dissolvedParcelSqft`, `overlappingParcelPairs`, `PARCEL_OVERLAP_TOL`, `polyIntersectArea`, `triangulate`
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
   - _exports_: `nearestPointOnSeg`, `polyArea`, `segLineIntersect`, `splitPolygonByLine`, `splitPolygonByPath`
+- **`src/workspaces/site-planner/lib/pondChangeSummary.js`** — Pure "what changed" support for ⚡ Design pond (B909 round 4): plain-English before/after delta rows, the atomic infeasibility gap-proposal sentence, and schematic (not-to-scale) cross-section marks
+  - _exports_: `buildChangeSummaryRows`, `gapProposalNote`, `pondCrossSectionMarks`
 - **`src/workspaces/site-planner/lib/pondCriteriaRules.js`** — B709 editable per-jurisdiction pond design criteria (max side slope, min freeboard, maintenance-berm width; all verified:false) + drawn-input conformance checks
   - _exports_: `checkPondCriteria`, `DEFAULT_POND_CRITERIA`, `loadPondCriteria`, `savePondCriteria`
 - **`src/workspaces/site-planner/lib/pondGeom.js`** — Pond expansion label placement (deepest added-ground point) and stage contour rings with elevation/depth labels
@@ -530,7 +532,7 @@ _296 source files mapped._
 - **`src/workspaces/site-planner/lib/wseProviders.js`** — the pluggable estimated-WSE provider registry (B882, pure): per-county precedence (district model → FEMA InFRM EBFE → grade) + provenance labels; `resolveEstimatedWse` picks the winning 1%/0.2% source and reports cross-provider disagreement.
   - _exports_: `resolveEstimatedWse`, `WSE_PROVIDERS`, `wseProviderMeta`
 - **`src/workspaces/site-planner/lib/yieldBar.js`** — B862: the shared required-vs-provided bullet-bar geometry + primitive marks for the Yield → Stormwater readout; one source consumed by the on-screen SVG (SitePlanner `BulletBar`) AND the PDF export string (`printSheet.bulletBarSvg`) so they can't drift (PDF-PARITY). `bulletBarLayout`/`stackedBarLayout` (pure geometry), `bulletBarMarks`/`stackedBarMarks` (render primitives), `bulletBarSvg` (PDF string), `stormwaterBarSpecs` (the det/mit bar specs from the drainage object).
-  - _exports_: `bulletBarLayout`, `bulletBarMarks`, `bulletBarSvg`, `stackedBarLayout`, `stackedBarMarks`, `stormwaterBarSpecs`
+  - _exports_: `ACFT_EPS`, `bulletBarLayout`, `bulletBarMarks`, `bulletBarSvg`, `stackedBarLayout`, `stackedBarMarks`, `stormwaterBarSpecs`
 - **`src/workspaces/site-planner/lib/zOrder.js`** — explicit z_index utilities (B671): assign/sort/renormalize the within-type-layer stacking tiebreak that replaced implicit array position
   - _exports_: `byZAsc`, `ensureZ`, `needsZ`, `nextZ`, `normalizeZ`, `sortByZ`, `Z_GAP`
 - **`src/workspaces/site-planner/MapFinder.jsx`** — Leaflet map finder: aerial basemaps + labels, GIS overlay panel, eager county/statewide parcel identify, and status-pinned site markers for picking/opening sites

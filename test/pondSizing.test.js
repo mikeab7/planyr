@@ -174,6 +174,25 @@ describe("applyPondSizingActions (B909/B910) — apply the assistant's actions o
     expect(rectEl.det.depth).toBe(8); // input never mutated
   });
 
+  // B909 round 3 (owner spec): "the user's drawn polygon IS the pond boundary — never
+  // relocate, rescale, or auto-expand it." raise-tob (the elevation-only lever Design
+  // pond leans on for an EXISTING pond) must never touch the ring — byte-identical w/h
+  // for a rect pond, byte-identical points for a polygon pond.
+  it("a raise-tob action alone updates tobElev/depth/tobBerm, leaves a RECT footprint BYTE-IDENTICAL", () => {
+    const out = applyPondSizingActions(rectEl, [{ kind: "raise-tob", hFt: 4, addCf: 5000 }]);
+    expect(out.det.tobElev).toBe(104); // det0.tobElev + 4 (det0 defined below)
+    expect(out.det.depth).toBe(12); // det0.depth + 4
+    expect(out.w).toBe(rectEl.w); expect(out.h).toBe(rectEl.h);
+    expect(out.cx).toBe(rectEl.cx); expect(out.cy).toBe(rectEl.cy); expect(out.rot).toBe(rectEl.rot);
+    expect(out.points).toBeUndefined();
+  });
+
+  it("a raise-tob action alone leaves a POLYGON footprint's points BYTE-IDENTICAL", () => {
+    const out = applyPondSizingActions(polyEl, [{ kind: "raise-tob", hFt: 4, addCf: 5000 }]);
+    expect(out.points).toEqual(SQ());
+    expect(out.points).toBe(polyEl.points); // same reference — never touched, not even copied
+  });
+
   it("a grow action alone scales a RECT pond's w/h by the factor, leaves depth untouched", () => {
     const out = applyPondSizingActions(rectEl, [{ kind: "grow", factor: 1.5, addAcres: 1 }]);
     expect(out.w).toBeCloseTo(300, 6);

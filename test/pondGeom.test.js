@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   pointInRing, addedAreaLabelPoint,
   excavationVolume, incrementalExcavationCf, estimateFootprintSf, detentionLandTakeEstimate,
-  pondPlacementCandidates,
+  pondPlacementCandidates, bermAsFillHeight, bermFillVolume,
 } from "../src/workspaces/site-planner/lib/pondGeom.js";
+import { offsetOutward } from "../src/workspaces/site-planner/lib/pondOffset.js";
 
 // Helper: a rectangle ring from corner (x0,y0) to (x1,y1).
 const rect = (x0, y0, x1, y1) => [
@@ -174,5 +175,54 @@ describe("pondPlacementCandidates (B909) — screening grid for auto-placing a p
     expect(pondPlacementCandidates({ minX: 0, minY: 0, maxX: 0, maxY: 100 })).toEqual([]);
     expect(pondPlacementCandidates({})).toEqual([]);
     expect(pondPlacementCandidates({ minX: 0, minY: 0, maxX: 100, maxY: 100, divisions: 0 })).toEqual([]);
+  });
+});
+
+// B833's berm-as-fill ring — load-bearing for B909 round 3/4 (owner spec): "a berm is NOT
+// a footprint expansion — it's a derived ring around the drawn boundary computed from
+// berm height and configured side slopes. Example: berm up 3 ft at 3:1 slopes both sides
+// -> roughly an extra ~6-12 ft apron around the pond edge." These functions predate this
+// session but had no direct unit coverage — closing that gap since Design pond's
+// elevation-only solve now leans on them more heavily.
+describe("Berm ring geometry (B833) — ring width = berm height × outer side slope", () => {
+  it("bermAsFillHeight: TOB above grade is the fill height; at/below grade (within the 0.25ft survey tolerance) is null — no berm", () => {
+    expect(bermAsFillHeight({ tobElev: 104 }, 100)).toBe(4);
+    expect(bermAsFillHeight({ tobElev: 100 }, 100)).toBeNull();
+    expect(bermAsFillHeight({ tobElev: 99 }, 100)).toBeNull();
+    expect(bermAsFillHeight({ tobElev: 100.1 }, 100)).toBeNull();
+    expect(bermAsFillHeight({ tobElev: 100.3 }, 100)).toBeCloseTo(0.3, 6);
+  });
+
+  it("offsetOutward by height×slope reproduces the owner's own worked example (3ft @ 3:1 -> a 9ft-wide ring)", () => {
+    const ring = rect(0, 0, 100, 100);
+    const heightFt = 3, slope = 3;
+    const toeReach = heightFt * slope; // 9 ft
+    const [toeRing] = offsetOutward(ring, toeReach);
+    expect(Math.min(...toeRing.map((p) => p.x))).toBeCloseTo(-toeReach, 3);
+    expect(Math.max(...toeRing.map((p) => p.x))).toBeCloseTo(100 + toeReach, 3);
+    expect(Math.min(...toeRing.map((p) => p.y))).toBeCloseTo(-toeReach, 3);
+    expect(Math.max(...toeRing.map((p) => p.y))).toBeCloseTo(100 + toeReach, 3);
+  });
+
+  it("a steeper (4:1) slope widens the ring proportionally — the same height, more apron", () => {
+    const ring = rect(0, 0, 100, 100);
+    const heightFt = 3;
+    const [ring3] = offsetOutward(ring, heightFt * 3);
+    const [ring4] = offsetOutward(ring, heightFt * 4);
+    const widthAt = (r) => Math.max(...r.map((p) => p.x)) - Math.min(...r.map((p) => p.x));
+    expect(widthAt(ring4)).toBeGreaterThan(widthAt(ring3));
+    expect(widthAt(ring4) - widthAt(ring3)).toBeCloseTo(2 * heightFt * (4 - 3), 3); // both sides widen
+  });
+
+  it("bermFillVolume: perimeter × height² × slope / 2 — the triangular-cross-section screening formula", () => {
+    const ring = rect(0, 0, 100, 200); // perimeter 600
+    const vol = bermFillVolume(ring, 4, 3);
+    expect(vol).toBeCloseTo(600 * 4 * 4 * 3 / 2, 6);
+  });
+
+  it("no height / no ring / no slope -> null, never a fabricated volume", () => {
+    expect(bermFillVolume(null, 4, 3)).toBeNull();
+    expect(bermFillVolume(rect(0, 0, 10, 10), 0, 3)).toBeNull();
+    expect(bermFillVolume(rect(0, 0, 10, 10), 4, 0)).toBeNull();
   });
 });
