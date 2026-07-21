@@ -1,12 +1,12 @@
-/* B915 / B916 — pure hit-test + z-stack cycling for Site Planner markups.
+/* B918 / B919 — pure hit-test + z-stack cycling for Site Planner markups.
  *
  * The reported bug: a big UNFILLED (fillOpacity:0) polygon, drawn over the roads, swallowed every
  * click across its whole interior — so the roads under it were unreachable and "Send to Back" was
  * powerless (it's a hit-AREA problem, not paint order). These specs pin the two fixes so a future
  * canvas refactor can't silently regress them:
- *   • B915 — an UNFILLED closed markup grabs on its stroke + tolerance ONLY, never its interior;
+ *   • B918 — an UNFILLED closed markup grabs on its stroke + tolerance ONLY, never its interior;
  *            a FILLED one still grabs by its whole body (B155 small-annotation feel).
- *   • B916 — repeat/Alt-click cycles DOWN the stack of markups under the pointer, smaller-area
+ *   • B919 — repeat/Alt-click cycles DOWN the stack of markups under the pointer, smaller-area
  *            first, so a covered shape is always reachable.
  */
 import { describe, it, expect } from "vitest";
@@ -25,7 +25,7 @@ import {
 
 const square = (id, s, extra = {}) => ({ id, kind: "polygon", pts: [{ x: 0, y: 0 }, { x: s, y: 0 }, { x: s, y: s }, { x: 0, y: s }], ...extra });
 
-describe("markupUnderPoint — the B915 fill-aware rule", () => {
+describe("markupUnderPoint — the B918 fill-aware rule", () => {
   it("a FILLED closed polygon is hit on its interior", () => {
     const m = square("f", 100, { fillOpacity: 0.2 });
     expect(markupUnderPoint(m, { x: 50, y: 50 }, 1)).toMatchObject({ area: 10000 });
@@ -72,7 +72,7 @@ describe("markupUnderPoint — the B915 fill-aware rule", () => {
   });
 });
 
-describe("markupsUnderPoint + nextMarkupSelection — the B916 cycle", () => {
+describe("markupsUnderPoint + nextMarkupSelection — the B919 cycle", () => {
   it("orders overlapping FILLED shapes smaller-area-first so a small shape on a big one wins", () => {
     const big = square("big", 100, { fillOpacity: 0.2 });
     const small = square("small", 20, { fillOpacity: 0.2 });

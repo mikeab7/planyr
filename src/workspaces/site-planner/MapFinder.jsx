@@ -10,6 +10,7 @@ import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMil
 import LayerPanel from "./components/LayerPanel.jsx";
 import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
+import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import {
   resolveLayerUrl,
   identifyParcelEager,
@@ -1235,18 +1236,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           </div>
         )}
 
-        {/* Right-click-on-empty-map menu → export the map's sites to Google Earth (B684). */}
+        {/* Right-click-on-empty-map menu → export the map's sites to Google Earth (B684).
+            Shared viewport-aware ContextMenu (B915) — flips/clamps at any edge. */}
         {mapMenu && (
-          <>
-            <div onClick={() => setMapMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMapMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 3999 }} />
-            <div style={{ position: "fixed", left: Math.min(mapMenu.x + 4, window.innerWidth - 244), top: Math.min(mapMenu.y + 4, window.innerHeight - 108), zIndex: 4000, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, boxShadow: "0 10px 30px rgba(28,25,20,0.22)", padding: 4, minWidth: 236, fontFamily: "inherit" }}>
-              <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 10px 4px" }}>Map</div>
-              <button onClick={() => exportSitesKmz(false)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: 6 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export to Google Earth (KMZ)</button>
-              <button onClick={() => exportSitesKmz(true)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: 6 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export with 3D buildings</button>
-            </div>
-          </>
+          <ContextMenu x={mapMenu.x} y={mapMenu.y} onClose={() => setMapMenu(null)} minWidth={236} zIndex={3999}
+            className="" ariaLabel="Map actions"
+            panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, boxShadow: "0 10px 30px rgba(28,25,20,0.22)", padding: 4, fontFamily: "inherit" }}>
+            <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 10px 4px" }}>Map</div>
+            <button onClick={() => exportSitesKmz(false)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: 6 }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export to Google Earth (KMZ)</button>
+            <button onClick={() => exportSitesKmz(true)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: 6 }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export with 3D buildings</button>
+          </ContextMenu>
         )}
 
         {/* ── Combined site bar — floating pill at top-center (full-width bar on a phone) ── */}
@@ -1572,12 +1573,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           Opened from a card row OR a map marker/boundary. Positioned at the cursor,
           clamped to the viewport; the full-screen backdrop keeps it above all map layers. */}
       {statusMenu && (
-        <div onClick={() => setStatusMenu(null)} onContextMenu={(e) => { e.preventDefault(); setStatusMenu(null); }}
-          style={{ position: "fixed", inset: 0, zIndex: 4200 }}>
-          <div onClick={(e) => e.stopPropagation()}
-            style={{ position: "fixed", left: Math.min(statusMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 188),
-              top: Math.min(statusMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 288),
-              width: 180, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", maxHeight: "min(80vh, 520px)", overflowY: "auto", padding: "4px 0" }}>
+        <ContextMenu x={statusMenu.x} y={statusMenu.y} onClose={() => setStatusMenu(null)} width={180} zIndex={4200}
+          className="" ariaLabel="Project actions"
+          panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", padding: "4px 0" }}>
+          <>
             <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{statusMenu.site.site || statusMenu.site.name || "Site"}</div>
             {STATUSES.map((st) => {
               const t = statusToken(st); const cur = statusOf(statusMenu.site) === st;
@@ -1650,8 +1649,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               </span>
               <span style={{ flex: 1 }}>Delete project…</span>
             </button>
-          </div>
-        </div>
+          </>
+        </ContextMenu>
       )}
       {confirmDel && (
         <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }}>

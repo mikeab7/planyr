@@ -31,6 +31,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import AnchoredMenu from "./AnchoredMenu.jsx";
+import ContextMenu from "./ContextMenu.jsx";
 import { NO_AUTOFILL } from "./noAutofill.js";
 import {
   listProjects, filterProjects, relTime, warmProjectsIfEmpty,
@@ -462,23 +463,15 @@ export default function ProjectBreadcrumb({
 
       {/* Per-row manage menu (B439) — Rename / Delete, a SECOND portal layer above the dropdown's
           click-away backdrop, so clicking inside it never closes the parent dropdown. */}
-      {menuFor && createPortal(
-        <>
-          <div
-            role="presentation"
-            onClick={() => setMenuFor(null)}
-            onContextMenu={(e) => { e.preventDefault(); setMenuFor(null); }}
-            style={{ position: "fixed", inset: 0, zIndex: 5000 }}
-          />
-          <div
-            data-testid="project-manage-menu"
-            role="menu" aria-label="Project actions" /* B557 */
-            style={{
-              ...panel, position: "fixed", zIndex: 5001, minWidth: 180, padding: 5,
-              left: Math.min(menuFor.x, window.innerWidth - 196),
-              top: Math.min(menuFor.y, window.innerHeight - 132),
-            }}
-          >
+      {menuFor && (
+        <ContextMenu
+          x={menuFor.x} y={menuFor.y} onClose={() => setMenuFor(null)}
+          minWidth={180} zIndex={5000}
+          className="" role="menu" ariaLabel="Project actions" /* B557 */
+          testId="project-manage-menu"
+          panelStyle={{ ...panel, padding: 5 }}
+        >
+          <>
             {!menuFor.confirm ? (
               <>
                 {canRename && (
@@ -524,9 +517,8 @@ export default function ProjectBreadcrumb({
                 </div>
               </div>
             )}
-          </div>
-        </>,
-        document.body,
+          </>
+        </ContextMenu>
       )}
 
       {/* Transient at-risk-switch notice (B193) — non-blocking, auto-dismiss */}

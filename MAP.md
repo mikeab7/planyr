@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-21 @ `351108d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-21 @ `198856b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_293 source files mapped._
+_295 source files mapped._
 
 ## infra
 
@@ -182,6 +182,10 @@ _293 source files mapped._
   - _exports_: `default (AppHeader)`, `MODULE_ACCENT`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
+- **`src/shared/ui/ContextMenu.jsx`** — The ONE shared cursor-anchored right-click menu (B915): portal-to-body, measures itself in a layout effect, flips up/left + clamps + scrolls over-tall via `placeContextMenu`; closes on Escape / outside click / scroll / resize. Replaces every hand-rolled assumed-height menu.
+  - _exports_: `default (ContextMenu)`
+- **`src/shared/ui/contextMenuPlacement.js`** — Pure viewport-placement math for `ContextMenu` (B915): flip-up-if-bottom-overflow, flip-left-if-right-overflow, hard-clamp to a margin on all four edges, and a viewport max-height. Unit-tested without a DOM.
+  - _exports_: `placeContextMenu`
 - **`src/shared/ui/controls.jsx`** — shared control primitives (B657-5B): one radius/padding/typography scale + Button/ToggleChip/IconButton/Field/Section/MenuItem, token-driven, with a threaded `accent` prop so each module keeps its hue.
   - _exports_: `Button`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `PAD`, `RADIUS`, `Section`, `ToggleChip`
 - **`src/shared/ui/floatingPanel.js`** — NEW-1 poppable panels: pure geometry + docked-only decision (clamp-to-map-viewport, first-open cascade, narrow reconcile) + the 760px breakpoint constant; unit-tested, shared by the live drag path and tests
@@ -393,7 +397,7 @@ _293 source files mapped._
   - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbGet`, `idbPersist`, `idbPut`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
-- **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B915 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B916)
+- **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B918 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B919)
   - _exports_: `boxCorners`, `distToPolyline`, `distToRing`, `ellipseRing`, `markupHitModel`, `markupsUnderPoint`, `markupUnderPoint`, `nextMarkupSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureHit.js`** — Pure hit-test + z-order cycling for on-canvas measurements (B910): which measurement a feet-space click lands on (smaller-area-wins), and the next selection when a stack is re-clicked (wraps)
   - _exports_: `distToPolyline`, `measModeOf`, `measPoints`, `measuresUnderPoint`, `nextMeasureSelection`, `pointInRing`, `ringArea`

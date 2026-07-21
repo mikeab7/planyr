@@ -10,7 +10,7 @@ import {
   scaleRing,
   applyPondSizingActions,
 } from "../src/workspaces/site-planner/lib/pondSizing.js";
-import { bandedStorage } from "../src/workspaces/site-planner/lib/pondGeom.js";
+import { bandedStorage, usablePondVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
 
 // The B708 fixture family: axis-aligned squares → exact stage areas at slope 3.
 const SQ = (s = 200) => [{ x: 0, y: 0 }, { x: s, y: 0 }, { x: s, y: s }, { x: 0, y: s }];
@@ -307,5 +307,75 @@ describe("applyPondSizingActions (B909/B910) — apply the assistant's actions o
     const final = bandedStorage(afterBoth.points || SQ(200 * (afterBoth.w / 200)), afterBoth.det, { wseFt: 95 });
     expect(final.usableCf).toBeGreaterThanOrEqual(detTarget - 1);
     expect(final.mitigationCandidateCf).toBeGreaterThanOrEqual(mitTarget - 1);
+  });
+});
+
+// B909 round 2 — the reopened live bug (Tsakiris): a pond auto-anchored at GRADE, with
+// grade sitting below the flood water surface (WSE), is fully submerged from the start.
+// The original "Design pond" only ever grew the FOOTPRINT (solvePondExpansion) for a
+// pure-detention job — but a wider submerged basin is still 100% submerged, so it could
+// never earn a single acre-foot of usable (above-WSE) detention credit. These tests pin
+// the underlying physics directly against the already-tested pure library functions
+// (no SitePlanner.jsx orchestration involved — that's the routing fix; this is proof the
+// routing fix targets a REAL, provable failure mode, and that its alternative — raising
+// the top of bank — actually works).
+describe("B909 round 2 — footprint growth alone cannot fix a submerged pond; raising the TOB can", () => {
+  const submergedDet = { depth: 8, freeboard: 1, slope: 3, tobElev: 100 }; // TOB 100, WSE 102 → fully below the flood
+  const wseFt = 102; // within the 4′ BERM_MAX_RAISE_FT screening clamp of the TOB
+
+  it("a pond anchored below the flood WSE earns ZERO usable detention no matter how large its footprint grows", () => {
+    for (const side of [60, 200, 600, 2000]) {
+      const u = usablePondVolume(SQ(side), submergedDet, { wseFt });
+      expect(u.usableCf).toBe(0);
+      expect(u.bands.fullyInundated).toBe(true);
+    }
+  });
+
+  it("raising the top of bank above the flood WSE (a berm) — NOT growing the footprint — is what unlocks usable detention", () => {
+    const ring = SQ(200);
+    const before = usablePondVolume(ring, submergedDet, { wseFt });
+    expect(before.usableCf).toBe(0);
+
+    const raised = solveTobRaise({ ring, det: submergedDet, wseFt, targetCf: 20000 });
+    expect(raised.ok).toBe(true);
+    expect(raised.hFt).toBeGreaterThan(0); // TOB must actually go up
+
+    const afterDet = { ...submergedDet, tobElev: submergedDet.tobElev + raised.hFt, depth: submergedDet.depth + raised.hFt };
+    const after = usablePondVolume(ring, afterDet, { wseFt });
+    expect(after.usableCf).toBeGreaterThan(0);
+    expect(after.usableCf).toBeGreaterThanOrEqual(20000 - 1);
+    expect(after.bands.fullyInundated).toBe(false);
+  });
+
+  it("sizePondForTargets, asked ONLY for detention (mitTargetCf: 0) on a submerged pond, proposes raise-tob — never a footprint-only remedy that can't work", () => {
+    const result = sizePondForTargets({ ring: SQ(200), det: submergedDet, wseFt, detTargetCf: 20000, mitTargetCf: 0 });
+    expect(result.ok).toBe(true);
+    expect(result.fullyInundated).toBe(true);
+    const raiseA = result.actions.find((a) => a.kind === "raise-tob");
+    expect(raiseA).toBeTruthy();
+    expect(raiseA.hFt).toBeGreaterThan(0);
+    // No deepen/grow proposed for a target that was never asked for.
+    expect(result.actions.some((a) => a.kind === "deepen" || a.kind === "grow")).toBe(false);
+  });
+
+  // The ACTUAL Tsakiris scenario: the flood WSE sits WELL above the TOB — deeper than
+  // the 4′ screening clamp can raise it in one shot. raise-tob reports `partial: true`
+  // (still submerged, still short) rather than a false success — this is exactly the
+  // signal designPond() checks to trigger its verify-and-iterate footprint-growth
+  // follow-up (SitePlanner.jsx), so growing the footprint at the now-raised (but still
+  // clamped) rim is the ONLY way left to close the remaining gap.
+  it("when the submergence exceeds the raise clamp, raise-tob reports a PARTIAL result — the signal that a footprint-growth follow-up is required", () => {
+    const deepSubmergedDet = { depth: 8, freeboard: 1, slope: 3, tobElev: 100 };
+    const deepWseFt = 153.1; // far beyond the 4′ clamp — the reported Tsakiris figure
+    const result = sizePondForTargets({ ring: SQ(200), det: deepSubmergedDet, wseFt: deepWseFt, detTargetCf: 20000, mitTargetCf: 0 });
+    expect(result.ok).toBe(true);
+    const raiseA = result.actions.find((a) => a.kind === "raise-tob");
+    expect(raiseA).toBeTruthy();
+    expect(raiseA.partial).toBe(true);
+    // Even the clamped raise still leaves the pond fully inundated at this gap size —
+    // confirming a footprint-only remedy (the pre-fix behavior) truly had nothing to work with.
+    const stillSubmergedDet = { ...deepSubmergedDet, tobElev: deepSubmergedDet.tobElev + raiseA.hFt, depth: deepSubmergedDet.depth + raiseA.hFt };
+    const afterClampedRaise = usablePondVolume(SQ(200), stillSubmergedDet, { wseFt: deepWseFt });
+    expect(afterClampedRaise.usableCf).toBe(0);
   });
 });
