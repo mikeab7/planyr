@@ -56,6 +56,12 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
      GIS-caching and Tier-1 site-killer work per the owner's chat. B915 (NEW-1, context menus) shipped
      the same session and is in BACKLOG-DONE.md. -->
 
+### B937 — Pond inspector: collapsed-group summaries were ellipsizing at panel width (B934 follow-up) `[Site Planner / yield · pond]` (bug) #site-planner #yield #pond #ui  *(owner live-check on Tsakiris 2026-07-21 — "SIZING & CRITERIA req 28.62–33.82 ac-ft · dr…" / "FLOOD & DATUM NOTES flood level 153.1' (e…" were cut off; violates the spec's no-truncation rule; minted **B937** via `npm run next-id -- --against-main`)*
+`[x]` SHIPPED THIS SESSION. Verify: sandbox (copy + CSS wrap change; build + unit tests).
+- Sizing summary shortened to `req 28.6–33.8 ac-ft` (1-decimal, drainage tail dropped); Flood summary to `flood 153.1′ est.` — the exact strings the owner asked for.
+- Belt-and-suspenders: the shared `Collapse` summary now shrinks + WRAPS instead of ellipsizing, so no group summary can ever be cut off with "…" regardless of panel width.
+- `test/pondInspectorCopy.test.js` updated to the new summary shapes; build green.
+
 ### B936 — FINAL UI SPEC Part B: Yield-panel verdict strip + number format (PR 2) `[Site Planner / yield]` (feature) #site-planner #yield #ui  *(owner "FINAL UI SPEC" chat 2026-07-21, Part B; minted **B936** via `npm run next-id -- --against-main` — B935 taken by a concurrent session)*
 `[x]` SHIPPED THIS SESSION: the verdict strip (B1.1) + the number-format module (B2/B3). Presentation only.
 - Verify: live — see **V394** (the strip is gated on a live `drainage` GIS object, so it renders only on a signed-in / geocoded project; the strip LOGIC is unit-tested — `test/yieldVerdicts.test.js`, 11 cases).
