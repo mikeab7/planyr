@@ -82,7 +82,7 @@ import {
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, toHex6, byZ, zOrder } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder } from "./lib/planStyle.js";
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -1137,6 +1137,11 @@ const DEFAULT_SETTINGS = {
   gridSize: 10, snap: false,
   parcelSelect: true,   // B311: ON = click a parcel to select it (drag still pans); OFF = pure browse/measure, a click never selects. Persisted per project.
   setback: 25, showSetback: true,
+  // B929 — default style for NEW parcels (outline color/weight/style + optional fill),
+  // stamped at creation via parcelDefaultStyle(). Empty = the theme-aware built-ins; only
+  // keys the user customizes in Standards → Parcels are stored. A duplicated/merged parcel
+  // copies its source style instead, and any parcel can still override on itself.
+  parcelStyle: {}, // { stroke, weight, dash, fill, fillOpacity }
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
   // Building-anchored dock-zone stack default depths (B228), outward from the dock
@@ -4766,7 +4771,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const closePoly = () => {
     if (draftPoly && draftPoly.length >= 3) {
       pushHistory();
-      const pc = { id: uid(), points: draftPoly, locked: true };
+      const pc = { id: uid(), points: draftPoly, locked: true, ...parcelDefaultStyle(settings) }; // B929: born with the user's Standards parcel defaults
       setParcels((a) => [...a, pc]);
       flashPolyWarn(draftPoly, "Parcel");
       requestFit();
@@ -4842,7 +4847,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
     pushHistory();
-    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], locked: true };
+    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], locked: true, ...parcelDefaultStyle(settings) }; // B929
     setParcels((a) => [...a, pc]);
     requestFit();
   };
@@ -5408,7 +5413,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let n = 0, slon = 0, slat = 0;
     rings.forEach((r) => r.forEach(([lon, lat]) => { slon += lon; slat += lat; n++; }));
     const lon0 = slon / n, lat0 = slat / n;
-    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), locked: true })).filter((pc) => pc.points.length >= 3);
+    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), locked: true, ...parcelDefaultStyle(settings) })).filter((pc) => pc.points.length >= 3); // B929
     if (!pcs.length) { setLookupErr("That record has no usable polygon geometry."); return; }
     pushHistory();
     setParcels((a) => [...a, ...pcs]);
@@ -8666,7 +8671,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const parcelsFromRings = (rings, addr, attrs) => {
     const key = parcelGisKey(attrs, rings);
     return rings
-      .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), locked: true, addr: addr || null, attrs: attrs || null, gisKey: key }))
+      .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), locked: true, addr: addr || null, attrs: attrs || null, gisKey: key, ...parcelDefaultStyle(settings) })) // B929
       .filter((pc) => pc.points.length >= 3);
   };
   // B93/B94 — jurisdiction (city/ETJ/county) + road maintenance authority, on
@@ -11511,6 +11516,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const multiStyle = multiStyleable ? commonStyleState(multiMembers, settings) : null;
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); // RC-6: settings-only → not undoable (no pushHistory dead frame)
+  // B929 — merge a patch into the default style for NEW parcels (Standards → Parcels). Settings-only,
+  // so not undoable (no pushHistory dead frame); consumed at creation by parcelDefaultStyle().
+  const setParcelStd = (patch) => setSettings((s) => ({ ...s, parcelStyle: { ...(s.parcelStyle || {}), ...patch } }));
 
   /* ---- live color picking (B567) ----
    * A native <input type="color"> fires `change` only when the OS palette CLOSES, but fires
@@ -12579,10 +12587,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div data-std-sec="parcels">
           <Section key={`std-parcels:${standardsFocus === "parcels"}`} title="Parcels" collapsed={standardsFocus !== "parcels"}>
             <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
+            {/* B929 — the rest of a parcel's own properties, now settable as defaults for NEW parcels
+                (stamped at creation via parcelDefaultStyle; each mirrors a control in the parcel
+                inspector). livePick uses hist=false since these touch settings only (RC-6). */}
+            <Field label="Outline color">
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input type="color" value={toHex6(settings.parcelStyle?.stroke ?? PAL.parcel)} {...livePick((v) => setParcelStd({ stroke: v }), false)} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+              </span>
+            </Field>
+            <Field label="Line weight">
+              <NumInput style={numInput} value={settings.parcelStyle?.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setParcelStd({ weight: n })} />
+            </Field>
+            <Field label="Line style">
+              <select value={settings.parcelStyle?.dash ?? "solid"} onChange={(e) => setParcelStd({ dash: e.target.value })}
+                style={{ ...numInput, width: "auto", cursor: "pointer" }}>
+                <option value="solid">Solid</option>
+                <option value="dashed">Dashed</option>
+                <option value="dotted">Dotted</option>
+              </select>
+            </Field>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
+              <input type="checkbox" checked={!!settings.parcelStyle?.fill} onChange={(e) => setParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
+            </label>
+            {settings.parcelStyle?.fill && (
+              <>
+                <Field label="Translucence">
+                  <input type="range" min={0} max={0.6} step={0.02} value={settings.parcelStyle?.fillOpacity ?? 0.12}
+                    onChange={(e) => setParcelStd({ fillOpacity: +e.target.value })} />
+                </Field>
+                <Field label="Fill color">
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="color" value={toHex6(settings.parcelStyle?.fill)} {...livePick((v) => setParcelStd({ fill: v }), false)} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  </span>
+                </Field>
+              </>
+            )}
             {/* B721 cross-link (consistent with B164's placement): per-edge setbacks are a
                 property of the parcel itself, not a global default — say so here so nobody hunts
                 for a per-edge control on this panel. */}
-            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "-2px 2px 2px" }}>Per-edge setbacks live on the parcel — select it on the canvas.</div>
+            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "6px 2px 2px" }}>Per-edge setbacks live on the parcel — select it on the canvas.</div>
           </Section>
           </div>
 

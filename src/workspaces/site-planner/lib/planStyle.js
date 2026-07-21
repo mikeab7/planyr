@@ -47,6 +47,27 @@ export const elStyle = (el, settings) => {
   };
 };
 
+// Style keys stamped onto a freshly DRAWN / ADDED parcel from the user's Standards
+// defaults (settings.parcelStyle). Only keys the user actually customized are returned,
+// so an untouched default leaves the new parcel to the theme-aware built-in render
+// fallbacks (no stroke → the theme's parcel color; no weight → 2; no dash → solid; no
+// fill → unfilled). Fill is deliberately opt-in: fillOpacity rides along only when a fill
+// color is set. A duplicated / merged / split parcel copies its SOURCE style and never
+// calls this. Because these are stamped at creation (not resolved at render), changing a
+// default only affects PARCELS DRAWN AFTERWARD — matching "Defaults for new elements".
+export const parcelDefaultStyle = (settings) => {
+  const ps = (settings && settings.parcelStyle) || {};
+  const out = {};
+  if (ps.stroke) out.stroke = ps.stroke;
+  if (ps.weight != null) out.weight = ps.weight;
+  if (ps.dash && ps.dash !== "solid") out.dash = ps.dash;
+  if (ps.fill) {
+    out.fill = ps.fill;
+    if (ps.fillOpacity != null) out.fillOpacity = ps.fillOpacity;
+  }
+  return out;
+};
+
 // Coerce any CSS color we store into the #rrggbb form an <input type=color> needs.
 export const toHex6 = (c) => {
   if (!c) return "#000000";
