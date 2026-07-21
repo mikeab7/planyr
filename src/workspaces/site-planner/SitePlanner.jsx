@@ -1794,7 +1794,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         CSS-`transform` the whole map container (tiles AND the shared overlay
         layers together, so they stay mutually aligned) to track the gesture with
         the pixels already on screen — no reload, no flash.
-     2. (B931) When we re-render crisp AND the zoom is UNCHANGED — every panel /
+     2. (B933) When we re-render crisp AND the zoom is UNCHANGED — every panel /
         left-rail toggle and every pure-pan settle — `commit` moves with `map.panBy`
         instead of `setView`. A pan never fires `viewreset`, so no tile is wiped and
         NO ghost is needed. This is what kills the "screen flashes every time I click
@@ -1848,7 +1848,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } catch (_) { /* snapshot is best-effort; commit still proceeds */ }
     };
 
-    // THE ANTI-FLASH CORE (B931). A plain `map.setView` ALWAYS fires Leaflet's
+    // THE ANTI-FLASH CORE (B933). A plain `map.setView` ALWAYS fires Leaflet's
     // `viewprereset`, whose GridLayer handler REMOVES and reloads every tile — the
     // one-frame wipe/blink that reads as "the screen flashes." But `viewprereset`
     // only actually needs to fire when the ZOOM changes; a same-zoom re-center is
@@ -1883,7 +1883,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
     // First paint (`prev` null) → a plain commit; nothing on screen yet. A RESIZE while a prior view
     // IS on screen — a docked panel / left-rail opening/closing shrinks or grows the in-flow canvas —
-    // needs Leaflet's cached size re-synced, then a same-zoom re-center. B931 does that WITHOUT a
+    // needs Leaflet's cached size re-synced, then a same-zoom re-center. B933 does that WITHOUT a
     // tile-wipe or a ghost (see the sizeChanged branch below).
     if (sizeChanged) {
       clearTimeout(geoCommitTimer.current);
@@ -1895,7 +1895,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // `commit`, which pans (no wipe) because a toggle never changes the zoom.
         // Net: opening/closing/switching a panel no longer flashes the aerial at
         // all — the residual tile-wipe B821/B837 masked with a ghost is now gone
-        // at the source, so no ghost is spawned for a toggle. (B931)
+        // at the source, so no ghost is spawned for a toggle. (B933)
         wrap.style.transform = "";
         try { map.invalidateSize({ animate: false, pan: false }); } catch (_) {}
         commit(center, z, false);

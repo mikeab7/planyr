@@ -1,4 +1,4 @@
-/* A docked-panel / left-rail toggle must NOT disturb the aerial backdrop (B931).
+/* A docked-panel / left-rail toggle must NOT disturb the aerial backdrop (B933).
  *
  * Owner report (after B821 + B837 shipped and were live): "clicking between elements and parcels
  * and menus makes the screen flash a ton." Root cause traced in code:
@@ -11,18 +11,18 @@
  *   `setView` itself does NOT wipe here: Leaflet converts a same-zoom, in-viewport re-center into an
  *   internal panBy, so `viewprereset` never fires on a toggle — the flash is the ghost, not a wipe.)
  *
- * B931 fixes it at the source: a same-zoom re-center now moves with `map.panBy` and spawns NO ghost.
+ * B933 fixes it at the source: a same-zoom re-center now moves with `map.panBy` and spawns NO ghost.
  * The ghost is reserved for a genuine ZOOM change (where `setView` really does wipe and the B65 ghost
  * is the right mask). This spec proves the fix headlessly — no real tiles needed — by counting the
  * ghost clones appended to the map's clip during a full open / switch / switch / close cycle: it must
- * be ZERO. (Pre-B931 each resize appended one.) The map is exposed on `window.__geoMap` only under
+ * be ZERO. (Pre-B933 each resize appended one.) The map is exposed on `window.__geoMap` only under
  * `window.__PLANYR_E2E`, a hook that never runs in production.
  */
 import { test, expect } from "@playwright/test";
 
 const SITE = {
-  schemaVersion: 12, id: "b931-flash", groupId: "b931-flash",
-  site: "B931 Flash Guard", name: "B931 Flash Guard",
+  schemaVersion: 12, id: "b933-flash", groupId: "b933-flash",
+  site: "B933 Flash Guard", name: "B933 Flash Guard",
   updatedAt: 1783000000000, teamId: null, ownerId: null,
   scheduleProjectId: null, scheduleProjectName: null,
   origin: { lat: 29.7604, lon: -95.3698 }, county: "Harris", status: "active",
@@ -51,7 +51,7 @@ async function armGhostWatch(page) {
 }
 const ghostCount = (page) => page.evaluate(() => window.__ghosts | 0);
 
-test.describe("panel toggle aerial flash (B931)", () => {
+test.describe("panel toggle aerial flash (B933)", () => {
   test("opening / switching / closing a left panel spawns no aerial ghost", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -59,7 +59,7 @@ test.describe("panel toggle aerial flash (B931)", () => {
     await page.addInitScript((s) => { try { localStorage.setItem("planarfit:sites:v1", s); } catch (_) {} }, JSON.stringify({ [SITE.id]: SITE }));
 
     await page.goto("/#/site-planner", { waitUntil: "load" });
-    await page.getByText("B931 Flash Guard", { exact: false }).first().click();
+    await page.getByText("B933 Flash Guard", { exact: false }).first().click();
     await page.locator('[data-testid="planner-canvas"]').first().waitFor({ state: "visible", timeout: 20000 });
     await page.waitForTimeout(1000); // fit-on-load + first crisp commit settle
 
@@ -67,7 +67,7 @@ test.describe("panel toggle aerial flash (B931)", () => {
     if ((await openPanels(page)).length) { await page.locator('button[title="Parcel"]').first().click(); await page.waitForTimeout(600); }
     await armGhostWatch(page);
 
-    // A full open / switch / switch / close cycle. Each step resizes the in-flow canvas. Post-B931
+    // A full open / switch / switch / close cycle. Each step resizes the in-flow canvas. Post-B933
     // a same-zoom re-center pans (no ghost); the whole cycle must append ZERO ghost clones.
     for (const title of ["Parcel", "Analysis", "Yield", "Yield"]) {
       await page.locator(`button[title="${title}"]`).first().click();

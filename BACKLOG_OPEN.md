@@ -75,7 +75,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B931 | Click / panel-toggle flashes the aerial: it's B837's ghost-on-resize, not a tile-wipe — fixed at the source with panBy | [Site Planner / Map] | #site-planner #ui #perf | ⏳ live — awaiting |
+| B933 | Click / panel-toggle flashes the aerial: it's B837's ghost-on-resize, not a tile-wipe — fixed at the source with panBy | [Site Planner / Map] | #site-planner #ui #perf | ⏳ live — awaiting |
 | B928 | Rail / menu / tool chrome audit-and-fix pass, both themes, screenshot-verified | [App-wide / UI] | #ui | ⏳ live — awaiting |
 | B914 | Review resume leaks one project's last loose PDF (its "upload didn't finish" banner) onto every OTHER project's Review tab | [Doc Review] | #doc-review #persistence #ui | ⏳ live — awaiting |
 | B918 | Callout text overflows its box in Document Review | [Doc Review] | #markup #doc-review | ⏳ live — awaiting |
@@ -186,15 +186,15 @@
 - **#infra** — B916, B917, B778, B735, B726, B406, B179, B63, B864, B786, B812, B811, B759, B756, B748, B675, B669
 - **#library** — B663, B662, B792, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B918, B919, B913, B820, B746, B737
-- **#perf** — B842, B495, B484, B479, B931, B860, B839, B837, B832, B821, B816, B694, B669
+- **#perf** — B842, B495, B484, B479, B933, B860, B839, B837, B832, B821, B816, B694, B669
 - **#persistence** — B916, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B914, B860, B863, B864, B836, B832, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
 - **#pond** — B906, B909, B907, B905, B904, B903, B902, B901, B900, B888, B884, B883, B870, B871, B707
 - **#road** — B742
 - **#scheduler** — B908, B818, B778, B495, B865, B863, B864, B836, B816
 - **#selection** — B912, B880, B820, B746, B742, B743, B737, B682, B651
-- **#site-planner** — B906, B842, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B931, B919, B911, B912, B913, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B880, B879, B878, B868, B870, B871, B860, B861, B862, B839, B840, B837, B832, B821, B691, B820, B802, B793, B789, B787, B784, B785, B786, B782, B812, B811, B775, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B738, B737, B716, B707, B712, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B906, B842, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B933, B919, B911, B912, B913, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B880, B879, B878, B868, B870, B871, B860, B861, B862, B839, B840, B837, B832, B821, B691, B820, B802, B793, B789, B787, B784, B785, B786, B782, B812, B811, B775, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B738, B737, B716, B707, B712, B695, B694, B693, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413, B839
 - **#testing** — B269, B63, B878, B863, B836, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B917, B842, B810, B735, B723, B115, B931, B928, B914, B911, B912, B913, B909, B903, B902, B901, B900, B882, B880, B879, B865, B862, B837, B821, B820, B802, B746, B742, B712, B695, B693, B669, B668, B673, B674
+- **#ui** — B917, B842, B810, B735, B723, B115, B933, B928, B914, B911, B912, B913, B909, B903, B902, B901, B900, B882, B880, B879, B865, B862, B837, B821, B820, B802, B746, B742, B712, B695, B693, B669, B668, B673, B674
 - **#yield** — B906, B724, B909, B888, B885, B884, B882, B883, B878, B868, B870, B871, B860, B861, B862, B832, B802, B782, B751, B712, B651
