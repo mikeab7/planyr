@@ -124,6 +124,7 @@ import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
 import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
+import { yieldVerdictStrip } from "./lib/yieldVerdicts.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote } from "./lib/pondChangeSummary.js";
@@ -18284,6 +18285,36 @@ function YieldPanel({
               <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac of overlap). Site area counts the shared ground once — but if one is a duplicate or stray outline, make it inactive in the Parcel panel.</div>
             </div>
           )}
+          {/* FINAL UI SPEC B1.1 — the verdict strip: up to four one-line verdicts (colored
+              dot + never-truncated sentence) that lead the panel, read off the SAME drainage
+              object the detailed groups below expand on. A detention/mitigation shortfall
+              hangs a compact ⚡ Design pond button off its line; the data's age reads on a
+              single quiet line (SWR house rule — always show the age). */}
+          {drainage && (() => {
+            const strip = yieldVerdictStrip(drainage);
+            if (!strip.length) return null;
+            const dotColor = (t) => t === "good" ? "var(--success-text)" : t === "danger" ? "var(--danger-text)" : t === "warn" ? Y.warnText : Y.muted;
+            const ageMs = drainage.floodAgeMs;
+            return (
+              <div style={{ margin: "10px 0 4px" }} data-testid="yield-verdict-strip">
+                {strip.map((v) => (
+                  <div key={v.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                    <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: dotColor(v.tone) }} />
+                    <span style={{ fontSize: 12, fontWeight: 650, color: Y.text, lineHeight: 1.4, flex: 1 }}>{v.text}</span>
+                    {v.short && drainage.onDesignPond ? (
+                      <button type="button" onClick={drainage.onDesignPond} title="Draws (or grows) a right-sized pond and solves its outlet — one click, no map skill required." style={{ flex: "none", padding: "3px 9px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Design pond</button>
+                    ) : null}
+                  </div>
+                ))}
+                {ageMs != null && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10.5, color: Y.muted }}>
+                    <span>Flood data {formatAge(ageMs)}</span>
+                    {drainage.onCheck ? <button type="button" onClick={drainage.onCheck} title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", padding: 0 }}>· ↻ Re-check</button> : null}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {/* KPI cards */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 13 }}>
             {kpi("Site", f2(acres), "ac")}

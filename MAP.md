@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-21 @ `b6cf251` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-21 @ `7ef3d3a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_300 source files mapped._
+_301 source files mapped._
 
 ## infra
 
@@ -539,6 +539,8 @@ _300 source files mapped._
   - _exports_: `resolveEstimatedWse`, `WSE_PROVIDERS`, `wseProviderMeta`
 - **`src/workspaces/site-planner/lib/yieldBar.js`** — B862: the shared required-vs-provided bullet-bar geometry + primitive marks for the Yield → Stormwater readout; one source consumed by the on-screen SVG (SitePlanner `BulletBar`) AND the PDF export string (`printSheet.bulletBarSvg`) so they can't drift (PDF-PARITY). `bulletBarLayout`/`stackedBarLayout` (pure geometry), `bulletBarMarks`/`stackedBarMarks` (render primitives), `bulletBarSvg` (PDF string), `stormwaterBarSpecs` (the det/mit bar specs from the drainage object).
   - _exports_: `ACFT_EPS`, `bulletBarLayout`, `bulletBarMarks`, `bulletBarSvg`, `stackedBarLayout`, `stackedBarMarks`, `stormwaterBarSpecs`
+- **`src/workspaces/site-planner/lib/yieldVerdicts.js`** — FINAL UI SPEC Part B pure Yield-panel verdict strip (B1.1) + number format (B2/B3): maps the drainage object to up-to-four one-line detention/mitigation/buildability verdicts, and `fmtAcFt` (1 decimal, signed-zero collapsed so −0.00 never renders)
+  - _exports_: `fmtAcFt`, `fmtProvidedOfRequired`, `yieldVerdictStrip`
 - **`src/workspaces/site-planner/lib/zOrder.js`** — explicit z_index utilities (B671): assign/sort/renormalize the within-type-layer stacking tiebreak that replaced implicit array position
   - _exports_: `byZAsc`, `ensureZ`, `needsZ`, `nextZ`, `normalizeZ`, `sortByZ`, `Z_GAP`
 - **`src/workspaces/site-planner/MapFinder.jsx`** — Leaflet map finder: aerial basemaps + labels, GIS overlay panel, eager county/statewide parcel identify, and status-pinned site markers for picking/opening sites
