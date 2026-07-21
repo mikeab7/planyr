@@ -125,6 +125,40 @@ test.describe("B912 — editable dimension length", () => {
   });
 });
 
+test.describe("B923 — click to place the caret inside a text box", () => {
+  test("clicking inside the callout/text-box editor moves the caret to the click point", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+
+    // Place a Text box and type a long single-line string; leave the editor OPEN (don't commit).
+    const box = await canvas(page).boundingBox();
+    await page.getByRole("button", { name: /^Text\s/ }).click();
+    const tx = box.x + 380, ty = box.y + 300;
+    await page.mouse.click(tx, ty);
+    const ta = page.getByPlaceholder("Type…");
+    await ta.waitFor({ state: "visible" });
+    const TEXT = "alpha beta gamma delta epsilon zeta";
+    await page.keyboard.type(TEXT);
+
+    // Baseline: after typing, the caret sits at the END of the text.
+    await expect.poll(() => ta.evaluate((el) => el.selectionStart)).toBe(TEXT.length);
+
+    // Click near the LEFT edge of the text box → the browser must move the caret to that point.
+    // The bug (B923): the canvas SVG's onMouseDown preventDefault — bubbling up from this
+    // foreignObject <textarea> — cancelled the mousedown's default caret placement, so the caret
+    // stayed stuck at the end and a mouse click could never reposition it. The fix guards that
+    // handler so it doesn't preventDefault when the mousedown lands on an inline text editor.
+    const tb = await ta.boundingBox();
+    await page.mouse.click(tb.x + 12, tb.y + tb.height / 2);
+    await page.waitForTimeout(50);
+    const caret = await ta.evaluate((el) => el.selectionStart);
+    expect(caret, `caret should move off the end (was ${caret}, text length ${TEXT.length})`).toBeLessThan(TEXT.length);
+
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+});
+
 test.describe("B913 — resizable text box / callout", () => {
   test("drag a text box's side handle → explicit width; Fit to text clears it", async ({ page }) => {
     const errors = [];
