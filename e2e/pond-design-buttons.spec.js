@@ -1,18 +1,23 @@
-/* B909/B910 — the Yield panel's one-click "⚡ Design detention" / "⚡ Design mitigation"
- * cures. Both only render once a live drainage/floodplain check has resolved a real
- * required-vs-provided shortfall (the `drainage` object needs a geocoded `origin`, which a
- * logged-out "Start blank" site never has — the same reason B907's own land-take-advisory
- * check was left untested here: "needs a live drainage-criteria check — GIS-gated, blocked
- * in this sandbox"). That live SHORT → click → pond-appears path is filed as a LIVE-VERIFY
- * item (VERIFICATION.md) for a signed-in, real-address session instead of faked here.
+/* B909/B910 — the Yield panel's ONE unified one-click "⚡ Design pond" cure. A single
+ * pond can carry BOTH detention (rate control, Post ≤ Pre) and floodplain mitigation
+ * (compensating storage) at once, so this is deliberately ONE button/handler, not two —
+ * it renders on WHICHEVER of the Detention / Floodplain Mitigation cards currently read
+ * SHORT, and clicking it (from either card) sizes ONE pond for whichever requirement(s)
+ * actually apply. It only renders once a live drainage/floodplain check has resolved a
+ * real required-vs-provided shortfall (the `drainage` object needs a geocoded `origin`,
+ * which a logged-out "Start blank" site never has — the same reason B907's own
+ * land-take-advisory check was left untested here: "needs a live drainage-criteria
+ * check — GIS-gated, blocked in this sandbox"). That live SHORT → click → pond-appears
+ * path is filed as a LIVE-VERIFY item (VERIFICATION.md) for a signed-in, real-address
+ * session instead of faked here.
  *
- * What THIS spec confirms, logged out, with zero network dependency: the buttons are
+ * What THIS spec confirms, logged out, with zero network dependency: the button is
  * correctly ABSENT when there's nothing to design against (no live check has run) — a
- * regression guard against them ever rendering ungated — and that opening the Yield panel
- * with a drawn pond still renders with zero console/page errors (the panel's det/mit
- * verdict-group code path this PR touches runs cleanly even off the "Detention storage"
- * always-visible row). The underlying sizing math (solvePondExpansion / sizePondForTargets
- * / pondPlacementCandidates reuse) is unit-tested directly — see test/pondGeom.test.js.
+ * regression guard against it ever rendering ungated — and that opening the Yield panel
+ * with a drawn pond still renders with zero console/page errors. The underlying sizing
+ * math (solvePondExpansion / sizePondForTargets / applyPondSizingActions' two-pass
+ * combine / pondPlacementCandidates reuse) is unit-tested directly — see
+ * test/pondGeom.test.js and test/pondSizing.test.js.
  *
  * Drives the real app LOGGED OUT (no account) on a seeded-blank site. */
 import { test, expect } from "@playwright/test";
@@ -54,8 +59,8 @@ async function drawPond(page) {
   await page.keyboard.press("Escape");
 }
 
-test.describe("Yield panel — ⚡ Design detention / ⚡ Design mitigation gating (B909/B910)", () => {
-  test("neither button renders on a blank (ungeocoded) site — no drainage check is possible without a live GIS pull", async ({ page }) => {
+test.describe("Yield panel — ⚡ Design pond gating (B909/B910, unified single-pond button)", () => {
+  test("the button doesn't render on a blank (ungeocoded) site — no drainage check is possible without a live GIS pull", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -64,6 +69,8 @@ test.describe("Yield panel — ⚡ Design detention / ⚡ Design mitigation gati
     await page.getByRole("button", { name: "Yield", exact: true }).click();
 
     await expect(page.getByText("Detention storage", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /⚡ Design pond/i })).toHaveCount(0);
+    // No leftover two-button naming from an earlier revision of this feature.
     await expect(page.getByRole("button", { name: /⚡ Design detention/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /⚡ Design mitigation/i })).toHaveCount(0);
 
@@ -72,7 +79,7 @@ test.describe("Yield panel — ⚡ Design detention / ⚡ Design mitigation gati
 });
 
 test.describe("Detention Pond draw-tool hint (B909 §2b)", () => {
-  test("arming the tool shows a transient hint naming both the manual draw and the ⚡ Design detention shortcut; it clears once drawing starts", async ({ page }) => {
+  test("arming the tool shows a transient hint naming both the manual draw and the ⚡ Design pond shortcut; it clears once drawing starts", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -81,7 +88,7 @@ test.describe("Detention Pond draw-tool hint (B909 §2b)", () => {
     await page.getByRole("button", { name: "Detention Pond", exact: true }).click();
     const hint = page.getByText(/Click on the map to place the detention pond/i);
     await expect(hint).toBeVisible();
-    await expect(hint).toContainText("⚡ Design detention");
+    await expect(hint).toContainText("⚡ Design pond");
 
     // Once a drag starts, the hint gets out of the way.
     const box = await canvas(page).boundingBox();

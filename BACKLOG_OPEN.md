@@ -73,7 +73,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B909 | Detention + mitigation: one-click "⚡ Design detention" / "⚡ Design mitigation" on the Yield panel (novice-proof) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
+| B909 | Detention + mitigation: ONE unified one-click "⚡ Design pond" on the Yield panel (novice-proof) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
 | B907 | Civil-engineering roadmap #7: tie detention SIZING to LAND TAKE + EARTHWORK $ | [Site Planner / Pond] | #site-planner #pond | ⏳ live — awaiting |
 | B905 | Civil-engineering upgrade #3: COMPUTED time of concentration (Kirpich), replacing the hard-coded 15-min screening assumption | [Site Planner / Pond] | #site-planner #pond | ⏳ live — awaiting |
 | B904 | Civil-engineering upgrade #2 (STAGE 1 of 2): NRCS Type III design-storm hyetograph + Rational-vs-NRCS method-by-area guardrail | [Site Planner / Pond] | #site-planner #pond | ⏳ live — awaiting |
