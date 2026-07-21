@@ -144,17 +144,13 @@ test.describe("click behavior — single-click selects, double-click opens Prope
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  /* NEW-1 — regression guard: a centerline road, a Line markup, and a callout each carried a raw
-   * native `onDoubleClick` (a pre-B750 B620 leftover) that unconditionally forced the inline text/label
-   * editor open, bypassing the "single-click selects; double-click opens Properties; an ALREADY-selected
-   * text-bearing feature's double-click edits its text" gate that B750 wired everywhere else. That raw
-   * handler is a fallback for whenever the browser's native dblclick fires (pointer capture doesn't
-   * always suppress it) — so a fresh double-click on any of these three could open the inline editor
-   * straight away instead of Properties. Fixed by gating the fallback identically to the reconstructed
-   * pointerdown path (onElDouble / the new onMarkupDouble / the callout box handler all now read
-   * dblWasSelRef). This spec drives all three: fresh double-click → Properties; select, then
-   * double-click again → inline editor. */
-  test("Site Planner: double-click a centerline road opens Properties; already-selected double-click edits its inline label", async ({ page }) => {
+  /* B934 — the owner rule: "in no circumstance should double-clicking an easement or a road go into a
+   * text editor to add the inline label; that's reserved for the properties." So EVERY double-click on
+   * a centerline road (or an easement / Line markup) opens Properties — a fresh one AND one that is
+   * already selected — and the old on-canvas inline-label editor never appears. The inline label is
+   * edited only in the Properties panel's own "Inline label" field. (Callouts are text boxes and keep
+   * their own double-click-to-edit-text behavior — covered by the two tests below.) */
+  test("Site Planner: double-click a centerline road always opens Properties, never the inline editor", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -173,23 +169,23 @@ test.describe("click behavior — single-click selects, double-click opens Prope
     await page.locator('button[aria-label="Close properties"]').click();
     await expect(panel(page)).toHaveCount(0);
 
-    // Already-selected (single click, then a SEPARATE double-click) → edits the inline label in place.
-    // The wait clears the single click's own tap record (DBLTAP_MS=350ms) so the upcoming double-click's
-    // two presses pair with EACH OTHER, not with this re-select click (which would itself count as the
-    // double-tap's first press and leave only one further press — a single, not a double, click).
+    // Already-selected (single click, then a SEPARATE double-click) → STILL Properties, never the inline
+    // editor. The wait clears the single click's own tap record (DBLTAP_MS=350ms) so the upcoming
+    // double-click's two presses pair with EACH OTHER, not with this re-select click (which would itself
+    // count as the double-tap's first press and leave only one further press — a single, not a double).
     await page.mouse.click(cx, cy);
     await expect(panel(page)).toHaveCount(0);
     await page.waitForTimeout(450);
     await page.mouse.move(cx, cy);
     await page.mouse.down(); await page.mouse.up();
     await page.mouse.down(); await page.mouse.up();
-    await expect(panel(page)).toHaveCount(0);
-    await expect(inlineLabelOverlay(page)).toBeVisible();
+    await expect(panel(page)).toBeVisible();
+    await expect(inlineLabelOverlay(page)).toHaveCount(0);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  test("Site Planner: double-click a Line markup opens Properties; already-selected double-click edits its inline label", async ({ page }) => {
+  test("Site Planner: double-click a Line markup always opens Properties, never the inline editor", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -213,8 +209,8 @@ test.describe("click behavior — single-click selects, double-click opens Prope
     await page.mouse.move(cx, cy);
     await page.mouse.down(); await page.mouse.up();
     await page.mouse.down(); await page.mouse.up();
-    await expect(panel(page)).toHaveCount(0);
-    await expect(inlineLabelOverlay(page)).toBeVisible();
+    await expect(panel(page)).toBeVisible();
+    await expect(inlineLabelOverlay(page)).toHaveCount(0);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });
