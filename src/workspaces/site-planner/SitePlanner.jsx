@@ -309,8 +309,8 @@ const TOOLS = [
   { id: "marquee", label: "Marquee", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" },
   { id: "parcel", label: "Parcel", hint: "Draw mode: click to drop boundary points, then click the first point (or double-click) to close — draw as many as you like • Remove mode: click a parcel to delete it • click Done (or Esc) to exit" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
-  { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text" },
-  { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit" },
+  { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text. Drag a side handle to set a fixed width (text wraps); Alt+Z shrinks the box back to fit its text" },
+  { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit; Alt+Z shrinks the box to fit its text" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
   { id: "paving", label: "Paving", hint: "Drag for a rectangle, or click points for an irregular paving / drive / truck court (double-click to close)" },
   { id: "parking", label: "Car Parking", hint: "Pick a row preset from Car Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
@@ -3091,6 +3091,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return;
       }
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) { e.preventDefault(); setShowShortcuts((s) => !s); return; }
+      // B932 — Alt+Z autosizes the selected text box / callout to fit its text (Bluebeam parity: its
+      // "Autosize Text Box" shortcut). Clears any dragged fixed width so the box hugs its content again
+      // — the keyboard peer of the "↔ Fit to text" button. `e.code` (physical Z) because Alt+Z emits a
+      // dead/other char on some layouts. Live refs (selRef/stateRef) so a stale keydown closure can't
+      // miss a just-dragged boxW. Consumes the key even when already auto (no empty history frame).
+      if (e.altKey && e.code === "KeyZ" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        const s = selRef.current;
+        if (s?.kind === "callout") {
+          e.preventDefault();
+          const c = (stateRef.current.callouts || []).find((x) => x.id === s.id);
+          if (c && c.boxW != null) { pushHistory(); setCallout(s.id, { boxW: null }); }
+          return;
+        }
+      }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("text"); return; }
       // Bluebeam-matching markup shortcuts: L line, R rect, E ellipse, ⇧P polygon, ⇧N polyline
@@ -13818,6 +13832,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         e.stopPropagation();
                         // Bluebeam text box: Enter makes a new line; finish by clicking away or Esc.
                         if (e.key === "Escape") { e.preventDefault(); commitEditCallout(); }
+                        // B932 — Alt+Z autosizes to fit even while still typing (Bluebeam parity): drop
+                        // the fixed width so the box hugs the text; the editor re-flows to auto on the spot.
+                        else if (e.altKey && e.code === "KeyZ") { e.preventDefault(); setCallout(editCallout.id, { boxW: null }); }
                       }}
                       placeholder="Type…"
                       maxLength={2000}
@@ -14989,7 +15006,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* B913 — an explicit width was set by dragging a side handle (text wraps to it). "Fit to
                     text" clears it so the box auto-sizes to its content again (matches the per-element inspector). */}
                 {selCallout.boxW != null && (
-                  <button style={{ ...chip, width: "100%", marginBottom: 9 }} title="Clear the fixed width — auto-size the box to its text again" onClick={() => setSelCallout({ boxW: null })}>↔ Fit to text</button>
+                  <button style={{ ...chip, width: "100%", marginBottom: 9 }} title="Clear the fixed width — auto-size the box to its text again (Alt+Z)" onClick={() => setSelCallout({ boxW: null })}>↔ Fit to text <kbd style={{ marginLeft: 6 }}>Alt Z</kbd></button>
                 )}
                 {/* row 1: size · text color · fill */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
@@ -16720,7 +16737,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 ["Tools", ""], ["V", "Select"], ["H", "Pan (hand)"], ["Space-drag", "Pan temporarily"], ["S", "Toggle snap"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
                 ["⇧P", "Polygon"], ["⇧N", "Polyline"], ["Q", "Callout"], ["T", "Text box"],
                 ["Edit", ""], ["Ctrl/⌘ Z", "Undo"], ["Ctrl/⌘ ⇧Z", "Redo"], ["Ctrl/⌘ C / X / V", "Copy / Cut / Paste"],
-                ["Ctrl/⌘ D", "Duplicate"], ["Ctrl/⌘ G", "Group selection"], ["Ctrl/⌘ ⇧G", "Ungroup"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
+                ["Ctrl/⌘ D", "Duplicate"], ["Ctrl/⌘ G", "Group selection"], ["Ctrl/⌘ ⇧G", "Ungroup"], ["Alt Z", "Fit text box / callout to its text"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
                 ["While drawing", ""], ["⇧ drag", "Constrain (square / circle / 45°)"], ["Double-click / Enter", "Finish polygon / polyline"], ["Click 1st dot", "Close a shape"],
                 ["Gestures", ""], ["Drag a dot", "Move a vertex"], ["＋ on an edge", "Add a vertex"], ["⇧-click a dot", "Delete a vertex"],
                 ["Right-click element", "Actions menu"], ["Double-click in a group", "Edit that member in place"], ["Drag a group", "Move as one unit"], ["Alt drag", "Bypass snap (place freely)"], ["?", "This panel"],
