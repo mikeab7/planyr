@@ -313,8 +313,8 @@ const TOOLS = [
   { id: "marquee", label: "Marquee", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" },
   { id: "parcel", label: "Parcel", hint: "Draw mode: click to drop boundary points, then click the first point (or double-click) to close — draw as many as you like • Remove mode: click a parcel to delete it • click Done (or Esc) to exit" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
-  { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text" },
-  { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit" },
+  { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text. Drag a side handle to set a fixed width (text wraps); Alt+Z shrinks the box back to fit its text" },
+  { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit; Alt+Z shrinks the box to fit its text" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
   { id: "paving", label: "Paving", hint: "Drag for a rectangle, or click points for an irregular paving / drive / truck court (double-click to close)" },
   { id: "parking", label: "Car Parking", hint: "Pick a row preset from Car Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
@@ -1702,7 +1702,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
     geoCommitRef.current = null; // fresh map → no committed view yet (forces a snap on first sync)
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; };
+    // E2E-only hook (never runs in production): expose the backdrop map so the panel-toggle
+    // flash spec can count Leaflet `viewreset` events — a tile-wipe fires one, a panBy doesn't.
+    if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__geoMap = map;
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; if (typeof window !== "undefined" && window.__geoMap === map) window.__geoMap = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
@@ -1789,17 +1792,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
      Anti-flash (B65): a real `map.setView` fires Leaflet's `viewreset`, whose
      GridLayer handler wipes & reloads ALL tiles — so calling it on every wheel
-     step blanks the aerial for a frame each time (the white/dim flash). Two
+     step blanks the aerial for a frame each time (the white/dim flash). Three
      defenses:
      1. During a live gesture we hold Leaflet at a committed view and just
         CSS-`transform` the whole map container (tiles AND the shared overlay
         layers together, so they stay mutually aligned) to track the gesture with
         the pixels already on screen — no reload, no flash.
-     2. When we DO re-render crisp (`commit`), we first clone the current tiles
-        into a frozen "ghost" overlay that stays on top until the fresh tiles
-        finish loading, THEN remove it — so the `setView` wipe never shows the
-        backdrop. This kills the "whole screen flashes to black on zoom-out"
-        (the wipe used to blank even already-loaded tiles).
+     2. (B933) When we re-render crisp AND the zoom is UNCHANGED — every panel /
+        left-rail toggle and every pure-pan settle — `commit` moves with `map.panBy`
+        instead of `setView`. A pan never fires `viewreset`, so no tile is wiped and
+        NO ghost is needed. This is what kills the "screen flashes every time I click
+        between elements / parcels / menus" report (each of those resizes the in-flow
+        canvas → a same-zoom re-center that used to setView-wipe).
+     3. When we re-render crisp AND the zoom genuinely CHANGES (a zoom gesture
+        settle, or the mid-gesture >0.75-level re-base), `setView` is unavoidable, so
+        `commit` first clones the current tiles into a frozen "ghost" overlay that
+        stays on top until the fresh tiles finish loading, THEN removes it — so the
+        wipe never shows the backdrop. This kills the "whole screen flashes to black
+        on zoom-out" (the wipe used to blank even already-loaded tiles).
      The crisp re-render is debounced (gesture settles) and also forced once the
      accumulated zoom delta passes ~0.75 levels, so the transform never scales the
      aerial into a blurry mess — but because the commit is ghost-buffered, that
@@ -1842,7 +1852,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } catch (_) { /* snapshot is best-effort; commit still proceeds */ }
     };
 
+    // THE ANTI-FLASH CORE (B933). A plain `map.setView` ALWAYS fires Leaflet's
+    // `viewprereset`, whose GridLayer handler REMOVES and reloads every tile — the
+    // one-frame wipe/blink that reads as "the screen flashes." But `viewprereset`
+    // only actually needs to fire when the ZOOM changes; a same-zoom re-center is
+    // just a pan. So when the target zoom equals the map's current zoom — which is
+    // EVERY panel/rail toggle (a resize re-centers but never zooms) and every
+    // pure-pan settle — we move with `map.panBy`, which translates the map pane and
+    // lazy-loads only the newly exposed edge tiles, never wiping. No wipe → no flash,
+    // and no ghost clone is needed. Only a genuine zoom change takes the old ghosted
+    // `setView` path (B65's snapshot still masks that unavoidable wipe). This
+    // supersedes the B821/B837 approach of wiping-then-masking the toggle flash.
     const commit = (c, zoom, ghost) => {
+      const cur = map.getZoom();
+      if (Math.abs(zoom - cur) < 1e-3) {
+        wrap.style.transform = "";
+        try {
+          const target = map.latLngToContainerPoint(c);
+          const half = map.getSize().divideBy(2);
+          map.panBy(target.subtract(half), { animate: false, noMoveStart: true });
+        } catch (_) { try { map.setView(c, zoom, { animate: false }); } catch (_) {} }
+        // Store the map's ACTUAL settled center (panBy rounds to whole pixels), so the
+        // next sizeChanged test compares against reality, not the pre-round target.
+        try { geoCommitRef.current = { center: map.getCenter(), zoom: cur, w: size.w, h: size.h }; } catch (_) { geoCommitRef.current = { center: c, zoom: cur, w: size.w, h: size.h }; }
+        return;
+      }
       if (ghost) spawnGhost();
       wrap.style.transform = "";
       try { map.setView(c, zoom, { animate: false }); } catch (_) {}
@@ -1851,20 +1885,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
     const prev = geoCommitRef.current;
     const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
-    // First paint (no prior tiles on screen to clone) → plain commit. But a RESIZE while a prior
-    // view IS on screen — e.g. a docked panel opening/closing shrinks the in-flow canvas — needs
-    // Leaflet's size re-synced (invalidateSize) AND fires setView→viewreset→tile-wipe. Do BOTH under
-    // one ghost of the current tiles so the reflow + reload are never seen. (B837 folds the formerly
-    // separate, un-ghosted invalidateSize into this ghosted commit; reuses B65's spawnGhost. `prev`
-    // is null only on first paint → no ghost, no invalidateSize needed then.)
+    // First paint (`prev` null) → a plain commit; nothing on screen yet. A RESIZE while a prior view
+    // IS on screen — a docked panel / left-rail opening/closing shrinks or grows the in-flow canvas —
+    // needs Leaflet's cached size re-synced, then a same-zoom re-center. B933 does that WITHOUT a
+    // tile-wipe or a ghost (see the sizeChanged branch below).
     if (sizeChanged) {
       clearTimeout(geoCommitTimer.current);
       if (prev) {
-        spawnGhost();
-        try { map.invalidateSize(false); } catch (_) {}
+        // A resize while a view is already on screen — a docked panel / left-rail
+        // opening or closing shrinks or grows the in-flow canvas. Update Leaflet's
+        // cached size WITHOUT panning or wiping (`invalidateSize` with pan:false
+        // fires only `move`/`resize`, never `viewreset`), then re-center through
+        // `commit`, which pans (no wipe) because a toggle never changes the zoom.
+        // Net: opening/closing/switching a panel no longer flashes the aerial at
+        // all — the residual tile-wipe B821/B837 masked with a ghost is now gone
+        // at the source, so no ghost is spawned for a toggle. (B933)
         wrap.style.transform = "";
-        try { map.setView(center, z, { animate: false }); } catch (_) {}
-        geoCommitRef.current = { center, zoom: z, w: size.w, h: size.h };
+        try { map.invalidateSize({ animate: false, pan: false }); } catch (_) {}
+        commit(center, z, false);
       } else {
         commit(center, z, false); // first paint: plain commit, nothing on screen to ghost
       }
@@ -3057,6 +3095,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return;
       }
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) { e.preventDefault(); setShowShortcuts((s) => !s); return; }
+      // B932 — Alt+Z autosizes the selected text box / callout to fit its text (Bluebeam parity: its
+      // "Autosize Text Box" shortcut). Clears any dragged fixed width so the box hugs its content again
+      // — the keyboard peer of the "↔ Fit to text" button. `e.code` (physical Z) because Alt+Z emits a
+      // dead/other char on some layouts. Live refs (selRef/stateRef) so a stale keydown closure can't
+      // miss a just-dragged boxW. Consumes the key even when already auto (no empty history frame).
+      if (e.altKey && e.code === "KeyZ" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        const s = selRef.current;
+        if (s?.kind === "callout") {
+          e.preventDefault();
+          const c = (stateRef.current.callouts || []).find((x) => x.id === s.id);
+          if (c && c.boxW != null) { pushHistory(); setCallout(s.id, { boxW: null }); }
+          return;
+        }
+      }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("text"); return; }
       // Bluebeam-matching markup shortcuts: L line, R rect, E ellipse, ⇧P polygon, ⇧N polyline
@@ -13784,6 +13836,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         e.stopPropagation();
                         // Bluebeam text box: Enter makes a new line; finish by clicking away or Esc.
                         if (e.key === "Escape") { e.preventDefault(); commitEditCallout(); }
+                        // B932 — Alt+Z autosizes to fit even while still typing (Bluebeam parity): drop
+                        // the fixed width so the box hugs the text; the editor re-flows to auto on the spot.
+                        else if (e.altKey && e.code === "KeyZ") { e.preventDefault(); setCallout(editCallout.id, { boxW: null }); }
                       }}
                       placeholder="Type…"
                       maxLength={2000}
@@ -14955,7 +15010,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* B913 — an explicit width was set by dragging a side handle (text wraps to it). "Fit to
                     text" clears it so the box auto-sizes to its content again (matches the per-element inspector). */}
                 {selCallout.boxW != null && (
-                  <button style={{ ...chip, width: "100%", marginBottom: 9 }} title="Clear the fixed width — auto-size the box to its text again" onClick={() => setSelCallout({ boxW: null })}>↔ Fit to text</button>
+                  <button style={{ ...chip, width: "100%", marginBottom: 9 }} title="Clear the fixed width — auto-size the box to its text again (Alt+Z)" onClick={() => setSelCallout({ boxW: null })}>↔ Fit to text <kbd style={{ marginLeft: 6 }}>Alt Z</kbd></button>
                 )}
                 {/* row 1: size · text color · fill */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
@@ -16739,7 +16794,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 ["Tools", ""], ["V", "Select"], ["H", "Pan (hand)"], ["Space-drag", "Pan temporarily"], ["S", "Toggle snap"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
                 ["⇧P", "Polygon"], ["⇧N", "Polyline"], ["Q", "Callout"], ["T", "Text box"],
                 ["Edit", ""], ["Ctrl/⌘ Z", "Undo"], ["Ctrl/⌘ ⇧Z", "Redo"], ["Ctrl/⌘ C / X / V", "Copy / Cut / Paste"],
-                ["Ctrl/⌘ D", "Duplicate"], ["Ctrl/⌘ G", "Group selection"], ["Ctrl/⌘ ⇧G", "Ungroup"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
+                ["Ctrl/⌘ D", "Duplicate"], ["Ctrl/⌘ G", "Group selection"], ["Ctrl/⌘ ⇧G", "Ungroup"], ["Alt Z", "Fit text box / callout to its text"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
                 ["While drawing", ""], ["⇧ drag", "Constrain (square / circle / 45°)"], ["Double-click / Enter", "Finish polygon / polyline"], ["Click 1st dot", "Close a shape"],
                 ["Gestures", ""], ["Drag a dot", "Move a vertex"], ["＋ on an edge", "Add a vertex"], ["⇧-click a dot", "Delete a vertex"],
                 ["Right-click element", "Actions menu"], ["Double-click in a group", "Edit that member in place"], ["Drag a group", "Move as one unit"], ["Alt drag", "Bypass snap (place freely)"], ["?", "This panel"],

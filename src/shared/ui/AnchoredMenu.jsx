@@ -30,6 +30,16 @@ import { placeMenu } from "./anchoredMenuPlacement.js";
  *                  matching the app's modal layer — above the map, below AuthPanel)
  *  - panelStyle  : visual style for the panel (e.g. the shared `menuPanel`)
  *  - className   : panel className (default "menu", for the existing menu styles)
+ *  - hoverSafe   : for HOVER-opened popovers (RowInfo/SourcesLegend). The normal
+ *                  full-viewport click-away backdrop sits ON TOP of the trigger, so
+ *                  the instant a hover-opened menu appears the backdrop covers the
+ *                  button, the browser fires `mouseleave` on it, the close timer
+ *                  fires, the menu closes, the backdrop is removed, `mouseenter`
+ *                  fires again → the popover FLASHES open/closed continuously. In
+ *                  hoverSafe mode we render NO interactive backdrop (so it can't
+ *                  steal the pointer) and dismiss via a document `mousedown` that
+ *                  ignores clicks on the anchor or the panel. Click-opened consumers
+ *                  keep the default backdrop (unchanged). (B930 — info-icon flash)
  */
 export default function AnchoredMenu({
   open,
@@ -41,6 +51,7 @@ export default function AnchoredMenu({
   zIndex = 4000,
   panelStyle,
   className = "menu",
+  hoverSafe = false,
   children,
 }) {
   const menuRef = useRef(null);
@@ -85,12 +96,30 @@ export default function AnchoredMenu({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // hoverSafe click-away: no backdrop to catch the click (it would steal the hover
+  // and flash the popover), so dismiss on any document mousedown outside both the
+  // anchor (its own click toggles) and the panel (its content is not click-away).
+  useEffect(() => {
+    if (!open || !hoverSafe) return;
+    const onDown = (e) => {
+      const panel = menuRef.current;
+      const anchor = anchorRef?.current;
+      if (panel && panel.contains(e.target)) return;
+      if (anchor && anchor.contains(e.target)) return;
+      onClose?.();
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+  }, [open, hoverSafe, onClose, anchorRef]);
+
   if (!open) return null;
 
   return createPortal(
     <>
-      {/* click-away backdrop (transparent) */}
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex }} />
+      {/* click-away backdrop (transparent). Skipped in hoverSafe mode — an
+          interactive full-viewport layer over the trigger makes a hover-opened
+          popover flash; hoverSafe dismisses via the document mousedown above. */}
+      {!hoverSafe && <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex }} />}
       <div
         ref={menuRef}
         className={className}
