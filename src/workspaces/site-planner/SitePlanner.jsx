@@ -23,6 +23,7 @@ import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
+import { nearestBoundaryEdge, constrainToEdgeAngle } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
@@ -477,6 +478,9 @@ const MK_BOX_KINDS = ["rect", "ellipse"];
 // Width (screen px) of the transparent fat hit-stroke under open-path markups (line/polyline),
 // so they grab within ~6px on either side at any zoom — matching a polyline's forgiving feel (B155).
 const MK_HIT_PX = 12;
+// How close (px) a measurement/line start-click must be to a parcel boundary to snap onto it and
+// arm the Shift "perpendicular-to-the-property-line" lock (NEW). Same feel as MK_HIT_PX.
+const EDGE_LOCK_PX = 12;
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
 const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
@@ -1358,12 +1362,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B656: the Properties companion follows the selection — these three kinds have an
   // inspector. Derived from `sel` alone (not the resolved selectors) so early effects can use it.
   // B740 widens it to a styleable multi-selection.
-  const companionSel = (!!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup")) || multiStyleable;
+  const companionSel = (!!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup" || sel.kind === "measure")) || multiStyleable;
   // B750: does the explicitly-opened Properties marker still point at the CURRENT selection? Declared
   // here (right after companionSel) so both the canvas-shift effect and companionOpen can read it.
+  // Measures are selected by index (sel.i, no stable sel.id), so match them on `i` (NEW).
   const propsMatches = propsFor === "multi"
     ? multiStyleable
-    : (!!propsFor && !!sel && propsFor.kind === sel.kind && propsFor.id === sel.id);
+    : (!!propsFor && !!sel && propsFor.kind === sel.kind && (sel.kind === "measure" ? propsFor.i === sel.i : propsFor.id === sel.id));
   // B261: while a persistent group is selected, double-clicking a member "drills in" to
   // edit just that one element in place (without ungrouping). drillId = that member's id,
   // or null when we're operating on the group as a whole.
@@ -2790,6 +2795,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [parcels, view]);
   const snapSplit = useCallback((p) => snapToBoundary(p) || snapPt(p), [snapToBoundary, snapPt]);
 
+  /* ---- Shift "perpendicular to the parcel boundary" lock (measurements & lines) ----
+     Michael's setback gesture: click a parcel line to START (the first point snaps ONTO the
+     boundary), then hold Shift to keep the segment perpendicular / parallel / 45° to that line —
+     the property-line-relative analogue of the page-absolute Shift-45 lock. When a draft did NOT
+     begin on a boundary, Shift falls back to the page-absolute lock, unchanged. */
+  // First point of a measure/line: snap onto a nearby parcel boundary (so the shape can begin ON
+  // the property line, arming the lock below), else the usual grid snap. Alt bypasses the snap.
+  const drawStartPt = (fp) => {
+    if (!altSnapOffRef.current) {
+      const edge = nearestBoundaryEdge(fp, parcels, EDGE_LOCK_PX / view.ppf);
+      if (edge) return edge.pt;
+    }
+    return snapPt(fp);
+  };
+  // The angle of the parcel edge a draft started on, recovered from its first point (which
+  // drawStartPt snapped ONTO the edge). null → the draft didn't start on a boundary.
+  const anchorEdgeAngle = (firstPt) => {
+    if (!firstPt) return null;
+    const edge = nearestBoundaryEdge(firstPt, parcels, EDGE_LOCK_PX / view.ppf);
+    return edge ? edge.ang : null;
+  };
+  // Shift-lock for a draft segment: perpendicular / parallel / 45° RELATIVE to the boundary the
+  // draft began on (exact — no grid rounding, so a setback reads a true right angle), else the
+  // page-absolute 45° lock. `pivot` is the vertex the new point extends from; `firstPt` the
+  // draft's first point (used only to recover the anchor edge).
+  const shiftLockPoint = (pivot, firstPt, cursorFt) => {
+    const eang = anchorEdgeAngle(firstPt);
+    return eang != null ? constrainToEdgeAngle(pivot, cursorFt, eang) : snapPt(snap45(pivot, cursorFt));
+  };
+
   /* ------------ fit to content ------------ */
   const fit = useCallback(() => {
     const pts = [];
@@ -2866,7 +2901,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     const keep = propsFor === "multi"
       ? multiStyleable
-      : (!!propsFor && !!sel && propsFor.kind === sel.kind && propsFor.id === sel.id);
+      : (!!propsFor && !!sel && propsFor.kind === sel.kind && (sel.kind === "measure" ? propsFor.i === sel.i : propsFor.id === sel.id));
     if (propsFor && !keep) { setPropsFor(null); setNarrowProps(false); }
   }, [sel, multi, propsFor, multiStyleable]);
   // NEW-1 — single-occupancy left dock (desktop): when the inspector OPENS for the current selection
@@ -3346,7 +3381,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // through anything stacked under the cursor (smaller-area-wins so a tiny measurement on top of a
   // big one is reachable first). Mid-draw (a new measurement in progress) we do NOT steal the click:
   // it falls through to place the next vertex, even when that vertex lands on an existing measurement.
-  const selectMeasure = (e, i) => {
+  // NEW — one press both SELECTS the measurement (repeat-click cycles the stack) AND arms a
+  // whole-measurement MOVE, so a drag repositions it and a plain click (no travel) just selects.
+  // Mirrors startMoveMarkup; the settled result flushes in onUp's generic tail. This is what makes
+  // "click and drag a measurement" work — previously the body press only ever selected.
+  const startMoveMeasure = (e, i) => {
     if (e.button !== 0) return;
     if (tool === "measure" && measDraft.length > 0) return; // mid-draw: let onBgDown place the next vertex
     e.stopPropagation();
@@ -3354,8 +3393,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fp = p2f(e.clientX, e.clientY);
     const order = measuresUnderPoint(measures, fp, 12 / view.ppf); // 12px hit buffer → feet
     const next = nextMeasureSelection(order, sel?.kind === "measure" ? sel.i : -1);
+    const idx = next != null ? next : i;
+    const m = measures[idx];
+    if (!m) return;
+    // B750 parity — double-click a measurement opens its Properties (pointer capture eats the native
+    // dblclick, so reconstruct the double-tap like startMoveMarkup does).
+    if (isDoubleTap(e, m.id, sel?.kind === "measure" && sel.i === idx)) {
+      setMulti([]); setSelVtx(null);
+      setSel({ kind: "measure", i: idx });
+      setPropsFor({ kind: "measure", i: idx });
+      if (narrow) setNarrowProps(true);
+      return;
+    }
     setMulti([]); setSelVtx(null);
-    setSel({ kind: "measure", i: next != null ? next : i });
+    setSel({ kind: "measure", i: idx });
+    if (m.locked) return; // locked: select (so its Properties can open) but never drag
+    pushHistory();
+    drag.current = { mode: "measureMove", i: idx, fx: fp.x, fy: fp.y, orig: m };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  const onMeasureContext = (e, i) => {
+    e.preventDefault(); e.stopPropagation();
+    const m = measures[i];
+    if (!m) return;
+    if (tool !== "select") setTool("select");
+    setMulti([]); setSelVtx(null);
+    setSel({ kind: "measure", i });
+    setParcelMenu(null); setOvMenu(null); setTypeMenu(null);
+    setMapMenu({ x: e.clientX, y: e.clientY, kind: "measure", i, id: m.id });
   };
 
   /* ------------ pointer handlers (svg root) ------------ */
@@ -3470,11 +3535,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "callout") { placeCallout(fp); return; } // click tip, then box
     if (tool === "text") { placeText(fp); return; }       // one click → text box
     if (tool === "mline" || tool === "mrect" || tool === "mellipse") { // line/rect/ellipse: drag OR click-click
-      const a = snapPt(fp);
+      // A line can start ON a parcel boundary (arming the Shift perpendicular lock); rect/ellipse keep grid-snap.
+      const a = tool === "mline" ? drawStartPt(fp) : snapPt(fp);
       // Click-to-start mode is armed (a prior single click without a drag): this press is the
       // SECOND click → commit from the anchor to here (Bluebeam-style two-click placement).
       if (mkRect && mkRect.pending && mkRect.kind === tool) {
-        const b = (tool === "mline" && e.shiftKey) ? snapPt(snap45(mkRect.a, fp)) : a;
+        const b = (tool === "mline" && e.shiftKey) ? shiftLockPoint(mkRect.a, mkRect.a, fp) : a;
         commitMkRect(tool, mkRect.a, b);
         setMkRect(null);
         return;
@@ -3486,10 +3552,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (tool === "mpolygon" || tool === "mpolyline") { // click-draw markup
-      const sp = snapPt(fp);
-      if (mkPoly && mkPoly.pts.length >= (tool === "mpolygon" ? 3 : 2) && dist(f2p(sp), f2p(mkPoly.pts[0])) < 12 && tool === "mpolygon") { finishMkPoly(); return; }
+      const isLine = tool === "mpolyline"; // a polyline is a "line" → gets the boundary-relative lock
       const last = mkPoly?.pts?.[mkPoly.pts.length - 1];
-      const pt = (e.shiftKey && last) ? snapPt(snap45(last, fp)) : sp;
+      const sp = (isLine && !last) ? drawStartPt(fp) : snapPt(fp); // first line point can start on a boundary
+      if (mkPoly && mkPoly.pts.length >= (tool === "mpolygon" ? 3 : 2) && dist(f2p(snapPt(fp)), f2p(mkPoly.pts[0])) < 12 && tool === "mpolygon") { finishMkPoly(); return; }
+      const pt = (e.shiftKey && last) ? (isLine ? shiftLockPoint(last, mkPoly.pts[0], fp) : snapPt(snap45(last, fp))) : sp;
       setMkPoly((d) => (d ? { ...d, pts: [...d.pts, pt] } : { kind: tool, pts: [pt] }));
       return;
     }
@@ -3515,14 +3582,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (tool === "measure") {
-      const sp = snapPt(fp);
+      // First point snaps ONTO a nearby parcel boundary (so a setback measurement begins on the
+      // property line, arming the Shift lock); later points honor Shift = perpendicular / parallel
+      // / 45° to that boundary, else grid-snap. (drawStartPt / shiftLockPoint own the fall-throughs.)
+      const start = measDraft.length === 0 ? drawStartPt(fp) : null;
+      const pivot = measDraft.length ? measDraft[measDraft.length - 1] : null;
+      const sp = pivot && e.shiftKey ? shiftLockPoint(pivot, measDraft[0], fp) : (start != null ? start : snapPt(fp));
       if (measureMode === "line") {
         // two-click distance
         if (measDraft.length === 0) setMeasDraft([sp]);
         else { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "line", pts: [measDraft[0], sp] }]); setMeasDraft([]); }
       } else {
         // polyline / area: accumulate points; close an area by clicking the first dot
-        if (measureMode === "area" && measDraft.length >= 3 && dist(f2p(sp), f2p(measDraft[0])) < 12) { finishMeasure(); return; }
+        if (measureMode === "area" && measDraft.length >= 3 && dist(f2p(snapPt(fp)), f2p(measDraft[0])) < 12) { finishMeasure(); return; }
         setMeasDraft((d) => [...d, sp]);
       }
       return;
@@ -3875,7 +3947,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // under the pointer (smaller-area-first), so a shape covered by another is always reachable — the
     // escape hatch for "I can't get to the one underneath." A FRESH click (nothing under this point is
     // selected yet) keeps the DOM-topmost hit the browser already resolved. Mirrors the B910 measure
-    // cycle (selectMeasure + measureHit.js); the under-point stack honours the B920 fill-aware rule, so
+    // cycle (startMoveMeasure + measureHit.js); the under-point stack honours the B920 fill-aware rule, so
     // an unfilled boundary only joins the cycle when you click near its stroke.
     let selId = id, selM = m;
     {
@@ -3916,6 +3988,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "groupMove", fx: fp.x, fy: fp.y, orig, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  const selMeasure = sel?.kind === "measure" ? measures[sel.i] : null; // NEW — the selected measurement (Properties inspector)
+  const toggleMeasureLock = (id) => { pushHistory(); setMeasures((a) => a.map((x) => (x.id === id ? { ...x, locked: !x.locked } : x))); };
   const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
   const setSelMarkup = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); setMkStyle((s) => ({ ...s, ...patch })); };
   // Geometry patch (w/h/rot) — kept out of mkStyle so new shapes don't inherit a past size/angle.
@@ -4076,6 +4150,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const m = measures[i];
     if (!m) return;
+    if (m.locked) { setSel({ kind: "measure", i }); return; } // locked: select only, no reshape
     pushHistory();
     setSel({ kind: "measure", i });
     setSelVtx({ layer: "measure", id: i, index });
@@ -4114,7 +4189,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (isCenterlineRoad(el)) return { layer: "road", id: el.id, pts: el.pts, closed: false, min: 2, edgeTolFt: (+el.travelW || 0) / 2 + roadCurbWidth(el) + 11 / view.ppf, noEndpointDelete: true };
       return el.points ? { layer: "el", id: el.id, pts: el.points, closed: true, min: 3 } : null;
     }
-    if (sel.kind === "measure") { const m = measures[sel.i]; if (!m) return null; const closed = measMode(m) === "area"; const min = closed ? 3 : measMode(m) === "count" ? 1 : 2; return { layer: "measure", id: sel.i, pts: measPts(m), closed, min }; }
+    if (sel.kind === "measure") { const m = measures[sel.i]; if (!m || m.locked) return null; const closed = measMode(m) === "area"; const min = closed ? 3 : measMode(m) === "count" ? 1 : 2; return { layer: "measure", id: sel.i, pts: measPts(m), closed, min }; }
     if (sel.kind === "markup") {
       const m = markups.find((x) => x.id === sel.id); if (!m || m.locked) return null;
       if (m.kind === "easement") { const closed = m.mode === "boundary"; return { layer: "ease", id: m.id, pts: easeEditPath(m), closed, min: closed ? 3 : 2 }; }
@@ -4317,7 +4392,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Click-to-finish for line/rect/ellipse: the anchored shape tracks the cursor between the first
     // and second click (no button held, so there's no drag.current to drive it).
     if (mkRect && mkRect.pending) {
-      const b = (mkRect.kind === "mline" && e.shiftKey) ? snapPt(snap45(mkRect.a, fp)) : snapPt(fp);
+      const b = (mkRect.kind === "mline" && e.shiftKey) ? shiftLockPoint(mkRect.a, mkRect.a, fp) : snapPt(fp);
       setMkRect((m) => (m && m.pending ? { ...m, b } : m));
     }
     const d = drag.current;
@@ -4410,7 +4485,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "mkDraw") {
       let b = snapPt(fp);
       if (e.shiftKey) {
-        if (d.kind === "mline") b = snapPt(snap45(d.a, fp));
+        if (d.kind === "mline") b = shiftLockPoint(d.a, d.a, fp);
         else { const s = Math.max(Math.abs(b.x - d.a.x), Math.abs(b.y - d.a.y)); b = { x: d.a.x + Math.sign(b.x - d.a.x || 1) * s, y: d.a.y + Math.sign(b.y - d.a.y || 1) * s }; } // square/circle
       }
       setMkRect({ kind: d.kind, a: d.a, b });
@@ -4419,6 +4494,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "mkMove") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       setMarkups((a) => a.map((m) => m.id === d.id ? translateMarkup(d.orig, dx, dy) : m));
+      return;
+    }
+    if (d.mode === "measureMove") { // NEW — drag a whole measurement to reposition it
+      const dx = fp.x - d.fx, dy = fp.y - d.fy;
+      setMeasures((a) => a.map((mm, k) => (k === d.i ? translateMeasure(d.orig, dx, dy) : mm)));
       return;
     }
     if (d.mode === "mkVertex") { // drag a line/polyline/polygon control point
@@ -13536,7 +13616,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // angle by default, 45°-constrained ONLY while Shift is held. Snapping the preview to
                 // 45° unconditionally made the polyline look like it "only goes at specific angles"
                 // even though the placed point was free — fixed by gating on shiftHeld.
-                const live = cursor ? ((shiftHeld && mkPoly.pts.length) ? snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor)) : snapPt(cursor)) : null;
+                const live = cursor ? ((shiftHeld && mkPoly.pts.length) ? (mkPoly.kind === "mpolyline" ? shiftLockPoint(mkPoly.pts[mkPoly.pts.length - 1], mkPoly.pts[0], cursor) : snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor))) : snapPt(cursor)) : null;
                 const all = live ? [...mkPoly.pts, live] : mkPoly.pts;
                 const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                 const lp = live ? f2p(live) : null, total = pathLen(all);
@@ -13899,15 +13979,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const pts = fpts.map(f2p);
                 const isSel = sel?.kind === "measure" && sel.i === i;
                 // B910 — a finished measurement is grabbable from BOTH the Select tool and the
-                // Measure tool (the tool you're still in right after drawing it); selectMeasure
-                // drops you back to Select on the click so the grips/×/highlight show.
+                // Measure tool (the tool you're still in right after drawing it); startMoveMeasure
+                // drops you back to Select on the click so the grips/×/highlight show (B936: it also
+                // arms a whole-measurement drag on the same press).
                 const canGrab = tool === "select" || tool === "measure";
                 const warn = calibrationState === "uncalibrated";
                 const mcolor = warn ? "#b45309" : PAL.accent;
 
                 if (mode === "count") {
                   const lastPt = pts[pts.length - 1];
-                  const countLbl = `${fpts.length} item${fpts.length !== 1 ? "s" : ""}`;
+                  const countLbl = (m.label ? `${m.label}  ` : "") + `${fpts.length} item${fpts.length !== 1 ? "s" : ""}`;
+                  // LOD (B911 family): the total label hides at overview zoom just like every other
+                  // dimension callout — an unselected count's tally shows only past the callout gate.
+                  const labelVisible = isSel || dimCalloutVisible(view.ppf);
                   return (
                     <g key={m.id || `m${i}`}>
                       {pts.map((p, k) => (
@@ -13916,14 +14000,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <text x={p.x} y={p.y + 3.5} fontSize="8.5" textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
                         </g>
                       ))}
-                      <text x={lastPt.x} y={lastPt.y - 14} textAnchor="middle" fontSize="12" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
-                        fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{countLbl}</text>
+                      {labelVisible && <text x={lastPt.x} y={lastPt.y - 14} textAnchor="middle" fontSize="12" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
+                        fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{countLbl}</text>}
                       {/* hit targets — one transparent circle per marker */}
                       {pts.map((p, k) => (
                         <circle key={`h${k}`} cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       ))}
-                      {isSel && tool === "select" && (
+                      {isSel && tool === "select" && !m.locked && (
                         <g data-testid="measure-selected" data-sel-i={i}>
                           {pts.map((p, k) => {
                             const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === i && selVtx.index === k;
@@ -13947,28 +14031,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                 // label + anchor point. Area shows area + perimeter; amber + ⚠ when uncalibrated.
                 const perim = pathLen([...fpts, fpts[0]]);
-                const lbl = (warn ? "⚠ " : "") + (isArea
+                const lbl = (warn ? "⚠ " : "") + (m.label ? `${m.label}  ` : "") + (isArea
                   ? `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac · ${f0(perim)}′ perim`
                   : `${f0(pathLen(fpts))}′`);
                 const anchor = isArea ? f2p(centroid(fpts)) : (() => {
                   const a = pts[pts.length - 2], b = pts[pts.length - 1];
                   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
                 })();
+                // LOD (B911 family): a measurement's number rides the SAME on-screen-size gate as
+                // building/parcel dimensions — it hides at overview zoom (or when the feature is too
+                // small to project past ~30px) instead of stamping a big fixed number over a pinhead.
+                // A selected measurement always shows its value so you can read what you're editing.
+                const spanFt = isArea ? Math.sqrt(Math.max(0, polyArea(fpts))) : pathLen(fpts);
+                const labelVisible = isSel || detailLabelVisible(spanFt, view.ppf);
                 return (
                   <g key={m.id || `m${i}`}>
                     {isArea
                       ? <polygon points={ptsStr} fill={mcolor} fillOpacity={isSel ? 0.16 : 0.1} stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
                       : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />}
                     {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
-                    <text x={anchor.x} y={anchor.y - 5} textAnchor="middle" fontSize="12" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
-                      fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>
+                    {labelVisible && <text x={anchor.x} y={anchor.y - 5} textAnchor="middle" fontSize="12" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
+                      fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>}
                     {/* wide invisible hit path to select the measurement (Select OR Measure tool — B910) */}
                     {isArea
                       ? <polygon points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />}
-                    {isSel && tool === "select" && (
+                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
+                    {isSel && tool === "select" && !m.locked && (
                       <g data-testid="measure-selected" data-sel-i={i}>
                         {/* B230: draggable SQUARE control points (no "+" dots) — Shift-click /
                             right-click an edge inserts a point; right-click / Delete removes one.
@@ -13993,7 +14083,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })}
               {/* in-progress measure draft */}
               {tool === "measure" && measDraft.length > 0 && (() => {
-                const live = cursor ? snapPt(cursor) : null;
+                // Live point mirrors the commit: Shift = perpendicular / parallel / 45° to the
+                // parcel edge the measurement started on (else grid-snap), so the preview never lies.
+                const live = cursor
+                  ? (shiftHeld && measureMode !== "count" ? shiftLockPoint(measDraft[measDraft.length - 1], measDraft[0], cursor) : snapPt(cursor))
+                  : null;
                 const all = live ? [...measDraft, live] : measDraft;
                 const pts = all.map(f2p);
                 if (measureMode === "count") {
@@ -14762,7 +14856,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
-              {multiStyleable ? `${multi.length} selected` : <>Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` — ${l}` : ""; })()}</>}
+              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : <>Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` — ${l}` : ""; })()}</>}
             </span>
             {/* Explicit close. The element STAYS selected — double-click it again to reopen. ✕ drops the
                 explicit-open marker (setPropsFor(null)); on DESKTOP that closes propsMatches, so the
@@ -15032,6 +15126,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <Field label="Line spacing"><NumInput style={numInput} value={cs.lineHeight} min={0.8} step={0.1} coarse={0.5} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
+                </div>
+              </Section>
+              </div>
+            );
+          })()}
+          {/* NEW — selected measurement inspector (parity with every other element's Properties) */}
+          {!multiStyleable && selMeasure && (() => {
+            const m = selMeasure;
+            const mode = measMode(m);
+            const fpts = measPts(m);
+            const modeLabel = { line: "Distance", polyline: "Polyline length", area: "Area", count: "Count" }[mode] || "Measurement";
+            const rows = [];
+            if (mode === "count") rows.push(["Items", `${fpts.length}`]);
+            else if (mode === "area") { rows.push(["Area", `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac`]); rows.push(["Perimeter", `${f0(pathLen([...fpts, fpts[0]]))}′`]); }
+            else rows.push(["Length", `${f0(pathLen(fpts))}′`]);
+            const valStyle = { fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontWeight: 700, fontSize: 13, color: PAL.ink };
+            return (
+              <div>
+              <Section title={`Measurement · ${modeLabel}`}>
+                {calibrationState === "uncalibrated" && <div style={{ fontSize: 11, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 8 }}>⚠ This drawing isn’t calibrated yet — the value below is in raw units, not real feet. Calibrate to a known distance first.</div>}
+                {rows.map(([k, v], j) => <Field key={j} label={k}><span style={valStyle}>{v}</span></Field>)}
+                <Field label="Label"><input value={m.label || ""} maxLength={80}
+                  onFocus={() => pushHistory()}
+                  onChange={(ev) => setMeasures((a) => a.map((x) => (x.id === m.id ? { ...x, label: ev.target.value } : x)))}
+                  placeholder="e.g. Front setback" style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
+                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
+                  {m.locked
+                    ? "Locked — click 🔓 Unlock below to move or reshape it."
+                    : mode === "count"
+                      ? "Drag any marker to move the whole set; drag a grip to reposition one."
+                      : "Drag the line to move it, or a square grip to reshape."}
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                  <button style={chip} onClick={() => toggleMeasureLock(m.id)}>{m.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+                  <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete</button>
                 </div>
               </Section>
               </div>
@@ -17055,6 +17184,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {row({ text: m.behindEls ? "Bring in front of buildings" : "Send behind buildings", on: setBehind })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: delText, hint: "Del", danger: true, on: () => { deleteMarkupById(m.id); } })}
+          </>;
+        } else if (mapMenu.kind === "measure") {
+          // NEW — measurements get a right-click menu just like every other element.
+          const m = measures[mapMenu.i];
+          if (!m) return null;
+          header = "Measurement";
+          body = <>
+            {row({ text: "Properties…", on: () => { setSel({ kind: "measure", i: mapMenu.i }); setPropsFor({ kind: "measure", i: mapMenu.i }); if (narrow) setNarrowProps(true); close(); } })}
+            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMeasureLock(m.id); close(); } })}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+            {row({ text: "Delete measurement", hint: "Del", danger: true, on: () => { deleteSel({ kind: "measure", i: mapMenu.i }); close(); } })}
           </>;
         } else if (mapMenu.kind === "callout") {
           // Multi-leader — Add / Delete Leader for the SEPARATE `callouts` collection.
