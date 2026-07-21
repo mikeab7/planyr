@@ -76,6 +76,8 @@
   --warn-border:   #E0BC7A;
   --danger-bg:     #FBE4E0;
   --danger-border: #E4AFA9;
+  --success-bg:    #ECF7F0;
+  --success-border:#C3E2CF;
 
   /* Yield-panel PROVENANCE source-tag color (B895 — the CODE tag: an adopted
      ordinance/criteria value). PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED reuse the
@@ -198,6 +200,8 @@
   --warn-border:   #6B531F;
   --danger-bg:     #331917;
   --danger-border: #6B2F2C;
+  --success-bg:    #16301F;
+  --success-border:#2C6B45;
   --source-code-text: #AFA9EC;
 
   /* Status — lighter variants so saturated values don't go muddy on dark cards (B320).

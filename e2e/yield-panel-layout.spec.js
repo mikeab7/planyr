@@ -1,8 +1,9 @@
-/* FINAL UI SPEC Part B (B1.2) — the Yield panel folds into top-level Collapse groups.
- * Drives the REAL app logged out on a seeded-blank site (no network): draws a parcel + pond,
- * opens Yield, and asserts the ① Stormwater (open) · ② Land & yield (closed) · ④ Costs
- * (closed) groups render and toggle, with zero page errors. The verdict strip + the detailed
- * drainage groups are GIS-gated (need a live drainage check) and unit-tested elsewhere. */
+/* v3 UI SPEC Part A — the Yield panel's top-level groups. Drives the REAL app logged out on a
+ * seeded-blank site (no network): draws a parcel + pond, opens Yield, and asserts the SITE YIELD
+ * header, the LAND USE (open) · BUILDINGS (closed) · BUILDABILITY (closed) · COSTS (closed)
+ * groups render and toggle, and the A9 footer legend shows, with zero page errors. The verdict
+ * strip + the DETENTION DETAIL groups are GIS-gated (need a live drainage check) and unit-tested
+ * elsewhere (test/yieldVerdicts.test.js). */
 import { test, expect } from "@playwright/test";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
@@ -36,8 +37,8 @@ async function drawPond(page) {
   await page.keyboard.press("Escape");
 }
 
-test.describe("Yield panel — FINAL UI SPEC Part B top-level groups", () => {
-  test("Stormwater / Land & yield / Costs render, and Land & yield toggles", async ({ page }) => {
+test.describe("Yield panel — v3 UI SPEC Part A top-level groups", () => {
+  test("SITE YIELD header + LAND USE / BUILDINGS / BUILDABILITY / COSTS render; BUILDINGS toggles; footer legend shows", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -45,21 +46,28 @@ test.describe("Yield panel — FINAL UI SPEC Part B top-level groups", () => {
     await drawPond(page);
     await page.getByRole("button", { name: "Yield", exact: true }).click();
 
-    // The four top-level groups' headers (① Stormwater · ② Land & yield · ③ Buildability/FFE · ④ Costs).
-    await expect(page.getByRole("button", { name: /Stormwater/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /Land & yield/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Buildability \/ FFE/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Costs road \+ earthwork/i })).toBeVisible();
+    // A1 header.
+    await expect(page.getByText("Site Yield", { exact: true })).toBeVisible();
 
-    // ① Stormwater is open by default → its base rows (Detention storage) show.
-    await expect(page.getByText("Detention storage", { exact: true })).toBeVisible();
+    // The top-level groups (LAND USE open · BUILDINGS · BUILDABILITY · COSTS closed).
+    await expect(page.getByRole("button", { name: /Land use/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /Buildings/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /Buildability/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /Costs/i }).first()).toBeVisible();
 
-    // ② Land & yield is closed → the Site-area row is hidden until we open it.
-    await expect(page.getByText("Site area", { exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: /Land & yield/i }).click();
-    await expect(page.getByText("Site area", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /Land & yield/i }).click();
-    await expect(page.getByText("Site area", { exact: true })).toHaveCount(0);
+    // A5 LAND USE is open by default → its legend labels show (Buildings/Open space/Pond/Paving).
+    await expect(page.getByText("Open space", { exact: true })).toBeVisible();
+    await expect(page.getByText("Impervious (buildings + paving)", { exact: true })).toBeVisible();
+
+    // A6 BUILDINGS is closed → the Car-stalls row is hidden until we open it.
+    await expect(page.getByText("Car stalls", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: /Buildings/i }).first().click();
+    await expect(page.getByText("Car stalls", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /Buildings/i }).first().click();
+    await expect(page.getByText("Car stalls", { exact: true })).toHaveCount(0);
+
+    // A9 footer legend.
+    await expect(page.getByText("measured from your drawing", { exact: true })).toBeVisible();
 
     expect(errors, errors.join("\n")).toEqual([]);
   });

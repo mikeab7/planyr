@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const DISCLAIMER = "Screening estimates for deal-stage decisions — not a substitute for a licensed engineer's design or the reviewing agency's determination.";
+const DISCLAIMER = "Screening estimates for deal-stage decisions, not a substitute for your engineer or the reviewing agency.";
 
 const componentSrc = readFileSync(
   fileURLToPath(new URL("../src/workspaces/site-planner/components/YieldFooterDisclaimer.jsx", import.meta.url)),

@@ -7,8 +7,9 @@ import RowInfo from "./RowInfo.jsx";
  * muted --text-tertiary the old per-card notes used) so the one disclaimer that matters
  * stays clearly legible rather than fading — the theming rule against low-contrast body
  * text applies doubly to the line carrying the "not a substitute for an engineer" caveat. */
-const TEXT = "Screening estimates for deal-stage decisions — not a substitute for a licensed engineer's design or the reviewing agency's determination.";
-const DETAIL = "Every figure in this panel — detention, floodplain mitigation, buildability/FFE, road and earthwork cost, and each pond's readout — is a deal-stage screening estimate meant to move a go/no-go decision quickly. It is not a construction document. Confirm required volumes, elevations, and costs with your licensed engineer and the reviewing authority (the jurisdiction or district that approves the project) before design or permitting.";
+// v3 A9 line 1 — comma, not an em dash (G2). The full caveat rides the ⓘ.
+const TEXT = "Screening estimates for deal-stage decisions, not a substitute for your engineer or the reviewing agency.";
+const DETAIL = "Every figure in this panel (detention, floodplain mitigation, buildability/FFE, road and earthwork cost, and each pond's readout) is a deal-stage screening estimate meant to move a go/no-go decision quickly. It is not a construction document. Confirm required volumes, elevations, and costs with your licensed engineer and the reviewing authority (the jurisdiction or district that approves the project) before design or permitting.";
 
 export default function YieldFooterDisclaimer() {
   return (
