@@ -59,7 +59,7 @@ describe("bulletBarMarks — the shared primitive list", () => {
     expect(marks.find((m) => m.role === "provided")).toBeTruthy();
     expect(marks.find((m) => m.role === "required")).toBeTruthy();
     const delta = marks.find((m) => m.t === "text" && m.role === "good");
-    expect(delta.s).toMatch(/\+2\.00 ac-ft/);
+    expect(delta.s).toMatch(/\+2\.0 ac-ft/);
     expect(delta.mono).toBe(true);
   });
   it("band requirement emits a span rect + an edge tick, no point tick", () => {
@@ -97,7 +97,7 @@ describe("stormwaterBarSpecs — the ONE shared derivation (screen == PDF)", () 
     const d = { req: { kind: "point", requiredAcFt: 10 }, providedUsableCf: 15 * AF, providedCf: 15 * AF };
     const { det } = stormwaterBarSpecs(d);
     expect(det.status).toBe("covered");
-    expect(det.verdict).toMatch(/\+5\.00 ac-ft/);
+    expect(det.verdict).toMatch(/\+5\.0 ac-ft/);
     expect(det.layout.delta).toBeCloseTo(5, 5);
   });
   it("point detention: short → −delta + short status", () => {
@@ -145,7 +145,7 @@ describe("stormwaterBarSpecs — the ONE shared derivation (screen == PDF)", () 
     const d = { mitigation: { intersectAcres: 2, volumeCf: 8 * AF, volumeAcFt: 8 }, mitProvided: { creditedCf: 3 * AF } };
     const { mit } = stormwaterBarSpecs(d);
     expect(mit.status).toBe("short");
-    expect(mit.verdict).toMatch(/−5\.00 ac-ft/);
+    expect(mit.verdict).toMatch(/−5\.0 ac-ft/);
   });
   it("mitigation volume UNKNOWN → an unknown bar", () => {
     const d = { mitigation: { intersectAcres: 2, volumeCf: null } };
@@ -163,7 +163,7 @@ describe("B909 round 3 polish — a shortfall/requirement inside display-precisi
     const { mit } = stormwaterBarSpecs(d);
     expect(mit.status).not.toBe("short");
     expect(mit.verdict).not.toMatch(/short/i);
-    expect(mit.verdict).not.toMatch(/-0\.00/i);
+    expect(mit.verdict).not.toMatch(/[−-]0\.0/i); // never a signed zero (1-decimal, B3)
   });
   it("mitigation: a real requirement met within epsilon (rounding residue) reads COVERED, not SHORT -0.00", () => {
     const d = { mitigation: { intersectAcres: 2, volumeCf: 4 * AF, volumeAcFt: 4 }, mitProvided: { creditedCf: (4 - 1e-9) * AF } };

@@ -1,7 +1,7 @@
 // FINAL UI SPEC Part B — the Yield-panel verdict strip (B1.1) + number-format rule (B2/B3).
 // Pure tests over lib/yieldVerdicts.js (the repo's vitest config is DOM-free).
 import { describe, it, expect } from "vitest";
-import { fmtAcFt, fmtProvidedOfRequired, yieldVerdictStrip } from "../src/workspaces/site-planner/lib/yieldVerdicts.js";
+import { fmtAcFt, fmtProvidedOfRequired, fmtSignedAcFt, yieldVerdictStrip } from "../src/workspaces/site-planner/lib/yieldVerdicts.js";
 
 describe("B2/B3 — ac-ft number format (1 decimal, no signed zero)", () => {
   it("formats to one decimal", () => {
@@ -19,6 +19,17 @@ describe("B2/B3 — ac-ft number format (1 decimal, no signed zero)", () => {
   });
   it("provided / required renders the 15.0 / 33.8 shape", () => {
     expect(fmtProvidedOfRequired(15, 33.8)).toBe("15.0 / 33.8");
+  });
+});
+
+describe("B2/B3 — fmtSignedAcFt (delta, never a signed zero)", () => {
+  it("signs a real delta and drops the sign at a near-zero residue", () => {
+    expect(fmtSignedAcFt(5)).toBe("+5.0");
+    expect(fmtSignedAcFt(-15)).toBe("−15.0");
+    expect(fmtSignedAcFt(0)).toBe("0.0");
+    expect(fmtSignedAcFt(-0.03)).toBe("0.0");   // never "−0.0"
+    expect(fmtSignedAcFt(0.02)).toBe("0.0");     // never "+0.00"
+    expect(fmtSignedAcFt(0.2)).toBe("+0.2");
   });
 });
 

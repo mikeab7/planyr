@@ -125,7 +125,7 @@ import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
 import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
-import { yieldVerdictStrip } from "./lib/yieldVerdicts.js";
+import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt } from "./lib/yieldVerdicts.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote } from "./lib/pondChangeSummary.js";
@@ -9836,14 +9836,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the sheet must not credit gross volume as usable any more than the screen may.
       pairs.push(["Det. req / prov (usable)", d.providedUsableCf == null
         ? `${f2(reqAcFt)} / UNKNOWN — re-check (usable split not saved)`
-        : `${f2(reqAcFt)} / ${f2(d.providedUsableCf / 43560)} ac-ft${caution}`]);
+        : `${f2(reqAcFt)} / ${f1(d.providedUsableCf / 43560)} ac-ft${caution}`]);
     }
     const mit = d && d.mitigation;
     const geoFailed = d && d.floodGeo && d.floodGeo.state === "failed";
     if (geoFailed) {
       pairs.push(["Floodplain mitigation", "UNKNOWN (source unavailable)"]);
     } else if (mit && mit.intersectAcres > 0) {
-      let v = mit.volumeCf != null ? `${f2(mit.volumeAcFt)} ac-ft` : "UNKNOWN";
+      let v = mit.volumeCf != null ? `${f1(mit.volumeAcFt)} ac-ft` : "UNKNOWN";
       if (mit.volumeCf != null && mit.providers?.wse1pct === "bfe-line-interp") v += " (derived BFE — screening est.)";
       // B794 (PDF-PARITY with the card's basis note): the DRAFT label carries the §9-basis
       // qualifier — the Atlas-14 read stands in for the pre-Atlas-14 FIS basis, not equals it.
@@ -9873,10 +9873,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const bal = provAcFt - mit.volumeAcFt;
           // NEW-2 (PDF-PARITY): "over-dug" is retired here too — a surplus prints "covered".
           const balTag = bal < 0 ? ` — ${f2(Math.abs(bal))} SHORT` : " — covered";
-          pairs.push(["Mit. req / prov (credited)", `${f2(mit.volumeAcFt)} / ${f2(provAcFt)} ac-ft${balTag} · engineer confirms connection`]);
+          pairs.push(["Mit. req / prov (credited)", `${f2(mit.volumeAcFt)} / ${f1(provAcFt)} ac-ft${balTag} · engineer confirms connection`]);
         }
       }
-      if (reqAcFt != null && mit.volumeCf != null) pairs.push(["Combined basin", `${f2(reqAcFt + mit.volumeAcFt)} ac-ft`]);
+      if (reqAcFt != null && mit.volumeCf != null) pairs.push(["Combined basin", `${f1(reqAcFt + mit.volumeAcFt)} ac-ft`]);
     }
     // B759/B760 (PDF-PARITY): the required finished-floor elevation is a screening output
     // too — mirror it on the sheet so print and the on-screen buildability card can't drift.
@@ -18182,6 +18182,45 @@ function barAria(layout, status, unit) {
   const req = layout.bandHi != null ? `band ${layout.bandLo}–${layout.bandHi}` : layout.required;
   return `Provided ${Math.round(layout.provided * 100) / 100} vs required ${req} ${unit} — ${status || ""}`;
 }
+// FINAL UI SPEC B2 — the ONE requirement band: [BADGE] full-label · provided / required
+// ac-ft over a horizontal fill bar (provided÷required, capped 100%), fill green when met /
+// red when short / gray when checking or not-required. Numbers ON the bar (tabular-nums,
+// 1-decimal via fmtAcFt so "−0.00" can never render); endpoint labels 0 and the requirement.
+// The full label never truncates ("Floodplain mitigation", never "Floodplain mit…"). Module
+// scope (MODULE-SCOPE-COMPONENTS). Reads the SAME `spec` (yieldBar.stormwaterBarSpecs) the
+// PDF export walks, so screen and print can't drift.
+const BAND_BADGE = { covered: "COVERED", short: "SHORT", "needs-input": "CHECKING", unknown: "CHECKING", over: "COVERED" };
+function RequirementBand({ spec, Y }) {
+  if (!spec) return null;
+  const { label, layout, status } = spec;
+  const badge = status == null ? "NOT REQUIRED" : (BAND_BADGE[status] || "CHECKING");
+  const badgeTone = badge === "COVERED" ? "good" : badge === "SHORT" ? "danger" : "info";
+  const fill = badge === "COVERED" ? "var(--success-text)" : badge === "SHORT" ? "var(--danger-text)" : Y.muted;
+  const fullLabel = label === "Mitigation" ? "Floodplain mitigation" : label;
+  const provided = layout ? layout.provided : null;
+  const required = layout ? (layout.required != null ? layout.required : layout.bandHi) : null;
+  const known = provided != null && required != null && required > 0.05;
+  const frac = known ? Math.min(1, Math.max(0, provided / required)) : 0;
+  const onBar = known ? `${fmtAcFt(provided)} / ${fmtAcFt(required)}` : "";
+  return (
+    <div style={{ margin: "6px 2px 4px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+        <StatusChip label={badge} tone={badgeTone} />
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: Y.rowLabel, flex: 1, whiteSpace: "normal", overflowWrap: "anywhere" }}>{fullLabel}</span>
+        {known ? <span style={{ fontFamily: NUM_FONT, fontSize: 11.5, fontVariantNumeric: TABULAR_NUMS, color: Y.text, fontWeight: 650, whiteSpace: "nowrap", flex: "none" }}>{fmtAcFt(provided)} / {fmtAcFt(required)} ac-ft</span> : null}
+      </div>
+      <div style={{ position: "relative", height: 15, borderRadius: 7, background: Y.track, overflow: "hidden" }} role="img"
+        aria-label={known ? `${fullLabel}: provided ${fmtAcFt(provided)} of ${fmtAcFt(required)} ac-ft — ${badge}` : `${fullLabel}: ${badge}`}>
+        <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${frac * 100}%`, background: fill, transition: "width .2s ease" }} />
+        {onBar ? <span style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, display: "flex", alignItems: "center", paddingLeft: 7, fontFamily: NUM_FONT, fontSize: 9.5, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS, color: frac > 0.4 ? "var(--on-accent)" : Y.text, pointerEvents: "none" }}>{onBar}</span> : null}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: Y.muted, marginTop: 1, fontVariantNumeric: TABULAR_NUMS }}>
+        <span>0</span>
+        <span>{known ? `${fmtAcFt(required)} ac-ft` : (badge === "NOT REQUIRED" ? "none required" : "checking…")}</span>
+      </div>
+    </div>
+  );
+}
 function BulletBar({ layout, width = 210, status = null, unit = "ac-ft", Y }) {
   if (!layout) return null;
   const built = layout.mode === "stacked" ? stackedBarMarks(layout, { w: width }) : bulletBarMarks(layout, { w: width, unit });
@@ -18398,90 +18437,9 @@ function YieldPanel({
     ? (swSummaryVerdict.tone === "danger" ? "detention short" : swSummaryVerdict.tone === "good" ? "detention covered ✓" : "checking flood data")
     : "run a drainage check";
   const landSummary = hasSite ? `${f2(acres)} ac · ${f0(cov)}% coverage · ${f0(bldg / 1000)}k sf` : "no site drawn";
-
-  return (
-    <div style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
-      {/* header — identity tile + label + collapse chevron (collapse preserved) */}
-      <div onClick={() => setOpenPanel((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "9px 11px", userSelect: "none" }}>
-        <span style={{ width: 32, height: 32, borderRadius: 9, background: Y.iconTile, display: "grid", placeItems: "center", flex: "none" }}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2.2" y="2.2" width="13.6" height="13.6" rx="2.6" stroke={Y.buildingAccent} strokeWidth="1.4" />
-            <rect x="4.6" y="8" width="5.6" height="5.4" rx="0.7" fill={Y.buildingAccent} />
-            <rect x="10.6" y="4.4" width="3.2" height="3.2" rx="0.6" fill={Y.buildingAccent} opacity="0.5" />
-          </svg>
-        </span>
-        <span style={{ flex: 1, fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Site Yield</span>
-        {openPanel && <span onClick={(e) => e.stopPropagation()}><SourcesLegend /></span>}
-        <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10 }}>▶</span>
-      </div>
-
-      {openPanel && (
-        <div style={{ padding: "0 12px 13px" }}>
-          {/* B652 warning + B715 fix: two or more ACTIVE parcels cover the same ground. Site area now
-              DISSOLVES the overlap (counts it once), so the acreage is correct — but an overlap usually
-              means a duplicate/stray outline worth reviewing. Non-blocking; names the offending parcels. */}
-          {parcelOverlaps && (
-            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "rgba(234,179,8,0.13)", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
-              <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap</div>
-              <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac of overlap). Site area counts the shared ground once — but if one is a duplicate or stray outline, make it inactive in the Parcel panel.</div>
-            </div>
-          )}
-          {/* FINAL UI SPEC B1.1 — the verdict strip: up to four one-line verdicts (colored
-              dot + never-truncated sentence) that lead the panel, read off the SAME drainage
-              object the detailed groups below expand on. A detention/mitigation shortfall
-              hangs a compact ⚡ Design pond button off its line; the data's age reads on a
-              single quiet line (SWR house rule — always show the age). */}
-          {drainage && (() => {
-            const strip = yieldVerdictStrip(drainage);
-            if (!strip.length) return null;
-            const dotColor = (t) => t === "good" ? "var(--success-text)" : t === "danger" ? "var(--danger-text)" : t === "warn" ? Y.warnText : Y.muted;
-            const ageMs = drainage.floodAgeMs;
-            return (
-              <div style={{ margin: "10px 0 4px" }} data-testid="yield-verdict-strip">
-                {strip.map((v) => (
-                  <div key={v.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
-                    <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: dotColor(v.tone) }} />
-                    <span style={{ fontSize: 12, fontWeight: 650, color: Y.text, lineHeight: 1.4, flex: 1 }}>{v.text}</span>
-                    {v.short && drainage.onDesignPond ? (
-                      <button type="button" onClick={drainage.onDesignPond} title="Draws (or grows) a right-sized pond and solves its outlet — one click, no map skill required." style={{ flex: "none", padding: "3px 9px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Design pond</button>
-                    ) : null}
-                  </div>
-                ))}
-                {ageMs != null && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10.5, color: Y.muted }}>
-                    <span>Flood data {formatAge(ageMs)}</span>
-                    {drainage.onCheck ? <button type="button" onClick={drainage.onCheck} title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", padding: 0 }}>· ↻ Re-check</button> : null}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-          {/* FINAL UI SPEC B1.2 — the panel folds into top-level Collapse groups: ① Stormwater
-              (open) · ② Land & yield (closed) · (Costs live in the parent as ④). The verdict strip
-              above leads; the detailed verdict groups (Detention/Mitigation/Buildability) nest here. */}
-          <Collapse sectionId="yield-stormwater" title="Stormwater" defaultOpen={true} summary={swSummary}>
-          {/* B722: an undefined percentage feeds real detention decisions — define exactly what
-              the engine sums, verified against the impervious accumulator (bldg + paving/roads/
-              sidewalks + parking + trailer, each incl. derived curbs). Pond surface is a SEPARATE
-              tally (it's neither impervious nor open) — it does NOT count here. */}
-          <div key="Impervious" title="What counts as impervious: building footprints (incl. bump-outs) + paving, roads & sidewalks + car parking + trailer storage — each including its derived curbs. Detention pond surface is tallied separately below and is NOT counted as impervious." style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "help" }}>
-            <span style={{ fontSize: 12, color: Y.rowLabel, borderBottom: `1px dotted ${Y.muted}` }}>Impervious<span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span></span>
-            <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: Y.text, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{f0(impPct)}%</span>
-          </div>
-          {row("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
-          {row("Detention %", `${f0(detPct)}%`)}
-          {/* B719: site-wide detention STORAGE (volume) — Σ detentionStorage() across every pond,
-              in acre-feet (the number that actually sizes a pond; cf is the secondary). Same
-              accumulator (providedDetCf) the drainage screen reads as "Detention provided", so the
-              rollup can never disagree with the sum of the per-pond panel readouts. This is the
-              "Provided" half of the future required-vs-provided check — the sibling "Required
-              (screening)" / "Headroom" rows slot in right here without rework. */}
-          {row("Detention storage", `${f2(providedDetCf / 43560)} ac-ft`, pondCount ? `· ${f0(providedDetCf)} cf` : "· no ponds drawn", false,
-            pondCount > 0 ? { code: "plan", basis: "Prismoidal (average-end-area) volume off every pond's drawn footprint and depth." } : null)}
-          {/* B630–B632: required-vs-provided detention, analysis tier, hydraulic regime.
-              GIS facts load on the explicit button (house rule); every number carries its
-              rule record via ruleBadge — a bare number here is a defect. */}
-          {drainage && (() => {
+  // FINAL UI SPEC B1.2 — compute the drainage verdict groups ONCE, split so ① Stormwater
+  // renders the det/mit/bal groups and ③ Buildability/FFE renders the ffe group separately.
+  const drainageBlocks = drainage ? (() => {
             const d = drainage;
             // B823 — warn notes are hard-capped at ONE line (≤110 chars, unit-guarded); the
             // teaching/detail copy rides an optional ⓘ hover (native title — the infoRow pattern).
@@ -18724,7 +18682,7 @@ function YieldPanel({
                     <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                       <span style={{ color: Y.muted, fontSize: 10, flex: "none" }}>{open ? "▾" : "▸"}</span>
                       {chip ? <StatusChip label={chip} tone={tone} /> : null}
-                      <span style={{ fontSize: 11, fontWeight: 700, color: Y.rowLabel, letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: Y.rowLabel, letterSpacing: "0.02em", whiteSpace: "normal", overflowWrap: "anywhere" }}>{label}</span>
                     </span>
                     <span style={{ fontFamily: NUM_FONT, fontSize: 13.5, fontWeight: 800, fontVariantNumeric: TABULAR_NUMS, color: vColor, textAlign: "right", whiteSpace: "nowrap", flex: "none" }}>
                       <FlashValue token={String(verdict)}>{verdict}</FlashValue>{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10 }}> {sub}</span> : null}
@@ -18751,7 +18709,7 @@ function YieldPanel({
               );
             };
             if (req && (req.kind === "point" || req.kind === "none")) {
-              detR.push(row("Detention required", `${f2(req.requiredAcFt ?? 0)} ac-ft`, req.governing ? "greater-of" : "", false, { code: "code" }));
+              detR.push(row("Detention required", `${f1(req.requiredAcFt ?? 0)} ac-ft`, req.governing ? "greater-of" : "", false, { code: "code" }));
               detR.push(keyedNote(ruleBadge(req.rule, req.rateAcFtPerAc), "badge"));
               // Municipal adopt-by-reference: show the overlay's own record + its extra rule.
               if (req.overlayRule) {
@@ -18762,10 +18720,10 @@ function YieldPanel({
                 // B750 — name the reviewing authority (detected/overridden) DISTINCTLY from the
                 // governing-rate authority (the badge). On a >20 ac Houston tract they differ, and
                 // that difference read as indecision; spell out that it's Houston's own rule.
-                const cands = req.governing.candidates.map((c) => `${c.rule?.authorityLabel || c.authorityId} ${f2(c.acFt)} ac-ft`);
+                const cands = req.governing.candidates.map((c) => `${c.rule?.authorityLabel || c.authorityId} ${f1(c.acFt)} ac-ft`);
                 const govLabel = req.rule?.authorityLabel || req.governing.picked;
                 if (d.reviewer?.authorityId === "coh" && req.governing.picked === "hcfcd") {
-                  detR.push(keyedNote(`Reviewing authority: ${d.reviewer.label} ${d.reviewer.source === "override" ? "(you set this)" : detectedPhrase}. For a tract over 20 acres, City of Houston applies the larger of its own rate and HCFCD's — ${cands.join(" vs ")} — so ${govLabel}'s ${f2(req.requiredAcFt ?? 0)} ac-ft governs.`, "gov"));
+                  detR.push(keyedNote(`Reviewing authority: ${d.reviewer.label} ${d.reviewer.source === "override" ? "(you set this)" : detectedPhrase}. For a tract over 20 acres, City of Houston applies the larger of its own rate and HCFCD's — ${cands.join(" vs ")} — so ${govLabel}'s ${f1(req.requiredAcFt ?? 0)} ac-ft governs.`, "gov"));
                 } else {
                   detR.push(keyedNote(`Greater-of: ${cands.join(" vs ")} — more restrictive governs${d.reviewer?.label ? ` (${d.reviewer.label} review)` : ""}.`, "gov"));
                 }
@@ -18776,7 +18734,7 @@ function YieldPanel({
               if (req.flags.includes("hcfcd-not-applicable")) detR.push(warnNote("Houston set as reviewer but the site is outside Harris — Houston's own rate shown alone.", "hcfcd-na", "You set City of Houston as the reviewing agency, but this site is outside Harris County, so HCFCD's rate can't apply. Double-check the reviewing agency under Assumptions."));
             } else if (req && req.kind === "band") {
               // Band authorities NEVER render a single number.
-              detR.push(row("Detention required", `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`, "screening band", false, { code: "code" }));
+              detR.push(row("Detention required", `${f1(req.bandAcFt[0])}–${f1(req.bandAcFt[1])} ac-ft`, "", false, { code: "code" }));
               // The badge shows the GOVERNING per-acre band (e.g. "0.75–1.0 ac-ft/ac by
               // outfall"), never the rule record's base rate — an unset-outfall Harris band
               // read "0.65 ac-ft/ac" directly under the 0.75–1.0 figure (contradictory).
@@ -18797,7 +18755,7 @@ function YieldPanel({
               detR.push(warnNote(req.basis, "unk"));
               if (req.governing?.candidates?.length) {
                 for (const c of req.governing.candidates) {
-                  detR.push(row(`· if ${c.rule?.authorityLabel || c.authorityId}`, c.result?.kind === "band" ? `${f2(c.result.bandAcFt[0])}–${f2(c.result.bandAcFt[1])} ac-ft` : `${f2(c.acFt)} ac-ft`, "", true));
+                  detR.push(row(`· if ${c.rule?.authorityLabel || c.authorityId}`, c.result?.kind === "band" ? `${f2(c.result.bandAcFt[0])}–${f1(c.result.bandAcFt[1])} ac-ft` : `${f1(c.acFt)} ac-ft`, "", true));
                   if (c.rule) detR.push(keyedNote(ruleBadge(c.rule, c.result?.rateAcFtPerAc ?? c.result?.rateBandAcFtPerAc, c.result?.rateBandLabel), `cand-badge-${c.authorityId}`));
                 }
               }
@@ -18805,7 +18763,7 @@ function YieldPanel({
               // Boundary straddle: every candidate labeled + its rule record — never a silent default.
               detR.push(row("Detention required", "straddle"));
               for (const { aid, r } of d.reqCandidates) {
-                detR.push(row(`· if ${r.rule?.authorityLabel || aid}`, r.kind === "band" ? `${f2(r.bandAcFt[0])}–${f2(r.bandAcFt[1])} ac-ft` : r.kind === "point" ? `${f2(r.requiredAcFt)} ac-ft` : "unknown", "", true));
+                detR.push(row(`· if ${r.rule?.authorityLabel || aid}`, r.kind === "band" ? `${f2(r.bandAcFt[0])}–${f1(r.bandAcFt[1])} ac-ft` : r.kind === "point" ? `${f1(r.requiredAcFt)} ac-ft` : "unknown", "", true));
                 if (r.rule) detR.push(keyedNote(ruleBadge(r.rule, r.rateAcFtPerAc ?? r.rateBandAcFtPerAc, r.rateBandLabel), `straddle-badge-${aid}`));
               }
               if (d.ambiguous[0]) detR.push(warnNote(d.ambiguous[0].detail, "straddle"));
@@ -18835,15 +18793,15 @@ function YieldPanel({
             if (d.providedUsableCf == null) {
               // NEW-9 — restored check without the per-pond split: gross is shown AS gross,
               // with a loud "usable unknown" warning — never silently credited as usable.
-              detR.push(row("Detention provided (gross)", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "", false, { code: "plan" }));
+              detR.push(row("Detention provided (gross)", `${f1(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "", false, { code: "plan" }));
               detR.push(warnNote("Usable split wasn't saved with this remembered check — gross OVERSTATES usable; ↻ re-check.", "det-remembered-split",
                 "This remembered check predates the per-pond split record (or a pond was drawn after it). How much of the gross volume is usable for detention (above the flood water surface and the permanent pool) is unknown until the next live check — so no surplus/short verdict is shown."));
             } else if (d.deadCf > 0) {
-              detR.push(infoRow("Detention provided", `${f2(providedAcFt)} ac-ft`,
-                `Usable ${f2(usableAcFt)} ac-ft after ${f2(d.deadCf / 43560)} ac-ft sits below the flood WSE / permanent pool — dead storage earns no credit. Anchored ponds split at their real water surfaces; the rest use the Regime-B estimate.`,
+              detR.push(infoRow("Detention provided", `${f1(providedAcFt)} ac-ft`,
+                `Usable ${f1(usableAcFt)} ac-ft after ${f1(d.deadCf / 43560)} ac-ft sits below the flood WSE / permanent pool — dead storage earns no credit. Anchored ponds split at their real water surfaces; the rest use the Regime-B estimate.`,
                 { key: "provided", sub: d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""} · usable ${f2(usableAcFt)}` : `· usable ${f2(usableAcFt)}`, tag: { code: "plan" } }));
             } else {
-              detR.push(row("Detention provided", `${f2(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn", false, { code: "plan" }));
+              detR.push(row("Detention provided", `${f1(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn", false, { code: "plan" }));
             }
             // NEW-1 — the fully-inundated crisis, surfaced as a LOUD inline remedy row: the flood
             // WSE sits at/above the top of bank, so usable detention is ZERO no matter how large the
@@ -18905,9 +18863,9 @@ function YieldPanel({
                 for (const [cls, bucket] of Object.entries(mit.perClass || {})) {
                   if (!(bucket.acres > 0)) continue;
                   const clsLbl = cls === "1pct" ? "1% (100-yr) floodplain fill" : cls === "02pct" ? "0.2% (500-yr) band fill" : "Regulatory FLOODWAY fill";
-                  mitR.push(row(clsLbl, `${f2(bucket.acres)} ac`, cls === "floodway" ? "" : bucket.volumeCf != null ? `· ${f2(bucket.volumeCf / 43560)} ac-ft` : "· UNKNOWN"));
+                  mitR.push(row(clsLbl, `${f2(bucket.acres)} ac`, cls === "floodway" ? "" : bucket.volumeCf != null ? `· ${f1(bucket.volumeCf / 43560)} ac-ft` : "· UNKNOWN"));
                 }
-                if (mit.volumeCf != null) mitR.push(row("Required compensating storage", `${f2(mit.volumeAcFt)} ac-ft`, `· ${f2(mit.cutCy)} cy`, false, { code: "code" }));
+                if (mit.volumeCf != null) mitR.push(row("Required compensating storage", `${f1(mit.volumeAcFt)} ac-ft`, `· ${f2(mit.cutCy)} cy`, false, { code: "code" }));
                 // NEW-8 — the Provided/Balance ledger: below-WSE cut CREDITED from ponds whose
                 // role is Mitigation or Dual (set per pond in its inspector). Role only gates
                 // credit — the detention usable split (B708) is untouched, and the exclusive
@@ -18920,14 +18878,14 @@ function YieldPanel({
                   } else {
                     const provAcFt = provCf / 43560;
                     const nProv = d.mitProvided.pondCount;
-                    mitR.push(infoRow("Provided (credited pond cut)", `${f2(provAcFt)} ac-ft`,
+                    mitR.push(infoRow("Provided (credited pond cut)", `${f1(provAcFt)} ac-ft`,
                       "Below-WSE cut in ponds whose purpose is Mitigation or Hybrid — set each pond's purpose in its inspector. Below the flood WSE the flood already occupies the volume at design stage: no detention credit, but it IS candidate compensating storage for fill. Credit is a screening call: the cut must be hydraulically connected to the floodplain at flood stages and sit in the same watershed; your engineer confirms both.",
                       { key: "mit-prov", sub: nProv ? `· ${nProv} pond${nProv > 1 ? "s" : ""}` : "· no credited ponds", tag: { code: "plan" } }));
                     const bal = provAcFt - mit.volumeAcFt;
                     const overBy = bal - Math.max(1, mit.volumeAcFt * 0.1); // beyond required + max(1 ac-ft, 10%)
                     // NEW-2 — a surplus reads quiet COVERED (green), only a real shortfall is loud
                     // (danger); "over-dug" is retired from the salient balance line.
-                    const balText = bal < 0 ? `−${f2(Math.abs(bal))} ac-ft SHORT` : "covered";
+                    const balText = bal < 0 ? `${f1(Math.abs(bal))} ac-ft SHORT` : "covered";
                     const balColor = bal < 0 ? Y.dangerText : Y.green;
                     mitR.push(
                       <div key="mit-balance" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
@@ -18956,7 +18914,7 @@ function YieldPanel({
                       </span>
                     </div>
                   );
-                  if (heat.on && heat.totals) mitR.push(keyedNote(`Overlay Σ ${f2(heat.totals.volumeAcFt)} ac-ft = ledger ${heat.ledgerAcFt != null ? f2(heat.ledgerAcFt) : "—"} ac-ft — same cells, by construction.`, "mit-heat-tie"));
+                  if (heat.on && heat.totals) mitR.push(keyedNote(`Overlay Σ ${f1(heat.totals.volumeAcFt)} ac-ft = ledger ${heat.ledgerAcFt != null ? f2(heat.ledgerAcFt) : "—"} ac-ft — same cells, by construction.`, "mit-heat-tie"));
                 }
                 if (mit.volumeCf != null) {
                   const mitTag = mit.expertBypass ? "expert avg-depth"
@@ -18965,7 +18923,7 @@ function YieldPanel({
                     : mit.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr"
                     : "";
                   // NEW-1(a) — "volumes are additive" teaching copy → ⓘ on the row.
-                  mitR.push(infoRow("Mitigation volume", `+${f2(mit.volumeAcFt)} ac-ft`,
+                  mitR.push(infoRow("Mitigation volume", `+${f1(mit.volumeAcFt)} ac-ft`,
                     "Additive with detention — the same acre-foot can't count twice. The mitigation cut must be hydraulically connected to the floodplain at flood stages; the per-class ledger, providers and derivation notes are the rows of this group (B824 — one drainage home).",
                     { key: "mit", sub: mitTag, tag: { code: "code", basis: "The compensating-storage ratio is the adopted criteria value; the fill footprint it's applied to is measured from your drawn geometry." } }));
                   // B755 — when the volume is priced off a DERIVED BFE, say so loudly (an
@@ -18994,7 +18952,7 @@ function YieldPanel({
                   }
                   if (d.mitigationStraddle && d.mitigationStraddle.anyUnknown) mitR.push(warnNote("Straddle with an UNKNOWN candidate — worst PRICED case shown.", "mit-straddle-unk", "One straddle candidate couldn't be priced, so it could govern with a larger number than shown. Enter its elevations to price it."));
                   if (req && req.kind === "point" && req.requiredAcFt > 0) {
-                    mitR.push(row("Combined basin volume", `${f2(req.requiredAcFt + mit.volumeAcFt)} ac-ft`, "", false, { code: "code" }));
+                    mitR.push(row("Combined basin volume", `${f1(req.requiredAcFt + mit.volumeAcFt)} ac-ft`, "", false, { code: "code" }));
                   }
                 } else {
                   mitR.push(row("Floodplain mitigation", "UNKNOWN"));
@@ -19014,7 +18972,7 @@ function YieldPanel({
                 if (mit.flags.includes("unstudied_a")) mitR.push(warnNote("Unstudied Zone A on the site — BFE undetermined from the map.", "mit-unstudied-a", "FEMA publishes no BFE for this zone; a flood study or the effective model sets the governing elevation."));
                 if (mit.flags.includes("datum_mismatch")) mitR.push(warnNote("A zone publishes a non-NAVD88 datum — convert before comparing.", "mit-datum", "Mixed datums are a multi-foot silent error in the Houston area (subsidence): convert NGVD29 values to NAVD88 before entering or comparing."));
                 if (d.floodGeo?.bfeLineFlags && d.floodGeo.bfeLineFlags.usable === 0 && d.floodGeo.bfeLineFlags.datumExcluded > 0) mitR.push(warnNote("FEMA BFE lines here publish a non-NAVD88 datum — no auto-derive; enter one manually.", "mit-bfe-datum", "Deriving from a mixed datum would be a multi-foot silent error, so the tool refuses. Convert the published lines to NAVD88 and enter a BFE below."));
-                if (d.mitigationStraddle) mitR.push(warnNote(`Jurisdiction straddle — every candidate priced, worst case shown${d.mitigationStraddle.anyUnknown ? " (one UNKNOWN)" : ""}.`, "mit-straddle-detail", `Candidates: ${d.mitigationStraddle.candidates.map((c) => `${c.rule.label} ${c.result.volumeCf != null ? f2(c.result.volumeCf / 43560) + " ac-ft" : "unknown"}`).join(" · ")}.`));
+                if (d.mitigationStraddle) mitR.push(warnNote(`Jurisdiction straddle — every candidate priced, worst case shown${d.mitigationStraddle.anyUnknown ? " (one UNKNOWN)" : ""}.`, "mit-straddle-detail", `Candidates: ${d.mitigationStraddle.candidates.map((c) => `${c.rule.label} ${c.result.volumeCf != null ? f1(c.result.volumeCf / 43560) + " ac-ft" : "unknown"}`).join(" · ")}.`));
                 if (mit.expertBypass) mitR.push(keyedNote("Expert bypass in use — volume = intersect area × the entered average fill depth.", "mit-bypass"));
                 mitR.push(keyedNote(`Rule: ${d.mitigationRule?.label} — ${mit.trigger === "1pct_plus_02pct" ? "1% + 0.2% trigger" : "1% trigger"} @ ${mit.ratio}:1${d.mitigationRule?.offsetScope === "storage_and_conveyance" ? " (offsets storage AND conveyance — large contiguous fringe fill can trigger a no-rise/hydraulic analysis beyond this volume screen)" : ""}.`, "mit-rule"));
                 mitR.push(keyedNote(`Providers: pad FFE ${{ "proposed-surface": "proposed surface (auto-grade)" }[mit.providers.padElev] || mit.providers.padElev || "—"} · grade ${{ "3dep-grid": "3DEP per-cell grid", "3dep": "3DEP median" }[mit.providers.existGrade] || mit.providers.existGrade || "—"} · 1% WSE ${wseProvLabel(mit.providers.wse1pct)} · 0.2% WSE ${wseProvLabel(mit.providers.wse02pct)}${d.floodGeo && d.floodGeo.ts != null ? ` · flood data ${formatAge(Date.now() - d.floodGeo.ts)}` : ""}`, "mit-providers"));
@@ -19026,22 +18984,22 @@ function YieldPanel({
                 // flat), and the grid's own flags surface one line each (the B823 cap).
                 if (mit.gradeBasis === "median") mitR.push(keyedNote("Flat-grade estimate — one median grade priced every cell.", "mit-flat", "The per-cell 3DEP grid was unavailable this check (or the check predates it) — every cell priced at the site-median grade. ↻ Re-check to fetch the grid; a typed grade always overrides."));
                 if (mit.flags.includes("grid-voids")) mitR.push(warnNote("Over 5% of the priced footprint sits on DEM voids — those cells priced nothing.", "mit-voids", "The 3DEP grid has no ground return under part of the footprint (water, structures, data gaps). Void cells are EXCLUDED from the volume — treat the number as a floor there and confirm grades before design."));
-                if (mit.flags.includes("grid-median-delta") && mit.volumeFlatCf != null) mitR.push(warnNote(`Terrain relief moved this volume >15% vs the flat-grade estimate.`, "mit-delta", `Per-cell grid: ${f2(mit.volumeAcFt)} ac-ft vs flat median: ${f2(mit.volumeFlatCf / 43560)} ac-ft. The old single-grade number was silently wrong on this site — the per-cell figure stands (screening).`));
+                if (mit.flags.includes("grid-median-delta") && mit.volumeFlatCf != null) mitR.push(warnNote(`Terrain relief moved this volume >15% vs the flat-grade estimate.`, "mit-delta", `Per-cell grid: ${f1(mit.volumeAcFt)} ac-ft vs flat median: ${f1(mit.volumeFlatCf / 43560)} ac-ft. The old single-grade number was silently wrong on this site — the per-cell figure stands (screening).`));
                 // NEW-8 — what remains a footnote is only the UNCREDITED remainder (below-WSE
                 // cut sitting in detention-role ponds); the credited share now lives in the
                 // Provided row above instead of being footnoted away.
-                if (d.mitProvided && d.mitProvided.uncreditedCf > 0.05 * 43560) mitR.push(warnNote(`Below-WSE cut in detention-purpose ponds: ${f2(d.mitProvided.uncreditedCf / 43560)} ac-ft — uncredited.`, "mit-cand",
+                if (d.mitProvided && d.mitProvided.uncreditedCf > 0.05 * 43560) mitR.push(warnNote(`Below-WSE cut in detention-purpose ponds: ${f1(d.mitProvided.uncreditedCf / 43560)} ac-ft — uncredited.`, "mit-cand",
                   "This volume sits below the flood WSE in ponds whose purpose is Detention, so it is credited to neither ledger (it earns no detention credit either). Set a pond's purpose to Mitigation or Hybrid in its inspector to credit its below-WSE cut here."));
                 // B833 — transition wedges + in-floodplain pond berms are REAL fill: when the
                 // proposed surface priced them, the required volume above already includes
                 // them and the delta is named; without the surface the footprint-only figure
                 // stays honestly labeled a FLOOR.
                 if (mit.wedgePriced) {
-                  if (mit.wedgeAcFt > 0) mitR.push(warnNote(`+${f2(mit.wedgeAcFt)} ac-ft of the requirement comes from transition slopes past pad edges.`, "mit-wedge",
+                  if (mit.wedgeAcFt > 0) mitR.push(warnNote(`+${f1(mit.wedgeAcFt)} ac-ft of the requirement comes from transition slopes past pad edges.`, "mit-wedge",
                     "Past every graded edge the fill continues as a daylight wedge (3:1 default, 4:1 with the mowable toggle) down to existing ground; inside the mapped floodplain that wedge displaces storage too, so it joins the required volume. Priced from the auto-graded surface's transition cells — screening; the wedge fringe renders on the cut/fill map."));
                   if (mit.wedgeUnknownSf > 0.02 * SQFT_PER_ACRE) mitR.push(warnNote(`~${f2(mit.wedgeUnknownSf / SQFT_PER_ACRE)} ac of wedge sits on unpriceable cells — the wedge share is a floor.`, "mit-wedge-unk",
                     "Part of the transition fringe crosses DEM voids or zones without a usable water surface — those cells price nothing (never zero-as-a-number). Enter a BFE or re-check to close the gap."));
-                  if (mit.bermAcFt > 0) mitR.push(warnNote(`+${f2(mit.bermAcFt)} ac-ft from pond berms whose toe crosses the mapped floodplain.`, "mit-berm",
+                  if (mit.bermAcFt > 0) mitR.push(warnNote(`+${f1(mit.bermAcFt)} ac-ft from pond berms whose toe crosses the mapped floodplain.`, "mit-berm",
                     "A bermed pond's embankment is placed fill; the below-WSE share of a berm face inside the floodplain displaces storage, so it joins the requirement (sampled toe share × the below-WSE slice — screening; upland berms price as earthwork only, never here)."));
                 } else {
                   mitR.push(warnNote("Fill priced at element footprints — daylight/transition slopes aren't counted here; treat as a floor.", "mit-wedge-floor",
@@ -19074,7 +19032,7 @@ function YieldPanel({
                 <div key="deficit" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: Y.rowLabel }}>{diff >= 0 ? "Surplus" : "Shortfall"}</span>
                   <span style={{ fontFamily: NUM_FONT, fontSize: 13, fontWeight: 750, fontVariantNumeric: TABULAR_NUMS, color: diff >= 0 ? Y.green : Y.dangerText }}>
-                    {diff >= 0 ? "+" : "−"}{f2(Math.abs(diff))} ac-ft
+                    {fmtSignedAcFt(diff)} ac-ft
                   </span>
                 </div>
               );
@@ -19533,8 +19491,9 @@ function YieldPanel({
             // the PDF export can't drift; only the header CHIP / verdict word (richer — floodway,
             // straddle, remembered states) is computed here.
             const swSpecs = stormwaterBarSpecs(d);
-            const detBar = swSpecs.det ? <BulletBar layout={swSpecs.det.layout} status={swSpecs.det.status} Y={Y} /> : null;
-            const mitBar = swSpecs.mit ? <BulletBar layout={swSpecs.mit.layout} status={swSpecs.mit.status} Y={Y} /> : null;
+            // FINAL UI SPEC B2 — the requirement-band redesign (badge + provided/required fill bar).
+            const detBar = swSpecs.det ? <RequirementBand spec={swSpecs.det} Y={Y} /> : null;
+            const mitBar = swSpecs.mit ? <RequirementBand spec={swSpecs.mit} Y={Y} /> : null;
             let detVerdict = "—", detTone = null, detSub = "", detChip = null;
             if (req && req.kind === "point" && req.requiredAcFt > ACFT_EPS && usableAcFt == null) {
               // NEW-9 — usable split unknown on a remembered view: an honest non-verdict + the action.
@@ -19544,7 +19503,7 @@ function YieldPanel({
               // B909 round 3 polish — a shortfall inside display-precision epsilon reads as MET,
               // never a "SHORT -0.00 ac-ft" rounding artifact.
               const short = dv < -ACFT_EPS;
-              detVerdict = `${short ? "−" : "+"}${f2(Math.abs(dv))} ac-ft`;
+              detVerdict = `${fmtSignedAcFt(dv)} ac-ft`;
               detTone = short ? "danger" : "good"; detChip = short ? "SHORT" : "COVERED"; detSub = `req ${f2(req.requiredAcFt)}`;
             } else if (req && req.kind === "point") {
               // A requirement that itself rounds to zero (epsilon residue) is nothing to
@@ -19553,7 +19512,7 @@ function YieldPanel({
             } else if (req && req.kind === "band" && usableAcFt == null) {
               // NEW-1 — a band requirement with an unknown usable split is honestly "unknown",
               // never a gross-fed all-clear.
-              detVerdict = `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`; detTone = "warn"; detChip = "RE-CHECK"; detSub = "screening band";
+              detVerdict = `${f1(req.bandAcFt[0])}–${f1(req.bandAcFt[1])} ac-ft`; detTone = "warn"; detChip = "RE-CHECK"; detSub = "";
             } else if (req && req.kind === "band") {
               // NEW-1 — the CHIP carries the STATUS (COVERED / SHORT / NEEDS INPUT), computed off
               // USABLE against the band; the requirement TYPE ("screening band") rides the suffix,
@@ -19562,7 +19521,7 @@ function YieldPanel({
               const shortBand = usableAcFt < req.bandAcFt[0] - ACFT_EPS;
               detChip = covered ? "COVERED" : shortBand ? "SHORT" : "NEEDS INPUT";
               detTone = covered ? "good" : shortBand ? "danger" : "warn";
-              detVerdict = `${f2(req.bandAcFt[0])}–${f2(req.bandAcFt[1])} ac-ft`; detSub = "screening band";
+              detVerdict = `${f1(req.bandAcFt[0])}–${f1(req.bandAcFt[1])} ac-ft`; detSub = "";
             } else if (req && req.kind === "unknown") { detVerdict = "required unknown"; detTone = "warn"; detChip = "UNKNOWN"; }
             else if (d.reqCandidates) { detVerdict = "boundary straddle"; detTone = "warn"; detChip = "STRADDLE"; }
             else { detVerdict = "unresolved"; detTone = "warn"; detChip = "SET AGENCY"; }
@@ -19600,7 +19559,7 @@ function YieldPanel({
                   // credit math), so it never reads as a genuine "SHORT -0.00 ac-ft req 0.00".
                   const provAcFt = provCf / 43560;
                   mitVerdict = "not required for this plan"; mitTone = null; mitChip = "NOT REQUIRED";
-                  mitSub = provAcFt > ACFT_EPS ? `${f2(provAcFt)} ac-ft credited anyway` : "";
+                  mitSub = provAcFt > ACFT_EPS ? `${f1(provAcFt)} ac-ft credited anyway` : "";
                 } else {
                   const provAcFt = provCf / 43560;
                   const bal = provAcFt - mitV.volumeAcFt;
@@ -19608,7 +19567,7 @@ function YieldPanel({
                   // NEW-2 — "OVER-DUG" is retired: an over-provided cut just reads COVERED (a
                   // zero-requirement surplus must never out-shout a real detention shortfall).
                   // B909 round 3 — a shortfall inside display-precision epsilon reads as MET.
-                  mitVerdict = short ? `−${f2(Math.abs(bal))} ac-ft` : "covered";
+                  mitVerdict = short ? `${fmtSignedAcFt(bal)} ac-ft` : "covered";
                   mitTone = short ? "danger" : "good";
                   mitChip = short ? "SHORT" : "COVERED";
                   mitSub = `req ${f2(mitV.volumeAcFt)}${mitTag ? ` · ${mitTag}` : ""}`;
@@ -19684,13 +19643,99 @@ function YieldPanel({
                 out.push(groupFold("bal", "Ledger balancer", `${bal.moves.length} move${bal.moves.length > 1 ? "s" : ""} screened`, null, balR, balSub));
               }
             }
-            out.push(groupFold("ffe", "Buildability / FFE", ffeVerdict, ffeTone, ffeR, "", { chip: ffeChip }));
+            // FINAL UI SPEC B1.2 — Buildability/FFE is its OWN top-level group (③): return its
+            // detail rows + verdict/chip so the panel renders them directly there, with the
+            // verdict as the group's closed summary (no redundant nested groupFold header).
             // NEW-1(e) — the bottom "↻ Re-check" button folded into the top status line.
             // B895 — the generic "screening estimate — confirm with your engineer and the
             // reviewing authority" caveat that used to repeat here (and ~6 more times across
             // this panel) now lives ONCE in the panel footer (YieldFooterDisclaimer, below).
-            return out;
+            return { sw: out, ffeR, ffeVerdict, ffeChip, ffeTone };
+          })() : null;
+
+  return (
+    <div style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+      {/* header — identity tile + label + collapse chevron (collapse preserved) */}
+      <div onClick={() => setOpenPanel((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "9px 11px", userSelect: "none" }}>
+        <span style={{ width: 32, height: 32, borderRadius: 9, background: Y.iconTile, display: "grid", placeItems: "center", flex: "none" }}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="2.2" y="2.2" width="13.6" height="13.6" rx="2.6" stroke={Y.buildingAccent} strokeWidth="1.4" />
+            <rect x="4.6" y="8" width="5.6" height="5.4" rx="0.7" fill={Y.buildingAccent} />
+            <rect x="10.6" y="4.4" width="3.2" height="3.2" rx="0.6" fill={Y.buildingAccent} opacity="0.5" />
+          </svg>
+        </span>
+        <span style={{ flex: 1, fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Site Yield</span>
+        {openPanel && <span onClick={(e) => e.stopPropagation()}><SourcesLegend /></span>}
+        <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10 }}>▶</span>
+      </div>
+
+      {openPanel && (
+        <div style={{ padding: "0 12px 13px" }}>
+          {/* B652 warning + B715 fix: two or more ACTIVE parcels cover the same ground. Site area now
+              DISSOLVES the overlap (counts it once), so the acreage is correct — but an overlap usually
+              means a duplicate/stray outline worth reviewing. Non-blocking; names the offending parcels. */}
+          {parcelOverlaps && (
+            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "rgba(234,179,8,0.13)", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
+              <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap</div>
+              <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac of overlap). Site area counts the shared ground once — but if one is a duplicate or stray outline, make it inactive in the Parcel panel.</div>
+            </div>
+          )}
+          {/* FINAL UI SPEC B1.1 — the verdict strip: up to four one-line verdicts (colored
+              dot + never-truncated sentence) that lead the panel, read off the SAME drainage
+              object the detailed groups below expand on. A detention/mitigation shortfall
+              hangs a compact ⚡ Design pond button off its line; the data's age reads on a
+              single quiet line (SWR house rule — always show the age). */}
+          {drainage && (() => {
+            const strip = yieldVerdictStrip(drainage);
+            if (!strip.length) return null;
+            const dotColor = (t) => t === "good" ? "var(--success-text)" : t === "danger" ? "var(--danger-text)" : t === "warn" ? Y.warnText : Y.muted;
+            const ageMs = drainage.floodAgeMs;
+            return (
+              <div style={{ margin: "10px 0 4px" }} data-testid="yield-verdict-strip">
+                {strip.map((v) => (
+                  <div key={v.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                    <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: dotColor(v.tone) }} />
+                    <span style={{ fontSize: 12, fontWeight: 650, color: Y.text, lineHeight: 1.4, flex: 1 }}>{v.text}</span>
+                    {v.short && drainage.onDesignPond ? (
+                      <button type="button" onClick={drainage.onDesignPond} title="Draws (or grows) a right-sized pond and solves its outlet — one click, no map skill required." style={{ flex: "none", padding: "3px 9px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Design pond</button>
+                    ) : null}
+                  </div>
+                ))}
+                {ageMs != null && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10.5, color: Y.muted }}>
+                    <span>Flood data {formatAge(ageMs)}</span>
+                    {drainage.onCheck ? <button type="button" onClick={drainage.onCheck} title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", padding: 0 }}>· ↻ Re-check</button> : null}
+                  </div>
+                )}
+              </div>
+            );
           })()}
+          {/* FINAL UI SPEC B1.2 — the panel folds into top-level Collapse groups: ① Stormwater
+              (open) · ② Land & yield (closed) · (Costs live in the parent as ④). The verdict strip
+              above leads; the detailed verdict groups (Detention/Mitigation/Buildability) nest here. */}
+          <Collapse sectionId="yield-stormwater" title="Stormwater" defaultOpen={true} summary={swSummary}>
+          {/* B722: an undefined percentage feeds real detention decisions — define exactly what
+              the engine sums, verified against the impervious accumulator (bldg + paving/roads/
+              sidewalks + parking + trailer, each incl. derived curbs). Pond surface is a SEPARATE
+              tally (it's neither impervious nor open) — it does NOT count here. */}
+          <div key="Impervious" title="What counts as impervious: building footprints (incl. bump-outs) + paving, roads & sidewalks + car parking + trailer storage — each including its derived curbs. Detention pond surface is tallied separately below and is NOT counted as impervious." style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: "help" }}>
+            <span style={{ fontSize: 12, color: Y.rowLabel, borderBottom: `1px dotted ${Y.muted}` }}>Impervious<span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span></span>
+            <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: Y.text, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{f0(impPct)}%</span>
+          </div>
+          {row("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
+          {row("Detention %", `${f0(detPct)}%`)}
+          {/* B719: site-wide detention STORAGE (volume) — Σ detentionStorage() across every pond,
+              in acre-feet (the number that actually sizes a pond; cf is the secondary). Same
+              accumulator (providedDetCf) the drainage screen reads as "Detention provided", so the
+              rollup can never disagree with the sum of the per-pond panel readouts. This is the
+              "Provided" half of the future required-vs-provided check — the sibling "Required
+              (screening)" / "Headroom" rows slot in right here without rework. */}
+          {row("Detention storage", `${f1(providedDetCf / 43560)} ac-ft`, pondCount ? `· ${f0(providedDetCf)} cf` : "· no ponds drawn", false,
+            pondCount > 0 ? { code: "plan", basis: "Prismoidal (average-end-area) volume off every pond's drawn footprint and depth." } : null)}
+          {/* B630–B632: required-vs-provided detention, analysis tier, hydraulic regime.
+              GIS facts load on the explicit button (house rule); every number carries its
+              rule record via ruleBadge — a bare number here is a defect. */}
+          {drainageBlocks && drainageBlocks.sw}
           </Collapse>
           <Collapse sectionId="yield-land" title="Land & yield" defaultOpen={false} summary={landSummary}>
           {/* KPI cards */}
@@ -19738,7 +19783,7 @@ function YieldPanel({
           {detentionLandTake && (
             <WatchOutChip
               style={{ margin: "6px 2px 0" }}
-              info={`Detention is short ${f2(detentionLandTake.deficitAcFt)} ac-ft against the required volume (site total). At a typical ${detentionLandTake.avgDepthFt}-ft screening pond depth, that shortfall would take roughly ${f2(detentionLandTake.footprintAc)} more acres of land than this plan currently shows drawn — a screening estimate (footprint ≈ volume / assumed depth), not a sized or placed pond. Size/expand a basin to confirm the real footprint.`}
+              info={`Detention is short ${f1(detentionLandTake.deficitAcFt)} ac-ft against the required volume (site total). At a typical ${detentionLandTake.avgDepthFt}-ft screening pond depth, that shortfall would take roughly ${f2(detentionLandTake.footprintAc)} more acres of land than this plan currently shows drawn — a screening estimate (footprint ≈ volume / assumed depth), not a sized or placed pond. Size/expand a basin to confirm the real footprint.`}
             >
               Detention shortfall ≈ +{f2(detentionLandTake.footprintAc)} ac more land (screening estimate)
             </WatchOutChip>
@@ -19764,6 +19809,13 @@ function YieldPanel({
           {groupHead(Y.paving, "Parking")}
           {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
           {row("Trailer stalls", f0(trailers))}
+          </Collapse>
+          {/* FINAL UI SPEC B1.2 — ③ Buildability/FFE is its own top-level group; its verdict is
+              the closed summary and the status badge rides the header. */}
+          <Collapse sectionId="yield-buildability" title="Buildability / FFE" defaultOpen={false}
+            summary={drainageBlocks ? drainageBlocks.ffeVerdict : "run a drainage check"}
+            headerRight={drainageBlocks && drainageBlocks.ffeChip ? <StatusChip label={drainageBlocks.ffeChip} tone={drainageBlocks.ffeTone} /> : null}>
+            {drainageBlocks ? drainageBlocks.ffeR : <div style={{ fontSize: 11, color: Y.muted, padding: "4px 2px" }}>Run a drainage check to screen finished-floor elevations.</div>}
           </Collapse>
 
           {easeAll.length > 0 && (<>

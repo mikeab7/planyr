@@ -45,9 +45,10 @@ test.describe("Yield panel — FINAL UI SPEC Part B top-level groups", () => {
     await drawPond(page);
     await page.getByRole("button", { name: "Yield", exact: true }).click();
 
-    // The three top-level groups' headers.
+    // The four top-level groups' headers (① Stormwater · ② Land & yield · ③ Buildability/FFE · ④ Costs).
     await expect(page.getByRole("button", { name: /Stormwater/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /Land & yield/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Buildability \/ FFE/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Costs road \+ earthwork/i })).toBeVisible();
 
     // ① Stormwater is open by default → its base rows (Detention storage) show.

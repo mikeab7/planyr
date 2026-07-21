@@ -21,7 +21,11 @@
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
-const _f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// FINAL UI SPEC B3 — ac-ft renders to ONE decimal, with a sub-0.05 residue collapsed to a
+// clean 0.0 so a signed zero ("−0.00") can never render (screen AND the shared PDF path).
+const _f2 = (n) => { const v = Math.abs(n) < 0.05 ? 0 : n; return (Math.round(v * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }); };
+// Signed 1-decimal for a delta — a near-zero magnitude reads "+0.0", never "−0.0".
+const _signed = (n) => { const v = Math.abs(n) < 0.05 ? 0 : n; const mag = (Math.round(Math.abs(v) * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }); return `${v < 0 ? "−" : "+"}${mag}`; };
 const CF_PER_ACFT = 43560;
 // Display-precision epsilon (2-decimal ac-ft, same as _f2): a requirement or shortfall this
 // small is floating-point residue (e.g. a berm-fill credit computed to a near-zero remainder),
@@ -128,9 +132,7 @@ export function bulletBarMarks(layout, { w = 200, barH = 12, unit = "ac-ft", sho
     if (layout.noneRequired) {
       marks.push({ t: "text", role: "muted", x: 0, y: barH + 10, s: "required 0 — nothing to offset here", anchor: "start" });
     } else if (layout.delta != null) {
-      const sign = layout.delta >= 0 ? "+" : "−";
-      const mag = Math.abs(Math.round(layout.delta * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      marks.push({ t: "text", role: layout.delta >= 0 ? "good" : "danger", x: w, y: barH + 10, s: `${sign}${mag} ${unit}`, anchor: "end", mono: true });
+      marks.push({ t: "text", role: layout.delta >= 0 ? "good" : "danger", x: w, y: barH + 10, s: `${_signed(layout.delta)} ${unit}`, anchor: "end", mono: true });
     }
   }
   return { marks, w, h: barH + (showDelta ? 13 : 0) };
@@ -156,7 +158,7 @@ export function stormwaterBarSpecs(d) {
   } else if (req && req.kind === "point" && req.requiredAcFt > ACFT_EPS) {
     const dv = usableAcFt - req.requiredAcFt;
     const short = dv < -ACFT_EPS;
-    out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt, required: req.requiredAcFt, reference: providedAcFt }), status: short ? "short" : "covered", verdict: `${short ? "−" : "+"}${_f2(Math.abs(dv))} ac-ft` };
+    out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt, required: req.requiredAcFt, reference: providedAcFt }), status: short ? "short" : "covered", verdict: `${_signed(dv)} ac-ft` };
   } else if (req && req.kind === "point") {
     out.det = { label: "Detention", layout: bulletBarLayout({ provided: usableAcFt ?? providedAcFt, required: 0 }), status: null, verdict: "none required" };
   } else if (req && req.kind === "band" && usableAcFt == null) {
@@ -189,7 +191,7 @@ export function stormwaterBarSpecs(d) {
           label: "Mitigation",
           layout: bulletBarLayout({ provided: provAcFt, required: mit.volumeAcFt }),
           status: short ? "short" : "covered",
-          verdict: short ? `−${_f2(Math.abs(bal))} ac-ft` : "covered",
+          verdict: short ? `${_signed(bal)} ac-ft` : "covered",
         };
       }
     } else {

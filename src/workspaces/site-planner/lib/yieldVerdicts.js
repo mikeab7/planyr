@@ -23,6 +23,14 @@ export function fmtProvidedOfRequired(provided, required) {
   return `${fmtAcFt(provided)} / ${fmtAcFt(required)}`;
 }
 
+// Signed 1-decimal ac-ft for a delta (surplus/shortfall): a sub-0.05 residue reads "0.0"
+// with NO sign — so a signed zero ("−0.0" / "+0.00") can never render.
+export function fmtSignedAcFt(v) {
+  const n = Math.abs(v) < 0.05 ? 0 : v;
+  const mag = (Math.round(Math.abs(n) * 10) / 10).toFixed(1);
+  return n === 0 ? mag : `${n < 0 ? "−" : "+"}${mag}`;
+}
+
 function detentionVerdict(d) {
   const req = d.req;
   const usableAcFt = d.providedUsableCf == null ? null : d.providedUsableCf / AC_FT;

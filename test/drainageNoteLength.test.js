@@ -18,10 +18,12 @@ const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/S
 
 // Slice the drainage readout region: from the B823 warnNote helper to the IIFE's return.
 // B895 — the end anchor used to be the trailing generic disclaimer keyedNote call; that
-// caveat now lives once in the panel footer (YieldFooterDisclaimer), so the end anchor
-// moved to the last groupFold push (Buildability/FFE, the IIFE's last row-producing call).
+// caveat now lives once in the panel footer (YieldFooterDisclaimer).
+// FINAL UI SPEC B1.2 — Buildability/FFE moved to its own top-level group, so the drainage
+// block now RETURNS `{ sw, ffeR, … }` instead of pushing an ffe groupFold; the end anchor is
+// that structured return (still after every warnNote call, incl. the ffe detail rows).
 const start = src.indexOf("const warnNote = (text, key, info)");
-const end = src.indexOf('groupFold("ffe", "Buildability / FFE"', start);
+const end = src.indexOf("return { sw: out, ffeR", start);
 if (start === -1 || end === -1) throw new Error("drainage readout region anchors not found — update this guard with the surface");
 const region = src.slice(start, end);
 
