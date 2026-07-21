@@ -231,7 +231,9 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
 
   it("B557: ProjectBreadcrumb manage menu has role=menu + menuitem", () => {
     const src = read("../src/shared/ui/ProjectBreadcrumb.jsx");
-    expect(src).toMatch(/role="menu" aria-label="Project actions"/);
+    // B915: the menu now renders through the shared <ContextMenu>, which applies role/aria-label
+    // from props — so the guard matches the prop form (rendered output is unchanged).
+    expect(src).toMatch(/role="menu" ariaLabel="Project actions"/);
     expect((src.match(/role="menuitem"/g) || []).length).toBeGreaterThanOrEqual(2);
   });
 

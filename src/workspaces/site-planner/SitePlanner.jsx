@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, Fragment } from "react";
-import { createPortal } from "react-dom";
+import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
@@ -16570,39 +16570,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
 
       {/* B230 — Add / Delete control-point menu, portal-mounted at the document root so it can
-          never be clipped or trapped behind the canvas / tool-rail stacking contexts. */}
-      {vtxMenu && createPortal(
-        <>
-          <div onClick={() => setVtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setVtxMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 6000 }} />
-          <div className="menu" style={{ ...menuPanel, position: "fixed", left: Math.min(vtxMenu.x + 2, window.innerWidth - 200), top: Math.min(vtxMenu.y + 2, window.innerHeight - 64), zIndex: 6001, minWidth: 190 }}>
-            {vtxMenu.mode === "edge"
-              ? <button style={menuItem(false)} onClick={() => { insertVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index, vtxMenu.ptFeet); setVtxMenu(null); }}>＋&nbsp; Add control point</button>
-              : <button disabled={!vtxMenu.canDelete} style={{ ...menuItem(false), color: vtxMenu.canDelete ? "#b3361b" : "#b9b3a6", cursor: vtxMenu.canDelete ? "pointer" : "default" }} onClick={() => { if (vtxMenu.canDelete) { deleteVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index); setVtxMenu(null); } }}>✕&nbsp; Delete control point{vtxMenu.canDelete ? "" : " (min reached)"}</button>}
-          </div>
-        </>,
-        document.body,
+          never be clipped or trapped behind the canvas / tool-rail stacking contexts. Shared
+          viewport-aware ContextMenu (B915) — measures + flips/clamps at any edge. */}
+      {vtxMenu && (
+        <ContextMenu x={vtxMenu.x} y={vtxMenu.y} onClose={() => setVtxMenu(null)} minWidth={190} zIndex={6000} className="menu" panelStyle={menuPanel}>
+          {vtxMenu.mode === "edge"
+            ? <button style={menuItem(false)} onClick={() => { insertVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index, vtxMenu.ptFeet); setVtxMenu(null); }}>＋&nbsp; Add control point</button>
+            : <button disabled={!vtxMenu.canDelete} style={{ ...menuItem(false), color: vtxMenu.canDelete ? "#b3361b" : "#b9b3a6", cursor: vtxMenu.canDelete ? "pointer" : "default" }} onClick={() => { if (vtxMenu.canDelete) { deleteVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index); setVtxMenu(null); } }}>✕&nbsp; Delete control point{vtxMenu.canDelete ? "" : " (min reached)"}</button>}
+        </ContextMenu>
       )}
 
       {parcelMenu && (
-        <>
-          <div onClick={() => setParcelMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
-          <div className="menu" style={{ ...menuPanel, position: "fixed", left: Math.min(parcelMenu.x, window.innerWidth - 206), top: Math.min(parcelMenu.y, window.innerHeight - 130), zIndex: 1999, width: 196 }}>
-            <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
-            <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
-            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { if (parcelMenu.id) deleteParcelById(parcelMenu.id); setParcelMenu(null); }}>Delete parcel</button>
-            <div style={{ fontSize: 10.5, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.4, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Shift-click parcels to add more, then Merge.</div>
-          </div>
-        </>
+        <ContextMenu x={parcelMenu.x} y={parcelMenu.y} onClose={() => setParcelMenu(null)} width={196} zIndex={1998} className="menu" panelStyle={menuPanel}>
+          <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
+          <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
+          <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+          <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { if (parcelMenu.id) deleteParcelById(parcelMenu.id); setParcelMenu(null); }}>Delete parcel</button>
+          <div style={{ fontSize: 10.5, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.4, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Shift-click parcels to add more, then Merge.</div>
+        </ContextMenu>
       )}
 
       {mapMenu && (() => {
-        const MW = 214, GAP = 8, vw = window.innerWidth, vh = window.innerHeight;
-        const left = Math.max(GAP, Math.min(mapMenu.x + 6, vw - MW - GAP));
-        const spaceBelow = vh - mapMenu.y - GAP, spaceAbove = mapMenu.y - GAP;
-        const openUp = spaceBelow < spaceAbove;
-        const maxH = Math.max(140, openUp ? spaceAbove : spaceBelow);
-        const vEdge = openUp ? { bottom: vh - mapMenu.y + 6 } : { top: mapMenu.y + 6 };
+        const MW = 214;
         const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
         const close = () => setMapMenu(null);
         const row = ({ text, on, danger, dis, hint, title }) => (
@@ -16652,27 +16641,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </>;
         }
         return (
-          <>
-            <div onClick={close} onContextMenu={(e) => { e.preventDefault(); close(); }} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
-            <div className="menu" style={{ ...menuPanel, position: "fixed", left, ...vEdge, zIndex: 1999, width: MW, maxHeight: maxH, overflowY: "auto" }}>
-              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 8px 6px" }}>{header}</div>
-              {body}
-            </div>
-          </>
+          <ContextMenu x={mapMenu.x} y={mapMenu.y} onClose={close} width={MW} zIndex={1998} className="menu" panelStyle={menuPanel}>
+            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 8px 6px" }}>{header}</div>
+            {body}
+          </ContextMenu>
         );
       })()}
 
-      {typeMenu && (() => {
-        const MW = 200, GAP = 8, vw = window.innerWidth, vh = window.innerHeight;
-        const left = Math.max(GAP, Math.min(typeMenu.x + 6, vw - MW - GAP));
-        const spaceBelow = vh - typeMenu.y - GAP, spaceAbove = typeMenu.y - GAP;
-        const openUp = spaceBelow < spaceAbove; // open toward whichever side has more room
-        const maxH = Math.max(140, openUp ? spaceAbove : spaceBelow);
-        const vEdge = openUp ? { bottom: vh - typeMenu.y + 6 } : { top: typeMenu.y + 6 };
-        return (
-        <>
-          <div onClick={() => setTypeMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
-          <div className="menu" style={{ ...menuPanel, position: "fixed", left, ...vEdge, zIndex: 1999, width: MW, maxHeight: maxH, overflowY: "auto" }}>
+      {typeMenu && (
+        <ContextMenu x={typeMenu.x} y={typeMenu.y} onClose={() => setTypeMenu(null)} width={200} zIndex={1998} className="menu" panelStyle={menuPanel}>
             {(() => {
               const t = els.find((el) => el.id === typeMenu.id);
               if (!t) return null;
@@ -16774,21 +16751,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </>
               );
             })()}
-          </div>
-        </>
-        );
-      })()}
+        </ContextMenu>
+      )}
 
       {/* Site-plan overlay right-click menu (B461). Mirrors the element typeMenu: a portalled,
           viewport-clamped floating menu at the cursor. Opens from the canvas overlay (unlocked) or
           its Overlay-panel row (works even when locked, which is pointer-inert on the map). */}
       {ovMenu && (() => {
-        const MW = 220, GAP = 8, vw = window.innerWidth, vh = window.innerHeight;
-        const left = Math.max(GAP, Math.min(ovMenu.x + 6, vw - MW - GAP));
-        const spaceBelow = vh - ovMenu.y - GAP, spaceAbove = ovMenu.y - GAP;
-        const openUp = spaceBelow < spaceAbove;
-        const maxH = Math.max(160, openUp ? spaceAbove : spaceBelow);
-        const vEdge = openUp ? { bottom: vh - ovMenu.y + 6 } : { top: ovMenu.y + 6 };
+        const MW = 220;
         const o = sheetOverlays.find((x) => x.id === ovMenu.id);
         if (!o) return null;
         const idx = sheetOverlays.findIndex((x) => x.id === ovMenu.id);
@@ -16804,9 +16774,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </button>
         );
         return (
-        <>
-          <div onClick={() => setOvMenu(null)} onContextMenu={(e) => { e.preventDefault(); setOvMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
-          <div className="menu" style={{ ...menuPanel, position: "fixed", left, ...vEdge, zIndex: 1999, width: MW, maxHeight: maxH, overflowY: "auto" }}>
+          <ContextMenu x={ovMenu.x} y={ovMenu.y} onClose={() => setOvMenu(null)} width={MW} zIndex={1998} className="menu" panelStyle={menuPanel}>
             <div style={hdr(false)}>Edit</div>
             {item({ text: "Copy", hint: `${MOD}C`, on: () => { copyOverlay(ovMenu.id); setOvMenu(null); } })}
             {item({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateOverlay(ovMenu.id); setOvMenu(null); } })}
@@ -16819,8 +16787,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {item({ text: "Align to base edge…", dis: locked || !hasParcel, title: locked ? "Unlock to align" : (!hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this drawing parallel to it"), on: () => { setSelOverlay(ovMenu.id); setOvAlignBase(ovMenu.id); setOvMenu(null); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {item({ text: "Delete", hint: "Del", danger: true, on: () => { removeOverlay(ovMenu.id); setOvMenu(null); } })}
-          </div>
-        </>
+          </ContextMenu>
         );
       })()}
     </div>
