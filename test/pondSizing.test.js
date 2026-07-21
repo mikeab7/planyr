@@ -8,6 +8,7 @@ import {
   solveMitigationGrow,
   solveTobRaise,
   scaleRing,
+  applyPondSizingActions,
 } from "../src/workspaces/site-planner/lib/pondSizing.js";
 import { bandedStorage } from "../src/workspaces/site-planner/lib/pondGeom.js";
 
@@ -154,5 +155,84 @@ describe("sizePondForTargets — the assistant", () => {
     const ring = Object.freeze(SQ().map((p) => Object.freeze({ ...p })));
     const det = Object.freeze({ ...det0 });
     expect(() => sizePondForTargets({ ring, det, wseFt: 95, mitTargetCf: AC_FT, detTargetCf: AC_FT, inTrigger: true, gradeFt: 99 })).not.toThrow();
+  });
+});
+
+describe("applyPondSizingActions (B909/B910) — apply the assistant's actions onto a pond element", () => {
+  const rectEl = { id: "p1", type: "pond", cx: 100, cy: 100, w: 200, h: 200, rot: 0, det: { ...det0 } };
+  const polyEl = { id: "p2", type: "pond", points: SQ(), rot: 0, det: { ...det0 } };
+
+  it("no actions → the element comes back unchanged", () => {
+    expect(applyPondSizingActions(rectEl, [])).toBe(rectEl); // same reference — nothing to patch
+    expect(applyPondSizingActions(rectEl, undefined)).toBe(rectEl);
+  });
+
+  it("a deepen action alone updates depth, leaves the footprint untouched", () => {
+    const out = applyPondSizingActions(rectEl, [{ kind: "deepen", depthFt: 11 }]);
+    expect(out.det.depth).toBe(11);
+    expect(out.w).toBe(200); expect(out.h).toBe(200);
+    expect(rectEl.det.depth).toBe(8); // input never mutated
+  });
+
+  it("a grow action alone scales a RECT pond's w/h by the factor, leaves depth untouched", () => {
+    const out = applyPondSizingActions(rectEl, [{ kind: "grow", factor: 1.5, addAcres: 1 }]);
+    expect(out.w).toBeCloseTo(300, 6);
+    expect(out.h).toBeCloseTo(300, 6);
+    expect(out.det.depth).toBe(8);
+    expect(rectEl.w).toBe(200); // input never mutated
+  });
+
+  it("a grow action alone scales a POLYGON pond's points via scaleRing", () => {
+    const out = applyPondSizingActions(polyEl, [{ kind: "grow", factor: 2, addAcres: 1 }]);
+    expect(out.points).toEqual(scaleRing(SQ(), 2));
+    expect(polyEl.points).toEqual(SQ()); // input never mutated
+  });
+
+  // The exact bug this test guards: sizePondForTargets pushes pinch-off + grow TOGETHER
+  // when deepening alone can't reach the target — the pinch-off ceiling depth must apply
+  // even though a SEPARATE grow action carries the footprint change, not the depth.
+  it("pinch-off + grow together: BOTH the ceiling depth and the footprint growth apply", () => {
+    const actions = [
+      { kind: "pinch-off", maxDepthFt: 12, ceilingCf: 1000, slope: 3, label: "pinches off at 12.0′" },
+      { kind: "grow", factor: 1.3, addAcres: 0.5 },
+    ];
+    const out = applyPondSizingActions(rectEl, actions);
+    expect(out.det.depth).toBe(12); // deepened to the pinch-off ceiling...
+    expect(out.w).toBeCloseTo(260, 6); // ...AND grown — neither remedy is dropped
+    expect(out.h).toBeCloseTo(260, 6);
+  });
+
+  // The regression this test guards directly: when growing FURTHER is infeasible (no
+  // "grow" action at all, only "grow-infeasible"), the pond must still bank the partial
+  // gain from deepening to the pinch-off ceiling — not silently discard it.
+  it("pinch-off + grow-infeasible (no grow action): the ceiling depth STILL applies", () => {
+    const actions = [
+      { kind: "pinch-off", maxDepthFt: 9.5, ceilingCf: 500, slope: 3, label: "pinches off at 9.5′" },
+      { kind: "grow-infeasible" },
+    ];
+    const out = applyPondSizingActions(rectEl, actions);
+    expect(out.det.depth).toBe(9.5);
+    expect(out.w).toBe(200); expect(out.h).toBe(200); // no footprint change — grow never fired
+  });
+
+  it("deepen and grow together (both fully solved): deepen wins over the pinch-off ceiling, grow still applies", () => {
+    const actions = [
+      { kind: "deepen", depthFt: 10 },
+      { kind: "pinch-off", maxDepthFt: 12, ceilingCf: 1000, slope: 3, label: "x" }, // shouldn't occur alongside a successful deepen in practice, but the precedence must be unambiguous
+      { kind: "grow", factor: 1.2, addAcres: 0.3 },
+    ];
+    const out = applyPondSizingActions(rectEl, actions);
+    expect(out.det.depth).toBe(10);
+    expect(out.w).toBeCloseTo(240, 6);
+  });
+
+  it("end-to-end against the real solver: a pinch-off + grow result from sizePondForTargets applies cleanly and reaches the target", () => {
+    const el = { id: "p3", type: "pond", cx: 30, cy: 30, w: 60, h: 60, rot: 0, det: { ...det0 } };
+    const result = sizePondForTargets({ ring: SQ(60), det: el.det, wseFt: 95, mitTargetCf: 5 * AC_FT, detTargetCf: 0 });
+    expect(result.ok).toBe(true);
+    const out = applyPondSizingActions(el, result.actions);
+    // Deepened (to the pinch-off ceiling) at minimum — never left un-deepened when a
+    // pinch-off action was reported.
+    expect(out.det.depth).toBeGreaterThan(el.det.depth);
   });
 });

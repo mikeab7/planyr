@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   pointInRing, addedAreaLabelPoint,
   excavationVolume, incrementalExcavationCf, estimateFootprintSf, detentionLandTakeEstimate,
+  pondPlacementCandidates,
 } from "../src/workspaces/site-planner/lib/pondGeom.js";
 
 // Helper: a rectangle ring from corner (x0,y0) to (x1,y1).
@@ -144,5 +145,34 @@ describe("detentionLandTakeEstimate — the site-level forward-looking land-take
     const shallow = detentionLandTakeEstimate({ requiredAcFt: 5, providedUsableCf: 0, avgDepthFt: 4 });
     const deep = detentionLandTakeEstimate({ requiredAcFt: 5, providedUsableCf: 0, avgDepthFt: 8 });
     expect(shallow.footprintAc).toBeGreaterThan(deep.footprintAc);
+  });
+});
+
+describe("pondPlacementCandidates (B909) — screening grid for auto-placing a pond", () => {
+  it("returns divisions² candidate points, all inside the bounding box", () => {
+    const pts = pondPlacementCandidates({ minX: 0, minY: 0, maxX: 1000, maxY: 500, divisions: 4 });
+    expect(pts.length).toBe(16);
+    for (const p of pts) {
+      expect(p.x).toBeGreaterThan(0); expect(p.x).toBeLessThan(1000);
+      expect(p.y).toBeGreaterThan(0); expect(p.y).toBeLessThan(500);
+    }
+  });
+
+  it("orders candidates nearest-to-center first", () => {
+    const pts = pondPlacementCandidates({ minX: 0, minY: 0, maxX: 1000, maxY: 1000, divisions: 5 });
+    const cx = 500, cy = 500;
+    const distances = pts.map((p) => Math.hypot(p.x - cx, p.y - cy));
+    for (let i = 1; i < distances.length; i++) expect(distances[i]).toBeGreaterThanOrEqual(distances[i - 1] - 1e-9);
+  });
+
+  it("defaults to a 5×5 grid when divisions is omitted", () => {
+    expect(pondPlacementCandidates({ minX: 0, minY: 0, maxX: 100, maxY: 100 }).length).toBe(25);
+  });
+
+  it("degenerate / inverted bounding boxes return no candidates rather than throwing", () => {
+    expect(pondPlacementCandidates({ minX: 100, minY: 0, maxX: 0, maxY: 100 })).toEqual([]);
+    expect(pondPlacementCandidates({ minX: 0, minY: 0, maxX: 0, maxY: 100 })).toEqual([]);
+    expect(pondPlacementCandidates({})).toEqual([]);
+    expect(pondPlacementCandidates({ minX: 0, minY: 0, maxX: 100, maxY: 100, divisions: 0 })).toEqual([]);
   });
 });

@@ -546,3 +546,25 @@ export function detentionLandTakeEstimate({ requiredAcFt, providedUsableCf, avgD
   if (footprintSf == null) return null;
   return { deficitCf, deficitAcFt: deficitCf / 43560, footprintSf, footprintAc: footprintSf / 43560, avgDepthFt };
 }
+
+// B909 — screening candidate CENTER points for auto-placing a pond that doesn't exist yet
+// ("⚡ Design detention" / "⚡ Design mitigation" one-click flows): an N×N grid over a
+// bounding box (e.g. the active parcels' extent), ordered NEAREST-TO-CENTER first so a
+// caller's first collision-free / in-parcel / in-floodplain hit reads as "the most central
+// open spot found," not an arbitrary corner. The caller supplies its own validity test
+// (collision with drawn elements, inside a parcel, intersects a mapped flood zone, …) —
+// this function only ever proposes WHERE to look, never judges a spot itself, so it stays
+// free of the app's element/GIS state and unit-tests with plain numbers. Pure.
+export function pondPlacementCandidates({ minX, minY, maxX, maxY, divisions = 5 } = {}) {
+  if (!(maxX > minX) || !(maxY > minY) || !(Number.isFinite(divisions)) || divisions < 1) return [];
+  const n = Math.floor(divisions);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      pts.push({ x: minX + ((i + 0.5) / n) * (maxX - minX), y: minY + ((j + 0.5) / n) * (maxY - minY) });
+    }
+  }
+  pts.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+  return pts;
+}

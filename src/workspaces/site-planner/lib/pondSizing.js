@@ -241,3 +241,26 @@ export function sizePondForTargets({
     actions,
   };
 }
+
+/* B909/B910 — apply sizePondForTargets' proposed "deepen"/"grow" actions onto a pond
+ * element in one shot, mirroring the SAME choice the Sizing assistant's manual Apply
+ * chips make (SitePlanner.jsx): deepen alone when that reaches the target; otherwise
+ * deepen to the pinch-off ceiling (pinchA) AND grow the footprint by the solved factor —
+ * the ceiling depth applies even when the FOLLOW-UP grow is itself infeasible, so a
+ * partial gain from digging is never left on the table. `actions` is sizePondForTargets'
+ * own `.actions` array; `el` is a rect ({cx,cy,w,h,rot}) or polygon ({points}) pond
+ * element — never mutated, a patched copy is returned. Pure. */
+export function applyPondSizingActions(el, actions = []) {
+  let out = el;
+  const deepenA = actions.find((a) => a.kind === "deepen");
+  const growA = actions.find((a) => a.kind === "grow");
+  const pinchA = actions.find((a) => a.kind === "pinch-off");
+  if (deepenA) out = { ...out, det: { ...out.det, depth: deepenA.depthFt } };
+  else if (pinchA) out = { ...out, det: { ...out.det, depth: pinchA.maxDepthFt } };
+  if (growA) {
+    out = el.points
+      ? { ...out, points: scaleRing(el.points, growA.factor) }
+      : { ...out, w: out.w * growA.factor, h: out.h * growA.factor };
+  }
+  return out;
+}
