@@ -14,9 +14,10 @@
  * Import path: "../../shared/markup/MarkupRenderer.jsx" from either workspace.
  */
 import { measureLabel } from "./measure.js";
-import { midOfPath, centroidOf } from "./geometry.js";
+import { midOfPath, centroidOf, nearestRectPerimeterPoint } from "./geometry.js";
 import { readProp } from "./propertySchema.js";
 import { resolveMarkupStyle, MEASURE_KINDS, MEAS_STROKE } from "./markupStyle.js";
+import { calloutBoxMetrics, bestMeasurer } from "./textWrap.js";
 
 /* Scalloped "cloud" path — shared with DocReview's cloudPath (same algorithm, module-local). */
 function cloudPath(x, y, w, h, r = 9) {
@@ -280,36 +281,49 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
   }
 
   if (m.kind === "callout") {
-    const tip = pts[0], box = pts[1];
-    if (!tip) return null;
-    const anchor = box || tip;
+    // N-leader model (B909/NEW-2): pts = [...tips, box]. A single point is a plain box-only
+    // label (no leader — also what remains once the last leader is removed); ≥2 points is the
+    // box plus one arrow per leading point, each pointing from its own nearest box edge/corner.
+    if (!pts.length) return null;
+    const box = pts[pts.length - 1];
+    const tips = pts.slice(0, -1);
     const text = m.text || "";
     const fs        = Math.max(6, (readProp(m, "fontSize") || 14) * scale / 16);
     const fc        = readProp(m, "fontColor") || "#1a1a1a";
-    const fw        = readProp(m, "bold")      ? 700 : 400;
-    const fi        = readProp(m, "italic")    ? "italic" : "normal";
+    const bold      = !!readProp(m, "bold");
+    const italic    = !!readProp(m, "italic");
+    const fw        = bold ? 700 : 400;
+    const fi        = italic ? "italic" : "normal";
     const fd        = readProp(m, "underline") ? "underline" : "none";
     const bgFill    = p.fill !== "none" ? p.fill : "#fff";
     const bgOpacity = p.fillOpacity > 0 ? p.fillOpacity : 1;
     const padX = 8, padY = 4;   // horizontal a touch more generous than vertical (B566 parity)
-    const textW = Math.max(60, text.length * fs * 0.58 + padX * 2);
-    const textH = fs + padY * 2;
-    const leaderX = anchor.x;
-    const leaderY = anchor.y + textH / 2;
+    // The box is sized to the LONGEST ACTUAL wrapped line + the real line count (never a
+    // char-count guess) — see textWrap.js. `measure` prefers real <canvas> glyph metrics in
+    // the browser, so the box can't drift narrower than what actually paints.
+    const measure = bestMeasurer({ bold, italic });
+    const { lines, boxW, boxH, lineHeight } = calloutBoxMetrics(text, fs, { padX, padY, measure });
     return (
       <g opacity={p.opacity}>
-        {box && (
-          <>
-            <line x1={leaderX} y1={leaderY} x2={tip.x} y2={tip.y}
-              stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
-            <Arrowhead from={{ x: leaderX, y: leaderY }} to={tip} color={p.stroke} />
-          </>
-        )}
-        <rect x={anchor.x} y={anchor.y} width={textW} height={textH}
+        {tips.map((tip, i) => {
+          const origin = nearestRectPerimeterPoint({ x: box.x, y: box.y, w: boxW, h: boxH }, tip);
+          return (
+            <g key={i}>
+              <line x1={origin.x} y1={origin.y} x2={tip.x} y2={tip.y}
+                stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
+              <Arrowhead from={origin} to={tip} color={p.stroke} />
+            </g>
+          );
+        })}
+        <rect x={box.x} y={box.y} width={boxW} height={boxH}
           fill={bgFill} fillOpacity={bgOpacity} stroke={p.stroke} strokeWidth={1} rx={3} />
-        <text x={anchor.x + padX} y={anchor.y + fs + padY / 2}
+        <text x={box.x + padX} y={box.y + fs + padY / 2}
           fontSize={fs} fill={fc} fontWeight={fw} fontStyle={fi} textDecoration={fd}
-          pointerEvents="none">{text}</text>
+          pointerEvents="none">
+          {lines.map((line, i) => (
+            <tspan key={i} x={box.x + padX} dy={i === 0 ? 0 : lineHeight}>{line}</tspan>
+          ))}
+        </text>
       </g>
     );
   }

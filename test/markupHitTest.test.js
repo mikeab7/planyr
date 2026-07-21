@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickMarkup, pickMarkupIndex, hitEditPath, hitMarkup, scoreMarkup } from "../src/shared/markup/hitTest.js";
+import { pickMarkup, pickMarkupIndex, hitEditPath, hitMarkup, scoreMarkup, hitCalloutLeaderIndex } from "../src/shared/markup/hitTest.js";
 
 /* B423 / B155 — the shared hit-test. Tolerances are screen px ÷ view.scale; tests use
  * scale 1 so px == world units for legibility. Markups are seeded in BOTH host forms:
@@ -132,5 +132,45 @@ describe("hitEditPath — vertex beats edge", () => {
     const h = hitEditPath(sq, { x: 0.5, y: 50 }, view); // on the left (closing) edge
     expect(h.type).toBe("edge");
     expect(h.index).toBe(3);
+  });
+});
+
+describe("multi-leader callout hit-test (B909/NEW-2)", () => {
+  // Box at (400,350), 3 leaders fanning out in different directions.
+  const co3 = { id: "co3", kind: "callout", text: "hi",
+    pts: [{ x: 200, y: 350 }, { x: 460, y: 200 }, { x: 460, y: 500 }, { x: 400, y: 350 }] };
+
+  it("still hits the box interior with a scale (WYSIWYG box test)", () => {
+    expect(scoreMarkup(co3, { x: 415, y: 358 }, 6, 10, 1)).toMatchObject({ d: 0, interior: true });
+  });
+  // The box is ~60×14 (short text), so each leader's nearest-edge origin lands at a box corner:
+  // leader 0 (tip left of the box, y level with the top edge) → top-left corner, running along y=350;
+  // leader 1 (tip above-right) → top-right corner (460,350), running up the vertical x=460;
+  // leader 2 (tip below-right) → bottom-right corner (460,364), running down the vertical x=460.
+  it("hits each of the 3 leader lines independently", () => {
+    expect(scoreMarkup(co3, { x: 300, y: 350 }, 6, 10, 1)).toMatchObject({ interior: false }); // leader 0
+    expect(scoreMarkup(co3, { x: 460, y: 275 }, 6, 10, 1)).toMatchObject({ interior: false }); // leader 1
+    expect(scoreMarkup(co3, { x: 460, y: 430 }, 6, 10, 1)).toMatchObject({ interior: false }); // leader 2
+  });
+  it("misses far from every leader and the box", () => {
+    expect(scoreMarkup(co3, { x: 0, y: 0 }, 6, 10, 1)).toBe(null);
+  });
+
+  it("hitCalloutLeaderIndex picks out the specific leader under the point", () => {
+    expect(hitCalloutLeaderIndex(co3, { x: 300, y: 350 }, view, { tolPx: 10 })).toBe(0);
+    expect(hitCalloutLeaderIndex(co3, { x: 460, y: 275 }, view, { tolPx: 10 })).toBe(1);
+    expect(hitCalloutLeaderIndex(co3, { x: 460, y: 430 }, view, { tolPx: 10 })).toBe(2);
+  });
+  it("hitCalloutLeaderIndex returns -1 off any leader, on a non-callout, or with no leaders", () => {
+    expect(hitCalloutLeaderIndex(co3, { x: 0, y: 0 }, view, { tolPx: 10 })).toBe(-1);
+    expect(hitCalloutLeaderIndex(sq, { x: 50, y: 50 }, view, { tolPx: 10 })).toBe(-1);
+    const boxOnly = { id: "bo", kind: "callout", text: "hi", pts: [{ x: 5, y: 5 }] };
+    expect(hitCalloutLeaderIndex(boxOnly, { x: 5, y: 5 }, view, { tolPx: 10 })).toBe(-1);
+  });
+
+  it("a box-only callout (0 leaders, post-removal) hits only its box, not a phantom leader", () => {
+    const boxOnly = { id: "bo2", kind: "callout", text: "note", pts: [{ x: 100, y: 100 }] };
+    expect(scoreMarkup(boxOnly, { x: 110, y: 105 }, 6, 10, 1)).toMatchObject({ d: 0, interior: true });
+    expect(scoreMarkup(boxOnly, { x: 100, y: 100 }, 6, 10, 0)).toMatchObject({ interior: false }); // geometry-only fallback (no scale)
   });
 });

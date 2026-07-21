@@ -8,7 +8,10 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   machine-checkable spec (**never edit it to make a test green** — fix the code). Pure modules:
   `geometry.js`, `markupModel.js`, `measure.js`, `hitTest.js`, `propertySchema.js`, `selection.js`,
   `markupStyle.js` (per-object style + kind-keyed fallback, shared by renderer + draft preview, B736);
-  renderers `MarkupRenderer.jsx`, `PropertyPanel.jsx`, `SelectionChrome.jsx`.
+  `textWrap.js` (callout text wrap + box-fit measurement — greedy word-wrap, force-break on an
+  unbroken long word, `calloutBoxMetrics` sizes the box to the longest actual line; heuristic +
+  real-`<canvas>` measurers, B909); renderers `MarkupRenderer.jsx`, `PropertyPanel.jsx`,
+  `SelectionChrome.jsx`.
 - `coordinates/` — the EPSG:2278 ↔ WGS84 projection (shared coordinate spine). Read-only
   screening use today; grow additively, not a planner rewrite.
 - `files/` — `chunkedUpload.js` (any-size chunked Drive upload via /api/uploads/* — pure chunk

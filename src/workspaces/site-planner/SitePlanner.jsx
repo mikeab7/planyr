@@ -59,6 +59,8 @@ import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
+import { addCalloutLeader, removeCalloutLeader } from "../../shared/markup/markupModel.js";
+import { nearestRectPerimeterPoint } from "../../shared/markup/geometry.js";
 import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates } from "./lib/counties.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./lib/kmzExport.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
@@ -1239,6 +1241,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mergePick, setMergePick] = useState(false);  // B720: click-to-pick merge mode (plain clicks toggle parcels — no Shift needed)
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
+  const [addLeaderFor, setAddLeaderFor] = useState(null); // B919: callout id armed by "Add Leader" — the NEXT map click drops the new leader's tip there (feet)
   const [editInline, setEditInline] = useState(null);     // B620: {kind:'markup'|'el', id, text} while typing a feature's inline label in place
   const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit} — inline numeric edit, NEVER a dialog box
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
@@ -3047,7 +3050,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
       // B875 — Enter on a selected pond opens its inspector (keyboard peer of double-click).
       if (e.key === "Enter" && tool === "select" && sel?.kind === "el") { const se = els.find((x) => x.id === sel.id); if (se && se.type === "pond") { e.preventDefault(); revealPondInspector(se.id); return; } }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); cancelEditInline(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -3317,6 +3320,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
+    if (addLeaderFor) { addLeaderToCallout(addLeaderFor, fp); setAddLeaderFor(null); flashWarn(""); return; } // multi-leader: Add Leader armed — this click drops the new tip (feet)
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (ovAlignBase) { alignOverlayToParcelEdge(fp, null); return; } // B462: align the overlay to the nearest parcel edge
@@ -3648,6 +3652,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // padX default is more generous than padY (B566): equal 8/8 padding read as cramped on the
   // sides because text butts closer to a vertical edge than to the line-height-cushioned top/bottom.
   const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 14, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
+  // Multi-leader (Bluebeam-style) — a callout persists as { tip } (legacy single leader),
+  // { tips: [...] } (N leaders), or neither + noLeader:true (plain text label). `calloutTips` is
+  // the ONE read accessor so render/drag/menu code never branches on which shape a given callout
+  // is in (old saved sites still have plain `tip`; nothing migrates). B913's boxW/width-handle
+  // sizing is untouched — it rides through setPts's spread as an opaque extra field.
+  const calloutTips = (c) => (Array.isArray(c.tips) ? c.tips : (c.tip ? [c.tip] : []));
+  // Add/remove a leader by reusing the SHARED markup engine's pure functions (not forked) — they
+  // operate through markupModel's ptsOf/setPts, which recognizes this {tip|tips, box, noLeader?}
+  // shape and preserves every other field (boxW, style, noLeader) across the edit. Removing the
+  // last leader leaves a plain box-only text label (Bluebeam's own behaviour).
+  const addLeaderToCallout = (id, pt) => { pushHistory(); setCallouts((a) => a.map((c) => (c.id === id ? addCalloutLeader(c, pt) : c))); };
+  const removeLeaderFromCallout = (id, tipIndex) => { pushHistory(); setCallouts((a) => a.map((c) => (c.id === id ? removeCalloutLeader(c, tipIndex) : c))); };
   // Inline editing: a textarea overlays the box. Empty text removes the callout.
   const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); }; // no history on open — pushed on commit only if the text changed (B32)
   const commitEditCallout = () => {
@@ -3896,7 +3912,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "easeVertex", id, index };
     svgRef.current.setPointerCapture(ev.pointerId);
   };
-  const startMoveCallout = (e, id, part) => {
+  const startMoveCallout = (e, id, part, tipIndex = 0) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     // B750 — double-click a callout (box part only): an ALREADY-selected callout edits its text in place
@@ -3912,7 +3928,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "callout", id });
     pushHistory();
     const fp = p2f(e.clientX, e.clientY);
-    drag.current = { mode: "callout", id, part, fx: fp.x, fy: fp.y, box0: { ...c.box }, tip0: { ...c.tip } };
+    // Multi-leader — re-aiming a leader (part === "tip") drags ONE tip by index; the other leaders
+    // and the box stay put. tips0 is a full snapshot so onMove only ever moves tipIndex.
+    drag.current = { mode: "callout", id, part, tipIndex, fx: fp.x, fy: fp.y, box0: { ...c.box }, tips0: calloutTips(c).map((p) => ({ ...p })) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   // B913 — drag a text-box / callout width handle. `hx` (∈ {-1,+1}) is which vertical edge moves; the
@@ -4369,8 +4387,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     if (d.mode === "callout") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
-      if (d.part === "tip") setCallout(d.id, { tip: { x: d.tip0.x + dx, y: d.tip0.y + dy } });
-      else setCallout(d.id, { box: { x: d.box0.x + dx, y: d.box0.y + dy } });
+      if (d.part === "tip") {
+        // move only the dragged leader; collapse back to a singular `tip` at N===1 so legacy
+        // single-leader callouts keep persisting in their original shape.
+        const tips = d.tips0.map((p, i) => (i === d.tipIndex ? { x: p.x + dx, y: p.y + dy } : p));
+        setCallout(d.id, tips.length === 1 ? { tip: tips[0], tips: undefined } : { tips, tip: undefined });
+      } else setCallout(d.id, { box: { x: d.box0.x + dx, y: d.box0.y + dy } });
       return;
     }
     if (d.mode === "draw") {
@@ -6191,6 +6213,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "markup", id }); // B656: selection alone surfaces the companion
     setParcelMenu(null); setOvMenu(null);
     setMapMenu({ x: e.clientX, y: e.clientY, kind: "markup", id });
+  };
+  // Multi-leader — same dedicated right-click menu, for the SEPARATE `callouts` collection (its own
+  // {tip|tips, box} shape, not a `markups` entry). `leaderIndex` >= 0 when the right-click landed on
+  // a specific leader line (each leader passes its own index from its onContextMenu), which offers
+  // "Delete Leader"; -1 (box or empty) offers only "Add Leader" + delete.
+  const onCalloutContext = (e, id, leaderIndex = -1) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!callouts.some((c) => c.id === id)) return;
+    setSel({ kind: "callout", id });
+    setParcelMenu(null); setOvMenu(null);
+    setMapMenu({ x: e.clientX, y: e.clientY, kind: "callout", id, leaderIndex });
   };
   // Delete a markup — and, for a plotted deed, its whole save-and-except group — with a tombstone.
   const deleteMarkupById = (id) => {
@@ -13443,23 +13476,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const border = st.stroke; // B619: no recolor on select — the leader/box keep the callout's own color; blue chrome cues selection
                 const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
                 const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
-                const hasLeader = !c.noLeader && c.tip;
-                const tp = hasLeader ? f2p(c.tip) : null;
+                const tips = calloutTips(c).map((p) => f2p(p));
+                const boxRect = { x: bp.x - w / 2, y: bp.y - h / 2, w, h };
                 const ah = Math.max(7, fontPx * 0.7);
-                const ang = tp ? Math.atan2(tp.y - bp.y, tp.x - bp.x) : 0;
                 return (
-                  <g key={c.id}>
-                    {hasLeader && <>
-                      <line x1={bp.x} y1={bp.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
-                      <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
-                    </>}
+                  <g key={c.id} data-testid={`callout-${c.id}`} data-callout-leaders={tips.length}>
+                    {/* N leaders — each anchored from its OWN nearest box edge/corner (not one shared
+                        box-centre anchor) via the shared nearestRectPerimeterPoint geometry helper. */}
+                    {tips.map((tp, i) => {
+                      const origin = nearestRectPerimeterPoint(boxRect, tp);
+                      const ang = Math.atan2(tp.y - origin.y, tp.x - origin.x);
+                      return (
+                        <g key={i} data-testid={`callout-leader-${c.id}-${i}`} onContextMenu={(e) => onCalloutContext(e, c.id, i)}>
+                          <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
+                          <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
+                          {/* a transparent, wider hit-stroke so a thin leader is still easy to right-click */}
+                          <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke="transparent" strokeWidth={10} data-export="skip" />
+                        </g>
+                      );
+                    })}
                     {/* B680 — hide the committed box + text while its editor is open so the textarea is the
                         ONLY box on screen (was drawing a second, offset box behind the editor overlay). */}
-                    {editCallout?.id !== c.id && <rect x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} rx={4}
+                    {editCallout?.id !== c.id && <rect data-testid={`callout-box-${c.id}`} x={boxRect.x} y={boxRect.y} width={w} height={h} rx={4}
                       fill={st.fill} stroke={border} strokeWidth={1.4}
                       pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
                       style={{ cursor: tool === "select" ? "move" : "default" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
+                      onContextMenu={(e) => onCalloutContext(e, c.id, -1)}
                       onDoubleClick={(e) => {
                         // NEW-1 — native-dblclick fallback; same B750 gate as startMoveCallout's
                         // reconstructed double-tap (was unconditionally forcing the text editor open,
@@ -13498,10 +13541,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </g>
                       );
                     })()}
-                    {isSel && hasLeader && tool === "select" && (
-                      <circle cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2} data-export="skip"
-                        style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip")} />
-                    )}
+                    {/* per-leader re-aim grip + a small × delete affordance at its midpoint
+                        (Bluebeam-style), shown per leader while this callout is selected. */}
+                    {isSel && tool === "select" && tips.map((tp, i) => {
+                      const origin = nearestRectPerimeterPoint(boxRect, tp);
+                      const mx = (origin.x + tp.x) / 2, my = (origin.y + tp.y) / 2;
+                      return (
+                        <g key={i} data-export="skip">
+                          <circle cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
+                            style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)} />
+                          <g style={{ cursor: "pointer" }} aria-label="Delete this leader" data-testid={`callout-delete-leader-${c.id}-${i}`}
+                            onPointerDown={(e) => { e.stopPropagation(); removeLeaderFromCallout(c.id, i); }}>
+                            <circle cx={mx} cy={my} r={8} fill="var(--surface-raised)" stroke={PAL.danger} strokeWidth={1.25} />
+                            <line x1={mx - 3} y1={my - 3} x2={mx + 3} y2={my + 3} stroke={PAL.danger} strokeWidth={1.5} />
+                            <line x1={mx - 3} y1={my + 3} x2={mx + 3} y2={my - 3} stroke={PAL.danger} strokeWidth={1.5} />
+                          </g>
+                        </g>
+                      );
+                    })}
                   </g>
                 );
               })}
@@ -16749,6 +16806,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {row({ text: m.behindEls ? "Bring in front of buildings" : "Send behind buildings", on: setBehind })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: delText, hint: "Del", danger: true, on: () => { deleteMarkupById(m.id); } })}
+          </>;
+        } else if (mapMenu.kind === "callout") {
+          // Multi-leader — Add / Delete Leader for the SEPARATE `callouts` collection.
+          const c = callouts.find((x) => x.id === mapMenu.id);
+          if (!c) return null;
+          header = c.noLeader ? "Text box" : "Callout";
+          body = <>
+            {row({ text: "Add Leader", on: () => { setAddLeaderFor(c.id); flashWarn("Add Leader: click where the new leader should point — Esc to cancel.", 0); close(); } })}
+            {mapMenu.leaderIndex >= 0 && row({ text: "Delete Leader", danger: true, on: () => { removeLeaderFromCallout(c.id, mapMenu.leaderIndex); close(); } })}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+            {row({ text: c.noLeader ? "Delete text box" : "Delete callout", hint: "Del", danger: true, on: () => { deleteSel({ kind: "callout", id: c.id }); close(); } })}
           </>;
         } else {
           const hasClip = !!(clip.current || overlayClip.current);
