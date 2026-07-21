@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { wrapLines, calloutLayout, minCalloutWidthFt } from "../src/workspaces/site-planner/lib/calloutLayout.js";
+import { heuristicWidth } from "../src/shared/markup/textWrap.js";
 
 // A resolved style matching calloutStyle()'s defaults (size/padX/padY/lineHeight/bold).
 const ST = { size: 13, bold: false, lineHeight: 1.3, padX: 14, padY: 8 };
@@ -27,16 +28,36 @@ describe("wrapLines (B913)", () => {
   });
 });
 
-describe("calloutLayout (B913)", () => {
+describe("calloutLayout (B913 / B929)", () => {
   it("AUTO mode hugs the widest line and never wraps (pre-B913 behaviour)", () => {
     const c = { text: "short\nmuch longer line" };
     const g = calloutLayout(c, ST, 0.35);
     expect(g.wrapped).toBe(false);
     expect(g.lines).toEqual(["short", "much longer line"]); // hard lines, untouched
-    // width hugs the widest line: tw = 16 chars * charW + 2*padX.
-    const charW = 13 * 0.56;
-    expect(g.w).toBeCloseTo(16 * charW + 14 * 2, 3);
+    // B929: width hugs the widest line by REAL measured glyph width, not length * flat charW.
+    const fontPx = 13; // size 13 * zk 1 at ppf 0.35
+    const widest = Math.max(fontPx, heuristicWidth("much longer line", fontPx));
+    expect(g.w).toBeCloseTo(widest + 14 * 2, 3);
     expect(g.h).toBeCloseTo(2 * (13 * 1.3) + 8 * 2, 3);
+  });
+
+  it("B929 — the AUTO box fully encloses every line: no glyph spills past the rect (the overflow bug)", () => {
+    // All-caps, M/W-heavy text is exactly what the old flat `length * 0.56` estimate under-sized.
+    const c = { text: "COULD ADD VOLUME TO ADJACENT MASON BASIN" };
+    for (const ppf of [0.2, 0.35, 0.9]) {
+      const g = calloutLayout(c, ST, ppf);
+      const inner = g.w - g.padX * 2;                 // usable text width inside the padding
+      for (const ln of g.lines) expect(heuristicWidth(ln, g.fontPx)).toBeLessThanOrEqual(inner + 1e-6);
+    }
+  });
+
+  it("B929 — the old flat char estimate under-sized wide all-caps text; real measurement is wider", () => {
+    // Proof the fix matters: the all-caps line measures wider than length * the old 0.56 flat charW.
+    const line = "COULD ADD VOLUME TO ADJACENT MASON BASIN";
+    const fontPx = 13;
+    const oldEstimate = line.length * (fontPx * 0.56);   // the pre-B929 AUTO width (minus padding)
+    const g = calloutLayout({ text: line }, ST, 0.35);
+    expect(g.w - g.padX * 2).toBeGreaterThan(oldEstimate); // the box is now wide enough (was too narrow)
   });
 
   it("EXPLICIT width wraps the text and grows the height", () => {

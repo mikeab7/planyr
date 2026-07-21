@@ -202,3 +202,78 @@ test.describe("B913 — resizable text box / callout", () => {
     expect(errors, errors.join("\n")).toEqual([]);
   });
 });
+
+test.describe("B929 — the committed callout box encloses its text (no overflow)", () => {
+  test("a long all-caps text box renders its text INSIDE the box rect", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+
+    // Place a Text box and type the exact wide all-caps string from the owner's screenshot — the
+    // case the old flat char-count estimate under-sized so the text spilled past the rect.
+    const box = await canvas(page).boundingBox();
+    await page.getByRole("button", { name: /^Text\s/ }).click();
+    const tx = box.x + 320, ty = box.y + 280;
+    await page.mouse.click(tx, ty);
+    await page.getByPlaceholder("Type…").waitFor({ state: "visible" });
+    await page.keyboard.type("COULD ADD VOLUME TO ADJACENT MASON BASIN");
+    await page.keyboard.press("Escape"); // commit
+    await page.keyboard.press("Escape"); // deselect
+    await expect.poll(() => firstCallout(page)).not.toBeNull();
+
+    // Measure the REAL committed render: the widest <text> line must fit inside the box <rect>.
+    const m = await page.evaluate(() => {
+      const rect = document.querySelector('rect[data-testid^="callout-box-"]');
+      if (!rect) return { err: "no committed box rect" };
+      const g = rect.parentElement;
+      const texts = [...g.querySelectorAll("text")];
+      const rb = rect.getBoundingClientRect();
+      let widest = 0; for (const t of texts) widest = Math.max(widest, t.getBoundingClientRect().width);
+      return { rectW: rb.width, widest };
+    });
+    expect(m.err, m.err || "").toBeFalsy();
+    // The box is text width + horizontal padding on each side, so the text is strictly narrower.
+    expect(m.widest, `text ${m.widest}px must fit inside box ${m.rectW}px`).toBeLessThan(m.rectW);
+
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+});
+
+test.describe("B930 — Alt+Z autosizes the selected text box to fit (Bluebeam parity)", () => {
+  test("drag a side handle to set a fixed width, then Alt+Z clears it back to auto", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+
+    const box = await canvas(page).boundingBox();
+    await page.getByRole("button", { name: /^Text\s/ }).click();
+    const tx = box.x + 380, ty = box.y + 300;
+    await page.mouse.click(tx, ty);
+    await page.getByPlaceholder("Type…").waitFor({ state: "visible" });
+    await page.keyboard.type("alpha beta gamma delta epsilon");
+    await page.keyboard.press("Escape"); // commit text
+    await page.keyboard.press("Escape"); // deselect
+    await expect.poll(() => firstCallout(page)).not.toBeNull();
+
+    // Select it and drag the right handle out → it gets an explicit fixed width (text wraps).
+    await page.mouse.click(tx, ty);
+    const rightHandle = page.getByTestId("callout-handle-r").first();
+    await expect(rightHandle).toBeVisible({ timeout: 6000 });
+    const hb = await rightHandle.boundingBox();
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hb.x + 140, hb.y + hb.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(async () => {
+      const c = await firstCallout(page);
+      return c && c.boxW != null && c.boxW > 0;
+    }, { timeout: 6000 }).toBe(true);
+
+    // THE B930 ASSERTION: with the box still selected, Alt+Z clears the fixed width (autosize to fit),
+    // exactly like the "Fit to text" button — no Properties panel needed.
+    await page.keyboard.press("Alt+z");
+    await expect.poll(async () => (await firstCallout(page)).boxW == null, { timeout: 6000 }).toBe(true);
+
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+});
