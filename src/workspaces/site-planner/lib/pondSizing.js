@@ -242,19 +242,52 @@ export function sizePondForTargets({
   };
 }
 
-/* B909/B910 — apply sizePondForTargets' proposed "deepen"/"grow" actions onto a pond
- * element in one shot, mirroring the SAME choice the Sizing assistant's manual Apply
- * chips make (SitePlanner.jsx): deepen alone when that reaches the target; otherwise
- * deepen to the pinch-off ceiling (pinchA) AND grow the footprint by the solved factor —
- * the ceiling depth applies even when the FOLLOW-UP grow is itself infeasible, so a
- * partial gain from digging is never left on the table. `actions` is sizePondForTargets'
- * own `.actions` array; `el` is a rect ({cx,cy,w,h,rot}) or polygon ({points}) pond
- * element — never mutated, a patched copy is returned. Pure. */
+/* B909/B910 — apply sizePondForTargets' proposed actions onto a pond element, mirroring
+ * the SAME choices the Sizing assistant's manual Apply chips make (SitePlanner.jsx):
+ *
+ *   - raise-tob (detention): floor HELD, so raising the top of bank by hFt adds hFt to
+ *     depth (and stamps tobBerm provenance).
+ *   - deepen (mitigation): an ABSOLUTE target depth from the pond's CURRENT tobElev —
+ *     solveMitigationDepth holds det.tobElev fixed while it searches.
+ *   - pinch-off + grow: when deepening alone can't reach the mitigation target, deepen
+ *     to the geometric ceiling (pinchA) and grow the footprint by the solved factor;
+ *     the ceiling depth applies even when the grow is itself infeasible, so a partial
+ *     gain from digging is never left on the table.
+ *
+ * ⚠ raise-tob and deepen/pinch-off must come from SEPARATE sizePondForTargets calls
+ * against the pond's ACTUAL state at each step, never combined from one shared solve.
+ * Side-slope offsets are measured DOWN FROM the top of bank, so raising the TOB changes
+ * the below-WSE candidate volume at any fixed floor elevation — solveMitigationDepth's
+ * absolute depthFt, solved against the pre-raise tobElev, does NOT land where intended
+ * once tobElev has actually moved (confirmed by direct measurement — a plausible-looking
+ * "add the deltas" formula silently under-delivers the mitigation target). The caller
+ * (SitePlanner.jsx `designPond`) therefore runs a TWO-PASS solve for a pond that needs
+ * both: solve + apply detention (mitTargetCf: 0) first, then re-invoke
+ * sizePondForTargets against the UPDATED pond (detTargetCf: 0) so the mitigation remedy
+ * is computed — and applied — against what the pond actually is now, never stale deltas.
+ * This function itself only ever needs to apply ONE growth-type remedy per call under
+ * that calling convention; if both kinds are ever passed together anyway, deepen/pinch-
+ * off's absolute depth wins (applied after raise-tob) rather than silently combining two
+ * numbers that don't add.
+ *
+ * `actions` is sizePondForTargets' own `.actions` array; `el` is a rect
+ * ({cx,cy,w,h,rot}) or polygon ({points}) pond element — never mutated, a patched copy
+ * is returned. Pure. */
 export function applyPondSizingActions(el, actions = []) {
   let out = el;
+  const raiseA = actions.find((a) => a.kind === "raise-tob");
   const deepenA = actions.find((a) => a.kind === "deepen");
   const growA = actions.find((a) => a.kind === "grow");
   const pinchA = actions.find((a) => a.kind === "pinch-off");
+
+  if (raiseA) {
+    const det0 = out.det || {};
+    if (Number.isFinite(det0.tobElev)) {
+      const newTob = Math.round((det0.tobElev + raiseA.hFt) * 100) / 100;
+      const newDepth = (Number.isFinite(det0.depth) ? det0.depth : 8) + raiseA.hFt;
+      out = { ...out, det: { ...out.det, tobElev: newTob, depth: newDepth, tobBerm: { h: raiseA.hFt, applied: newTob } } };
+    }
+  }
   if (deepenA) out = { ...out, det: { ...out.det, depth: deepenA.depthFt } };
   else if (pinchA) out = { ...out, det: { ...out.det, depth: pinchA.maxDepthFt } };
   if (growA) {

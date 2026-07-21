@@ -7966,38 +7966,164 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const patch = { outlet: r.outlet, ...(relSource === "suggested" ? { releaseRateCfs: relCap } : {}) };
     return { patch, msg: r.ok ? "" : ` ${r.reason}` };
   };
-  // "⚡ Design detention" — closes a required-vs-provided VOLUME shortfall. With an
-  // existing pond, grows its footprint (solvePondExpansion, the same solver behind "⇱
-  // Size for required detention"); with none, auto-places a square footprint seeded from
-  // B907's volume→footprint estimate, then grows it the same way. Either way, finishes by
-  // auto-sizing the outlet (autoSizeCompoundOutlet) so the whole card moves toward met.
-  const designDetention = () => {
-    if (!detReq || !(detReq.kind === "point" || detReq.kind === "band")) return;
-    const requiredAcFt = detReq.kind === "point" ? detReq.requiredAcFt : detReq.bandAcFt[1];
-    if (!(requiredAcFt > 0) || providedUsableCf == null) return;
-    const requiredCf = requiredAcFt * 43560;
-    if (providedUsableCf >= requiredCf) return; // already covered
+  // "⚡ Design pond" — ONE pond can serve BOTH ledgers at once (above-WSE detention +
+  // below-WSE floodplain compensating storage), so a single click closes WHICHEVER of
+  // the site's two required-vs-provided shortfalls actually exist, on a SINGLE basin —
+  // never two separate ponds for what one basin can do. Reuses the exact same solvers as
+  // the manual controls: solvePondExpansion (pure footprint growth, no flood WSE needed)
+  // when mitigation isn't in play at all; sizePondForTargets (the pond inspector's own
+  // Sizing assistant) whenever mitigation is, via a TWO-PASS solve — size + apply
+  // detention (raise-tob) first, THEN re-invoke sizePondForTargets against the pond as it
+  // NOW actually is to solve mitigation. This isn't an arbitrary choice: side-slope
+  // offsets are measured DOWN FROM the top of bank, so raising it changes the below-WSE
+  // candidate volume at any fixed floor elevation — combining a raise-tob and a deepen/
+  // grow computed from ONE shared solve is not mathematically valid (confirmed by direct
+  // measurement while building this — see applyPondSizingActions' doc comment). Either
+  // path finishes with the existing outlet auto-size (autoSizeCompoundOutlet, "⚡
+  // Auto-size") whenever detention was actually part of the job.
+  const designPond = () => {
+    // ---- 1. What's actually short, site-wide? ----
+    const requiredDetAcFt = detReq && (detReq.kind === "point" || detReq.kind === "band")
+      ? (detReq.kind === "point" ? detReq.requiredAcFt : detReq.bandAcFt[1]) : null;
+    const detRequiredCf = requiredDetAcFt > 0 && providedUsableCf != null ? requiredDetAcFt * 43560 : null;
+    const needsDet = detRequiredCf != null && providedUsableCf < detRequiredCf;
+
+    const mit = drainMitDisplay;
+    const mitProvidedCf = pondLedger.creditedMitCf || 0;
+    const mitDeficitCf = mit && mit.volumeCf > 0 ? mit.volumeCf - mitProvidedCf : null;
+    const needsMit = mitDeficitCf != null && mitDeficitCf > 0;
+    if (!needsDet && !needsMit) return;
 
     const criteria = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
     const avgDepthFt = criteria.screeningPondDepthFt?.value ?? 8;
+    const mitRatio = fmRule && Number.isFinite(fmRule.ratio) ? fmRule.ratio : 1;
+    const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
     const existingPonds = els.filter((e) => e.type === "pond");
-    const pond = existingPonds.find((e) => e.det?.role !== "mitigation") || existingPonds[0] || null;
 
+    // ---- 2. Pick (or place) the ONE pond. Mitigation, when needed, governs location —
+    //         only a pond intersecting the mapped floodplain earns compensating-storage
+    //         credit, so it decides which existing pond qualifies / where a new one goes.
+    //         "dual" (Hybrid) is the honest purpose label whenever mitigation is in play —
+    //         it may ALSO carry detention credit, which role never gates (pondLedger.js). ----
     let baseEl, isNew;
-    if (pond) {
-      baseEl = pond; isNew = false;
+    if (needsMit) {
+      const inFloodplain = existingPonds.filter((e) => e.det?.role !== "detention" && pondSplitFor(e).wseFt != null);
+      const pond = inFloodplain[0] || null;
+      if (pond) { baseEl = pond; isNew = false; }
+      else {
+        isNew = true;
+        const seedSf = needsDet
+          ? Math.max(DESIGN_POND_MIN_SEED_SF, estimateFootprintSf({ volumeCf: detRequiredCf, avgDepthFt }) || DESIGN_POND_MIN_SEED_SF)
+          : DESIGN_POND_MIN_SEED_SF * 4; // a modest starter basin — the assistant solves the real size below
+        const side = Math.sqrt(seedSf);
+        const center = findOpenPondCenter({ halfW: side / 2, halfH: side / 2, requireFlood: true });
+        baseEl = { id: uid(), type: "pond", cx: center.x, cy: center.y, w: side, h: side, rot: 0, det: {} };
+      }
     } else {
-      isNew = true;
-      const seedSf = Math.max(DESIGN_POND_MIN_SEED_SF, estimateFootprintSf({ volumeCf: requiredCf, avgDepthFt }) || DESIGN_POND_MIN_SEED_SF);
-      const side = Math.sqrt(seedSf);
-      const center = findOpenPondCenter({ halfW: side / 2, halfH: side / 2 });
-      baseEl = { id: uid(), type: "pond", cx: center.x, cy: center.y, w: side, h: side, rot: 0, det: { depth: avgDepthFt } };
+      const pond = existingPonds.find((e) => e.det?.role !== "mitigation") || existingPonds[0] || null;
+      if (pond) { baseEl = pond; isNew = false; }
+      else {
+        isNew = true;
+        const seedSf = Math.max(DESIGN_POND_MIN_SEED_SF, estimateFootprintSf({ volumeCf: detRequiredCf, avgDepthFt }) || DESIGN_POND_MIN_SEED_SF);
+        const side = Math.sqrt(seedSf);
+        const center = findOpenPondCenter({ halfW: side / 2, halfH: side / 2 });
+        baseEl = { id: uid(), type: "pond", cx: center.x, cy: center.y, w: side, h: side, rot: 0, det: { depth: avgDepthFt } };
+      }
     }
 
-    const thisUsableCf = isNew ? 0 : (pondSplitFor(baseEl).usableCf ?? null);
-    if (thisUsableCf == null) { flashWarn("This pond's usable/dead split isn't known — ↻ Re-check first, then Design detention can size against a real number.", 7000); return; }
-    const otherUsableCf = Math.max(0, providedUsableCf - thisUsableCf);
-    const targetUsableCf = requiredCf - otherUsableCf;
+    const place = (el) => {
+      pushHistory();
+      if (isNew) setEls((a) => [...a, el]); else setEls((a) => a.map((e) => (e.id === el.id ? el : e)));
+      setSel({ kind: "el", id: el.id });
+    };
+
+    // Net THIS pond's own current contribution out of each site target — "other ponds'"
+    // share is the site total minus this one's, reusing the SAME accumulator the ledger
+    // itself is built from so a pond that's ALREADY partially credited (e.g. an existing
+    // Hybrid basin) is never double-subtracted or double-counted.
+    const otherLedger = accumulatePondLedger(pondLedgerEntries.filter((p) => p.id !== baseEl.id));
+
+    // ---- 3a. Mitigation involved: two-pass solve on the SAME pond. ----
+    if (needsMit) {
+      const effDet = detWithAuto({ ...baseEl.det, role: "dual" });
+      if (effDet.tobElev == null) {
+        if (isNew) { place({ ...baseEl, det: { ...baseEl.det, role: "dual" } }); revealPondInspector(baseEl.id); }
+        flashWarn(`${isNew ? "Placed a pond in the mapped floodplain, but it" : "This pond"} needs a top-of-bank elevation before it can be sized — set it in the pond's Properties, then reopen the Sizing assistant.`, 8500);
+        return;
+      }
+      const split = pondSplitFor({ ...baseEl, det: effDet });
+      if (split.wseFt == null) {
+        if (isNew) { place({ ...baseEl, det: { ...baseEl.det, role: "dual" } }); revealPondInspector(baseEl.id); }
+        flashWarn("This site's mapped floodplain wasn't found under open ground, so a pond couldn't be placed inside it automatically — drag the pond onto the flood zone shown on the map, then reopen the Sizing assistant to size it.", 8500);
+        return;
+      }
+      if ((needsDet && otherLedger.usableCf == null) || otherLedger.creditedMitCf == null) {
+        flashWarn("This site's usable/dead pond split isn't fully known — ↻ Re-check first, then Design pond can size against real numbers.", 7000);
+        return;
+      }
+      const detTargetCf = needsDet ? Math.max(0, detRequiredCf - otherLedger.usableCf) : 0;
+      const mitTargetCf = Math.max(0, mit.volumeCf - otherLedger.creditedMitCf);
+
+      let finalEl = { ...baseEl, det: { ...baseEl.det, role: "dual" } };
+      let detMsg = "", mitMsg = "";
+
+      // Pass 1 — detention (raise-tob) only, solved + applied against the pond's actual
+      // current state before mitigation is even considered.
+      if (detTargetCf > 0) {
+        const pass1 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet, wseFt: split.wseFt, wseProvider: split.wseSrc, inTrigger: split.inTrigger, gradeFt, detTargetCf, mitTargetCf: 0, mitRatio });
+        if (!pass1.ok) {
+          detMsg = `detention couldn't be sized: ${pass1.reason}`;
+        } else {
+          const raiseA = pass1.actions.find((a) => a.kind === "raise-tob");
+          if (!raiseA) {
+            detMsg = `already covers the required ${f2(detTargetCf / 43560)} ac-ft of detention`;
+          } else {
+            // Bake the resolved anchor in — the raise math needs a concrete tobElev to
+            // add to, and (matching B902's own precedent) this is what a one-click
+            // auto-accept commits into a real, auditable field.
+            finalEl = applyPondSizingActions({ ...finalEl, det: effDet }, pass1.actions);
+            detMsg = raiseA.partial
+              ? `raised the rim as far as it safely can but is still short of the required ${f2(detTargetCf / 43560)} ac-ft of detention — dig it deeper or draw a second pond`
+              : `sized for the required ${f2(detTargetCf / 43560)} ac-ft of detention`;
+          }
+        }
+      }
+
+      // Pass 2 — mitigation, RE-SOLVED against the pond as it actually is now (post-Pass 1).
+      const effDet2 = detWithAuto(finalEl.det);
+      const splitNow = pondSplitFor(finalEl);
+      const pass2 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet2, wseFt: splitNow.wseFt ?? split.wseFt, wseProvider: splitNow.wseSrc ?? split.wseSrc, inTrigger: splitNow.inTrigger ?? split.inTrigger, gradeFt, detTargetCf: 0, mitTargetCf, mitRatio });
+      if (!pass2.ok) {
+        mitMsg = `mitigation couldn't be sized automatically: ${pass2.reason}`;
+      } else if (pass2.mitigation.covered && !pass2.actions.some((a) => a.kind === "deepen" || a.kind === "grow")) {
+        mitMsg = `already covers the required ${f2(mitTargetCf / 43560)} ac-ft of mitigation`;
+      } else {
+        const infeasible = pass2.actions.some((a) => a.kind === "grow-infeasible");
+        finalEl = applyPondSizingActions(finalEl, pass2.actions);
+        mitMsg = infeasible
+          ? `deepened and grown as far as this footprint allows but still short of the required ${f2(mitTargetCf / 43560)} ac-ft of mitigation — enlarge it further by hand or add a second basin`
+          : `sized toward the required ${f2(mitTargetCf / 43560)} ac-ft of mitigation`;
+      }
+
+      // Outlet auto-size finishes the job whenever detention was actually part of it.
+      let outletMsg = "";
+      if (needsDet) {
+        const { patch: outletPatch, msg } = autoSizeOutletFor(finalEl, criteria);
+        finalEl = { ...finalEl, det: { ...finalEl.det, ...outletPatch } };
+        outletMsg = msg;
+      }
+
+      place(finalEl);
+      revealPondInspector(finalEl.id, "assistant");
+      const parts = [detMsg, mitMsg].filter(Boolean).join("; ");
+      flashWarn(`${isNew ? "Placed a pond in the mapped floodplain — " : "This pond was "}${parts}.${outletMsg}`, 9500);
+      return;
+    }
+
+    // ---- 3b. Pure detention (no floodplain / no mitigation requirement): the simple
+    //          footprint-growth path (solvePondExpansion) — no anchor or flood WSE needed. ----
+    if (otherLedger.usableCf == null) { flashWarn("This pond's usable/dead split isn't known — ↻ Re-check first, then Design pond can size against a real number.", 7000); return; }
+    const detTargetCf = Math.max(0, detRequiredCf - otherLedger.usableCf);
 
     const candidateEl = (N) => {
       if (baseEl.points) {
@@ -8013,11 +8139,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const split = pondSplitFor(cand);
       return split.usableCf == null ? null : { vol: split.usableCf };
     };
-    const s = solvePondExpansion({ requiredCf: targetUsableCf, volumeAt });
+    const s = solvePondExpansion({ requiredCf: detTargetCf, volumeAt });
     let finalEl = candidateEl(s.ok ? s.expandFt : 0) || baseEl;
-    const sizeMsg = s.ok ? `sized to the required ${f2(requiredAcFt)} ac-ft (screening estimate)`
-      : s.reason === "already-sufficient" ? (isNew ? `sized to the required ${f2(requiredAcFt)} ac-ft (screening estimate)` : "already covers the site's required detention")
-      : `couldn't be grown all the way to ${f2(requiredAcFt)} ac-ft by pushing the banks out — try digging it deeper or drawing a second pond`;
+    const sizeMsg = s.ok ? `sized to the required ${f2(requiredDetAcFt)} ac-ft (screening estimate)`
+      : s.reason === "already-sufficient" ? (isNew ? `sized to the required ${f2(requiredDetAcFt)} ac-ft (screening estimate)` : "already covers the site's required detention")
+      : `couldn't be grown all the way to ${f2(requiredDetAcFt)} ac-ft by pushing the banks out — try digging it deeper or drawing a second pond`;
 
     const { patch: outletPatch, msg: outletMsg } = autoSizeOutletFor(finalEl, criteria);
     finalEl = { ...finalEl, det: { ...finalEl.det, ...outletPatch } };
@@ -8025,77 +8151,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const overlaps = els.filter((e) => e.id !== finalEl.id && DESIGN_POND_BLOCKER_TYPES.includes(e.type) && ringsOverlap(ringOf(finalEl), ringOf(e)));
     const overlapMsg = overlaps.length ? ` It now overlaps ${overlaps.length === 1 ? "another element" : `${overlaps.length} other elements`} in your layout — drag it clear.` : "";
 
-    pushHistory();
-    if (isNew) setEls((a) => [...a, finalEl]); else setEls((a) => a.map((e) => (e.id === finalEl.id ? finalEl : e)));
-    setSel({ kind: "el", id: finalEl.id });
+    place(finalEl);
     revealPondInspector(finalEl.id);
     flashWarn(`${isNew ? "Placed a detention pond" : "Grew this pond"}, ${sizeMsg}.${outletMsg}${overlapMsg}`, 9000);
-  };
-  // "⚡ Design mitigation" — closes a required compensating-storage shortfall. Prefers an
-  // EXISTING pond already sitting in the mapped floodplain (has a real flood water
-  // surface); with none, auto-places a basin inside a mapped flood zone. Either way, hands
-  // off to sizePondForTargets (the Sizing assistant's own solver) for the below-WSE grow/
-  // deepen — the exact same math the manual Apply chips use.
-  const designMitigation = () => {
-    const mit = drainMitDisplay;
-    if (!mit || !(mit.volumeCf > 0)) return;
-    const providedCf = pondLedger.creditedMitCf || 0;
-    const deficitCf = mit.volumeCf - providedCf;
-    if (!(deficitCf > 0)) return;
-
-    const mitRatio = fmRule && Number.isFinite(fmRule.ratio) ? fmRule.ratio : 1;
-    const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
-    const existingPonds = els.filter((e) => e.type === "pond");
-    const inFloodplain = existingPonds.filter((e) => { const sp = pondSplitFor(e); return sp.wseFt != null && Number.isFinite(sp.wseFt); });
-    const pond = inFloodplain.find((e) => e.det?.role !== "detention") || inFloodplain[0] || null;
-
-    let baseEl, isNew;
-    if (pond) {
-      baseEl = pond; isNew = false;
-    } else {
-      isNew = true;
-      const side = Math.sqrt(DESIGN_POND_MIN_SEED_SF * 4); // a modest starter basin — the assistant solves the real size below
-      const center = findOpenPondCenter({ halfW: side / 2, halfH: side / 2, requireFlood: true });
-      baseEl = { id: uid(), type: "pond", cx: center.x, cy: center.y, w: side, h: side, rot: 0, det: {} };
-    }
-
-    const effDet = detWithAuto({ ...baseEl.det, role: "mitigation" });
-    const place = (el) => {
-      pushHistory();
-      if (isNew) setEls((a) => [...a, el]); else setEls((a) => a.map((e) => (e.id === el.id ? el : e)));
-      setSel({ kind: "el", id: el.id });
-    };
-
-    if (effDet.tobElev == null) {
-      if (isNew) { place({ ...baseEl, det: effDet }); revealPondInspector(baseEl.id); }
-      flashWarn(`${isNew ? "Placed a basin in the mapped floodplain, but it" : "This pond"} needs a top-of-bank elevation before it can be sized for mitigation — set it in the pond's Properties, then reopen the Sizing assistant.`, 8500);
-      return;
-    }
-    const split = pondSplitFor({ ...baseEl, det: effDet });
-    if (split.wseFt == null) {
-      if (isNew) { place({ ...baseEl, det: effDet }); revealPondInspector(baseEl.id); }
-      flashWarn("This site's mapped floodplain wasn't found under open ground, so a basin couldn't be placed inside it automatically — drag the pond onto the flood zone shown on the map, then reopen the Sizing assistant to size it.", 8500);
-      return;
-    }
-
-    const assist = sizePondForTargets({ ring: ringOf(baseEl), det: effDet, wseFt: split.wseFt, wseProvider: split.wseSrc, inTrigger: split.inTrigger, gradeFt, mitTargetCf: deficitCf, detTargetCf: 0, mitRatio });
-    let finalEl = { ...baseEl, det: { ...baseEl.det, role: "mitigation" } };
-    let msg;
-    if (!assist.ok) {
-      msg = `couldn't be sized automatically: ${assist.reason}`;
-    } else if (assist.mitigation.covered && !assist.actions.some((a) => a.kind === "deepen" || a.kind === "grow")) {
-      msg = `already covers the required ${f2(deficitCf / 43560)} ac-ft`;
-    } else {
-      const infeasible = assist.actions.some((a) => a.kind === "grow-infeasible");
-      finalEl = applyPondSizingActions(finalEl, assist.actions);
-      msg = infeasible
-        ? `deepened and grown as far as this footprint allows but still short of the required ${f2(deficitCf / 43560)} ac-ft — enlarge it further by hand or add a second basin`
-        : `sized toward the required ${f2(deficitCf / 43560)} ac-ft (screening estimate)`;
-    }
-
-    place(finalEl);
-    revealPondInspector(finalEl.id, "assistant");
-    flashWarn(`${isNew ? "Placed a compensating-storage basin, " : "This basin was "}${msg}.`, 9000);
   };
   // (B789: drainChannelRelevant now computed up with the drainage inputs — it county-gates
   // the stored channel override too, not just this control's visibility.)
@@ -8136,10 +8194,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // honest enough to rank against); the berm move's apply rides NEW-13's click.
     balancer: drainBalancer,
     onApplyBerm: applyBermMove,
-    // B909/B910 — the Yield panel's one-click cures: "⚡ Design detention" / "⚡ Design
-    // mitigation" render on their card whenever it reads SHORT (see the chip logic below).
-    onDesignDetention: designDetention,
-    onDesignMitigation: designMitigation,
+    // B909/B910 — the Yield panel's ONE-CLICK cure: "⚡ Design pond" renders on WHICHEVER
+    // card(s) read SHORT (see the chip logic below) — same button, same handler, either
+    // way. A single pond can serve both ledgers, so this is deliberately not two separate
+    // detention/mitigation buttons/handlers.
+    onDesignPond: designPond,
     // NEW-5 — the fully-inundated crisis remedy: a one-click TOB raise (materializing the berm)
     // that closes the site detention deficit, mounted on the NEW-1 warning row. Null when there
     // are no inundated ponds or no honest deficit to solve against.
@@ -13739,10 +13798,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* B909 §2b — arming "Detention Pond" from the palette used to give NO guidance at
               all; a first-time user had to already know to drag a rectangle or click points.
               A transient hint (armed, nothing drawn yet) names both paths — draw it by hand,
-              or back out and let ⚡ Design detention size one automatically. */}
+              or back out and let ⚡ Design pond size one automatically. */}
           {tool === "pond" && !draftRect && !draftElPoly && (
             <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, pointerEvents: "none", display: "flex", alignItems: "center", gap: 9, boxShadow: "0 6px 22px rgba(0,0,0,0.28)", zIndex: 6 }}>
-              Click on the map to place the detention pond — or use ⚡ Design detention in the Yield panel to size one automatically.
+              Click on the map to place the detention pond — or use ⚡ Design pond in the Yield panel to size one automatically.
             </div>
           )}
 
@@ -18767,19 +18826,32 @@ function YieldPanel({
             // site-based screening pad may still be offered below; that's a suggestion, not a rule.
             else if (bb && bb.ffe.status === "no_rule") { ffeVerdict = bb.ffe.outsideFloodplain ? "outside floodplain" : "no rule modeled"; ffeTone = null; ffeChip = "NO RULE"; }
             else if (bb) { ffeVerdict = "unknown"; ffeTone = "warn"; ffeChip = "SET BFE"; }
-            // B909/B910 — the primary "⚡ Design…" cure buttons: render ONLY when their card
-            // reads SHORT (never when covered/unknown/straddle/needs-input — the button would
-            // have nothing honest to do). One click each; no map skill or jargon required. Put
-            // where the shortfall is diagnosed, so the cure sits next to the problem statement.
-            const designBtnStyle = { width: "100%", padding: "8px 10px", border: "none", borderRadius: 8, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" };
-            const detAction = detChip === "SHORT" && d.onDesignDetention ? (
-              <button type="button" style={designBtnStyle} onClick={d.onDesignDetention} title="Draws (or grows) a right-sized detention pond and solves its outlet — one click, no map skill required.">⚡ Design detention</button>
+            // B909/B910 — ONE primary "⚡ Design pond" cure, not two separate buttons: a
+            // single basin can carry BOTH detention (rate control) and floodplain
+            // mitigation (compensating storage) at once, so two buttons would wrongly
+            // imply two separate ponds/actions. The SAME button + SAME handler renders on
+            // WHICHEVER card(s) currently read SHORT (never when covered/unknown/
+            // straddle/needs-input — the button would have nothing honest to do); if both
+            // cards are short, both show it and clicking either does the whole job,
+            // moving BOTH verdicts toward met. Put where the shortfall is diagnosed, so
+            // the cure sits next to the problem statement.
+            const detShort = detChip === "SHORT", mitShort = mitChip === "SHORT";
+            const designAction = (detShort || mitShort) && d.onDesignPond ? (
+              <button type="button" onClick={d.onDesignPond}
+                title={detShort && mitShort
+                  ? "Draws (or grows) ONE pond sized for both the required detention AND the required floodplain mitigation, and solves its outlet — one click, no map skill required."
+                  : detShort
+                  ? "Draws (or grows) a right-sized detention pond and solves its outlet — one click, no map skill required."
+                  : "Creates (or grows) a pond in the mapped floodplain sized for the required compensating storage — one click, no map skill required."}
+                style={{ width: "100%", padding: "8px 10px", border: "none", borderRadius: 8, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                ⚡ Design pond
+              </button>
             ) : null;
-            const mitAction = mitChip === "SHORT" && d.onDesignMitigation ? (
-              <button type="button" style={designBtnStyle} onClick={d.onDesignMitigation} title="Creates (or grows) a compensating-storage basin in the mapped floodplain — one click, no map skill required.">⚡ Design mitigation</button>
-            ) : null;
-            out.push(groupFold("det", "Detention", detVerdict, detTone, detR, detSub, { chip: detChip, bar: detBar, action: detAction }));
-            out.push(groupFold("mit", "Floodplain mitigation", mitVerdict, mitTone, mitR, mitSub, { chip: mitChip, bar: mitBar, action: mitAction }));
+            // Each card only shows the button for ITS OWN shortfall — "Design pond" on
+            // the Detention card when detention alone is fine but mitigation is short
+            // would read as a false alarm on that card.
+            out.push(groupFold("det", "Detention", detVerdict, detTone, detR, detSub, { chip: detChip, bar: detBar, action: detShort ? designAction : null }));
+            out.push(groupFold("mit", "Floodplain mitigation", mitVerdict, mitTone, mitR, mitSub, { chip: mitChip, bar: mitBar, action: mitShort ? designAction : null }));
             // NEW-10/B830 — the ledger balancer: one card of ranked screening moves that
             // close detention + mitigation together. Every move is one line + ⓘ; nothing
             // is applied without a click — the ONE apply affordance is the berm move

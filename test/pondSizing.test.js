@@ -235,4 +235,77 @@ describe("applyPondSizingActions (B909/B910) — apply the assistant's actions o
     // pinch-off action was reported.
     expect(out.det.depth).toBeGreaterThan(el.det.depth);
   });
+
+  // B909/B910 (unified "Design pond") — a single pond can now be sized for detention
+  // (raise-tob, above-WSE) AND mitigation (deepen/grow, below-WSE) in the same click.
+  it("raise-tob alone: floor held — tobElev and depth both rise by hFt, with tobBerm provenance", () => {
+    const el = { id: "p4", type: "pond", cx: 30, cy: 30, w: 60, h: 60, rot: 0, det: { ...det0 } };
+    const out = applyPondSizingActions(el, [{ kind: "raise-tob", hFt: 2, addCf: 500 }]);
+    expect(out.det.tobElev).toBeCloseTo(102, 6);
+    expect(out.det.depth).toBeCloseTo(10, 6); // original depth 8 + hFt 2
+    expect(out.det.tobBerm).toEqual({ h: 2, applied: 102 });
+    expect(el.det.tobElev).toBe(100); // input never mutated
+  });
+
+  // ⚠ A GENUINE GEOMETRY FINDING from writing this test: side-slope offsets are measured
+  // DOWN FROM the top of bank, so raising tobElev changes the below-WSE candidate volume
+  // at any FIXED floor elevation — a "deepen's absolute depthFt was solved against the
+  // pre-raise tobElev, so add the raise height to reach the same floor" formula LOOKS
+  // right (the floor elevation math checks out) but measurably under-delivers the
+  // mitigation target once actually priced through bandedStorage (confirmed by direct
+  // measurement while building this feature). So this function does NOT attempt to
+  // combine raise-tob with deepen/pinch-off from one shared solve — deepen's absolute
+  // value simply wins (applied after raise-tob). The caller is responsible for a
+  // TWO-PASS solve instead: apply detention, then re-invoke sizePondForTargets against
+  // the UPDATED pond to get a mitigation remedy that's actually correct for what the
+  // pond now is — see the two-pass test below, which is the pattern designPond uses.
+  it("raise-tob + deepen from the SAME call: deepen's absolute depth wins (documented — NOT a valid combined solve)", () => {
+    const el = { id: "p5", type: "pond", cx: 30, cy: 30, w: 60, h: 60, rot: 0, det: { ...det0 } };
+    const out = applyPondSizingActions(el, [
+      { kind: "raise-tob", hFt: 3, addCf: 500 },
+      { kind: "deepen", depthFt: 11 },
+    ]);
+    expect(out.det.tobElev).toBeCloseTo(103, 6); // the raise still applies to tobElev...
+    expect(out.det.depth).toBe(11); // ...but deepen's absolute value governs depth, not a sum
+  });
+
+  it("raise-tob + pinch-off + grow from the SAME call: same precedence — pinch-off's ceiling wins over the raise, footprint still grows", () => {
+    const el = { id: "p6", type: "pond", cx: 30, cy: 30, w: 60, h: 60, rot: 0, det: { ...det0 } };
+    const out = applyPondSizingActions(el, [
+      { kind: "raise-tob", hFt: 2, addCf: 400 },
+      { kind: "pinch-off", maxDepthFt: 9, ceilingCf: 300, slope: 3, label: "x" },
+      { kind: "grow", factor: 1.4, addAcres: 0.4 },
+    ]);
+    expect(out.det.tobElev).toBeCloseTo(102, 6);
+    expect(out.det.depth).toBe(9);
+    expect(out.w).toBeCloseTo(84, 6); // 60 × 1.4 — the grow remedy still applies regardless
+    expect(out.h).toBeCloseTo(84, 6);
+  });
+
+  it("end-to-end TWO-PASS pattern against the real solver: a detention target (raise-tob) applied first, then mitigation RE-SOLVED against the updated pond, reaches BOTH targets — this is the pattern designPond uses", () => {
+    const el = { id: "p7", type: "pond", cx: 100, cy: 100, w: 200, h: 200, rot: 0, det: { ...det0 } };
+    const before = bandedStorage(SQ(200), el.det, { wseFt: 95 });
+    const detTarget = before.usableCf * 1.3;
+    const mitTarget = before.mitigationCandidateCf * 1.3;
+
+    // Pass 1 — detention only (mitTargetCf: 0): solves at most a raise-tob.
+    const pass1 = sizePondForTargets({ ring: SQ(200), det: el.det, wseFt: 95, detTargetCf: detTarget, mitTargetCf: 0 });
+    expect(pass1.ok).toBe(true);
+    expect(pass1.actions.some((a) => a.kind === "raise-tob")).toBe(true);
+    const afterDet = applyPondSizingActions(el, pass1.actions);
+    const detCheck = bandedStorage(SQ(200), afterDet.det, { wseFt: 95 });
+    expect(detCheck.usableCf).toBeGreaterThanOrEqual(detTarget - 1);
+
+    // Pass 2 — mitigation, RE-SOLVED against the pond as it actually is now.
+    const pass2 = sizePondForTargets({ ring: SQ(200), det: afterDet.det, wseFt: 95, detTargetCf: 0, mitTargetCf: mitTarget });
+    expect(pass2.ok).toBe(true);
+    expect(pass2.actions.some((a) => a.kind === "deepen" || a.kind === "grow")).toBe(true);
+    const afterBoth = applyPondSizingActions(afterDet, pass2.actions);
+
+    // BOTH bands clear their targets — and pass 2's re-solve never regressed pass 1's
+    // detention gain (detention doesn't depend on the floor deepening further).
+    const final = bandedStorage(afterBoth.points || SQ(200 * (afterBoth.w / 200)), afterBoth.det, { wseFt: 95 });
+    expect(final.usableCf).toBeGreaterThanOrEqual(detTarget - 1);
+    expect(final.mitigationCandidateCf).toBeGreaterThanOrEqual(mitTarget - 1);
+  });
 });
