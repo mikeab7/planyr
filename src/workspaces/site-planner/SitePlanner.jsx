@@ -13074,7 +13074,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
-            onMouseDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => {
+              // Don't cancel the default action when the mousedown lands on an inline text
+              // editor (a foreignObject <textarea>/<input> — the callout/text box, the inline
+              // label field, the numeric field). preventDefault here bubbles from that child and
+              // would block the browser from moving the text caret to the click point, so a click
+              // inside a text box couldn't reposition the cursor — it stayed wherever autoFocus
+              // left it (B923). Note the editors stop only the POINTER event; mousedown is a
+              // separate event that still reaches this handler, so the guard lives here. Canvas
+              // drags everywhere else still suppress text-selection as before.
+              const t = e.target;
+              if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
+              e.preventDefault();
+            }}
             // Two-finger pinch runs on native touch events (B555) — see onTouchStartPinch. While a
             // 2-finger gesture is live (touchCountRef ≥ 2) the pointer-driven vertex edit / pan / draw
             // handlers all bail, so the pinch owns the gesture and nothing fights it.
