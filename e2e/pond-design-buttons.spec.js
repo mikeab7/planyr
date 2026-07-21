@@ -68,9 +68,10 @@ test.describe("Yield panel — ⚡ Design pond gating (B909/B910, unified single
     await drawPond(page);
     await page.getByRole("button", { name: "Yield", exact: true }).click();
 
-    await expect(page.getByText("Detention storage", { exact: true })).toBeVisible();
+    await expect(page.getByText("Site Yield", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /⚡ Optimize pond/i })).toHaveCount(0);
+    // No leftover "Design pond" naming (renamed to Optimize pond, G8) or two-button revision.
     await expect(page.getByRole("button", { name: /⚡ Design pond/i })).toHaveCount(0);
-    // No leftover two-button naming from an earlier revision of this feature.
     await expect(page.getByRole("button", { name: /⚡ Design detention/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /⚡ Design mitigation/i })).toHaveCount(0);
 
@@ -88,7 +89,7 @@ test.describe("Detention Pond draw-tool hint (B909 §2b)", () => {
     await page.getByRole("button", { name: "Detention Pond", exact: true }).click();
     const hint = page.getByText(/Click on the map to place the detention pond/i);
     await expect(hint).toBeVisible();
-    await expect(hint).toContainText("⚡ Design pond");
+    await expect(hint).toContainText("⚡ Optimize pond");
 
     // Once a drag starts, the hint gets out of the way.
     const box = await canvas(page).boundingBox();
