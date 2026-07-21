@@ -82,6 +82,8 @@ test.describe("Detention land-take + earthwork $ (B907)", () => {
     await drawPond(page);
     await openYield(page);
 
+    // FINAL UI SPEC B1.2 — the cost cards now live inside the collapsed "④ Costs" group.
+    await page.getByRole("button", { name: /Costs road \+ earthwork/i }).click();
     await page.getByRole("button", { name: "Earthwork cost (screening)", exact: true }).click();
 
     const excavationRow = page.getByText(/Pond excavation/i).first();

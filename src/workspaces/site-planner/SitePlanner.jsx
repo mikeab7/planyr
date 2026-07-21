@@ -12463,6 +12463,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
             onMitOpenChange={setFmMitOpen}
           />
+          {/* FINAL UI SPEC B1.2 — ④ Costs: the road + earthwork cards fold into one top-level group. */}
+          <Collapse sectionId="yield-costs" title="Costs" defaultOpen={false} summary="road + earthwork">
           {(() => {
             // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
             // (LF, both sides), split by curb type so each rides its own unit price.
@@ -12646,6 +12648,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </Section>
             );
           })()}
+          </Collapse>
           </>)}
 
           {/* Standards (B653) — pure per-element-type STARTING VALUES. The what-you-see
@@ -18249,6 +18252,13 @@ function YieldPanel({
   );
   const note = (text) => <div style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
 
+  // FINAL UI SPEC Part B (B1.2) — closed-state summaries for the top-level Collapse groups.
+  const swSummaryVerdict = drainage ? yieldVerdictStrip(drainage)[0] : null;
+  const swSummary = swSummaryVerdict
+    ? (swSummaryVerdict.tone === "danger" ? "detention short" : swSummaryVerdict.tone === "good" ? "detention covered ✓" : "checking flood data")
+    : "run a drainage check";
+  const landSummary = hasSite ? `${f2(acres)} ac · ${f0(cov)}% coverage · ${f0(bldg / 1000)}k sf` : "no site drawn";
+
   return (
     <div style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
       {/* header — identity tile + label + collapse chevron (collapse preserved) */}
@@ -18306,79 +18316,10 @@ function YieldPanel({
               </div>
             );
           })()}
-          {/* KPI cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 13 }}>
-            {kpi("Site", f2(acres), "ac")}
-            {kpi("Building", `${f0(bldg / 1000)}k`, "sf")}
-            {kpi("Coverage", `${f0(cov)}`, "%")}
-          </div>
-
-          {/* composition donut + legend */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "2px 0 4px" }}>
-            <svg width="100" height="100" viewBox="0 0 100 100" style={{ flex: "none" }}>
-              <circle cx="50" cy="50" r={R} fill="none" stroke={Y.track} strokeWidth="13" />
-              <g transform="rotate(-90 50 50)">
-                {hasSite && arcs.map((a) => (
-                  <circle key={a.key} cx="50" cy="50" r={R} fill="none" stroke={a.color} strokeWidth="13"
-                    strokeLinecap="butt" strokeDasharray={`${a.len} ${C - a.len}`} strokeDashoffset={a.offset} />
-                ))}
-              </g>
-              <text x="50" y="46" textAnchor="middle" dominantBaseline="central" style={{ fontFamily: NUM_FONT, fontSize: 16, fontWeight: 700, fill: Y.text, fontVariantNumeric: TABULAR_NUMS }}>{f2(acres)}</text>
-              <text x="50" y="61" textAnchor="middle" dominantBaseline="central" style={{ fontSize: 8.5, fill: Y.muted, letterSpacing: "0.06em" }}>acres</text>
-            </svg>
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
-              {slices.map((s) => {
-                const zero = Math.round(s.pct) === 0;
-                // A zeroed share is present-and-zero, never hidden — Detention especially
-                // always shows, with a muted hollow swatch to read as "0%, not omitted".
-                const sw = s.key === "detention" && zero
-                  ? { background: Y.detZeroFill, border: `1px solid ${Y.detZeroBorder}` }
-                  : { background: s.color };
-                return (
-                  <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 3, flex: "none", ...sw }} />
-                    <span style={{ flex: 1, fontSize: 11.5, color: zero ? Y.muted : Y.rowLabel }}>{s.label}</span>
-                    <span style={{ fontFamily: NUM_FONT, fontSize: 12, fontWeight: 650, color: zero ? Y.muted : Y.text, fontVariantNumeric: TABULAR_NUMS }}>{Math.round(s.pct)}%</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* B907 — a detention shortfall's estimated additional land take: advisory only,
-              never folded into the pie above (which stays 100%-consistent, reflecting only
-              what's actually drawn). Shows nothing when required ≤ provided. */}
-          {detentionLandTake && (
-            <WatchOutChip
-              style={{ margin: "6px 2px 0" }}
-              info={`Detention is short ${f2(detentionLandTake.deficitAcFt)} ac-ft against the required volume (site total). At a typical ${detentionLandTake.avgDepthFt}-ft screening pond depth, that shortfall would take roughly ${f2(detentionLandTake.footprintAc)} more acres of land than this plan currently shows drawn — a screening estimate (footprint ≈ volume / assumed depth), not a sized or placed pond. Size/expand a basin to confirm the real footprint.`}
-            >
-              Detention shortfall ≈ +{f2(detentionLandTake.footprintAc)} ac more land (screening estimate)
-            </WatchOutChip>
-          )}
-
-          {/* hairline divider */}
-          <div style={{ height: 1, background: Y.hairline, margin: "8px 0 0" }} />
-
-          {/* grouped detail rows — one semantic dot per group */}
-          {groupHead(Y.green, "Land")}
-          {row("Site area", `${f2(acres)} ac`, `(${f0(siteSqft)} sf)`)}
-          {inactiveCount > 0 && note(`Excludes ${inactiveCount} inactive parcel${inactiveCount > 1 ? "s" : ""} — toggle in the Parcel panel.`)}
-          {/* B722: the FAR (1-story) row was dropped — for single-story industrial it's
-              arithmetically identical to Coverage, so it was noise. Reinstate it only if a
-              multi-story / mezzanine input ever lands. */}
-          {row("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
-
-          {groupHead(Y.building, "Building")}
-          {row("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
-          {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} sf`, bumpsUniform ? `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′` : `${bumpCount} bump-out${bumpCount > 1 ? "s" : ""} · sizes vary`, true)}
-          {row("Coverage", `${f0(cov)}%`)}
-
-          {groupHead(Y.paving, "Parking")}
-          {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
-          {row("Trailer stalls", f0(trailers))}
-
-          {groupHead(Y.detention, "Stormwater")}
+          {/* FINAL UI SPEC B1.2 — the panel folds into top-level Collapse groups: ① Stormwater
+              (open) · ② Land & yield (closed) · (Costs live in the parent as ④). The verdict strip
+              above leads; the detailed verdict groups (Detention/Mitigation/Buildability) nest here. */}
+          <Collapse sectionId="yield-stormwater" title="Stormwater" defaultOpen={true} summary={swSummary}>
           {/* B722: an undefined percentage feeds real detention decisions — define exactly what
               the engine sums, verified against the impervious accumulator (bldg + paving/roads/
               sidewalks + parking + trailer, each incl. derived curbs). Pond surface is a SEPARATE
@@ -19610,6 +19551,80 @@ function YieldPanel({
             // this panel) now lives ONCE in the panel footer (YieldFooterDisclaimer, below).
             return out;
           })()}
+          </Collapse>
+          <Collapse sectionId="yield-land" title="Land & yield" defaultOpen={false} summary={landSummary}>
+          {/* KPI cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 13 }}>
+            {kpi("Site", f2(acres), "ac")}
+            {kpi("Building", `${f0(bldg / 1000)}k`, "sf")}
+            {kpi("Coverage", `${f0(cov)}`, "%")}
+          </div>
+
+          {/* composition donut + legend */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "2px 0 4px" }}>
+            <svg width="100" height="100" viewBox="0 0 100 100" style={{ flex: "none" }}>
+              <circle cx="50" cy="50" r={R} fill="none" stroke={Y.track} strokeWidth="13" />
+              <g transform="rotate(-90 50 50)">
+                {hasSite && arcs.map((a) => (
+                  <circle key={a.key} cx="50" cy="50" r={R} fill="none" stroke={a.color} strokeWidth="13"
+                    strokeLinecap="butt" strokeDasharray={`${a.len} ${C - a.len}`} strokeDashoffset={a.offset} />
+                ))}
+              </g>
+              <text x="50" y="46" textAnchor="middle" dominantBaseline="central" style={{ fontFamily: NUM_FONT, fontSize: 16, fontWeight: 700, fill: Y.text, fontVariantNumeric: TABULAR_NUMS }}>{f2(acres)}</text>
+              <text x="50" y="61" textAnchor="middle" dominantBaseline="central" style={{ fontSize: 8.5, fill: Y.muted, letterSpacing: "0.06em" }}>acres</text>
+            </svg>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+              {slices.map((s) => {
+                const zero = Math.round(s.pct) === 0;
+                // A zeroed share is present-and-zero, never hidden — Detention especially
+                // always shows, with a muted hollow swatch to read as "0%, not omitted".
+                const sw = s.key === "detention" && zero
+                  ? { background: Y.detZeroFill, border: `1px solid ${Y.detZeroBorder}` }
+                  : { background: s.color };
+                return (
+                  <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, flex: "none", ...sw }} />
+                    <span style={{ flex: 1, fontSize: 11.5, color: zero ? Y.muted : Y.rowLabel }}>{s.label}</span>
+                    <span style={{ fontFamily: NUM_FONT, fontSize: 12, fontWeight: 650, color: zero ? Y.muted : Y.text, fontVariantNumeric: TABULAR_NUMS }}>{Math.round(s.pct)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* B907 — a detention shortfall's estimated additional land take: advisory only,
+              never folded into the pie above (which stays 100%-consistent, reflecting only
+              what's actually drawn). Shows nothing when required ≤ provided. */}
+          {detentionLandTake && (
+            <WatchOutChip
+              style={{ margin: "6px 2px 0" }}
+              info={`Detention is short ${f2(detentionLandTake.deficitAcFt)} ac-ft against the required volume (site total). At a typical ${detentionLandTake.avgDepthFt}-ft screening pond depth, that shortfall would take roughly ${f2(detentionLandTake.footprintAc)} more acres of land than this plan currently shows drawn — a screening estimate (footprint ≈ volume / assumed depth), not a sized or placed pond. Size/expand a basin to confirm the real footprint.`}
+            >
+              Detention shortfall ≈ +{f2(detentionLandTake.footprintAc)} ac more land (screening estimate)
+            </WatchOutChip>
+          )}
+
+          {/* hairline divider */}
+          <div style={{ height: 1, background: Y.hairline, margin: "8px 0 0" }} />
+
+          {/* grouped detail rows — one semantic dot per group */}
+          {groupHead(Y.green, "Land")}
+          {row("Site area", `${f2(acres)} ac`, `(${f0(siteSqft)} sf)`)}
+          {inactiveCount > 0 && note(`Excludes ${inactiveCount} inactive parcel${inactiveCount > 1 ? "s" : ""} — toggle in the Parcel panel.`)}
+          {/* B722: the FAR (1-story) row was dropped — for single-story industrial it's
+              arithmetically identical to Coverage, so it was noise. Reinstate it only if a
+              multi-story / mezzanine input ever lands. */}
+          {row("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
+
+          {groupHead(Y.building, "Building")}
+          {row("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
+          {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} sf`, bumpsUniform ? `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′` : `${bumpCount} bump-out${bumpCount > 1 ? "s" : ""} · sizes vary`, true)}
+          {row("Coverage", `${f0(cov)}%`)}
+
+          {groupHead(Y.paving, "Parking")}
+          {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
+          {row("Trailer stalls", f0(trailers))}
+          </Collapse>
 
           {easeAll.length > 0 && (<>
             {groupHead(Y.faint, "Easements")}
