@@ -70,13 +70,15 @@ describe("A1.6 — the four collapsed groups + summaries", () => {
     ]);
   });
 
-  it("summaries render the specified shapes", () => {
-    expect(pondGroupSummary.sizing({ reqLo: "28.60", reqHi: "33.80", drainageAc: "52.04" }))
-      .toBe("req 28.60–33.80 ac-ft · drainage 52.04 ac");
+  it("summaries render the specified shapes (short — no-truncation, owner live-check)", () => {
+    // 1-decimal ac-ft, no drainage tail (would ellipsize next to the long title at panel width)
+    expect(pondGroupSummary.sizing({ reqLo: "28.6", reqHi: "33.8" })).toBe("req 28.6–33.8 ac-ft");
+    expect(pondGroupSummary.sizing({ req: "30.0" })).toBe("req 30.0 ac-ft");
     expect(pondGroupSummary.outlet({ hasOutlet: false })).toBe("no outlet");
     expect(pondGroupSummary.outlet({ hasOutlet: true, stages: 2, allPass: true })).toBe("2 stages · all storms PASS");
     expect(pondGroupSummary.outlet({ hasOutlet: true, stages: 2, allPass: null })).toBe("2 stages");
-    expect(pondGroupSummary.flood({ wse: "153.1", estimated: true })).toBe("flood level 153.1′ (estimated)");
+    expect(pondGroupSummary.flood({ wse: "153.1", estimated: true })).toBe("flood 153.1′ est.");
+    expect(pondGroupSummary.flood({ wse: "153.1", estimated: false })).toBe("flood 153.1′");
     expect(pondGroupSummary.flood({ wse: null })).toBe("no flood data");
     expect(pondGroupSummary.appearance({})).toBe("fill · outline · opacity");
   });
@@ -91,7 +93,7 @@ describe("A4 — visible word budget (default state, all groups closed)", () => 
       .reduce((n, c) => n + words(c.text), 0);
     const titleWords = POND_GROUPS.reduce((n, g) => n + words(g.title), 0);
     const summaryWords = [
-      pondGroupSummary.sizing({ reqLo: "28.60", reqHi: "33.80", drainageAc: "52.04" }),
+      pondGroupSummary.sizing({ reqLo: "28.6", reqHi: "33.8" }),
       pondGroupSummary.outlet({ hasOutlet: true, stages: 2, allPass: null }),
       pondGroupSummary.flood({ wse: "153.1", estimated: true }),
       pondGroupSummary.appearance({}),

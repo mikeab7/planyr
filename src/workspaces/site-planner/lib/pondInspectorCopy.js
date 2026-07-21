@@ -48,16 +48,19 @@ export const POND_GROUPS = [
 
 // One-line closed-state summaries (A1.6). Pure string builders; the caller passes already-
 // formatted value strings so the number-format rules live in one place (SitePlanner f1/f2).
+// Summaries are kept SHORT so they never ellipsize next to the (uppercase, letter-spaced)
+// group title at panel width (owner live-check on Tsakiris, 2026-07-21): the drainage-area
+// tail is dropped from Sizing, and Flood abbreviates to "flood 153.1′ est." Values are
+// already 1-decimal ac-ft (B3) by the time they reach here.
 export const pondGroupSummary = {
-  sizing: ({ reqLo, reqHi, req, drainageAc }) =>
-    (reqLo != null && reqHi != null ? `req ${reqLo}–${reqHi} ac-ft` : req != null ? `req ${req} ac-ft` : "screening inputs")
-    + (drainageAc != null ? ` · drainage ${drainageAc} ac` : ""),
+  sizing: ({ reqLo, reqHi, req }) =>
+    reqLo != null && reqHi != null ? `req ${reqLo}–${reqHi} ac-ft` : req != null ? `req ${req} ac-ft` : "screening inputs",
   outlet: ({ hasOutlet, stages, allPass }) =>
     !hasOutlet ? "no outlet"
       : allPass == null ? `${stages} stage${stages === 1 ? "" : "s"}`
       : `${stages} stage${stages === 1 ? "" : "s"} · all storms ${allPass ? "PASS" : "check"}`,
   flood: ({ wse, estimated }) =>
-    wse != null ? `flood level ${wse}′${estimated ? " (estimated)" : ""}` : "no flood data",
+    wse != null ? `flood ${wse}′${estimated ? " est." : ""}` : "no flood data",
   appearance: () => "fill · outline · opacity",
 };
 

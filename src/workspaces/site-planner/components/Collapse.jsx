@@ -50,7 +50,9 @@ export default function Collapse({
           <span style={{ flex: "none", fontSize: 9.5, fontWeight: 700, color: "var(--text-tertiary)", background: "var(--planner-panel)", borderRadius: 999, padding: "0 6px", fontVariantNumeric: TABULAR_NUMS }}>{count}</span>
         ) : null}
         {!open && summary ? (
-          <span style={{ marginLeft: "auto", minWidth: 0, fontSize: 10.5, color: "var(--text-tertiary)", fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{summary}</span>
+          // No-truncation rule (FINAL UI SPEC): the summary shrinks and WRAPS rather than
+          // ellipsizing, so it's never cut off with "…" next to a long group title.
+          <span style={{ marginLeft: "auto", minWidth: 0, flexShrink: 1, textAlign: "right", fontSize: 10.5, color: "var(--text-tertiary)", fontVariantNumeric: TABULAR_NUMS, whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.3 }}>{summary}</span>
         ) : null}
         {headerRight != null ? (
           <span onClick={(e) => e.stopPropagation()} style={{ marginLeft: open || !summary ? "auto" : 8, flex: "none" }}>{headerRight}</span>

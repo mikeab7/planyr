@@ -15692,11 +15692,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 );
                 // Closed-state one-line summaries for the four collapsed groups (A1.6).
+                // Summary values are 1-decimal ac-ft (B3) and drop the drainage tail so the
+                // closed-group header never truncates at panel width (owner live-check).
                 const g_sizingSummary = pondGroupSummary.sizing({
-                  reqLo: detReq && detReq.kind === "band" ? f2(detReq.bandAcFt[0]) : null,
-                  reqHi: detReq && detReq.kind === "band" ? f2(detReq.bandAcFt[1]) : null,
-                  req: detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? f2(detReq.requiredAcFt) : null,
-                  drainageAc: Number.isFinite(det.daAcres) ? f2(det.daAcres) : (Number.isFinite(acresActive) ? f2(acresActive) : null),
+                  reqLo: detReq && detReq.kind === "band" ? f1(detReq.bandAcFt[0]) : null,
+                  reqHi: detReq && detReq.kind === "band" ? f1(detReq.bandAcFt[1]) : null,
+                  req: detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? f1(detReq.requiredAcFt) : null,
                 });
                 const g_outletStages = det.outlet && Array.isArray(det.outlet.stages) ? det.outlet.stages.length : 0;
                 const g_outletSummary = pondGroupSummary.outlet({ hasOutlet: g_outletStages > 0, stages: g_outletStages, allPass: null });
