@@ -397,7 +397,7 @@ _295 source files mapped._
   - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbGet`, `idbPersist`, `idbPut`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
-- **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B918 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B919)
+- **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)
   - _exports_: `boxCorners`, `distToPolyline`, `distToRing`, `ellipseRing`, `markupHitModel`, `markupsUnderPoint`, `markupUnderPoint`, `nextMarkupSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureHit.js`** — Pure hit-test + z-order cycling for on-canvas measurements (B910): which measurement a feet-space click lands on (smaller-area-wins), and the next selection when a stack is re-clicked (wraps)
   - _exports_: `distToPolyline`, `measModeOf`, `measPoints`, `measuresUnderPoint`, `nextMeasureSelection`, `pointInRing`, `ringArea`

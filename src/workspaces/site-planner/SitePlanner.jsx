@@ -2653,14 +2653,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const arrangeSel = (mode, target) => {
     const s = target || selRef.current;
     // Resolve the peer set once (a building reorders within its type-layer band; a markup within the
-    // markup layer) so the patch AND the B919/NEW-2 no-op cue read the same list.
+    // markup layer) so the patch AND the B921/NEW-2 no-op cue read the same list.
     let peers = null;
     if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return; const band = zOrder(t); peers = els.filter((e) => zOrder(e) === band); }
     else if (s?.kind === "markup") { peers = markups; }
     else return;
     const patch = reorderByZ(peers, s.id, mode);
     if (!patch) {
-      // B919/NEW-2 — a no-op arrange (already at that end of a real stack) used to be dead silence;
+      // B921/NEW-2 — a no-op arrange (already at that end of a real stack) used to be dead silence;
       // via a keyboard chord that read as "nothing works." Flash a brief cue instead. Skip a lone
       // item (nothing to reorder) so we don't cry "already at back" when there's no stack at all.
       const af = arrangeFlags(peers, s.id);
@@ -3792,11 +3792,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (multi.length) setMulti([]);
-    // B919/NEW-2 — repeat-click OR Alt-click CYCLES the selection DOWN through the markups stacked
+    // B921/NEW-2 — repeat-click OR Alt-click CYCLES the selection DOWN through the markups stacked
     // under the pointer (smaller-area-first), so a shape covered by another is always reachable — the
     // escape hatch for "I can't get to the one underneath." A FRESH click (nothing under this point is
     // selected yet) keeps the DOM-topmost hit the browser already resolved. Mirrors the B910 measure
-    // cycle (selectMeasure + measureHit.js); the under-point stack honours the B918 fill-aware rule, so
+    // cycle (selectMeasure + measureHit.js); the under-point stack honours the B920 fill-aware rule, so
     // an unfilled boundary only joins the cycle when you click near its stroke.
     let selId = id, selM = m;
     {
@@ -12644,24 +12644,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const nStroke = m.stroke;
                 const nsw = sw + (isSel ? 1 : 0);
                 const vsw = strokeZoom(nsw, zk); // B617: on-screen weight held constant relative to the drawing
-                // B920/NEW-3 — a LOCKED markup can't be moved or reshaped, so it must NOT wear the
+                // B922/NEW-3 — a LOCKED markup can't be moved or reshaped, so it must NOT wear the
                 // four-arrow "move" cursor (that false affordance is exactly what the owner hit: a
                 // locked shape shows "move" but nothing happens). It stays selectable (click → Unlock),
                 // so a plain "pointer" reads honestly.
                 const mkCursor = { cursor: tool === "select" ? (m.locked ? "pointer" : "move") : "crosshair" };
                 const common = { stroke: nStroke, strokeWidth: vsw, strokeDasharray: da, fill: "none", style: mkCursor, onPointerDown: (e) => startMoveMarkup(e, m.id), onContextMenu: (e) => onMarkupContext(e, m.id) };
-                // B918/NEW-1 — a closed shape (rect/ellipse/polygon) grabs by its whole INTERIOR only
+                // B920/NEW-1 — a closed shape (rect/ellipse/polygon) grabs by its whole INTERIOR only
                 // when it is FILLED. An UNFILLED one (fillOpacity 0) grabs on its stroke + a forgiving
                 // buffer ONLY, via a fat transparent hit companion (the line/polyline technique) — so a
                 // big invisible boundary stops blanketing everything under it (the reported bug: an
                 // unfilled ~5,000-ft polygon swallowed every off-road click, and "Send to Back" was
                 // powerless because it's a hit-AREA problem, not paint order). Small FILLED annotations
                 // still select by interior (B155/B156 preserved). markupPick.js reads the SAME
-                // fillOpacity>0 rule, so the JS cycle (B919) and this declarative hit area never diverge.
+                // fillOpacity>0 rule, so the JS cycle (B921) and this declarative hit area never diverge.
                 const closedFill = (m.fillOpacity ?? 0) > 0;
                 const visFill = closedFill ? { fill: m.fill, fillOpacity: m.fillOpacity } : { fill: "none" };
-                const closedHitPE = closedFill ? "all" : "stroke"; // whole-body vs stroke-only grab (B918)
-                // Top-centre screen anchor for the selected-locked 🔒 cue (B920/NEW-3), per markup kind.
+                const closedHitPE = closedFill ? "all" : "stroke"; // whole-body vs stroke-only grab (B920)
+                // Top-centre screen anchor for the selected-locked 🔒 cue (B922/NEW-3), per markup kind.
                 const mkLockAnchor = () => {
                   const pts = m.kind === "line" ? [m.a, m.b]
                     : MK_BOX_KINDS.includes(m.kind) ? boxCorners(m)
@@ -12785,7 +12785,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
-                // B918/NEW-1 — each closed shape is a fat TRANSPARENT hit companion (carries the
+                // B920/NEW-1 — each closed shape is a fat TRANSPARENT hit companion (carries the
                 // grab: whole-body when filled, stroke-only when unfilled) UNDER a pointer-inert
                 // VISIBLE shape. Same declarative pattern the line/polyline already use, so hover
                 // and click share one hit geometry (B156). No double-paint: the companion is fill:none.
@@ -12822,7 +12822,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                      onPointerEnter={() => { if (tool === "select") setHoverMkId(m.id); }}
                      onPointerLeave={() => setHoverMkId((h) => (h === m.id ? null : h))}>
                     {node}
-                    {/* B920/NEW-3 — a small 🔒 on the SELECTED locked markup (mirrors the element lock
+                    {/* B922/NEW-3 — a small 🔒 on the SELECTED locked markup (mirrors the element lock
                         glyph), so it's obvious WHY dragging does nothing: it's locked, not stuck. */}
                     {isSel && m.locked && tool === "select" && (() => { const a = mkLockAnchor(); return a ? <text x={a.x} y={a.y} textAnchor="middle" fontSize={13} pointerEvents="none" data-export="skip">🔒</text> : null; })()}
                   </g>
@@ -14745,7 +14745,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   );
                 })()}
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
-                  {/* B920/NEW-3 — a locked markup renders no reshape dots (editablePath returns null
+                  {/* B922/NEW-3 — a locked markup renders no reshape dots (editablePath returns null
                       when locked), so the "drag a dot" instruction was a lie. Tell the truth instead. */}
                   {selMarkup.locked
                     ? "Locked — click 🔓 Unlock below to move or reshape it."

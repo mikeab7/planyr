@@ -1,17 +1,17 @@
-// markupPick.js — pure hit-testing + z-stack cycling for Site Planner markups (B918 / B919).
+// markupPick.js — pure hit-testing + z-stack cycling for Site Planner markups (B920 / B921).
 //
 // The Site Planner picks markups SVG-natively (the browser's hit-testing over DOM paint order +
 // each node's `pointerEvents`), which the shared imperative picker (src/shared/markup/hitTest.js)
 // deliberately does NOT own for this surface — see its header note. Two things still need the
 // stack in PURE JS, independent of the DOM, and this sibling of measureHit.js (B910) provides them:
 //
-//   • B918 / NEW-1 — the ONE fill-aware rule the DOM render also follows: a CLOSED markup grabs by
+//   • B920 / NEW-1 — the ONE fill-aware rule the DOM render also follows: a CLOSED markup grabs by
 //     its whole INTERIOR only when it is FILLED (fillOpacity > 0). An UNFILLED closed markup grabs
 //     on its STROKE + a tolerance only — so a big invisible boundary can't blanket everything under
 //     it (the reported "can't click the roads — a transparent polygon eats every click" bug). The
 //     canvas render sets pointerEvents "all" vs "stroke" off the very same `fillOpacity > 0` test,
 //     so the declarative hit area and this predicate agree by construction.
-//   • B919 / NEW-2 — repeat-click / Alt-click must CYCLE down through every markup under the pointer
+//   • B921 / NEW-2 — repeat-click / Alt-click must CYCLE down through every markup under the pointer
 //     so a covered shape is always reachable. Smaller-area-first (a small markup on a big one wins,
 //     matching the shared picker's B374 rule), array index breaks ties so the cycle is stable.
 //
@@ -79,9 +79,9 @@ export function ellipseRing(m, seg = 48) {
   return out;
 }
 
-// A markup's clickable geometry + whether its BODY captures (the B918 rule in ONE place, so the
+// A markup's clickable geometry + whether its BODY captures (the B920 rule in ONE place, so the
 // DOM render and this picker never diverge): { ring, path, closed, filled, area } | null.
-//   - polygon/rect/ellipse — closed; `filled` follows fillOpacity > 0 (B918).
+//   - polygon/rect/ellipse — closed; `filled` follows fillOpacity > 0 (B920).
 //   - line/polyline/traced/infwater — open paths (stroke hit only), area 0.
 //   - encumbrance/easement/utilRoute — semantic markups whose bodies already grab in the DOM
 //     (pattern fill / corridor fill / pointerEvents "all"), so they are always `filled`.
@@ -103,7 +103,7 @@ export function markupHitModel(m) {
 }
 
 // Does feet-point `p` land on markup `m` within `tol` feet? Returns { area } (the ranking key) or
-// null. Honours the B918 rule: an unfilled closed shape hits on its stroke only, never its interior.
+// null. Honours the B920 rule: an unfilled closed shape hits on its stroke only, never its interior.
 export function markupUnderPoint(m, p, tol) {
   const g = markupHitModel(m);
   if (!g) return null;
@@ -113,7 +113,7 @@ export function markupUnderPoint(m, p, tol) {
     if (g.filled) {
       if (pointInRing(p, ring) || distToRing(p, ring) <= tol) return { area: g.area };
     } else if (distToRing(p, ring) <= tol) {
-      return { area: g.area }; // B918: unfilled → stroke + tolerance only
+      return { area: g.area }; // B920: unfilled → stroke + tolerance only
     }
     return null;
   }

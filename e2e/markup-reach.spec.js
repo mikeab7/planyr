@@ -1,14 +1,14 @@
-/* B918 / B919 / B920 — reaching markups you can click, and the honesty cues for locked ones.
+/* B920 / B921 / B922 — reaching markups you can click, and the honesty cues for locked ones.
  *
  * The owner's report: on a real plan a big INVISIBLE (fillOpacity:0) polygon sat over the roads and
  * swallowed every click across its whole interior, so the roads under it were unreachable; the shape
  * was also locked, so all he got was the four-arrow move cursor and nothing happened, and "Send to
  * Back" was powerless (it's a hit-AREA problem, not paint order). These logged-out specs drive the
  * REAL SVG canvas against a seeded-blank site and pin the three fixes:
- *   • B918 — an UNFILLED closed markup no longer grabs its interior; a click falls THROUGH to what's
+ *   • B920 — an UNFILLED closed markup no longer grabs its interior; a click falls THROUGH to what's
  *            under it, and the markup is still reachable near its stroke.
- *   • B919 — repeat-clicking a spot where two markups overlap CYCLES the selection between them.
- *   • B920 — a LOCKED markup shows an honest "unlock to move/reshape" hint, a 🔒 cue, and a non-move
+ *   • B921 — repeat-clicking a spot where two markups overlap CYCLES the selection between them.
+ *   • B922 — a LOCKED markup shows an honest "unlock to move/reshape" hint, a 🔒 cue, and a non-move
  *            cursor instead of the lying four-arrow move cursor.
  * The selected markup renders data-testid="markup-selected" (carrying data-mk-id / data-mk-kind /
  * data-mk-locked) only while a markup is selected in Select mode. */
@@ -65,7 +65,7 @@ async function drawBuilding(page, x1, y1, x2, y2) {
 }
 
 test.describe("markup reachability + locked honesty (logged out)", () => {
-  test("B918 — an unfilled markup no longer swallows interior clicks; a covered element is reachable through it", async ({ page }) => {
+  test("B920 — an unfilled markup no longer swallows interior clicks; a covered element is reachable through it", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -102,7 +102,7 @@ test.describe("markup reachability + locked honesty (logged out)", () => {
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  test("B919 — repeat-clicking overlapping markups cycles the selection between them", async ({ page }) => {
+  test("B921 — repeat-clicking overlapping markups cycles the selection between them", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -137,7 +137,7 @@ test.describe("markup reachability + locked honesty (logged out)", () => {
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  test("B920 — a locked markup shows an honest hint + 🔒 cue + a non-move cursor", async ({ page }) => {
+  test("B922 — a locked markup shows an honest hint + 🔒 cue + a non-move cursor", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
