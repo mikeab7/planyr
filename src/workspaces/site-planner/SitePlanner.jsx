@@ -22,6 +22,7 @@ import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
+import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale } from "./lib/overlayPdf.js";
@@ -3264,10 +3265,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const refs = [...newEls.filter((e) => e.groupId === ng).map((e) => ({ kind: "el", id: e.id })), ...newMks.map((m) => ({ kind: "markup", id: m.id }))];
     setMulti(refs); setSel(refs[0] || null); setDrillId(null);
   };
+  // B910 / NEW-1 — clicking a measurement used to be inert unless you'd first switched to the
+  // Select tool: the Measure tool STAYS active after you draw (so you can measure many things in a
+  // row), but the hit target + this handler both gated on tool==="select", so the measurement you
+  // just drew swallowed clicks silently. Now a click grabs a finished measurement from the Measure
+  // tool too and drops back to Select (the handles / × / highlight are all gated on Select), so the
+  // selection is immediately visible and editable — mirroring how every other drawn item becomes
+  // grabbable the instant its tool hands back to Select. A repeated click cycles the selection down
+  // through anything stacked under the cursor (smaller-area-wins so a tiny measurement on top of a
+  // big one is reachable first). Mid-draw (a new measurement in progress) we do NOT steal the click:
+  // it falls through to place the next vertex, even when that vertex lands on an existing measurement.
   const selectMeasure = (e, i) => {
-    if (tool !== "select" || e.button !== 0) return;
+    if (e.button !== 0) return;
+    if (tool === "measure" && measDraft.length > 0) return; // mid-draw: let onBgDown place the next vertex
     e.stopPropagation();
-    setSel({ kind: "measure", i });
+    if (tool !== "select") setTool("select"); // drop to Select so the grips / × / highlight render
+    const fp = p2f(e.clientX, e.clientY);
+    const order = measuresUnderPoint(measures, fp, 12 / view.ppf); // 12px hit buffer → feet
+    const next = nextMeasureSelection(order, sel?.kind === "measure" ? sel.i : -1);
+    setMulti([]); setSelVtx(null);
+    setSel({ kind: "measure", i: next != null ? next : i });
   };
 
   /* ------------ pointer handlers (svg root) ------------ */
@@ -13507,6 +13524,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
                 const pts = fpts.map(f2p);
                 const isSel = sel?.kind === "measure" && sel.i === i;
+                // B910 — a finished measurement is grabbable from BOTH the Select tool and the
+                // Measure tool (the tool you're still in right after drawing it); selectMeasure
+                // drops you back to Select on the click so the grips/×/highlight show.
+                const canGrab = tool === "select" || tool === "measure";
                 const warn = calibrationState === "uncalibrated";
                 const mcolor = warn ? "#b45309" : PAL.accent;
 
@@ -13526,10 +13547,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {/* hit targets — one transparent circle per marker */}
                       {pts.map((p, k) => (
                         <circle key={`h${k}`} cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
-                          pointerEvents={tool === "select" ? "all" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />
                       ))}
                       {isSel && tool === "select" && (
-                        <g>
+                        <g data-testid="measure-selected" data-sel-i={i}>
                           {pts.map((p, k) => {
                             const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === i && selVtx.index === k;
                             return (
@@ -13567,14 +13588,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
                     <text x={anchor.x} y={anchor.y - 5} textAnchor="middle" fontSize="12" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
                       fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>
-                    {/* wide invisible hit path to select the measurement (select tool only) */}
+                    {/* wide invisible hit path to select the measurement (Select OR Measure tool — B910) */}
                     {isArea
                       ? <polygon points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={tool === "select" ? "all" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />
                       : <polyline points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
-                          pointerEvents={tool === "select" ? "stroke" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />}
+                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />}
                     {isSel && tool === "select" && (
-                      <g>
+                      <g data-testid="measure-selected" data-sel-i={i}>
                         {/* B230: draggable SQUARE control points (no "+" dots) — Shift-click /
                             right-click an edge inserts a point; right-click / Delete removes one.
                             The active control point (Delete target) is shown inverted. */}
