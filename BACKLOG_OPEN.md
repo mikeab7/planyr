@@ -75,7 +75,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B923 | Rail / menu / tool chrome audit-and-fix pass, both themes, screenshot-verified | [App-wide / UI] | #ui | ⏳ live — awaiting |
+| B928 | Rail / menu / tool chrome audit-and-fix pass, both themes, screenshot-verified | [App-wide / UI] | #ui | ⏳ live — awaiting |
 | B914 | Review resume leaks one project's last loose PDF (its "upload didn't finish" banner) onto every OTHER project's Review tab | [Doc Review] | #doc-review #persistence #ui | ⏳ live — awaiting |
 | B918 | Callout text overflows its box in Document Review | [Doc Review] | #markup #doc-review | ⏳ live — awaiting |
 | B919 | Add / remove leaders on a callout, Bluebeam-style | [Site Planner / Doc Review] | #markup #site-planner #doc-review | ⏳ live — awaiting |
@@ -196,5 +196,5 @@
 - **#stitching** — B413, B839
 - **#testing** — B269, B63, B878, B863, B836, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B917, B842, B810, B735, B723, B115, B923, B914, B911, B912, B913, B909, B903, B902, B901, B900, B882, B881, B880, B879, B865, B862, B837, B821, B820, B802, B746, B742, B712, B695, B693, B669, B668, B673, B674
+- **#ui** — B917, B842, B810, B735, B723, B115, B928, B914, B911, B912, B913, B909, B903, B902, B901, B900, B882, B881, B880, B879, B865, B862, B837, B821, B820, B802, B746, B742, B712, B695, B693, B669, B668, B673, B674
 - **#yield** — B906, B724, B909, B888, B885, B884, B882, B883, B878, B868, B870, B871, B860, B861, B862, B832, B802, B782, B751, B712, B651

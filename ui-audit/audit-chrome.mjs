@@ -1,9 +1,9 @@
-/* B923 (NEW-1) — rail / menu / tool chrome audit screenshot harness.
+/* B928 (NEW-1) — rail / menu / tool chrome audit screenshot harness.
  *
  * Walks every rail / toolbar / menu surface — Site Planner (both rails + an open tool menu),
  * Library, Doc Review, and Schedule — at desktop AND narrow width, in LIGHT and DARK theme, and
  * saves a screenshot per surface/theme to ui-audit/screenshots/chrome/. This is the evidence pass
- * for the audit-and-fix items B923–B927: the token sweep (no raw-hex chrome), the opacity→token
+ * for the audit-and-fix items B928 + B924–B927: the token sweep (no raw-hex chrome), the opacity→token
  * hierarchy fix (B925), the shared ContextMenu (B924), and the shared interaction states (B927).
  *
  * Logged out — no Supabase / network tiles needed. Theme is seeded via localStorage["planyr.theme"]
