@@ -13037,7 +13037,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
-                      {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
+                      {/* NEW-1 (extends B149) — the easement's centroid label ("50′ Utility Esmt") rides
+                          the shared zoom-FLOOR gate (dimCalloutVisible), so at site-overview zoom it drops
+                          like the auto dims + measurement labels and reveals on zoom-in; the hatched fill +
+                          centerline geometry always stay (keep-geometry, avoid the on/off flicker). A
+                          selected easement keeps its label at any zoom (edit handles never vanish mid-edit). */}
+                      {(isSel || dimCalloutVisible(view.ppf)) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
                       {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, ...easementInsetOpts(m) })}
                     </g>
@@ -14034,12 +14039,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const a = pts[pts.length - 2], b = pts[pts.length - 1];
                   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
                 })();
-                // LOD (B911 family): a measurement's number rides the SAME on-screen-size gate as
-                // building/parcel dimensions — it hides at overview zoom (or when the feature is too
-                // small to project past ~30px) instead of stamping a big fixed number over a pinhead.
-                // A selected measurement always shows its value so you can read what you're editing.
-                const spanFt = isArea ? Math.sqrt(Math.max(0, polyArea(fpts))) : pathLen(fpts);
-                const labelVisible = isSel || detailLabelVisible(spanFt, view.ppf);
+                // NEW-1 (extends B149/B940) — a measurement's value label rides the shared zoom-FLOOR
+                // gate (dimCalloutVisible), the SAME floor that drops the auto infrastructure dims at
+                // site-overview zoom. We deliberately use the pure floor, NOT a per-feature min-on-
+                // screen-length: a length rule keeps a long run's label (a 3,500′ distance projects to
+                // hundreds of px) painting at overview — exactly the clutter the owner reported —
+                // whereas the floor drops short AND long labels together, and they reveal together on
+                // zoom-in. Scoped to measurement labels only (this `labelVisible`), so it can never
+                // catch the always-on overview tier (building name/SF, site-summary chip, acreage
+                // chips). A selected measurement always shows its value so you can read what you're
+                // editing (parity with B149 / B121 / B225-B226 selected-element exception).
+                const labelVisible = isSel || dimCalloutVisible(view.ppf);
                 return (
                   <g key={m.id || `m${i}`}>
                     {isArea

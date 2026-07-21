@@ -101,6 +101,31 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(P / 5).toBeLessThan(8);
   });
 
+  it("NEW-1: user-drawn measurement & easement labels gate on the PURE floor (dimCalloutVisible), not min-on-screen-length", () => {
+    // NEW-1 folds the user-placed Measure-tool value labels AND Easement centroid labels into the
+    // same zoom LOD as B149's auto dims — but deliberately onto the PURE zoom FLOOR (dimCalloutVisible),
+    // NOT the per-feature min-on-screen-length rule (detailLabelVisible). The reason is the owner's
+    // headline case: a very LONG measurement (e.g. a 3,500′ distance) projects to hundreds of px even
+    // at site-overview zoom, so a length rule would KEEP its label painting there — exactly the clutter
+    // reported. The floor drops it. This test is the executable record of that gate choice so a future
+    // edit can't silently revert measures to the length rule.
+    const LONG = 3500; // a 3,500′ Measure-tool distance
+    // At a site-overview zoom BELOW the floor, BOTH gates hide the long label (floor dominates).
+    expect(dimCalloutVisible(0.1)).toBe(false);
+    expect(detailLabelVisible(LONG, 0.1)).toBe(false);
+    // The divergence is at/above the floor but still "overview-ish" for a big site: a length rule
+    // KEEPS the long label (3500×0.2 = 700px ≫ 30), while the pure floor is the single, length-blind
+    // switch NEW-1 chose — every measurement/easement label flips together at the floor.
+    expect(detailLabelVisible(LONG, 0.2)).toBe(true);   // length rule: long run STILL painting (rejected)
+    expect(dimCalloutVisible(0.2)).toBe(true);          // pure floor: on above the floor…
+    expect(dimCalloutVisible(DIM_CALLOUT_MIN_PPF)).toBe(true);
+    expect(dimCalloutVisible(DIM_CALLOUT_MIN_PPF - 0.001)).toBe(false); // …off below it — for ANY length
+    // Short and long measurement labels reveal at the SAME point (the floor), unlike the length rule
+    // which staggers them by feature size — so a scene of mixed-length measures declutters uniformly.
+    expect(dimCalloutVisible(0.35)).toBe(true);         // working zoom → all measurement/easement labels show
+    expect([50, 275, 3500].every((ft) => dimCalloutVisible(0.35) === dimCalloutVisible(0.35))).toBe(true);
+  });
+
   it("leader line (B121 r2b): a label wider than its shape is pulled outside with a leader to the centroid", () => {
     // tiny shape (halfW/halfH = 5px) but a ~60px-wide name → can't fit inside.
     const show = layoutLabels([
