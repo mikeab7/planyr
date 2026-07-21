@@ -91,3 +91,23 @@ export function resolveResume({ routeProjectId, map, legacy }) {
   }
   return out;
 }
+
+/* May a resume candidate whose LOADED record belongs to project `recProjectId` (null =
+ * unfiled / loose PDF) open under the current route?
+ *
+ *   • No route project (falsy) → resume freely (today's "whatever was last, anywhere").
+ *   • A NAMED route → resume ONLY that project's own review: require an EXACT match.
+ *
+ * The exact-match rule is the B914 fix. The old downstream guard was
+ * `rec.projectId && rec.projectId !== routeProjectId`, whose leading `rec.projectId &&`
+ * let an UNFILED (projectId-less) legacy-global orphan slip through — so a project with no
+ * per-project entry of its own resumed the GLOBAL-last loose PDF, leaking one project's
+ * last-opened drawing (and its "upload didn't finish" banner) onto every other project's
+ * Review tab. An unfiled doc lives in the "" bucket and belongs to no named project, so a
+ * named route must reject it (null !== routeProjectId → false). A project's OWN map entry
+ * always carries that project's id (writeLastDoc keys by the doc's meta.projectId), so this
+ * never blocks a legitimate per-project resume. */
+export function resumeAllowedForRoute(routeProjectId, recProjectId) {
+  if (!routeProjectId) return true;
+  return recProjectId === routeProjectId;
+}

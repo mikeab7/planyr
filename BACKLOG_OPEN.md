@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _60 open · 88 awaiting live verification._
+> _60 open · 89 awaiting live verification._
 
 ## 🔲 Open
 
@@ -75,6 +75,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B914 | Review resume leaks one project's last loose PDF (its "upload didn't finish" banner) onto every OTHER project's Review tab | [Doc Review] | #doc-review #persistence #ui | ⏳ live — awaiting |
 | B911 | Parcel/edge dimension labels stay oversized on zoom-out (don't declutter or scale like building dims) | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
 | B912 | Editable dimension length: single-click to select, double-click to edit the length inline | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
 | B913 | Resizable text boxes / callouts (horizontal width handles + text wrap) | [Site Planner] | #site-planner #ui #markup | ⏳ live — awaiting |
@@ -169,7 +170,7 @@
 - **#auth** — B916, B917, B778, B483, B676, B714
 - **#compare** — B471
 - **#coordinates** — B625, B684
-- **#doc-review** — B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B791, B792, B746, B687, B685, B667, B659
+- **#doc-review** — B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B914, B791, B792, B746, B687, B685, B667, B659
 - **#drive** — B663, B662, B629, B791, B792, B699, B701, B687
 - **#entitlements** — B818, B725, B726, B868, B816
 - **#export** — B818, B810, B752, B862, B839, B840, B816, B745, B738, B712, B684
@@ -183,7 +184,7 @@
 - **#library** — B663, B662, B792, B699, B701, B687, B685, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B913, B820, B746, B737
 - **#perf** — B842, B495, B484, B479, B860, B839, B837, B832, B821, B816, B694, B669
-- **#persistence** — B916, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B860, B863, B864, B836, B832, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
+- **#persistence** — B916, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B914, B860, B863, B864, B836, B832, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
 - **#pond** — B906, B909, B907, B905, B904, B903, B902, B901, B900, B888, B884, B883, B870, B871, B707
 - **#road** — B742
 - **#scheduler** — B908, B818, B778, B495, B865, B863, B864, B836, B816
@@ -192,5 +193,5 @@
 - **#stitching** — B413, B839
 - **#testing** — B269, B63, B878, B863, B836, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B917, B842, B810, B735, B723, B115, B911, B912, B913, B909, B903, B902, B901, B900, B882, B881, B880, B879, B865, B862, B837, B821, B820, B802, B746, B742, B712, B695, B693, B669, B668, B673, B674
+- **#ui** — B917, B842, B810, B735, B723, B115, B914, B911, B912, B913, B909, B903, B902, B901, B900, B882, B881, B880, B879, B865, B862, B837, B821, B820, B802, B746, B742, B712, B695, B693, B669, B668, B673, B674
 - **#yield** — B906, B724, B909, B888, B885, B884, B882, B883, B878, B868, B870, B871, B860, B861, B862, B832, B802, B782, B751, B712, B651
