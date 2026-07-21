@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines, dimCalloutVisible, DIM_CALLOUT_MIN_PPF, detailLabelVisible, DETAIL_LABEL_MIN_PX, suppressedDimIds } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines, dimCalloutVisible, DIM_CALLOUT_MIN_PPF, detailLabelVisible, DETAIL_LABEL_MIN_PX, suppressedDimIds, dimFontScale, dimFontPx, DIM_FONT_BASE_PX, DIM_FONT_MIN_SCALE } from "../src/workspaces/site-planner/lib/labelLayout.js";
 
 describe("labelLayout — shared label level-of-detail + collision engine (B121)", () => {
   it("boxOf centres a box on its point; boxesOverlap respects pad", () => {
@@ -183,6 +183,34 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(suppressedDimIds([{ id: "x", box: boxOf(0, 0, 4, 4) }], []).size).toBe(0); // no labels → nothing hidden
     expect(suppressedDimIds([], labelBoxes).size).toBe(0);
     expect(suppressedDimIds(null, null).size).toBe(0);
+  });
+
+  it("B911: dimFontScale/dimFontPx scale the dimension number with zoom, with a low floor", () => {
+    // At/above working zoom the number is full size; it scales linearly down with zoom.
+    expect(dimFontScale(0.45)).toBe(1);                      // working zoom → full size
+    expect(dimFontScale(1)).toBe(1);                          // zoomed in → clamped to full size
+    expect(dimFontScale(0.225)).toBeCloseTo(0.5, 5);          // half working zoom → half size
+    expect(dimFontPx(0.45)).toBe(DIM_FONT_BASE_PX);           // 11px at working zoom
+    expect(dimFontPx(0.225)).toBeCloseTo(DIM_FONT_BASE_PX * 0.5, 5);
+    // The floor keeps the number from vanishing entirely, but is LOWER than the old inline 0.34 so
+    // the number keeps shrinking toward its declutter drop point instead of parking relatively-huge.
+    expect(dimFontScale(0.01)).toBe(DIM_FONT_MIN_SCALE);      // extreme zoom-out → clamped to the floor
+    expect(DIM_FONT_MIN_SCALE).toBeLessThan(0.34);            // lower than the pre-B911 park value
+    // Building-dim parity: the layer is HIDDEN below ppf 0.18 (dimCalloutVisible), and at that drop
+    // point the scale is the same ~0.4 it always was — so visible building dims are unchanged.
+    expect(dimFontScale(DIM_CALLOUT_MIN_PPF)).toBeCloseTo(DIM_CALLOUT_MIN_PPF / 0.45, 5);
+    expect(dimFontScale(DIM_CALLOUT_MIN_PPF)).toBeGreaterThan(DIM_FONT_MIN_SCALE); // floor doesn't bite while visible
+  });
+
+  it("B911: a parcel-edge length label uses the SAME declutter gate as the dim layer (detailLabelVisible)", () => {
+    // The parcel-edge label is gated on its OWN side length, exactly like a paving/road width. A long
+    // 275′ side (the owner's SCHIEL tract) stays labelled down to the shared zoom floor, then hides;
+    // when the site is zoomed fully out (ppf below the floor) the label is gone, matching the fix.
+    expect(detailLabelVisible(275, 0.35)).toBe(true);        // working zoom → the side is labelled
+    expect(detailLabelVisible(275, 0.05)).toBe(false);       // zoomed fully out → label hidden (the bug)
+    // A SHORT side hides sooner (its on-screen length falls below the legibility threshold first).
+    expect(detailLabelVisible(40, 0.2)).toBe(false);         // 40×0.2 = 8px → hidden
+    expect(detailLabelVisible(40, 0.8)).toBe(true);          // 40×0.8 = 32px ≥ 30 → shown
   });
 
   it("B121: buildingLabelLines omits the sf line when sqft is falsy (Show areas off)", () => {

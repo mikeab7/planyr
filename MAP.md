@@ -265,6 +265,8 @@ _291 source files mapped._
   - _exports_: `computeBuildingGrid`, `divideSpan`, `GRID_DEFAULTS`, `placeDockDoors`, `resolveGridSettings`
 - **`src/workspaces/site-planner/lib/buildingProps.js`** — Pure tiered building-property rules: sf-driven clear-height + slab-thickness defaults with per-building manual overrides
   - _exports_: `autoClearHeight`, `autoSlab`, `DEFAULT_BUILDING_RULES`, `effectiveBuildingProps`, `evalTier`, `fmtClearHeight`, `fmtSlab`, `normalizeRules`
+- **`src/workspaces/site-planner/lib/calloutLayout.js`** — pure callout / text-box box geometry (B913): auto-size OR wrap-to-explicit-width, shared by the committed SVG render, its resize handles, and the inline editor so they never drift
+  - _exports_: `calloutLayout`, `minCalloutWidthFt`, `wrapLines`
 - **`src/workspaces/site-planner/lib/ccnClassify.js`** — Pure water/sewer CCN screening classifier (PHASE 1): infers the utility KIND (city/MUD/WSC/…) from the provider name and turns a CCN /query result into an `info` finding (who is certificated to serve, or an honest well/septic flag when none)
   - _exports_: `CCN_UTILITY_TYPES`, `ccnHolders`, `classifyCcn`, `describeHolder`, `inferUtilityType`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
@@ -320,7 +322,7 @@ _291 source files mapped._
 - **`src/workspaces/site-planner/lib/ebfe.js`** — FEMA/USGS InFRM Estimated BFE (EBFE) point sampler (B882): reads the estimated 1% BFE (layer 17) + 0.2% WSE (layer 21) via ArcGIS MapServer /identify, per-location cache, bounded fetch. `sampleEbfePoint`/`foldIdentify`/`pixelValueOf`/`ebfeIdentifyUrl`.
   - _exports_: `clearEbfeCache`, `EBFE_LAYERS`, `EBFE_URL`, `ebfeIdentifyUrl`, `foldIdentify`, `pixelValueOf`, `sampleEbfePoint`
 - **`src/workspaces/site-planner/lib/edgeRuns.js`** — Group parcel boundary edges into logical sides (runs) by bearing tolerance, with per-run length, midpoint, and shared setback value
-  - _exports_: `bearingDelta`, `edgeRuns`, `runOfEdge`, `runSetbackValue`, `segBearing`
+  - _exports_: `bearingDelta`, `edgeRuns`, `resizeRunLength`, `runOfEdge`, `runSetbackValue`, `segBearing`
 - **`src/workspaces/site-planner/lib/editorNames.js`** — conflict-toast naming (B673): cached editor display names via the team roster RPC (self → "you (another window)") + describeElement labels
   - _exports_: `createNameResolver`, `describeElement`
 - **`src/workspaces/site-planner/lib/elementApi.js`** — network seam for per-element sync (B671): the commit_elements RPC wrapper, element-row fetch, and the pure unload keepalive commit
@@ -376,7 +378,7 @@ _291 source files mapped._
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelLayout.js`** — Pure label level-of-detail plus collision engine: line-dropping by priority, greedy overlap resolution, leader overflow, and dimension-callout zoom gates
-  - _exports_: `boxesOverlap`, `boxOf`, `buildingLabelLines`, `DETAIL_LABEL_MIN_PX`, `detailLabelVisible`, `DIM_CALLOUT_MIN_PPF`, `dimCalloutVisible`, `fitLines`, `layoutLabels`, `suppressedDimIds`
+  - _exports_: `boxesOverlap`, `boxOf`, `buildingLabelLines`, `DETAIL_LABEL_MIN_PX`, `detailLabelVisible`, `DIM_CALLOUT_MIN_PPF`, `DIM_FONT_BASE_PX`, `DIM_FONT_MIN_SCALE`, `dimCalloutVisible`, `dimFontPx`, `dimFontScale`, `fitLines`, `layoutLabels`, `suppressedDimIds`
 - **`src/workspaces/site-planner/lib/layerPanelInfo.js`** — Pure Layers-panel row helpers: per-row ⓘ content assembly + merged City/ETJ combined-status precedence (B760/B761)
   - _exports_: `buildGroupSlots`, `combineLayerStatus`, `mergeGroupInfoSections`, `mergeSlotAnyOn`, `mergeSlotOpacity`, `rowInfoSections`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests

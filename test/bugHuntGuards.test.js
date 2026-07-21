@@ -512,8 +512,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // the committed box + selection chrome are hidden while THIS callout's editor is open → only ONE box
     expect(src).toMatch(/editCallout\?\.id !== c\.id && <rect x=\{bp\.x - w \/ 2\}/);
     expect(src).toMatch(/isSel && tool === "select" && editCallout\?\.id !== c\.id/);
-    // a screen-px minimum is kept ONLY for typeability — safe now the box is hidden (can't double it)
-    expect(src).toMatch(/const w = Math\.max\(64, tw \+ padX \* 2\), h = Math\.max\(30,/);
+    // a screen-px minimum is kept ONLY for typeability — safe now the box is hidden (can't double it).
+    // B913 — geometry now comes from calloutLayout (auto-size OR wrap-to-boxW); the 64/30 min is kept
+    // for the auto path (a fixed-width box already has an explicit, non-tiny width).
+    expect(src).toMatch(/const w = wrapped \? geo\.w : Math\.max\(64, geo\.w\), h = Math\.max\(30, geo\.h\)/);
   });
 
   it("B681: callout align buttons use the Word-style SVG icon, not cryptic glyphs", () => {

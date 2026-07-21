@@ -87,7 +87,7 @@ import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offse
 import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid as deedCentroid, describeRotation } from "./lib/deedAlign.js";
 import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
-import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
+import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
 import { representativeRing, ringCentroid, ringsSignature } from "./lib/siteAnalysis.js";
@@ -105,7 +105,8 @@ import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds, dimFontScale, dimFontPx } from "./lib/labelLayout.js";
+import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
@@ -1337,6 +1338,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
   const capturePidRef = useRef(null);              // last pointerId the canvas captured — lets a gesture interrupted without a pointer-up still release capture (NEW-1)
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
+  const [selEdgeRun, setSelEdgeRun] = useState(null); // B912: index (into selRuns) of the selected parcel side whose length dim is highlighted/being edited
   const [multi, setMulti] = useState([]);
   // B740 — a multi-selection of ≥2 styleable items (elements / markups) drives the SHARED
   // property panel. A marquee box-select leaves `sel` null while `multi` is populated, so the
@@ -1441,6 +1443,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [ovEdit, setOvEdit] = useState(null);           // { id, opacityText?, scaleMode?, page?, pageUnit?, real?, realUnit? } | null
   const setOvEditFor = (id, patch) => setOvEdit((cur) => ({ id, ...(cur && cur.id === id ? cur : {}), ...patch }));
   useEffect(() => { setOvEdit(null); }, [selOverlay]); // a different row expands → drop the previous row's draft
+  // B912 — the highlighted parcel side belongs to the currently-selected parcel only; drop it whenever
+  // the parcel selection changes or clears (covers Escape + background deselect + switching parcels) so
+  // a stale side highlight can't linger on another parcel. Same-parcel edge clicks don't change the id.
+  useEffect(() => { setSelEdgeRun(null); }, [sel?.kind === "parcel" ? sel.id : null]);
   const overlayClip = useRef(null);                     // copied site-plan overlay (B461 Copy/Paste — shares the source ref, not a re-import)
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Drag-and-drop affordance for the site-plan overlay (B445). Two independent hover flags:
@@ -3909,6 +3915,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "callout", id, part, fx: fp.x, fy: fp.y, box0: { ...c.box }, tip0: { ...c.tip } };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // B913 — drag a text-box / callout width handle. `hx` (∈ {-1,+1}) is which vertical edge moves; the
+  // OPPOSITE edge stays fixed (in feet), so the box grows/shrinks toward the pointer without hopping.
+  // On drag the callout gets an explicit `boxW` (feet) → the text wraps to it and the height auto-grows
+  // (see calloutLayout). Clamped to a minimum so it can't collapse; a locked callout never starts one.
+  const startCalloutResize = (e, id, hx) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const c = callouts.find((x) => x.id === id);
+    if (!c || c.locked) return;
+    const st = calloutStyle(c);
+    const { w } = calloutLayout(c, st, view.ppf);
+    const wFt = w / view.ppf;
+    const fixedX = c.box.x - hx * (wFt / 2);        // opposite edge, in feet
+    setSel({ kind: "callout", id });
+    pushHistory();
+    drag.current = { mode: "calloutResize", id, hx, fixedX, cy: c.box.y, minWFt: minCalloutWidthFt(st, view.ppf) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
 
   /* ------------ parcel vertex editing (B230: drag only; insert/delete via shared edge/vertex) ------------ */
   const startVertex = (e, id, index) => {
@@ -4214,6 +4238,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
       const dx = fp.x - d.start.x, dy = fp.y - d.start.y;
       setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : pc));
+      return;
+    }
+    if (d.mode === "calloutResize") { // B913: drag a text-box / callout width handle → explicit boxW + text wrap
+      const signed = d.hx * (fp.x - d.fixedX);      // width toward the pointer along the handle's side
+      const newWFt = Math.max(d.minWFt, Math.min(MAX_DIM, signed));
+      const newCx = d.fixedX + d.hx * newWFt / 2;   // keep the opposite edge fixed
+      setCallouts((a) => a.map((c) => c.id === d.id ? { ...c, boxW: newWFt, box: { x: newCx, y: d.cy } } : c));
       return;
     }
     if (d.mode === "dimMove") { // B146/B592: slide a selected element's dimension callout along its length
@@ -6296,12 +6327,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     drag.current = { mode: "acChip", id, start: p2f(e.clientX, e.clientY), base: pc.labelOffset || { x: 0, y: 0 } };
     svgRef.current.setPointerCapture(e.pointerId);
-  };
-  const editDimWidth = (id, e) => {
-    const el = els.find((x) => x.id === id);
-    if (!el || el.type !== "road") return;
-    const fp = e ? p2f(e.clientX, e.clientY) : { x: el.cx, y: el.cy };
-    setNumEdit({ fx: fp.x, fy: fp.y, value: String(Math.round(roadTravel(el))), onCommit: (n) => { if (n > 0) setRoadTravel(el, n); } });
   };
   // Inline numeric editor — NEVER a dialog box (owner rule 2026-06-17). Commit on Enter / click-away,
   // cancel on Esc; each opener says where to place it (feet) + what to do with the entered value.
@@ -9925,7 +9950,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         rot: el.rot || 0, horizLong: el.w >= el.h,
         posF: el.type === "road" ? DIM_POS_F_ROAD : DIM_POS_F_DEFAULT,
         ox: dimOff.x * view.ppf, oy: dimOff.y * view.ppf,
-        textLen: `${f0(dimW)}′`.length, fz: 11 * Math.max(0.34, Math.min(1, view.ppf / 0.45)),
+        textLen: `${f0(dimW)}′`.length, fz: dimFontPx(view.ppf),
       }),
     });
   }
@@ -10358,16 +10383,55 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   // ONE length label per side (run), placed OUTBOARD so it never stacks on the inboard
   // setback pill or the add-vertex "+" at the segment midpoint (B214 single dim, B215 fan).
+  // B911 — LOD-gate + zoom-scale, mirroring the building-dim layer (don't stand up a parallel
+  // gate). Each side's length label rides detailLabelVisible keyed off THAT side's on-screen
+  // length, so a side hides once it shrinks below the legible threshold and returns on zoom-in;
+  // and its font scales with zoom (dimFontPx) instead of the old fixed 11px that stayed large and
+  // dominated the view when the whole site was zoomed out to nothing.
+  // B912 — each side's length label is a click target: single click selects the side (blue), a
+  // double-tap opens the inline length editor and resizes that side's geometry (resizeRunLength).
+  // A LOCKED parcel is select-only (no editor). pointerEvents="all" so the number is clickable even
+  // though it isn't wrapped in an interactive group.
   const parcelEdgeLabels = (() => {
     if (!selParcel || !selRuns) return null;
+    const dfz = dimFontPx(view.ppf);
+    const locked = selParcel.locked;
+    const editable = tool === "select";
     return selRuns.map((run, ri) => {
+      if (!detailLabelVisible(run.lengthFt, view.ppf)) return null; // hide on zoom-out, return on zoom-in
       const { out } = runLabelAnchors(selParcel, run);
+      const on = selEdgeRun === ri;
+      const onDown = editable ? (e) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        setSel({ kind: "parcel", id: selParcel.id });
+        setSelEdgeRun(ri);
+        if (!locked && isDoubleTap(e, `pedim:${selParcel.id}:${ri}`, on)) {
+          const fp = p2f(e.clientX, e.clientY);
+          const pid = selParcel.id, thisRun = run;
+          setNumEdit({ fx: fp.x, fy: fp.y, value: String(Math.round(thisRun.lengthFt)), onCommit: (n) => {
+            if (!(n > 0)) return;
+            pushHistory();
+            setParcels((a) => a.map((pc) => pc.id === pid ? { ...pc, points: resizeRunLength(pc.points, thisRun, n) } : pc));
+          } });
+        }
+      } : undefined;
       return (
-        <text key={`pe${ri}`} x={out.x} y={out.y} dy={3} textAnchor="middle" fontSize="11"
-          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.ink} stroke={PAL.paper} strokeWidth={3}
-          paintOrder="stroke" pointerEvents="none" fontWeight="600">{f0(run.lengthFt)}′</text>
+        <text key={`pe${ri}`} data-testid="parcel-edge-dim" x={out.x} y={out.y} dy={dfz * 0.27} textAnchor="middle" fontSize={dfz}
+          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={on ? SEL_BLUE : PAL.ink} stroke={PAL.paper} strokeWidth={3 * dimFontScale(view.ppf)}
+          paintOrder="stroke" pointerEvents={editable ? "all" : "none"} style={editable ? { cursor: locked ? "pointer" : "text" } : undefined} onPointerDown={onDown} fontWeight="600">{f0(run.lengthFt)}′</text>
       );
     });
+  })();
+  // B912 — highlight the selected parcel side's edge(s) in blue, so a single click on a length label
+  // clearly shows which side it drives (mirrors the editable-vertex handle style, B141). Drawn only
+  // for the currently-selected parcel; never exported.
+  const parcelEdgeHighlight = (() => {
+    if (!selParcel || !selRuns || tool !== "select" || selEdgeRun == null) return null;
+    const run = selRuns[selEdgeRun];
+    if (!run || !run.vertices || run.vertices.length < 2) return null;
+    const pts = run.vertices.map(f2p);
+    return <polyline data-export="skip" points={pts.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={3} strokeOpacity={0.65} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />;
   })();
 
   // B230 — draggable SQUARE vertex handles on the selected parcel. The always-on "+" midpoint
@@ -11103,6 +11167,50 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const hc = hostClampOf(selEl);
     if (hc) clampToHost(nb, hc);
     setEls((a) => refitChildren(a, selEl.id, nb, kids));
+  };
+  // B912 — resize a SPECIFIC element to a typed dimension (double-tap its on-canvas dimension label).
+  // Mirrors resizeSelEl but targets `el` by value rather than the current selection, so it can be
+  // called straight from the dim-label editor no matter what `selEl` resolves to this frame. Grows/
+  // shrinks about the element centre, host-clamped so an attached truck court stays on its dock wall.
+  const resizeElToValue = (el, axisKey, val) => {
+    if (!el || el.points || el.locked) return;
+    const v = Math.max(1, Math.min(MAX_DIM, val));
+    const nb = { cx: el.cx, cy: el.cy, w: el.w, h: el.h, rot: el.rot, [axisKey]: v };
+    pushHistory();
+    const kids = wallKids(el);
+    const hc = hostClampOf(el);
+    if (hc) clampToHost(nb, hc);
+    setEls((a) => refitChildren(a, el.id, nb, kids));
+  };
+  // B912 — open the inline numeric editor on an element's on-canvas dimension NUMBER (double-tap).
+  // The geometry resizes to the typed feet: road = travel width; building = depth about its dock
+  // axis (footprintAxes); paving/other strip = the measured short side. Reject ≤0 / non-numeric
+  // (commitNumEdit already drops non-finite input; onCommit guards > 0). Locked / irregular-footprint
+  // (points) elements are select-only — no editor opens.
+  const editElDim = (el, e) => {
+    if (!el || el.locked || el.points) return;
+    const fp = e ? p2f(e.clientX, e.clientY) : { x: el.cx, y: el.cy };
+    if (el.type === "road") {
+      setNumEdit({ fx: fp.x, fy: fp.y, value: String(Math.round(roadTravel(el))), onCommit: (n) => { if (n > 0) setRoadTravel(el, n); } });
+      return;
+    }
+    const axisKey = el.type === "building" ? footprintAxes(el).depth : (el.w >= el.h ? "h" : "w");
+    const cur = el.type === "building" ? footprintDepth(el) : Math.min(el.w, el.h);
+    setNumEdit({ fx: fp.x, fy: fp.y, value: String(Math.round(cur)), onCommit: (n) => { if (n > 0) resizeElToValue(el, axisKey, n); } });
+  };
+  // B912 — the on-canvas dimension NUMBER is a click target (like a text box): a single click
+  // selects the element (highlighting its measured edge — the red dim line), a double-tap opens the
+  // inline length editor. Reuses the shared isDoubleTap gesture (B679) so it behaves like every other
+  // double-tap-to-edit feature. Stops propagation so it never starts a dim-reposition drag.
+  const onDimNumberDown = (e, id) => {
+    if (e.button !== 0 || tool !== "select") return;
+    e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    if (!el) return;
+    const wasSel = sel?.kind === "el" && sel.id === id;
+    setSel({ kind: "el", id });
+    setSelEdgeRun(null); // an element dim, not a parcel edge
+    if (!el.locked && isDoubleTap(e, `eldim:${id}`, wasSel)) editElDim(el, e);
   };
   // Re-sync a centerline road's stored strip bbox (cx/cy/w/h/rot) after a pts/travelW/curb/
   // class change, so every generic geometry consumer (fit, snap, group bbox) stays correct.
@@ -12990,7 +13098,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
               {markupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext, dimSuppressed, editInline && editInline.kind === "el" ? editInline.id : null))}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, editInline && editInline.kind === "el" ? editInline.id : null))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {markupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
@@ -13249,13 +13357,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const bp = f2p(c.box);
                 const isSel = sel?.kind === "callout" && sel.id === c.id;
                 const st = calloutStyle(c);
-                const zk = view.ppf / 0.35;            // scale relative to the default zoom
-                const fontPx = st.size * zk;
-                const lines = String(c.text || "").split("\n");
-                const charW = fontPx * 0.56 * (st.bold ? 1.05 : 1), lineH = fontPx * st.lineHeight;
-                const padX = st.padX * zk, padY = st.padY * zk;
-                const tw = Math.max(fontPx, ...lines.map((l) => l.length * charW));
-                const w = tw + padX * 2, h = lines.length * lineH + padY * 2;
+                // B913 — one shared geometry helper (auto-size, OR wrap-to-c.boxW when the user has
+                // dragged a width handle). fontPx/lineH/padX/padY/lines/w/h all come from it, so the
+                // committed box, its handles, and the inline editor can't drift.
+                const { fontPx, lineH, padX, padY, w, h, lines } = calloutLayout(c, st, view.ppf);
                 const border = st.stroke; // B619: no recolor on select — the leader/box keep the callout's own color; blue chrome cues selection
                 const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
                 const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
@@ -13290,16 +13395,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
                         fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
-                    {/* B619 — blue selection chrome (outline + corner handles + tip grip); never exported. B680: also
-                        hidden while this callout's text editor is open (the editor's own accent outline cues focus). */}
+                    {/* B619 — blue selection chrome (outline + resize handles + tip grip); never exported. B680: also
+                        hidden while this callout's text editor is open (the editor's own accent outline cues focus).
+                        B913 — the corner + left/right-edge handles are now interactive WIDTH handles: drag one and
+                        the box gets an explicit width and the text wraps to it (auto-height). A locked callout keeps
+                        pointer-inert handles (visual only). */}
                     {isSel && tool === "select" && editCallout?.id !== c.id && (() => {
                       const gx = bp.x - w / 2, gy = bp.y - h / 2;
-                      const corners = [[gx, gy], [gx + w, gy], [gx + w, gy + h], [gx, gy + h]];
+                      // [x, y, hx] — hx (∈ {-1,+1}) is which vertical edge this handle drives (width only).
+                      const grips = [
+                        [gx, gy, -1], [gx + w, gy, 1], [gx + w, gy + h, 1], [gx, gy + h, -1], // corners
+                        [gx, gy + h / 2, -1], [gx + w, gy + h / 2, 1],                          // left / right mids (the width must-have)
+                      ];
+                      const canResize = !c.locked;
                       return (
-                        <g data-export="skip" pointerEvents="none">
-                          <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={5} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} />
-                          {corners.map(([hx, hy], i) => (
-                            <rect key={i} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25} />
+                        <g data-export="skip">
+                          <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={5} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
+                          {grips.map(([hx, hy, dir], i) => (
+                            <rect key={i} data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
+                              pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ew-resize" } : undefined}
+                              onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined} />
                           ))}
                         </g>
                       );
@@ -13325,28 +13440,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const c = callouts.find((x) => x.id === editCallout.id);
                 if (!c) return null;
                 const st = calloutStyle(c);
-                // B616 — WYSIWYG editor: auto-size the box to the LIVE text with the SAME symmetric
-                // padX/padY (× zoom) the committed render uses, so left/right margins match and
-                // top/bottom margins match, and there's no jump between editing and committed. Mirror
-                // the exact geometry from the callouts.map render above (zk/charW/lineH/tw/w/h).
-                const zk = view.ppf / 0.35;
-                const fontPx = st.size * zk;
-                const text = editCallout.text || "";
-                const lines = String(text).split("\n");
-                const charW = fontPx * 0.56 * (st.bold ? 1.05 : 1), lineH = fontPx * st.lineHeight;
-                const padX = st.padX * zk, padY = st.padY * zk;
-                const tw = Math.max(fontPx, ...lines.map((l) => l.length * charW));
-                // B680 — the editor uses the committed box's own geometry (tw/padX/padY), so for a
-                // normal callout it overlays the box EXACTLY. The doubling the owner saw came from the
-                // committed box being VISIBLE behind an over-sized editor — now the committed box + its
-                // selection chrome are hidden while editing (below), so there is never a second box. A
-                // screen-px minimum (64×30) is kept ONLY so a tiny / zoomed-way-out / empty callout is
-                // still a usable typing target; because the box is hidden it can no longer double it.
-                const w = Math.max(64, tw + padX * 2), h = Math.max(30, lines.length * lineH + padY * 2);
+                // B616 — WYSIWYG editor: same geometry helper the committed render uses, fed the LIVE
+                // text, so left/right + top/bottom margins match and there's no jump between editing and
+                // committed. B913 — when the callout has an explicit width (boxW), the editor takes that
+                // exact width and SOFT-WRAPS (matching the committed wrap); otherwise it auto-sizes and
+                // never wraps, as before. A screen-px minimum (64×30) keeps a tiny/empty box usable.
+                const geo = calloutLayout({ text: editCallout.text || "", boxW: c.boxW }, st, view.ppf);
+                const { fontPx, lineH, padX, padY } = geo;
+                const wrapped = geo.wrapped;
+                const w = wrapped ? geo.w : Math.max(64, geo.w), h = Math.max(30, geo.h);
                 const bp = f2p(c.box);
                 return (
                   <foreignObject x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} style={{ overflow: "visible" }}>
-                    <textarea autoFocus value={editCallout.text} wrap="off"
+                    <textarea autoFocus value={editCallout.text} wrap={wrapped ? "soft" : "off"}
                       onChange={(e) => setEditCallout((s) => ({ ...s, text: e.target.value }))}
                       onBlur={commitEditCallout}
                       onPointerDown={(e) => e.stopPropagation()}
@@ -13363,7 +13469,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                          active-edit ring is an OUTLINE (not a border) so it doesn't consume any content
                          box — the padded text area then equals the committed SVG text region exactly (a
                          2px border would shrink each axis by 4px and clip the last line / caret). */
-                      style={{ width: w, height: h, resize: "none", overflow: "hidden", whiteSpace: "pre", border: "none", outline: `2px solid ${PAL.accent}`, borderRadius: 4, padding: `${padY}px ${padX}px`, fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      style={{ width: w, height: h, resize: "none", overflow: "hidden", whiteSpace: wrapped ? "pre-wrap" : "pre", overflowWrap: wrapped ? "break-word" : undefined, border: "none", outline: `2px solid ${PAL.accent}`, borderRadius: 4, padding: `${padY}px ${padX}px`, fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -13627,6 +13733,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* selection / editing chrome — stripped from exports */}
               <g data-export="skip">
                 {attachLinks}
+                {parcelEdgeHighlight}
                 {parcelEdgeLabels}
                 {handleNodes}
                 {sideAddNodes}
@@ -14518,6 +14625,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div>
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
                 <button style={{ ...chip, width: "100%", marginBottom: 9 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
+                {/* B913 — an explicit width was set by dragging a side handle (text wraps to it). "Fit to
+                    text" clears it so the box auto-sizes to its content again (matches the per-element inspector). */}
+                {selCallout.boxW != null && (
+                  <button style={{ ...chip, width: "100%", marginBottom: 9 }} title="Clear the fixed width — auto-size the box to its text again" onClick={() => setSelCallout({ boxW: null })}>↔ Fit to text</button>
+                )}
                 {/* row 1: size · text color · fill */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
                   <span style={{ ...cap, marginRight: 1 }}>Size</span>
@@ -16835,7 +16947,7 @@ function dimSlideFor(el, allEls) {
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext, dimSuppressed, editInlineId) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed, editInlineId) {
   // B617 — zoom multiplier (px/ft ÷ the default 0.35) so a road's curb/edge stroke holds constant
   // relative to the drawing across zoom, exactly like the in-component markup/utility strokes.
   const zk = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x) / 0.35;
@@ -17002,12 +17114,15 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       const A = f2p({ x: midPt.x + nrm.x * hw + off.x, y: midPt.y + nrm.y * hw + off.y });
       const B = f2p({ x: midPt.x - nrm.x * hw + off.x, y: midPt.y - nrm.y * hw + off.y });
       const M = f2p({ x: midPt.x + off.x, y: midPt.y + off.y });
-      const RED = "#dc2626", k = Math.max(0.34, Math.min(1, ppf / 0.45)), tick = 4 * k, fz = 11 * k, txt = `${f0(+el.travelW || 0)}′`;
+      const RED = "#dc2626", k = dimFontScale(ppf), tick = 4 * k, fz = 11 * k, txt = `${f0(+el.travelW || 0)}′`; // B911: shared zoom→font scale
       const dimSel = isSel && tool === "select";
       const dimVisible = detailLabelVisible(+el.travelW || 0, ppf);
       const moved = Math.hypot(off.x, off.y) > 0.5;
-      const numHandlers = dimSel
-        ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id, e); } }
+      // B912 — the width number is a click target (select on single, edit length on double-tap),
+      // active whenever the select tool is up; pointerEvents="all" so it's clickable even before the
+      // road is selected (the wrapping dim group is pointer-transparent when unselected).
+      const numHandlers = (tool === "select" && onDimNumberDown)
+        ? { style: { cursor: "text" }, pointerEvents: "all", onPointerDown: (e) => { if (e.button === 0) { e.stopPropagation(); onDimNumberDown(e, el.id); } } }
         : {};
       if (settings.showDims !== false && (dimVisible || dimSel)) { // B121: "Show dimensions" gates the centerline-road width callout too
         const dim = [];
@@ -17017,7 +17132,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         dim.push(<line key="t0" x1={A.x - dir.x * tick} y1={A.y - dir.y * tick} x2={A.x + dir.x * tick} y2={A.y + dir.y * tick} stroke={RED} strokeWidth={1.25} />);
         dim.push(<line key="t1" x1={B.x - dir.x * tick} y1={B.y - dir.y * tick} x2={B.x + dir.x * tick} y2={B.y + dir.y * tick} stroke={RED} strokeWidth={1.25} />);
         if (dimSel) dim.push(<line key="grab" x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="transparent" strokeWidth={14} />);
-        dim.push(<text key="tx" x={M.x + dir.x * (fz * 0.9) - tnx} y={M.y + dir.y * (fz * 0.9) - tny} textAnchor="middle" dominantBaseline="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
+        dim.push(<text key="tx" data-testid="el-dim" x={M.x + dir.x * (fz * 0.9) - tnx} y={M.y + dir.y * (fz * 0.9) - tny} textAnchor="middle" dominantBaseline="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
         rparts.push(
           <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
             onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
@@ -17183,7 +17298,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // (stays on the global dimCalloutVisible zoom gate); a PAVING/ROAD width is DETAIL tier,
     // so it only draws once the measured span projects past DETAIL_LABEL_MIN_PX (~30px) on screen
     // (detailLabelVisible) — a drive-aisle / road width drops at site-overview zoom, reveals on zoom-in.
-    const k = Math.max(0.34, Math.min(1, ppf / 0.45));
+    const k = dimFontScale(ppf); // B911: shared zoom→font scale (building dims + parcel-edge labels)
     const fullMin = Math.min(el.w, el.h);
     // B417: a building's depth is read off its dock axis (dockSidesFor → footprintDepth):
     // the footprint span perpendicular to the dock face (dock wall → dock wall / → rear wall),
@@ -17205,10 +17320,14 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // off the bumps; the next drag then persists the clamped value.
     const dimOff = clampDimOffset(el.dimOffset, dimSlideFor(el, allEls));
     const ox = dimOff.x * ppf, oy = dimOff.y * ppf;
-    const dimSel = isSel && tool === "select"; // interactive (drag/edit) only when the element is selected
+    const dimSel = isSel && tool === "select"; // interactive (drag/reposition) only when the element is selected
     const isRoad = el.type === "road";
-    const numHandlers = dimSel && isRoad // road number: click to edit width (and don't start a drag)
-      ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id, e); } }
+    // B912 — the dimension number is a click target for EVERY building/paving/road (not just roads):
+    // single click selects the element (highlighting its measured edge), double-tap opens the inline
+    // length editor. Active whenever the select tool is up; pointerEvents="all" so a click on the
+    // number selects even before the element is selected (the dim group is pointer-transparent then).
+    const numHandlers = (tool === "select" && onDimNumberDown)
+      ? { style: { cursor: "text" }, pointerEvents: "all", onPointerDown: (e) => { if (e.button === 0) { e.stopPropagation(); onDimNumberDown(e, el.id); } } }
       : {};
     const dim = [];
     // NEW-1: a road's width dimension anchors to the MIDPOINT of the measured span
@@ -17225,7 +17344,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<line key="t1" x1={X - tick} y1={Y1} x2={X + tick} y2={Y1} stroke={RED} strokeWidth={1.25} />);
       if (dimSel) dim.push(<line key="grab" x1={X} y1={Y0} x2={X} y2={Y1} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
       // number OUTBOARD of the line (away from the centred label) so it doesn't clutter by default
-      dim.push(<text key="tx" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
+      dim.push(<text key="tx" data-testid="el-dim" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
     } else { // short side is horizontal (w)
       const y = tl.y + h * posF, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
       // B592: no leader line — the dimension slides ALONG the length and stays on the footprint
@@ -17235,7 +17354,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<line key="t0" x1={X0} y1={Y - tick} x2={X0} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
       dim.push(<line key="t1" x1={X1} y1={Y - tick} x2={X1} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
       if (dimSel) dim.push(<line key="grab" x1={X0} y1={Y} x2={X1} y2={Y} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
-      dim.push(<text key="tx" x={MX} y={Y - 6} transform={`rotate(${-el.rot} ${MX} ${Y - 6})`} textAnchor="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
+      dim.push(<text key="tx" data-testid="el-dim" x={MX} y={Y - 6} transform={`rotate(${-el.rot} ${MX} ${Y - 6})`} textAnchor="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
     }
     // When the element is selected the dimension is grab-to-move (the red line/ticks are the handle);
     // otherwise it ignores pointers so a click falls through to select/move the element itself.
