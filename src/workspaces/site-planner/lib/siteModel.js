@@ -102,6 +102,22 @@ export function countJunkEntries(p) {
 
 const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 
+// NEW-1 — per-site GIS Layers-panel toggle memory: a sparse `{ layerKey: boolean }` map of overlay
+// layers the user toggled AWAY from their default on/off (see lib/layerPrefs.js). Kept light HERE
+// (no layer-registry import — siteModel stays DOM/deps-free for the Node tests): coerce to booleans
+// only. The planner ignores any key not in the current registry on apply, and a later toggle rewrites
+// the map from the live registry, so a stale key can't render and self-prunes. Reference-stable when
+// already clean, so an unchanged record never churns.
+const layerOverridesObj = (v) => {
+  const src = obj(v);
+  let changed = false;
+  const out = {};
+  for (const [k, on] of Object.entries(src)) {
+    if (typeof on === "boolean") out[k] = on; else changed = true;
+  }
+  return changed ? out : src;
+};
+
 // B682 — every parcel MUST carry a stable `id`. The map-finder hand-off (MapFinder.computeAssembly)
 // and legacy saved sites can hold id-LESS parcels ({points, addr, acct, attrs} with no id). Two bugs
 // flow from that. (1) The acreage-chip drag matches parcels by `pc.id === draggedId`; with both
@@ -328,6 +344,11 @@ export function createSiteModel(p = {}) {
     deletedIds: [...new Set(arr(p.deletedIds).filter((x) => typeof x === "string"))].slice(-MAX_TOMBSTONES),
     // elevation references (newly persisted; empty for legacy records)
     elevation: { crossSections: objArr(p.elevation && p.elevation.crossSections) },
+    // Per-site GIS Layers-panel toggle memory (NEW-1): a SPARSE { layerKey: boolean } map of overlay
+    // layers toggled away from their default on/off (see lib/layerPrefs.js). Absent field / empty map
+    // = today's default behavior (every session rebuilds from defaultOverlayState()). Additive +
+    // back-compatible; carried newer-wins by mergeSiteContent's `...newer` spread, like any scalar field.
+    layerOverrides: layerOverridesObj(p.layerOverrides),
     // constraint metadata. `liveLayers` is RESERVED for future per-site layer
     // memory — populated later; today layer state is a global app preference.
     constraints: { liveLayers: arr(p.constraints && p.constraints.liveLayers) },

@@ -34,6 +34,7 @@ import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESE
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, gisProxyEnabled, layerVintage } from "./lib/layers.js";
+import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { overlayExportRequest } from "./lib/layerRequest.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -1576,6 +1577,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Delete-tombstones (B276): ids of items deliberately removed (today: overlays). Persisted +
   // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
   const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
+  // Per-site GIS Layers-panel toggle memory (NEW-1). The app-shared `overlays` prop is the LIVE
+  // source of truth for which layers are ON; we persist a SPARSE projection of it per site
+  // (layerOverrides) and restore it when the site reopens. restored.layerOverrides seeds both.
+  const [layerOverrides, setLayerOverrides] = useState(() => sanitizeLayerOverrides(restored?.layerOverrides));
+  // Guard: ignore the app-shared overlays until THIS site's saved set has been applied onto it, so a
+  // pre-open toggle (from the map) or another site's set still sitting in the shared state can't be
+  // mis-saved onto this site. Flips true once the restore round-trips (see the tracking effect).
+  const layerApplied = useRef(false);
+  // Last seen VISIBILITY signature (sparse on/off) — distinguishes a real toggle (persist + undo
+  // frame) from an opacity-only change (which never touches layerOverrides), and lets a programmatic
+  // restore (mount / undo) pre-set it so the tracking effect doesn't treat the restore as a toggle.
+  const prevLayerSig = useRef(overridesSig(sanitizeLayerOverrides(restored?.layerOverrides)));
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
   const [aerialSel, setAerialSel] = useState(false);    // References: aerial row expanded (B654)
   // Transient editor state for the ONE expanded overlay row (B575 opacity field draft + B576 scale
@@ -2188,8 +2201,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // current state. A passive-effect mirror lagged a paint behind, so undo right
   // after a drag-move intermittently snapshotted or compared a stale state — the
   // building wouldn't fully snap back, or undo appeared to do nothing (B315).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [] });
-  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds };
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [], layerOverrides: {} });
+  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides };
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -2272,7 +2285,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ALONGSIDE the whole-doc save below (dual-write; the blob is still the read source until B672).
     reconcileElems(!!drag.current);
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
-    const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds };
+    const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides };
     // B458 — write the on-device mirror IMMEDIATELY, decoupled from the debounced cloud push: a reload
     // within the 400ms debounce must still find this edit on the device so boot's union-merge can
     // restore it (the prior structural cause of the 8 South building-loss — the mirror + history were
@@ -2353,7 +2366,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else setSaveStatus("unsaved"); // logged out + device full: the red localSaveFailed banner (writeMirror) covers it
     }, 400);
     return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
-  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds]);
+  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides]);
   // Manual "Retry now" for the loud cloud-save-failure banner (B125) — also the escape from a
   // watchdog escalation (B455/NEW-7).
   const retryCloudSave = () => {
@@ -2362,7 +2375,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides }; });
   const persistOrDrop = () => {
     if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
@@ -2807,7 +2820,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no"); // RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no") + // RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
+    "|L:" + overridesSig(s.layerOverrides); // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
   // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
   // compares against the live state we pass in (stateRef.current), so undo/redo
   // can't act on a stale baseline (B315). One stack instance, kept across renders.
@@ -2850,6 +2864,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
+    // NEW-1 — restore the GIS Layers-panel visibility too (it lives in the app-shared overlays). Merge
+    // the snapshot's on/off onto the LIVE overlays so opacity isn't disturbed, and pre-set prevLayerSig
+    // so the [overlays] tracking effect sees this programmatic change as already-accounted-for (no new
+    // undo frame, no double-save). setLayerOverrides keeps this planner's persisted projection in step.
+    const snapOverrides = sanitizeLayerOverrides(s.layerOverrides);
+    prevLayerSig.current = overridesSig(snapOverrides);
+    if (setOverlays) setOverlays((cur) => applyOnOverrides(cur, snapOverrides));
+    setLayerOverrides(snapOverrides);
     // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard itself — an
     // undo/redo shrink now just diffs into per-element deletes through the rev-checked path.)
     setSel(null); setSplitPath([]); setTypeMenu(null);
@@ -2873,6 +2895,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     touchHist();
     return true;
   };
+
+  /* ---- Per-site GIS Layers-panel toggle memory (NEW-1) --------------------------------------
+   * The app-shared `overlays` is the live source of truth for which layers are ON; each site
+   * remembers its own set. Two effects bridge them:
+   *  1) RESTORE (mount, keyed remount per site): rebuild the shared overlays from fresh defaults +
+   *     this site's saved sparse overrides — REPLACING whatever the shared state held (the map's
+   *     ad-hoc toggles, or the previous site's set). A never-saved site → {} → plain defaults.
+   *  2) TRACK: after the restore lands, project subsequent visibility toggles back into the saved
+   *     `layerOverrides` (which the autosave persists) and push a pre-toggle undo frame so a toggle
+   *     is undoable — matching how sheetOverlays.visible works. Opacity-only changes don't change the
+   *     visibility signature, so they neither snapshot nor churn the saved set. */
+  useEffect(() => {
+    if (setOverlays) setOverlays(overlaysWithOverrides(layerOverrides));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const proj = overridesFromOverlays(overlays);
+    const sig = overridesSig(proj);
+    if (!layerApplied.current) {
+      // Wait until the restore above has been applied onto the shared overlays (the projection
+      // matches this site's saved set) before tracking — so a pre-open toggle left in the shared
+      // state can't be captured as this site's.
+      if (sig === overridesSig(layerOverrides)) { layerApplied.current = true; prevLayerSig.current = sig; }
+      return;
+    }
+    if (sig === prevLayerSig.current) return; // no visibility change (e.g. opacity-only) → nothing to persist
+    pushHistory(); // capture the PRE-toggle state (stateRef still holds the old layerOverrides) so undo reverts just this toggle
+    prevLayerSig.current = sig;
+    setLayerOverrides(proj);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlays]);
 
   /* ------------ size tracking ------------ */
   useEffect(() => {
