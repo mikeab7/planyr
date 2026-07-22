@@ -46,6 +46,6 @@ describe("B828: undo records a frame on every editable-state mutation (wiring gu
 
     // the pattern this mirrors: SitePlanner assigns its undo state ref during render, not in an effect
     const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    expect(sp).toMatch(/\n  stateRef\.current = \{ parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds \};/);
+    expect(sp).toMatch(/\n  stateRef\.current = \{ parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides \};/);
   });
 });
