@@ -170,7 +170,7 @@ export class CloudBadgeBoundary extends Component {
       return (
         <span role="img" aria-label="Cloud sync: status unavailable"
           data-testid="cloud-sync-badge" data-sync-state="crashed"
-          title="Sync status couldn't be read — your latest work is saved on this device."
+          title="Sync status couldn't be read: your latest work is saved on this device."
           style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: 7,
             color: "var(--danger)", border: "1px solid var(--danger)" }}>
           <CloudGlyph variant="cloud-slash" />

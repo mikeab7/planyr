@@ -64,7 +64,7 @@ log(/DETENTION POND/.test(txt), "header reads DETENTION POND");
 log(/ac water area/.test(txt), "subtitle reads '{ac} ac water area'");
 log(!/Selected · Detention Pond/i.test(txt), "the word 'Selected ·' is gone from the pond header");
 // B3 Dimensions rows
-for (const label of ["Water area", "Land take", "Depth", "Rim", "Holds", "Purpose"]) {
+for (const label of ["Water area", "Land take", "Total depth", "Rim", "Holds", "Purpose"]) {
   log(new RegExp(label).test(txt), `Dimensions row: ${label}`);
 }
 log(/PLAN/.test(txt) && /EST/.test(txt), "provenance tags PLAN + EST render on the dimensions");

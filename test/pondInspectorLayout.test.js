@@ -55,8 +55,10 @@ describe("B5 — the four collapsed groups in fixed order with the v3 titles", (
 });
 
 describe("B3 — Dimensions rows carry the v3 labels (not the old ones)", () => {
-  it("has Water area / Land take / Depth / Rim / Holds / Purpose", () => {
-    for (const label of ['g_glanceRow("Water area"', 'g_glanceRow("Depth"', 'g_glanceRow("Rim"', 'g_glanceRow("Holds"']) {
+  it("has Water area / Land take / Total depth / Rim / Holds / Purpose", () => {
+    // v3 B7 — the top row reads "Total depth" (water depth + freeboard), distinct from the
+    // sizing group's "Water depth" row.
+    for (const label of ['g_glanceRow("Water area"', 'g_glanceRow("Total depth"', 'g_glanceRow("Rim"', 'g_glanceRow("Holds"']) {
       expect(pondBody, label).toContain(label);
     }
     expect(pondBody).toContain("Land take ");
@@ -65,7 +67,7 @@ describe("B3 — Dimensions rows carry the v3 labels (not the old ones)", () => 
 
   it("the old at-a-glance labels are gone", () => {
     expect(pondBody).not.toContain('g_glanceRow("Water footprint"');
-    expect(pondBody).not.toContain('g_glanceRow("Total depth"');
+    expect(pondBody).not.toContain('g_glanceRow("Depth"');
     expect(pondBody).not.toContain('"Rim (top of bank)"');
     expect(pondBody).not.toContain("usable above flood");
   });
@@ -142,5 +144,37 @@ describe("A4 — the sizing-assistant zero-detention line + 'no targets' line ar
   it("the assistant heading has a space before '· est. WSE'", () => {
     expect(sizingGroup).toContain('{" · est. WSE"}');
     expect(sizingGroup.includes(">· est. WSE<")).toBe(false);
+  });
+});
+
+// ── v3 post-ship audit — PR-B ───────────────────────────────────────────────────────
+describe("PR-B — pond inspector fixes", () => {
+  it("B4 — the status-card heading drops 'the' (SHORT: X of Y ac-ft required)", () => {
+    expect(pondBody).toContain("SHORT: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required");
+    expect(pondBody.includes("of the ${f1(detReqAcFt)}")).toBe(false);
+  });
+  it("B5 — the OUTLET & STORMS summary is fed the real routed fail count", () => {
+    expect(pondBody).toContain("const g_outletFails");
+    expect(pondBody).toContain("fails: g_outletFails");
+  });
+  it("B7 — 'Total depth' row + its explanatory title; the per-pond label ellipsizes with the full name in title", () => {
+    expect(pondBody).toContain('g_glanceRow("Total depth"');
+    expect(pondBody).toContain('"water depth + freeboard"');
+    expect(src).toContain("title={p.label}"); // per-pond row: full name in title
+  });
+  it("B7 — Stored volume is one ac-ft row (cf in the tag); the split rows are 1dp", () => {
+    expect(sizingGroup).toContain('pondRow("Stored volume", `${f1(r.vol / 43560)} ac-ft`');
+    expect(sizingGroup.includes('pondRow("", `${f2(r.vol / 43560)} ac-ft`)')).toBe(false);
+    expect(sizingGroup).toContain('pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / 43560)} ac-ft`)');
+  });
+  it("B7 — the Purpose 'Auto' segment drops the parenthetical; the hint reads 'picks by site needs · now:'", () => {
+    expect(pondBody).toContain('g_purposeBtn(null, "Auto"');
+    expect(pondBody).toContain("picks by site needs · now:");
+    expect(pondBody.includes("`Auto (${POND_ROLE_LABEL")).toBe(false);
+  });
+  it("B7 — the shared ProvenanceLegend renders at the pond panel bottom", () => {
+    // It sits just past the Appearance group (outside the pondBody slice), so scan the whole src.
+    expect(src).toContain("the shared provenance legend at the bottom of the pond panel");
+    expect(src).toContain("<ProvenanceLegend");
   });
 });

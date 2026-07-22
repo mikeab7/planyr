@@ -102,6 +102,27 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
   });
 });
 
+describe("B2 — buildability is a PERMANENT strip row; unassessed reads 'not checked yet' + ↻", () => {
+  it("no buildability data → a neutral 'not checked yet' row carrying the recheck flag", () => {
+    const strip = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT });
+    const ffe = strip.find((v) => v.key === "ffe");
+    expect(ffe).toBeTruthy();
+    expect(ffe.pill).toBe("…");
+    expect(ffe.text).toBe("Buildability: not checked yet");
+    expect(ffe.recheck).toBe(true);
+  });
+  it("the 'not checked yet' row sorts LAST, below a passing detention verdict", () => {
+    const strip = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT });
+    expect(strip.map((v) => v.key)).toEqual(["det", "ffe"]);
+  });
+  it("an assessed buildability carries NO recheck flag", () => {
+    const strip = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT, buildability: { ffe: { status: "pass", requiredFfeFt: 101.2 } } });
+    const ffe = strip.find((v) => v.key === "ffe");
+    expect(ffe.recheck).toBeFalsy();
+    expect(ffe.pill).toBe("OK");
+  });
+});
+
 describe("A2 — sort: SHORT first, then loading, then OK", () => {
   it("orders a mixed strip shortfalls-first, preserving det/mit/ffe order within a rank", () => {
     const strip = yieldVerdictStrip({
