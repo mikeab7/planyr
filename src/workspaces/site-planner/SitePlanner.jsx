@@ -108,12 +108,12 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii } from "./lib/roadGeometry.js";
+import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry } from "./lib/roadGeometry.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
-import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
+import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds, dimFontScale, dimFontPx } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds, dimFontScale, dimFontPx, boxOf } from "./lib/labelLayout.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
@@ -1024,6 +1024,49 @@ const roadStripArea = (el, settings) => {
   const ring = roadStripRing(el, settings);
   return ring.length >= 3 ? Math.abs(polyArea(ring)) : 0;
 };
+// B953/NEW-1 — detect road tees for the clean-intersection render. A tee = a centerline road's
+// ENDPOINT coincident with an INTERIOR vertex of another centerline road (the B945/B949 tee
+// topology, where planRoadConnect inserted a vertex on the through road at the weld point). Returns
+// [{ sideId, throughId, T, geom }] with geom = teeGeometry(...) in world feet (or skips a non-tee).
+// The return radius seeds from the side road's class (classReturnRadius) unless the side road stores
+// an explicit el.tee override for this through road. Pure over (els, settings); memoized at the call site.
+const TEE_COINCIDE_FT = 0.75;
+function teeJunctionsOf(els, settings) {
+  const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+  const out = [];
+  for (const S of roads) {
+    for (const ei of [0, S.pts.length - 1]) {
+      const P = S.pts[ei];
+      let G = null, gvi = -1;
+      for (const H of roads) {
+        if (H.id === S.id) continue;
+        for (let i = 1; i < H.pts.length - 1; i++) {
+          if (Math.hypot(H.pts[i].x - P.x, H.pts[i].y - P.y) <= TEE_COINCIDE_FT) { G = H; gvi = i; break; }
+        }
+        if (G) break;
+      }
+      if (!G) continue;
+      const nb = S.pts[ei === 0 ? 1 : S.pts.length - 2];                 // the side road's next vertex (into its body)
+      const sideDir = { x: nb.x - P.x, y: nb.y - P.y };
+      const a = G.pts[gvi - 1], b = G.pts[gvi + 1];
+      const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangent at the vertex
+      const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;
+      const throughDir = { x: din.x / li + dout.x / lo, y: din.y / li + dout.y / lo };
+      const clsS = roadClassOf(settings, S.roadClass);
+      const teeOverride = S.tee && S.tee.throughId === G.id ? S.tee : null;
+      const R = teeOverride && teeOverride.returnR > 0 ? teeOverride.returnR : classReturnRadius(clsS);
+      const flare = teeOverride && teeOverride.flare > 0 ? teeOverride.flare : 0;
+      const geom = teeGeometry({
+        T: { x: P.x, y: P.y }, throughDir, sideDir,
+        phT: Math.max(0, (+G.travelW || 0) / 2), phS: Math.max(0, (+S.travelW || 0) / 2),
+        R, flare, curbT: roadCurbWidth(G), curbS: roadCurbWidth(S),
+        throughAvail: Math.min(li, lo), sideAvail: Math.hypot(sideDir.x, sideDir.y),
+      });
+      if (geom) out.push({ sideId: S.id, throughId: G.id, T: { x: P.x, y: P.y }, geom });
+    }
+  }
+  return out;
+}
 // True length (ft) of a centerline road = its tessellated centerline length.
 const roadCenterlineLength = (el, settings) => {
   const dense = roadDenseCenterline(el, settings);
@@ -10387,16 +10430,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         lines: showAreas ? ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`] : ["Additional Detention"], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true });
     }
   }
+  // B951 — the parcel-area badges ("5.24 ac" pills) are painted as their own fixed layer
+  // (parcelLabels, below) with no reflow, so the label-collision engine never treated them as
+  // obstacles: a building's name/sf/dims stack could land on top of a parcel badge and read as
+  // garbled "166,240 sf ac". Compute each visible badge's screen box UP FRONT (same geometry the
+  // render uses just below) and hand them to layoutLabels as immovable obstacles so element
+  // labels yield around them. Reused by parcelLabels so the obstacle box and the drawn pill agree.
+  const parcelChips = parcels.map((pc) => {
+    if (pc.active === false) return null; // inactive parcel shows no chip (B213) → not an obstacle
+    const base = centroid(pc.points), off = pc.labelOffset || { x: 0, y: 0 };
+    const c = f2p({ x: base.x + off.x, y: base.y + off.y });
+    const txt = `${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
+    const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
+    const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
+    return { pc, c, txt, fs, padX, padY, boxW, boxH, box: boxOf(c.x, c.y, boxW, boxH) };
+  }).filter(Boolean);
+  const parcelChipBoxes = parcelChips.map((p) => p.box);
   const labelShow = layoutLabels(
     labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader })),
-    { pad: 2 },
+    { pad: 2, obstacles: parcelChipBoxes },
   );
   // B121 (round 3): fold the red per-edge dimension callouts into the collision pool. The dimension
   // number is the lowest tier — if its screen box would overprint a committed centred name/area
   // label, HIDE it (never move it: B592 pins it on the footprint). Iterate ELS (not labelCands — a
   // deduped / LOD-dropped label still draws its dimension), mirroring renderElPx's visibility gate
   // (:10866/:10887) and number geometry so the collision test and the render can't disagree.
-  const committedLabelBoxes = [...labelShow.values()].map((p) => p.box).filter(Boolean);
+  // B951 — the red per-edge dimension number is the lowest tier: it yields to any committed
+  // centred label AND (now) to a parcel-area badge, so a dim tick can't overprint a "5.24 ac"
+  // pill either. Fold the parcel-chip boxes into the obstacle set alongside the placed labels.
+  const committedLabelBoxes = [...labelShow.values()].map((p) => p.box).filter(Boolean).concat(parcelChipBoxes);
   const dimItems = [];
   for (const el of els) {
     if (!(el.type === "building" || el.type === "paving" || el.type === "road") || el.points || el.noLabel) continue;
@@ -10462,18 +10524,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
   });
 
-  const parcelLabels = parcels.map((pc) => {
-    // B213 — the acreage chip is anchored to the parcel, so it inherits its active state:
-    // an inactive parcel (excluded from the math, drawn dimmed/dashed) shows no chip.
-    if (pc.active === false) return null;
-    // NEW-3: the acreage chip sits on the parcel centroid by default but is click-and-drag
-    // to any spot (including outside the boundary); the offset is stored on the parcel (feet)
-    // so it persists with the plan. Drag only in Select so it never blocks drawing tools.
-    const base = centroid(pc.points), off = pc.labelOffset || { x: 0, y: 0 };
-    const c = f2p({ x: base.x + off.x, y: base.y + off.y });
-    const txt = `${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
-    const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
-    const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
+  // B213 — the acreage chip is anchored to the parcel, so it inherits its active state:
+  // an inactive parcel (excluded from the math, drawn dimmed/dashed) shows no chip.
+  // NEW-3: the chip sits on the parcel centroid by default but is click-and-drag to any spot
+  // (including outside the boundary); the offset is stored on the parcel (feet) so it persists
+  // with the plan. Drag only in Select so it never blocks drawing tools.
+  // B951 — geometry (c / txt / fs / box) is precomputed in `parcelChips` above so the drawn pill
+  // matches the obstacle box the label-collision engine avoided; here we only render it.
+  const parcelLabels = parcelChips.map(({ pc, c, txt, fs, padY, boxW, boxH }) => {
     const draggable = tool === "select";
     return (
       <g key={`pl${pc.id}`} data-print-chip="acre" pointerEvents={draggable ? "auto" : "none"}
@@ -11768,6 +11826,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEls((a) => a.map((x) => x.id === el.id ? reRoad({ ...x, ...patch }) : x));
     if (toast) flashWarn(toast, 7000);
   };
+  // B953/NEW-1 — per-junction tee params (curb return radius + throat flare), stored on the SIDE
+  // road as el.tee = { throughId, returnR, flare }. The clean-tee render reads this override (else
+  // the class default). One undo; geometry re-solves live on the next render (teeJunctions memo).
+  const setRoadTee = (el, throughId, patch) => {
+    pushHistory();
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, tee: { throughId, ...(x.tee && x.tee.throughId === throughId ? x.tee : {}), ...patch } } : x));
+  };
   // Per-vertex curve treatment / radius (B597/NEW-2). Endpoints carry no corner; a new arc
   // seeds the class default radius. Re-syncs the strip bbox after the curve changes.
   const setRoadVtx = (el, idx, patch) => {
@@ -12156,6 +12221,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
             {!sheetOverlays.length ? null : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                {/* B952 — map references live ONLY in the Site Planner and are a SEPARATE feature
+                    from Library documents: the two write to disjoint stores (references → the site
+                    model's sheetOverlays; Library files → doc_reviews/file_facts), with no bridge in
+                    either direction. A plain Library upload never creates a reference here, and
+                    removing a Library file never removes one from the map. This one honest line keeps
+                    a user from expecting a Library delete to clear a map backdrop (the B952 report). */}
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>
+                  Map references are managed here, separate from your Library documents — deleting a Library file won't remove a reference from the map, and adding a Library file won't add one.
+                </div>
                 {sheetOverlays.map((o) => {
                   const on = selOverlay === o.id;
                   return (
@@ -13100,6 +13174,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // BEFORE the elements (sent behind the buildings), the rest after. Hit-testing is native SVG DOM
   // order, so reordering the DOM reorders clicks too — what looks on top is what you grab.
   const markupsZ = [...markups].sort(byZAsc);
+  // B953/NEW-1 — clean-tee junction geometry (world feet), recomputed only when els/settings change;
+  // rendered through f2p each frame. Drawn as an overlay after the element pass (see the render below).
+  const teeJunctions = useMemo(() => teeJunctionsOf(els, settings), [els, settings]);
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
   const renderMarkupNode = (m) => {
@@ -13735,6 +13812,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
               {markupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
               {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
+              {/* B953/NEW-1 — clean T-intersection overlay: an opaque pavement patch unifies each road
+                  tee (hiding the raw butting curbs across the throat) and the curb-return fillets draw
+                  on top. Roads are the lowest layer and road-to-road tees aren't normally overlapped by
+                  paving/buildings, so this reads correctly; a rare overlap is a v1 z-order note. */}
+              {teeJunctions.length > 0 && (
+                <g data-testid="road-tee-layer" pointerEvents="none">
+                  {teeJunctions.map((tj, i) => {
+                    const g = tj.geom;
+                    const through = els.find((x) => x.id === tj.throughId);
+                    const st = through ? elStyle(through, settings) : typeStyle("road", settings);
+                    const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
+                    const cw = curbStrokePx(roadCurbWidth(through || {}), ppf, CURB_STROKE_MIN_PX);
+                    const toD = (poly) => poly && poly.length >= 3
+                      ? poly.map((p, k) => { const q = f2p(p); return `${k ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z"
+                      : null;
+                    const coverD = toD(g.cover);
+                    const stemD = toD(g.stem);
+                    const fOp = st.fillOpacity ?? 1;
+                    return (
+                      <g key={`tee-${tj.sideId}-${tj.throughId}-${i}`} data-tee={`${tj.sideId}→${tj.throughId}`}>
+                        {stemD && <path d={stemD} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-stem" />}
+                        {coverD && <path d={coverD} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-cover" />}
+                        {g.returns.map((arc, k) => arc.length >= 2 ? (
+                          <polyline key={k} data-testid="road-tee-return"
+                            points={arc.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")}
+                            fill="none" stroke={st.stroke} strokeWidth={cw} strokeLinecap="round" />
+                        ) : null)}
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {markupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
@@ -15460,6 +15569,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           )}
                         </div>
                       )}
+                      {/* B953/NEW-1 — clean-tee params, shown only when THIS road tees into another
+                          (its endpoint on the through road's side). Curb return radius + throat flare,
+                          seeded from the road class, editable per junction; the render re-solves live. */}
+                      {cl && (() => {
+                        const myTees = teeJunctions.filter((tj) => tj.sideId === selEl.id);
+                        if (!myTees.length) return null;
+                        const tj = myTees[0];
+                        const seedR = classReturnRadius(roadClassOf(settings, selEl.roadClass));
+                        const curR = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.returnR > 0 ? selEl.tee.returnR : seedR;
+                        const curFlare = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.flare > 0 ? selEl.tee.flare : 0;
+                        return (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Tee intersection</div>
+                            <Field label="Curb return (ft)"><NumInput style={numInput} value={Math.round(curR)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { returnR: n })} /></Field>
+                            <Field label="Throat flare (ft)"><NumInput style={numInput} value={Math.round(curFlare)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { flare: n })} /></Field>
+                            <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Rounds the curb returns where this road meets the through road{myTees.length > 1 ? ` (${myTees.length} tees)` : ""}. Larger return / flare widens the throat. Seeded from the road class; returns clamp to fit.</div>
+                          </div>
+                        );
+                      })()}
                     </>
                     );
                   })() : isDockZone(selEl) ? (() => {

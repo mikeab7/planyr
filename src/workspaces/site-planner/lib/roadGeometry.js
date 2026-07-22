@@ -528,6 +528,141 @@ export function fixRoadRadii(pts, vtx, threshold, opts = {}) {
   };
 }
 
+/* ---- Clean T-intersection geometry at a road tee (B953/NEW-1) -------------------------
+ * When a road tees into another (the B945/B949 tee: a side road's endpoint welded onto a
+ * through road's centerline), render a real intersection instead of the side road's pavement
+ * strip butting into the through road. This pure module computes, in world feet:
+ *   • two CURB RETURN fillets (tangent arcs) rounding the corners where the side road's
+ *     pavement edges meet the through road's near edge — radius from the road class, clamped;
+ *   • a WIDENED THROAT (the return radii push the opening on the through road wider than the
+ *     side road's pavement; an extra `flare` widens it further);
+ *   • a merged pavement COVER polygon (opaque) that unifies the junction and hides the raw
+ *     butting curbs (through near-curb across the throat + the side road's mouth curbs), so the
+ *     caller redraws only the clean returns on top;
+ *   • the throat span on the through road whose near curb must be INTERRUPTED.
+ * The renderer supplies screen scale; this owns the geometry so tangency / throat / clamp are
+ * unit-tested. v1 scope: the T/Y tee (one road into another's side); 4-way + heavy skew deferred.
+ * A very acute tee clamps the returns (down to a near-sharp corner) so pavement never self-crosses. */
+
+// Intersection of two infinite lines (point p1 dir d1) × (point p2 dir d2). Null if parallel.
+function lineX(p1, d1, p2, d2) {
+  const den = cross(d1, d2);
+  if (Math.abs(den) < EPS) return null;
+  const t = cross(sub(p2, p1), d2) / den;
+  return add(p1, mul(d1, t));
+}
+const leftNormal = (d) => ({ x: -d.y, y: d.x }); // rotate +90°
+
+/* A fillet of radius R in the wedge at corner P between unit ray dirs u1,u2. Returns
+ * { R, t, tan1, tan2, arc } (t = corner→tangent distance along each ray) or null if degenerate. */
+function rayFillet(P, u1, u2, R, tessDeg) {
+  const c = Math.max(-1, Math.min(1, dot(u1, u2)));
+  const phi = Math.acos(c);                       // wedge angle between the rays
+  if (phi < 1e-3 || phi > Math.PI - 1e-3) return null; // straight / folded → no fillet
+  const half = phi / 2;
+  const t = R / Math.tan(half);                    // tangent length from the corner
+  const tan1 = add(P, mul(u1, t));
+  const tan2 = add(P, mul(u2, t));
+  const bis = unit(add(u1, u2));
+  const centre = add(P, mul(bis, R / Math.sin(half)));
+  let a0 = Math.atan2(tan1.y - centre.y, tan1.x - centre.x);
+  const a1 = Math.atan2(tan2.y - centre.y, tan2.x - centre.x);
+  let da = a1 - a0;
+  while (da > Math.PI) da -= 2 * Math.PI;
+  while (da < -Math.PI) da += 2 * Math.PI;
+  const n = Math.max(2, Math.ceil((Math.abs(da) * 180) / Math.PI / (tessDeg > 0 ? tessDeg : DEFAULT_TESS_DEG)));
+  const arc = [];
+  for (let k = 0; k <= n; k++) { const a = a0 + (da * k) / n; arc.push({ x: centre.x + R * Math.cos(a), y: centre.y + R * Math.sin(a) }); }
+  return { R, t, tan1, tan2, arc };
+}
+
+/* teeGeometry(params) — the clean-tee primitives.
+ *   T          — the tee point (side endpoint on the through centerline).
+ *   throughDir — unit tangent of the through centerline at T.
+ *   sideDir    — unit direction of the side road at T, pointing INTO the side road body.
+ *   phT, phS   — through / side pavement half-widths (travelW/2, face of curb).
+ *   R          — desired curb return radius (class turning radius). flare — extra throat widening (ft).
+ *   curbT, curbS — curb band widths (so the cover hides the back-of-curb edge rings too).
+ *   throughAvail — min distance the through road runs each way from T (clamps the returns).
+ *   sideAvail  — distance the side road runs from T (clamps the returns).
+ * Returns { R, throatWidth, throughTangents:[a,b], sideTangents:[a,b], returns:[arcA,arcB],
+ *           cover:[polygon], throatMid, nTee } or null when it isn't a real tee (side ∥ through). */
+export function teeGeometry(params) {
+  const {
+    T, throughDir, sideDir, phT, phS, R, flare = 0,
+    curbT = 0, curbS = 0, throughAvail = Infinity, sideAvail = Infinity, tessDeg = DEFAULT_TESS_DEG,
+  } = params || {};
+  if (!T || !throughDir || !sideDir || !(phT >= 0) || !(phS >= 0)) return null;
+  const u = unit(throughDir), d = unit(sideDir);
+  const nrm = leftNormal(u);
+  const sideSign = Math.sign(dot(d, nrm));
+  if (sideSign === 0) return null;                  // side road parallel to the through road → not a tee
+  const nTee = mul(nrm, sideSign);                  // unit normal from through centerline toward the side road
+  const perpS = leftNormal(d);
+  const E0 = add(T, mul(nTee, phT));                // mouth centre on the through near (face-of-curb) edge
+  const phSm = phS + Math.max(0, flare);            // flared mouth half-width
+  // The side road's two flared face edges, and where each meets the through near edge (the corners).
+  const cornerA = lineX(add(T, mul(perpS, phSm)), d, E0, u);
+  const cornerB = lineX(add(T, mul(perpS, -phSm)), d, E0, u);
+  if (!cornerA || !cornerB) return null;
+  const tMax = Math.max(0, Math.min(throughAvail, sideAvail) * 0.9);
+  // Fillet one corner: rays go ALONG the through edge away from the throat, and ALONG the side edge
+  // into the body. Clamp R down so the tangent run fits the available road (acute angle → tiny arc).
+  const fillet = (corner) => {
+    const awayThrough = mul(u, Math.sign(dot(sub(corner, E0), u)) || 1);
+    const cAng = Math.max(-1, Math.min(1, dot(awayThrough, d)));
+    const phi = Math.acos(cAng);
+    if (phi < 1e-3 || phi > Math.PI - 1e-3) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0 };
+    let Rc = R > 0 ? R : 0;
+    let f = rayFillet(corner, awayThrough, d, Rc, tessDeg);
+    if (f && f.t > tMax && tMax > EPS) { Rc = tMax * Math.tan(phi / 2); f = rayFillet(corner, awayThrough, d, Rc, tessDeg); }
+    if (!f || !(Rc > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0 }; // degenerate → sharp corner
+    return f;
+  };
+  const fA = fillet(cornerA);
+  const fB = fillet(cornerB);
+  // Cover polygon: throat inset a hair INTO the through pavement (to hide its near curb across the
+  // throat) → return A → out along side edge A past the curb band → across the mouth → side edge B →
+  // return B → back along the through edge. Filling it opaque unifies the junction; the returns draw on top.
+  // Margins reach past the pavement FACE by the curb band + ~half the curb stroke, so the opaque
+  // cover fully hides each road's back-of-curb edge ring (matching how a road fills to back-of-curb).
+  const mT = curbT * 1.75 + 0.05, mS = curbS * 1.75 + 0.05;
+  const insetV = mul(nTee, -mT);                        // push the throat edge INTO the through pavement past its near curb
+  const outA = add(fA.tan2, mul(perpS, mS));            // widen past the side curb band (the +perpS side)
+  const outB = add(fB.tan2, mul(perpS, -mS));
+  const cover = [
+    add(fA.tan1, insetV),
+    ...fA.arc,
+    outA,
+    outB,
+    ...[...fB.arc].reverse(),
+    add(fB.tan1, insetV),
+  ];
+  // STEM — the side road's real (un-flared) pavement footprint where it overlaps INTO the through
+  // road (from the near edge down to just past the tee point). Filling it opaque hides the side
+  // road's curb stubs that otherwise draw across the through pavement (the little "box" at the mouth).
+  const realCornerA = lineX(add(T, mul(perpS, phS)), d, E0, u);
+  const realCornerB = lineX(add(T, mul(perpS, -phS)), d, E0, u);
+  const stem = (realCornerA && realCornerB) ? [
+    add(realCornerA, mul(perpS, mS)),
+    add(realCornerB, mul(perpS, -mS)),
+    add(add(T, mul(perpS, -(phS + mS))), mul(nTee, -mS)),
+    add(add(T, mul(perpS, phS + mS)), mul(nTee, -mS)),
+  ] : null;
+  const throatWidth = len(sub(fA.tan1, fB.tan1));
+  return {
+    R: Math.max(fA.R, fB.R),
+    throatWidth,
+    throughTangents: [fA.tan1, fB.tan1],
+    sideTangents: [fA.tan2, fB.tan2],
+    returns: [fA.arc, fB.arc],
+    cover,
+    stem,
+    throatMid: E0,
+    nTee,
+  };
+}
+
 /* Curb / border stroke width in PIXELS for a true real-world curb of `curbFt` feet at the
  * current `ppf` (pixels-per-foot), floored to `minPx` so it stays visible when the true
  * width goes sub-pixel at overview zoom. NO ceiling — a 6" curb SHOULD read thicker as you
