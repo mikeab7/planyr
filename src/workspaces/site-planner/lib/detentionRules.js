@@ -1366,7 +1366,7 @@ export const AUTHORITY_SHORT = {
  * additive-to-county, the hydrograph-routing reality, PE/RPLS seals, 365-day permit, and
  * the datum trap). Single source so the readout + print never drift. */
 export const BKDD_OVERLAY_SHORT =
-  "in Brookshire–Katy DD — rate-control detention (Post ≤ Pre at 2/10/100-yr) also applies";
+  "in Brookshire–Katy DD: rate-control detention (Post ≤ Pre at 2/10/100-yr) also applies";
 export const BKDD_OVERLAY_DETAIL =
   "This site falls inside the Brookshire–Katy Drainage District. BKDD is a RATE-control district: " +
   "detention must hold the post-development peak discharge to the pre-development rate (matched at the " +
