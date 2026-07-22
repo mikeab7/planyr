@@ -215,61 +215,47 @@ test.describe("click behavior — single-click selects, double-click opens Prope
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  test("Site Planner: double-click a callout opens Properties; already-selected double-click edits its text", async ({ page }) => {
+  /* NEW-2 — a callout's double-click is now LOCATION-based (supersedes the old B750/B893/B894 temporal
+   * "edit only if already selected" rule): a double-click INSIDE the text region edits the text in
+   * place (on a FRESH double-click, no pre-selection needed); a double-click ON the border/frame band
+   * opens Properties. Both halves are asserted here, targeting real box-edge coordinates read off the
+   * committed callout rect. The callout box carries data-testid="callout-box-<id>". */
+  const calloutBox = (p) => p.locator('[data-testid^="callout-box-"]');
+  test("Site Planner: double-click a callout — text region EDITS, border opens PROPERTIES (location-based)", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
-    const { cx, cy } = await drawCallout(page);
+    await drawCallout(page);
 
-    await expect(panel(page)).toHaveCount(0); // deselected after the two Escapes in drawCallout
+    await expect(panel(page)).toHaveCount(0);       // deselected after the two Escapes in drawCallout
+    await expect(calloutBox(page)).toBeVisible();
 
-    // Fresh double-click (not already selected) → Properties, NOT the text editor reopening.
-    await page.mouse.move(cx, cy);
+    // (a) FRESH double-click INSIDE the text region → the text editor opens, Properties stays CLOSED.
+    // No prior select click — this supersedes the old "click to select, then double-click" path.
+    const bIn = await calloutBox(page).boundingBox();
+    const inX = Math.round(bIn.x + bIn.width / 2), inY = Math.round(bIn.y + bIn.height / 2);
+    await page.mouse.move(inX, inY);
+    await page.mouse.down(); await page.mouse.up();
+    await page.mouse.down(); await page.mouse.up();
+    await expect(page.getByPlaceholder("Type…")).toBeVisible();
+    await expect(panel(page)).toHaveCount(0);
+
+    // commit the editor + deselect so the committed box is back on screen for part (b)
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(page.getByPlaceholder("Type…")).toHaveCount(0);
+    await expect(calloutBox(page)).toBeVisible();
+    await page.waitForTimeout(450); // clear the tap history so part (b)'s two presses pair with each other
+
+    // (b) double-click ON the border band (a few px inside the top edge) → Properties opens, the text
+    // editor stays CLOSED.
+    const bEdge = await calloutBox(page).boundingBox();
+    const edX = Math.round(bEdge.x + bEdge.width / 2), edY = Math.round(bEdge.y + 3);
+    await page.mouse.move(edX, edY);
     await page.mouse.down(); await page.mouse.up();
     await page.mouse.down(); await page.mouse.up();
     await expect(panel(page)).toBeVisible();
     await expect(page.getByPlaceholder("Type…")).toHaveCount(0);
-
-    await page.locator('button[aria-label="Close properties"]').click();
-    await expect(panel(page)).toHaveCount(0);
-
-    // Already-selected → double-click reopens the text editor in place.
-    await page.mouse.click(cx, cy);
-    await expect(panel(page)).toHaveCount(0);
-    await page.waitForTimeout(450); // see the road test above for why this wait matters
-    await page.mouse.move(cx, cy);
-    await page.mouse.down(); await page.mouse.up();
-    await page.mouse.down(); await page.mouse.up();
-    await expect(panel(page)).toHaveCount(0);
-    await expect(page.getByPlaceholder("Type…")).toBeVisible();
-
-    expect(errors, errors.join("\n")).toEqual([]);
-  });
-
-  /* NEW-1 — regression guard: "click to select, then immediately double-click to edit" done FAST (all
-   * three presses landing inside one ~350ms double-tap window, a completely natural way to do this
-   * gesture) used to silently swallow the third press. `isDoubleTap`'s matched branch wiped its tap
-   * history to an empty record, so press 3 had nothing to pair with and fell through as an unrelated
-   * lone click — the callout ended up selected with Properties open (from presses 1+2), never editing.
-   * Fixed by re-arming the tap history to press 2 (marked "already selected", since a matched pair
-   * always selects) instead of clearing it, so press 3 pairs with press 2 and correctly edits. */
-  test("Site Planner: a fast 3-click select-then-double-click on a callout edits its text (not just Properties)", async ({ page }) => {
-    const errors = [];
-    page.on("pageerror", (e) => errors.push(String(e)));
-    await startBlank(page);
-    const { cx, cy } = await drawCallout(page);
-
-    // ~100ms between presses — a genuinely fast triple-click by human standards (a real mouse can't
-    // produce a truly zero-gap press anyway), and enough for the Properties panel's own reflow (opening
-    // it narrows the canvas) to settle before the next press, so the press lands on the callout and not
-    // on whatever the reflow left behind at that fixed viewport coordinate.
-    await page.mouse.move(cx, cy);
-    await page.mouse.down(); await page.mouse.up(); // press 1: selects
-    await page.waitForTimeout(100);
-    await page.mouse.down(); await page.mouse.up(); // press 2: pairs with 1 → Properties
-    await page.waitForTimeout(100);
-    await page.mouse.down(); await page.mouse.up(); // press 3: pairs with 2 → edit
-    await expect(page.getByPlaceholder("Type…")).toBeVisible();
 
     expect(errors, errors.join("\n")).toEqual([]);
   });

@@ -483,14 +483,21 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
 
   it("B750/B935: single-click selects only; a double-tap opens Properties (only a callout still edits its text)", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    // isDoubleTap now also carries whether the feature was ALREADY selected at the FIRST press (wasSel);
-    // it reconstructs the browser's own double-click test (pointer capture eats the DOM dblclick) and
-    // exposes the first-press selection via dblWasSelRef when the second tap matches.
+    // isDoubleTap reconstructs the browser's own double-click test (pointer capture eats the DOM
+    // dblclick). NEW-2: it only DETECTS the pair — a callout's double-tap then branches on the click
+    // LOCATION (interior text vs border band), not on whether the feature was already selected.
     expect(src).toMatch(/const isDoubleTap = \(e, id, wasSel\) => \{/);
     expect(src).toMatch(/const near = Math\.abs\(e\.clientX - p\.x\) <= DBLTAP_PX/);
-    expect(src).toMatch(/dblWasSelRef\.current = !!p\.wasSel;/);
-    // callout: already-selected → edit text in place; otherwise open Properties (a callout IS a text box)
-    expect(src).toMatch(/if \(part === "box" && isDoubleTap\(e, id, [\s\S]{0,90}if \(dblWasSelRef\.current\) beginEditCallout\(id\);[\s\S]{0,90}setPropsFor\(\{ kind: "callout", id \}\)/);
+    // callout: double-tap on the box hands off to calloutDblAction (no dblWasSelRef temporal branch)
+    expect(src).not.toMatch(/dblWasSelRef/);
+    expect(src).toMatch(/if \(part === "box" && isDoubleTap\(e, id, [\s\S]{0,90}calloutDblAction\(e, id\)/);
+    // NEW-2 — calloutDblAction: interior text region → edit in place; border band → Properties; locked
+    // stays select-only. The hit-zone is computed in screen px from the same box geometry the render uses.
+    expect(src).toMatch(/const calloutDblAction = \(e, id\) => \{/);
+    expect(src).toMatch(/if \(c\.locked\) return; \/\/ locked/);
+    expect(src).toMatch(/const zone = calloutDblZone\(\{ x: bp\.x - w \/ 2, y: bp\.y - h \/ 2, w, h \}, clickPx, CALLOUT_BORDER_BAND_PX\);/);
+    expect(src).toMatch(/if \(zone === "interior"\) beginEditCallout\(id\);/);
+    expect(src).toMatch(/else \{ setPropsFor\(\{ kind: "callout", id \}\); if \(narrow\) setNarrowProps\(true\); \}/);
     // B935 — a markup (line/polyline/easement) double-tap ALWAYS opens Properties, never an inline editor
     expect(src).toMatch(/if \(m && !m\.locked && isDoubleTap\(e, id, sel\?\.kind === "markup" && sel\.id === id\)\) \{[\s\S]{0,120}setPropsFor\(\{ kind: "markup", id \}\)/);
     // B935 — an element (centerline road) double-tap ALWAYS opens Properties, never an inline editor

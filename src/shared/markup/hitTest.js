@@ -32,6 +32,34 @@ const MARKER_TOL_PX = 10; // a count marker / text anchor is a forgiving target
 const tolWorld = (px, view) => px / ((view && view.scale) || 1);
 const bboxArea = (pts) => { const b = bboxOf(pts); return b.w * b.h; };
 
+/* The rendered callout BOX size (boxW, boxH) for markup `m` at viewport `scale` (screen px per world
+ * unit). With `scale` set the box is in WORLD units, mirroring the renderer's screen-fixed box (fs =
+ * fontSize*scale/16 converted back via /scale, pad 8/4 px → world); with `scale` 0 it falls back to
+ * raw property units. This is the ONE place the wrap-based box sizing lives, so selection, leader
+ * hit-testing (below) and the NEW-2 double-click zone can't drift from what actually paints. */
+export function calloutBoxWH(m, scale) {
+  const fs = scale ? Math.max(6 / scale, (readProp(m, "fontSize") || 14) / 16) : (readProp(m, "fontSize") || 14);
+  const measure = bestMeasurer({ bold: !!readProp(m, "bold"), italic: !!readProp(m, "italic") });
+  const { boxW, boxH } = calloutBoxMetrics(m.text || "", fs, { padX: scale ? 8 / scale : 8, padY: scale ? 4 / scale : 4, measure });
+  return { boxW, boxH };
+}
+
+/* NEW-2 — which ZONE of a callout's box a double-click landed in, for the location-based rule:
+ *   "interior" — the text region → edit the text in place
+ *   "border"   — the frame band (within `tol` of the perimeter, inside the box) → open Properties
+ *   "outside"  — not on the box (e.g. a click on a leader) → caller opens Properties, never text edit
+ * `box` is {x,y,w,h}; `p` and `tol` are in the SAME units (screen px for the Site Planner; world units
+ * — pass tolPx/scale — for Document Review). The band is clamped to 35% of the shorter side so even a
+ * tiny box always keeps a reachable interior (text edit is the primary action). Pure. */
+export function calloutDblZone(box, p, tol) {
+  if (!box || !(box.w > 0) || !(box.h > 0)) return "outside";
+  const dx = p.x - box.x, dy = p.y - box.y;
+  if (dx < 0 || dx > box.w || dy < 0 || dy > box.h) return "outside";
+  const band = Math.min(Math.max(0, tol || 0), Math.min(box.w, box.h) * 0.35);
+  const dEdge = Math.min(dx, box.w - dx, dy, box.h - dy);
+  return dEdge <= band ? "border" : "interior";
+}
+
 /* How world point `p` relates to markup `m`: returns { d, interior } — `d` is the distance (in
  * world units) to the markup's selectable geometry, `0` for an interior grab — or `null` if the
  * point is beyond `tol` (outline / markers) . Closed rings hit on their filled interior OR their
@@ -77,9 +105,7 @@ export function scoreMarkup(m, p, tol, markerTol, scale = 0) {
       // world-space font size is scale-INDEPENDENT (a real annotation has a fixed size on the
       // page); fontSize/16 mirrors the renderer's fs_screen = fontSize*scale/16 converted back
       // to world units (÷scale) — matches at every zoom level.
-      const fsWorld = Math.max(6 / scale, (readProp(m, "fontSize") || 14) / 16);
-      const measure = bestMeasurer({ bold: !!readProp(m, "bold"), italic: !!readProp(m, "italic") });
-      const { boxW, boxH } = calloutBoxMetrics(m.text || "", fsWorld, { padX: 8 / scale, padY: 4 / scale, measure });
+      const { boxW, boxH } = calloutBoxWH(m, scale);
       if (p.x >= box.x && p.x <= box.x + boxW && p.y >= box.y && p.y <= box.y + boxH) return { d: 0, interior: true };
       if (tips.length) {
         let d = Infinity;
@@ -201,11 +227,7 @@ export function hitCalloutLeaderIndex(m, p, view, opts = {}) {
   const scale = (view && view.scale) || 0;
   const tol = tolWorld(opts.tolPx ?? EDGE_TOL_PX, view);
   let boxW = 0, boxH = 0;
-  if (scale) {
-    const fsWorld = Math.max(6 / scale, (readProp(m, "fontSize") || 14) / 16);
-    const measure = bestMeasurer({ bold: !!readProp(m, "bold"), italic: !!readProp(m, "italic") });
-    ({ boxW, boxH } = calloutBoxMetrics(m.text || "", fsWorld, { padX: 8 / scale, padY: 4 / scale, measure }));
-  }
+  if (scale) ({ boxW, boxH } = calloutBoxWH(m, scale));
   let best = -1, bd = Infinity;
   tips.forEach((tip, i) => {
     const origin = scale ? nearestRectPerimeterPoint({ x: box.x, y: box.y, w: boxW, h: boxH }, tip) : box;

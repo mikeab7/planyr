@@ -62,7 +62,8 @@ import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { addCalloutLeader, removeCalloutLeader } from "../../shared/markup/markupModel.js";
-import { nearestRectPerimeterPoint } from "../../shared/markup/geometry.js";
+import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
+import { calloutDblZone } from "../../shared/markup/hitTest.js";
 import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates } from "./lib/counties.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./lib/kmzExport.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
@@ -482,6 +483,10 @@ const MK_BOX_KINDS = ["rect", "ellipse"];
 // Width (screen px) of the transparent fat hit-stroke under open-path markups (line/polyline),
 // so they grab within ~6px on either side at any zoom — matching a polyline's forgiving feel (B155).
 const MK_HIT_PX = 12;
+// NEW-2 — width (screen px) of a callout's border/frame band for the LOCATION-based double-click:
+// a double-click landing this close to the box perimeter opens Properties; deeper inside (the text
+// region) edits the text. Screen px so the band is the same at every zoom (mirrors hitTest's 6px).
+const CALLOUT_BORDER_BAND_PX = 6;
 // How close (px) a measurement/line start-click must be to a parcel boundary to snap onto it and
 // arm the Shift "perpendicular-to-the-property-line" lock (NEW). Same feel as MK_HIT_PX.
 const EDGE_LOCK_PX = 12;
@@ -2036,26 +2041,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // select, then press over THERE to drag" gesture from misfiring as an edit.
   const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0, wasSel: false });
   const labelSessionRef = useRef(null);  // B682 — coalesces a live label-spacing slider drag into one undo frame
-  // B750 — carries whether the feature was ALREADY selected at the FIRST press of a double-tap. That
-  // decides a double-click's job: an already-selected text-bearing feature edits its text ("click to
-  // select, then double-click to edit text"); anything else opens Properties. Read right after
-  // isDoubleTap(...) returns true.
-  const dblWasSelRef = useRef(false);
   const DBLTAP_MS = 350, DBLTAP_PX = 14;
-  // NEW-1 — a THIRD rapid press on the same spot (a real "click to select, then immediately
-  // double-click to edit" gesture done fast, all three landing inside one DBLTAP_MS window) used to
-  // read as select+Properties+a harmless dangling single tap, never edit: a matched pair used to WIPE
-  // lastTapRef to the empty record, so press 3 had nothing to pair with. Re-arm it to press 2 instead —
-  // wasSel:true, since every matched pair just selected the feature — so a press 3 within the window
-  // pairs with press 2 and correctly reads "already selected" → edits. A press 3 that arrives outside
-  // the window just starts its own fresh (unpaired) tap, same as today. Because the re-armed record
-  // now survives past a completed pair, anything that clearly ends the gesture (Escape, the Properties
-  // ✕) explicitly clears lastTapRef too — otherwise an unrelated LATER single click landing inside that
-  // window would still misread as "press 3" of a gesture the user never intended to continue.
+  // A THIRD rapid press on the same spot (a real "click to select, then immediately double-click"
+  // gesture done fast, all three inside one DBLTAP_MS window) used to read as a lone dangling tap: a
+  // matched pair used to WIPE lastTapRef to the empty record, so press 3 had nothing to pair with.
+  // Re-arm it to press 2 instead, so a press 3 within the window pairs with press 2 and still registers
+  // as a double-tap — which for a callout (NEW-2) now branches on the click LOCATION (interior text →
+  // edit; border band → Properties), no longer on whether the feature was already selected. A press 3
+  // outside the window just starts its own fresh (unpaired) tap. Because the re-armed record survives
+  // past a completed pair, anything that clearly ends the gesture (Escape, the Properties ✕) explicitly
+  // clears lastTapRef too — otherwise an unrelated LATER single click inside that window would misread
+  // as "press 3" of a gesture the user never intended to continue.
   const isDoubleTap = (e, id, wasSel) => {
     const now = Date.now(), p = lastTapRef.current;
     const near = Math.abs(e.clientX - p.x) <= DBLTAP_PX && Math.abs(e.clientY - p.y) <= DBLTAP_PX;
-    if (p.id === id && now - p.t < DBLTAP_MS && near) { dblWasSelRef.current = !!p.wasSel; lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY, wasSel: true }; return true; }
+    if (p.id === id && now - p.t < DBLTAP_MS && near) { lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY, wasSel: true }; return true; }
     lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY, wasSel: !!wasSel };
     return false;
   };
@@ -3890,6 +3890,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const removeLeaderFromCallout = (id, tipIndex) => { pushHistory(); setCallouts((a) => a.map((c) => (c.id === id ? removeCalloutLeader(c, tipIndex) : c))); };
   // Inline editing: a textarea overlays the box. Empty text removes the callout.
   const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); }; // no history on open — pushed on commit only if the text changed (B32)
+  // NEW-2 — LOCATION-based callout double-click (supersedes the B750/B893/B894 temporal "edit only if
+  // already selected" rule): double-click INSIDE the text region → edit the text in place; double-click
+  // ON the border/frame band → open Properties. The hit-zone is computed in screen px from the SAME box
+  // geometry the render uses, so a FRESH double-click (no pre-selection) lands correctly. A locked
+  // callout stays select-only (B679). Callers pass the raw pointer event; single-click still just selects.
+  const calloutDblAction = (e, id) => {
+    const c = callouts.find((x) => x.id === id);
+    if (!c) return;
+    setSel({ kind: "callout", id });
+    if (c.locked) return; // locked → select-only
+    const st = calloutStyle(c);
+    const { w, h } = calloutLayout(c, st, view.ppf);
+    const bp = f2p(c.box);
+    const clickPx = f2p(p2f(e.clientX, e.clientY)); // client → SVG px (identity round-trip; box is in SVG px)
+    const zone = calloutDblZone({ x: bp.x - w / 2, y: bp.y - h / 2, w, h }, clickPx, CALLOUT_BORDER_BAND_PX);
+    if (zone === "interior") beginEditCallout(id);
+    else { setPropsFor({ kind: "callout", id }); if (narrow) setNarrowProps(true); }
+  };
   const commitEditCallout = () => {
     if (!editCallout) return;
     const { id, text, isNew } = editCallout;
@@ -4141,13 +4159,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMoveCallout = (e, id, part, tipIndex = 0) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
-    // B750 — double-click a callout (box part only): an ALREADY-selected callout edits its text in place
-    // ("click to select, then double-click to edit text"); otherwise it opens Properties. Pointer capture
-    // eats the DOM dblclick, so we reconstruct the double-tap here.
+    // NEW-2 — double-click a callout (box part): branch on WHERE the click landed, not on prior selection
+    // (interior text region → edit; border band → Properties — see calloutDblAction). Pointer capture
+    // eats the DOM dblclick, so we reconstruct the double-tap here; isDoubleTap only DETECTS the pair now.
     if (part === "box" && isDoubleTap(e, id, sel?.kind === "callout" && sel.id === id)) {
-      setSel({ kind: "callout", id });
-      if (dblWasSelRef.current) beginEditCallout(id);
-      else { setPropsFor({ kind: "callout", id }); if (narrow) setNarrowProps(true); }
+      calloutDblAction(e, id);
       return;
     }
     const c = callouts.find((x) => x.id === id);
@@ -13987,6 +14003,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
                 const tips = calloutTips(c).map((p) => f2p(p));
                 const boxRect = { x: bp.x - w / 2, y: bp.y - h / 2, w, h };
+                const cr = calloutCornerRadius(w, h); // NEW-1 — zoom-invariant, low → rectangle at every zoom
                 const ah = Math.max(7, fontPx * 0.7);
                 return (
                   <g key={c.id} data-testid={`callout-${c.id}`} data-callout-leaders={tips.length}>
@@ -13996,7 +14013,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const origin = nearestRectPerimeterPoint(boxRect, tp);
                       const ang = Math.atan2(tp.y - origin.y, tp.x - origin.x);
                       return (
-                        <g key={i} data-testid={`callout-leader-${c.id}-${i}`} onContextMenu={(e) => onCalloutContext(e, c.id, i)}>
+                        <g key={i} data-testid={`callout-leader-${c.id}-${i}`} onContextMenu={(e) => onCalloutContext(e, c.id, i)}
+                          onPointerDown={(e) => {
+                            // NEW-2 — a LEADER: single click SELECTS the callout; a double-click opens
+                            // Properties (never text edit). stopPropagation so the leader click doesn't fall
+                            // through to the canvas (which would deselect + start a pan and eat the dblclick);
+                            // the double-tap is reconstructed here (own gesture id) like the box path. A locked
+                            // callout stays select-only (B679); right-click still offers Add/Delete Leader.
+                            if (tool !== "select" || e.button !== 0) return;
+                            e.stopPropagation();
+                            setSel({ kind: "callout", id: c.id });
+                            if (isDoubleTap(e, `${c.id}:leader`, sel?.kind === "callout" && sel.id === c.id) && !c.locked) {
+                              setPropsFor({ kind: "callout", id: c.id }); if (narrow) setNarrowProps(true);
+                            }
+                          }}>
                           <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
                           <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
                           {/* a transparent, wider hit-stroke so a thin leader is still easy to right-click */}
@@ -14006,20 +14036,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     })}
                     {/* B680 — hide the committed box + text while its editor is open so the textarea is the
                         ONLY box on screen (was drawing a second, offset box behind the editor overlay). */}
-                    {editCallout?.id !== c.id && <rect data-testid={`callout-box-${c.id}`} x={boxRect.x} y={boxRect.y} width={w} height={h} rx={4}
+                    {editCallout?.id !== c.id && <rect data-testid={`callout-box-${c.id}`} x={boxRect.x} y={boxRect.y} width={w} height={h} rx={cr} ry={cr}
                       fill={st.fill} stroke={border} strokeWidth={1.4}
                       pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
                       style={{ cursor: tool === "select" ? "move" : "default" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
                       onContextMenu={(e) => onCalloutContext(e, c.id, -1)}
                       onDoubleClick={(e) => {
-                        // NEW-1 — native-dblclick fallback; same B750 gate as startMoveCallout's
-                        // reconstructed double-tap (was unconditionally forcing the text editor open,
-                        // even on a callout that wasn't already selected).
+                        // NEW-2 — native-dblclick fallback for when pointer capture didn't eat it; branches
+                        // on the click LOCATION (interior text → edit; border band → Properties).
                         e.stopPropagation();
-                        setSel({ kind: "callout", id: c.id });
-                        if (dblWasSelRef.current) beginEditCallout(c.id);
-                        else setPropsFor({ kind: "callout", id: c.id });
+                        calloutDblAction(e, c.id);
                       }} />}
                     {editCallout?.id !== c.id && lines.map((ln, i) => (
                       <text key={i} x={tx} y={bp.y - h / 2 + padY + fontPx * 0.82 + i * lineH} textAnchor={anchor}
@@ -14041,7 +14068,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const canResize = !c.locked;
                       return (
                         <g data-export="skip">
-                          <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={5} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
+                          <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={cr + 2} ry={cr + 2} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
                           {grips.map(([hx, hy, dir], i) => (
                             <rect key={i} data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
                               pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ew-resize" } : undefined}
@@ -14094,6 +14121,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const { fontPx, lineH, padX, padY } = geo;
                 const wrapped = geo.wrapped;
                 const w = wrapped ? geo.w : Math.max(64, geo.w), h = Math.max(30, geo.h);
+                const cr = calloutCornerRadius(w, h); // NEW-1 — match the committed box so edit ↔ commit don't jump
                 const bp = f2p(c.box);
                 return (
                   <foreignObject x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} style={{ overflow: "visible" }}>
@@ -14117,7 +14145,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                          active-edit ring is an OUTLINE (not a border) so it doesn't consume any content
                          box — the padded text area then equals the committed SVG text region exactly (a
                          2px border would shrink each axis by 4px and clip the last line / caret). */
-                      style={{ width: w, height: h, resize: "none", overflow: "hidden", whiteSpace: wrapped ? "pre-wrap" : "pre", overflowWrap: wrapped ? "break-word" : undefined, border: "none", outline: `2px solid ${PAL.accent}`, borderRadius: 4, padding: `${padY}px ${padX}px`, fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      style={{ width: w, height: h, resize: "none", overflow: "hidden", whiteSpace: wrapped ? "pre-wrap" : "pre", overflowWrap: wrapped ? "break-word" : undefined, border: "none", outline: `2px solid ${PAL.accent}`, borderRadius: cr, padding: `${padY}px ${padX}px`, fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
