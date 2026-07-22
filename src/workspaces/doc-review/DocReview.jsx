@@ -42,7 +42,7 @@ import { writeProp, readProp } from "../../shared/markup/propertySchema.js";
 import { kindDefaults } from "../../shared/markup/markupStyle.js";
 import { bboxOfMarkup, calloutParts, addCalloutLeader, removeCalloutLeader } from "../../shared/markup/markupModel.js";
 import { pickInMarquee, selMods, nextSelection, hasSelMod } from "../../shared/markup/selection.js";
-import { pickMarkup, hitCalloutLeaderIndex } from "../../shared/markup/hitTest.js";
+import { pickMarkup, hitCalloutLeaderIndex, calloutBoxWH, calloutDblZone } from "../../shared/markup/hitTest.js";
 import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
@@ -1514,15 +1514,31 @@ export default function DocReview({
   };
   const onDbl = (e) => {
     if (tool === "select") {
-      // B750 — double-click opens the markup's Properties. Exception: an ALREADY-selected TEXT note or
-      // callout edits its text in place ("click to select, then double-click to edit text"). `dblRef`
-      // (set in onDown) says whether it was selected at the FIRST press of this double-click.
-      const m = pageMarks.find((mm) => mm.id === hitTest(toPage(e)));
+      const pgpt = toPage(e);
+      const m = pageMarks.find((mm) => mm.id === hitTest(pgpt));
       if (!m) return;
+      // NEW-2 — a CALLOUT uses a LOCATION-based rule (supersedes the B750/B893/B894 temporal one): a
+      // double-click INSIDE the text region edits the text in place (no pre-selection needed); ON the
+      // border/frame band — or on a leader (→ zone "outside") — it opens Properties. A locked callout
+      // stays select-only (B679).
+      if (m.kind === "callout") {
+        selectOne(m.id);
+        if (m.locked) return;
+        const { box } = calloutParts(m);
+        if (box) {
+          const { boxW, boxH } = calloutBoxWH(m, view.scale);
+          const zone = calloutDblZone({ x: box.x, y: box.y, w: boxW, h: boxH }, pgpt, 6 / (view.scale || 1));
+          if (zone === "interior") { openEditor({ id: m.id, page, pt: box, text: m.text || "" }); return; }
+        }
+        setPropsForId(m.id);
+        return;
+      }
+      // B750 — every other markup: double-click opens Properties. Exception: an ALREADY-selected TEXT
+      // note edits its text in place ("click to select, then double-click to edit text"). `dblRef` (set
+      // in onDown) says whether it was selected at the FIRST press of this double-click.
       const wasSel = dblRef.current.id === m.id ? dblRef.current.wasSel : false;
       if (wasSel && m.kind === "text") openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
-      else if (wasSel && m.kind === "callout") openEditor({ id: m.id, page, pt: calloutParts(m).box || { x: 0, y: 0 }, text: m.text || "" });
-      else setPropsForId(m.id); // not-already-selected (→ props) or a non-text markup (→ props)
+      else setPropsForId(m.id);
       return;
     }
     if (!draft) return;

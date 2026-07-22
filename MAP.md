@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-21 @ `3469bd1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-22 @ `26713bd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -113,9 +113,9 @@ _302 source files mapped._
 - **`src/shared/ids.js`** — Collision-resistant element-id minter: per-tab random letter salt + seedAbove counter so no two tabs mint a tombstoned id (B591)
   - _exports_: `createIdMinter`, `randomIdSalt`
 - **`src/shared/markup/geometry.js`** — Pure unit-agnostic point math for all markup surfaces: length, shoelace area, arc-midpoint, point-in-poly, clamped centroid, snap45, projToSeg, bbox
-  - _exports_: `bboxOf`, `centroidOf`, `dist`, `midOfPath`, `nearestRectPerimeterPoint`, `pathLength`, `pointInPoly`, `polyArea`, `projToSeg`, `rot2`, `snap45`
+  - _exports_: `bboxOf`, `CALLOUT_CORNER_FRAC`, `calloutCornerRadius`, `centroidOf`, `dist`, `midOfPath`, `nearestRectPerimeterPoint`, `pathLength`, `pointInPoly`, `polyArea`, `projToSeg`, `rot2`, `snap45`
 - **`src/shared/markup/hitTest.js`** — Shared JS-picker hit-testing: pickMarkup click selection (nearest, smallest-interior-wins) and hitEditPath vertex/edge grab for the selected markup
-  - _exports_: `hitCalloutLeaderIndex`, `hitEditPath`, `hitMarkup`, `pickMarkup`, `pickMarkupIndex`, `scoreMarkup`
+  - _exports_: `calloutBoxWH`, `calloutDblZone`, `hitCalloutLeaderIndex`, `hitEditPath`, `hitMarkup`, `pickMarkup`, `pickMarkupIndex`, `scoreMarkup`
 - **`src/shared/markup/markupModel.js`** — Cross-host markup accessors reconciling Site Planner a/b + centre-box vs Document Review pts list: ptsOf/setPts/translate/bbox + load-path sanitize
   - _exports_: `addCalloutLeader`, `bboxOfMarkup`, `boxCorners`, `calloutParts`, `isClosed`, `minPtsOf`, `ptsOf`, `removeCalloutLeader`, `sanitizeMarkup`, `sanitizeMarkups`, `setPts`, `translate`
 - **`src/shared/markup/MarkupRenderer.jsx`** — Pure SVG renderer for one markup of any kind (measures, shapes, text, callout, cloud, dimension, arrows) given viewport scale + ftPerUnit

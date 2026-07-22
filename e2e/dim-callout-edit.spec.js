@@ -193,11 +193,66 @@ test.describe("B913 — resizable text box / callout", () => {
       return c && c.boxW != null && c.boxW > 0;
     }, { timeout: 6000 }).toBe(true);
 
-    // Open Properties and "Fit to text" → boxW clears back to auto.
-    await doubleTap(page, tx, ty);          // double-tap opens Properties (already selected)
+    // Open Properties and "Fit to text" → boxW clears back to auto. NEW-2: a double-click is now
+    // LOCATION-based — the interior edits the text, so open Properties by double-tapping the BORDER
+    // band (a few px inside the top edge of the committed box).
+    const cb = await page.locator('[data-testid^="callout-box-"]').first().boundingBox();
+    await doubleTap(page, Math.round(cb.x + cb.width / 2), Math.round(cb.y + 3));
     await expect(panel(page)).toBeVisible();
     await page.getByRole("button", { name: /Fit to text/i }).click();
     await expect.poll(async () => (await firstCallout(page)).boxW == null).toBe(true);
+
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+});
+
+/* NEW-1 — the callout border must be the SAME shape (a near-rectangle) at every zoom. The old bug: a
+ * fixed-pixel corner radius rounded a zoomed-OUT (small) box into a bubble while a zoomed-IN (large)
+ * box read as a rectangle. The fix ties the radius to a small, constant fraction of the box's shorter
+ * side, so its proportion — and therefore its shape — is invariant across zoom. This reads the real
+ * rendered rect off the live SVG at two zoom levels and proves the proportion doesn't drift. */
+test.describe("NEW-1 — callout border corner radius is zoom-invariant (rectangle at every zoom)", () => {
+  const boxGeo = async (page) => {
+    const el = page.locator('[data-testid^="callout-box-"]').first();
+    await expect(el).toBeVisible();
+    return el.evaluate((r) => ({
+      rx: parseFloat(r.getAttribute("rx")),
+      w: r.width.baseVal.value,
+      h: r.height.baseVal.value,
+    }));
+  };
+
+  test("the corner radius stays the same small proportion of the box across zoom", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+
+    // Place a callout (tip click, then box click), type, commit + deselect.
+    const box = await canvas(page).boundingBox();
+    await page.getByRole("button", { name: /^Callout\s/ }).click();
+    await page.mouse.click(box.x + 300, box.y + 460);
+    await page.mouse.click(box.x + 460, box.y + 410);
+    await page.getByPlaceholder("Type…").waitFor({ state: "visible" });
+    await page.keyboard.type("Rectangle");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+
+    const g1 = await boxGeo(page);
+    const ratio1 = g1.rx / Math.min(g1.w, g1.h);
+
+    // Zoom OUT several steps → the box shrinks in px. Under the old fixed-px radius the proportion
+    // would BALLOON (bubble); with the fix it holds.
+    await wheelZoom(page, 4, +1);
+    const g2 = await boxGeo(page);
+    const ratio2 = g2.rx / Math.min(g2.w, g2.h);
+
+    // The box really did change size across the zoom (so we're genuinely testing across zoom)…
+    expect(Math.abs(g2.w - g1.w)).toBeGreaterThan(2);
+    // …yet the corner-radius PROPORTION is unchanged (same shape at both zooms) and stays LOW enough
+    // to read as a rectangle (never approaching the half-side that would make a pill).
+    expect(ratio2).toBeCloseTo(ratio1, 3);
+    expect(ratio1).toBeGreaterThan(0);
+    expect(ratio1).toBeLessThan(0.1);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });

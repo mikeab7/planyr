@@ -14,7 +14,7 @@
  * Import path: "../../shared/markup/MarkupRenderer.jsx" from either workspace.
  */
 import { measureLabel } from "./measure.js";
-import { midOfPath, centroidOf, nearestRectPerimeterPoint } from "./geometry.js";
+import { midOfPath, centroidOf, nearestRectPerimeterPoint, calloutCornerRadius } from "./geometry.js";
 import { readProp } from "./propertySchema.js";
 import { resolveMarkupStyle, MEASURE_KINDS, MEAS_STROKE } from "./markupStyle.js";
 import { calloutBoxMetrics, bestMeasurer } from "./textWrap.js";
@@ -315,8 +315,11 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
             </g>
           );
         })}
+        {/* NEW-1 — corner radius scales with the box (zoom-invariant) and stays LOW so the callout
+            reads as a rectangle at every zoom, matching the Site Planner callout. */}
         <rect x={box.x} y={box.y} width={boxW} height={boxH}
-          fill={bgFill} fillOpacity={bgOpacity} stroke={p.stroke} strokeWidth={1} rx={3} />
+          fill={bgFill} fillOpacity={bgOpacity} stroke={p.stroke} strokeWidth={1}
+          rx={calloutCornerRadius(boxW, boxH)} ry={calloutCornerRadius(boxW, boxH)} />
         <text x={box.x + padX} y={box.y + fs + padY / 2}
           fontSize={fs} fill={fc} fontWeight={fw} fontStyle={fi} textDecoration={fd}
           pointerEvents="none">
