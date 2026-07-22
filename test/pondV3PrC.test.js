@@ -37,23 +37,14 @@ describe("C1 — Optimize pond APPLIES the elevation solution it computes (no mo
   });
 });
 
-describe("C2 — the Max berm (ft) ceiling: an input the solver honors", () => {
-  it("the ceiling defaults to the Standards BERM_MAX_RAISE_FT and reads the pond's own maxBermFt override", () => {
-    expect(src).toContain("const maxBermFt = Number.isFinite(baseEl.det?.maxBermFt) && baseEl.det.maxBermFt > 0 ? baseEl.det.maxBermFt : BERM_MAX_RAISE_FT;");
+describe("C2 — SUPERSEDED by PR-D (D5): the Max berm (ft) input is REMOVED; the cap is computed", () => {
+  it("the SIZING & CRITERIA group no longer renders a 'Max berm (ft)' input", () => {
+    expect(src.includes('<Field label="Max berm (ft)">')).toBe(false);
+    expect(src.includes("setDet({ maxBermFt:")).toBe(false);
   });
-  it("both the flood-affected and upland solvers are threaded the ceiling as maxRaiseFt", () => {
-    // sizePondForTargets (flood) + solveTobRaise (upland) both carry maxRaiseFt: maxBermFt.
-    const hits = src.split("maxRaiseFt: maxBermFt").length - 1;
-    expect(hits).toBeGreaterThanOrEqual(3); // det flood + det upland + mit re-solve
-  });
-  it("the SIZING & CRITERIA group renders a 'Max berm (ft)' input writing det.maxBermFt, with YOU / Standards provenance", () => {
-    expect(src).toContain('<Field label="Max berm (ft)">');
-    expect(src).toContain("setDet({ maxBermFt: Number.isFinite(n) && n > 0 ? n : null })");
-    expect(src).toContain("How high the rim may rise above existing grade");
-    expect(src).toContain("· Standards");
-  });
-  it("when the solve is cap-bound the gap proposal is built with capBound:true", () => {
-    expect(dp).toContain("capBound: true");
+  it("the solve's ceiling is the COMPUTED cap, not a user maxBermFt setting", () => {
+    expect(src.includes("baseEl.det?.maxBermFt")).toBe(false);
+    expect(src).toContain("const { capFt: bermCapFt, binding: bermBinding } = bindingBermCap(");
   });
 });
 
@@ -73,14 +64,14 @@ describe("C4 — the pond's earthen berm ring on the plan + the LAND USE legend 
     expect(src).toContain('fill="#b08d57" opacity="0.45"'); // ~45% opacity body
     expect(src).toContain('patternTransform="rotate(45)"'); // 45-degree hatch (shared token, present on pat-berm)
   });
-  it("a pointer-inert berm-ring layer draws the annulus (toe ring minus water, even-odd) with a 'berm {h} ft' tag", () => {
+  it("a pointer-inert berm-ring layer exists (PR-D flips it INWARD; see pondV3PrD)", () => {
     expect(src).toContain('data-testid="pond-berm-ring-layer"');
     expect(src).toContain('fillRule="evenodd" fill="url(#pat-berm)"');
-    // v3 E4 — the tag now reads the RIM-ABOVE-GRADE height (bermLabelFt), matching the what-changed card.
-    expect(src).toContain("berm {(Math.round(bermLabelFt * 10) / 10).toFixed(1)} ft");
+    // v3 D3 — the tag now reads the rim-above-grade berm height (bermH), inside the outline.
+    expect(src).toContain("berm {(Math.round(bermH * 10) / 10).toFixed(1)} ft");
   });
-  it("the site-wide berm-ring area is summed and the Pond legend title names water + berm ring when a berm exists", () => {
-    expect(src).toContain("const pondBermRingSf = pondBerms.reduce((s, b) => s + (b.landTakeSf || 0), 0);");
-    expect(src).toContain("ac water + ${f2(pondBermRingSf / SQFT_PER_ACRE)} ac berm ring");
+  it("the site-wide berm-ring area is summed for the Pond legend title (PR-D: inward ring area)", () => {
+    expect(src).toContain("const pondBermRingSf = els.reduce((s, e) => {");
+    expect(src).toContain("ac berm (inside ${f2(pondArea / SQFT_PER_ACRE)} ac footprint)");
   });
 });

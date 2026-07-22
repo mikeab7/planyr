@@ -20,22 +20,34 @@ const f0 = (n) => Math.round(n).toLocaleString();
 
 const changed = (a, b, eps) => a != null && b != null && Math.abs(a - b) > eps;
 
-/* v3 A5 / C2 — the gap proposal after Optimize applies the rim/berm it could (the elevation
- * solve is now APPLIED, not atomic — C1). Names the ways to close the REMAINING gap. `bermFt`
- * is the applied berm raise in feet (null when the cap was a floor, not a berm — e.g. the
- * mitigation case — so the berm clause drops); `extraAcres` is a screening estimate of the
- * extra footprint (null/0 drops the acreage rather than fabricating one). `capBound` (C2) is
- * true when the solve hit the user's Max berm ceiling — then the proposal leads with raising
- * that setting, since more berm height (not just more land) can close the gap. Pure. */
-export function gapProposalNote({ bermFt = null, extraAcres = null, capBound = false } = {}) {
+/* v3 A5 — the gap proposal after Optimize applies the rim/berm it could. Names the ways to close
+ * the REMAINING gap. `bermFt` is the applied berm raise in feet (null when the cap was a floor,
+ * not a berm — e.g. the mitigation case — so the berm clause drops); `extraAcres` is a screening
+ * estimate of the extra footprint (null/0 drops the acreage rather than fabricating one).
+ * (v3 D5: the user-set "Max berm" ceiling is gone — the berm cap is COMPUTED — so this note no
+ * longer mentions a Max-berm setting; a cap-bound solve routes to bermCapProposalNote instead.) */
+export function gapProposalNote({ bermFt = null, extraAcres = null } = {}) {
   const hasBerm = bermFt != null && Number.isFinite(bermFt) && bermFt > 0;
-  if (capBound && hasBerm) {
-    const acres = extraAcres > 0 ? ` by about ${f2(extraAcres)} ac` : "";
-    return `To close the gap: keep the ${f1(bermFt)}-ft berm (your Max berm setting). Raise Max berm if your grading allows, or enlarge the pond${acres}, or add a second basin.`;
-  }
   const berm = hasBerm ? `keep the ${f1(bermFt)}-ft berm and ` : "";
   const acres = extraAcres > 0 ? ` by about ${f2(extraAcres)} ac` : "";
   return `To close the gap: ${berm}enlarge the pond${acres}, or add a second basin.`;
+}
+
+/* v3 D5 — when the berm solve is capped, the toast names the BINDING constraint in plain English.
+ * `binding` is "drainage" (runoff can no longer reach the pond by gravity) or "geometry" (the
+ * inward berm faces pinch the footprint closed). `bermFt` is the capped berm height; for the
+ * drainage case `controllingGradeFt` + `designWaterFt` explain WHY; for the geometry case
+ * `geometricMaxFt` is the footprint's ceiling. `extraAcres` names the enlargement if estimable. */
+export function bermCapProposalNote({ binding = "geometry", bermFt = null, controllingGradeFt = null, designWaterFt = null, geometricMaxFt = null, extraAcres = null } = {}) {
+  const enlarge = extraAcres != null && extraAcres > 0 ? `enlarge the pond by about ${f2(extraAcres)} ac` : "enlarge the pond";
+  if (binding === "drainage") {
+    const g = controllingGradeFt != null ? f1(controllingGradeFt) : "?";
+    const w = designWaterFt != null ? f1(designWaterFt) : "?";
+    const h = bermFt != null ? f1(bermFt) : "?";
+    return `Berm capped at ${h} ft: above that, the site can no longer drain into the pond by gravity (controlling grade ${g} ft, design water ${w} ft). More storage needs regrading, pumped inflow, ${enlarge}, or a second basin.`;
+  }
+  const hmax = geometricMaxFt != null ? f1(geometricMaxFt) : (bermFt != null ? f1(bermFt) : "?");
+  return `This footprint tops out at ${hmax} ft of berm before the pond closes in on itself; to hold more, ${enlarge} or add a second basin.`;
 }
 
 /* Plain-English delta rows for the change-summary card. Only rows that actually moved
