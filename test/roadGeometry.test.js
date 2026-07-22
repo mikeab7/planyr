@@ -3,7 +3,7 @@ import {
   roadCenterline, minRadiusOfCurvature, roadMinRadius, polylineLength,
   insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx,
   findRoadConnect, roadsMergeCompatible, concatRoads, planRoadConnect, fixRoadRadii,
-  teeGeometry,
+  teeGeometry, rectEdges, nearestRectEdge,
 } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import {
   speedMinRadius, classMinRadius, classDefaultRadius, roadClassOf, ROAD_CLASS_SEEDS,
@@ -580,3 +580,73 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
 });
 
 function unitv(x, y) { const l = Math.hypot(x, y) || 1; return { x: x / l, y: y / l }; }
+
+// ---------------------------------------------------------------------------------------
+// B955/NEW-1 — road → parking-drive / truck-court connect (rect-edge targets)
+// ---------------------------------------------------------------------------------------
+
+describe("rectEdges — the 4 edges of a rect element", () => {
+  it("axis-aligned rect: 4 edges with outward normals pointing away from centre", () => {
+    const es = rectEdges(0, 0, 100, 40, 0);
+    expect(es).toHaveLength(4);
+    for (const e of es) {
+      // outward normal points away from the centre (dot with centre→mid ≥ 0)
+      expect(e.outN.x * e.mid.x + e.outN.y * e.mid.y).toBeGreaterThanOrEqual(-1e-9);
+      expect(Math.hypot(e.outN.x, e.outN.y)).toBeCloseTo(1, 6);
+    }
+    // edge lengths are the two side lengths
+    const lens = es.map((e) => Math.round(e.len)).sort((a, b) => a - b);
+    expect(lens).toEqual([40, 40, 100, 100]);
+  });
+
+  it("a rotated rect still yields unit outward normals and correct lengths", () => {
+    const es = rectEdges(10, 5, 60, 20, 37);
+    for (const e of es) expect(Math.hypot(e.outN.x, e.outN.y)).toBeCloseTo(1, 6);
+    const lens = es.map((e) => Math.round(e.len)).sort((a, b) => a - b);
+    expect(lens).toEqual([20, 20, 60, 60]);
+  });
+});
+
+describe("nearestRectEdge — connect-target edge for a road endpoint", () => {
+  const es = rectEdges(0, 0, 100, 40, 0); // rect spans x∈[-50,50], y∈[-20,20]
+
+  it("picks the facing edge nearest the point and clamps onto the segment", () => {
+    // A point above the top edge (y=+20 for this frame) → nearest facing edge is the top.
+    const hit = nearestRectEdge({ x: 10, y: 60 }, es);
+    expect(hit).toBeTruthy();
+    expect(hit.pt.y).toBeCloseTo(20, 6);   // clamped onto the top edge
+    expect(hit.pt.x).toBeCloseTo(10, 6);
+    expect(hit.dist).toBeCloseTo(40, 6);
+  });
+
+  it("ignores edges the point is INSIDE of (facingOnly) — only outward edges qualify", () => {
+    // A point off the right end: nearest facing edge is the right short edge (x=50).
+    const hit = nearestRectEdge({ x: 80, y: 0 }, es);
+    expect(hit.pt.x).toBeCloseTo(50, 6);
+    expect(hit.pt.y).toBeCloseTo(0, 6);
+  });
+
+  it("clamps to the edge's corner when the point is beyond the segment end", () => {
+    const hit = nearestRectEdge({ x: 90, y: 60 }, es);
+    // nearest point is the top-right corner (50, 20)
+    expect(hit.pt.x).toBeCloseTo(50, 6);
+    expect(hit.pt.y).toBeCloseTo(20, 6);
+  });
+});
+
+describe("teeGeometry reused for a road→drive connect (edge as 'through', no through curb)", () => {
+  it("car-scale (parking) vs truck-scale returns: bigger radius → wider throat", () => {
+    // Target edge along +x at y=0 (a parking-field / court edge); road tees from the north.
+    const common = { T: { x: 0, y: 0 }, throughDir: { x: 1, y: 0 }, sideDir: { x: 0, y: 1 }, phT: 0, phS: 12, curbT: 0, curbS: 0.5 };
+    const car = teeGeometry({ ...common, R: 20 });
+    const truck = teeGeometry({ ...common, R: 50, flare: 20 });
+    expect(car).toBeTruthy();
+    expect(truck).toBeTruthy();
+    expect(truck.throatWidth).toBeGreaterThan(car.throatWidth); // truck court reads much wider
+    // returns are tangent to the target edge (y≈0) on one end
+    for (const g of [car, truck]) for (const arc of g.returns) {
+      const ends = [arc[0], arc[arc.length - 1]];
+      expect(ends.some((p) => Math.abs(p.y) < 1e-3)).toBe(true);
+    }
+  });
+});
