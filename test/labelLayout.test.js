@@ -210,6 +210,39 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(suppressedDimIds(null, null).size).toBe(0);
   });
 
+  it("B951: obstacles (parcel-area badges) are pre-committed boxes an element label must avoid", () => {
+    // A parcel "5.24 ac" badge sits at the origin as a fixed obstacle. A building label dropped at
+    // the same spot must NOT overprint it — it yields (shrinks to fewer lines that clear the badge,
+    // leaders out, or hides), exactly as it would to a higher-importance label.
+    const badge = boxOf(0, 0, 60, 24); // the parcel-area pill, immovable
+    // A big shape whose label sits right on the badge and cannot shrink small enough → hidden.
+    const hidden = layoutLabels([
+      { id: "bldg", cx: 0, cy: 0, lines: ["Building 4"], lh: 12, charW: 6, halfW: 400, halfH: 400, importance: 1e12 },
+    ], { pad: 0, obstacles: [badge] });
+    expect(hidden.has("bldg")).toBe(false); // one-line label can't clear the badge at the same centre → hidden
+    // Same building far from the badge places normally (the obstacle only bites where it overlaps).
+    const clear = layoutLabels([
+      { id: "bldg", cx: 500, cy: 500, lines: ["Building 4", "166,240 sf", "260′ × 614′"], lh: 12, charW: 6, halfW: 400, halfH: 400, importance: 1e12 },
+    ], { pad: 0, obstacles: [badge] });
+    expect(clear.get("bldg").lines).toEqual(["Building 4", "166,240 sf", "260′ × 614′"]);
+    // A multi-line stack near (not on) the badge drops its lowest lines to clear it rather than piling.
+    // badge spans y −12..12; centred at y=18: 3 lines span 0..36 (clips), 2 lines 6..30 (clips), 1 line
+    // 12..24 (clears at the seam) → the engine shrinks the stack to the one line that no longer overprints.
+    const shrunk = layoutLabels([
+      { id: "bldg", cx: 0, cy: 18, lines: ["Building 4", "166,240 sf", "260′ × 614′"], lh: 12, charW: 6, halfW: 400, halfH: 400, importance: 1e12 },
+    ], { pad: 0, obstacles: [badge] });
+    expect(shrunk.get("bldg").lines).toEqual(["Building 4"]); // dropped to the one line that clears the badge
+    // Obstacles are order-independent and never appear in the output map (they aren't reflowable labels).
+    expect(hidden.has("__obstacle__")).toBe(false);
+    // Empty / missing obstacles is a no-op (back-compat with every existing caller).
+    const plain = layoutLabels([
+      { id: "a", cx: 0, cy: 0, lines: ["AA"], lh: 10, charW: 6, maxH: 1000, importance: 1 },
+    ], { pad: 0 });
+    expect(plain.get("a").lines).toEqual(["AA"]);
+    expect(layoutLabels([{ id: "a", cx: 0, cy: 0, lines: ["AA"], lh: 10, charW: 6, importance: 1 }], { obstacles: [] }).get("a").lines).toEqual(["AA"]);
+    expect(layoutLabels([{ id: "a", cx: 0, cy: 0, lines: ["AA"], lh: 10, charW: 6, importance: 1 }], { obstacles: [null] }).get("a").lines).toEqual(["AA"]);
+  });
+
   it("B911: dimFontScale/dimFontPx scale the dimension number with zoom, with a low floor", () => {
     // At/above working zoom the number is full size; it scales linearly down with zoom.
     expect(dimFontScale(0.45)).toBe(1);                      // working zoom → full size
