@@ -8618,27 +8618,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     //         Pure detention PREFERS open ground OUTSIDE the floodplain (avoidFlood — a
     //         simpler basin, no berm needed) but falls back to floodplain ground when
     //         that's all the site has; step 3 below then solves elevation for it either way. ----
+    // E1 (HARD RULE, owner 2026-07-22) — Optimize NEVER creates, deletes, or duplicates geometry
+    // when a pond already exists. It only adjusts the ELEVATIONS of a pond the user drew. The
+    // draw-a-pond path may fire ONLY when the project has ZERO ponds — and even then the toast
+    // says a pond was drawn. "Add a second basin" stays a PROPOSAL sentence, never an action. The
+    // old code created a fresh square basin whenever mitigation was needed but no flood-affected
+    // pond existed, spawning a second pond over the user's drawn one.
     let baseEl, isNew;
-    if (needsMit) {
-      const inFloodplain = existingPonds.filter((e) => e.det?.role !== "detention" && pondSplitFor(e).wseFt != null);
-      const pond = inFloodplain[0] || null;
-      if (pond) { baseEl = pond; isNew = false; }
-      else {
-        isNew = true;
+    if (existingPonds.length > 0) {
+      isNew = false;
+      if (needsMit) {
+        // Prefer a flood-affected, non-detention pond (only such a pond earns mitigation credit);
+        // otherwise adjust the best existing pond and let the mitigation gap fall to a proposal.
+        baseEl = existingPonds.find((e) => e.det?.role !== "detention" && pondSplitFor(e).wseFt != null)
+          || existingPonds.find((e) => e.det?.role !== "mitigation")
+          || existingPonds[0];
+      } else {
+        baseEl = existingPonds.find((e) => e.det?.role !== "mitigation" && pondSplitFor(e).wseFt == null)
+          || existingPonds.find((e) => e.det?.role !== "mitigation")
+          || existingPonds[0];
+      }
+    } else {
+      // ZERO ponds on the site — the ONE path allowed to place geometry.
+      isNew = true;
+      if (needsMit) {
         const seedSf = needsDet
           ? Math.max(DESIGN_POND_MIN_SEED_SF, estimateFootprintSf({ volumeCf: detRequiredCf, avgDepthFt }) || DESIGN_POND_MIN_SEED_SF)
           : DESIGN_POND_MIN_SEED_SF * 4; // a modest starter basin — the assistant solves the real size below
         const side = Math.sqrt(seedSf);
         const center = findOpenPondCenter({ halfW: side / 2, halfH: side / 2, requireFlood: true });
         baseEl = { id: uid(), type: "pond", cx: center.x, cy: center.y, w: side, h: side, rot: 0, det: {} };
-      }
-    } else {
-      const pond = existingPonds.find((e) => e.det?.role !== "mitigation" && pondSplitFor(e).wseFt == null)
-        || existingPonds.find((e) => e.det?.role !== "mitigation")
-        || existingPonds[0] || null;
-      if (pond) { baseEl = pond; isNew = false; }
-      else {
-        isNew = true;
+      } else {
         const seedSf = Math.max(DESIGN_POND_MIN_SEED_SF, estimateFootprintSf({ volumeCf: detRequiredCf, avgDepthFt }) || DESIGN_POND_MIN_SEED_SF);
         const side = Math.sqrt(seedSf);
         const center = findOpenPondCenter({ halfW: side / 2, halfH: side / 2, avoidFlood: true });
@@ -14003,13 +14013,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     // Tag anchored at the toe ring's top edge (min-y point).
                     const toePx = berm.toeRing.map((p) => f2p(p));
                     const top = toePx.reduce((a, b) => (b.y < a.y ? b : a), toePx[0]);
+                    // E4 (owner 2026-07-22) — the label shows the SAME berm number as the "what changed"
+                    // card: the RIM ABOVE GRADE (crest minus the site's representative grade), not the
+                    // max fill height over cells (which reads higher wherever grade dips). One berm
+                    // number, everywhere. Falls back to the fill height only if grade is unknown.
+                    const bermLabelFt = Number.isFinite(fmElev.existGradeFt) && Number.isFinite(berm.crestElevFt)
+                      ? berm.crestElevFt - fmElev.existGradeFt
+                      : berm.hFt;
                     return (
                       <g key={e.id}>
                         <path d={annulus} fillRule="evenodd" fill="url(#pat-berm)" stroke="#7a5f36" strokeWidth={strokeZoom(1.5, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.9} />
                         <path d={ringPath(water)} fill="none" stroke="#7a5f36" strokeWidth={strokeZoom(1, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.6} />
-                        {view.ppf > 0.16 && (
+                        {view.ppf > 0.16 && bermLabelFt > 0.05 && (
                           <text x={top.x} y={top.y - 4} textAnchor="middle" style={{ fontSize: 11, fontWeight: 700, fill: "#5c4626", paintOrder: "stroke", stroke: "#f4ecdd", strokeWidth: 3, strokeLinejoin: "round" }}>
-                            berm {(Math.round(berm.hFt * 10) / 10).toFixed(1)} ft
+                            berm {(Math.round(bermLabelFt * 10) / 10).toFixed(1)} ft
                           </text>
                         )}
                       </g>
@@ -16337,10 +16354,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const thisInundated = !!(split.mode === "anchored" && split.bands && split.bands.fullyInundated);
                   const floodLevel = split.mode === "anchored" && split.wseFt != null ? split.wseFt : null;
                   const floodEst = !!(split.mode === "anchored" && isEstimatedWseSrc(split.wseSrc));
-                  const detReqAcFt = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt
+                  // E2(a) — a status card must NOT render when its requirement ROUNDS TO 0 at the
+                  // 1dp we display (a "of 0.0 ac-ft required" card is meaningless). The floor is
+                  // 0.05 ac-ft, aligned with f1's rounding, so no card ever reads "of 0.0".
+                  const detReqRaw = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt
                     : detReq && detReq.kind === "band" ? detReq.bandAcFt[1] : null;
+                  const detReqAcFt = detReqRaw != null && detReqRaw >= 0.05 ? detReqRaw : null;
                   const mit = drainMitDisplay;
-                  const mitReqAcFt = mit && mit.volumeCf > 0 && mit.volumeAcFt > 0.005 ? mit.volumeAcFt : null;
+                  const mitReqAcFt = mit && mit.volumeCf > 0 && mit.volumeAcFt >= 0.05 ? mit.volumeAcFt : null;
                   const out = [];
                   if (detReqAcFt != null && providedUsableCf != null) {
                     const provAcFt = providedUsableCf / 43560;
@@ -16349,6 +16370,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       ? `The basin sits below the flood level (${f1(floodLevel)}′${floodEst ? " est." : ""}), so its ${f1(thisHoldsAcFt)} ac-ft don't count. Raising the rim creates storage that does.`
                       : "";
                     out.push({
+                      kind: "detention",
                       short,
                       heading: short ? `SHORT: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required` : `OK: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`,
                       body,
@@ -16358,6 +16380,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const provMitAcFt = pondLedger.creditedMitCf / 43560;
                     const short = provMitAcFt < mitReqAcFt - 0.005;
                     out.push({
+                      kind: "mitigation",
                       short,
                       heading: short ? `Mitigation SHORT: ${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft required` : `Mitigation OK: ${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft required`,
                       body: "",
@@ -16515,20 +16538,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button type="button" style={{ ...chip, padding: "3px 10px", color: PAL.danger, fontWeight: 700 }} onClick={deleteSel}>Delete</button>
                       </span>
                     </div>
-                    {/* v3 UI SPEC B2 — status card(s): the ONE provided/required statement in this panel (G1). */}
-                    {statusCards.length > 0 && (
+                    {/* v3 UI SPEC B2 — status card(s): the ONE provided/required statement in this panel (G1).
+                        E2(c) — EXACTLY ONE ⚡ Optimize pond button per panel: it rides only the FIRST short
+                        card (the detention card when detention is short), never once per card. One click of
+                        it runs the whole solve for every shortfall, so a second button was pure duplication. */}
+                    {statusCards.length > 0 && (() => {
+                      const optimizeIdx = statusCards.findIndex((c) => c.short);
+                      return (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 11 }}>
                         {statusCards.map((c, i) => (
                           <div key={i} style={{ borderLeft: `3px solid ${c.short ? PAL.danger : PAL.success}`, background: "var(--planner-raised)", borderRadius: 8, padding: "9px 11px" }}>
                             <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.4, color: c.short ? PAL.danger : PAL.success }}>{c.heading}</div>
                             {c.body ? <div style={{ fontSize: 11.5, color: PAL.text, lineHeight: 1.5, marginTop: 4 }}>{c.body}</div> : null}
-                            {c.short && (
+                            {c.short && i === optimizeIdx && (
                               <button type="button" onClick={designPond} title="One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed." style={{ marginTop: 8, padding: "5px 11px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Optimize pond</button>
                             )}
                           </div>
                         ))}
                       </div>
-                    )}
+                      );
+                    })()}
                     {designChangeSummary && designChangeSummary.pondId === selEl.id && (
                       <DesignChangeSummaryCard
                         summary={designChangeSummary}

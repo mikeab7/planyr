@@ -22,8 +22,8 @@ describe("buildChangeSummaryRows", () => {
     expect(rim.from).toBe("at grade");
     expect(rim.to).toBe("+4.0 ft berm");
     const usable = rows.find((r) => r.key === "usable");
-    expect(usable.from).toBe("0.00 ac-ft");
-    expect(usable.to).toBe("34.00 ac-ft");
+    expect(usable.from).toBe("0.0 ac-ft"); // E4 — ac-ft render at 1dp everywhere
+    expect(usable.to).toBe("34.0 ac-ft");
     expect(usable.note).toBe("requirement met");
   });
 
@@ -32,7 +32,7 @@ describe("buildChangeSummaryRows", () => {
     const after = { depthFt: 12, tobElevFt: 104, gradeFt: 100, usableCf: 20 * AF, mitCandidateCf: 0, landTakeSf: 5 * AF, excavationCf: 1000, bermFillCf: 500 };
     const rows = buildChangeSummaryRows({ before, after, siteDetReqAcFt: 34, siteDetProvidedOtherAcFt: 0 });
     const usable = rows.find((r) => r.key === "usable");
-    expect(usable.note).toMatch(/still short by 14\.00 ac-ft/);
+    expect(usable.note).toMatch(/still short by 14\.0 ac-ft/); // E4 — 1dp
   });
 
   it("land-take delta names the berm ring as the reason when a berm exists", () => {

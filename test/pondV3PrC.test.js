@@ -76,7 +76,8 @@ describe("C4 — the pond's earthen berm ring on the plan + the LAND USE legend 
   it("a pointer-inert berm-ring layer draws the annulus (toe ring minus water, even-odd) with a 'berm {h} ft' tag", () => {
     expect(src).toContain('data-testid="pond-berm-ring-layer"');
     expect(src).toContain('fillRule="evenodd" fill="url(#pat-berm)"');
-    expect(src).toContain("berm {(Math.round(berm.hFt * 10) / 10).toFixed(1)} ft");
+    // v3 E4 — the tag now reads the RIM-ABOVE-GRADE height (bermLabelFt), matching the what-changed card.
+    expect(src).toContain("berm {(Math.round(bermLabelFt * 10) / 10).toFixed(1)} ft");
   });
   it("the site-wide berm-ring area is summed and the Pond legend title names water + berm ring when a berm exists", () => {
     expect(src).toContain("const pondBermRingSf = pondBerms.reduce((s, b) => s + (b.landTakeSf || 0), 0);");
