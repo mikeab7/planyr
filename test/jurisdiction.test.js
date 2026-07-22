@@ -296,7 +296,7 @@ describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
     const out = await identifyJurisdiction(-95.45, 29.71, { ring, cache: freshCache(), fetchJson: fakeFetch(base) });
     expect(out.cityCentroid).toEqual(["Houston"]); // Bellaire is a ring-only (edge) hit
     const b = formatJurisdictionBadge(out);
-    expect(b.text).toMatch(/^City of Houston \/ City of Bellaire — edge only/);
+    expect(b.text).toMatch(/^City of Houston \/ City of Bellaire · edge only/);
     expect(b.straddle).toBe(false); // demoted to a qualifier, not a ⚑
   });
   it("B793 — a POINT query leaves cityCentroid null (no ring, nothing to arbitrate)", async () => {
@@ -500,9 +500,9 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
     expect(b.straddle).toBe(false);
   });
 
-  it("in an ETJ (no city) → 'City of X — ETJ · Y County'", () => {
+  it("in an ETJ (no city) → 'City of X · ETJ · Y County'", () => {
     const b = formatJurisdictionBadge({ city: [], etj: ["Baytown"], county: ["Harris"], unincorporated: true });
-    expect(b.text).toBe("City of Baytown — ETJ · Harris County");
+    expect(b.text).toBe("City of Baytown · ETJ · Harris County");
   });
 
   it("neither city nor ETJ → 'Unincorporated · Y County'", () => {
@@ -516,10 +516,10 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
     expect(b.straddle).toBe(true);
   });
 
-  it("B793 — a frontage-sliver city (centroid outside) demotes to '— edge only' at the tail, no ⚑", () => {
+  it("B793 — a frontage-sliver city (centroid outside) demotes to '· edge only' at the tail, no ⚑", () => {
     // The Bain shape: ring intersects Katy, centroid outside it; Houston-ETJ; Fort Bend.
     const b = formatJurisdictionBadge({ city: ["Katy"], cityCentroid: [], etj: ["Houston"], county: ["Fort Bend"], isd: ["Katy ISD"], straddle: false });
-    expect(b.text).toBe("City of Houston — ETJ / City of Katy — edge only · Fort Bend County · Katy ISD");
+    expect(b.text).toBe("City of Houston · ETJ / City of Katy · edge only · Fort Bend County · Katy ISD");
     expect(b.straddle).toBe(false);
     expect(b.edgeOnlyCities).toEqual(["Katy"]);
   });
@@ -530,7 +530,7 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
   });
   it("B793 — two ring cities with the centroid in one: dominant leads, sliver trails, no ⚑", () => {
     const b = formatJurisdictionBadge({ city: ["Houston", "Katy"], cityCentroid: ["Houston"], etj: [], county: ["Harris"], straddle: true });
-    expect(b.text).toBe("City of Houston / City of Katy — edge only · Harris County");
+    expect(b.text).toBe("City of Houston / City of Katy · edge only · Harris County");
     expect(b.straddle).toBe(false); // an edge sliver is qualified, not flagged
   });
   it("B793 — NO centroid answer (point query / outage) keeps the pre-B793 behavior: no edge-only claims, ⚑ stands", () => {
@@ -551,12 +551,12 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
 
   it("appends the ISD from the identify result (B764: j.isd)", () => {
     const b = formatJurisdictionBadge({ city: [], etj: ["Baytown"], county: ["Harris"], isd: ["Goose Creek Consolidated ISD"] });
-    expect(b.text).toBe("City of Baytown — ETJ · Harris County · Goose Creek Consolidated ISD");
+    expect(b.text).toBe("City of Baytown · ETJ · Harris County · Goose Creek Consolidated ISD");
     expect(b.isd).toBe("Goose Creek Consolidated ISD");
   });
   it("an explicit opts.isd overrides the result's ISD", () => {
     const b = formatJurisdictionBadge({ city: [], etj: ["Baytown"], county: ["Harris"], isd: ["A ISD"] }, { isd: "B ISD" });
-    expect(b.text).toBe("City of Baytown — ETJ · Harris County · B ISD");
+    expect(b.text).toBe("City of Baytown · ETJ · Harris County · B ISD");
   });
   it("lists both districts when a parcel straddles two ISDs", () => {
     const b = formatJurisdictionBadge({ city: ["Houston"], etj: [], county: ["Harris"], isd: ["Houston ISD", "Aldine ISD"], straddle: true });

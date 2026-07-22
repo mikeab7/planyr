@@ -409,7 +409,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     point: { lng, lat }, city: [], county: [], etj: [], isd: [],
     // B793 — when a ring is queried, cityCentroid holds the CITY names at the centroid
     // point (null = not tested / outage). A ring-hit city absent here is a frontage
-    // sliver the badge demotes to "— edge only".
+    // sliver the badge demotes to "· edge only".
     cityCentroid: null,
     unincorporated: false, straddle: false, ages: {}, sources: [],
     note: "Screening only — verify with the jurisdiction. Boundaries (especially ETJ) change.",
@@ -462,12 +462,12 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
  * `identifyJurisdiction` result into ONE screening-line string a developer reads
  * without toggling any boundary layer:
  *   • in a city            → "City of Houston · Harris County"
- *   • in an ETJ, no city    → "City of Baytown — ETJ · Harris County"
+ *   • in an ETJ, no city    → "City of Baytown · ETJ · Harris County"
  *   • neither               → "Unincorporated · Waller County"
  *   • straddle              → both listed ("City of Houston / City of Katy · …"),
  *                             `straddle:true` so the badge can mark it (⚑).
  * ETJ names already covered by a matched city are dropped (a limit straddle reads
- * "City of Houston", not "… / City of Houston — ETJ"). Once B764 lands, an ISD name
+ * "City of Houston", not "… / City of Houston · ETJ"). Once B764 lands, an ISD name
  * appends via `opts.isd`. Pure → unit-tested; null when there's nothing to show. */
 export function formatJurisdictionBadge(j, opts = {}) {
   if (!j) return null;
@@ -483,8 +483,8 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const edgeCities = centroid === null ? [] : cities.filter((c) => !centroid.includes(c));
   const parts = [
     ...coreCities.map((c) => `City of ${c}`),
-    ...etjs.map((c) => `City of ${c} — ETJ`),
-    ...edgeCities.map((c) => `City of ${c} — edge only`),
+    ...etjs.map((c) => `City of ${c} · ETJ`),
+    ...edgeCities.map((c) => `City of ${c} · edge only`),
   ];
   const jur = parts.length ? parts.join(" / ") : "Unincorporated";
   const county = counties.length ? counties.map((c) => `${c} County`).join(" / ") : null;

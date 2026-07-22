@@ -134,7 +134,7 @@
             var n = getCount(), cap = kind === "timeout" ? 1 : MAX;
             if (n >= cap) {
               overlay("Planyr is finishing an update",
-                "A new version is still rolling out. Give it a moment, then try again — your work is saved.", true);
+                "A new version is still rolling out. Give it a moment, then try again. Your work is saved.", true);
               return;
             }
             setCount(n + 1);

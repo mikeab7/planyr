@@ -127,4 +127,20 @@ describe("gapProposalNote — v3 A5: the atomic infeasibility proposal (exact co
     const note = gapProposalNote({});
     expect(note).toBe("To close the gap: enlarge the pond, or add a second basin.");
   });
+
+  it("v3 C2 — capBound leads with raising the Max berm setting", () => {
+    const note = gapProposalNote({ bermFt: 4, extraAcres: 2.5, capBound: true });
+    expect(note).toBe("To close the gap: keep the 4.0-ft berm (your Max berm setting). Raise Max berm if your grading allows, or enlarge the pond by about 2.50 ac, or add a second basin.");
+  });
+
+  it("v3 C2 — capBound with no acreage drops the 'by about … ac' clause", () => {
+    const note = gapProposalNote({ bermFt: 4, extraAcres: null, capBound: true });
+    expect(note).toBe("To close the gap: keep the 4.0-ft berm (your Max berm setting). Raise Max berm if your grading allows, or enlarge the pond, or add a second basin.");
+  });
+
+  it("v3 C2 — capBound without a berm falls back to the plain A5 shape (no cap mention)", () => {
+    const note = gapProposalNote({ bermFt: null, extraAcres: 0.3, capBound: true });
+    expect(note).toBe("To close the gap: enlarge the pond by about 0.30 ac, or add a second basin.");
+    expect(note).not.toMatch(/Max berm/);
+  });
 });

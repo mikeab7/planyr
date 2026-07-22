@@ -29,8 +29,14 @@ describe("B1/B2 — header + status card sit above the Dimensions rows", () => {
   });
 
   it("the header carries the geometry-help ⓘ and a Delete button, not the word 'selected'", () => {
-    expect(src).toContain('title={selEl.type === "pond" ? TYPE[selEl.type].label');
     expect(pondBody).toContain("Drag the body to move. Drag a corner dot to reshape");
+  });
+
+  it("v3 B7.3 — a pond's inner Section passes NO title (bare card) so 'DETENTION POND' isn't a double header", () => {
+    // The panel-chrome row already reads "ELEMENT · DETENTION POND" and owns the collapse chevron;
+    // the selected-element Section must not repeat the pond label as a second header.
+    expect(src).toContain('title={selEl.type === "pond" ? false : `Selected · ${TYPE[selEl.type].label}`}');
+    expect(src.includes('title={selEl.type === "pond" ? TYPE[selEl.type].label')).toBe(false);
   });
 });
 
