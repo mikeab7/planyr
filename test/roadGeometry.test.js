@@ -606,6 +606,66 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     const xs = g.cover.map((p) => p.x);
     expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(2 * base.phS); // wider than the raw side strip
   });
+
+  // B962 — the cover apron must be a SIMPLE, SMOOTH outline: NO spikes / pointed cusps (fold-back
+  // vertices) and NO self-intersection (the old outA/outB "ears" folded the top edge back on itself,
+  // making a star/blob). A curb return is legitimately CONCAVE where it rounds the reflex corner, so
+  // we do NOT require convexity — we require no ~180° reversal at any vertex, and no crossing edges.
+  const segCross = (p1, p2, p3, p4) => {
+    const d = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    const d1 = d(p3, p4, p1), d2 = d(p3, p4, p2), d3 = d(p1, p2, p3), d4 = d(p1, p2, p4);
+    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+  };
+  const isSimple = (ring) => {
+    const n = ring.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (j === i || (j + 1) % n === i || (i + 1) % n === j) continue;      // skip shared-vertex/adjacent edges
+        if (segCross(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])) return false;
+      }
+    }
+    return true;
+  };
+  const maxFoldBack = (ring) => {                            // most-reversed vertex: min dot of consecutive unit edge dirs
+    const n = ring.length; let worst = 1;
+    const dir = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1; return { x: dx / L, y: dy / L }; };
+    for (let i = 0; i < n; i++) {
+      const din = dir(ring[(i - 1 + n) % n], ring[i]), dout = dir(ring[i], ring[(i + 1) % n]);
+      worst = Math.min(worst, din.x * dout.x + din.y * dout.y);
+    }
+    return worst;                                            // near -1 ⇒ a cusp/spike (edge reverses); we require > -0.9
+  };
+
+  it("B962: the cover apron is SIMPLE (no self-intersection) with NO spike/cusp — road tee + car & truck drives + skew", () => {
+    const cases = [
+      teeGeometry(base),                                                   // road-to-road tee
+      teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS: 12, R: 20, curbT: 0.5, curbS: 0.5 }),   // car parking drive
+      teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS: 15, R: 50, curbT: 0.5, curbS: 0.5 }),   // truck-court drive (WB-62 ~50 ft)
+      teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: unitv(1, 2), phT: 0, phS: 15, R: 40, curbT: 0.5, curbS: 0.5 }),    // skewed drive
+    ];
+    for (const g of cases) {
+      expect(g).toBeTruthy();
+      expect(g.cover.length).toBeGreaterThan(8);                           // two tessellated fillet flares, not a 6-pt ear shape
+      expect(g.cover.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
+      expect(isSimple(g.cover)).toBe(true);                                // no self-intersecting edges (no star/blob)
+      expect(maxFoldBack(g.cover)).toBeGreaterThan(-0.9);                  // no ~180° reversal → no spike/pointed cusp
+    }
+  });
+
+  it("B962: each return arc is a single smooth (monotonic-turning) fillet — not a spiky path", () => {
+    const g = teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS: 15, R: 50, curbT: 0.5, curbS: 0.5 });
+    for (const arc of g.returns) {
+      expect(arc.length).toBeGreaterThanOrEqual(3);
+      let sign = 0;
+      for (let i = 1; i < arc.length - 1; i++) {
+        const a = arc[i - 1], b = arc[i], c = arc[i + 1];
+        const cz = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        if (Math.abs(cz) < 1e-6) continue;
+        const s = Math.sign(cz);
+        if (sign === 0) sign = s; else expect(s).toBe(sign);               // turns the SAME way throughout ⇒ one clean convex arc
+      }
+    }
+  });
 });
 
 function unitv(x, y) { const l = Math.hypot(x, y) || 1; return { x: x / l, y: y / l }; }

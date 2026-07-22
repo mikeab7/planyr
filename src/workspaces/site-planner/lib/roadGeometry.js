@@ -582,7 +582,7 @@ function rayFillet(P, u1, u2, R, tessDeg) {
   const n = Math.max(2, Math.ceil((Math.abs(da) * 180) / Math.PI / (tessDeg > 0 ? tessDeg : DEFAULT_TESS_DEG)));
   const arc = [];
   for (let k = 0; k <= n; k++) { const a = a0 + (da * k) / n; arc.push({ x: centre.x + R * Math.cos(a), y: centre.y + R * Math.sin(a) }); }
-  return { R, t, tan1, tan2, arc };
+  return { R, t, tan1, tan2, arc, centre };
 }
 
 /* teeGeometry(params) — the clean-tee primitives.
@@ -621,31 +621,37 @@ export function teeGeometry(params) {
     const awayThrough = mul(u, Math.sign(dot(sub(corner, E0), u)) || 1);
     const cAng = Math.max(-1, Math.min(1, dot(awayThrough, d)));
     const phi = Math.acos(cAng);
-    if (phi < 1e-3 || phi > Math.PI - 1e-3) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0 };
+    if (phi < 1e-3 || phi > Math.PI - 1e-3) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null };
     let Rc = R > 0 ? R : 0;
     let f = rayFillet(corner, awayThrough, d, Rc, tessDeg);
     if (f && f.t > tMax && tMax > EPS) { Rc = tMax * Math.tan(phi / 2); f = rayFillet(corner, awayThrough, d, Rc, tessDeg); }
-    if (!f || !(Rc > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0 }; // degenerate → sharp corner
+    if (!f || !(Rc > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null }; // degenerate → sharp corner
     return f;
   };
   const fA = fillet(cornerA);
   const fB = fillet(cornerB);
-  // Cover polygon: throat inset a hair INTO the through pavement (to hide its near curb across the
-  // throat) → return A → out along side edge A past the curb band → across the mouth → side edge B →
-  // return B → back along the through edge. Filling it opaque unifies the junction; the returns draw on top.
-  // Margins reach past the pavement FACE by the curb band + ~half the curb stroke, so the opaque
-  // cover fully hides each road's back-of-curb edge ring (matching how a road fills to back-of-curb).
+  // Cover polygon (B962 rewrite). The old code inserted perpendicular "ears" (outA/outB) at the mouth,
+  // whose polygon order folded back on itself — a spike + concave notch + a self-overlapping top edge
+  // (a star/blob). A curb return is LEGITIMATELY concave where it rounds the reflex corner between the
+  // two roads, so the apron is NOT convex — the fix is a SIMPLE, SMOOTH outline with no fold-back cusps.
+  // Walk: throat-left (on the through/court edge, pushed a hair INTO that pavement) → left return fillet
+  // (the exact face arc) → mouth-left (up the side road AND out to back-of-curb) → mouth-right → right
+  // return fillet → throat-right. The mouth corners extend ALONG the side road (never a perpendicular
+  // ear), so the outline can't fold back; the small into-court / up-road / out-to-curb pushes make the
+  // opaque fill reach back-of-curb on every side → it hides each butting edge stroke (seamless). The
+  // return arcs are still drawn on top at the pavement FACE (the visible curb line).
   const mT = curbT * 1.75 + 0.05, mS = curbS * 1.75 + 0.05;
-  const insetV = mul(nTee, -mT);                        // push the throat edge INTO the through pavement past its near curb
-  const outA = add(fA.tan2, mul(perpS, mS));            // widen past the side curb band (the +perpS side)
-  const outB = add(fB.tan2, mul(perpS, -mS));
+  const intoThrough = mul(nTee, -mT);                        // push the throat edge INTO the through/court pavement, past its near curb
+  // The mouth is the DIRECT edge between the two return tangent points (tan2_A → tan2_B): the cover's
+  // interior already includes the side road's wedge below the tangent height, so it overlaps the road
+  // strip (same fill) — no collar, hence no fold-back cusp at any tee angle. The road strip (opaque, to
+  // back-of-curb) covers the road part; this covers the throat + flares + the wedge, hiding the butting
+  // cap/curb strokes across the junction. (An up-the-road "collar" folded back on a skewed tee — B962.)
   const cover = [
-    add(fA.tan1, insetV),
-    ...fA.arc,
-    outA,
-    outB,
-    ...[...fB.arc].reverse(),
-    add(fB.tan1, insetV),
+    add(fA.tan1, intoThrough),
+    ...fA.arc,                                              // left return (face fillet), tan1 → tan2
+    ...[...fB.arc].reverse(),                               // right return (face fillet), tan2 → tan1 (mouth = the tan2_A→tan2_B edge between them)
+    add(fB.tan1, intoThrough),
   ];
   // STEM — the side road's real (un-flared) pavement footprint where it overlaps INTO the through
   // road (from the near edge down to just past the tee point). Filling it opaque hides the side
