@@ -1657,3 +1657,19 @@ _Move items here with the date and who/what checked them._
 - **Caveat:** the toast check was via sequential screenshots, not continuous recording, so a toast that fired and cleared between screenshots can't be fully ruled out (same caveat class already logged for V310/V328's flash-detection limits). Not treated as a fail — the apron-separation and geometry-propagation checks (the core of this item) were confirmed positively via screenshot evidence, and no toast was seen at any captured point.
 - Cadence: once — CLOSED.
 
+
+### V28 — ★ Boot fix: no stale-plan flash on reload; signed-in resume shows the latest (B134 display-half, cause #5) ✅ CONFIRMED PASS 2026-07-22 (Cowork, signed-in on planyr.io, Bain — Fort Bend, Concept A)
+- **Added** 2026-06-17 · **Cadence** once (data-display acceptance) · references **B134** (its display half; B134 causes #3/#4 stay open there).
+- **✅ Live result (2026-07-22, Cowork, signed in, Bain smr9olizi5ue):** reloaded Bain's Site tab; the app resumed directly into the correct latest plan state — **NO stale/old-plan flash** for even one frame, and **NO bounce** to the project finder. This is the exact "an older/thinner copy paints first, then comes back on its own" check, now confirmed live after the B478 resume-into-planner fix unblocked it (V28 had been BLOCKED on V13's resume bug — no resume meant nothing to flash).
+- **Scope note:** this closes the **DISPLAY half (cause #5)** of B134. The never-persisted / silent-save-error halves (B134 causes #3/#4) are tracked separately and remain open there.
+- Cadence: once — CLOSED.
+
+### V21 — Building label is a 4-line stack; square footage persists on zoom-out (B123) ✅ CONFIRMED PASS 2026-07-22 (Cowork, signed-in on planyr.io, Bain — Fort Bend, Concept A)
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · references **B123**.
+- **✅ Live result (2026-07-22, Cowork, signed in, Bain):** "Building 3"'s label renders a clean 4-line stack — **name / square footage / "(incl. 2 bump-outs)" / dimensions** — with no truncation, exactly as specified. The square-footage line holds its own line in the priority order and survives zoom-out as designed.
+- Cadence: once — CLOSED.
+
+### V22 — Red edge-dimension callouts hide when zoomed out (B121 round 2a) ✅ CONFIRMED PASS 2026-07-22 (Cowork, signed-in on planyr.io, Bain — Fort Bend, Concept A)
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · references **B121** (round 2a).
+- **✅ Live result (2026-07-22, Cowork, signed in, Bain):** the callout-render sub-claim was already confirmed in an earlier round; this round confirmed the second sub-claim — the red edge-dimension callouts cleanly **disappear at zoomed-out views** (reproduced twice via zoom out / in / out). Both sub-claims now pass — closed fully.
+- Cadence: once — CLOSED.

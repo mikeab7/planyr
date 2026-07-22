@@ -48,6 +48,14 @@ export const layoutLabels = (items, opts = {}) => {
   const pad = opts.pad == null ? 2 : opts.pad;
   const gap = opts.gap == null ? 4 : opts.gap; // px between an outside label and its shape
   const placed = []; // boxes already committed this frame
+  // B951 — fixed OBSTACLES that the reflow pool must avoid but that are not themselves
+  // reflowable labels: the parcel-area badges ("5.24 ac" pills). They paint at a fixed spot
+  // (the parcel centroid, or the user-dragged offset) and were previously a SEPARATE layer the
+  // collision engine never saw, so a building's name/sf/dims stack could overprint one into an
+  // unreadable jumble ("166,240 sf ac"). Seeding them as pre-committed boxes makes an element
+  // label yield — shrink a line, leader out, or hide — around the badge instead of piling onto
+  // it. Order-independent (they're all present before the first label is placed) and immovable.
+  for (const ob of (opts.obstacles || [])) { if (ob) placed.push(ob); }
   const out = new Map();
   // Most important first; stable id tiebreak so the result is deterministic (testable).
   const ordered = [...(items || [])].sort(

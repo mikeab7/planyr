@@ -113,7 +113,7 @@ import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds, dimFontScale, dimFontPx } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds, dimFontScale, dimFontPx, boxOf } from "./lib/labelLayout.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
@@ -10430,16 +10430,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         lines: showAreas ? ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`] : ["Additional Detention"], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true });
     }
   }
+  // B951 — the parcel-area badges ("5.24 ac" pills) are painted as their own fixed layer
+  // (parcelLabels, below) with no reflow, so the label-collision engine never treated them as
+  // obstacles: a building's name/sf/dims stack could land on top of a parcel badge and read as
+  // garbled "166,240 sf ac". Compute each visible badge's screen box UP FRONT (same geometry the
+  // render uses just below) and hand them to layoutLabels as immovable obstacles so element
+  // labels yield around them. Reused by parcelLabels so the obstacle box and the drawn pill agree.
+  const parcelChips = parcels.map((pc) => {
+    if (pc.active === false) return null; // inactive parcel shows no chip (B213) → not an obstacle
+    const base = centroid(pc.points), off = pc.labelOffset || { x: 0, y: 0 };
+    const c = f2p({ x: base.x + off.x, y: base.y + off.y });
+    const txt = `${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
+    const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
+    const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
+    return { pc, c, txt, fs, padX, padY, boxW, boxH, box: boxOf(c.x, c.y, boxW, boxH) };
+  }).filter(Boolean);
+  const parcelChipBoxes = parcelChips.map((p) => p.box);
   const labelShow = layoutLabels(
     labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader })),
-    { pad: 2 },
+    { pad: 2, obstacles: parcelChipBoxes },
   );
   // B121 (round 3): fold the red per-edge dimension callouts into the collision pool. The dimension
   // number is the lowest tier — if its screen box would overprint a committed centred name/area
   // label, HIDE it (never move it: B592 pins it on the footprint). Iterate ELS (not labelCands — a
   // deduped / LOD-dropped label still draws its dimension), mirroring renderElPx's visibility gate
   // (:10866/:10887) and number geometry so the collision test and the render can't disagree.
-  const committedLabelBoxes = [...labelShow.values()].map((p) => p.box).filter(Boolean);
+  // B951 — the red per-edge dimension number is the lowest tier: it yields to any committed
+  // centred label AND (now) to a parcel-area badge, so a dim tick can't overprint a "5.24 ac"
+  // pill either. Fold the parcel-chip boxes into the obstacle set alongside the placed labels.
+  const committedLabelBoxes = [...labelShow.values()].map((p) => p.box).filter(Boolean).concat(parcelChipBoxes);
   const dimItems = [];
   for (const el of els) {
     if (!(el.type === "building" || el.type === "paving" || el.type === "road") || el.points || el.noLabel) continue;
@@ -10505,18 +10524,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
   });
 
-  const parcelLabels = parcels.map((pc) => {
-    // B213 — the acreage chip is anchored to the parcel, so it inherits its active state:
-    // an inactive parcel (excluded from the math, drawn dimmed/dashed) shows no chip.
-    if (pc.active === false) return null;
-    // NEW-3: the acreage chip sits on the parcel centroid by default but is click-and-drag
-    // to any spot (including outside the boundary); the offset is stored on the parcel (feet)
-    // so it persists with the plan. Drag only in Select so it never blocks drawing tools.
-    const base = centroid(pc.points), off = pc.labelOffset || { x: 0, y: 0 };
-    const c = f2p({ x: base.x + off.x, y: base.y + off.y });
-    const txt = `${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
-    const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
-    const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
+  // B213 — the acreage chip is anchored to the parcel, so it inherits its active state:
+  // an inactive parcel (excluded from the math, drawn dimmed/dashed) shows no chip.
+  // NEW-3: the chip sits on the parcel centroid by default but is click-and-drag to any spot
+  // (including outside the boundary); the offset is stored on the parcel (feet) so it persists
+  // with the plan. Drag only in Select so it never blocks drawing tools.
+  // B951 — geometry (c / txt / fs / box) is precomputed in `parcelChips` above so the drawn pill
+  // matches the obstacle box the label-collision engine avoided; here we only render it.
+  const parcelLabels = parcelChips.map(({ pc, c, txt, fs, padY, boxW, boxH }) => {
     const draggable = tool === "select";
     return (
       <g key={`pl${pc.id}`} data-print-chip="acre" pointerEvents={draggable ? "auto" : "none"}
@@ -12206,6 +12221,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
             {!sheetOverlays.length ? null : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                {/* B952 — map references live ONLY in the Site Planner and are a SEPARATE feature
+                    from Library documents: the two write to disjoint stores (references → the site
+                    model's sheetOverlays; Library files → doc_reviews/file_facts), with no bridge in
+                    either direction. A plain Library upload never creates a reference here, and
+                    removing a Library file never removes one from the map. This one honest line keeps
+                    a user from expecting a Library delete to clear a map backdrop (the B952 report). */}
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>
+                  Map references are managed here, separate from your Library documents — deleting a Library file won't remove a reference from the map, and adding a Library file won't add one.
+                </div>
                 {sheetOverlays.map((o) => {
                   const on = selOverlay === o.id;
                   return (
