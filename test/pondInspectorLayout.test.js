@@ -98,7 +98,7 @@ describe("G2/G8 — no em dash in the new visible copy; 'Optimize pond' not 'Des
     for (const s of [
       "The basin sits below the flood level",
       "Drag the body to move. Drag a corner dot to reshape",
-      "incl. berm ring",
+      "Open water inside the berm", // D2 — replaces the removed "incl. berm ring" land-take copy
     ]) {
       const i = pondBody.indexOf(s);
       expect(i, s).toBeGreaterThan(-1);

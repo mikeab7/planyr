@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-22 @ `36cc1dd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-22 @ `10fcba2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_304 source files mapped._
+_305 source files mapped._
 
 ## infra
 
@@ -385,6 +385,8 @@ _304 source files mapped._
   - _exports_: `loadAndDownscaleImage`
 - **`src/workspaces/site-planner/lib/imagePdf.js`** — Pure dependency-free JPEG-to-one-page-PDF wrapper at an exact physical page size, so exports carry no browser print-dialog chrome
   - _exports_: `jpegToPdf`
+- **`src/workspaces/site-planner/lib/inwardBerm.js`** — v3 D1/D5 INWARD berm geometry (outer-toe model): the drawn polygon is the FIXED outer toe; a rim above grade builds the berm INWARD (crest = toe inset by extSlope·h), shrinking the water surface with diminishing returns up to a geometric ceiling where the footprint pinches closed. Also the COMPUTED berm cap (drainage cap vs geometric ceiling, D5). Pure — feeds pondGeom the crest ring; no storage math of its own.
+  - _exports_: `bermPinched`, `bermRingAreaSf`, `bermWaterAreaSf`, `bindingBermCap`, `crestRingForBerm`, `crestTopRing`, `drainageBermCapFt`, `EXT_BERM_SLOPE`, `geometricMaxBermFt`, `INFLOW_HEAD_ALLOWANCE_FT`, `inwardBermSplit`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
   - _exports_: `buildIdentifyParams`, `countyAtPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
@@ -458,7 +460,7 @@ _304 source files mapped._
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
   - _exports_: `nearestPointOnSeg`, `polyArea`, `segLineIntersect`, `splitPolygonByLine`, `splitPolygonByPath`
 - **`src/workspaces/site-planner/lib/pondChangeSummary.js`** — Pure "what changed" support for ⚡ Design pond (B909 round 4): plain-English before/after delta rows, the atomic infeasibility gap-proposal sentence, and schematic (not-to-scale) cross-section marks
-  - _exports_: `boxesIntersect`, `buildChangeSummaryRows`, `gapProposalNote`, `pondCrossSectionMarks`, `pondLabelBBox`
+  - _exports_: `bermCapProposalNote`, `boxesIntersect`, `buildChangeSummaryRows`, `gapProposalNote`, `pondCrossSectionMarks`, `pondLabelBBox`
 - **`src/workspaces/site-planner/lib/pondCriteriaRules.js`** — B709 editable per-jurisdiction pond design criteria (max side slope, min freeboard, maintenance-berm width; all verified:false) + drawn-input conformance checks
   - _exports_: `checkPondCriteria`, `DEFAULT_POND_CRITERIA`, `loadPondCriteria`, `savePondCriteria`
 - **`src/workspaces/site-planner/lib/pondGeom.js`** — Pond expansion label placement (deepest added-ground point) and stage contour rings with elevation/depth labels
@@ -466,7 +468,7 @@ _304 source files mapped._
 - **`src/workspaces/site-planner/lib/pondInspectorCopy.js`** — FINAL UI SPEC Part A pond-inspector visible copy as pure data (chip vocabulary A3, collapsed-group titles/summaries, at-a-glance labels, purpose tooltips) so the chip set and word budget unit-test without a browser
   - _exports_: `POND_CHIP_DEFS`, `POND_DIMENSION_LABELS`, `POND_FLOOD_NOTES`, `POND_GROUPS`, `POND_PURPOSE_DESCRIPTOR`, `POND_PURPOSE_TOOLTIP`, `pondGroupSummary`, `pondInspectorChips`
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
-  - _exports_: `accumulatePondLedger`, `effectivePondRole`, `POND_ROLE_LABEL`, `POND_ROLES`, `ROLE_SHARE`, `suggestPondRole`
+  - _exports_: `accumulatePondLedger`, `effectivePondRole`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
 - **`src/workspaces/site-planner/lib/pondOptimizer.js`** — Pond economics optimizer (NEW-D / Phase D): searches depth × placement pond configurations under constraints (max depth, groundwater ceiling, maintenance berm, pipeline-corridor exclusions) and ranks by earthwork $, land-take, and buildable-SF recovered. Exports `solveScaleForVolume`, `evaluateCandidate`, `optimizePond`.

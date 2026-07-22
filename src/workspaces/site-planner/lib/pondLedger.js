@@ -21,6 +21,15 @@ export const POND_ROLES = ["detention", "mitigation", "dual"];
 // NEW-4 (owner naming): the third purpose reads "Hybrid" everywhere the user sees it.
 // The STORED enum stays "dual" — renaming the stored value would orphan saved ponds.
 export const POND_ROLE_LABEL = { detention: "Detention", mitigation: "Mitigation", dual: "Hybrid" };
+// D4 (owner 2026-07-22) — the on-screen NOUN follows the pond's RESOLVED purpose, so a mitigation
+// pond is never labeled "Detention Pond". Used at every render site that names a specific pond
+// (element header, section title, map label, Yield per-pond row, status/toast). The STORED element
+// type/id stays "pond" — only the display string changes.
+export const POND_DISPLAY_NAME = { detention: "Detention Pond", mitigation: "Mitigation Pond", dual: "Detention + Mitigation Pond" };
+export function pondDisplayName(role) { return POND_DISPLAY_NAME[role] || POND_DISPLAY_NAME.detention; }
+/* The display noun for a specific pond from its `det` + elevation `split` — resolves the effective
+ * role (owner's explicit purpose, else the auto suggestion) and maps it to the noun. Pure. */
+export function pondDisplayNameFor(det, split) { return pondDisplayName(effectivePondRole(det, split).role); }
 export const ROLE_SHARE = 0.8; // ≥80% of volume below the WSE → mitigation-primary; ≥80% above → detention
 
 /* NEW-8 — auto-suggest a pond's role from its elevation split. Screening share =

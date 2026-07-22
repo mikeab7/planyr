@@ -56,18 +56,21 @@ const ringAreaSf = (ring) => {
   return Math.abs(a) / 2;
 };
 
-const bandsAt = (ring, det, wseFt) => bandedStorage(ring, det, { wseFt });
+// D1 — gradeFt threads the INWARD berm model into the solve: a rim above grade shrinks the
+// effective ring to the crest, so the solver sizes against the same diminishing-returns storage
+// the panel recomputes. gradeFt null (no terrain) → the classic drawn-ring bands.
+const bandsAt = (ring, det, wseFt, gradeFt = null) => bandedStorage(ring, det, { wseFt, gradeFt });
 
 /* Solve the smallest design depth (det.depth, TOB held) whose below-WSE
  * mitigation-candidate band meets targetCf. Bounded by the pinch-off ceiling
  * maxDepth = maxInwardOffset/slope. Returns
  *   { ok, depthFt?, addCf, ceilingCf?, maxDepthFt? } — ok:false carries what the
  * geometry CAN reach so the caller reports the ceiling honestly. */
-export function solveMitigationDepth({ ring, det, wseFt, targetCf }) {
+export function solveMitigationDepth({ ring, det, wseFt, targetCf, gradeFt = null }) {
   const { depth, slope } = detOf(det);
   const maxDepthFt = slope > 0 ? maxInwardOffset(ring) / slope : 0;
   const candAt = (d) => {
-    const b = bandsAt(ring, { ...det, depth: d }, wseFt);
+    const b = bandsAt(ring, { ...det, depth: d }, wseFt, gradeFt);
     return b ? b.mitigationCandidateCf : 0;
   };
   const now = candAt(depth);
@@ -85,9 +88,9 @@ export function solveMitigationDepth({ ring, det, wseFt, targetCf }) {
 
 /* Solve the smallest uniform footprint growth whose below-WSE band meets targetCf at
  * the CURRENT design depth. Reports added acres (screening — the owner redraws). */
-export function solveMitigationGrow({ ring, det, wseFt, targetCf, maxFactor = 3 }) {
+export function solveMitigationGrow({ ring, det, wseFt, targetCf, maxFactor = 3, gradeFt = null }) {
   const candAt = (f) => {
-    const b = bandsAt(scaleRing(ring, f), det, wseFt);
+    const b = bandsAt(scaleRing(ring, f), det, wseFt, gradeFt);
     return b ? b.mitigationCandidateCf : 0;
   };
   if (candAt(1) >= targetCf) return { ok: true, factor: 1, addAcres: 0 };
@@ -104,24 +107,46 @@ export function solveMitigationGrow({ ring, det, wseFt, targetCf, maxFactor = 3 
 /* Solve the smallest TOB raise h (floor HELD: depth grows with the TOB, the
  * ledgerBalancer pondUsableAt convention) whose above-WSE usable band meets
  * targetCf. Clamped at maxRaiseFt (screening convention, labeled). */
-export function solveTobRaise({ ring, det, wseFt, targetCf, maxRaiseFt = BERM_MAX_RAISE_FT }) {
+export function solveTobRaise({ ring, det, wseFt, targetCf, maxRaiseFt = BERM_MAX_RAISE_FT, gradeFt = null }) {
   const { depth } = detOf(det);
   const usableAt = (h) => {
     const d2 = { ...det, depth: depth + h, tobElev: det.tobElev + h };
-    const b = bandsAt(ring, d2, wseFt);
+    const b = bandsAt(ring, d2, wseFt, gradeFt);
     return b ? b.usableCf : 0;
   };
   const now = usableAt(0);
   if (now >= targetCf) return { ok: true, hFt: 0, addCf: 0 };
-  const capCf = usableAt(maxRaiseFt);
-  if (capCf < targetCf) return { ok: false, hFt: maxRaiseFt, addCf: Math.max(0, capCf - now), partial: capCf > now };
-  let lo = 0, hi = maxRaiseFt;
-  for (let i = 0; i < 24; i++) {
-    const mid = (lo + hi) / 2;
-    if (usableAt(mid) >= targetCf) hi = mid; else lo = mid;
+  // D1 — with the INWARD berm, usable is NON-monotonic in h: it rises, then FALLS to zero as the
+  // crest ring pinches the footprint closed near the geometric ceiling. A plain "does the cap reach
+  // the target?" test would sample the pinched ceiling (usable 0), wrongly conclude the target is
+  // unreachable, and max the berm out at the ceiling. Instead SCAN: take the smallest berm that
+  // reaches the target; if none does, return the berm at PEAK usable (never the pinched ceiling,
+  // which holds nothing). For the classic (gradeFt null) case usable is monotonic, so the scan
+  // finds the same smallest-berm answer and the peak is the cap — fully backward-compatible.
+  const STEP = Math.max(0.1, Math.min(0.5, maxRaiseFt / 40));
+  let bestH = 0, bestUse = now, reached = null;
+  for (let h = STEP; h <= maxRaiseFt + 1e-9; h += STEP) {
+    const u = usableAt(h);
+    if (u > bestUse) { bestUse = u; bestH = h; }
+    if (reached == null && u >= targetCf) { reached = h; break; }
   }
-  const hFt = Math.min(maxRaiseFt, Math.ceil(hi * 10) / 10); // 0.1-ft build convention
-  return { ok: true, hFt, addCf: usableAt(hFt) - now };
+  if (reached != null) {
+    // refine to the smallest h in (reached − STEP, reached] that still hits the target
+    let lo = Math.max(0, reached - STEP), hi = reached;
+    for (let i = 0; i < 20; i++) { const mid = (lo + hi) / 2; if (usableAt(mid) >= targetCf) hi = mid; else lo = mid; }
+    const hFt = Math.min(maxRaiseFt, Math.ceil(hi * 10) / 10); // 0.1-ft build convention
+    return { ok: true, hFt, addCf: usableAt(hFt) - now };
+  }
+  // Target unreachable. If raising found a real INTERIOR peak (usable rose then fell — the inward
+  // pinch), report that peak: the most this footprint can hold, well below the closed ceiling.
+  if (bestH > 0 && bestUse > now) {
+    return { ok: false, hFt: Math.round(bestH * 10) / 10, addCf: Math.max(0, bestUse - now), partial: true };
+  }
+  // No improvement anywhere in range (e.g. a pond fully submerged far above its rim): report the
+  // clamp itself as the maxed-out attempt (the classic signal that a footprint-growth follow-up is
+  // needed). ok:false marks it partial to the caller.
+  const capUse = usableAt(maxRaiseFt);
+  return { ok: false, hFt: maxRaiseFt, addCf: Math.max(0, capUse - now), partial: capUse > now };
 }
 
 /* The assistant. Inputs (site feet / ft NAVD88 / CUBIC FEET):
@@ -158,7 +183,7 @@ export function sizePondForTargets({
   }
   const estimated = EST_PROVIDERS.has(wseProvider);
   const { depth, freeboard, slope } = detOf(det);
-  const bands = bandsAt(ring, det, wseFt);
+  const bands = bandsAt(ring, det, wseFt, gradeFt);
   const mit0 = bands ? bands.mitigationCandidateCf : 0;
   const use0 = bands ? bands.usableCf : 0;
 
@@ -171,7 +196,7 @@ export function sizePondForTargets({
   const fullyInundated = wseFt >= det.tobElev - 1e-9;
   let tob = null;
   if (detTarget > use0) {
-    tob = solveTobRaise({ ring, det, wseFt, targetCf: detTarget, maxRaiseFt });
+    tob = solveTobRaise({ ring, det, wseFt, targetCf: detTarget, maxRaiseFt, gradeFt });
     // Berm-as-fill feedback (the fixed-point pass): a raised TOB above existing grade
     // inside the trigger floodplain is NEW fill; the prism below the WSE displaces
     // flood storage and raises the mitigation requirement this pond is solving.
@@ -194,8 +219,8 @@ export function sizePondForTargets({
   const mitShort = Math.max(0, mitTarget - mit0);
   let deepen = null, grow = null;
   if (mitShort > 0) {
-    deepen = solveMitigationDepth({ ring, det, wseFt, targetCf: mitTarget });
-    if (!deepen.ok) grow = solveMitigationGrow({ ring, det: { ...det, depth: deepen.maxDepthFt ?? depth }, wseFt, targetCf: mitTarget });
+    deepen = solveMitigationDepth({ ring, det, wseFt, targetCf: mitTarget, gradeFt });
+    if (!deepen.ok) grow = solveMitigationGrow({ ring, det: { ...det, depth: deepen.maxDepthFt ?? depth }, wseFt, targetCf: mitTarget, gradeFt });
   }
 
   // Assemble ordered actions (plain payloads; the caller renders copy + deltas).

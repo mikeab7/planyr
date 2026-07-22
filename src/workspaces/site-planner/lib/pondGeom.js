@@ -13,6 +13,7 @@
 // so it unit-tests without a browser. Screening-grade placement, not survey geometry.
 import { offsetInward, offsetOutward, ringsArea, maxInwardOffset } from "./pondOffset.js";
 import { polyArea } from "./polygonSplit.js";
+import { crestTopRing } from "./inwardBerm.js";
 
 // Even-odd ray cast: is point `pt` inside ring `ring` (array of {x,y})?
 export const pointInRing = (pt, ring) => {
@@ -284,10 +285,23 @@ const BAND_MEMO_MAX = 32;
  * only the pool band splits (a wet-bottom pond outside the floodplain still earns
  * no credit below its outlet). Returns null when unanchored — the caller falls back
  * to the Regime-B estimate, NEVER silently to gross. Pure + memoized. */
-export function bandedStorage(ring, det, { wseFt = null } = {}) {
+export function bandedStorage(ring, det, { wseFt = null, gradeFt = null } = {}) {
   const tob = det && det.tobElev;
   if (tob == null || !isFinite(tob)) return null;
   const { depth, freeboard, slope } = detOf(det);
+  // D1 — INWARD berm: when the rim sits above existing grade the drawn ring is the fixed OUTER
+  // TOE; the effective top-of-bank is the CREST, inset inward by extSlope·(tob−grade). Storage
+  // then integrates down from the crest on the shrunk ring (diminishing returns; a closed
+  // footprint → zero). gradeFt omitted, or the rim at/below grade, leaves the drawn ring as-is.
+  const bermH = gradeFt != null && isFinite(gradeFt) && tob > gradeFt + 0.02 ? tob - gradeFt : 0;
+  if (bermH > 0) {
+    const crest = crestTopRing(ring, bermH);
+    if (!crest) {
+      return { usableCf: 0, mitigationCandidateCf: 0, poolDeadCf: 0, grossCf: 0, fullyInundated: false,
+        anchored: true, closed: true, elevations: { tobElev: tob, waterSurfElev: tob - freeboard, floorElev: tob, poolElev: det.poolElev ?? null, wseFt } };
+    }
+    ring = crest;
+  }
   const poolElev = det.poolElev != null && isFinite(det.poolElev) ? det.poolElev : null;
   const sig = `${depth}|${freeboard}|${slope}|${tob}|${poolElev}|${wseFt}|${ring.length}|` +
     `${ring[0] ? `${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}` : ""}|${polyArea(ring).toFixed(1)}`;
@@ -339,16 +353,23 @@ export function bandedStorage(ring, det, { wseFt = null } = {}) {
  *               are missing lands HERE — it must never silently zero its dead band.
  *   gross     — no flood/pool information at all → everything counts.
  * Pure. */
-export function usablePondVolume(ring, det = {}, { wseFt = null, estimatePoolDepthFt = null } = {}) {
+export function usablePondVolume(ring, det = {}, { wseFt = null, estimatePoolDepthFt = null, gradeFt = null } = {}) {
   const { depth, freeboard, slope } = detOf(det);
-  const grossCf = detentionStorage(ring, depth, freeboard, slope).vol;
   const anchored = det.tobElev != null && isFinite(det.tobElev);
+  // D1 — INWARD berm: a rim above grade shrinks the effective top-of-bank to the crest ring
+  // (inset by extSlope·(tob−grade)); every volume below is integrated on that shrunk ring, so a
+  // taller berm holds progressively LESS (diminishing returns) until the footprint pinches
+  // closed. gradeFt omitted / rim at grade → the drawn ring is used, exactly as before.
+  const bermH = gradeFt != null && isFinite(gradeFt) && anchored && det.tobElev > gradeFt + 0.02 ? det.tobElev - gradeFt : 0;
+  const effRing = bermH > 0 ? crestTopRing(ring, bermH) : ring;
+  if (bermH > 0 && !effRing) return { mode: "closed", usableCf: 0, deadCf: 0, grossCf: 0, bands: null, closed: true };
+  const grossCf = detentionStorage(effRing, depth, freeboard, slope).vol;
   if (anchored && (wseFt != null || (det.poolElev != null && isFinite(det.poolElev)))) {
-    const bands = bandedStorage(ring, det, { wseFt });
+    const bands = bandedStorage(effRing, det, { wseFt }); // effRing is already the crest → no gradeFt
     return { mode: "anchored", usableCf: bands.usableCf, deadCf: Math.max(0, grossCf - bands.usableCf), grossCf, bands };
   }
   if (estimatePoolDepthFt != null && estimatePoolDepthFt > 0) {
-    const dead = detentionStorage(ring, depth, Math.max(0, depth - estimatePoolDepthFt), slope).vol;
+    const dead = detentionStorage(effRing, depth, Math.max(0, depth - estimatePoolDepthFt), slope).vol;
     return { mode: "estimate", usableCf: Math.max(0, grossCf - dead), deadCf: Math.min(grossCf, dead), grossCf, bands: null };
   }
   return { mode: "gross", usableCf: grossCf, deadCf: 0, grossCf, bands: null };
