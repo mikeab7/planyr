@@ -297,11 +297,16 @@ export function roadsMergeCompatible(a, b, tol = 0.5) {
 }
 
 /* Find the nearest connectable target for a moving endpoint at `movePt`.
- *   roads   — candidate roads [{ id, pts }] (centerline roads only; the caller excludes
+ *   roads   — candidate roads [{ id, pts, halfW? }] (centerline roads only; the caller excludes
  *             dock-bonded rect roads, which have no `pts`). MAY include the moving road itself
- *             (for closing a loop) — `exclude` skips only the moving vertex.
+ *             (for closing a loop) — `exclude` skips only the moving vertex. `halfW` (travelW/2 +
+ *             curb) is the distance from the centerline to the OUTER pavement edge (back of curb).
  *   exclude — { id, index } of the moving vertex (never a candidate → "never snap to itself").
- *   opts.tolFt        — world tolerance (ft). The caller sets it = min(screen-px budget, world Snap cap).
+ *   opts.tolFt        — world tolerance (ft), measured to the pavement EDGE (B961/NEW-3), not the
+ *             hidden centerline: the effective centerline tolerance is `tolFt + halfW`, so you connect
+ *             by bringing the point to the visible curb line. The hit still RESOLVES to the centerline
+ *             (endpoint weld / tee vertex). `dist` is the edge distance, so it compares fairly with a
+ *             parking/court edge hit. The caller sets tolFt = min(screen-px budget, world Snap cap).
  *   opts.allowInterior — also consider a T/Y onto another road's centerline (endpoint→interior).
  * Returns the nearest hit within tolerance, endpoints preferred on ties (an interior projection
  * that coincides with an endpoint defers to the endpoint case), or null. */
@@ -310,15 +315,18 @@ export function findRoadConnect(movePt, exclude, roads, opts = {}) {
   const tolFt = opts.tolFt > 0 ? opts.tolFt : 10;
   const list = Array.isArray(roads) ? roads : [];
   let best = null;
-  // Endpoint candidates (both ends of every road), skipping the moving vertex itself.
+  // Endpoint candidates (both ends of every road), skipping the moving vertex itself. Distance is
+  // measured to the CENTERLINE but the tolerance and the returned `dist` are EDGE-relative (B961).
   for (const r of list) {
     if (!r || !Array.isArray(r.pts) || r.pts.length < 2) continue;
+    const hw = r.halfW > 0 ? r.halfW : 0;
     const last = r.pts.length - 1;
     for (const idx of last === 0 ? [0] : [0, last]) {
       if (exclude && r.id === exclude.id && idx === exclude.index) continue;
       const p = r.pts[idx];
       const d = Math.hypot(p.x - movePt.x, p.y - movePt.y);
-      if (d <= tolFt && (!best || d < best.dist)) best = { roadId: r.id, kind: "endpoint", index: idx, pt: { x: p.x, y: p.y }, dist: d };
+      const edgeD = Math.max(0, d - hw);
+      if (d <= tolFt + hw && (!best || edgeD < best.dist)) best = { roadId: r.id, kind: "endpoint", index: idx, pt: { x: p.x, y: p.y }, dist: edgeD };
     }
   }
   // Interior (T/Y) candidates — only on OTHER roads, and only when strictly closer than any
@@ -327,17 +335,18 @@ export function findRoadConnect(movePt, exclude, roads, opts = {}) {
     for (const r of list) {
       if (!r || !Array.isArray(r.pts) || r.pts.length < 2) continue;
       if (exclude && r.id === exclude.id) continue;          // never tee onto self
+      const hw = r.halfW > 0 ? r.halfW : 0;
       const last = r.pts.length - 1;
       for (let i = 0; i < last; i++) {
         const q = nearestOnSeg(movePt, r.pts[i], r.pts[i + 1]);
         const d = Math.hypot(q.x - movePt.x, q.y - movePt.y);
-        if (d > tolFt || (best && d >= best.dist - 1e-6)) continue;
-        // Defer to the endpoint pass when the projection lands within tolerance of either end —
-        // near a road's end you want a clean end-to-end join, not a tee just inside it. A tee
-        // registers only when the endpoint is solidly mid-road (> tolFt from both ends).
-        const nearEnd = Math.hypot(q.x - r.pts[0].x, q.y - r.pts[0].y) <= tolFt ||
-                        Math.hypot(q.x - r.pts[last].x, q.y - r.pts[last].y) <= tolFt;
-        if (!nearEnd) best = { roadId: r.id, kind: "interior", index: i, pt: { x: q.x, y: q.y }, dist: d };
+        const edgeD = Math.max(0, d - hw);
+        if (d > tolFt + hw || (best && edgeD >= best.dist - 1e-6)) continue;
+        // Defer to the endpoint pass when the projection lands within (edge) tolerance of either end —
+        // near a road's end you want a clean end-to-end join, not a tee just inside it.
+        const nearEnd = Math.hypot(q.x - r.pts[0].x, q.y - r.pts[0].y) <= tolFt + hw ||
+                        Math.hypot(q.x - r.pts[last].x, q.y - r.pts[last].y) <= tolFt + hw;
+        if (!nearEnd) best = { roadId: r.id, kind: "interior", index: i, pt: { x: q.x, y: q.y }, dist: edgeD };
       }
     }
   }
@@ -710,4 +719,56 @@ export function nearestRectEdge(P, edges, opts = {}) {
 export function curbStrokePx(curbFt, ppf, minPx = 0.75) {
   const w = (Number.isFinite(curbFt) ? curbFt : 0) * (Number.isFinite(ppf) ? ppf : 0);
   return Math.max(minPx, w);
+}
+
+/* Convex hull (monotone chain) of a point cloud → CCW-ish ring, or null if < 3 distinct points. */
+function convexHull(points) {
+  const pts = (points || [])
+    .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p) => ({ x: p.x, y: p.y }))
+    .sort((a, b) => a.x - b.x || a.y - b.y);
+  const n = pts.length;
+  if (n < 3) return null;
+  const crossz = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [];
+  for (const p of pts) { while (lower.length >= 2 && crossz(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop(); lower.push(p); }
+  const upper = [];
+  for (let i = n - 1; i >= 0; i--) { const p = pts[i]; while (upper.length >= 2 && crossz(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop(); upper.push(p); }
+  lower.pop(); upper.pop();
+  const hull = lower.concat(upper);
+  return hull.length >= 3 ? hull : null;
+}
+
+/* ---- Seamless road-to-road weld cover (B960/NEW-2) ------------------------------------
+ * Where two roads connect END-TO-END (endpoint welded onto endpoint — a plain weld or a loop
+ * close, NOT a tee onto an interior vertex), each road renders its own strip with a FLAT end cap,
+ * so the back-of-curb edge stroke traces perpendicularly across the join and the two caps butt —
+ * a visible SEAM. This mirrors the B953 tee "cover": an opaque pavement patch painted over the
+ * join hides those butting cap strokes so the welded surface reads as one continuous pavement.
+ *   P     — the weld point (world ft).
+ *   arms  — [{ dir, halfW }] per road meeting at P; `dir` points from the road body TOWARD P
+ *           (neighbor→P), `halfW` = travelW/2 + curb (centerline → back-of-curb, the outer edge).
+ *           A loop-close weld passes the SAME road twice (its two end tangents).
+ *   opts.back — how far to extend the patch back into each arm (ft); default scales with width.
+ * Returns the convex hull of each arm's cross-section (at P and backed off by `back`) — a patch
+ * that spans the join, bridges a width step, and miters a bent weld — or null if under-specified. */
+export function weldCoverPolygon(P, arms, opts = {}) {
+  if (!P || !Number.isFinite(P.x) || !Number.isFinite(P.y) || !Array.isArray(arms) || arms.length < 2) return null;
+  const halfMax = arms.reduce((m, a) => Math.max(m, a && a.halfW > 0 ? a.halfW : 0), 0);
+  if (!(halfMax > 0)) return null;
+  const back = opts.back > 0 ? opts.back : Math.max(2, halfMax * 0.75);
+  const cloud = [];
+  for (const a of arms) {
+    if (!a || !a.dir) continue;
+    const d = unit(a.dir);
+    if (!Number.isFinite(d.x) || !Number.isFinite(d.y) || (d.x === 0 && d.y === 0)) continue;
+    const n = leftNormal(d);
+    const hw = a.halfW > 0 ? a.halfW : halfMax;
+    const base = { x: P.x - d.x * back, y: P.y - d.y * back };   // step back INTO the road body from P
+    cloud.push({ x: base.x + n.x * hw, y: base.y + n.y * hw });
+    cloud.push({ x: base.x - n.x * hw, y: base.y - n.y * hw });
+    cloud.push({ x: P.x + n.x * hw, y: P.y + n.y * hw });        // the cap corners AT P (bridge a width step)
+    cloud.push({ x: P.x - n.x * hw, y: P.y - n.y * hw });
+  }
+  return convexHull(cloud);
 }
