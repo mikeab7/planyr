@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   roadCenterline, minRadiusOfCurvature, roadMinRadius, polylineLength,
   insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx,
+  findRoadConnect, roadsMergeCompatible, concatRoads, planRoadConnect, fixRoadRadii,
 } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import {
   speedMinRadius, classMinRadius, classDefaultRadius, roadClassOf, ROAD_CLASS_SEEDS,
@@ -277,5 +278,232 @@ describe("curbStrokePx — to-scale 6\" curb border (B719)", () => {
   it("is defensive against non-finite inputs", () => {
     expect(curbStrokePx(undefined, 2, 0.75)).toBe(0.75);
     expect(curbStrokePx(0.5, NaN, 0.75)).toBe(0.75);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// NEW-1 — snap-and-connect road endpoints
+// ---------------------------------------------------------------------------------------
+describe("findRoadConnect — endpoint / interior candidate search", () => {
+  // Two separate roads; road B's near end sits ~6 ft from the query point.
+  const roadA = { id: "a", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }] };
+  const roadB = { id: "b", pts: [{ x: 106, y: 0 }, { x: 200, y: 0 }] };
+
+  it("finds the nearest endpoint within tolerance", () => {
+    const hit = findRoadConnect({ x: 100, y: 0 }, { id: "a", index: 1 }, [roadA, roadB], { tolFt: 10 });
+    expect(hit).toBeTruthy();
+    expect(hit.roadId).toBe("b");
+    expect(hit.kind).toBe("endpoint");
+    expect(hit.pt).toEqual({ x: 106, y: 0 });
+  });
+
+  it("returns null when nothing is within tolerance", () => {
+    expect(findRoadConnect({ x: 100, y: 0 }, { id: "a", index: 1 }, [roadB], { tolFt: 3 })).toBeNull();
+  });
+
+  it("never snaps the moving vertex to itself, but allows the road's OTHER endpoint (loop close)", () => {
+    const loop = { id: "a", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 5 }] };
+    // dragging endpoint 0 near endpoint 2 (the last) of the same road → loop-close candidate
+    const hit = findRoadConnect({ x: 100, y: 5 }, { id: "a", index: 0 }, [loop], { tolFt: 10 });
+    expect(hit.roadId).toBe("a");
+    expect(hit.index).toBe(2);
+    // the excluded moving vertex itself is never returned
+    const none = findRoadConnect({ x: 0, y: 0 }, { id: "a", index: 0 }, [loop], { tolFt: 3 });
+    expect(none).toBeNull();
+  });
+
+  it("finds an interior (T-junction) point when allowInterior and it is the nearest", () => {
+    const through = { id: "t", pts: [{ x: 0, y: 0 }, { x: 200, y: 0 }] };
+    const hit = findRoadConnect({ x: 100, y: 4 }, { id: "m", index: 1 }, [through], { tolFt: 10, allowInterior: true });
+    expect(hit.kind).toBe("interior");
+    expect(hit.pt.x).toBeCloseTo(100);
+    expect(hit.pt.y).toBeCloseTo(0);
+    expect(hit.index).toBe(0);
+  });
+
+  it("prefers an endpoint over an interior projection near that same endpoint", () => {
+    const through = { id: "t", pts: [{ x: 0, y: 0 }, { x: 200, y: 0 }] };
+    const hit = findRoadConnect({ x: 2, y: 3 }, { id: "m", index: 1 }, [through], { tolFt: 10, allowInterior: true });
+    expect(hit.kind).toBe("endpoint");   // the (0,0) end, not a tee just past it
+    expect(hit.pt).toEqual({ x: 0, y: 0 });
+  });
+
+  it("nearest candidate wins on ties (closer road chosen)", () => {
+    const near = { id: "near", pts: [{ x: 103, y: 0 }, { x: 150, y: 0 }] };
+    const far = { id: "far", pts: [{ x: 108, y: 0 }, { x: 150, y: 20 }] };
+    const hit = findRoadConnect({ x: 100, y: 0 }, { id: "m", index: 1 }, [near, far], { tolFt: 12 });
+    expect(hit.roadId).toBe("near");
+  });
+});
+
+describe("roadsMergeCompatible — same class + travel width + curb", () => {
+  const base = { roadClass: "aisle", travelW: 24, curb: 0.5 };
+  it("true for matching roads", () => {
+    expect(roadsMergeCompatible(base, { ...base })).toBe(true);
+  });
+  it("false when the class differs", () => {
+    expect(roadsMergeCompatible(base, { ...base, roadClass: "truck" })).toBe(false);
+  });
+  it("false when travel width or curb differs beyond tolerance", () => {
+    expect(roadsMergeCompatible(base, { ...base, travelW: 30 })).toBe(false);
+    expect(roadsMergeCompatible(base, { ...base, curb: 1.5 })).toBe(false);
+  });
+});
+
+describe("concatRoads — merge two roads into one polyline", () => {
+  it("A.last ↔ B.first: appends, shared point becomes an interior arc vertex", () => {
+    const aPts = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+    const bPts = [{ x: 100, y: 0 }, { x: 100, y: 100 }];
+    const r = concatRoads(aPts, [{}, {}], 1, bPts, [{}, {}], 0, 40);
+    expect(r.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]);
+    expect(r.vtx).toHaveLength(3);
+    expect(r.joinIndex).toBe(1);
+    expect(r.vtx[1]).toEqual({ treatment: "arc", radius: 40 });
+    expect(r.vtx[0]).toEqual({});
+    expect(r.vtx[2]).toEqual({});
+  });
+
+  it("A.last ↔ B.last: B is reversed so the alignment is continuous", () => {
+    const aPts = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+    const bPts = [{ x: 100, y: 100 }, { x: 100, y: 0 }]; // shared point is B's LAST
+    const r = concatRoads(aPts, [{}, {}], 1, bPts, [{}, {}], 1, 40);
+    expect(r.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]);
+  });
+
+  it("A.first ↔ B.first: A is reversed so its free end leads", () => {
+    const aPts = [{ x: 100, y: 0 }, { x: 0, y: 0 }]; // shared point is A's FIRST
+    const bPts = [{ x: 100, y: 0 }, { x: 100, y: 100 }];
+    const r = concatRoads(aPts, [{}, {}], 0, bPts, [{}, {}], 0, 40);
+    expect(r.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]);
+    expect(r.joinIndex).toBe(1);
+  });
+
+  it("preserves interior treatments through the concat", () => {
+    const aPts = [{ x: 0, y: 0 }, { x: 50, y: 20 }, { x: 100, y: 0 }];
+    const aVtx = [{}, { treatment: "smooth" }, {}];
+    const bPts = [{ x: 100, y: 0 }, { x: 150, y: 0 }];
+    const r = concatRoads(aPts, aVtx, 2, bPts, [{}, {}], 0, 40);
+    expect(r.pts).toHaveLength(4);
+    expect(r.vtx[1]).toEqual({ treatment: "smooth" }); // A's original interior kept
+    expect(r.vtx[2]).toEqual({ treatment: "arc", radius: 40 }); // the new join vertex
+  });
+
+  it("returns null when an index is not an endpoint", () => {
+    const aPts = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }];
+    expect(concatRoads(aPts, [{}, {}, {}], 1, [{ x: 100, y: 0 }, { x: 150, y: 0 }], [{}, {}], 0, 40)).toBeNull();
+  });
+});
+
+describe("planRoadConnect — merge / weld / tee decision", () => {
+  const aisleA = { id: "a", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }], vtx: [{}, {}], roadClass: "aisle", travelW: 24, curb: 0.5 };
+  const aisleB = { id: "b", pts: [{ x: 100, y: 0 }, { x: 100, y: 100 }], vtx: [{}, {}], roadClass: "aisle", travelW: 24, curb: 0.5 };
+
+  it("merges two matching roads meeting end-to-end", () => {
+    const cand = { roadId: "b", kind: "endpoint", index: 0, pt: { x: 100, y: 0 } };
+    const plan = planRoadConnect(aisleA, 1, aisleB, cand, 40);
+    expect(plan.action).toBe("merge");
+    expect(plan.deleteTarget).toBe(true);
+    expect(plan.moving.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]);
+  });
+
+  it("welds (no merge) when the road classes differ", () => {
+    const truckB = { ...aisleB, roadClass: "truck" };
+    const cand = { roadId: "b", kind: "endpoint", index: 0, pt: { x: 100, y: 0 } };
+    const plan = planRoadConnect(aisleA, 1, truckB, cand, 40);
+    expect(plan.action).toBe("weld");
+    expect(plan.deleteTarget).toBeUndefined();
+    expect(plan.moving.pts[1]).toEqual({ x: 100, y: 0 }); // dragged endpoint welded exactly
+  });
+
+  it("welds when closing a loop on the same road (never merges with itself)", () => {
+    const loop = { id: "a", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }], vtx: [{}, {}, {}], roadClass: "aisle", travelW: 24, curb: 0.5 };
+    const cand = { roadId: "a", kind: "endpoint", index: 2, pt: { x: 100, y: 100 } };
+    const plan = planRoadConnect(loop, 0, loop, cand, 40);
+    expect(plan.action).toBe("weld");
+    expect(plan.moving.pts[0]).toEqual({ x: 100, y: 100 }); // endpoint 0 welded onto endpoint 2
+  });
+
+  it("tees an endpoint onto another road's interior, inserting a vertex on the through road", () => {
+    const through = { id: "t", pts: [{ x: 0, y: 0 }, { x: 200, y: 0 }], vtx: [{}, {}], roadClass: "aisle", travelW: 24, curb: 0.5 };
+    const moving = { id: "m", pts: [{ x: 100, y: 50 }, { x: 100, y: 8 }], vtx: [{}, {}], roadClass: "aisle", travelW: 24, curb: 0.5 };
+    const cand = { roadId: "t", kind: "interior", index: 0, pt: { x: 100, y: 0 } };
+    const plan = planRoadConnect(moving, 1, through, cand, 40);
+    expect(plan.action).toBe("tee");
+    expect(plan.moving.pts[1]).toEqual({ x: 100, y: 0 });         // moving endpoint welded onto the centerline
+    expect(plan.target.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }]); // vertex inserted
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// NEW-2 — auto-fix sub-minimum road radius
+// ---------------------------------------------------------------------------------------
+describe("fixRoadRadii — tier 1 (arc to the class target with room)", () => {
+  it("bumps a too-tight arc up to meet the class minimum", () => {
+    // A gentle bend with generous run-up but a small user arc radius (10 ft) → below a 50 ft min.
+    const pts = [{ x: 0, y: 0 }, { x: 400, y: 0 }, { x: 800, y: 120 }];
+    const vtx = [{}, { treatment: "arc", radius: 10 }, {}];
+    expect(roadMinRadius(pts, vtx, { defaultRadius: 10 })).toBeLessThan(50);
+    const res = fixRoadRadii(pts, vtx, 50, { targetRadius: 120 });
+    expect(res.changed).toBe(true);
+    expect(res.fixed).toContain(1);
+    expect(res.residual).toHaveLength(0);
+    expect(roadMinRadius(res.pts, res.vtx, { defaultRadius: 120 })).toBeGreaterThanOrEqual(50 - 1e-6);
+  });
+
+  it("leaves an already-compliant road unchanged", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 400, y: 0 }, { x: 800, y: 120 }];
+    const vtx = [{}, { treatment: "arc", radius: 120 }, {}];
+    const res = fixRoadRadii(pts, vtx, 50, { targetRadius: 120 });
+    expect(res.changed).toBe(false);
+    expect(res.fixed).toHaveLength(0);
+  });
+
+  it("leaves a deliberate SHARP corner alone (a hard corner is not a sub-min radius)", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
+    const vtx = [{}, { treatment: "sharp" }, {}];
+    const res = fixRoadRadii(pts, vtx, 50, { targetRadius: 120 });
+    expect(res.changed).toBe(false);
+    expect(res.vtx[1].treatment).toBe("sharp");
+  });
+
+  it("no-ops on a straight 2-point road or when the class has no threshold", () => {
+    expect(fixRoadRadii([{ x: 0, y: 0 }, { x: 100, y: 0 }], [{}, {}], 50).changed).toBe(false);
+    const pts = [{ x: 0, y: 0 }, { x: 400, y: 0 }, { x: 800, y: 120 }];
+    expect(fixRoadRadii(pts, [{}, { treatment: "arc", radius: 5 }, {}], 0).changed).toBe(false);
+  });
+});
+
+describe("fixRoadRadii — tier 3 nudge + tier 4 located residual", () => {
+  it("nudges a pinched corner that an arc alone cannot open, and it then meets the minimum", () => {
+    // A ~37°-deflection zag whose short arms cannot fit a 50 ft arc (feasible ≈19 ft), but a
+    // bounded vertex nudge toward the A–C chord opens the corner enough to reach the minimum.
+    const pts = [{ x: 0, y: 0 }, { x: 30, y: 40 }, { x: 60, y: 0 }];
+    const vtx = [{}, { treatment: "arc", radius: 50 }, {}];
+    expect(roadMinRadius(pts, vtx, { defaultRadius: 50 })).toBeLessThan(50); // arc alone can't reach it
+    const res = fixRoadRadii(pts, vtx, 50, { targetRadius: 120, maxNudgeFt: 60 });
+    expect(res.changed).toBe(true);
+    expect(res.fixed).toContain(1);
+    // the interior vertex actually moved (a nudge happened)
+    expect(res.pts[1]).not.toEqual({ x: 30, y: 40 });
+    expect(roadMinRadius(res.pts, res.vtx, { defaultRadius: 120 })).toBeGreaterThanOrEqual(50 - 1e-3);
+  });
+
+  it("reports a LOCATED residual for a truly impossible pinch (tiny bound, no nudge room)", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 20, y: 20 }, { x: 40, y: 0 }];
+    const vtx = [{}, { treatment: "arc", radius: 50 }, {}];
+    const res = fixRoadRadii(pts, vtx, 50, { targetRadius: 120, allowNudge: false });
+    expect(res.residual.length).toBeGreaterThanOrEqual(1);
+    expect(res.residual[0].index).toBe(1);
+    expect(res.residual[0].reason).toMatch(/short/);
+  });
+
+  it("is a pure function — never mutates the caller's pts/vtx", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 30, y: 40 }, { x: 60, y: 0 }]; // exercises the nudge path
+    const vtx = [{}, { treatment: "arc", radius: 50 }, {}];
+    const ptsCopy = JSON.parse(JSON.stringify(pts));
+    const vtxCopy = JSON.parse(JSON.stringify(vtx));
+    fixRoadRadii(pts, vtx, 50, { targetRadius: 120, maxNudgeFt: 60 });
+    expect(pts).toEqual(ptsCopy);
+    expect(vtx).toEqual(vtxCopy);
   });
 });
