@@ -11,7 +11,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `siteModel.js` — the per-plan schema (`createSiteModel`, `SITE_MODEL_VERSION`); read via
   selectors, persist via `storage.js`. **Additive only** — bump the version, extend `migrate`.
 - `storage.js` — thin model layer (migrate on read, merge+renormalize on save).
-- `layers.js` + `components/LayerPanel.jsx` — map-layer system; `coverage.js` (coverage engine);
+- `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
+  toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle); `coverage.js` (coverage engine);
   `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; `gisCache.js` — screening cache;
   `vectorLayers.js` (pure vector engine — polygons AND lines — + boundary/pipeline registry) +
   `vectorOverlay.js` (cached boundary/pipeline/corridor render + identify + labels glue) +

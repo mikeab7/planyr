@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-22 @ `af2f844` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-22 @ `36cc1dd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_303 source files mapped._
+_304 source files mapped._
 
 ## infra
 
@@ -393,6 +393,8 @@ _303 source files mapped._
   - _exports_: `boxesOverlap`, `boxOf`, `buildingLabelLines`, `DETAIL_LABEL_MIN_PX`, `detailLabelVisible`, `DIM_CALLOUT_MIN_PPF`, `DIM_FONT_BASE_PX`, `DIM_FONT_MIN_SCALE`, `dimCalloutVisible`, `dimFontPx`, `dimFontScale`, `fitLines`, `layoutLabels`, `suppressedDimIds`
 - **`src/workspaces/site-planner/lib/layerPanelInfo.js`** — Pure Layers-panel row helpers: per-row ⓘ content assembly + merged City/ETJ combined-status precedence (B760/B761)
   - _exports_: `buildGroupSlots`, `combineLayerStatus`, `mergeGroupInfoSections`, `mergeSlotAnyOn`, `mergeSlotOpacity`, `rowInfoSections`
+- **`src/workspaces/site-planner/lib/layerPrefs.js`** — Per-site GIS Layers-panel toggle memory (NEW-1): project the app-shared overlays to/from a sparse per-site on/off override map (restore on open, persist on toggle, undo-signature)
+  - _exports_: `applyOnOverrides`, `overlaysWithOverrides`, `overridesFromOverlays`, `overridesSig`, `sanitizeLayerOverrides`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
   - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
@@ -498,7 +500,7 @@ _303 source files mapped._
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)
   - _exports_: `classDefaultRadius`, `classMinRadius`, `classReturnRadius`, `DEFAULT_ROAD_CLASS`, `ROAD_CLASS_SEEDS`, `roadClassesOf`, `roadClassOf`, `speedMinRadius`
 - **`src/workspaces/site-planner/lib/roadGeometry.js`** — Pure centerline road geometry: tessellate clicked alignment into arc fillets/smooth splines/sharp corners, min radius of curvature
-  - _exports_: `canRemoveRoadVertex`, `concatRoads`, `curbStrokePx`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fixRoadRadii`, `insertRoadVertex`, `minRadiusOfCurvature`, `planRoadConnect`, `polylineLength`, `removeRoadVertex`, `roadCenterline`, `roadMinRadius`, `roadsMergeCompatible`, `teeGeometry`
+  - _exports_: `canRemoveRoadVertex`, `concatRoads`, `curbStrokePx`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fixRoadRadii`, `insertRoadVertex`, `minRadiusOfCurvature`, `nearestRectEdge`, `planRoadConnect`, `polylineLength`, `rectEdges`, `removeRoadVertex`, `roadCenterline`, `roadMinRadius`, `roadsMergeCompatible`, `teeGeometry`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export

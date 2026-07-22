@@ -34,6 +34,7 @@ import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESE
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, gisProxyEnabled, layerVintage } from "./lib/layers.js";
+import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { overlayExportRequest } from "./lib/layerRequest.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -108,7 +109,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry } from "./lib/roadGeometry.js";
+import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge } from "./lib/roadGeometry.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
@@ -1068,6 +1069,41 @@ function teeJunctionsOf(els, settings) {
   }
   return out;
 }
+// B955/NEW-1 — road → parking-drive / truck-court junctions for the clean-intersection render. Reads
+// el.driveTee (set at connect), locates the connected endpoint on the target rect's facing edge, and
+// reuses teeGeometry with the target edge as the "through" edge (no through curb; return radius scaled
+// by target type). Returns [{ sideId, targetId, kind, geom }]. Pure over (els, settings); memoized.
+const DRIVE_RETURN_SEED = { parking: 20, truckcourt: 50 };
+function driveJunctionsOf(els, settings) {
+  const out = [];
+  const byId = new Map((els || []).map((e) => [e.id, e]));
+  for (const S of els || []) {
+    if (!isCenterlineRoad(S) || S.attachedTo || !S.driveTee) continue;
+    const T = byId.get(S.driveTee.targetId);
+    if (!T || T.points || !(T.w > 0) || !(T.h > 0) || typeof T.cx !== "number") continue;
+    const edges = rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0);
+    let ei = -1, hit = null;                                        // which endpoint sits on the target edge?
+    for (const idx of [0, S.pts.length - 1]) {
+      const h = nearestRectEdge(S.pts[idx], edges, { facingOnly: false });
+      if (h && h.dist <= 6 && (!hit || h.dist < hit.dist)) { hit = h; ei = idx; }
+    }
+    if (!hit) continue;
+    const P = S.pts[ei];                                            // the road's welded endpoint
+    const nb = S.pts[ei === 0 ? 1 : S.pts.length - 2];
+    const sideDir = { x: nb.x - P.x, y: nb.y - P.y };
+    const kind = S.driveTee.kind === "truckcourt" ? "truckcourt" : "parking";
+    const R = S.driveTee.returnR > 0 ? S.driveTee.returnR : DRIVE_RETURN_SEED[kind];
+    const flare = S.driveTee.flare > 0 ? S.driveTee.flare : 0;
+    const geom = teeGeometry({
+      T: { x: P.x, y: P.y }, throughDir: hit.edge.dir, sideDir,
+      phT: 0, phS: Math.max(0, (+S.travelW || 0) / 2),
+      R, flare, curbT: 0.5, curbS: roadCurbWidth(S),              // curbT covers any parking/court curb across the mouth
+      throughAvail: hit.edge.len, sideAvail: Math.hypot(sideDir.x, sideDir.y),
+    });
+    if (geom) out.push({ sideId: S.id, targetId: T.id, kind, geom });
+  }
+  return out;
+}
 // True length (ft) of a centerline road = its tessellated centerline length.
 const roadCenterlineLength = (el, settings) => {
   const dense = roadDenseCenterline(el, settings);
@@ -1542,6 +1578,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Delete-tombstones (B276): ids of items deliberately removed (today: overlays). Persisted +
   // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
   const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
+  // Per-site GIS Layers-panel toggle memory (NEW-1). The app-shared `overlays` prop is the LIVE
+  // source of truth for which layers are ON; we persist a SPARSE projection of it per site
+  // (layerOverrides) and restore it when the site reopens. restored.layerOverrides seeds both.
+  const [layerOverrides, setLayerOverrides] = useState(() => sanitizeLayerOverrides(restored?.layerOverrides));
+  // Guard: ignore the app-shared overlays until THIS site's saved set has been applied onto it, so a
+  // pre-open toggle (from the map) or another site's set still sitting in the shared state can't be
+  // mis-saved onto this site. Flips true once the restore round-trips (see the tracking effect).
+  const layerApplied = useRef(false);
+  // Last seen VISIBILITY signature (sparse on/off) — distinguishes a real toggle (persist + undo
+  // frame) from an opacity-only change (which never touches layerOverrides), and lets a programmatic
+  // restore (mount / undo) pre-set it so the tracking effect doesn't treat the restore as a toggle.
+  const prevLayerSig = useRef(overridesSig(sanitizeLayerOverrides(restored?.layerOverrides)));
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
   const [aerialSel, setAerialSel] = useState(false);    // References: aerial row expanded (B654)
   // Transient editor state for the ONE expanded overlay row (B575 opacity field draft + B576 scale
@@ -2154,8 +2202,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // current state. A passive-effect mirror lagged a paint behind, so undo right
   // after a drag-move intermittently snapshotted or compared a stale state — the
   // building wouldn't fully snap back, or undo appeared to do nothing (B315).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [] });
-  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds };
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [], layerOverrides: {} });
+  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides };
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -2238,7 +2286,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ALONGSIDE the whole-doc save below (dual-write; the blob is still the read source until B672).
     reconcileElems(!!drag.current);
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
-    const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds };
+    const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides };
     // B458 — write the on-device mirror IMMEDIATELY, decoupled from the debounced cloud push: a reload
     // within the 400ms debounce must still find this edit on the device so boot's union-merge can
     // restore it (the prior structural cause of the 8 South building-loss — the mirror + history were
@@ -2319,7 +2367,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else setSaveStatus("unsaved"); // logged out + device full: the red localSaveFailed banner (writeMirror) covers it
     }, 400);
     return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
-  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds]);
+  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides]);
   // Manual "Retry now" for the loud cloud-save-failure banner (B125) — also the escape from a
   // watchdog escalation (B455/NEW-7).
   const retryCloudSave = () => {
@@ -2328,7 +2376,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides }; });
   const persistOrDrop = () => {
     if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
@@ -2773,7 +2821,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no"); // RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no") + // RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
+    "|L:" + overridesSig(s.layerOverrides); // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
   // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
   // compares against the live state we pass in (stateRef.current), so undo/redo
   // can't act on a stale baseline (B315). One stack instance, kept across renders.
@@ -2816,6 +2865,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
+    // NEW-1 — restore the GIS Layers-panel visibility too (it lives in the app-shared overlays). Merge
+    // the snapshot's on/off onto the LIVE overlays so opacity isn't disturbed, and pre-set prevLayerSig
+    // so the [overlays] tracking effect sees this programmatic change as already-accounted-for (no new
+    // undo frame, no double-save). setLayerOverrides keeps this planner's persisted projection in step.
+    const snapOverrides = sanitizeLayerOverrides(s.layerOverrides);
+    prevLayerSig.current = overridesSig(snapOverrides);
+    if (setOverlays) setOverlays((cur) => applyOnOverrides(cur, snapOverrides));
+    setLayerOverrides(snapOverrides);
     // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard itself — an
     // undo/redo shrink now just diffs into per-element deletes through the rev-checked path.)
     setSel(null); setSplitPath([]); setTypeMenu(null);
@@ -2839,6 +2896,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     touchHist();
     return true;
   };
+
+  /* ---- Per-site GIS Layers-panel toggle memory (NEW-1) --------------------------------------
+   * The app-shared `overlays` is the live source of truth for which layers are ON; each site
+   * remembers its own set. Two effects bridge them:
+   *  1) RESTORE (mount, keyed remount per site): rebuild the shared overlays from fresh defaults +
+   *     this site's saved sparse overrides — REPLACING whatever the shared state held (the map's
+   *     ad-hoc toggles, or the previous site's set). A never-saved site → {} → plain defaults.
+   *  2) TRACK: after the restore lands, project subsequent visibility toggles back into the saved
+   *     `layerOverrides` (which the autosave persists) and push a pre-toggle undo frame so a toggle
+   *     is undoable — matching how sheetOverlays.visible works. Opacity-only changes don't change the
+   *     visibility signature, so they neither snapshot nor churn the saved set. */
+  useEffect(() => {
+    if (setOverlays) setOverlays(overlaysWithOverrides(layerOverrides));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const proj = overridesFromOverlays(overlays);
+    const sig = overridesSig(proj);
+    if (!layerApplied.current) {
+      // Wait until the restore above has been applied onto the shared overlays (the projection
+      // matches this site's saved set) before tracking — so a pre-open toggle left in the shared
+      // state can't be captured as this site's.
+      if (sig === overridesSig(layerOverrides)) { layerApplied.current = true; prevLayerSig.current = sig; }
+      return;
+    }
+    if (sig === prevLayerSig.current) return; // no visibility change (e.g. opacity-only) → nothing to persist
+    pushHistory(); // capture the PRE-toggle state (stateRef still holds the old layerOverrides) so undo reverts just this toggle
+    prevLayerSig.current = sig;
+    setLayerOverrides(proj);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlays]);
 
   /* ------------ size tracking ------------ */
   useEffect(() => {
@@ -2918,6 +3006,54 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return next;
     });
     if (plan.deleteTarget) tombstone([targetId]);
+  };
+
+  /* ---- Road → parking-drive / truck-court connect (B955/NEW-1) ----
+     A PARKING field or a TRUCK COURT paving strip is also a connect target: a road endpoint welds
+     onto the facing rectangle edge and the junction renders as a TYPE-SCALED clean intersection —
+     car-scale returns (~20 ft) for a parking drive, truck-scale (~50 ft) for a dock-court drive.
+     v1 connects to the nearest FACING edge (the aisle-mouth / access-edge the road approaches);
+     picking the exact aisle opening + a 3-centred compound truck return are flagged fast-follows. */
+  const driveTargetKind = (el) => (el && !el.points && typeof el.cx === "number" && el.w > 0 && el.h > 0
+    ? (el.type === "parking" ? "parking" : (el.type === "paving" && el.truckCourt ? "truckcourt" : null)) : null);
+  const driveTargetsOf = () => els.filter((x) => driveTargetKind(x)).map((x) => ({ id: x.id, kind: driveTargetKind(x), edges: rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0) }));
+  const DRIVE_RETURN = { parking: 20, truckcourt: 50 }; // curb-return seed (ft) by target vehicle scale
+  // Nearest parking/truck-court edge to a moving road endpoint, within `tolFt`.
+  const findDriveConnect = (P, tolFt) => {
+    let best = null;
+    for (const t of driveTargetsOf()) {
+      // facingOnly:false — a road drawn TO the edge ends ON it (not strictly outside); the nearest edge
+      // is still the one the road approaches, so consider all edges and take the nearest within tolerance.
+      const hit = nearestRectEdge(P, t.edges, { facingOnly: false });
+      if (hit && hit.dist <= tolFt && (!best || hit.dist < best.dist)) best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt: hit.pt, dist: hit.dist };
+    }
+    return best;
+  };
+  // The nearest of a ROAD connect (findRoadConnect) or a DRIVE-target connect, within tolerance.
+  // Returns { kind:"road"|"drive", pt, road? , drive? } or null. Drive wins only when strictly closer.
+  const resolveEndpointConnect = (fp, exclude) => {
+    const tolFt = connectTolFt();
+    const road = findRoadConnect(fp, exclude, connectableRoads(), { tolFt, allowInterior: true });
+    const drive = findDriveConnect(fp, tolFt);
+    if (drive && (!road || drive.dist < road.dist)) return { kind: "drive", pt: drive.pt, drive };
+    if (road) return { kind: "road", pt: road.pt, road };
+    return null;
+  };
+  // Store a road→drive junction on the road (the weld coord is already applied). Seeds the curb-return
+  // radius by target vehicle scale unless the road already overrides it for this target. Caller pushed history.
+  const applyDriveConnect = (movingId, drive) => {
+    setEls((a) => a.map((x) => {
+      if (x.id !== movingId || !isCenterlineRoad(x)) return x;
+      const keep = x.driveTee && x.driveTee.targetId === drive.targetId;
+      return { ...x, driveTee: {
+        targetId: drive.targetId, kind: drive.targetKind,
+        returnR: keep && x.driveTee.returnR > 0 ? x.driveTee.returnR : DRIVE_RETURN[drive.targetKind],
+        flare: keep && x.driveTee.flare > 0 ? x.driveTee.flare : 0,
+      } };
+    }));
+    flashWarn(drive.targetKind === "truckcourt"
+      ? "Road connected to the truck court — truck-scale curb returns."
+      : "Road connected to the parking drive — car-scale curb returns.", 5000);
   };
 
   /* ---- Shift "perpendicular to the parcel boundary" lock (measurements & lines) ----
@@ -3744,12 +3880,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (tool === "road" && roadWidth !== "free") {
         const prev = draftRoadPts && draftRoadPts.length ? draftRoadPts[draftRoadPts.length - 1] : null;
         let pt = e.shiftKey && prev ? snapPt(snap45(prev, fp)) : sp;
-        // B945/NEW-1 — placing a point on/near another road's endpoint (or centerline) welds it there,
-        // so the drawn road connects cleanly. finishRoad upgrades the FINAL point to a real merge/tee.
-        // NOT gated on the Snap toggle (B949) — endpoint AND tee connect always work; Alt bypasses.
+        // B945/NEW-1 — placing a point on/near another road's endpoint/centerline (or, B955, a
+        // parking-drive / truck-court edge) welds it there so the drawn road connects cleanly.
+        // finishRoad upgrades the FINAL point to a real merge/tee/drive. NOT Snap-gated (B949); Alt bypasses.
         if (!altSnapOffRef.current) {
-          const cand = findRoadConnect(fp, null, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
-          if (cand) pt = { x: cand.pt.x, y: cand.pt.y };
+          const c = resolveEndpointConnect(fp, null);
+          if (c) pt = { x: c.pt.x, y: c.pt.y };
         }
         setDraftRoadPts((a) => [...(a || []), pt]);
         return;
@@ -4664,14 +4800,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       d.moved = true; // NEW-1: a genuine reshape (vs a plain click) — cleared on release so Delete then targets the whole road, not this dot
       const ref = d.idx > 0 ? el.pts[d.idx - 1] : el.pts[d.idx + 1]; // 45°-lock against the neighbour
       let P = e.shiftKey && ref ? snapPt(snap45(ref, fp)) : snapPt(fp);
-      // B945/NEW-1 — snap-and-connect: dragging an ENDPOINT near another road's endpoint (or, for a
-      // T/Y, its centerline) engages a magnet — the ghost welds to the target while within tolerance,
-      // and the connection is finalized on release. NOT gated on the Snap toggle (B949); Alt bypasses.
+      // B945/NEW-1 — snap-and-connect: dragging an ENDPOINT near another road's endpoint (T/Y its
+      // centerline), OR (B955) a parking-drive / truck-court edge, engages a magnet — the ghost welds
+      // to the target while within tolerance, finalized on release. NOT Snap-gated (B949); Alt bypasses.
       let connect = null;
       const isEnd = d.idx === 0 || d.idx === el.pts.length - 1;
       if (isEnd && !altSnapOffRef.current) {
-        const cand = findRoadConnect(fp, { id: el.id, index: d.idx }, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
-        if (cand) { P = { x: cand.pt.x, y: cand.pt.y }; connect = cand; }
+        const c = resolveEndpointConnect(fp, { id: el.id, index: d.idx });
+        if (c) { P = { x: c.pt.x, y: c.pt.y }; connect = c; }
       }
       d.connect = connect; // stash for release
       setRoadSnapTarget(connect ? { x: connect.pt.x, y: connect.pt.y } : null);
@@ -5004,16 +5140,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Civil min-radius check on edit (B599/NEW-4): a vertex drag that tightened a curve below the
     // class threshold warns loudly on release (never blocks). The persistent ⚠ lives in the panel.
     if (d && d.mode === "roadVtx") {
-      // B945/NEW-1 — finalize a snap-and-connect if the endpoint released on a target (merge / weld
-      // / tee). History was pushed at drag-start, so the whole gesture is ONE undo.
+      // B945/NEW-1 — finalize a snap-and-connect if the endpoint released on a target: a ROAD (merge /
+      // weld / tee) or (B955) a PARKING drive / TRUCK COURT edge (weld + store the drive junction).
+      // History was pushed at drag-start, so the whole gesture is ONE undo.
       if (d.connect) {
         const moving = els.find((x) => x.id === d.id);
-        const target = els.find((x) => x.id === d.connect.roadId);
         if (moving && isCenterlineRoad(moving)) {
-          const plan = planRoadConnect(moving, d.idx, target, d.connect, roadDefaultRadius(moving, settings));
-          if (plan) {
-            applyRoadConnectPlan(d.id, d.connect.roadId, plan);
-            if (plan.action === "merge") flashWarn("Roads joined into one — the junction corner was rounded to the class minimum.", 5000);
+          if (d.connect.kind === "road") {
+            const rc = d.connect.road;
+            const plan = planRoadConnect(moving, d.idx, els.find((x) => x.id === rc.roadId), rc, roadDefaultRadius(moving, settings));
+            if (plan) {
+              applyRoadConnectPlan(d.id, rc.roadId, plan);
+              if (plan.action === "merge") flashWarn("Roads joined into one — the junction corner was rounded to the class minimum.", 5000);
+            }
+          } else if (d.connect.kind === "drive") {
+            applyDriveConnect(d.id, d.connect.drive);
           }
         }
       }
@@ -5093,12 +5234,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const bbox = roadStripBBox(raw, vtx, travelW, curb, { defaultRadius: defR });
     let el = { id: uid(), type: "road", pts: raw, vtx, travelW, curb, roadClass, ...bbox };
     pushHistory();
-    // B945/NEW-1 — connect the final endpoint if it landed on another road (merge / weld / tee).
-    // NOT gated on the Snap toggle (B949); the only bypass is holding Alt on the final point.
-    let plan = null, targetId = null;
+    // B945/NEW-1 — connect the final endpoint if it landed on another road (merge / weld / tee) or,
+    // B955, a parking-drive / truck-court edge (weld + store the drive junction). NOT Snap-gated (B949);
+    // the only bypass is holding Alt on the final point.
+    let plan = null, targetId = null, drive = null;
     if (!altSnapOffRef.current) {
-      const cand = findRoadConnect(raw[raw.length - 1], { id: el.id, index: raw.length - 1 }, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
-      if (cand) { targetId = cand.roadId; plan = planRoadConnect(el, raw.length - 1, els.find((x) => x.id === cand.roadId), cand, defR); }
+      const c = resolveEndpointConnect(raw[raw.length - 1], { id: el.id, index: raw.length - 1 });
+      if (c && c.kind === "road") { targetId = c.road.roadId; plan = planRoadConnect(el, raw.length - 1, els.find((x) => x.id === c.road.roadId), c.road, defR); }
+      else if (c && c.kind === "drive") { drive = c.drive; }
     }
     if (plan) {
       let mGeom = plan.moving;
@@ -5113,6 +5256,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return [...next, el];
       });
       if (plan.deleteTarget) tombstone([targetId]);
+    } else if (drive) { // weld the final point onto the drive edge + store the type-scaled junction
+      const last = el.pts.length - 1;
+      el = reRoad({ ...el, pts: el.pts.map((p, i) => i === last ? { x: drive.pt.x, y: drive.pt.y } : p),
+        driveTee: { targetId: drive.targetId, kind: drive.targetKind, returnR: DRIVE_RETURN[drive.targetKind], flare: 0 } });
+      setEls((a) => [...a, el]);
     } else {
       setEls((a) => [...a, el]);
     }
@@ -5121,6 +5269,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setRoadSnapTarget(null);
     setTool("select");
     if (plan && plan.action === "merge") flashWarn("Connected to the existing road — joined into one and rounded the junction corner.", 5000);
+    else if (drive) flashWarn(drive.targetKind === "truckcourt" ? "Connected to the truck court — truck-scale curb returns." : "Connected to the parking drive — car-scale curb returns.", 5000);
     else {
       const st = roadRadiusStatus(el, settings); // B599/NEW-4: warn loudly on commit, never block
       if (st) flashWarn(`⚠ ${f0(st.minR)}′ radius — below ${f0(st.threshold)}′ min for ${st.label}`, 7000);
@@ -11850,6 +11999,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setEls((a) => a.map((x) => x.id === el.id ? { ...x, tee: { throughId, ...(x.tee && x.tee.throughId === throughId ? x.tee : {}), ...patch } } : x));
   };
+  // B955/NEW-1 — per-junction road→drive params (curb return radius + throat flare) on el.driveTee.
+  const setRoadDrive = (el, patch) => {
+    pushHistory();
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, driveTee: { ...(x.driveTee || {}), ...patch } } : x));
+  };
   // Per-vertex curve treatment / radius (B597/NEW-2). Endpoints carry no corner; a new arc
   // seeds the class default radius. Re-syncs the strip bbox after the curve changes.
   const setRoadVtx = (el, idx, patch) => {
@@ -13195,6 +13349,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B953/NEW-1 — clean-tee junction geometry (world feet), recomputed only when els/settings change;
   // rendered through f2p each frame. Drawn as an overlay after the element pass (see the render below).
   const teeJunctions = useMemo(() => teeJunctionsOf(els, settings), [els, settings]);
+  // B955/NEW-1 — road → parking-drive / truck-court junctions (world feet); same overlay pass as tees.
+  const driveJunctions = useMemo(() => driveJunctionsOf(els, settings), [els, settings]);
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
   const renderMarkupNode = (m) => {
@@ -13868,38 +14024,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
               {markupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
               {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
-              {/* B953/NEW-1 — clean T-intersection overlay: an opaque pavement patch unifies each road
-                  tee (hiding the raw butting curbs across the throat) and the curb-return fillets draw
-                  on top. Roads are the lowest layer and road-to-road tees aren't normally overlapped by
-                  paving/buildings, so this reads correctly; a rare overlap is a v1 z-order note. */}
-              {teeJunctions.length > 0 && (
-                <g data-testid="road-tee-layer" pointerEvents="none">
-                  {teeJunctions.map((tj, i) => {
-                    const g = tj.geom;
-                    const through = els.find((x) => x.id === tj.throughId);
-                    const st = through ? elStyle(through, settings) : typeStyle("road", settings);
-                    const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
-                    const cw = curbStrokePx(roadCurbWidth(through || {}), ppf, CURB_STROKE_MIN_PX);
-                    const toD = (poly) => poly && poly.length >= 3
-                      ? poly.map((p, k) => { const q = f2p(p); return `${k ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z"
-                      : null;
-                    const coverD = toD(g.cover);
-                    const stemD = toD(g.stem);
-                    const fOp = st.fillOpacity ?? 1;
-                    return (
-                      <g key={`tee-${tj.sideId}-${tj.throughId}-${i}`} data-tee={`${tj.sideId}→${tj.throughId}`}>
-                        {stemD && <path d={stemD} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-stem" />}
-                        {coverD && <path d={coverD} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-cover" />}
-                        {g.returns.map((arc, k) => arc.length >= 2 ? (
-                          <polyline key={k} data-testid="road-tee-return"
-                            points={arc.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")}
-                            fill="none" stroke={st.stroke} strokeWidth={cw} strokeLinecap="round" />
-                        ) : null)}
-                      </g>
-                    );
-                  })}
-                </g>
-              )}
+              {/* B953/NEW-1 + B955 — clean intersection overlay: an opaque pavement patch unifies each
+                  road tee (road→road) AND each road→parking-drive / road→truck-court junction (hiding the
+                  raw butting curbs across the throat) with the curb-return fillets drawn on top. Roads are
+                  the lowest layer so this reads correctly; a rare paving/building overlap is a v1 z-order note. */}
+              {(teeJunctions.length > 0 || driveJunctions.length > 0) && (() => {
+                const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
+                const toD = (poly) => poly && poly.length >= 3
+                  ? poly.map((p, k) => { const q = f2p(p); return `${k ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z"
+                  : null;
+                const all = [
+                  ...teeJunctions.map((tj) => ({ geom: tj.geom, styleId: tj.throughId, roadId: tj.sideId, key: `tee-${tj.sideId}-${tj.throughId}`, tag: `${tj.sideId}→${tj.throughId}` })),
+                  ...driveJunctions.map((dj) => ({ geom: dj.geom, styleId: dj.sideId, roadId: dj.sideId, key: `drv-${dj.sideId}-${dj.targetId}`, tag: `${dj.sideId}→${dj.kind}` })),
+                ];
+                return (
+                  <g data-testid="road-tee-layer" pointerEvents="none">
+                    {all.map((j) => {
+                      const g = j.geom;
+                      const styleEl = els.find((x) => x.id === j.styleId);
+                      const st = styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings);
+                      const roadEl = els.find((x) => x.id === j.roadId);
+                      const cw = curbStrokePx(roadCurbWidth(roadEl || {}), ppf, CURB_STROKE_MIN_PX);
+                      const fOp = st.fillOpacity ?? 1;
+                      const coverD = toD(g.cover), stemD = toD(g.stem);
+                      return (
+                        <g key={j.key} data-tee={j.tag}>
+                          {stemD && <path d={stemD} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-stem" />}
+                          {coverD && <path d={coverD} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-cover" />}
+                          {g.returns.map((arc, k) => arc.length >= 2 ? (
+                            <polyline key={k} data-testid="road-tee-return"
+                              points={arc.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")}
+                              fill="none" stroke={st.stroke} strokeWidth={cw} strokeLinecap="round" />
+                          ) : null)}
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              })()}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {markupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
@@ -14508,10 +14670,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   provisional pavement+curb offset strip as points are placed */}
               {draftRoadPts && draftRoadPts.length > 0 && (() => {
                 let live = cursor ? snapPt(cursor) : null;
-                let magnet = null; // B945/NEW-1 — endpoint the live point will weld to on click (ungated, B949)
+                let magnet = null; // B945/NEW-1 — endpoint the live point will weld to on click (ungated, B949; B955 drive edges too)
                 if (live && cursor && !altSnapOffRef.current) {
-                  const cand = findRoadConnect(cursor, null, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
-                  if (cand) { live = { x: cand.pt.x, y: cand.pt.y }; magnet = cand.pt; }
+                  const c = resolveEndpointConnect(cursor, null);
+                  if (c) { live = { x: c.pt.x, y: c.pt.y }; magnet = c.pt; }
                 }
                 const all = live ? [...draftRoadPts, live] : draftRoadPts;
                 if (all.length < 2) {
@@ -15646,6 +15808,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <Field label="Curb return (ft)"><NumInput style={numInput} value={Math.round(curR)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { returnR: n })} /></Field>
                             <Field label="Throat flare (ft)"><NumInput style={numInput} value={Math.round(curFlare)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { flare: n })} /></Field>
                             <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Rounds the curb returns where this road meets the through road{myTees.length > 1 ? ` (${myTees.length} tees)` : ""}. Larger return / flare widens the throat. Seeded from the road class; returns clamp to fit.</div>
+                          </div>
+                        );
+                      })()}
+                      {/* B955/NEW-1 — road → parking-drive / truck-court connect params (curb return + throat
+                          flare), shown only when THIS road connects to a parking field or a dock court. */}
+                      {cl && (() => {
+                        const dj = driveJunctions.find((x) => x.sideId === selEl.id);
+                        if (!dj) return null;
+                        const kindLbl = dj.kind === "truckcourt" ? "truck court" : "parking drive";
+                        const seedR = DRIVE_RETURN[dj.kind] ?? 20;
+                        const curR = selEl.driveTee && selEl.driveTee.returnR > 0 ? selEl.driveTee.returnR : seedR;
+                        const curFlare = selEl.driveTee && selEl.driveTee.flare > 0 ? selEl.driveTee.flare : 0;
+                        return (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Drive intersection · {kindLbl}</div>
+                            <Field label="Curb return (ft)"><NumInput style={numInput} value={Math.round(curR)} min={0} onCommit={(n) => setRoadDrive(selEl, { returnR: n })} /></Field>
+                            <Field label="Throat flare (ft)"><NumInput style={numInput} value={Math.round(curFlare)} min={0} onCommit={(n) => setRoadDrive(selEl, { flare: n })} /></Field>
+                            <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Where this road meets the {kindLbl}. Seeded {dj.kind === "truckcourt" ? "truck-scale (≈50′)" : "car-scale (≈20′)"}; returns clamp to fit.</div>
                           </div>
                         );
                       })()}
