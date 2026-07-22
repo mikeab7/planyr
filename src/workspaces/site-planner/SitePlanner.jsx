@@ -8307,7 +8307,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!(hFt > 0) || !(gainAt(hFt) > 0)) return null;
     const perPond = inund.map((p) => ({ id: p.id, name: p.name, addCf: usableAt(p, hFt) - usableAt(p, 0), tobTargetFt: Math.round((p.det.tobElev + hFt) * 100) / 100, depthTargetFt: (Number.isFinite(p.det.depth) ? p.det.depth : 8) + hFt }));
     const gain = gainAt(hFt);
-    return { payload: { hFt, perPond }, preview: { hFt, diff: `Raise TOB +${(Math.round(hFt * 10) / 10).toFixed(1)}′ on ${inund.length} inundated pond${inund.length > 1 ? "s" : ""} → +${(gain / 43560).toFixed(2)} ac-ft usable${closes ? " (site closes)" : " (partial — the +15′ screening clamp still leaves it short)"}. The berm becomes modeled fill; one Ctrl+Z reverts it all.` } };
+    return { payload: { hFt, perPond }, preview: { hFt, diff: `Raise TOB +${(Math.round(hFt * 10) / 10).toFixed(1)}′ on ${inund.length} inundated pond${inund.length > 1 ? "s" : ""} → +${(gain / 43560).toFixed(2)} ac-ft usable${closes ? " (site closes)" : " (partial; the +15′ screening clamp still leaves it short)"}. The berm becomes modeled fill; one Ctrl+Z reverts it all.` } };
   })();
   // B750 — plain-English authority label from the shared choice list (never a raw id).
   const authLabelFor = (id) => (DETENTION_AUTHORITY_CHOICES.find((c) => c.id === id) || {}).label || id || null;
@@ -12799,48 +12799,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           return (
           <Collapse sectionId="yield-costs" title="Costs" defaultOpen={false} summary={costSummary}>
           {(() => {
-            // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
-            // (LF, both sides), split by curb type so each rides its own unit price.
-            // Unit prices are user-supplied (anchor to your own bids) — never defaulted.
-            const prices = settings.prices || {};
-            const cost = costRollup(els, roadTravel, roadLengthOf, prices);
-            if (!cost.segments) return null;
-            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
-            const setPrice = (k, v) => setSettings((s) => ({ ...s, prices: { ...(s.prices || {}), [k]: v } }));
-            const priceField = (label, k, unit) => (
-              <div id={`price-field-${k}`}>
-                <Field label={label}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
-                    <NumInput style={{ ...numInput, width: 70 }} value={prices[k] ?? null} min={0} placeholder="—" onCommit={(n) => setPrice(k, n)} />
-                    <span style={{ fontSize: 11, color: PAL.muted }}>{unit}</span>
-                  </span>
-                </Field>
-              </div>
-            );
-            // B895 — "Set unit prices" jumps to + focuses the matching bid field below.
-            const jumpToPrice = (k) => {
-              const el = typeof document !== "undefined" ? document.getElementById(`price-field-${k}`) : null;
-              if (el) { try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {} const inp = el.querySelector("input"); if (inp) try { inp.focus(); } catch (_) {} }
-            };
-            const priceCell = (costVal, k) => costVal != null ? usd(costVal) : <ActionLink onClick={() => jumpToPrice(k)}>Set $/{k === "pavingSy" ? "SY" : "LF"} →</ActionLink>;
-            return (
-              <Section title="Road cost (screening)" accent="#0e7490" collapsed>
-                {metricRow("Paving", `${f0(cost.pavingSy)} SY`, priceCell(cost.pavingCost, "pavingSy"), { code: "plan" })}
-                {cost.curbBarrierLf > 0 && metricRow("Curb · barrier", `${f0(cost.curbBarrierLf)} LF`, priceCell(cost.curbBarrierCost, "curbBarrierLf"), { code: "plan" })}
-                {cost.curbGutterLf > 0 && metricRow("Curb · curb & gutter", `${f0(cost.curbGutterLf)} LF`, priceCell(cost.curbGutterCost, "curbGutterLf"), { code: "plan" })}
-                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
-                {priceField("Paving", "pavingSy", "/SY")}
-                {cost.curbBarrierLf > 0 && priceField("Barrier curb", "curbBarrierLf", "/LF")}
-                {cost.curbGutterLf > 0 && priceField("Curb & gutter", "curbGutterLf", "/LF")}
-                {cost.total != null && metricRow("Subtotal", usd(cost.total), "priced lines", { code: "yours", basis: "Priced off the unit-price bids you entered above." })}
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
-                  Paving is face-of-curb to face-of-curb (curb excluded); curb-&amp;-gutter trims the gutter pan from paving.
-                </div>
-              </Section>
-            );
-          })()}
-          {(() => {
             // B712 — earthwork cost lines: the floodplain-mitigation CUT + pond
             // excavation, in CY, priced ONLY by the user (the road-cost pattern —
             // never a hardcoded rate). An unchecked drainage screen renders an
@@ -12886,7 +12844,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             };
             const earthPriceCell = (cy) => pEarth != null ? usd(cy * pEarth) : <ActionLink onClick={jumpToEarthPrice}>Set $/CY →</ActionLink>;
             return (
-              <Section title="Earthwork cost (screening)" accent="#0e7490" collapsed>
+              <CostDisclosure label="Earthwork">
                 {pondCy > 0 && metricRow(anyIncrementalExc ? "Pond excavation (incremental)" : "Pond excavation", `${f0(pondCy)} CY`, earthPriceCell(pondCy),
                   { code: "plan", basis: anyIncrementalExc ? "One or more basins reuse an existing pond/depression (Expand this pond) — this nets out the pre-expansion basin's own cut, pricing only the ADDED dirt, not a from-scratch re-dig." : undefined })}
                 {bermCy > 0 && metricRow("Pond berms — fill", `${f0(bermCy)} CY`, `modeled embankment · ${gsApronRatio}:1 face`, { code: "plan" })}
@@ -12978,7 +12936,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
                   Pond excavation is the full basin cut (top of bank → achievable floor){anyIncrementalExc ? " — except a basin reusing an existing pond/depression, which nets to only its ADDED cut" : ""}. Pond + mitigation cut count as on-site borrow in the net-dirt line — the same dirt raises the pad; volumes stay separate ledgers.
                 </div>
-              </Section>
+              </CostDisclosure>
+            );
+          })()}
+          {(() => {
+            // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
+            // (LF, both sides), split by curb type so each rides its own unit price.
+            // Unit prices are user-supplied (anchor to your own bids) — never defaulted.
+            const prices = settings.prices || {};
+            const cost = costRollup(els, roadTravel, roadLengthOf, prices);
+            if (!cost.segments) return null;
+            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
+            const setPrice = (k, v) => setSettings((s) => ({ ...s, prices: { ...(s.prices || {}), [k]: v } }));
+            const priceField = (label, k, unit) => (
+              <div id={`price-field-${k}`}>
+                <Field label={label}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
+                    <NumInput style={{ ...numInput, width: 70 }} value={prices[k] ?? null} min={0} placeholder="—" onCommit={(n) => setPrice(k, n)} />
+                    <span style={{ fontSize: 11, color: PAL.muted }}>{unit}</span>
+                  </span>
+                </Field>
+              </div>
+            );
+            // B895 — "Set unit prices" jumps to + focuses the matching bid field below.
+            const jumpToPrice = (k) => {
+              const el = typeof document !== "undefined" ? document.getElementById(`price-field-${k}`) : null;
+              if (el) { try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {} const inp = el.querySelector("input"); if (inp) try { inp.focus(); } catch (_) {} }
+            };
+            const priceCell = (costVal, k) => costVal != null ? usd(costVal) : <ActionLink onClick={() => jumpToPrice(k)}>Set $/{k === "pavingSy" ? "SY" : "LF"} →</ActionLink>;
+            return (
+              <CostDisclosure label="Road">
+                {metricRow("Paving", `${f0(cost.pavingSy)} SY`, priceCell(cost.pavingCost, "pavingSy"), { code: "plan" })}
+                {cost.curbBarrierLf > 0 && metricRow("Curb · barrier", `${f0(cost.curbBarrierLf)} LF`, priceCell(cost.curbBarrierCost, "curbBarrierLf"), { code: "plan" })}
+                {cost.curbGutterLf > 0 && metricRow("Curb · curb & gutter", `${f0(cost.curbGutterLf)} LF`, priceCell(cost.curbGutterCost, "curbGutterLf"), { code: "plan" })}
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
+                {priceField("Paving", "pavingSy", "/SY")}
+                {cost.curbBarrierLf > 0 && priceField("Barrier curb", "curbBarrierLf", "/LF")}
+                {cost.curbGutterLf > 0 && priceField("Curb & gutter", "curbGutterLf", "/LF")}
+                {cost.total != null && metricRow("Subtotal", usd(cost.total), "priced lines", { code: "yours", basis: "Priced off the unit-price bids you entered above." })}
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
+                  Paving is face-of-curb to face-of-curb (curb excluded); curb-&amp;-gutter trims the gutter pan from paving.
+                </div>
+              </CostDisclosure>
             );
           })()}
           </Collapse>
@@ -12987,14 +12987,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               the ONE screening disclaimer + the provenance legend (four quiet outlined chips with a
               muted plain-English definition; Yield panel only). */}
           <YieldFooterDisclaimer />
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 10px", marginTop: 7, marginBottom: 9, fontSize: 9.5, color: "var(--text-tertiary)", lineHeight: 1.6 }}>
-            {[["PLAN", "measured from your drawing"], ["CODE", "adopted criteria"], ["EST", "estimated"], ["YOU", "your input"]].map(([tag, def]) => (
-              <span key={tag} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.05em", color: "var(--text-tertiary)", border: "1px solid var(--planner-border)", borderRadius: 4, padding: "1px 4px" }}>{tag}</span>
-                <span>{def}</span>
-              </span>
-            ))}
-          </div>
+          <ProvenanceLegend style={{ marginTop: 7, marginBottom: 9 }} />
           </>)}
 
           {/* Standards (B653) — pure per-element-type STARTING VALUES. The what-you-see
@@ -15195,7 +15188,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 history: without this, a plain single click on the same feature shortly after closing
                 could still pair with the double-click that just opened this panel (the fast-3-click
                 re-arm in isDoubleTap is deliberately generous) and misfire as another double-tap. */}
-            {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected — double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }}>✕</button>}
+            {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected; double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }}>✕</button>}
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
@@ -16007,7 +16000,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
               {selEl.type !== "pond" && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
-                <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place — prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
+                <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                 <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete element</button>
               </div>
               )}
@@ -16116,7 +16109,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       : "";
                     out.push({
                       short,
-                      heading: short ? `SHORT: ${f1(provAcFt)} of the ${f1(detReqAcFt)} ac-ft required` : `OK: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`,
+                      heading: short ? `SHORT: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required` : `OK: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`,
                       body,
                     });
                   }
@@ -16125,7 +16118,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const short = provMitAcFt < mitReqAcFt - 0.005;
                     out.push({
                       short,
-                      heading: short ? `Mitigation SHORT: ${f1(provMitAcFt)} of the ${f1(mitReqAcFt)} ac-ft required` : `Mitigation OK: ${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft required`,
+                      heading: short ? `Mitigation SHORT: ${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft required` : `Mitigation OK: ${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft required`,
                       body: "",
                     });
                   }
@@ -16199,12 +16192,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>Land take <span style={{ fontSize: 9.5, color: PAL.muted }}>incl. berm ring</span></span>,
                       <>{g_glanceNum(`${f2(g_landTakeSf / SQFT_PER_ACRE)} ac`)}{provTag("EST", `Water footprint plus the ${g_bermToeReach > g_maintW + 1e-6 ? `modeled ${f1(g_matBerm.maxHeightFt)}-ft fill berm` : `${g_maintW}-ft maintenance berm`} around it. Estimated.`)}</>,
                       null, `${f0(g_landTakeSf)} sf`)}
-                    {g_glanceRow("Depth",
+                    {g_glanceRow("Total depth",
                       <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                         <NumInput allowClear style={{ ...numInput, width: 60 }} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
                         <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
                         {det.depth != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>}
-                      </span>)}
+                      </span>,
+                      "water depth + freeboard")}
                     {g_glanceRow("Rim",
                       <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                         <NumInput allowClear style={{ ...numInput, width: 58 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "opt."} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
@@ -16217,18 +16211,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>Purpose <RowInfo label="Purpose" sections={[{ text: POND_PURPOSE_TOOLTIP }]} /></span>,
                       <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
                         <span style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                          {g_purposeBtn(null, `Auto (${POND_ROLE_LABEL[g_roleInfo.suggested.role]})`, POND_PURPOSE_DESCRIPTOR.auto)}
+                          {g_purposeBtn(null, "Auto", POND_PURPOSE_DESCRIPTOR.auto)}
                           {g_purposeBtn("detention", POND_ROLE_LABEL.detention, POND_PURPOSE_DESCRIPTOR.detention)}
                           {g_purposeBtn("mitigation", POND_ROLE_LABEL.mitigation, POND_PURPOSE_DESCRIPTOR.mitigation)}
                           {g_purposeBtn("dual", POND_ROLE_LABEL.dual, POND_PURPOSE_DESCRIPTOR.hybrid)}
                         </span>
-                        <span style={{ fontSize: 10, color: PAL.muted }}>· {g_purposeDescriptor}</span>
+                        <span style={{ fontSize: 10, color: PAL.muted }}>picks by site needs · now: {POND_ROLE_LABEL[g_roleInfo.role] || g_purposeDescriptor}</span>
                       </span>)}
                   </div>
                 );
                 const g_sizingSummary = pondGroupSummary.sizing({});
                 const g_outletStages = det.outlet && Array.isArray(det.outlet.stages) ? det.outlet.stages.length : 0;
-                const g_outletSummary = pondGroupSummary.outlet({ hasOutlet: g_outletStages > 0, stages: g_outletStages, fails: null });
+                // v3 B5 — the closed OUTLET & STORMS summary names the storm outcome, not just the
+                // stage count. Route the same way the expanded group does (same pure helper, no solver
+                // change) so the summary reads "N stages · all storms PASS" / "N stages · M FAIL"; a
+                // non-routable outlet (no TOB anchor) stays "N stages".
+                const g_outletFails = (() => {
+                  if (g_outletStages === 0) return null;
+                  const effDetO = detWithAuto(selEl.det);
+                  if (!(effDetO.tobElev != null && Number.isFinite(effDetO.tobElev))) return null;
+                  const critO = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
+                  const daO = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
+                  const impO = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
+                  const tcO = computeTimeOfConcentration({ areaAcres: daO, impPct: impO, criteria: critO });
+                  const twO = g_split && g_split.wseFt != null ? g_split.wseFt : null;
+                  const routedO = assessRoutedDetention({ ring, det: effDetO, outlet: det.outlet, criteria: critO, areaAcres: daO, impPct: impO, tailwaterElevFt: twO, tcMin: tcO?.tcMin });
+                  return routedO.kind === "routed" ? routedO.perStorm.filter((s) => s.status !== "pass").length : null;
+                })();
+                const g_outletSummary = pondGroupSummary.outlet({ hasOutlet: g_outletStages > 0, stages: g_outletStages, fails: g_outletFails });
                 const g_floodSummary = pondGroupSummary.flood({ wse: g_split.mode === "anchored" && g_split.wseFt != null ? f1(g_split.wseFt) : null, estimated: g_facts.floodEstimated });
                 return (
                   <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
@@ -16237,7 +16247,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <span style={{ fontSize: 11.5, color: PAL.muted, whiteSpace: "nowrap" }}>{f2(g_waterSf / SQFT_PER_ACRE)} ac water area</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
                         <RowInfo label="Detention Pond" sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; click + on an edge to add a point; Shift-click to delete one." }]} />
-                        <button style={{ ...chip, padding: "3px 8px" }} onClick={() => toggleLock(selEl.id)} title="Pin in place — prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
+                        <button style={{ ...chip, padding: "3px 8px" }} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                         <button type="button" style={{ ...chip, padding: "3px 10px", color: PAL.danger, fontWeight: 700 }} onClick={deleteSel}>Delete</button>
                       </span>
                     </div>
@@ -16281,7 +16291,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <NumInput allowClear style={numInput} value={det.freeboard ?? ""} placeholder={`~${f1(pondAuto.freeboard.value)}`} min={0} onCommit={(n) => setDet({ freeboard: Number.isFinite(n) ? n : null })} />
                         {det.freeboard != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear — back to auto (${pondAuto.freeboard.source})`} onClick={() => setDet({ freeboard: null })}>×</button>
+                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear: back to auto (${pondAuto.freeboard.source})`} onClick={() => setDet({ freeboard: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.freeboard.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.freeboard.source}</span>}
                       </span>
                     </Field>
@@ -16289,7 +16299,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <NumInput allowClear style={numInput} value={det.slope ?? ""} placeholder={`~${f1(pondAuto.slope.value)}`} min={1} onCommit={(n) => setDet({ slope: Number.isFinite(n) ? n : null })} />
                         {det.slope != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear — back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
+                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear: back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.slope.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.slope.source}</span>}
                       </span>
                     </Field>
@@ -16341,8 +16351,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
                       {tobEff != null && pondRow("Pond floor", `${f1(tobEff - depth)}′ NAVD88`,
                         det.tobElev != null ? { code: "yours" } : { code: "survey", basis: "Top of bank ≈ existing grade — site 3DEP elevation median." })}
-                      {pondRow("Stored volume", `${f0(r.vol)} cf`, { code: "plan", basis: `Prismoidal (average-end-area) volume off this pond's drawn top-of-bank footprint; the basin tapers ${slope}:1 to its floor.` })}
-                      {pondRow("", `${f2(r.vol / 43560)} ac-ft`)}
+                      {pondRow("Stored volume", `${f1(r.vol / 43560)} ac-ft`, { code: "plan", basis: `${f0(r.vol)} cf. Prismoidal (average-end-area) volume off this pond's drawn top-of-bank footprint; the basin tapers ${slope}:1 to its floor.` })}
                     </div>
                     {!r.feasible && (
                       <div style={{ fontSize: 10.5, color: PAL.danger, lineHeight: 1.4, marginTop: 4, fontWeight: 700 }}>
@@ -16382,9 +16391,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       if (split.mode === "anchored" && split.bands && split.wseFt != null) {
                         out.push(
                           <div key="split" style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
-                            {pondRow("Usable detention (above flood WSE)", `${f2(split.usableCf / 43560)} ac-ft`)}
-                            {pondRow("Below flood WSE", `${f2(split.bands.mitigationCandidateCf / 43560)} ac-ft`)}
-                            {split.bands.poolDeadCf > 0 && pondRow("Permanent pool (dead)", `${f2(split.bands.poolDeadCf / 43560)} ac-ft`)}
+                            {pondRow("Usable detention (above flood WSE)", `${f1(split.usableCf / 43560)} ac-ft`)}
+                            {pondRow("Below flood WSE", `${f1(split.bands.mitigationCandidateCf / 43560)} ac-ft`)}
+                            {split.bands.poolDeadCf > 0 && pondRow("Permanent pool (dead)", `${f1(split.bands.poolDeadCf / 43560)} ac-ft`)}
                           </div>
                         );
                         // FINAL UI SPEC A2 — the flood-WSE caption, the ESTIMATE warning, and the
@@ -16435,12 +16444,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           });
                           if (opt.ok && opt.best && opt.best.buildableSfDelta != null && opt.best.buildableSfDelta > 0) {
                             const b = opt.best;
-                            out.push(noteLine(`Optimizer (screening): a ${b.depthFt}′-deep basin holds the required volume on ~${f2(b.landTakeAc)} ac — recovering ~${b.buildableSfDelta.toLocaleString()} SF buildable vs the current ${f2(opt.base.landTakeAc)}-ac take${b.earthworkCost != null ? ` (~$${b.earthworkCost.toLocaleString()} earthwork)` : ""}. Deeper-smaller vs shallower-bigger; redraw to adopt.`, "pond-opt"));
+                            out.push(noteLine(`Optimizer (screening): a ${b.depthFt}′-deep basin holds the required volume on ~${f2(b.landTakeAc)} ac; recovering ~${b.buildableSfDelta.toLocaleString()} SF buildable vs the current ${f2(opt.base.landTakeAc)}-ac take${b.earthworkCost != null ? ` (~$${b.earthworkCost.toLocaleString()} earthwork)` : ""}. Deeper-smaller vs shallower-bigger; redraw to adopt.`, "pond-opt"));
                           }
                         }
                       }
                       if ((crit.slope || crit.freeboard || landTakeSf != null) && critRule && critRule.verified === false) {
-                        out.push(noteLine("Criteria values are unverified placeholders — edit & confirm in settings against the PCPM / county DCM.", "crit-unv"));
+                        out.push(noteLine("Criteria values are unverified placeholders: confirm in Standards against the county criteria manual (PCPM / DCM).", "crit-unv"));
                       }
                       // NEW-B (Phase B) — soils/groundwater wet-vs-dry pond screen + subsidence-district
                       // flag. Depth-to-water is manual here (auto-fills from SSURGO once the /api/soils
@@ -16477,7 +16486,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       if (matBerm && matBerm.maxHeightFt > 0.25) {
                         // NEW-6 — the berm is now MODELED dirt: crest at TOB, per-cell height off the
                         // grade grid, priced into the fill heat map + earthwork + (in-trigger) mitigation.
-                        out.push(warnLine(`Bermed basin — crest ${f1(matBerm.crestElevFt)}′ NAVD88, up to ${f1(matBerm.maxHeightFt)}′ above existing grade. The berm is modeled fill (~${f0(matBerm.volCf / 27)} cy)${matBerm.floodCf > 0 ? `, ~${f2((matBerm.floodCf * (fmRule && isFinite(fmRule.ratio) ? fmRule.ratio : 1)) / 43560)} ac-ft of it below the flood WSE — 1:1 offset applies` : ""}.`, "berm-fill", false));
+                        out.push(warnLine(`Bermed basin: crest ${f1(matBerm.crestElevFt)}′ NAVD88, up to ${f1(matBerm.maxHeightFt)}′ above existing grade. The berm is modeled fill (~${f0(matBerm.volCf / 27)} cy)${matBerm.floodCf > 0 ? `, ~${f2((matBerm.floodCf * (fmRule && isFinite(fmRule.ratio) ? fmRule.ratio : 1)) / 43560)} ac-ft of it below the flood WSE; 1:1 offset applies` : ""}.`, "berm-fill", false));
                         if (split.inTrigger) {
                           // Waller §A(9) note + the conveyance caution (a ring levee in the floodplain
                           // can block flow — engineer's check).
@@ -16485,7 +16494,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           out.push(noteLine("Conveyance caution: a ring levee in the mapped floodplain can block flow (a no-rise / H&H check is your engineer's call) — this screening models the fill volume, not the hydraulic effect.", "berm-conveyance"));
                         }
                       } else if (berm != null) {
-                        out.push(warnLine(`Bermed basin — the top of bank sits ${f1(berm)}′ above existing grade. The berm itself is fill${split.inTrigger ? " requiring mitigation" : ""} and may block conveyance.`, "berm-fill", false));
+                        out.push(warnLine(`Bermed basin: the top of bank sits ${f1(berm)}′ above existing grade. The berm itself is fill${split.inTrigger ? " requiring mitigation" : ""} and may block conveyance.`, "berm-fill", false));
                       }
                       return out.length ? <>{out}</> : null;
                     })()}
@@ -16524,8 +16533,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const excl = bal.bermExcluded && bal.bermExcluded.find((x) => x.id === selEl.id);
                       if (excl && excl.reason === "floodplain-fringe") {
                         out.push(
-                          <div key="berm-excl" title="Berming below the flood WSE changes how the floodplain itself behaves (levee-adjacent hydraulics) — the auto-suggest won't propose it; that is engineer territory." style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 6, fontWeight: 700, cursor: "help" }}>
-                            Excluded from the berm auto-suggest — floodplain fringe.<span style={{ fontSize: 9.5, color: PAL.muted, marginLeft: 4, fontWeight: 400 }} aria-hidden="true">ⓘ</span>
+                          <div key="berm-excl" title="Berming below the flood WSE changes how the floodplain itself behaves (levee-adjacent hydraulics): the auto-suggest won't propose it; that is engineer territory." style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 6, fontWeight: 700, cursor: "help" }}>
+                            Excluded from the berm auto-suggest: floodplain fringe.<span style={{ fontSize: 9.5, color: PAL.muted, marginLeft: 4, fontWeight: 400 }} aria-hidden="true">ⓘ</span>
                           </div>
                         );
                       }
@@ -16610,7 +16619,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             const mitAdd = a.bermFillBelowWseCf ? (a.bermFillBelowWseCf * ratio) / 43560 : 0;
                             const preview = `TOB ${f1(effDet.tobElev)} → ${f1(newTob)}${newBermH != null ? ` · berm ${f1(newBermH)}′ above grade` : ""} · usable ${f2(use0 / 43560)} → ${f2((use0 + a.addCf) / 43560)} ac-ft${mitAdd > 0.005 ? ` · mitigation req +${f2(mitAdd)} ac-ft (berm fill)` : ""}. One Ctrl+Z reverts.`;
                             const onApply = () => setDet({ tobElev: Math.round(newTob * 100) / 100, depth: (Number.isFinite(effDet.depth) ? effDet.depth : depth) + a.hFt, tobBerm: { h: a.hFt, applied: Math.round(newTob * 100) / 100 } });
-                            body.push(actApply(`→ raise the top of bank +${f1(a.hFt)}′ (berm) → +${f2(a.addCf / 43560)} ac-ft usable${a.partial ? ` — the +${f1(a.maxRaiseFt)}′ screening clamp still leaves it short` : ""}${a.bermFillBelowWseCf ? `; the berm prism below the WSE is NEW fill (~${f2(a.bermFillBelowWseCf / 43560)} ac-ft) folded into the mitigation requirement` : ""}.`, "assist-tob", false, applyChip(onApply, preview, false)));
+                            body.push(actApply(`→ raise the top of bank +${f1(a.hFt)}′ (berm) → +${f2(a.addCf / 43560)} ac-ft usable${a.partial ? `; the +${f1(a.maxRaiseFt)}′ screening clamp still leaves it short` : ""}${a.bermFillBelowWseCf ? `; the berm prism below the WSE is NEW fill (~${f2(a.bermFillBelowWseCf / 43560)} ac-ft) folded into the mitigation requirement` : ""}.`, "assist-tob", false, applyChip(onApply, preview, false)));
                           }
                           else if (a.kind === "deepen") {
                             const preview = `depth ${f1(Number.isFinite(effDet.depth) ? effDet.depth : depth)}′ → ${f1(a.depthFt)}′ · below-WSE +${f2(a.addCf / 43560)} ac-ft (pinch-off ceiling ${f1(a.maxDepthFt)}′). One Ctrl+Z reverts.`;
@@ -16713,7 +16722,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         (push banks out / dig deeper) or free drag feed one Existing→Proposed delta. */}
                     {!inMode ? (
                       <div style={{ marginTop: 11 }}>
-                        <button style={{ ...chip, width: "100%", padding: "8px 10px", fontWeight: 700 }} onClick={startExpand} title="See how much more detention you'd gain by enlarging this pond — it snapshots today's size, then you push the banks out or dig deeper.">Expand this pond</button>
+                        <button style={{ ...chip, width: "100%", padding: "8px 10px", fontWeight: 700 }} onClick={startExpand} title="See how much more detention you'd gain by enlarging this pond: it snapshots today's size, then you push the banks out or dig deeper.">Expand this pond</button>
                         {/* B633 — auto-size: solve the expand offset that closes the SITE's
                             detention shortfall (B630's required-vs-provided), then land the
                             user in the normal expand mode (baseline + ghost + overlap /
@@ -16811,7 +16820,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 ⇱ Size for required detention ({f2(shortfallUsableCf / 43560)} ac-ft short)
                               </button>
                               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
-                                Solves how far to push the banks out so the site meets its required volume{thisDeadCf > 0 ? ` (the ${f2(thisDeadCf / 43560)} ac-ft permanent pool grows with the footprint and stays uncredited — Regime B)` : ""}, then lets you review before keeping it.
+                                Solves how far to push the banks out so the site meets its required volume{thisDeadCf > 0 ? ` (the ${f2(thisDeadCf / 43560)} ac-ft permanent pool grows with the footprint and stays uncredited; Regime B)` : ""}, then lets you review before keeping it.
                               </div>
                               {regimeUnsure && (
                                 <div style={{ fontSize: 10, color: PAL.warn || PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
@@ -17084,8 +17093,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {routed.kind === "routed" ? (
                             <div style={{ marginTop: 8, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                                <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Overall — Post ≤ Pre</span>
-                                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 5, color: "var(--on-accent)", background: routed.allPass ? PAL.success : PAL.danger }}>{routed.allPass ? "PASS — every storm" : "FAIL"}</span>
+                                <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Overall: Post ≤ Pre</span>
+                                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 5, color: "var(--on-accent)", background: routed.allPass ? PAL.success : PAL.danger }}>{routed.allPass ? "PASS: every storm" : "FAIL"}</span>
                               </div>
                               <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr 1fr auto", gap: "2px 8px", fontSize: 11, alignItems: "center" }}>
                                 <span style={{ fontSize: 9.5, color: PAL.muted, fontWeight: 700 }}>STORM</span>
@@ -17193,6 +17202,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </div>
                     </Collapse>
                     )}
+                    {/* v3 B7 — the shared provenance legend at the bottom of the pond panel. */}
+                    <ProvenanceLegend style={{ marginTop: 12, paddingTop: 9, borderTop: `1px solid ${PAL.panelLine}` }} />
                   </div>
                 );
               })()}
@@ -18556,6 +18567,41 @@ function InlineDisclosure({ open, onToggle, label, count, children, Y }) {
   );
 }
 
+// v3 B6 — the COSTS group body is two flat rows (Earthwork · Road); each carries a
+// "Set unit prices →" link that reveals the existing line-item + unit-price inputs in place,
+// instead of two always-present "… cost (screening)" accordions. Module scope
+// (MODULE-SCOPE-COMPONENTS). `summary` is an optional right-aligned muted note (e.g. a total).
+function CostDisclosure({ label, summary, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ borderBottom: "1px solid var(--planner-border)", padding: "2px 0" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 0" }}>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 600 }}>{label}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {summary ? <span style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>{summary}</span> : null}
+          <ActionLink onClick={() => setOpen((o) => !o)}>{open ? "Hide unit prices" : "Set unit prices →"}</ActionLink>
+        </span>
+      </div>
+      {open && <div style={{ paddingBottom: 8 }}>{children}</div>}
+    </div>
+  );
+}
+
+// v3 B7 — the ONE provenance legend (PLAN / CODE / EST / YOU / SURVEY), shared by the Yield
+// footer and the bottom of the pond panel so both read from one definition. Module scope.
+function ProvenanceLegend({ style }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 10px", fontSize: 9.5, color: "var(--text-tertiary)", lineHeight: 1.6, ...style }}>
+      {[["PLAN", "measured from your drawing"], ["CODE", "adopted criteria"], ["EST", "estimated"], ["YOU", "your input"], ["SURVEY", "from terrain data"]].map(([tag, def]) => (
+        <span key={tag} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.05em", color: "var(--text-tertiary)", border: "1px solid var(--planner-border)", borderRadius: 4, padding: "1px 4px" }}>{tag}</span>
+          <span>{def}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // B862 — the shared required-vs-provided bullet bar (screen renderer). It walks the SAME
 // primitive list (yieldBar.js bulletBarMarks / stackedBarMarks) that the PDF export walks,
 // so the on-screen bar and the printed bar can never drift (PDF-PARITY). Inline SVG; fills go
@@ -18908,7 +18954,7 @@ function YieldPanel({
               // read as trapping the reviewing-agency selector inside a warning box).
               return (
                 <div key="assumptions" style={{ marginTop: 7, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
-                  <div title={d.channelDischarge?.overrideIgnored ? "HCFCD n/a outside Harris — saved channel answer ignored." : ""} style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: d.channelDischarge?.overrideIgnored ? "help" : undefined }}>Assumptions — correct if needed{d.channelDischarge?.overrideIgnored ? <span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span> : null}</div>
+                  <div title={d.channelDischarge?.overrideIgnored ? "HCFCD n/a outside Harris: saved channel answer ignored." : ""} style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: d.channelDischarge?.overrideIgnored ? "help" : undefined }}>Assumptions: correct if needed{d.channelDischarge?.overrideIgnored ? <span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span> : null}</div>
                   {rows}
                 </div>
               );
@@ -19004,9 +19050,13 @@ function YieldPanel({
                       {chip ? <StatusChip label={chip} tone={tone} /> : null}
                       <span style={{ fontSize: 11, fontWeight: 700, color: Y.rowLabel, letterSpacing: "0.02em", whiteSpace: "normal", overflowWrap: "anywhere" }}>{label}</span>
                     </span>
+                    {/* v3 B7 — the group summary (verdict) shows ONLY when closed; when open, the
+                        detail below carries it (parity with the Collapse groups). */}
+                    {!open && (
                     <span style={{ fontFamily: NUM_FONT, fontSize: 13.5, fontWeight: 800, fontVariantNumeric: TABULAR_NUMS, color: vColor, textAlign: "right", whiteSpace: "nowrap", flex: "none" }}>
                       <FlashValue token={String(verdict)}>{verdict}</FlashValue>{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10 }}> {sub}</span> : null}
                     </span>
+                    )}
                   </button>
                   {bar ? <div style={{ padding: "1px 2px 5px 20px" }}>{bar}</div> : null}
                   {/* B909/B910 — the ⚡ Design cure sits ALWAYS-VISIBLE right under the bar
@@ -19122,7 +19172,7 @@ function YieldPanel({
                 "This remembered check predates the per-pond split record (or a pond was drawn after it). How much of the gross volume is usable for detention (above the flood water surface and the permanent pool) is unknown until the next live check — so no surplus/short verdict is shown."));
             } else if (d.deadCf > 0) {
               detR.push(infoRow("Detention provided", `${f1(providedAcFt)} ac-ft`,
-                `Usable ${f1(usableAcFt)} ac-ft after ${f1(d.deadCf / 43560)} ac-ft sits below the flood WSE / permanent pool — dead storage earns no credit. Anchored ponds split at their real water surfaces; the rest use the Regime-B estimate.`,
+                `Usable ${f1(usableAcFt)} ac-ft after ${f1(d.deadCf / 43560)} ac-ft sits below the flood WSE / permanent pool; dead storage earns no credit. Anchored ponds split at their real water surfaces; the rest use the Regime-B estimate.`,
                 { key: "provided", sub: d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""} · usable ${f2(usableAcFt)}` : `· usable ${f2(usableAcFt)}`, tag: { code: "plan" } }));
             } else {
               detR.push(row("Detention provided", `${f1(providedAcFt)} ac-ft`, d.pondCount ? `· ${d.pondCount} pond${d.pondCount > 1 ? "s" : ""}` : "· no ponds drawn", false, { code: "plan" }));
@@ -19152,7 +19202,7 @@ function YieldPanel({
               const splitLayout = stackedBarLayout({ segments: [{ key: "dead", value: deadRemAf }, { key: "mit", value: mitAf }, { key: "usable", value: usAf }], markerValue: deadRemAf + mitAf });
               const swatch = (c) => <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: c, marginRight: 3, verticalAlign: "middle" }} />;
               detR.push(
-                <div key="det-split" style={{ padding: "3px 2px 4px 0" }} title="How the drawn ponds' gross storage divides: usable detention (above the flood water surface) · below-WSE cut credited to mitigation · dead storage (permanent pool / below WSE — no detention credit). The tick marks the flood water surface.">
+                <div key="det-split" style={{ padding: "3px 2px 4px 0" }} title="How the drawn ponds' gross storage divides: usable detention (above the flood water surface) · below-WSE cut credited to mitigation · dead storage (permanent pool / below WSE, no detention credit). The tick marks the flood water surface.">
                   <BulletBar layout={splitLayout} Y={Y} width={200} />
                   <div style={{ display: "flex", gap: 10, marginTop: 2, fontSize: 9.5, color: Y.muted, flexWrap: "wrap" }}>
                     <span>{swatch("var(--success-text)")}usable {f2(usAf)}</span>
@@ -19368,7 +19418,7 @@ function YieldPanel({
               const tierUnknowns = d.channelFailed ? d.tier.unknowns.filter((u) => u.id !== "regulated-channel") : d.tier.unknowns;
               // NEW-1(a) — triggers + unknowns fold into the tier row's ⓘ instead of two notes.
               const tierInfo = [
-                d.tier.triggers.length ? `Triggers: ${d.tier.triggers.map((t) => `${t.label}${t.detail ? ` — ${t.detail}` : ""}`).join(" · ")}` : "",
+                d.tier.triggers.length ? `Triggers: ${d.tier.triggers.map((t) => `${t.label}${t.detail ? `: ${t.detail}` : ""}`).join(" · ")}` : "",
                 tierUnknowns.length ? `Unknown: ${tierUnknowns.map((u) => u.label).join(" · ")}` : "",
                 d.tier.tier === "dia"
                   ? "A full drainage impact analysis (H&H study) is the likely bar at this size / with these triggers."
@@ -19951,7 +20001,12 @@ function YieldPanel({
               for (const p of (d.ponds || [])) {
                 rows.push(
                   <div key={`pp-${p.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
-                    <button type="button" onClick={() => d.onSelectPond && d.onSelectPond(p.id)} title="Select this pond" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 12, color: "var(--accent)", fontWeight: 600, textAlign: "left" }}>{p.label} ↗</button>
+                    {/* v3 B7 — the pond label never wraps: it sits on one line and ellipsizes a long
+                        name (full name in the title), with the ↗ kept fixed at the end. */}
+                    <button type="button" onClick={() => d.onSelectPond && d.onSelectPond(p.id)} title={p.label} style={{ display: "flex", alignItems: "baseline", gap: 4, minWidth: 0, overflow: "hidden", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 12, color: "var(--accent)", fontWeight: 600, textAlign: "left" }}>
+                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{p.label}</span>
+                      <span style={{ flex: "none" }}>↗</span>
+                    </button>
                     <span style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
                       <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: Y.text, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS }}>{p.countsAcFt == null ? "usable unknown" : `${f1(p.countsAcFt)} ac-ft counts`}</span>
                       <span title={`${f0(p.holdsAcFt * 43560)} cf stored`} style={{ fontSize: 10.5, color: Y.muted, cursor: "help" }}>holds {f1(p.holdsAcFt)}</span>
@@ -19971,7 +20026,10 @@ function YieldPanel({
               }
               if (req && req.rule) {
                 const shortAuth = AUTHORITY_SHORT[req.rule.authority] || req.rule.authorityLabel || "criteria";
-                const appM = (req.rule.governingManual?.section || "").match(/Appendix\s+([A-Z])/);
+                // v3 B4 — some rules cite the appendix on `source.section` (e.g. Waller's
+                // "Appendix E, Volume Requirements…"), not `governingManual.section`; check both
+                // so the basis reads "Waller Co. App. E", never a truncated "Waller Co.".
+                const appM = (req.rule.governingManual?.section || req.rule.source?.section || "").match(/Appendix\s+([A-Z])/);
                 const basisVal = appM ? `${shortAuth} App. ${appM[1]}` : shortAuth;
                 const rangeTxt = req.kind === "band" ? `Screening range ${f1(req.bandAcFt[0])} to ${f1(req.bandAcFt[1])} ac-ft; planned to the conservative end.`
                   : (req.requiredAcFt != null ? `Required ${f1(req.requiredAcFt)} ac-ft.` : "");
@@ -19990,7 +20048,15 @@ function YieldPanel({
               return rows;
             })();
             const detCount = d.pondCount || 0;
-            const detClosed = `${detCount} pond${detCount === 1 ? "" : "s"} · ${detShort ? "short" : detChip === "COVERED" ? "ok" : "check"}`;
+            // v3 B7 — the closed summary styles "N pond" as secondary ink and only the status
+            // word (short) in its tone color, never the whole line red.
+            const detStatusWord = detShort ? "short" : detChip === "COVERED" ? "ok" : "check";
+            const detClosed = (
+              <>
+                <span style={{ color: Y.muted, fontWeight: 400 }}>{detCount} pond{detCount === 1 ? "" : "s"} · </span>
+                <span style={{ color: detShort ? Y.dangerText : detChip === "COVERED" ? "var(--success-text)" : Y.warnText }}>{detStatusWord}</span>
+              </>
+            );
             out.push(groupFold("det", "Detention detail", detClosed, detShort ? "danger" : detChip === "COVERED" ? "good" : "warn", detVisible, "", { action: detShort ? designAction : null, open: true, method: detR }));
             if (mitRequired) out.push(groupFold("mit", "Mitigation detail", mitVerdict, mitTone, mitR, mitSub, { chip: mitChip, action: mitShort ? designAction : null }));
             // NEW-10/B830 — the ledger balancer: one card of ranked screening moves that
@@ -20014,10 +20080,10 @@ function YieldPanel({
                 }
                 if (bal.bermExcluded && bal.bermExcluded.length) {
                   const n = bal.bermExcluded.length;
-                  balR.push(warnNote(`${n} pond${n > 1 ? "s" : ""} excluded from the berm auto-suggest — floodplain fringe / role.`, "bal-excl",
-                    `Excluded: ${bal.bermExcluded.map((x) => `${x.name || x.id} (${x.reason === "floodplain-fringe" ? "in the mapped floodplain — berming below the WSE is levee-adjacent hydraulics, engineer territory" : x.reason === "mitigation-role" ? "mitigation-role pond" : "split facts unknown — re-check"})`).join(" · ")}.`));
+                  balR.push(warnNote(`${n} pond${n > 1 ? "s" : ""} excluded from the berm auto-suggest: floodplain fringe / role.`, "bal-excl",
+                    `Excluded: ${bal.bermExcluded.map((x) => `${x.name || x.id} (${x.reason === "floodplain-fringe" ? "in the mapped floodplain: berming below the WSE is levee-adjacent hydraulics, engineer territory" : x.reason === "mitigation-role" ? "mitigation-role pond" : "split facts unknown, re-check"})`).join(" · ")}.`));
                 }
-                balR.push(keyedNote("Proposals only — nothing changes without your click; redraw the plan to take a move. Screening.", "bal-caveat"));
+                balR.push(keyedNote("Proposals only: nothing changes without your click; redraw the plan to take a move. Screening.", "bal-caveat"));
                 const balSub = bal.detGapAcFt > 0 ? `det gap ${f2(bal.detGapAcFt)}` : bal.mitOverAcFt > 0 ? `surplus ${f2(bal.mitOverAcFt)}` : "";
                 out.push(groupFold("bal", "Ledger balancer", `${bal.moves.length} move${bal.moves.length > 1 ? "s" : ""} screened`, null, balR, balSub));
               }
@@ -20039,7 +20105,7 @@ function YieldPanel({
   const floodAgeMs = drainage ? drainage.floodAgeMs : null;
 
   return (
-    <div style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+    <div data-testid="yield-panel" style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
       {/* v3 A1 — header: SITE YIELD + "{project} · {concept}" subtitle (left); the ONE freshness
           element "Flood data {age} ago · ↻" (right, neutral gray, amber while a verdict is blocked
           loading — state D). The old "As of … live check · auto" clock + 3-line flood banner are gone. */}
@@ -20060,9 +20126,11 @@ function YieldPanel({
         {openPanel && drainage && drainage.onCheck && (
           // v3 A1 — the ONE freshness element. The ↻ (re-check) is ALWAYS reachable when there's a
           // drainage context; the age shows when known ("Flood data 16h ago"), and the line goes
-          // amber while a verdict is blocked loading (state D).
+          // amber while a verdict is blocked loading (state D). v3 B3 — an unknown age reads
+          // "Flood data: not checked" (never a bare "Flood data"); a "·" separates the ↻.
           <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: verdictLoading ? Y.warnText : Y.muted, whiteSpace: "nowrap", flex: "none" }}>
-            <span>Flood data{floodAgeMs != null ? ` ${formatAge(floodAgeMs)}` : ""}</span>
+            <span>{floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)} ago` : "Flood data: not checked"}</span>
+            <span aria-hidden="true" style={{ color: Y.faint }}>·</span>
             <button type="button" onClick={drainage.onCheck} title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1 }} aria-label="Re-check flood data">↻</button>
           </span>
         )}
@@ -20101,10 +20169,15 @@ function YieldPanel({
                     {/* The sentence takes the full remaining width and NEVER ellipsizes (item 2).
                         The "…" pill + "checking flood data" already convey a loading row, so no
                         competing "↻ retrying" element squeezes the sentence into an overflow. */}
-                    <span data-testid={`yield-verdict-sentence-${v.key}`} style={{ fontSize: 12.5, color: Y.text, lineHeight: 1.35, whiteSpace: "nowrap", minWidth: 0 }}>
-                      {v.label}: {v.pair
+                    <span data-testid={`yield-verdict-sentence-${v.key}`} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 12.5, color: Y.text, lineHeight: 1.35, whiteSpace: "nowrap", minWidth: 0 }}>
+                      <span style={{ minWidth: 0 }}>{v.label}: {v.pair
                         ? <b style={{ whiteSpace: "nowrap", fontWeight: 750 }}>{v.sentence}</b>
-                        : <span style={{ color: v.loading ? Y.muted : Y.text }}>{v.sentence}</span>}
+                        : <span style={{ color: v.loading ? Y.muted : Y.text }}>{v.sentence}</span>}</span>
+                      {/* v3 B2 — an unassessed Buildability row (and the "set BFE" state) hangs a ↻
+                          that re-pulls the flood data, since its own group was deleted. */}
+                      {v.recheck && drainage && drainage.onCheck && (
+                        <button type="button" onClick={drainage.onCheck} aria-label="Re-check flood data" title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, flex: "none" }}>↻</button>
+                      )}
                     </span>
                   </div>
                 ))}
@@ -20180,21 +20253,9 @@ function YieldPanel({
             {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
             {row("Trailer stalls", f0(trailers))}
           </Collapse>
-          {/* v3 A7 — BUILDABILITY: its closed summary is the VERDICT TEXT (never a bare "—", item
-              6). The group renders ONLY when it has FFE detail beyond the verdict; with nothing to
-              add, the verdict-strip "Buildability: …" line already covers it, so the group is
-              deleted entirely. */}
-          {drainageBlocks && drainageBlocks.ffeR && drainageBlocks.ffeR.length > 0 && (() => {
-            const ffeRow = verdictStrip.find((v) => v.key === "ffe");
-            const summary = ffeRow ? ffeRow.sentence
-              : (drainageBlocks.ffeVerdict && drainageBlocks.ffeVerdict !== "—" ? drainageBlocks.ffeVerdict : "not assessed");
-            return (
-              <Collapse sectionId="yield-buildability" title="Buildability" defaultOpen={false} summary={summary}
-                headerRight={drainageBlocks.ffeChip ? <StatusChip label={drainageBlocks.ffeChip} tone={drainageBlocks.ffeTone} /> : null}>
-                {drainageBlocks.ffeR}
-              </Collapse>
-            );
-          })()}
+          {/* v3 B2 — the BUILDABILITY group is DELETED. Buildability is now a permanent verdict-
+              strip row (see yieldVerdicts.buildabilityVerdict) — "not checked yet" with a ↻ when
+              unassessed, OK/short when assessed — so a second group would only restate it. */}
 
           {easeAll.length > 0 && (<>
             {groupHead(Y.faint, "Easements")}

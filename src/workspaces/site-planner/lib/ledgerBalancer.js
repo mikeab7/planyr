@@ -197,8 +197,8 @@ export function rankLedgerMoves({
       const gain = u.usableCf / AC_FT + (reqDelta != null ? -reqDelta : 0);
       moves.push({
         kind: "convert-building", id: b.id,
-        label: `Convert ${short(b.name)}+court to a basin — +${f2(u.usableCf / AC_FT)} ac-ft, −${f0(sf / 1000)}k sf`,
-        info: `Replacing this building and its court with a bermed basin at the site pond pattern (${f1(synthDet.depth)}′ deep, ${synthDet.slope}:1 sides, ${f1(synthDet.freeboard)}′ freeboard) stores ~${f2(u.usableCf / AC_FT)} ac-ft usable${reqDelta != null ? ` and drops the requirement by ~${f2(-reqDelta)} ac-ft (impervious falls with the roof/paving)` : ""}. It costs ${f0(sf)} sf of yield — the most expensive move here; ranked accordingly. The tool proposes; redrawing the plan is your call.`,
+        label: `Convert ${short(b.name)}+court to a basin: +${f2(u.usableCf / AC_FT)} ac-ft, −${f0(sf / 1000)}k sf`,
+        info: `Replacing this building and its court with a bermed basin at the site pond pattern (${f1(synthDet.depth)}′ deep, ${synthDet.slope}:1 sides, ${f1(synthDet.freeboard)}′ freeboard) stores ~${f2(u.usableCf / AC_FT)} ac-ft usable${reqDelta != null ? ` and drops the requirement by ~${f2(-reqDelta)} ac-ft (impervious falls with the roof/paving)` : ""}. It costs ${f0(sf)} sf of yield: the most expensive move here; ranked accordingly. The tool proposes; redrawing the plan is your call.`,
         deltas: { detAcFt: Math.min(gain, detGapAcFt), mitAcFt: null, dirtCy: null, costUsd: null, buildingSf: -Math.round(sf) },
         confirmFlags: [], destructive: true,
         score: Math.min(gain, detGapAcFt) * 0.5,
@@ -227,12 +227,12 @@ export function rankLedgerMoves({
         for (let i = 0; i < 24; i++) { const mid = (lo + hi) / 2; if (creditAt(mid) >= targetAcFt) hi = mid; else lo = mid; }
         cfs = hi; credit = creditAt(hi);
       }
-      const clampNote = capAcFt != null && detGapAcFt > capAcFt ? ` — FBCDD caps pumped share at ${f2(capAcFt)}` : "";
+      const clampNote = capAcFt != null && detGapAcFt > capAcFt ? `; FBCDD caps pumped share at ${f2(capAcFt)}` : "";
       if (credit > 0.01) {
         moves.push({
           kind: "pumped-system", id: "pump",
-          label: `Pumped outfall ≈ ${f1(cfs)} cfs — credits ~${f2(credit)} ac-ft (rate-method)${clampNote}`,
-          info: `${detRule?.params?.gravityDrainNote ? detRule.params.gravityDrainNote + " " : ""}A pump running at rated capacity raises the allowable release, shrinking required storage by ~${f2(credit)} ac-ft on the Modified-Rational screen. Pumps cycle, need power and redundancy, and reviewers treat pumped systems as an exception — engineer-confirm before relying on this. The tool proposes only.`,
+          label: `Pumped outfall ≈ ${f1(cfs)} cfs: credits ~${f2(credit)} ac-ft (rate-method)${clampNote}`,
+          info: `${detRule?.params?.gravityDrainNote ? detRule.params.gravityDrainNote + " " : ""}A pump running at rated capacity raises the allowable release, shrinking required storage by ~${f2(credit)} ac-ft on the Modified-Rational screen. Pumps cycle, need power and redundancy, and reviewers treat pumped systems as an exception; engineer-confirm before relying on this. The tool proposes only.`,
           deltas: { detAcFt: Math.min(credit, detGapAcFt), mitAcFt: null, dirtCy: null, costUsd: null, buildingSf: null },
           confirmFlags: gdf != null ? ["engineer-confirm", "fbcdd-gravity-rule"] : ["engineer-confirm"], destructive: false,
           score: Math.min(credit, detGapAcFt) * 0.6,

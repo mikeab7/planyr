@@ -90,9 +90,13 @@ function mitigationVerdict(d) {
 
 function buildabilityVerdict(d) {
   const bb = d.buildability;
-  if (!bb) return null;
+  const row = (pill, tone, sentence, extra) => finish({ key: "ffe", label: "Buildability", pill, tone, sentence, short: pill === "SHORT", sortRank: pill === "SHORT" ? 0 : pill === "…" ? 1 : 2, ...extra });
+  // v3 B2 — buildability is now a PERMANENT strip row (its own group was deleted). When it has
+  // not been assessed it reads a neutral "not checked yet" that sorts LAST (below the real
+  // verdicts, so it never outshouts a passing one) and hangs a ↻ re-check (the `recheck` flag;
+  // the strip renderer draws the ↻ that re-pulls the flood data).
+  if (!bb) return row("…", "neutral", "not checked yet", { recheck: true, sortRank: 3 });
   const ffe = bb.ffe;
-  const row = (pill, tone, sentence) => finish({ key: "ffe", label: "Buildability", pill, tone, sentence, short: pill === "SHORT", sortRank: pill === "SHORT" ? 0 : pill === "…" ? 1 : 2 });
   if (ffe.status === "pass") return row("OK", "good", `pads pass at ${fmtAcFt(ffe.requiredFfeFt)}′ FFE`);
   if (ffe.status === "assumed") return row("OK", "neutral", `pads assumed at ${fmtAcFt(ffe.requiredFfeFt)}′ FFE`);
   if (ffe.status === "short") return row("SHORT", "danger", `pads ${fmtAcFt(ffe.shortByFt)}′ short of required FFE`);

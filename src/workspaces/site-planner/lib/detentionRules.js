@@ -918,12 +918,12 @@ export function assessHydraulicRegime({
   out.elevations = { bfeFt, bfeDatum, groundFt: round2(groundElevFt), groundDatum, marginFt: round2(marginFt) };
   if (marginFt < 0) {
     out.regime = "B";
-    out.label = "Regime B — floodplain / tailwater-governed";
+    out.label = "Regime B · floodplain / tailwater-governed";
     out.reasons.push(
-      `BFE ${bfeFt.toFixed(1)} ft ${bfeDatum} is within the pond depth of site grade ${groundElevFt.toFixed(1)} ft ${groundDatum} (basin floor ≈ ${(groundElevFt - pondDepthFt).toFixed(1)} ft — ${Math.abs(marginFt).toFixed(1)} ft BELOW the BFE).`
+      `BFE ${bfeFt.toFixed(1)} ft ${bfeDatum} is within the pond depth of site grade ${groundElevFt.toFixed(1)} ft ${groundDatum} (basin floor ≈ ${(groundElevFt - pondDepthFt).toFixed(1)} ft, ${Math.abs(marginFt).toFixed(1)} ft BELOW the BFE).`
     );
     out.consequence =
-      "Outfall depth will not reduce detention here — the outlet is drowned during the design storm; BFE, top-of-bank and floodplain mitigation govern.";
+      "Outfall depth will not reduce detention here; the outlet is drowned during the design storm; BFE, top-of-bank and floodplain mitigation govern.";
     out.wetBottomWarning = true; // permanent pool below the static water surface stores nothing
     return out;
   }
@@ -1249,7 +1249,7 @@ export function computePumpedCredit({
 } = {}) {
   const flags = ["regime-b-tailwater-suppressed-by-pump"];
   const assumption =
-    "Pumped outfall assumed to run continuously at its rated capacity during the design storm; its discharge is not gravity-drowned, so the Regime-B wet-bottom / tailwater penalty is not applied here. Real pumps cycle and need power + backup — confirm reliability and redundancy with your engineer.";
+    "Pumped outfall assumed to run continuously at its rated capacity during the design storm; its discharge is not gravity-drowned, so the Regime-B wet-bottom / tailwater penalty is not applied here. Real pumps cycle and need power + backup; confirm reliability and redundancy with your engineer.";
   if (pumpRateCfs == null || !Number.isFinite(pumpRateCfs) || pumpRateCfs < 0) {
     return { creditedAcFt: null, requiredWithPumpAcFt: null, requiredGravityAcFt: null, flags: [...flags, "pump-rate-missing"], assumption, caveat: SCREENING_CAVEAT };
   }

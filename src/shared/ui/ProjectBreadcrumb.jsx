@@ -271,7 +271,7 @@ export default function ProjectBreadcrumb({
       {/* Dashboard crumb (B192) — literal text, always visible, primary route home */}
       <button
         onClick={goDashboard}
-        title={`All projects — ${homeLabel}`}
+        title={`All projects: ${homeLabel}`}
         aria-current={onDash ? "page" : undefined}
         style={crumbBtn({ color: onDash ? INK : MUTED })}
         onMouseEnter={(e) => { if (!onDash) e.currentTarget.style.color = INK; }}
@@ -294,7 +294,7 @@ export default function ProjectBreadcrumb({
         style={crumbBtn({ color: (currentProject || cross) ? INK : MUTED, maxWidth: 240, minWidth: 0 })}
       >
         {currentProject && !cross && (
-          <span title="Private — only you can see this project. Sharing is always a deliberate act."
+          <span title="Private: only you can see this project. Sharing is always a deliberate act."
             style={{ flex: "none", color: MUTED, display: "flex", alignItems: "center" }}>
             <LockIcon />
           </span>
@@ -303,7 +303,7 @@ export default function ProjectBreadcrumb({
           {cross ? "All projects" : (currentName || "Select a project")}
         </span>
         {atRisk(saveState) && (
-          <span title="Saved on this device — the cloud is unreachable" aria-hidden
+          <span title="Saved on this device: the cloud is unreachable" aria-hidden
             style={{ flex: "none", color: "#f59e0b", fontSize: 11 }}>⚠</span>
         )}
         <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
