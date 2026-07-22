@@ -1979,10 +1979,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      first lands. A resize WHILE the planner is shown (a docked panel opening/closing shrinks the
      in-flow canvas) is handled UNDER the ghost by the view-sync effect's sizeChanged branch (B837),
      so it no longer flashes — `size` is deliberately NOT a dependency here: this un-ghosted
-     invalidateSize must not fire on a panel toggle (it was the residual tile-wipe). */
-  useEffect(() => {
+     invalidateSize must not fire on a panel toggle (it was the residual tile-wipe).
+
+     B842 — re-sync SYNCHRONOUSLY in a LAYOUT effect (before paint) on a keep-alive tab-return so the
+     re-shown aerial is correct in the FIRST visible frame instead of ~60 ms later (the possible tab-
+     return reveal flash). The deps are unchanged (`[active, origin]`, NOT `size`), so this still can
+     never fire on a panel toggle — only the WHEN-within-the-reveal changes, not the trigger. A timed
+     fallback stays for the origin-first-land case, where the Leaflet map isn't created yet at layout-
+     effect time (guard returns) and the passive map-build lands moments later. */
+  useLayoutEffect(() => {
     const map = geoMapRef.current;
-    if (map && active) { const t = setTimeout(() => { try { map.invalidateSize(false); } catch (_) {} }, 60); return () => clearTimeout(t); }
+    if (!(map && active)) return;
+    const sync = () => { try { map.invalidateSize(false); } catch (_) {} };
+    sync(); // before paint — the re-shown aerial is correct in the first frame
+    const t = setTimeout(sync, 60); // fallback: map may be built moments after origin first lands
+    return () => clearTimeout(t);
   }, [active, origin]);
 
   /* drive the basemap zoom/center from the planner view so it stays locked to

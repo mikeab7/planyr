@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
@@ -568,12 +568,23 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
   /* keep the map sized correctly when shown after being hidden — both when the Site
      workspace flips map↔plan (`visible`) AND when the whole workspace returns from a
-     hidden keep-alive tab (`isActive`: Leaflet sized itself at 0×0 while display:none). */
-  useEffect(() => {
-    if (visible && isActive && mapRef.current) {
-      const t = setTimeout(() => mapRef.current && mapRef.current.invalidateSize(), 60);
-      return () => clearTimeout(t);
-    }
+     hidden keep-alive tab (`isActive`: Leaflet sized itself at 0×0 while display:none).
+
+     B842 — re-sync SYNCHRONOUSLY in a LAYOUT effect (before paint) so the revealed map is
+     correctly sized in the FIRST visible frame. The old passive `setTimeout(…, 60)` let the
+     map paint once at its stale / 0×0 hidden size and then snap to the real size ~60 ms later
+     — the reveal "flash" on the map↔plan flip and on returning from a hidden keep-alive tab
+     (the less-protected sibling of the Site canvas, which the B65/B837/B933/B962 machinery
+     already covers). `invalidateSize(false)` = no pan animation, and it fires only Leaflet
+     `resize`/`move` (never a tile-wiping `viewreset`), so the re-sync itself costs no flash.
+     A timed fallback stays as a safety net for the rare case the container isn't laid out yet
+     at layout-effect time (then the synchronous call is a no-op and the fallback catches it). */
+  useLayoutEffect(() => {
+    if (!(visible && isActive && mapRef.current)) return;
+    const sync = () => { try { mapRef.current && mapRef.current.invalidateSize(false); } catch (_) {} };
+    sync(); // before paint — the revealed map is correct in the first frame, no 60ms snap
+    const t = setTimeout(sync, 60); // safety net if layout wasn't ready at layout-effect time
+    return () => clearTimeout(t);
   }, [visible, isActive]);
 
   /* Returning to the map (e.g. after committing parcels and planning) clears any
