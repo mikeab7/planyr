@@ -167,7 +167,7 @@ import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt, pondAutoValues,
   resolveDrainageContext, ruleBadge, AUTHORITY_SHORT,
-  computeRateBasedDetention, computePumpedCredit, DESIGN_STORM_PERIODS,
+  computeRateBasedDetention, DESIGN_STORM_PERIODS,
   effectiveChannelDischarge, effectiveReviewer, DETENTION_AUTHORITY_CHOICES,
   slimDrainageContext, hydrateDrainageContext,
 } from "./lib/detentionRules.js";
@@ -2837,12 +2837,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [parcels, view]);
   const snapSplit = useCallback((p) => snapToBoundary(p) || snapPt(p), [snapToBoundary, snapPt]);
 
-  /* ---- Road endpoint snap-and-connect (B945/NEW-1) ----
+  /* ---- Road endpoint snap-and-connect (B945/NEW-1; ungated B949 amendment) ----
      The magnet's world tolerance: ~12 screen px, capped at ROAD_CONNECT_MAX_FT so a weld can't
      bridge a large real-world gap at overview zoom. The candidate list is every CENTERLINE road
      (a dock-bonded rect road — attachedTo — is owned by the relayout engine and excluded). The
      moving road IS included so its OTHER endpoint can close a loop; findRoadConnect skips only the
-     moving vertex itself. */
+     moving vertex itself.
+     ⚠ The endpoint connect is NOT gated on the global Snap toggle (B949 amendment) — connecting
+     road endpoints must always work. Its ONLY momentary escape hatch is holding Alt
+     (`altSnapOffRef.current`), which places an endpoint freely without connecting. This is
+     independent of the separate grid/45° snap-during-draw, which stays gated on `settings.snap`. */
   const connectTolFt = () => Math.min(12 / (view.ppf || 1), ROAD_CONNECT_MAX_FT);
   const connectableRoads = () => els.filter((x) => x.type === "road" && isCenterlineRoad(x) && !x.attachedTo).map((x) => ({ id: x.id, pts: x.pts }));
   // Apply a planRoadConnect() result (merge / weld / tee) in ONE setEls. The caller has already
@@ -3698,7 +3702,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         let pt = e.shiftKey && prev ? snapPt(snap45(prev, fp)) : sp;
         // B945/NEW-1 — placing a point on/near another road's endpoint (or centerline) welds it there,
         // so the drawn road connects cleanly. finishRoad upgrades the FINAL point to a real merge/tee.
-        if (settings.snap && !altSnapOffRef.current) {
+        // NOT gated on the Snap toggle (B949) — endpoint AND tee connect always work; Alt bypasses.
+        if (!altSnapOffRef.current) {
           const cand = findRoadConnect(fp, null, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
           if (cand) pt = { x: cand.pt.x, y: cand.pt.y };
         }
@@ -4617,10 +4622,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let P = e.shiftKey && ref ? snapPt(snap45(ref, fp)) : snapPt(fp);
       // B945/NEW-1 — snap-and-connect: dragging an ENDPOINT near another road's endpoint (or, for a
       // T/Y, its centerline) engages a magnet — the ghost welds to the target while within tolerance,
-      // and the connection is finalized on release. Gated on the global Snap toggle; Alt bypasses.
+      // and the connection is finalized on release. NOT gated on the Snap toggle (B949); Alt bypasses.
       let connect = null;
       const isEnd = d.idx === 0 || d.idx === el.pts.length - 1;
-      if (isEnd && settings.snap && !altSnapOffRef.current) {
+      if (isEnd && !altSnapOffRef.current) {
         const cand = findRoadConnect(fp, { id: el.id, index: d.idx }, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
         if (cand) { P = { x: cand.pt.x, y: cand.pt.y }; connect = cand; }
       }
@@ -5045,8 +5050,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let el = { id: uid(), type: "road", pts: raw, vtx, travelW, curb, roadClass, ...bbox };
     pushHistory();
     // B945/NEW-1 — connect the final endpoint if it landed on another road (merge / weld / tee).
+    // NOT gated on the Snap toggle (B949); the only bypass is holding Alt on the final point.
     let plan = null, targetId = null;
-    if (settings.snap) {
+    if (!altSnapOffRef.current) {
       const cand = findRoadConnect(raw[raw.length - 1], { id: el.id, index: raw.length - 1 }, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
       if (cand) { targetId = cand.roadId; plan = planRoadConnect(el, raw.length - 1, els.find((x) => x.id === cand.roadId), cand, defR); }
     }
@@ -8578,7 +8584,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           detInfeasible = true;
           const achievedCf = (floodAffected ? (pass1.bands ? pass1.bands.usableCf : 0) : (splitProbe.usableCf ?? 0)) + raiseA.addCf;
           const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: achievedCf, avgDepthFt });
-          detGapNote = gapProposalNote({ achievedAcFt: achievedCf / 43560, targetAcFt: detTargetCf / 43560, reqLabel: "detention", capLabel: `with a ${f1(raiseA.hFt)}-ft berm`, extraAcres: extraEst?.footprintAc ?? null });
+          detGapNote = gapProposalNote({ bermFt: raiseA.hFt, extraAcres: extraEst?.footprintAc ?? null });
         }
       }
     }
@@ -8609,10 +8615,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             : `sized toward the required ${f2(mitTargetCf / 43560)} ac-ft of mitigation`;
         } else {
           mitInfeasible = true;
-          const pinchA = pass2.actions.find((a) => a.kind === "pinch-off");
           const growA = pass2.actions.find((a) => a.kind === "grow");
-          const achievedCf = pinchA ? pinchA.ceilingCf : (pass2.bands ? pass2.bands.mitigationCandidateCf : 0);
-          mitGapNote = gapProposalNote({ achievedAcFt: achievedCf / 43560, targetAcFt: mitTargetCf / 43560, reqLabel: "floodplain mitigation", capLabel: pinchA ? `at a ${f1(pinchA.maxDepthFt)}-ft floor` : null, extraAcres: growA?.addAcres ?? null });
+          // v3 A5 — the mitigation cap is a floor, not a berm, so no berm clause; name the
+          // extra footprint (screening) or a second basin.
+          mitGapNote = gapProposalNote({ bermFt: null, extraAcres: growA?.addAcres ?? null });
         }
       }
     }
@@ -14368,8 +14374,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   provisional pavement+curb offset strip as points are placed */}
               {draftRoadPts && draftRoadPts.length > 0 && (() => {
                 let live = cursor ? snapPt(cursor) : null;
-                let magnet = null; // B945/NEW-1 — endpoint the live point will weld to on click
-                if (live && cursor && settings.snap && !altSnapOffRef.current) {
+                let magnet = null; // B945/NEW-1 — endpoint the live point will weld to on click (ungated, B949)
+                if (live && cursor && !altSnapOffRef.current) {
                   const cand = findRoadConnect(cursor, null, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
                   if (cand) { live = { x: cand.pt.x, y: cand.pt.y }; magnet = cand.pt; }
                 }
@@ -16139,7 +16145,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.4, color: c.short ? PAL.danger : PAL.success }}>{c.heading}</div>
                             {c.body ? <div style={{ fontSize: 11.5, color: PAL.text, lineHeight: 1.5, marginTop: 4 }}>{c.body}</div> : null}
                             {c.short && (
-                              <button type="button" onClick={designPond} title="Draws (or grows) a right-sized pond and solves its outlet: one click, no map skill required." style={{ marginTop: 8, padding: "5px 11px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Optimize pond</button>
+                              <button type="button" onClick={designPond} title="One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed." style={{ marginTop: 8, padding: "5px 11px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Optimize pond</button>
                             )}
                           </div>
                         ))}
@@ -16456,7 +16462,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       );
                       const head = (
                         <div key="assist-head" style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 4 }}>
-                          Sizing assistant (screening){assist.estimated ? <span style={{ color: "var(--warn-text)", marginLeft: 6 }}>· est. WSE</span> : null}
+                          Sizing assistant (screening){assist.estimated ? <span style={{ color: "var(--warn-text)" }}>{" · est. WSE"}</span> : null}
                         </div>
                       );
                       const body = [];
@@ -16468,7 +16474,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const detTxt = detTargetCf > 0 || detReqCf != null
                           ? `detention ${assist.detention.covered ? "covered ✓" : `short ${f2(assist.detention.shortCf / 43560)} ac-ft`}`
                           : null;
-                        body.push(actLine(detTxt || "no targets", "assist-status", !(assist.mitigation.covered && assist.detention.covered)));
+                        // v3 A4 — the bare no-target fallback line is deleted; render the status
+                        // line only when there is a detention target to speak to.
+                        if (detTxt) body.push(actLine(detTxt, "assist-status", !(assist.mitigation.covered && assist.detention.covered)));
                         // NEW-5 — the remedies are one-click APPLICABLE (apply-gated, never auto):
                         // each Apply writes the real element fields through the normal element-sync
                         // path (setDet = pushHistory + setSelEl → ONE atomic undo), auto-recompute
@@ -16488,7 +16496,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </div>
                         );
                         for (const a of assist.actions) {
-                          if (a.kind === "inundated") body.push(actLine(`→ ${a.label}.`, "assist-inund", true));
+                          // v3 A4 — the "usable detention is ZERO — flood WSE at/above the top of bank"
+                          // notice is deleted here: the pond status card and Flood & datum already say
+                          // the rim sits below flood, so repeating it in the assistant is redundant.
+                          if (a.kind === "inundated") { /* not rendered */ }
                           else if (a.kind === "raise-tob") {
                             const newTob = effDet.tobElev + a.hFt;
                             const newBermH = grade != null ? newTob - grade : null;
@@ -16549,35 +16560,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // release agrees with the one the outlet solver actually targets.
                       const detTc = rel == null ? computeTimeOfConcentration({ areaAcres: da, impPct: imp, criteria: detCriteria }) : null;
                       const suggested = rel == null ? suggestedPreDevReleaseCfs({ requiredStorms: detCriteria.requiredStorms, areaAcres: da, tcMin: detTc?.tcMin }) : null;
-                      const pumped = det.outfallMode === "pumped";
-                      const pumpUnit = det.pumpRateUnit === "gpm" ? "gpm" : "cfs";
-                      const pumpRaw = Number.isFinite(det.pumpRateCfs) ? det.pumpRateCfs : null;
-                      const pumpCfs = pumpRaw == null ? null : pumpUnit === "gpm" ? pumpRaw / 448.831 : pumpRaw;
-                      const rateReq = computeRateBasedDetention({ acres: da, impPct: imp, allowableReleaseCfs: rel, returnPeriodYr: storm });
-                      const credit = pumped ? computePumpedCredit({ acres: da, impPct: imp, gravityReleaseCfs: rel ?? 0, pumpRateCfs: pumpCfs, returnPeriodYr: storm }) : null;
-                      // B708: the card credits USABLE volume via the ONE shared split helper —
-                      // the same number the site rollup and the auto-size solver use, so the
-                      // three can never disagree. Gross only when nothing splits it.
-                      const cardSplit = pondSplitFor(selEl);
-                      // NEW-9 — an unknown split (restored view without facts) renders "unknown",
-                      // never a fabricated 0.00 (or gross) provided figure.
-                      const providedAcFt = cardSplit.usableCf == null ? null : cardSplit.usableCf / 43560;
-                      // The pond delta uses the RESPONSIVE rate-based number (pumped-adjusted); the
-                      // authority site total is a reference badge. Null when no release rate yet.
-                      const reqAcFt = credit && credit.requiredWithPumpAcFt != null ? credit.requiredWithPumpAcFt
-                        : rateReq.kind === "rate-based" ? rateReq.requiredAcFt : null;
-                      const delta = reqAcFt == null || providedAcFt == null ? null : providedAcFt - reqAcFt;
-                      const authPoint = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0;
+                      // v3 A3 — the rate-based required-vs-provided card was RELOCATED: its result now
+                      // renders as ONE row in "Outlet & storms" (Outlet sizing check · rate control),
+                      // where the outlet that answers it lives, and no longer restates the site's
+                      // volumetric detention requirement here. What stays are the runoff / rate inputs
+                      // that feed both the outlet routing and that row.
                       const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 0" };
-                      // B895 — "Enter allowable release rate" jumps to + focuses the field above,
-                      // mirroring the Yield panel's jumpToDrainField pattern.
-                      const jumpToReleaseField = () => {
-                        const el = typeof document !== "undefined" ? document.getElementById(`pond-release-field-${selEl.id}`) : null;
-                        if (el) { try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {} const inp = el.querySelector("input"); if (inp) try { inp.focus(); } catch (_) {} }
-                      };
                       return (
                         <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Required detention (screening)</div>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Sizing inputs (screening)</div>
                           <Field label="Drainage area (ac)">
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                               <NumInput allowClear style={{ ...numInput, width: 64 }} value={Math.round(da * 100) / 100} min={0} onCommit={(n) => setDet({ daAcres: n > 0 ? n : null })} />
@@ -16611,55 +16602,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               ≈ {suggested.cfs} cfs — suggested (pre-development peak) · <ActionLink onClick={() => setDet({ releaseRateCfs: suggested.cfs })}>Use this →</ActionLink>
                             </div>
                           )}
-                          <Field label="Outfall">
-                            <span style={{ display: "flex", gap: 5, width: 150 }}>
-                              <button style={{ ...chip, flex: 1, padding: "6px 0", textAlign: "center", ...(!pumped ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={() => setDet({ outfallMode: "gravity" })}>Gravity</button>
-                              <button style={{ ...chip, flex: 1, padding: "6px 0", textAlign: "center", ...(pumped ? { background: PAL.accent, color: "var(--on-accent)", borderColor: PAL.accent } : null) }} onClick={() => setDet({ outfallMode: "pumped" })}>Pumped</button>
-                            </span>
-                          </Field>
-                          {pumped && (
-                            <Field label="Pump rate">
-                              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                                <NumInput allowClear style={{ ...numInput, width: 58 }} value={pumpRaw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ pumpRateCfs: Number.isFinite(n) ? n : null })} />
-                                <select style={{ ...numInput, width: 58 }} value={pumpUnit} onChange={(e) => setDet({ pumpRateUnit: e.target.value })}>
-                                  <option value="cfs">cfs</option>
-                                  <option value="gpm">gpm</option>
-                                </select>
-                              </span>
-                            </Field>
-                          )}
-                          <div style={{ marginTop: 7, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
-                            {pondRow(cardSplit.deadCf > 0 ? "Provided (this pond, usable)" : "Provided (this pond)", providedAcFt == null ? "unknown — re-check" : `${f2(providedAcFt)} ac-ft`,
-                              providedAcFt == null ? null : { code: "plan" })}
-                            {cardSplit.deadCf > 0 && (
-                              <div style={{ ...smallNote, color: PAL.warn }}>
-                                {f2(cardSplit.deadCf / 43560)} ac-ft below the {cardSplit.mode === "anchored" ? "flood WSE / permanent pool" : "estimated permanent pool (Regime B)"} earns no detention credit.
-                              </div>
-                            )}
-                            {rateReq.kind === "rate-based"
-                              ? pondRow(`Required · ${storm}-yr rate-based`, `${f2(rateReq.requiredAcFt)} ac-ft`, { code: "code", basis: "Modified Rational method, run at this design storm's allowable release rate." })
-                              : (
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, margin: "2px 0" }}>
-                                  <span style={{ ...smallNote, color: "var(--warn-text)" }}>Enter an allowable release rate to screen the required volume.</span>
-                                  <ActionLink onClick={jumpToReleaseField}>Enter rate →</ActionLink>
-                                </div>
-                              )}
-                            {pumped && credit && credit.creditedAcFt != null && (
-                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.info, marginTop: 2 }}><span>− pumped credit</span><span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(credit.creditedAcFt)} ac-ft</span></div>
-                            )}
-                            {delta != null && (
-                              <>
-                                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 700, color: delta >= 0 ? PAL.success : PAL.danger }}>
-                                  <span>{delta >= 0 ? "Surplus" : "Shortfall"}</span>
-                                  <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{delta >= 0 ? "+" : "−"}{f2(Math.abs(delta))} ac-ft</span>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                          {rateReq.kind === "rate-based" && <div style={smallNote}>{rateReq.basis}{rateReq.flags.includes("idf-secondary-source") ? " · Atlas-14 pending primary verification" : ""}</div>}
-                          {authPoint && <div style={smallNote}>Authority (site total): {f2(detReq.requiredAcFt)} ac-ft — {ruleBadge(detReq.rule, detReq.rateAcFtPerAc)}. The site rollup lives in Yield.</div>}
-                          {pumped && credit && <div style={{ ...smallNote, color: PAL.warn }}>{credit.assumption}</div>}
                         </div>
                       );
                     })()}
@@ -17071,6 +17013,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           ) : (
                             <div style={{ ...smallNote, color: PAL.warn }}>Can't route yet: {routed.reason || "missing inputs"}.</div>
                           )}
+                          {/* v3 A3 — the rate-control storage question, as ONE row where it belongs
+                              (next to the outlet that answers it), NOT conflated with the site's
+                              volumetric detention requirement in Sizing. The ⓘ spells out that the
+                              two are different questions and both must hold. */}
+                          {(() => {
+                            const rcStorm = det.designStorm || 100;
+                            const rcReq = computeRateBasedDetention({ acres: da, impPct: imp, allowableReleaseCfs: relCap, returnPeriodYr: rcStorm });
+                            const rcVal = rcReq.kind === "rate-based" ? rcReq.requiredAcFt : null;
+                            const bandAcFt = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt
+                              : detReq && detReq.kind === "band" && Array.isArray(detReq.bandAcFt) ? detReq.bandAcFt[1] : null;
+                            const rcTitle = `Storage needed to throttle the ${rcStorm}-yr release to the allowable rate. This is a different question from the site's volumetric detention requirement (${bandAcFt != null ? f1(bandAcFt) : "—"} ac-ft): both must hold.`;
+                            return (
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 8, paddingTop: 7, borderTop: `1px solid ${PAL.panelLine}` }}>
+                                <span style={{ fontSize: 11.5, color: PAL.muted, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                  Outlet sizing check (rate control)
+                                  <RowInfo label="Outlet sizing check (rate control)" sections={[{ text: rcTitle }]} />
+                                </span>
+                                <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS, color: PAL.ink, whiteSpace: "nowrap" }}>{rcVal != null ? `${f1(rcVal)} ac-ft` : "—"}</span>
+                              </div>
+                            );
+                          })()}
                           {/* FINAL UI SPEC A1.6 — the assumption sentences (pre-development runoff
                               coefficient, criteria, screening reservoir-routing caveat, time of
                               concentration) collapse into ONE Basis ⓘ; the actionable NRCS
@@ -18464,6 +18427,31 @@ function StatusChip({ label, tone }) {
   );
 }
 
+// v3 A1 — the inline "Assumptions & method (N)" disclosure inside a drainage verdict group.
+// A real, self-contained <button> that carries aria-expanded and flips its chevron, so a
+// screen reader announces the open/closed state and the header reliably toggles by mouse
+// AND keyboard (a native <button> activates on Enter and Space for free — no custom key
+// handler, which would double-fire against the synthetic click). Opening renders the
+// relocated method rows as its own children. The live post-ship audit found the prior
+// inline header didn't reliably open; rebuilding it as this dedicated control fixes that
+// and makes the state programmatically inspectable. Module scope (MODULE-SCOPE-COMPONENTS).
+function InlineDisclosure({ open, onToggle, label, count, children, Y }) {
+  return (
+    <div style={{ marginTop: 4 }}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        data-testid="assumptions-method-toggle"
+        style={{ background: "transparent", border: "none", padding: "2px 0", cursor: "pointer", fontFamily: "inherit", fontSize: 10, color: Y.rowLabel, fontWeight: 700, letterSpacing: "0.04em" }}
+      >
+        {open ? "▾" : "▸"} {label} ({count})
+      </button>
+      {open && <div data-testid="assumptions-method-body" style={{ marginTop: 1 }}>{children}</div>}
+    </div>
+  );
+}
+
 // B862 — the shared required-vs-provided bullet bar (screen renderer). It walks the SAME
 // primitive list (yieldBar.js bulletBarMarks / stackedBarMarks) that the PDF export walks,
 // so the on-screen bar and the printed bar can never drift (PDF-PARITY). Inline SVG; fills go
@@ -18924,13 +18912,15 @@ function YieldPanel({
                   {open && <div style={{ padding: "1px 0 3px 10px", borderLeft: `2px solid ${Y.hairline}` }}>
                     {inlineKids}
                     {methodKids.length > 0 && (
-                      <div style={{ marginTop: 4 }}>
-                        <button type="button" onClick={() => setDrainMethodOpen((s2) => ({ ...s2, [gKey]: !s2[gKey] }))}
-                          style={{ background: "transparent", border: "none", padding: "2px 0", cursor: "pointer", fontFamily: "inherit", fontSize: 10, color: Y.rowLabel, fontWeight: 700, letterSpacing: "0.04em" }}>
-                          {methodShown ? "▾" : "▸"} Assumptions &amp; method ({methodKids.length})
-                        </button>
-                        {methodShown && <div style={{ marginTop: 1 }}>{methodKids}</div>}
-                      </div>
+                      <InlineDisclosure
+                        open={methodShown}
+                        onToggle={() => setDrainMethodOpen((s2) => ({ ...s2, [gKey]: !s2[gKey] }))}
+                        label="Assumptions & method"
+                        count={methodKids.length}
+                        Y={Y}
+                      >
+                        {methodKids}
+                      </InlineDisclosure>
                     )}
                   </div>}
                 </div>
@@ -19826,13 +19816,15 @@ function YieldPanel({
             // moving BOTH verdicts toward met. Put where the shortfall is diagnosed, so
             // the cure sits next to the problem statement.
             const detShort = detChip === "SHORT", mitShort = mitChip === "SHORT";
+            // v3 A2 — the tooltip must never promise the drawn outline "grows". Two honest
+            // states: with a pond drawn, Optimize solves its elevations/outlet and leaves the
+            // outline untouched; with no pond, it draws a right-sized one and solves its outlet.
+            const hasPond = !!(d.ponds && d.ponds.length > 0);
             const designAction = (detShort || mitShort) && d.onDesignPond ? (
               <button type="button" onClick={d.onDesignPond}
-                title={detShort && mitShort
-                  ? "Draws (or grows) ONE pond sized for both the required detention AND the required floodplain mitigation, and solves its outlet — one click, no map skill required."
-                  : detShort
-                  ? "Draws (or grows) a right-sized detention pond and solves its outlet — one click, no map skill required."
-                  : "Creates (or grows) a pond in the mapped floodplain sized for the required compensating storage — one click, no map skill required."}
+                title={hasPond
+                  ? "One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed."
+                  : "One click: draws a right-sized pond and solves its outlet."}
                 style={{ width: "100%", padding: "8px 10px", border: "none", borderRadius: 8, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
                 ⚡ Optimize pond
               </button>
