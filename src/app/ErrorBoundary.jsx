@@ -74,7 +74,7 @@ export default class ErrorBoundary extends Component {
           <div style={S.wrap}>
             <div style={S.card}>
               <p style={S.title}>Planyr is finishing a deploy</p>
-              <p style={S.body}>A new version is still rolling out, so {String(label).toLowerCase()} couldn't load yet. Give it a minute, then try again — your work is saved.</p>
+              <p style={S.body}>A new version is still rolling out, so {String(label).toLowerCase()} couldn't load yet. Give it a minute, then try again. Your work is saved.</p>
               <pre style={S.msg}>{String((error && error.message) || error)}</pre>
               <div style={S.row}>
                 <button style={S.btn} onClick={() => { clearReloadGuard(); reloadFresh(); }}>Try again</button>

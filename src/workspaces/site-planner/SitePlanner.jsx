@@ -122,7 +122,7 @@ import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, fr
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
-import { rankLedgerMoves } from "./lib/ledgerBalancer.js";
+import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
 import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
@@ -130,6 +130,7 @@ import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt } from "./lib/yieldVerdicts.j
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote } from "./lib/pondChangeSummary.js";
+import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached, styleFor } from "./lib/vectorLayers.js";
 import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./lib/overlayVectorSvg.js";
@@ -7866,6 +7867,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return list;
   })();
   const pondBermFillCf = pondBerms.reduce((s, b) => s + b.volCf, 0);
+  // v3 C4 — site-wide berm-ring land area (the annular embankment footprint OUTSIDE the water),
+  // for the LAND USE Pond legend title "{water} ac water + {ring} ac berm ring".
+  const pondBermRingSf = pondBerms.reduce((s, b) => s + (b.landTakeSf || 0), 0);
   const pondBermFloodCf = pondBerms.reduce((s, b) => s + b.floodCf, 0) * (wedgeMitRule && isFinite(wedgeMitRule.ratio) ? wedgeMitRule.ratio : 1);
   const pondBermFloodCount = pondBerms.filter((b) => b.floodCf > 0).length;
   // NEW-6 — the below-WSE berm cells join the mitigation fill-depth heat map (engine-truth:
@@ -8729,8 +8733,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       });
     };
 
+    // C2 — the berm-height ceiling the elevation solve may use: the pond's own "Max berm"
+    // setting when the user set one, else the Standards default. When the solve hits it and a
+    // gap remains, the proposal says so (raising Max berm is one honest way to close it).
+    const maxBermFt = Number.isFinite(baseEl.det?.maxBermFt) && baseEl.det.maxBermFt > 0 ? baseEl.det.maxBermFt : BERM_MAX_RAISE_FT;
+
     let finalEl = { ...baseEl, det: { ...baseEl.det, role: roleForJob } };
-    let detMsg = "", detGapNote = null, detInfeasible = false;
+    let detMsg = "", detGapNote = null, detApplied = false;
 
     // ---- Detention: elevation-only (raise-tob, floor held) is the ONLY lever that ever
     //      earns credit above a flood WSE — a wider submerged basin is still 100%
@@ -8742,88 +8751,94 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     //      doesn't know about. ----
     if (detTargetCf > 0) {
       const pass1 = floodAffected
-        ? sizePondForTargets({ ring: ringOf(finalEl), det: effDetProbe, wseFt: splitProbe.wseFt, wseProvider: splitProbe.wseSrc, inTrigger: splitProbe.inTrigger, gradeFt, detTargetCf, mitTargetCf: 0, mitRatio })
-        : { ok: true, actions: (() => { const r = solveTobRaise({ ring: ringOf(finalEl), det: effDetProbe, wseFt: null, targetCf: detTargetCf }); return r.hFt > 0 ? [{ kind: "raise-tob", hFt: r.hFt, addCf: r.addCf, partial: r.ok === false }] : []; })() };
+        ? sizePondForTargets({ ring: ringOf(finalEl), det: effDetProbe, wseFt: splitProbe.wseFt, wseProvider: splitProbe.wseSrc, inTrigger: splitProbe.inTrigger, gradeFt, detTargetCf, mitTargetCf: 0, mitRatio, maxRaiseFt: maxBermFt })
+        : { ok: true, actions: (() => { const r = solveTobRaise({ ring: ringOf(finalEl), det: effDetProbe, wseFt: null, targetCf: detTargetCf, maxRaiseFt: maxBermFt }); return r.hFt > 0 ? [{ kind: "raise-tob", hFt: r.hFt, addCf: r.addCf, partial: r.ok === false }] : []; })() };
       if (!pass1.ok) {
-        detInfeasible = true; detMsg = `detention couldn't be sized: ${pass1.reason}`;
+        detMsg = `detention couldn't be sized: ${pass1.reason}`;
       } else {
         const raiseA = pass1.actions.find((a) => a.kind === "raise-tob");
         if (!raiseA) {
-          detMsg = `already covers the required ${f2(detTargetCf / 43560)} ac-ft of detention`;
-        } else if (!raiseA.partial) {
-          // Elevation-only fully closes it — apply. raise-tob only ever touches
-          // det.tobElev/depth/tobBerm (applyPondSizingActions), never the ring.
-          finalEl = applyPondSizingActions({ ...finalEl, det: effDetProbe }, pass1.actions);
-          detMsg = `raised the rim above the flood level and sized for the required ${f2(detTargetCf / 43560)} ac-ft of detention`;
-        } else if (isNew) {
-          // Creation-time exemption ONLY — nothing is user-owned yet, so this one act
-          // may still grow the footprint as a last resort (never again after this click).
-          finalEl = applyPondSizingActions({ ...finalEl, det: effDetProbe }, pass1.actions);
-          const grownCandidateEl = (N) => {
-            if (finalEl.points) { const g = N > 0 ? expandPolygon(ringOf(finalEl), N) : ringOf(finalEl); return !g || polySelfIntersects(g) ? null : { ...finalEl, points: g }; }
-            return { ...finalEl, w: finalEl.w + 2 * N, h: finalEl.h + 2 * N };
-          };
-          const grownVolumeAt = (N) => { const cand = grownCandidateEl(N); if (!cand) return null; const sp = pondSplitFor(cand); return sp.usableCf == null ? null : { vol: sp.usableCf }; };
-          const growS = solvePondExpansion({ requiredCf: detTargetCf, volumeAt: grownVolumeAt });
-          finalEl = grownCandidateEl(growS.ok ? growS.expandFt : 0) || finalEl;
-          detMsg = growS.ok
-            ? `raised the rim to its safe limit and grew the footprint to reach the required ${f2(detTargetCf / 43560)} ac-ft of detention`
-            : `raised the rim and grew the footprint as far as this site allows but is still short of the required ${f2(detTargetCf / 43560)} ac-ft of detention — talk to your engineer about a second pond or regional detention`;
+          detMsg = `already covers the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`;
         } else {
-          // Existing pond, elevation-only can't close it on THIS footprint — STOP. No
-          // expansion, no partial apply: either the fixed footprint's elevation solve
-          // fully meets the target, or nothing about this pond changes.
-          detInfeasible = true;
-          const achievedCf = (floodAffected ? (pass1.bands ? pass1.bands.usableCf : 0) : (splitProbe.usableCf ?? 0)) + raiseA.addCf;
-          const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: achievedCf, avgDepthFt });
-          detGapNote = gapProposalNote({ bermFt: raiseA.hFt, extraAcres: extraEst?.footprintAc ?? null });
+          // C1 — ALWAYS apply the rim/berm the elevation solve reaches (full OR partial). The
+          // footprint is UNTOUCHED (raise-tob writes only tobElev/depth/tobBerm), and a single
+          // Ctrl+Z reverts (place() pushes one history frame). This replaces the old atomic
+          // no-apply, which reported a berm the pond never received (owner-verified bug).
+          finalEl = applyPondSizingActions({ ...finalEl, det: effDetProbe }, pass1.actions);
+          detApplied = true;
+          if (!raiseA.partial) {
+            detMsg = `raised the rim above the flood level and sized for the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`;
+          } else if (isNew) {
+            // Creation-time exemption ONLY — nothing is user-owned yet, so this one act may
+            // still grow the footprint as a last resort (never again after this click).
+            const grownCandidateEl = (N) => {
+              if (finalEl.points) { const g = N > 0 ? expandPolygon(ringOf(finalEl), N) : ringOf(finalEl); return !g || polySelfIntersects(g) ? null : { ...finalEl, points: g }; }
+              return { ...finalEl, w: finalEl.w + 2 * N, h: finalEl.h + 2 * N };
+            };
+            const grownVolumeAt = (N) => { const cand = grownCandidateEl(N); if (!cand) return null; const sp = pondSplitFor(cand); return sp.usableCf == null ? null : { vol: sp.usableCf }; };
+            const growS = solvePondExpansion({ requiredCf: detTargetCf, volumeAt: grownVolumeAt });
+            finalEl = grownCandidateEl(growS.ok ? growS.expandFt : 0) || finalEl;
+            detMsg = growS.ok
+              ? `raised the rim to its safe limit and grew the footprint to reach the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`
+              : `raised the rim and grew the footprint as far as this site allows but is still short of the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`;
+          } else {
+            // C1 — existing pond: the elevation solve hit the Max berm ceiling and a gap
+            // remains. The berm IS applied and the footprint stays as drawn; name the gap so
+            // the persistent card + toast are honest about what's still owed (C5, A5 shape).
+            const achievedCf = (floodAffected ? (pass1.bands ? pass1.bands.usableCf : 0) : (splitProbe.usableCf ?? 0)) + raiseA.addCf;
+            const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: achievedCf, avgDepthFt });
+            detGapNote = gapProposalNote({ bermFt: raiseA.hFt, extraAcres: extraEst?.footprintAc ?? null, capBound: true });
+            detMsg = `raised the rim to a ${f1(raiseA.hFt)}-ft berm`;
+          }
         }
       }
     }
 
-    // ---- Mitigation: RE-SOLVED against the pond as it actually is now (post-detention —
-    //      or, if detention was infeasible and not applied, against the unchanged pond,
-    //      since nothing was applied there either). deepen/pinch-off (floor only) is
-    //      elevation-only and footprint-safe; "grow"/"grow-infeasible" is the same signal
-    //      as detention's partial raise — infeasible on THIS footprint, never applied. ----
-    let mitMsg = "", mitGapNote = null, mitInfeasible = false;
+    // ---- Mitigation: RE-SOLVED against the pond as it actually is now (post-detention). The
+    //      floor work (deepen) is elevation-only and footprint-safe and IS applied; a "grow"
+    //      remedy needs a bigger FOOTPRINT (immutable), so it becomes a gap proposal only. ----
+    let mitMsg = "", mitGapNote = null, mitApplied = false;
     if (needsMit) {
       const effDet2 = detWithAuto(finalEl.det);
       const splitNow = pondSplitFor(finalEl);
-      const pass2 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet2, wseFt: splitNow.wseFt ?? splitProbe.wseFt, wseProvider: splitNow.wseSrc ?? splitProbe.wseSrc, inTrigger: splitNow.inTrigger ?? splitProbe.inTrigger, gradeFt, detTargetCf: 0, mitTargetCf, mitRatio });
+      const pass2 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet2, wseFt: splitNow.wseFt ?? splitProbe.wseFt, wseProvider: splitNow.wseSrc ?? splitProbe.wseSrc, inTrigger: splitNow.inTrigger ?? splitProbe.inTrigger, gradeFt, detTargetCf: 0, mitTargetCf, mitRatio, maxRaiseFt: maxBermFt });
       if (!pass2.ok) {
-        mitInfeasible = true; mitMsg = `mitigation couldn't be sized automatically: ${pass2.reason}`;
+        mitMsg = `mitigation couldn't be sized automatically: ${pass2.reason}`;
       } else if (pass2.mitigation.covered && !pass2.actions.some((a) => a.kind === "deepen" || a.kind === "grow")) {
-        mitMsg = `already covers the required ${f2(mitTargetCf / 43560)} ac-ft of mitigation`;
+        mitMsg = `already covers the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`;
       } else {
         const needsGrow = pass2.actions.some((a) => a.kind === "grow" || a.kind === "grow-infeasible");
         if (!needsGrow) {
           finalEl = applyPondSizingActions(finalEl, pass2.actions);
-          mitMsg = `sized toward the required ${f2(mitTargetCf / 43560)} ac-ft of mitigation`;
+          mitApplied = true;
+          mitMsg = `sized toward the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`;
         } else if (isNew) {
           finalEl = applyPondSizingActions(finalEl, pass2.actions);
+          mitApplied = true;
           mitMsg = pass2.actions.some((a) => a.kind === "grow-infeasible")
-            ? `deepened and grown as far as this footprint allows but still short of the required ${f2(mitTargetCf / 43560)} ac-ft of mitigation — enlarge it further by hand or add a second basin`
-            : `sized toward the required ${f2(mitTargetCf / 43560)} ac-ft of mitigation`;
+            ? `deepened and grown as far as this footprint allows but still short of the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`
+            : `sized toward the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`;
         } else {
-          mitInfeasible = true;
+          // C1 — existing pond: apply any elevation-only floor work the solve included; a grow
+          // (footprint) is never applied. Name the footprint gap.
+          const elevActions = pass2.actions.filter((a) => a.kind === "deepen");
+          if (elevActions.length) { finalEl = applyPondSizingActions(finalEl, elevActions); mitApplied = true; mitMsg = `deepened toward the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`; }
           const growA = pass2.actions.find((a) => a.kind === "grow");
-          // v3 A5 — the mitigation cap is a floor, not a berm, so no berm clause; name the
-          // extra footprint (screening) or a second basin.
           mitGapNote = gapProposalNote({ bermFt: null, extraAcres: growA?.addAcres ?? null });
         }
       }
     }
 
-    if (!isNew && (detInfeasible || mitInfeasible)) {
-      // ATOMIC: the footprint (and everything else about this pond) stays exactly as
-      // drawn. finalEl is a LOCAL variable only — place() was never called, so nothing
-      // reaches React state. The card shows what was TRIED (finalEl, unapplied) next to
-      // what it would take to actually close the gap.
-      const gapMsgs = [detGapNote, mitGapNote].filter(Boolean).join(" ");
-      finishSummary(finalEl, true, gapMsgs);
+    const gapMsgs = [detGapNote, mitGapNote].filter(Boolean).join(" ");
+
+    if (!isNew && !detApplied && !mitApplied) {
+      // Nothing could be applied without changing the footprint (immutable) — a mitigation
+      // grow, or a solve that found no usable elevation remedy. Show what it would take; apply
+      // nothing. finalEl never reached React state (place() below is skipped by the return).
+      const stuck = gapMsgs || [detMsg, mitMsg].filter(Boolean).join("; ");
+      finishSummary(finalEl, true, gapMsgs || stuck);
       revealPondInspector(baseEl.id, "assistant");
-      flashWarn(`This pond's footprint stays exactly as you drew it. ${gapMsgs}`, 12000);
+      flashWarn(`This pond's footprint stays exactly as you drew it. ${stuck}`, 12000);
       return;
     }
 
@@ -8840,9 +8855,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
     place(finalEl);
     revealPondInspector(finalEl.id, "assistant");
-    finishSummary(finalEl, false, null);
+    // C1 — the change is APPLIED; pass any remaining gap so the persistent card shows both what
+    // changed AND (C5) what it would still take to close it.
+    finishSummary(finalEl, false, gapMsgs || null);
     const parts = [detMsg, mitMsg].filter(Boolean).join("; ");
-    flashWarn(`${isNew ? "Placed a pond — " : "This pond was "}${parts}.${outletMsg}${overlapMsg}`, 9500);
+    flashWarn(`${isNew ? "Placed a pond — " : "This pond was "}${parts}.${outletMsg}${overlapMsg}${gapMsgs ? ` ${gapMsgs}` : ""}`, 9500);
   };
   // (B789: drainChannelRelevant now computed up with the drainage inputs — it county-gates
   // the stored channel override too, not just this control's visibility.)
@@ -12935,6 +12952,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             siteSqft={siteSqft} bldg={bldg} cov={cov} stalls={stalls} ratio={ratio}
             providedDetCf={providedDetCf} pondCount={pondCount}
             trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
+            pondBermRingSf={pondBermRingSf}
             bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
             inactiveCount={parcels.filter((p) => p.active === false).length}
             easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
@@ -13744,6 +13762,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <pattern id="pat-encumber" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="8" stroke="#7c3aed" strokeWidth="1" opacity="0.55" />
               </pattern>
+              {/* v3 C4 — the pond's earthen berm ring: a warm-earth body at ~45% opacity + a 45°
+                  hatch in a darker tone, so the embankment around a bermed pond reads as raised
+                  ground distinct from the water it holds. */}
+              <pattern id="pat-berm" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <rect width="7" height="7" fill="#b08d57" opacity="0.45" />
+                <line x1="0" y1="0" x2="0" y2="7" stroke="#7a5f36" strokeWidth="1.1" opacity="0.6" />
+              </pattern>
               {/* colour-blind-safe secondary cues for the paved surfaces (H2): trailer
                   reads as a coarse diagonal (opposite lean to landscape), sidewalk as a
                   fine concrete-scoring dot grid. */}
@@ -13961,6 +13986,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onContextMenu={(e) => onParcelContext(e, pc.id)} />
                 </g>;
               })}
+              {/* v3 C4 — pond berm rings: the earthen embankment around a bermed pond (rim above
+                  grade), drawn UNDER the elements as an annulus (outer toe ring minus the water
+                  ring, even-odd) so the pond water sits cleanly in its hole. Warm-earth hatch +
+                  darker outline + a "berm {h} ft" tag. Only ponds whose berm is actually
+                  materialized (real fill above grade) appear here. pointer-inert. */}
+              {pondBermById.size > 0 && (
+                <g data-testid="pond-berm-ring-layer" pointerEvents="none">
+                  {els.filter((e) => e.type === "pond").map((e) => {
+                    const berm = pondBermById.get(e.id);
+                    if (!berm || !berm.toeRing || !(berm.hFt > 0)) return null;
+                    const water = ringOf(e);
+                    if (!water || water.length < 3) return null;
+                    const ringPath = (r) => r.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(" ") + " Z";
+                    const annulus = `${ringPath(berm.toeRing)} ${ringPath(water)}`;
+                    // Tag anchored at the toe ring's top edge (min-y point).
+                    const toePx = berm.toeRing.map((p) => f2p(p));
+                    const top = toePx.reduce((a, b) => (b.y < a.y ? b : a), toePx[0]);
+                    return (
+                      <g key={e.id}>
+                        <path d={annulus} fillRule="evenodd" fill="url(#pat-berm)" stroke="#7a5f36" strokeWidth={strokeZoom(1.5, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.9} />
+                        <path d={ringPath(water)} fill="none" stroke="#7a5f36" strokeWidth={strokeZoom(1, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.6} />
+                        {view.ppf > 0.16 && (
+                          <text x={top.x} y={top.y - 4} textAnchor="middle" style={{ fontSize: 11, fontWeight: 700, fill: "#5c4626", paintOrder: "stroke", stroke: "#f4ecdd", strokeWidth: 3, strokeLinejoin: "round" }}>
+                            berm {(Math.round(berm.hFt * 10) / 10).toFixed(1)} ft
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
@@ -15650,8 +15706,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
           {/* selected element */}
+          {/* v3 B7.3 — a pond passes NO Section title (bare, always-open card): the panel-chrome
+              row above already reads "ELEMENT · DETENTION POND" and carries the collapse chevron, so
+              a repeated "DETENTION POND" section header was a double title. The title string
+              "DETENTION POND" now appears exactly once (in the chrome). Other element types keep
+              their "Selected · {label}" section header. */}
           {!multiStyleable && selEl && (
-            <Section title={selEl.type === "pond" ? TYPE[selEl.type].label : `Selected · ${TYPE[selEl.type].label}`}>
+            <Section title={selEl.type === "pond" ? false : `Selected · ${TYPE[selEl.type].label}`}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
                   inspector (Footprint reshape controls, dock zones, structure, column grid), routed through
                   the isBuilding branch below whose Footprint group handles the polygon case. A hand-CLICK-
@@ -16406,7 +16467,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // stage count. Route the same way the expanded group does (same pure helper, no solver
                 // change) so the summary reads "N stages · all storms PASS" / "N stages · M FAIL"; a
                 // non-routable outlet (no TOB anchor) stays "N stages".
-                const g_outletFails = (() => {
+                // One routed pass feeds BOTH the outlet-fail count and the C3 FFE-proximity
+                // screen (the routed peak water-surface elevation) — same pure helper, no solver
+                // change. Null when the pond has no routable outlet / no TOB anchor.
+                const g_routed = (() => {
                   if (g_outletStages === 0) return null;
                   const effDetO = detWithAuto(selEl.det);
                   if (!(effDetO.tobElev != null && Number.isFinite(effDetO.tobElev))) return null;
@@ -16416,9 +16480,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const tcO = computeTimeOfConcentration({ areaAcres: daO, impPct: impO, criteria: critO });
                   const twO = g_split && g_split.wseFt != null ? g_split.wseFt : null;
                   const routedO = assessRoutedDetention({ ring, det: effDetO, outlet: det.outlet, criteria: critO, areaAcres: daO, impPct: impO, tailwaterElevFt: twO, tcMin: tcO?.tcMin });
-                  return routedO.kind === "routed" ? routedO.perStorm.filter((s) => s.status !== "pass").length : null;
+                  return routedO.kind === "routed" ? routedO : null;
                 })();
+                const g_outletFails = g_routed ? g_routed.perStorm.filter((s) => s.status !== "pass").length : null;
                 const g_outletSummary = pondGroupSummary.outlet({ hasOutlet: g_outletStages > 0, stages: g_outletStages, fails: g_outletFails });
+                // v3 C3 — screening guards (warnings only): a rim above grade → gravity-inflow
+                // (inlets-through-the-berm) chip; if the routed peak water climbs to within 1 ft of
+                // the lowest building's finished floor, name that building. Pure decision layer; the
+                // peak WSE is the worst routed max across the modeled storms (null if not routable).
+                const g_peakWseFt = g_routed
+                  ? g_routed.perStorm.reduce((mx, s) => (Number.isFinite(s.maxElevFt) && (mx == null || s.maxElevFt > mx) ? s.maxElevFt : mx), null)
+                  : null;
+                const g_bldgNums = buildingNumbers(els);
+                const g_dockDropFt = Number.isFinite(fmSettings.dockDropFt) ? fmSettings.dockDropFt : 4;
+                const g_ffeBuildings = els
+                  .filter((e) => e.type === "building")
+                  .map((e) => ({ label: String(g_bldgNums.get(e.id) ?? ""), ffeFt: effectivePadElev(e, { padFfeFt: fmElev.padElevFt, dockDropFt: g_dockDropFt }) }))
+                  .filter((b) => b.label && Number.isFinite(b.ffeFt));
+                const g_guards = pondScreeningGuards({ rimVsGradeFt: g_rimVsGrade, peakWseFt: g_peakWseFt, buildings: g_ffeBuildings });
+                const g_guardRow = g_guards.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "2px 0 2px" }}>
+                    {g_guards.map((c) => <Chip key={c.id} tone={c.tone} text={c.text} popover={c.popover} />)}
+                  </div>
+                );
                 const g_floodSummary = pondGroupSummary.flood({ wse: g_split.mode === "anchored" && g_split.wseFt != null ? f1(g_split.wseFt) : null, estimated: g_facts.floodEstimated });
                 return (
                   <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
@@ -16454,6 +16538,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     )}
                     {g_atAGlance}
                     {g_chipRow}
+                    {g_guardRow}
                     <Collapse sectionId="pond-sizing" title="Sizing & criteria" defaultOpen={false} summary={g_sizingSummary}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Detention storage</div>
                     {depthSolve && depthSolve.ok && Math.abs(depthSolve.depthFt - depth) > 0.05 && (
@@ -16481,6 +16566,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         {det.slope != null
                           ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear: back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.slope.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.slope.source}</span>}
+                      </span>
+                    </Field>
+                    {/* v3 C2 — the Max berm ceiling the Optimize solver may use (YOU when set, else the
+                        Standards default). When the solve hits it and a gap remains, the what-changed
+                        card says raising this is one way to close it. */}
+                    <Field label="Max berm (ft)">
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }} title="How high the rim may rise above existing grade. Higher berms hold more but need regrading checks for gravity inflow.">
+                        <NumInput allowClear style={numInput} value={det.maxBermFt ?? ""} placeholder={`~${f1(BERM_MAX_RAISE_FT)}`} min={0} onCommit={(n) => setDet({ maxBermFt: Number.isFinite(n) && n > 0 ? n : null })} />
+                        {det.maxBermFt != null
+                          ? <span title="Your input" style={{ flex: "none", display: "inline-block", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", lineHeight: 1.5, borderRadius: 4, padding: "1.5px 5px", whiteSpace: "nowrap", color: PAL.muted, border: `1px solid ${PAL.border}`, cursor: "help" }}>YOU</span>
+                          : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }}>· Standards</span>}
                       </span>
                     </Field>
                     {/* Stage contours on the plan — depth rings inside the basin. Default ON
@@ -18888,7 +18984,9 @@ function DesignChangeSummaryCard({ summary, onDismiss, onUndo }) {
         </div>
         <button type="button" onClick={onDismiss} title="Dismiss" style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "var(--text-tertiary)", padding: 0, lineHeight: 1 }}>×</button>
       </div>
-      {summary.infeasible && summary.proposal && (
+      {/* C1 — the proposal shows whether the click applied nothing (infeasible) OR applied the
+          rim/berm but a gap remains; in the applied case it reads as the next step to close it. */}
+      {summary.proposal && (
         <div style={{ fontSize: 11.5, color: "var(--text-primary)", lineHeight: 1.5, margin: "6px 0 2px" }}>{summary.proposal}</div>
       )}
       {rows.length > 0 && (
@@ -18921,6 +19019,7 @@ function YieldPanel({
   projectName, conceptName, // v3 A1 — the header subtitle "{project} · {concept}"
   buildingCount, // v3 A6 — the BUILDINGS closed summary "{n} · {sf} sf"
   siteSqft, bldg, cov, stalls, ratio, trailers, impPct, pondArea, detPct, open,
+  pondBermRingSf, // v3 C4 — site-wide berm-ring land area (ac source), for the LAND USE Pond legend title
   providedDetCf, pondCount, // B719: site-wide provided detention VOLUME (cf) + pond count — the same accumulator the drainage screen uses
   bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
   drainage, // B630–B632: required-vs-provided detention + tier + regime (null until a site exists)
@@ -20389,7 +20488,7 @@ function YieldPanel({
               const segs = [
                 { key: "building", label: "Buildings", ac: bldg / SQFT_PER_ACRE, pct: buildingPct, fill: "#eda100", title: `${f0(bldg)} sf` },
                 { key: "open", label: "Open space", ac: open / SQFT_PER_ACRE, pct: openPct, fill: "#008300", title: `${f0(open)} sf` },
-                { key: "pond", label: "Pond", ac: pondArea / SQFT_PER_ACRE, pct: detentionPct, fill: "#2a78d6", title: `${f0(pondArea)} sf water footprint` },
+                { key: "pond", label: "Pond", ac: pondArea / SQFT_PER_ACRE, pct: detentionPct, fill: "#2a78d6", title: pondBermRingSf > 0 ? `${f2(pondArea / SQFT_PER_ACRE)} ac water + ${f2(pondBermRingSf / SQFT_PER_ACRE)} ac berm ring` : `${f0(pondArea)} sf water footprint` },
                 { key: "paving", label: "Paving", ac: pavingSf / SQFT_PER_ACRE, pct: pavingPct, fill: "#eb6834", title: `${f0(pavingSf)} sf` },
               ];
               return (

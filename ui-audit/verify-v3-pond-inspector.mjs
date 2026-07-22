@@ -63,6 +63,17 @@ log(await page.locator('[data-testid="property-panel"]').count() > 0, "pond sele
 log(/DETENTION POND/.test(txt), "header reads DETENTION POND");
 log(/ac water area/.test(txt), "subtitle reads '{ac} ac water area'");
 log(!/Selected · Detention Pond/i.test(txt), "the word 'Selected ·' is gone from the pond header");
+// v3 B7.3 — the title "DETENTION POND" must appear EXACTLY ONCE in the property panel: the
+// chrome row ("ELEMENT · DETENTION POND") names it and carries the collapse chevron; the inner
+// Section must NOT repeat it as a second header directly beneath.
+{
+  const panelUpper = await page.evaluate(() => {
+    const p = document.querySelector('[data-testid="property-panel"]');
+    return p ? (p.innerText || "") : "";
+  });
+  const hits = (panelUpper.match(/DETENTION POND/g) || []).length;
+  log(hits === 1, `the title 'DETENTION POND' appears exactly once (no double header) — found ${hits}`);
+}
 // B3 Dimensions rows
 for (const label of ["Water area", "Land take", "Total depth", "Rim", "Holds", "Purpose"]) {
   log(new RegExp(label).test(txt), `Dimensions row: ${label}`);
