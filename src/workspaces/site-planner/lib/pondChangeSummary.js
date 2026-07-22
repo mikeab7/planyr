@@ -79,9 +79,11 @@ export function buildChangeSummaryRows({
       const providedNow = siteDetProvidedOtherAcFt + afterAcFt;
       note = providedNow >= siteDetReqAcFt - 0.005
         ? "requirement met"
-        : `site still short by ${f2(Math.max(0, siteDetReqAcFt - providedNow))} ac-ft`;
+        : `site still short by ${f1(Math.max(0, siteDetReqAcFt - providedNow))} ac-ft`;
     }
-    rows.push({ key: "usable", label: "Usable detention", from: `${f2(beforeAcFt)} ac-ft`, to: `${f2(afterAcFt)} ac-ft`, note });
+    // E4 (owner 2026-07-22) — ac-ft render at 1dp everywhere, matching the pond/yield cards;
+    // the 2dp form ("16.97") disagreed with the status card's 1dp ("17.0") for the same number.
+    rows.push({ key: "usable", label: "Usable detention", from: `${f1(beforeAcFt)} ac-ft`, to: `${f1(afterAcFt)} ac-ft`, note });
   }
 
   if (changed(before.mitCandidateCf, after.mitCandidateCf, EPS_CF)) {
@@ -91,9 +93,9 @@ export function buildChangeSummaryRows({
       const providedNow = siteMitProvidedOtherAcFt + afterAcFt;
       note = providedNow >= siteMitReqAcFt - 0.005
         ? "requirement met"
-        : `site still short by ${f2(Math.max(0, siteMitReqAcFt - providedNow))} ac-ft`;
+        : `site still short by ${f1(Math.max(0, siteMitReqAcFt - providedNow))} ac-ft`;
     }
-    rows.push({ key: "mit", label: "Mitigation credit", from: `${f2(beforeAcFt)} ac-ft`, to: `${f2(afterAcFt)} ac-ft`, note });
+    rows.push({ key: "mit", label: "Mitigation credit", from: `${f1(beforeAcFt)} ac-ft`, to: `${f1(afterAcFt)} ac-ft`, note });
   }
 
   if (changed(before.landTakeSf, after.landTakeSf, EPS_SF)) {
