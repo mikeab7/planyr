@@ -3,8 +3,9 @@
  * Drives the REAL SVG canvas LOGGED OUT against a seeded-blank site (no account, no GIS), so the
  * wiring is exercised end-to-end, not just the pure geometry (which test/roadGeometry.test.js
  * covers). Reads outcomes from the persisted site model in localStorage.
- *   • NEW-1: with Snap on, a new road whose FINAL point lands on an existing matching road's
- *            endpoint MERGES into one polyline (the two roads collapse to one).
+ *   • NEW-1 (Snap-independent per the B949 amendment): a new road whose FINAL point lands on an
+ *            existing matching road's endpoint MERGES into one polyline; a tee inserts a vertex;
+ *            Alt bypasses. These specs run with Snap OFF to prove the connect isn't Snap-gated.
  *   • NEW-2: assigning a class whose minimum the road violates AUTO-ROUNDS the tight corner —
  *            the stored per-vertex arc radius grows to meet the class minimum. */
 import { test, expect } from "@playwright/test";
@@ -32,7 +33,7 @@ async function pickRoadPreset(page) {
 }
 
 test.describe("NEW-1 — snap-and-connect road endpoints", () => {
-  // B947 amendment: the endpoint/tee connect is NOT gated on the global Snap toggle — these specs
+  // B949 amendment: the endpoint/tee connect is NOT gated on the global Snap toggle — these specs
   // run with Snap OFF (its default; never pressing "s") and still connect. Alt is the only bypass.
   test("a new road ending on a matching road's endpoint merges into one (Snap OFF)", async ({ page }) => {
     await startBlank(page);

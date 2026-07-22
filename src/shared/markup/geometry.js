@@ -12,6 +12,19 @@
 
 export const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
+/* NEW-1 — callout / text-box border corner radius: a small, ZOOM-INVARIANT proportion of the box's
+ * shorter side. The bug it fixes: a FIXED-pixel radius (rx=4) rounded a zoomed-OUT, small box into a
+ * bubble/pill while a zoomed-IN, large box read as a crisp rectangle — the shape changed with zoom.
+ * A box scales uniformly with zoom, so a radius that is a constant fraction of the box gives the SAME
+ * shape at every zoom. The fraction is LOW so it reads as a near-rectangle (owner preference), and is
+ * capped at this fraction of the shorter side, so it can never approach the half-side that makes a
+ * pill. Shared by the Site Planner canvas (px box) and the Document Review MarkupRenderer (scaled box)
+ * so the two stay consistent. Pure. */
+export const CALLOUT_CORNER_FRAC = 0.06;
+export function calloutCornerRadius(w, h) {
+  return Math.max(0, Math.min(w, h)) * CALLOUT_CORNER_FRAC;
+}
+
 /** Total length of a polyline; `closed` adds the wrap-around edge (perimeter loop). */
 export function pathLength(pts, closed) {
   if (!pts || pts.length < 2) return 0;
