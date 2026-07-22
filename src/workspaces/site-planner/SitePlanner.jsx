@@ -2933,7 +2933,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!wrapRef.current) return;
     const ro = new ResizeObserver((ents) => {
       const r = ents[0].contentRect;
-      setSize({ w: Math.max(320, r.width), h: Math.max(360, r.height), rawW: r.width });
+      const w = Math.max(320, r.width), h = Math.max(360, r.height);
+      // Bail when unchanged — the B962 layout effect often syncs the same width one frame earlier
+      // (on a panel toggle), so an identical RO callback would otherwise force a redundant re-render.
+      setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
     });
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
@@ -3221,6 +3224,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    const r = el.getBoundingClientRect();
+    // B962 — weld the SVG viewBox to the canvas's REAL width in the SAME pre-paint frame as the
+    // panel reflow. `size` is otherwise fed ONLY by the ResizeObserver, which reports the new width
+    // one frame LATER; for that frame the old (wider) viewBox renders into the freshly-narrowed
+    // element, so the whole drawing squishes sideways — the "screen flash" the owner sees when a
+    // left-rail panel (Yield, Parcel, …) opens or switches. Measuring here (a LAYOUT effect, before
+    // paint) and setting `size` synchronously lands the correct viewBox in the SAME commit as the
+    // offX pan-compensation below, so the drawing neither squishes nor jumps. Same clamp as the
+    // ResizeObserver; the functional bail keeps steady-state re-runs a no-op (VIEWPORT-STABLE (a):
+    // measure the real edge, fold the delta in the same frame — the panel-open twin of the B837 pan).
+    const w = Math.max(320, r.width), h = Math.max(360, r.height);
+    setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
     const left = Math.round(el.offsetLeft);
     if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
     const delta = left - panelShiftRef.current;
