@@ -260,6 +260,274 @@ export function canRemoveRoadVertex(pts, index) {
   return Array.isArray(pts) && pts.length > 2 && index > 0 && index < pts.length - 1;
 }
 
+/* ---- Snap-and-connect road endpoints (NEW-1) -----------------------------------------
+ * A dragged road ENDPOINT (or a new road's final point) that lands near another road's
+ * endpoint magnetically welds to it on release, forming a clean junction. Pure geometry:
+ * the React layer supplies the screen-pixel tolerance, the Snap-toggle/Alt gating, and the
+ * highlight; this module owns the candidate search and the pts/vtx surgery so the merge /
+ * weld / tee decision is unit-tested, never buried in the component.
+ *
+ * Three outcomes (planRoadConnect):
+ *   • merge — an unambiguous end-to-end meet of two MATCHING roads (same class + travel width
+ *             + curb) → concatenate into ONE polyline; the join point becomes an interior
+ *             vertex seeded with the class-default arc treatment (a real corner NEW-2 can round).
+ *   • weld  — endpoints of DIFFERING roads meet (or the two ends of the SAME road close a loop)
+ *             → both roads keep their identity, sharing the exact join coordinate.
+ *   • tee   — an endpoint lands on another road's INTERIOR (a T/Y) → weld onto the nearest
+ *             centerline point and insert a control vertex there on the through road (B718 engine).
+ */
+
+// Nearest point on segment a→b to point p (clamped to the segment). Pure, module-local.
+function nearestOnSeg(p, a, b) {
+  const d = sub(b, a);
+  const L2 = dot(d, d) || 1;
+  let t = dot(sub(p, a), d) / L2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + d.x * t, y: a.y + d.y * t };
+}
+
+/* Two roads can MERGE into one polyline iff they share a road class and match on travel width
+ * and curb (within `tol` ft). Differing roads stay separate (welded at the shared node). */
+export function roadsMergeCompatible(a, b, tol = 0.5) {
+  if (!a || !b) return false;
+  if ((a.roadClass || "") !== (b.roadClass || "")) return false;
+  if (Math.abs((+a.travelW || 0) - (+b.travelW || 0)) > tol) return false;
+  if (Math.abs((+a.curb || 0) - (+b.curb || 0)) > tol) return false;
+  return true;
+}
+
+/* Find the nearest connectable target for a moving endpoint at `movePt`.
+ *   roads   — candidate roads [{ id, pts }] (centerline roads only; the caller excludes
+ *             dock-bonded rect roads, which have no `pts`). MAY include the moving road itself
+ *             (for closing a loop) — `exclude` skips only the moving vertex.
+ *   exclude — { id, index } of the moving vertex (never a candidate → "never snap to itself").
+ *   opts.tolFt        — world tolerance (ft). The caller sets it = min(screen-px budget, world Snap cap).
+ *   opts.allowInterior — also consider a T/Y onto another road's centerline (endpoint→interior).
+ * Returns the nearest hit within tolerance, endpoints preferred on ties (an interior projection
+ * that coincides with an endpoint defers to the endpoint case), or null. */
+export function findRoadConnect(movePt, exclude, roads, opts = {}) {
+  if (!movePt || !Number.isFinite(movePt.x) || !Number.isFinite(movePt.y)) return null;
+  const tolFt = opts.tolFt > 0 ? opts.tolFt : 10;
+  const list = Array.isArray(roads) ? roads : [];
+  let best = null;
+  // Endpoint candidates (both ends of every road), skipping the moving vertex itself.
+  for (const r of list) {
+    if (!r || !Array.isArray(r.pts) || r.pts.length < 2) continue;
+    const last = r.pts.length - 1;
+    for (const idx of last === 0 ? [0] : [0, last]) {
+      if (exclude && r.id === exclude.id && idx === exclude.index) continue;
+      const p = r.pts[idx];
+      const d = Math.hypot(p.x - movePt.x, p.y - movePt.y);
+      if (d <= tolFt && (!best || d < best.dist)) best = { roadId: r.id, kind: "endpoint", index: idx, pt: { x: p.x, y: p.y }, dist: d };
+    }
+  }
+  // Interior (T/Y) candidates — only on OTHER roads, and only when strictly closer than any
+  // endpoint hit (so a near-endpoint press connects end-to-end, not as a tee beside it).
+  if (opts.allowInterior) {
+    for (const r of list) {
+      if (!r || !Array.isArray(r.pts) || r.pts.length < 2) continue;
+      if (exclude && r.id === exclude.id) continue;          // never tee onto self
+      const last = r.pts.length - 1;
+      for (let i = 0; i < last; i++) {
+        const q = nearestOnSeg(movePt, r.pts[i], r.pts[i + 1]);
+        const d = Math.hypot(q.x - movePt.x, q.y - movePt.y);
+        if (d > tolFt || (best && d >= best.dist - 1e-6)) continue;
+        // Defer to the endpoint pass when the projection lands within tolerance of either end —
+        // near a road's end you want a clean end-to-end join, not a tee just inside it. A tee
+        // registers only when the endpoint is solidly mid-road (> tolFt from both ends).
+        const nearEnd = Math.hypot(q.x - r.pts[0].x, q.y - r.pts[0].y) <= tolFt ||
+                        Math.hypot(q.x - r.pts[last].x, q.y - r.pts[last].y) <= tolFt;
+        if (!nearEnd) best = { roadId: r.id, kind: "interior", index: i, pt: { x: q.x, y: q.y }, dist: d };
+      }
+    }
+  }
+  return best;
+}
+
+/* Concatenate road A (its shared endpoint at `aIndex` ∈ {0,last}) with road B (shared endpoint
+ * `bIndex` ∈ {0,last}) into ONE alignment that keeps A's identity. The shared point becomes a
+ * single INTERIOR vertex seeded with `joinRadius` (class-default arc). Returns { pts, vtx,
+ * joinIndex } or null when either endpoint index is not an actual endpoint. */
+export function concatRoads(aPts, aVtx, aIndex, bPts, bVtx, bIndex, joinRadius) {
+  if (!Array.isArray(aPts) || !Array.isArray(bPts) || aPts.length < 2 || bPts.length < 2) return null;
+  const aLast = aPts.length - 1, bLast = bPts.length - 1;
+  if (aIndex !== 0 && aIndex !== aLast) return null;
+  if (bIndex !== 0 && bIndex !== bLast) return null;
+  let ap = aPts.map((p) => ({ x: p.x, y: p.y })), av = normVtx(aPts, aVtx);
+  if (aIndex === 0) { ap.reverse(); av.reverse(); }          // orient A so the shared point is LAST
+  let bp = bPts.map((p) => ({ x: p.x, y: p.y })), bv = normVtx(bPts, bVtx);
+  if (bIndex === bLast) { bp.reverse(); bv.reverse(); }      // orient B so the shared point is FIRST
+  const joinIndex = ap.length - 1;
+  const pts = ap.concat(bp.slice(1));
+  const vtx = av.concat(bv.slice(1)).map((v) => ({ ...(v || {}) }));
+  vtx[joinIndex] = { treatment: "arc", radius: joinRadius > 0 ? joinRadius : DEFAULT_ARC_RADIUS };
+  return { pts, vtx, joinIndex };
+}
+
+/* Decide + build the connect action for a moving road endpoint welding onto `candidate`.
+ *   movingEl / targetEl — { pts, vtx, id, roadClass, travelW, curb }.
+ *   movingIndex         — the moving endpoint (0 or last) being welded.
+ *   candidate           — a findRoadConnect() hit ({ roadId, kind, index, pt }).
+ *   joinRadius          — the merged road's class-default arc radius (merge only).
+ * Returns one of:
+ *   { action:"merge", moving:{pts,vtx}, deleteTarget:true }        — target absorbed into moving
+ *   { action:"weld",  moving:{pts,vtx} }                           — endpoints share a coord; both kept
+ *   { action:"tee",   moving:{pts,vtx}, target:{pts,vtx} }         — endpoint onto interior; vertex inserted
+ * or null when the inputs are unusable. Callers own the id bookkeeping (delete/patch). */
+export function planRoadConnect(movingEl, movingIndex, targetEl, candidate, joinRadius) {
+  if (!movingEl || !Array.isArray(movingEl.pts) || !candidate) return null;
+  const mPts = movingEl.pts, mLast = mPts.length - 1;
+  if (movingIndex !== 0 && movingIndex !== mLast) return null;
+  const weldPt = candidate.pt;
+  const weldMoving = () => ({
+    pts: mPts.map((p, i) => (i === movingIndex ? { x: weldPt.x, y: weldPt.y } : { x: p.x, y: p.y })),
+    vtx: normVtx(mPts, movingEl.vtx),
+  });
+  if (candidate.kind === "interior") {
+    if (!targetEl || !Array.isArray(targetEl.pts)) return null;
+    const ins = insertRoadVertex(targetEl.pts, targetEl.vtx, candidate.index, weldPt);
+    if (!ins) return { action: "weld", moving: weldMoving() };   // out-of-range → fall back to a plain weld
+    return { action: "tee", moving: weldMoving(), target: { pts: ins.pts, vtx: ins.vtx } };
+  }
+  // Endpoint candidate: merge two MATCHING, DIFFERENT roads end-to-end; else weld (incl. loop close).
+  const sameRoad = targetEl && candidate.roadId === movingEl.id;
+  if (!sameRoad && targetEl && roadsMergeCompatible(movingEl, targetEl)) {
+    const merged = concatRoads(mPts, movingEl.vtx, movingIndex, targetEl.pts, targetEl.vtx, candidate.index, joinRadius);
+    if (merged) return { action: "merge", moving: { pts: merged.pts, vtx: merged.vtx }, deleteTarget: true, joinIndex: merged.joinIndex };
+  }
+  return { action: "weld", moving: weldMoving() };
+}
+
+/* ---- Auto-fix sub-minimum road radius (NEW-2) ----------------------------------------
+ * Upgrade the B602 min-radius CHECK from warn-only to a corrective ACTION. Adjusts the road's
+ * per-vertex arc treatments — and, where a corner is pinched, a small bounded vertex nudge — so
+ * the rendered centerline meets the class minimum, matching B602's own measurement
+ * (`minRadiusOfCurvature(roadCenterline(pts,vtx))`). Radius/treatment stay per-vertex parametric
+ * and editable; a later vertex drag re-solves. Tiers, greedy from the tightest corner outward:
+ *   1  run-up room       → set an Arc at the feasible target radius (class default, clamped down
+ *                          toward the floor only as the adjacent segments allow).
+ *   3  pinched corner    → a small BOUNDED nudge of the vertex toward the A–C chord opens the
+ *                          deflection until the min radius fits (a run of adjacent tight corners is
+ *                          handled by nudging its members greedily — no separate spline pass).
+ *   4  truly impossible  → fixed endpoints too close for any min-radius arc; left as a LOCATED
+ *                          residual ({ index, reason }) for a specific, placed warning — never a blanket flag.
+ * Sharp corners read as ∞ (a hard corner is not a "sub-min radius" in this model — matches B602
+ * not flagging hard corners) so a deliberate sharp corner is left alone. Truck off-tracking /
+ * swept-path widening is explicitly out of scope for v1. External-element collision on a tier-3
+ * nudge is not checked here (the nudge is bounded small + kept from self-folding); the caller
+ * decides whether to surface that.
+ * Returns { pts, vtx, fixed:[idx…], residual:[{index,reason,achievable}…], changed }. */
+export function fixRoadRadii(pts, vtx, threshold, opts = {}) {
+  const clean = (pts || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+  const N = clean.length;
+  const passthrough = { pts: (pts || []).map((p) => ({ x: p.x, y: p.y })), vtx: normVtx(pts || [], vtx), fixed: [], residual: [], changed: false };
+  if (N < 3 || !(threshold > 0)) return passthrough;
+  const target = opts.targetRadius > 0 ? opts.targetRadius : threshold;
+  const tessDeg = opts.tessDeg > 0 ? opts.tessDeg : DEFAULT_TESS_DEG;
+  const allowNudge = opts.allowNudge !== false;
+  const work = clean.map((p) => ({ x: p.x, y: p.y }));
+  const wvtx = normVtx(clean, vtx);
+  const fixed = new Set();
+  const residual = [];
+
+  // The radius corner i currently contributes, measured the way B602 does (the rendered local
+  // triple). Sharp corners → ∞ (deliberate hard corners are not "sub-min radius" here).
+  const cornerR = (i) => {
+    if (treatmentAt(wvtx, i) === "sharp") return Infinity;
+    const local = roadCenterline([work[i - 1], work[i], work[i + 1]], [{}, wvtx[i], {}], { defaultRadius: target, tessDeg });
+    return minRadiusOfCurvature(local);
+  };
+  // Max feasible arc radius at i given the current adjacent SPARSE segments + deflection.
+  const feasR = (i) => {
+    const A = work[i - 1], P = work[i], C = work[i + 1];
+    const vA = sub(A, P), vC = sub(C, P);
+    const lA = len(vA), lC = len(vC);
+    if (lA < EPS || lC < EPS) return Infinity;
+    const cosPhi = Math.max(-1, Math.min(1, dot(mul(vA, 1 / lA), mul(vC, 1 / lC))));
+    const theta = Math.PI - Math.acos(cosPhi);
+    if (theta < 1e-4) return Infinity;                     // ~straight → no corner
+    return (0.5 * Math.min(lA, lC)) / Math.tan(theta / 2);
+  };
+  // Foot of the perpendicular from P onto the infinite line A→C (the nudge target direction).
+  const perpFoot = (P, A, C) => {
+    const d = sub(C, A), L2 = dot(d, d) || 1;
+    const t = dot(sub(P, A), d) / L2;
+    return add(A, mul(d, t));
+  };
+
+  // Tier 1 — set every violating arc/smooth corner to an arc at the feasible target radius.
+  // Point positions are untouched here, so the corners are independent.
+  for (let i = 1; i < N - 1; i++) {
+    if (cornerR(i) >= threshold - 1e-6) continue;          // already fine, or a sharp corner → leave
+    const maxR = feasR(i);
+    wvtx[i] = { treatment: "arc", radius: Math.min(target, maxR) };
+    if (maxR >= threshold - 1e-6) fixed.add(i);
+  }
+
+  // Tier 3 — bounded vertex nudge for corners the arc alone can't reach (segments too short).
+  if (allowNudge) {
+    let guard = 0;
+    while (guard++ < N * 3) {
+      let worst = -1, worstR = Infinity;
+      for (let i = 1; i < N - 1; i++) {
+        if (fixed.has(i) || residual.some((r) => r.index === i)) continue;
+        if (feasR(i) >= threshold - 1e-6) continue;         // arc alone suffices (handled in tier 1)
+        const r = cornerR(i);
+        if (r < worstR) { worstR = r; worst = i; }
+      }
+      if (worst < 0) break;
+      const i = worst, A = work[i - 1], P = work[i], C = work[i + 1];
+      const foot = perpFoot(P, A, C);
+      const toFoot = sub(foot, P), dFoot = len(toFoot);
+      const cap = Math.min(
+        opts.maxNudgeFt > 0 ? opts.maxNudgeFt : Infinity,
+        0.9 * dFoot,                                        // stop short of the chord (never fold/cross it)
+      );
+      if (!(cap > EPS)) { residual.push({ index: i, reason: "segments too short", achievable: feasR(i) }); continue; }
+      const dir = mul(toFoot, 1 / (dFoot || 1));
+      let applied = 0;
+      for (let s = 1; s <= 12; s++) {
+        const dcand = (cap * s) / 12;
+        const saved = work[i];
+        work[i] = add(P, mul(dir, dcand));
+        const ok = feasR(i) >= threshold - 1e-6;
+        work[i] = saved;
+        if (ok) { applied = dcand; break; }
+      }
+      if (applied > 0) {
+        work[i] = add(P, mul(dir, applied));
+        wvtx[i] = { treatment: "arc", radius: Math.min(target, feasR(i)) };
+        fixed.add(i);
+      } else {
+        wvtx[i] = { treatment: "arc", radius: Math.min(target, feasR(i)) }; // best-effort widest arc
+        residual.push({ index: i, reason: "segments too short", achievable: feasR(i) });
+      }
+    }
+  } else {
+    for (let i = 1; i < N - 1; i++) {
+      if (fixed.has(i)) continue;
+      if (feasR(i) < threshold - 1e-6 && cornerR(i) < threshold - 1e-6) residual.push({ index: i, reason: "segments too short", achievable: feasR(i) });
+    }
+  }
+
+  // Final verification against the real rendered centerline (a neighbour's nudge can re-tighten a
+  // corner tier 1 thought fixed): demote any still-violating "fixed" corner to a located residual.
+  for (const i of [...fixed]) {
+    if (cornerR(i) < threshold - 1e-6) {
+      fixed.delete(i);
+      if (!residual.some((r) => r.index === i)) residual.push({ index: i, reason: "segments too short", achievable: feasR(i) });
+    }
+  }
+
+  return {
+    pts: work,
+    vtx: wvtx,
+    fixed: [...fixed].sort((a, b) => a - b),
+    residual: residual.sort((a, b) => a.index - b.index),
+    changed: fixed.size > 0 || residual.length > 0,
+  };
+}
+
 /* Curb / border stroke width in PIXELS for a true real-world curb of `curbFt` feet at the
  * current `ppf` (pixels-per-foot), floored to `minPx` so it stays visible when the true
  * width goes sub-pixel at overview zoom. NO ceiling — a 6" curb SHOULD read thicker as you
