@@ -121,7 +121,7 @@ import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
-import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL } from "./lib/pondLedger.js";
+import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayName, pondDisplayNameFor } from "./lib/pondLedger.js";
 import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
 import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
@@ -129,8 +129,9 @@ import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, sto
 import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt } from "./lib/yieldVerdicts.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
-import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote } from "./lib/pondChangeSummary.js";
+import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
+import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached, styleFor } from "./lib/vectorLayers.js";
 import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./lib/overlayVectorSvg.js";
@@ -2991,7 +2992,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!wrapRef.current) return;
     const ro = new ResizeObserver((ents) => {
       const r = ents[0].contentRect;
-      setSize({ w: Math.max(320, r.width), h: Math.max(360, r.height), rawW: r.width });
+      const w = Math.max(320, r.width), h = Math.max(360, r.height);
+      // Bail when unchanged — the B962 layout effect often syncs the same width one frame earlier
+      // (on a panel toggle), so an identical RO callback would otherwise force a redundant re-render.
+      setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
     });
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
@@ -3281,6 +3285,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    const r = el.getBoundingClientRect();
+    // B962 — weld the SVG viewBox to the canvas's REAL width in the SAME pre-paint frame as the
+    // panel reflow. `size` is otherwise fed ONLY by the ResizeObserver, which reports the new width
+    // one frame LATER; for that frame the old (wider) viewBox renders into the freshly-narrowed
+    // element, so the whole drawing squishes sideways — the "screen flash" the owner sees when a
+    // left-rail panel (Yield, Parcel, …) opens or switches. Measuring here (a LAYOUT effect, before
+    // paint) and setting `size` synchronously lands the correct viewBox in the SAME commit as the
+    // offX pan-compensation below, so the drawing neither squishes nor jumps. Same clamp as the
+    // ResizeObserver; the functional bail keeps steady-state re-runs a no-op (VIEWPORT-STABLE (a):
+    // measure the real edge, fold the delta in the same frame — the panel-open twin of the B837 pan).
+    const w = Math.max(320, r.width), h = Math.max(360, r.height);
+    setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
     const left = Math.round(el.offsetLeft);
     if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
     const delta = left - panelShiftRef.current;
@@ -7782,13 +7798,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pondSplitFor = (e) => {
     const det = detWithAuto(e.det);
     const pring = ringOf(e);
+    // D1 — the INWARD berm model: a rim above existing grade shrinks the effective top-of-bank to
+    // the crest ring, so storage recomputes on the inward-tapering solid. gradeFt is the pond's
+    // existing grade; null (no terrain data) leaves the classic drawn-ring model in place.
+    const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
     const estPoolFor = () => (detRegime && detRegime.regime === "B"
       ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: det.depth ?? 8, freeboardFt: det.freeboard ?? 1 })
       : null);
     if (fmZones.length) {
       const facts = pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, bfeSrc: fmElev.bfeSrc, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt, derivedWse1pctFt: fmElev.derivedWse1pctFt, derivedWse1pctSrc: fmElev.derivedWse1pctSrc }, fmZonesSig);
       const estPool = estPoolFor();
-      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool }), wseFt: facts.wseFt, wseSrc: facts.wseSrc ?? null, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true };
+      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool, gradeFt }), wseFt: facts.wseFt, wseSrc: facts.wseSrc ?? null, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true };
     }
     // NEW-9 — a restored view replays the facts the check persisted for this pond, so
     // the usable/dead split (and the verdict built on it) survives a reload unchanged.
@@ -7796,7 +7816,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (rf) {
       const estPool = Number.isFinite(rf.estPoolDepthFt) ? rf.estPoolDepthFt : estPoolFor(); // check-time measurement wins
       const wseFt = Number.isFinite(rf.wseFt) ? rf.wseFt : null;
-      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool }), wseFt, wseSrc: rf.wseSrc ?? null, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true };
+      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool, gradeFt }), wseFt, wseSrc: rf.wseSrc ?? null, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true };
     }
     // NEW-9 — restored, flood evidence exists, but NO persisted fact for this pond (a
     // legacy snapshot saved before this fix, or a pond drawn after the check): the
@@ -7805,12 +7825,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const floodEvidence = drainIsRestored
       && ((drainDetSplitRec ? drainDetSplitRec.screened !== false : false) || (drainCtxData?.flood?.zones?.length > 0));
     if (floodEvidence) {
-      return { mode: "unknown", usableCf: null, deadCf: null, grossCf: usablePondVolume(pring, det, {}).grossCf, bands: null, wseFt: null, inTrigger: false, estPoolDepthFt: null, factsKnown: false };
+      return { mode: "unknown", usableCf: null, deadCf: null, grossCf: usablePondVolume(pring, det, { gradeFt }).grossCf, bands: null, wseFt: null, inTrigger: false, estPoolDepthFt: null, factsKnown: false };
     }
     // No flood evidence at all (an upland site, or no check yet) — the existing
     // estimate/gross precedence is legitimate here.
     const estPool = estPoolFor();
-    return { ...usablePondVolume(pring, det, { wseFt: null, estimatePoolDepthFt: estPool }), wseFt: null, inTrigger: false, estPoolDepthFt: estPool, factsKnown: true };
+    return { ...usablePondVolume(pring, det, { wseFt: null, estimatePoolDepthFt: estPool, gradeFt }), wseFt: null, inTrigger: false, estPoolDepthFt: estPool, factsKnown: true };
   };
   // NEW-9 — the site fold moved to the pure accumulator (lib/pondLedger.js) so the
   // "unknown facts poison the usable total" honesty rule is unit-testable. Entries are
@@ -7927,9 +7947,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return list;
   })();
   const pondBermFillCf = pondBerms.reduce((s, b) => s + b.volCf, 0);
-  // v3 C4 — site-wide berm-ring land area (the annular embankment footprint OUTSIDE the water),
-  // for the LAND USE Pond legend title "{water} ac water + {ring} ac berm ring".
-  const pondBermRingSf = pondBerms.reduce((s, b) => s + (b.landTakeSf || 0), 0);
+  // v3 D2 — site-wide berm-ring land area for the LAND USE Pond legend title, computed on the
+  // INWARD model: the earthen ring sits INSIDE each drawn footprint (between the outline and the
+  // inset crest), so water + berm ring sum to the fixed footprint — the ring never adds land.
+  const pondBermRingSf = els.reduce((s, e) => {
+    if (e.type !== "pond") return s;
+    const det = detWithAuto(e.det);
+    const ring = ringOf(e);
+    if (!ring || ring.length < 3 || !Number.isFinite(fmElev.existGradeFt) || !Number.isFinite(det.tobElev) || !(det.tobElev > fmElev.existGradeFt + 0.02)) return s;
+    return s + inwardBermSplit(ring, det.tobElev - fmElev.existGradeFt, { extSlope: EXT_BERM_SLOPE }).bermRingSf;
+  }, 0);
   const pondBermFloodCf = pondBerms.reduce((s, b) => s + b.floodCf, 0) * (wedgeMitRule && isFinite(wedgeMitRule.ratio) ? wedgeMitRule.ratio : 1);
   const pondBermFloodCount = pondBerms.filter((b) => b.floodCf > 0).length;
   // NEW-6 — the below-WSE berm cells join the mitigation fill-depth heat map (engine-truth:
@@ -8765,13 +8792,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     //      that note upgrades to when it's actually selected — good enough for a summary
     //      readout, and this never touches or replaces that existing per-cell math. ----
     const bermLandTake = (d, ring) => {
+      // D2 — land take is the FIXED drawn footprint: the inward berm builds inside the outline and
+      // never adds land outside it, so raising the rim never grows the land take.
+      const landTakeSf = ringsArea([ring]);
       const bermH = gradeFt != null ? bermAsFillHeight(d, gradeFt) : null;
-      const critRule = pondCriteria[floodJurKey] || pondCriteria.generic;
-      const maintW = critRule && critRule.maintBermWidthFt > 0 ? critRule.maintBermWidthFt : 0;
-      const toeReach = bermH ? bermH * gsApronRatio : 0;
-      const reach = Math.max(maintW, toeReach);
-      const bermRing = reach > 0 ? (offsetOutward(ring, reach)[0] || null) : null;
-      const landTakeSf = bermRing ? ringsArea([bermRing]) : ringsArea([ring]);
       const bermFillCf = bermH ? (bermFillVolume(ring, bermH, gsApronRatio) || 0) : 0;
       return { landTakeSf, bermFillCf };
     };
@@ -8803,10 +8827,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       });
     };
 
-    // C2 — the berm-height ceiling the elevation solve may use: the pond's own "Max berm"
-    // setting when the user set one, else the Standards default. When the solve hits it and a
-    // gap remains, the proposal says so (raising Max berm is one honest way to close it).
-    const maxBermFt = Number.isFinite(baseEl.det?.maxBermFt) && baseEl.det.maxBermFt > 0 ? baseEl.det.maxBermFt : BERM_MAX_RAISE_FT;
+    // D5 — the berm-height cap is COMPUTED, never user-set. Two constraints; the smaller binds:
+    //   (a) DRAINAGE cap — runoff must still reach the pond by gravity, so the design water surface
+    //       can't rise above the lowest grade that drains in (minus the inflow head allowance).
+    //       Needs real per-point terrain (fmGradeAt); without it the drainage cap is unknown.
+    //   (b) GEOMETRIC ceiling (D1) — where the inward berm faces pinch the footprint closed.
+    const bermFbFt = Number.isFinite(effDetProbe.freeboard) ? effDetProbe.freeboard : 1;
+    const geomCapFt = geometricMaxBermFt(ringOf(baseEl), EXT_BERM_SLOPE);
+    const controllingInflowElevFt = (() => {
+      if (typeof fmGradeAt !== "function") return null; // no per-point terrain → drainage cap unknown
+      let lo = Infinity;
+      for (const p of ringOf(baseEl)) { const g = fmGradeAt(p); if (Number.isFinite(g)) lo = Math.min(lo, g); }
+      return Number.isFinite(lo) ? lo : null;
+    })();
+    const drainCapFt = drainageBermCapFt({ controllingInflowElevFt, gradeAtPondFt: gradeFt, freeboardFt: bermFbFt });
+    const { capFt: bermCapFt, binding: bermBinding } = bindingBermCap({ drainageCapFt: drainCapFt, geometricCapFt: geomCapFt });
+    // Without a grade there's no berm-above-grade to cap, and the inward model is inactive, so fall
+    // back to the conservative screening clamp rather than the raw geometric ceiling.
+    const maxRaiseFt = gradeFt == null ? BERM_MAX_RAISE_FT : (Number.isFinite(bermCapFt) ? bermCapFt : BERM_MAX_RAISE_FT);
+    const bermDesignWaterFt = controllingInflowElevFt != null ? controllingInflowElevFt - INFLOW_HEAD_ALLOWANCE_FT : null;
 
     let finalEl = { ...baseEl, det: { ...baseEl.det, role: roleForJob } };
     let detMsg = "", detGapNote = null, detApplied = false;
@@ -8821,8 +8860,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     //      doesn't know about. ----
     if (detTargetCf > 0) {
       const pass1 = floodAffected
-        ? sizePondForTargets({ ring: ringOf(finalEl), det: effDetProbe, wseFt: splitProbe.wseFt, wseProvider: splitProbe.wseSrc, inTrigger: splitProbe.inTrigger, gradeFt, detTargetCf, mitTargetCf: 0, mitRatio, maxRaiseFt: maxBermFt })
-        : { ok: true, actions: (() => { const r = solveTobRaise({ ring: ringOf(finalEl), det: effDetProbe, wseFt: null, targetCf: detTargetCf, maxRaiseFt: maxBermFt }); return r.hFt > 0 ? [{ kind: "raise-tob", hFt: r.hFt, addCf: r.addCf, partial: r.ok === false }] : []; })() };
+        ? sizePondForTargets({ ring: ringOf(finalEl), det: effDetProbe, wseFt: splitProbe.wseFt, wseProvider: splitProbe.wseSrc, inTrigger: splitProbe.inTrigger, gradeFt, detTargetCf, mitTargetCf: 0, mitRatio, maxRaiseFt })
+        : { ok: true, actions: (() => { const r = solveTobRaise({ ring: ringOf(finalEl), det: effDetProbe, wseFt: null, targetCf: detTargetCf, maxRaiseFt, gradeFt }); return r.hFt > 0 ? [{ kind: "raise-tob", hFt: r.hFt, addCf: r.addCf, partial: r.ok === false }] : []; })() };
       if (!pass1.ok) {
         detMsg = `detention couldn't be sized: ${pass1.reason}`;
       } else {
@@ -8852,12 +8891,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ? `raised the rim to its safe limit and grew the footprint to reach the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`
               : `raised the rim and grew the footprint as far as this site allows but is still short of the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`;
           } else {
-            // C1 — existing pond: the elevation solve hit the Max berm ceiling and a gap
-            // remains. The berm IS applied and the footprint stays as drawn; name the gap so
-            // the persistent card + toast are honest about what's still owed (C5, A5 shape).
+            // C1/D5 — existing pond: the elevation solve hit the COMPUTED berm cap and a gap
+            // remains. The berm IS applied and the footprint stays as drawn; the toast names the
+            // BINDING constraint (drainage vs geometry) in plain English so the owner knows WHY it
+            // can't berm higher and what would close the rest.
             const achievedCf = (floodAffected ? (pass1.bands ? pass1.bands.usableCf : 0) : (splitProbe.usableCf ?? 0)) + raiseA.addCf;
             const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: achievedCf, avgDepthFt });
-            detGapNote = gapProposalNote({ bermFt: raiseA.hFt, extraAcres: extraEst?.footprintAc ?? null, capBound: true });
+            detGapNote = bermCapProposalNote({
+              binding: bermBinding === "drainage" ? "drainage" : "geometry",
+              bermFt: raiseA.hFt,
+              controllingGradeFt: controllingInflowElevFt,
+              designWaterFt: bermDesignWaterFt,
+              geometricMaxFt: geomCapFt,
+              extraAcres: extraEst?.footprintAc ?? null,
+            });
             detMsg = `raised the rim to a ${f1(raiseA.hFt)}-ft berm`;
           }
         }
@@ -8871,7 +8918,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (needsMit) {
       const effDet2 = detWithAuto(finalEl.det);
       const splitNow = pondSplitFor(finalEl);
-      const pass2 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet2, wseFt: splitNow.wseFt ?? splitProbe.wseFt, wseProvider: splitNow.wseSrc ?? splitProbe.wseSrc, inTrigger: splitNow.inTrigger ?? splitProbe.inTrigger, gradeFt, detTargetCf: 0, mitTargetCf, mitRatio, maxRaiseFt: maxBermFt });
+      const pass2 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet2, wseFt: splitNow.wseFt ?? splitProbe.wseFt, wseProvider: splitNow.wseSrc ?? splitProbe.wseSrc, inTrigger: splitNow.inTrigger ?? splitProbe.inTrigger, gradeFt, detTargetCf: 0, mitTargetCf, mitRatio, maxRaiseFt });
       if (!pass2.ok) {
         mitMsg = `mitigation couldn't be sized automatically: ${pass2.reason}`;
       } else if (pass2.mitigation.covered && !pass2.actions.some((a) => a.kind === "deepen" || a.kind === "grow")) {
@@ -8948,7 +8995,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // {counts} = usable (above the flood), {holds} = gross stored; ↗ selects the pond.
     ponds: pondLedgerEntries.map((p, i) => ({
       id: p.id,
-      label: pondCount === 1 ? "Detention Pond" : (p.name || `Pond ${i + 1}`),
+      // D4 — the lone pond reads by its resolved purpose (p carries det + the elevation split);
+      // multi-pond sites keep their per-pond names.
+      label: pondCount === 1 ? pondDisplayNameFor(p.det, p) : (p.name || `Pond ${i + 1}`),
       countsAcFt: p.usableCf != null ? p.usableCf / 43560 : null,
       holdsAcFt: (p.grossCf != null ? p.grossCf : 0) / 43560,
     })),
@@ -10577,6 +10626,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // old pond — the case where the whole-pond centroid stays inside the existing basin. If
       // the change is a net shrink (or too small to seat a label on the new ground) we fall
       // back to the inline "+/−" increment so the delta still shows.
+      // D4 — the pond's on-screen NOUN follows its resolved purpose (Detention / Mitigation /
+      // Detention + Mitigation Pond), so a mitigation pond is never mislabeled "Detention Pond".
+      const pondName = pondDisplayNameFor(detWithAuto(el.det), pondSplitFor(el));
       const base = el.det?.baseline;
       if (base?.ring?.length >= 3) {
         const exA = polyArea(base.ring), addA = area - exA;
@@ -10584,12 +10636,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // Seat the EXISTING-area label over the existing basin (baseline centroid), not the
         // whole-pond centre — so it reads over the old pond and clears the "+added" label.
         fc = centroid(base.ring);
-        lines = ["Existing Detention Pond"];
+        lines = [`Existing ${pondName}`];
         if (showAreas) lines.push(`${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`);
         if (pt) pondAdd = { pt, addA };
         else if (showAreas) { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`); }
       } else {
-        lines = ["Detention Pond"];
+        lines = [pondName];
         if (showAreas) lines.push(`${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`);
         // Stage-storage line, seated on the pond with its name (rides the same LOD/collision
         // pool). Same detentionStorage() the side panel reads, so the two can never disagree.
@@ -14059,44 +14111,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onContextMenu={(e) => onParcelContext(e, pc.id)} />
                 </g>;
               })}
-              {/* v3 C4 — pond berm rings: the earthen embankment around a bermed pond (rim above
-                  grade), drawn UNDER the elements as an annulus (outer toe ring minus the water
-                  ring, even-odd) so the pond water sits cleanly in its hole. Warm-earth hatch +
-                  darker outline + a "berm {h} ft" tag. Only ponds whose berm is actually
-                  materialized (real fill above grade) appear here. pointer-inert. */}
-              {pondBermById.size > 0 && (
-                <g data-testid="pond-berm-ring-layer" pointerEvents="none">
-                  {els.filter((e) => e.type === "pond").map((e) => {
-                    const berm = pondBermById.get(e.id);
-                    if (!berm || !berm.toeRing || !(berm.hFt > 0)) return null;
-                    const water = ringOf(e);
-                    if (!water || water.length < 3) return null;
-                    const ringPath = (r) => r.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(" ") + " Z";
-                    const annulus = `${ringPath(berm.toeRing)} ${ringPath(water)}`;
-                    // Tag anchored at the toe ring's top edge (min-y point).
-                    const toePx = berm.toeRing.map((p) => f2p(p));
-                    const top = toePx.reduce((a, b) => (b.y < a.y ? b : a), toePx[0]);
-                    // E4 (owner 2026-07-22) — the label shows the SAME berm number as the "what changed"
-                    // card: the RIM ABOVE GRADE (crest minus the site's representative grade), not the
-                    // max fill height over cells (which reads higher wherever grade dips). One berm
-                    // number, everywhere. Falls back to the fill height only if grade is unknown.
-                    const bermLabelFt = Number.isFinite(fmElev.existGradeFt) && Number.isFinite(berm.crestElevFt)
-                      ? berm.crestElevFt - fmElev.existGradeFt
-                      : berm.hFt;
-                    return (
-                      <g key={e.id}>
-                        <path d={annulus} fillRule="evenodd" fill="url(#pat-berm)" stroke="#7a5f36" strokeWidth={strokeZoom(1.5, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.9} />
-                        <path d={ringPath(water)} fill="none" stroke="#7a5f36" strokeWidth={strokeZoom(1, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.6} />
-                        {view.ppf > 0.16 && bermLabelFt > 0.05 && (
-                          <text x={top.x} y={top.y - 4} textAnchor="middle" style={{ fontSize: 11, fontWeight: 700, fill: "#5c4626", paintOrder: "stroke", stroke: "#f4ecdd", strokeWidth: 3, strokeLinejoin: "round" }}>
-                            berm {(Math.round(bermLabelFt * 10) / 10).toFixed(1)} ft
-                          </text>
-                        )}
-                      </g>
-                    );
-                  })}
-                </g>
-              )}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
@@ -14108,6 +14122,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   (hiding the raw butting curbs) yet buildings paint over IT (B959/NEW-1 — connection
                   pavement can never overlap a building). */}
               {[...els].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
+              {/* v3 D3 — INWARD pond berm ring: the earthen embankment sits INSIDE the drawn outline
+                  (the fixed outer toe), between the boundary and the inset crest (where the water
+                  begins). Drawn OVER the pond (a ground surface, below the building layer) so the water
+                  shows only in the crest hole; the annulus (drawn ring minus crest ring, even-odd) is the
+                  berm. Replaces C4's outward apron. Warm-earth hatch + "berm {h} ft" tag. Needs real grade. */}
+              {Number.isFinite(fmElev.existGradeFt) && (
+                <g data-testid="pond-berm-ring-layer" pointerEvents="none">
+                  {els.filter((e) => e.type === "pond").map((e) => {
+                    const toe = ringOf(e);
+                    if (!toe || toe.length < 3) return null;
+                    const det = detWithAuto(e.det);
+                    const bermH = Number.isFinite(det.tobElev) && det.tobElev > fmElev.existGradeFt + 0.02 ? det.tobElev - fmElev.existGradeFt : 0;
+                    if (!(bermH > 0.05)) return null;
+                    const crestRings = crestRingForBerm(toe, bermH, EXT_BERM_SLOPE); // the inset water edge(s)
+                    const ringPath = (r) => r.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(" ") + " Z";
+                    // even-odd: the drawn outer toe with the crest ring(s) punched out → the berm annulus INSIDE.
+                    const annulus = [ringPath(toe), ...crestRings.map(ringPath)].join(" ");
+                    const toePx = toe.map((p) => f2p(p));
+                    const top = toePx.reduce((a, b) => (b.y < a.y ? b : a), toePx[0]);
+                    return (
+                      <g key={e.id}>
+                        <path d={annulus} fillRule="evenodd" fill="url(#pat-berm)" stroke="#7a5f36" strokeWidth={strokeZoom(1.5, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.9} />
+                        {crestRings.map((r, i) => <path key={i} d={ringPath(r)} fill="none" stroke="#7a5f36" strokeWidth={strokeZoom(1, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.6} />)}
+                        {view.ppf > 0.16 && (
+                          <text x={top.x} y={top.y + 13} textAnchor="middle" style={{ fontSize: 11, fontWeight: 700, fill: "#5c4626", paintOrder: "stroke", stroke: "#f4ecdd", strokeWidth: 3, strokeLinejoin: "round" }}>
+                            berm {(Math.round(bermH * 10) / 10).toFixed(1)} ft
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
               {/* B953/NEW-1 + B955 + B960 — clean intersection overlay: an opaque pavement patch unifies
                   each road tee (road→road), each road→parking-drive / road→truck-court junction (hiding
                   the raw butting curbs across the throat, with the curb-return fillets drawn on top), AND
@@ -15494,7 +15541,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
-              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : <>Element{(() => { const l = selEl ? (TYPE[selEl.type]?.label || "").split(" / ")[0] : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
+              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitFor(selEl)) : (TYPE[selEl.type]?.label || "").split(" / ")[0]) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
             </span>
             {/* Explicit close. The element STAYS selected — double-click it again to reopen. ✕ drops the
                 explicit-open marker (setPropsFor(null)); on DESKTOP that closes propsMatches, so the
@@ -16476,14 +16523,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // Presentation only — no value / threshold / solver change.
                 const g_split = pondSplitFor(selEl);
                 const g_critRule = pondCriteria[floodJurKey] || pondCriteria.generic;
-                const g_matBerm = pondBermById.get(selEl.id) || null;
-                const g_bermToeReach = g_matBerm && g_matBerm.maxHeightFt > 0 ? g_matBerm.maxHeightFt * gsApronRatio : 0;
-                const g_maintW = g_critRule && g_critRule.maintBermWidthFt > 0 ? g_critRule.maintBermWidthFt : 0;
-                const g_landReach = Math.max(g_maintW, g_bermToeReach);
-                const g_bermRing = g_landReach > 0 ? (offsetOutward(ring, g_landReach)[0] || null) : null;
-                const g_landTakeSf = g_bermRing ? ringsArea([g_bermRing]) : null;
-                const g_waterSf = polyArea(ring);
-                const g_holdsAcFt = r.vol / 43560;
+                // D2 — INWARD berm split: the drawn footprint is the FIXED land take; a rim above
+                // grade fills a berm ring INSIDE it, so the water surface shrinks. Water + berm ring
+                // always sum to the drawn footprint (nothing is ever computed outside it).
+                const g_gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
+                const g_bermH = g_gradeFt != null && Number.isFinite(det.tobElev) && det.tobElev > g_gradeFt + 0.02 ? det.tobElev - g_gradeFt : 0;
+                const g_inward = inwardBermSplit(ring, g_bermH, { extSlope: EXT_BERM_SLOPE });
+                const g_footprintSf = g_inward.footprintSf;      // FIXED drawn footprint = land take
+                const g_waterSf = g_bermH > 0 ? g_inward.waterSf : g_footprintSf; // shrinking water surface
+                const g_bermRingSf = g_inward.bermRingSf;        // interior berm ring (0 with no berm)
+                const g_holdsAcFt = (g_split && g_split.grossCf != null ? g_split.grossCf : r.vol) / 43560;
                 const g_roleInfo = effectivePondRole(det, g_split);
                 const g_facts = {
                   floodEstimated: g_split.mode === "anchored" && isEstimatedWseSrc(g_split.wseSrc),
@@ -16531,13 +16580,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   : POND_PURPOSE_DESCRIPTOR[det.role === "dual" ? "hybrid" : det.role] || POND_PURPOSE_DESCRIPTOR.auto;
                 const g_atAGlance = (
                   <div style={{ marginBottom: 4 }}>
+                    {/* D2 — Water area is the (shrinking) open water; Berm ring is the interior
+                        annulus; Land take is the FIXED drawn footprint (water + berm ring = footprint). */}
                     {g_glanceRow("Water area",
-                      <>{g_glanceNum(`${f2(g_waterSf / SQFT_PER_ACRE)} ac`)}{provTag("PLAN", "Measured from your drawn shape")}</>,
-                      null, `${f0(g_waterSf)} sf water footprint`)}
-                    {g_landTakeSf != null && g_glanceRow(
-                      <span style={{ display: "inline-flex", alignItems: "baseline", gap: 4 }}>Land take <span style={{ fontSize: 9.5, color: PAL.muted }}>incl. berm ring</span></span>,
-                      <>{g_glanceNum(`${f2(g_landTakeSf / SQFT_PER_ACRE)} ac`)}{provTag("EST", `Water footprint plus the ${g_bermToeReach > g_maintW + 1e-6 ? `modeled ${f1(g_matBerm.maxHeightFt)}-ft fill berm` : `${g_maintW}-ft maintenance berm`} around it. Estimated.`)}</>,
-                      null, `${f0(g_landTakeSf)} sf`)}
+                      <>{g_glanceNum(`${f2(g_waterSf / SQFT_PER_ACRE)} ac`)}{provTag(g_bermH > 0 ? "EST" : "PLAN", g_bermH > 0 ? "Open water inside the berm; it shrinks as the berm rises." : "Measured from your drawn shape")}</>,
+                      null, `${f0(g_waterSf)} sf water surface`)}
+                    {g_bermH > 0 && g_bermRingSf > 0 && g_glanceRow("Berm ring",
+                      <>{g_glanceNum(`${f2(g_bermRingSf / SQFT_PER_ACRE)} ac`)}{provTag("EST", "The earthen berm ring INSIDE the drawn outline. Grows as the berm rises; water + berm ring equal the drawn footprint.")}</>,
+                      null, `${f0(g_bermRingSf)} sf`)}
+                    {g_glanceRow("Land take",
+                      <>{g_glanceNum(`${f2(g_footprintSf / SQFT_PER_ACRE)} ac`)}{provTag("PLAN", "Your drawn footprint: the fixed outer limit of disturbance. It never changes; the berm builds inward.")}</>,
+                      null, `${f0(g_footprintSf)} sf drawn footprint`)}
                     {g_glanceRow("Total depth",
                       <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                         <NumInput allowClear style={{ ...numInput, width: 60 }} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
@@ -16615,7 +16668,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
                       <span style={{ fontSize: 11.5, color: PAL.muted, whiteSpace: "nowrap" }}>{f2(g_waterSf / SQFT_PER_ACRE)} ac water area</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
-                        <RowInfo label="Detention Pond" sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; click + on an edge to add a point; Shift-click to delete one." }]} />
+                        <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; click + on an edge to add a point; Shift-click to delete one." }]} />
                         <button style={{ ...chip, padding: "3px 8px" }} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                         <button type="button" style={{ ...chip, padding: "3px 10px", color: PAL.danger, fontWeight: 700 }} onClick={deleteSel}>Delete</button>
                       </span>
@@ -16679,17 +16732,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.slope.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.slope.source}</span>}
                       </span>
                     </Field>
-                    {/* v3 C2 — the Max berm ceiling the Optimize solver may use (YOU when set, else the
-                        Standards default). When the solve hits it and a gap remains, the what-changed
-                        card says raising this is one way to close it. */}
-                    <Field label="Max berm (ft)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }} title="How high the rim may rise above existing grade. Higher berms hold more but need regrading checks for gravity inflow.">
-                        <NumInput allowClear style={numInput} value={det.maxBermFt ?? ""} placeholder={`~${f1(BERM_MAX_RAISE_FT)}`} min={0} onCommit={(n) => setDet({ maxBermFt: Number.isFinite(n) && n > 0 ? n : null })} />
-                        {det.maxBermFt != null
-                          ? <span title="Your input" style={{ flex: "none", display: "inline-block", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", lineHeight: 1.5, borderRadius: 4, padding: "1.5px 5px", whiteSpace: "nowrap", color: PAL.muted, border: `1px solid ${PAL.border}`, cursor: "help" }}>YOU</span>
-                          : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }}>· Standards</span>}
-                      </span>
-                    </Field>
+                    {/* v3 D5 — the "Max berm (ft)" input was REMOVED. The berm-height cap is COMPUTED,
+                        never a user setting: the smaller of the drainage cap (runoff must still reach
+                        the pond by gravity) and the geometric ceiling (where the inward berm closes the
+                        footprint). Optimize applies up to that cap and the toast names the binding one. */}
                     {/* Stage contours on the plan — depth rings inside the basin. Default ON
                         (only `false` is ever stored to hide). Interval + top-of-bank elevation
                         only show when contours are on (progressive disclosure). */}
@@ -16754,21 +16800,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const crit = checkPondCriteria(det, critRule);
                       const dd = drawdownWarning(det);
                       const berm = bermAsFillHeight(det, fmElev.existGradeFt);
-                      // NEW-6 — the MATERIALIZED berm (per-cell fill over the 3DEP grid): its height,
-                      // crest and toe ring feed the true land take + earthwork + heat map.
+                      // D2 — INWARD berm: land take is the FIXED drawn footprint. The berm builds
+                      // INSIDE the outline (never an outward ring), so it can never overlap the layout
+                      // and there is no outward-ring overlap check to run.
+                      const landTakeSf = ringsArea([ring]);
+                      // The materialized-berm fill facts (height/crest/fill volume/below-WSE displacement)
+                      // still come from the fill-cell model for the "Bermed basin" note + mitigation.
                       const matBerm = pondBermById.get(selEl.id) || null;
-                      const bermToeReach = matBerm && matBerm.maxHeightFt > 0 ? matBerm.maxHeightFt * gsApronRatio : 0;
-                      const maintW = critRule && critRule.maintBermWidthFt > 0 ? critRule.maintBermWidthFt : 0;
-                      // Land take = the GREATER reach of the maintenance-berm shelf and the modeled
-                      // fill-berm toe (the berm footprint joins the maintenance ring in true land take).
-                      const landReach = Math.max(maintW, bermToeReach);
-                      const bermRingArr = landReach > 0 ? offsetOutward(ring, landReach) : [];
-                      const bermRing = bermRingArr[0] || null;
-                      const landTakeSf = bermRing ? ringsArea([bermRing]) : null;
-                      const landIsBerm = bermToeReach > maintW + 1e-6;
-                      const bermOverlaps = bermRing
-                        ? els.filter((e2) => e2.id !== selEl.id && ["building", "parking", "trailer"].includes(e2.type) && ringsOverlap(bermRing, ringOf(e2)))
-                        : [];
                       // B895 — WatchOutChip supplies its own ⚠ glyph, so callers no longer prefix one.
                       const warnLine = (txt, key, danger) => <WatchOutChip key={key} danger={danger}>{txt}</WatchOutChip>;
                       const noteLine = (txt, key) => (
@@ -16804,10 +16842,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       if (crit.slope) out.push(warnLine(`${crit.slope.slope}:1 interior side slopes are steeper than the ${crit.slope.maxSideSlope}:1 criteria cap (${critRule.label}).`, "crit-slope", false));
                       if (crit.freeboard) out.push(warnLine(`${f1(crit.freeboard.freeboard)}′ freeboard is under the ${f1(crit.freeboard.minFreeboardFt)}′ criteria minimum (${critRule.label}).`, "crit-fb", false));
                       if (landTakeSf != null) {
-                        // FINAL UI SPEC A1.4 — the land-take value moved to the At-a-glance table
-                        // (its berm explanation rides that row's ⓘ); the overlap / fee-in-lieu /
-                        // optimizer notes below stay.
-                        if (bermOverlaps.length) out.push(warnLine(`The ${landIsBerm ? "fill-berm toe" : "maintenance-berm"} ring overlaps ${bermOverlaps.length === 1 ? `a ${TYPE[bermOverlaps[0].type].label.toLowerCase()}` : `${bermOverlaps.length} other elements`} — the ${landIsBerm ? "berm footprint" : "criteria shelf"} runs into your layout.`, "berm-overlap", false));
+                        // FINAL UI SPEC A1.4 — the land-take value lives in the At-a-glance table.
+                        // D2 — the inward berm never overlaps the layout, so the old outward-ring
+                        // overlap watch-out is gone; fee-in-lieu / optimizer notes below stay.
                         // NEW-C2 (Phase C) — if the jurisdiction has a regional-detention / fee-in-lieu
                         // program, show the deal trade: paying in lieu of this on-site pond recovers its
                         // land-take back to buildable ground.
@@ -18121,7 +18158,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       actions (was a generic Duplicate/Pin/Attach/Delete menu only). */}
                   {t.type === "pond" && (
                     <>
-                      <div style={hdr(true)}>Detention pond</div>
+                      <div style={hdr(true)}>{pondDisplayNameFor(detWithAuto(t.det), pondSplitFor(t))}</div>
                       <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, null); setTypeMenu(null); }} title="Open this pond's inspector — anchor, depth, purpose, usable/dead split">⚙ Pond settings…</button>
                       <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, "assistant"); setTypeMenu(null); }} title="Size this pond toward its detention + mitigation targets (one-click Apply)">📐 Sizing assistant…</button>
                       <div style={hdr(false)}>Set purpose</div>
@@ -20599,7 +20636,7 @@ function YieldPanel({
               const segs = [
                 { key: "building", label: "Buildings", ac: bldg / SQFT_PER_ACRE, pct: buildingPct, fill: "#eda100", title: `${f0(bldg)} sf` },
                 { key: "open", label: "Open space", ac: open / SQFT_PER_ACRE, pct: openPct, fill: "#008300", title: `${f0(open)} sf` },
-                { key: "pond", label: "Pond", ac: pondArea / SQFT_PER_ACRE, pct: detentionPct, fill: "#2a78d6", title: pondBermRingSf > 0 ? `${f2(pondArea / SQFT_PER_ACRE)} ac water + ${f2(pondBermRingSf / SQFT_PER_ACRE)} ac berm ring` : `${f0(pondArea)} sf water footprint` },
+                { key: "pond", label: "Pond", ac: pondArea / SQFT_PER_ACRE, pct: detentionPct, fill: "#2a78d6", title: pondBermRingSf > 0 ? `${f2((pondArea - pondBermRingSf) / SQFT_PER_ACRE)} ac water + ${f2(pondBermRingSf / SQFT_PER_ACRE)} ac berm (inside ${f2(pondArea / SQFT_PER_ACRE)} ac footprint)` : `${f0(pondArea)} sf water footprint` },
                 { key: "paving", label: "Paving", ac: pavingSf / SQFT_PER_ACRE, pct: pavingPct, fill: "#eb6834", title: `${f0(pavingSf)} sf` },
               ];
               return (

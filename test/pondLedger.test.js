@@ -3,7 +3,31 @@
 // round-trip that lets a restored check replay the exact live split. Pure.
 import { describe, it, expect } from "vitest";
 import { detentionStorage, usablePondVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
-import { accumulatePondLedger, suggestPondRole, effectivePondRole, ROLE_SHARE, POND_ROLES, POND_ROLE_LABEL } from "../src/workspaces/site-planner/lib/pondLedger.js";
+import { accumulatePondLedger, suggestPondRole, effectivePondRole, ROLE_SHARE, POND_ROLES, POND_ROLE_LABEL, pondDisplayName, pondDisplayNameFor } from "../src/workspaces/site-planner/lib/pondLedger.js";
+
+describe("D4 — the on-screen pond NOUN follows the resolved purpose", () => {
+  it("maps each role to its display noun", () => {
+    expect(pondDisplayName("detention")).toBe("Detention Pond");
+    expect(pondDisplayName("mitigation")).toBe("Mitigation Pond");
+    expect(pondDisplayName("dual")).toBe("Detention + Mitigation Pond");
+    expect(pondDisplayName(undefined)).toBe("Detention Pond"); // safe fallback
+  });
+
+  it("an owner's explicit purpose wins — a pond set to Mitigation reads 'Mitigation Pond'", () => {
+    expect(pondDisplayNameFor({ role: "mitigation" }, { mode: "gross" })).toBe("Mitigation Pond");
+    expect(pondDisplayNameFor({ role: "dual" }, { mode: "gross" })).toBe("Detention + Mitigation Pond");
+  });
+
+  it("Auto (no explicit role) resolves from the elevation split: a mostly-below-WSE pond reads 'Mitigation Pond'", () => {
+    // grossCf 100, usable 5 → belowShare 0.95 ≥ ROLE_SHARE → mitigation
+    const split = { mode: "anchored", bands: {}, wseFt: 95, grossCf: 100, usableCf: 5 };
+    expect(pondDisplayNameFor({}, split)).toBe("Mitigation Pond");
+  });
+
+  it("Auto with no elevation evidence defaults to 'Detention Pond'", () => {
+    expect(pondDisplayNameFor({}, { mode: "gross" })).toBe("Detention Pond");
+  });
+});
 
 // The B708 fixture: 100×100 ft square, slope 3 → stage areas are exact.
 const SQ = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];

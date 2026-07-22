@@ -607,7 +607,7 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(2 * base.phS); // wider than the raw side strip
   });
 
-  // B962 — the cover apron must be a SIMPLE, SMOOTH outline: NO spikes / pointed cusps (fold-back
+  // B964 — the cover apron must be a SIMPLE, SMOOTH outline: NO spikes / pointed cusps (fold-back
   // vertices) and NO self-intersection (the old outA/outB "ears" folded the top edge back on itself,
   // making a star/blob). A curb return is legitimately CONCAVE where it rounds the reflex corner, so
   // we do NOT require convexity — we require no ~180° reversal at any vertex, and no crossing edges.
@@ -636,7 +636,7 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     return worst;                                            // near -1 ⇒ a cusp/spike (edge reverses); we require > -0.9
   };
 
-  it("B962: the cover apron is SIMPLE (no self-intersection) with NO spike/cusp — road tee + car & truck drives + skew", () => {
+  it("B964: the cover apron is SIMPLE (no self-intersection) with NO spike/cusp — road tee + car & truck drives + skew", () => {
     const cases = [
       teeGeometry(base),                                                   // road-to-road tee
       teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS: 12, R: 20, curbT: 0.5, curbS: 0.5 }),   // car parking drive
@@ -652,7 +652,7 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     }
   });
 
-  it("B962: each return arc is a single smooth (monotonic-turning) fillet — not a spiky path", () => {
+  it("B964: each return arc is a single smooth (monotonic-turning) fillet — not a spiky path", () => {
     const g = teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS: 15, R: 50, curbT: 0.5, curbS: 0.5 });
     for (const arc of g.returns) {
       expect(arc.length).toBeGreaterThanOrEqual(3);

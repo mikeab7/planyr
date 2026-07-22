@@ -1,6 +1,6 @@
 // B909 round 4 — the persistent "what changed" card's pure delta rows + cross-section marks.
 import { describe, it, expect } from "vitest";
-import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote } from "../src/workspaces/site-planner/lib/pondChangeSummary.js";
+import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote, bermCapProposalNote } from "../src/workspaces/site-planner/lib/pondChangeSummary.js";
 
 const AF = 43560;
 
@@ -128,19 +128,26 @@ describe("gapProposalNote — v3 A5: the atomic infeasibility proposal (exact co
     expect(note).toBe("To close the gap: enlarge the pond, or add a second basin.");
   });
 
-  it("v3 C2 — capBound leads with raising the Max berm setting", () => {
-    const note = gapProposalNote({ bermFt: 4, extraAcres: 2.5, capBound: true });
-    expect(note).toBe("To close the gap: keep the 4.0-ft berm (your Max berm setting). Raise Max berm if your grading allows, or enlarge the pond by about 2.50 ac, or add a second basin.");
-  });
-
-  it("v3 C2 — capBound with no acreage drops the 'by about … ac' clause", () => {
-    const note = gapProposalNote({ bermFt: 4, extraAcres: null, capBound: true });
-    expect(note).toBe("To close the gap: keep the 4.0-ft berm (your Max berm setting). Raise Max berm if your grading allows, or enlarge the pond, or add a second basin.");
-  });
-
-  it("v3 C2 — capBound without a berm falls back to the plain A5 shape (no cap mention)", () => {
-    const note = gapProposalNote({ bermFt: null, extraAcres: 0.3, capBound: true });
-    expect(note).toBe("To close the gap: enlarge the pond by about 0.30 ac, or add a second basin.");
+  it("v3 D5 — the user-set Max berm ceiling is gone: gapProposalNote no longer accepts/mentions it", () => {
+    const note = gapProposalNote({ bermFt: 4, extraAcres: 2.5 });
     expect(note).not.toMatch(/Max berm/);
+  });
+});
+
+describe("bermCapProposalNote — v3 D5: the computed berm cap names the BINDING constraint", () => {
+  it("drainage-bound: names the controlling grade + design water and the ways to close the rest", () => {
+    const note = bermCapProposalNote({ binding: "drainage", bermFt: 3.2, controllingGradeFt: 101.4, designWaterFt: 100.9, extraAcres: 2.5 });
+    expect(note).toBe("Berm capped at 3.2 ft: above that, the site can no longer drain into the pond by gravity (controlling grade 101.4 ft, design water 100.9 ft). More storage needs regrading, pumped inflow, enlarge the pond by about 2.50 ac, or a second basin.");
+  });
+
+  it("geometry-bound: names the footprint's ceiling before the pond closes on itself", () => {
+    const note = bermCapProposalNote({ binding: "geometry", bermFt: 6, geometricMaxFt: 6.4, extraAcres: 1.0 });
+    expect(note).toBe("This footprint tops out at 6.4 ft of berm before the pond closes in on itself; to hold more, enlarge the pond by about 1.00 ac or add a second basin.");
+  });
+
+  it("drops the acreage clause when no estimate is available", () => {
+    const note = bermCapProposalNote({ binding: "geometry", bermFt: 5, geometricMaxFt: 5 });
+    expect(note).toBe("This footprint tops out at 5.0 ft of berm before the pond closes in on itself; to hold more, enlarge the pond or add a second basin.");
+    expect(note).not.toMatch(/about .* ac/);
   });
 });

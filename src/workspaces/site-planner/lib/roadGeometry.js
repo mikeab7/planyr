@@ -630,7 +630,7 @@ export function teeGeometry(params) {
   };
   const fA = fillet(cornerA);
   const fB = fillet(cornerB);
-  // Cover polygon (B962 rewrite). The old code inserted perpendicular "ears" (outA/outB) at the mouth,
+  // Cover polygon (B964 rewrite). The old code inserted perpendicular "ears" (outA/outB) at the mouth,
   // whose polygon order folded back on itself — a spike + concave notch + a self-overlapping top edge
   // (a star/blob). A curb return is LEGITIMATELY concave where it rounds the reflex corner between the
   // two roads, so the apron is NOT convex — the fix is a SIMPLE, SMOOTH outline with no fold-back cusps.
@@ -646,7 +646,7 @@ export function teeGeometry(params) {
   // interior already includes the side road's wedge below the tangent height, so it overlaps the road
   // strip (same fill) — no collar, hence no fold-back cusp at any tee angle. The road strip (opaque, to
   // back-of-curb) covers the road part; this covers the throat + flares + the wedge, hiding the butting
-  // cap/curb strokes across the junction. (An up-the-road "collar" folded back on a skewed tee — B962.)
+  // cap/curb strokes across the junction. (An up-the-road "collar" folded back on a skewed tee — B964.)
   const cover = [
     add(fA.tan1, intoThrough),
     ...fA.arc,                                              // left return (face fillet), tan1 → tan2

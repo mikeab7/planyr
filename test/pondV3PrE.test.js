@@ -88,9 +88,8 @@ describe("E3 — the pond→yield recompute is live (pure engine reflects a rim 
 });
 
 describe("E4 — number consistency: 1dp ac-ft + ONE berm number", () => {
-  it("the on-plan berm label uses the RIM ABOVE GRADE (the card's number), not the fill height", () => {
-    expect(src).toContain("berm.crestElevFt - fmElev.existGradeFt");
-    expect(src).toContain("berm {(Math.round(bermLabelFt * 10) / 10).toFixed(1)} ft");
+  it("the on-plan berm label shows the rim-above-grade berm height (PR-D: bermH, the same number everywhere)", () => {
+    expect(src).toContain("berm {(Math.round(bermH * 10) / 10).toFixed(1)} ft");
     // the old label off the max fill height (berm.hFt) is gone
     expect(src.includes("berm {(Math.round(berm.hFt * 10) / 10).toFixed(1)} ft")).toBe(false);
   });
