@@ -20,19 +20,17 @@ const f0 = (n) => Math.round(n).toLocaleString();
 
 const changed = (a, b, eps) => a != null && b != null && Math.abs(a - b) > eps;
 
-/* The plain-sentence infeasibility proposal (owner spec, round 3 clarification): when the
+/* v3 A5 — the atomic infeasibility proposal, in the owner's exact concise form: when the
  * elevation-only solve can't meet a target on the EXISTING footprint, the whole click is
- * atomic — nothing applied, not even the partial progress — and this names the gap and a
- * screening estimate of how much more land would close it. `reqLabel` names WHAT was
- * being solved for ("detention" / "floodplain mitigation" — omit for a generic sentence);
- * `capLabel` names WHY it stopped ("with a 4.0-ft berm" / "at an 8.0-ft floor");
- * `extraAcres` is the caller's own screening estimate of the additional footprint needed
- * — null/0 falls back to the generic close, never a fabricated acreage. Pure. */
-export function gapProposalNote({ achievedAcFt = 0, targetAcFt = 0, reqLabel = null, capLabel = null, extraAcres = null } = {}) {
-  const extra = extraAcres > 0
-    ? ` To close the gap, enlarge the pond by about ${f2(extraAcres)} ac or add a second basin.`
-    : " Enlarge the pond or add a second basin to close the gap.";
-  return `Your pond can hold ${f2(achievedAcFt)} of the ${f2(targetAcFt)} ac-ft required${reqLabel ? ` ${reqLabel}` : ""}${capLabel ? ` ${capLabel}` : ""}.${extra}`;
+ * atomic (nothing applied) and this names the two ways to close the gap — keep the berm the
+ * solve reached and enlarge, or add a second basin. `bermFt` is that berm raise in feet
+ * (null when the cap was a floor, not a berm — e.g. the mitigation case — so the berm clause
+ * drops); `extraAcres` is the caller's own screening estimate of the extra footprint needed
+ * — null/0 drops the acreage rather than fabricating one. Pure. */
+export function gapProposalNote({ bermFt = null, extraAcres = null } = {}) {
+  const berm = bermFt != null && Number.isFinite(bermFt) && bermFt > 0 ? `keep the ${f1(bermFt)}-ft berm and ` : "";
+  const acres = extraAcres > 0 ? ` by about ${f2(extraAcres)} ac` : "";
+  return `To close the gap: ${berm}enlarge the pond${acres}, or add a second basin.`;
 }
 
 /* Plain-English delta rows for the change-summary card. Only rows that actually moved

@@ -134,3 +134,36 @@ describe("punch 6/7/8 — group summaries", () => {
     expect(src).toContain("drainageBlocks.ffeR.length > 0");
   });
 });
+
+// ── v3 post-ship audit — PR-A ───────────────────────────────────────────────────────
+describe("A1 — the 'Assumptions & method' disclosure is a real accessible <button> that opens", () => {
+  it("a module-scope InlineDisclosure carries aria-expanded on a real button", () => {
+    const i = src.indexOf("function InlineDisclosure(");
+    expect(i, "InlineDisclosure component defined").toBeGreaterThan(-1);
+    const body = src.slice(i, i + 900);
+    expect(body).toContain('type="button"');
+    expect(body).toContain("aria-expanded={open}");
+    expect(body).toContain('data-testid="assumptions-method-toggle"');
+    expect(body).toContain('data-testid="assumptions-method-body"');
+    // the chevron flips with open state
+    expect(body).toContain('{open ? "▾" : "▸"}');
+  });
+  it("groupFold renders the method fold through InlineDisclosure, not the old bare button", () => {
+    expect(src).toContain("<InlineDisclosure");
+    expect(src).toContain('label="Assumptions & method"');
+    // the pre-audit inline button (no aria-expanded) is gone
+    expect(src.includes('{methodShown ? "▾" : "▸"} Assumptions &amp; method')).toBe(false);
+  });
+});
+
+describe("A2 — the Optimize pond tooltip never promises the drawn outline 'grows'", () => {
+  it("carries the exact has-pond and no-pond titles", () => {
+    expect(src).toContain("One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed.");
+    expect(src).toContain("One click: draws a right-sized pond and solves its outlet.");
+  });
+  it("none of the banned '(or grows)' Optimize-pond promises remain", () => {
+    expect(src.includes("Draws (or grows)")).toBe(false);
+    expect(src.includes("(or grows) ONE pond")).toBe(false);
+    expect(src.includes("Creates (or grows)")).toBe(false);
+  });
+});
