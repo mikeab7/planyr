@@ -106,21 +106,25 @@ describe("pondCrossSectionMarks — the schematic (not-to-scale) cross-section",
   });
 });
 
-describe("gapProposalNote — B909 round 3/4: the atomic infeasibility proposal", () => {
-  it("matches the owner's exact spec shape: 'Your pond can hold X of Y required ac-ft with a Z-ft berm. To close the gap, enlarge...'", () => {
-    const note = gapProposalNote({ achievedAcFt: 20, targetAcFt: 34, reqLabel: "detention", capLabel: "with a 4.0-ft berm", extraAcres: 2.5 });
-    expect(note).toBe("Your pond can hold 20.00 of the 34.00 ac-ft required detention with a 4.0-ft berm. To close the gap, enlarge the pond by about 2.50 ac or add a second basin.");
+describe("gapProposalNote — v3 A5: the atomic infeasibility proposal (exact concise form)", () => {
+  it("matches the owner's exact v3 sentence: 'To close the gap: keep the {x}-ft berm and enlarge the pond by about {y} ac, or add a second basin.'", () => {
+    const note = gapProposalNote({ bermFt: 4, extraAcres: 2.5 });
+    expect(note).toBe("To close the gap: keep the 4.0-ft berm and enlarge the pond by about 2.50 ac, or add a second basin.");
   });
 
-  it("no extraAcres estimate falls back to the generic close, never a fabricated acreage", () => {
-    const note = gapProposalNote({ achievedAcFt: 5, targetAcFt: 8, reqLabel: "floodplain mitigation", capLabel: "at a 6.0-ft floor", extraAcres: null });
-    expect(note).toMatch(/^Your pond can hold 5\.00 of the 8\.00 ac-ft required floodplain mitigation at a 6\.0-ft floor\./);
-    expect(note).toMatch(/Enlarge the pond or add a second basin to close the gap\.$/);
+  it("no berm (a floor cap, e.g. mitigation) drops the berm clause", () => {
+    const note = gapProposalNote({ bermFt: null, extraAcres: 0.3 });
+    expect(note).toBe("To close the gap: enlarge the pond by about 0.30 ac, or add a second basin.");
+  });
+
+  it("no extraAcres estimate drops the acreage rather than fabricating one", () => {
+    const note = gapProposalNote({ bermFt: 4, extraAcres: null });
+    expect(note).toBe("To close the gap: keep the 4.0-ft berm and enlarge the pond, or add a second basin.");
     expect(note).not.toMatch(/about .* ac/);
   });
 
-  it("omitting reqLabel/capLabel still reads as a complete, grammatical sentence", () => {
-    const note = gapProposalNote({ achievedAcFt: 1, targetAcFt: 2 });
-    expect(note).toBe("Your pond can hold 1.00 of the 2.00 ac-ft required. Enlarge the pond or add a second basin to close the gap.");
+  it("neither berm nor acreage still reads as a complete sentence", () => {
+    const note = gapProposalNote({});
+    expect(note).toBe("To close the gap: enlarge the pond, or add a second basin.");
   });
 });

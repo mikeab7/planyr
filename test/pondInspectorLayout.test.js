@@ -104,3 +104,43 @@ describe("G2/G8 — no em dash in the new visible copy; 'Optimize pond' not 'Des
     expect(pondBody).toContain("⚡ Optimize pond");
   });
 });
+
+// ── v3 post-ship audit — PR-A ───────────────────────────────────────────────────────
+const sizingGroup = pondBody.slice(pondBody.indexOf('sectionId="pond-sizing"'), pondBody.indexOf('sectionId="pond-outlet"'));
+const outletGroup = pondBody.slice(pondBody.indexOf('sectionId="pond-outlet"'), pondBody.indexOf('sectionId="pond-flood"'));
+
+describe("A3 — the rate-based sizing block moves to ONE row in Outlet & storms", () => {
+  it("Outlet & storms carries the 'Outlet sizing check (rate control)' row + its two-questions ⓘ", () => {
+    expect(outletGroup).toContain("Outlet sizing check (rate control)");
+    expect(outletGroup).toContain("different question from the site's volumetric detention requirement");
+    expect(outletGroup).toContain("both must hold.");
+  });
+  it("Sizing & criteria keeps the inputs but loses the required/provided/shortfall card", () => {
+    expect(sizingGroup).toContain("Sizing inputs (screening)");
+    // the deleted rows + heading
+    expect(sizingGroup.includes("Required detention (screening)")).toBe(false);
+    expect(sizingGroup.includes("Provided (this pond")).toBe(false);
+    expect(sizingGroup.includes("-yr rate-based")).toBe(false);
+    expect(sizingGroup.includes("earns no detention credit")).toBe(false);
+    // the words Required / Provided / Shortfall are gone as visible labels
+    expect(sizingGroup.includes("Shortfall")).toBe(false);
+    expect(sizingGroup.includes("Surplus")).toBe(false);
+    // the orphaned Outfall/Pump inputs (only fed the deleted pumped credit) are gone
+    expect(sizingGroup.includes('setDet({ outfallMode:')).toBe(false);
+  });
+});
+
+describe("A4 — the sizing-assistant zero-detention line + 'no targets' line are deleted; heading spaced", () => {
+  it("the inundated 'usable detention is ZERO … raise the TOB first' line is not rendered", () => {
+    expect(sizingGroup.includes('"assist-inund"')).toBe(false);
+    expect(sizingGroup.includes("→ ${a.label}.")).toBe(false);
+  });
+  it("the bare 'no targets' fallback line is deleted", () => {
+    expect(sizingGroup.includes('"no targets"')).toBe(false);
+    expect(sizingGroup.includes('detTxt || ')).toBe(false);
+  });
+  it("the assistant heading has a space before '· est. WSE'", () => {
+    expect(sizingGroup).toContain('{" · est. WSE"}');
+    expect(sizingGroup.includes(">· est. WSE<")).toBe(false);
+  });
+});
