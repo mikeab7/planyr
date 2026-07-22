@@ -2837,12 +2837,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [parcels, view]);
   const snapSplit = useCallback((p) => snapToBoundary(p) || snapPt(p), [snapToBoundary, snapPt]);
 
-  /* ---- Road endpoint snap-and-connect (B945/NEW-1) ----
+  /* ---- Road endpoint snap-and-connect (B945/NEW-1; ungated B947 amendment) ----
      The magnet's world tolerance: ~12 screen px, capped at ROAD_CONNECT_MAX_FT so a weld can't
      bridge a large real-world gap at overview zoom. The candidate list is every CENTERLINE road
      (a dock-bonded rect road — attachedTo — is owned by the relayout engine and excluded). The
      moving road IS included so its OTHER endpoint can close a loop; findRoadConnect skips only the
-     moving vertex itself. */
+     moving vertex itself.
+     ⚠ The endpoint connect is NOT gated on the global Snap toggle (B947 amendment) — connecting
+     road endpoints must always work. Its ONLY momentary escape hatch is holding Alt
+     (`altSnapOffRef.current`), which places an endpoint freely without connecting. This is
+     independent of the separate grid/45° snap-during-draw, which stays gated on `settings.snap`. */
   const connectTolFt = () => Math.min(12 / (view.ppf || 1), ROAD_CONNECT_MAX_FT);
   const connectableRoads = () => els.filter((x) => x.type === "road" && isCenterlineRoad(x) && !x.attachedTo).map((x) => ({ id: x.id, pts: x.pts }));
   // Apply a planRoadConnect() result (merge / weld / tee) in ONE setEls. The caller has already
@@ -3698,7 +3702,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         let pt = e.shiftKey && prev ? snapPt(snap45(prev, fp)) : sp;
         // B945/NEW-1 — placing a point on/near another road's endpoint (or centerline) welds it there,
         // so the drawn road connects cleanly. finishRoad upgrades the FINAL point to a real merge/tee.
-        if (settings.snap && !altSnapOffRef.current) {
+        // NOT gated on the Snap toggle (B947) — endpoint AND tee connect always work; Alt bypasses.
+        if (!altSnapOffRef.current) {
           const cand = findRoadConnect(fp, null, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
           if (cand) pt = { x: cand.pt.x, y: cand.pt.y };
         }
@@ -4601,10 +4606,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let P = e.shiftKey && ref ? snapPt(snap45(ref, fp)) : snapPt(fp);
       // B945/NEW-1 — snap-and-connect: dragging an ENDPOINT near another road's endpoint (or, for a
       // T/Y, its centerline) engages a magnet — the ghost welds to the target while within tolerance,
-      // and the connection is finalized on release. Gated on the global Snap toggle; Alt bypasses.
+      // and the connection is finalized on release. NOT gated on the Snap toggle (B947); Alt bypasses.
       let connect = null;
       const isEnd = d.idx === 0 || d.idx === el.pts.length - 1;
-      if (isEnd && settings.snap && !altSnapOffRef.current) {
+      if (isEnd && !altSnapOffRef.current) {
         const cand = findRoadConnect(fp, { id: el.id, index: d.idx }, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
         if (cand) { P = { x: cand.pt.x, y: cand.pt.y }; connect = cand; }
       }
@@ -5029,8 +5034,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let el = { id: uid(), type: "road", pts: raw, vtx, travelW, curb, roadClass, ...bbox };
     pushHistory();
     // B945/NEW-1 — connect the final endpoint if it landed on another road (merge / weld / tee).
+    // NOT gated on the Snap toggle (B947); the only bypass is holding Alt on the final point.
     let plan = null, targetId = null;
-    if (settings.snap) {
+    if (!altSnapOffRef.current) {
       const cand = findRoadConnect(raw[raw.length - 1], { id: el.id, index: raw.length - 1 }, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
       if (cand) { targetId = cand.roadId; plan = planRoadConnect(el, raw.length - 1, els.find((x) => x.id === cand.roadId), cand, defR); }
     }
@@ -14316,8 +14322,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   provisional pavement+curb offset strip as points are placed */}
               {draftRoadPts && draftRoadPts.length > 0 && (() => {
                 let live = cursor ? snapPt(cursor) : null;
-                let magnet = null; // B945/NEW-1 — endpoint the live point will weld to on click
-                if (live && cursor && settings.snap && !altSnapOffRef.current) {
+                let magnet = null; // B945/NEW-1 — endpoint the live point will weld to on click (ungated, B947)
+                if (live && cursor && !altSnapOffRef.current) {
                   const cand = findRoadConnect(cursor, null, connectableRoads(), { tolFt: connectTolFt(), allowInterior: true });
                   if (cand) { live = { x: cand.pt.x, y: cand.pt.y }; magnet = cand.pt; }
                 }

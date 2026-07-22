@@ -32,10 +32,11 @@ async function pickRoadPreset(page) {
 }
 
 test.describe("NEW-1 — snap-and-connect road endpoints", () => {
-  test("a new road ending on a matching road's endpoint merges into one", async ({ page }) => {
+  // B947 amendment: the endpoint/tee connect is NOT gated on the global Snap toggle — these specs
+  // run with Snap OFF (its default; never pressing "s") and still connect. Alt is the only bypass.
+  test("a new road ending on a matching road's endpoint merges into one (Snap OFF)", async ({ page }) => {
     await startBlank(page);
-    await canvas(page).click({ position: { x: 20, y: 20 } });   // focus the canvas
-    await page.keyboard.press("s");                             // Snap ON (default off) — gates the magnet
+    await canvas(page).click({ position: { x: 20, y: 20 } });   // focus the canvas — Snap stays OFF (default)
     const box = await canvas(page).boundingBox();
 
     // Road A — horizontal.
@@ -51,16 +52,15 @@ test.describe("NEW-1 — snap-and-connect road endpoints", () => {
     await page.mouse.click(box.x + 300, box.y + 320); // == A's left endpoint client px
     await page.keyboard.press("Enter");
 
-    // Merge collapses the two roads into ONE (the target is absorbed).
+    // Merge collapses the two roads into ONE (the target is absorbed) — even with Snap OFF.
     await expect.poll(() => roads(page).then((r) => r.length)).toBe(1);
     const merged = (await roads(page))[0];
     expect(merged.pts.length).toBeGreaterThanOrEqual(3); // A(2) + B(1 new) share the join node
   });
 
-  test("dragging a road endpoint onto another matching road's endpoint merges them", async ({ page }) => {
+  test("dragging a road endpoint onto another matching road's endpoint merges them (Snap OFF)", async ({ page }) => {
     await startBlank(page);
-    await canvas(page).click({ position: { x: 20, y: 20 } });
-    await page.keyboard.press("s"); // Snap ON — gates the endpoint-drag magnet
+    await canvas(page).click({ position: { x: 20, y: 20 } }); // Snap stays OFF (default)
     const box = await canvas(page).boundingBox();
 
     // Two separate, parallel roads.
@@ -85,8 +85,56 @@ test.describe("NEW-1 — snap-and-connect road endpoints", () => {
     await page.mouse.move(box.x + 300, box.y + 300, { steps: 8 }); // onto road A's left endpoint
     await page.mouse.up();
 
-    // The magnet welded + merged the two into one road.
+    // The magnet welded + merged the two into one road — even with Snap OFF.
     await expect.poll(() => roads(page).then((r) => r.length)).toBe(1);
+  });
+
+  test("a new road ending on another road's SIDE tees onto it, inserting a vertex (Snap OFF)", async ({ page }) => {
+    await startBlank(page);
+    await canvas(page).click({ position: { x: 20, y: 20 } }); // Snap stays OFF (default)
+    const box = await canvas(page).boundingBox();
+
+    // Through road A — horizontal.
+    await pickRoadPreset(page);
+    await page.mouse.click(box.x + 280, box.y + 300);
+    await page.mouse.click(box.x + 560, box.y + 300);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => roads(page).then((r) => r.length)).toBe(1);
+
+    // Stub road B — its FINAL point lands on the MIDDLE of A (a T/Y, not an endpoint).
+    await pickRoadPreset(page);
+    await page.mouse.click(box.x + 420, box.y + 180);
+    await page.mouse.click(box.x + 420, box.y + 300); // mid-span of A → tee
+    await page.keyboard.press("Enter");
+
+    // BOTH roads stay (a tee keeps them separate); the through road gained a control vertex.
+    await expect.poll(() => roads(page).then((r) => r.length)).toBe(2);
+    const rs = await roads(page);
+    expect(Math.max(...rs.map((r) => r.pts.length))).toBe(3); // A: 2 → 3 (vertex inserted at the tee)
+  });
+
+  test("holding Alt bypasses the connect — the endpoint places freely (Snap OFF)", async ({ page }) => {
+    await startBlank(page);
+    await canvas(page).click({ position: { x: 20, y: 20 } });
+    const box = await canvas(page).boundingBox();
+
+    // Road A — horizontal.
+    await pickRoadPreset(page);
+    await page.mouse.click(box.x + 300, box.y + 320);
+    await page.mouse.click(box.x + 560, box.y + 320);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => roads(page).then((r) => r.length)).toBe(1);
+
+    // Road B ends exactly on A's left endpoint, but with Alt held — so it must NOT connect.
+    await pickRoadPreset(page);
+    await page.keyboard.down("Alt");
+    await page.mouse.click(box.x + 300, box.y + 180);
+    await page.mouse.click(box.x + 300, box.y + 320); // == A's left endpoint, but Alt bypasses
+    await page.keyboard.press("Enter");
+    await page.keyboard.up("Alt");
+
+    // No merge — two separate roads remain.
+    await expect.poll(() => roads(page).then((r) => r.length)).toBe(2);
   });
 });
 
