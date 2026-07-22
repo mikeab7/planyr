@@ -663,6 +663,46 @@ export function teeGeometry(params) {
   };
 }
 
+/* ---- Road → parking-drive / truck-court connect targets (B955/NEW-1) ------------------
+ * A road can tee not only into another road (teeGeometry) but into a PARKING field's drive-aisle
+ * mouth or a TRUCK COURT's access edge. Those are rectangle elements, so the connect TARGET is one
+ * of the rectangle's edges (the one facing the road). The intersection itself reuses teeGeometry —
+ * the target edge plays the "through" edge (half-width 0, no through curb to interrupt) and the
+ * return radius scales by target type (car ≈ 20 ft for a parking drive, truck ≈ 50 ft + a wide
+ * throat flare for a dock-court drive). These two pure helpers own the rectangle-edge math. */
+
+/* The 4 world-space edges of a rect element {cx,cy,w,h,rot}. Each edge =
+ * { a, b, dir (unit a→b), outN (unit outward normal, away from centre), mid, len, axis, sign }. */
+export function rectEdges(cx, cy, w, h, rot = 0) {
+  const rad = (rot * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
+  const rp = (x, y) => ({ x: cx + (x * c - y * s), y: cy + (x * s + y * c) });
+  const hw = w / 2, hh = h / 2;
+  const cs = [rp(-hw, -hh), rp(hw, -hh), rp(hw, hh), rp(-hw, hh)];
+  const centre = { x: cx, y: cy };
+  const mk = (a, b, axis, sign) => {
+    const dir = unit(sub(b, a));
+    const mid = mul(add(a, b), 0.5);
+    let outN = { x: dir.y, y: -dir.x };
+    if (dot(outN, sub(centre, mid)) > 0) outN = mul(outN, -1); // point AWAY from the centre
+    return { a, b, dir, outN, mid, len: len(sub(b, a)), axis, sign };
+  };
+  return [mk(cs[0], cs[1], "y", -1), mk(cs[1], cs[2], "x", 1), mk(cs[2], cs[3], "y", 1), mk(cs[3], cs[0], "x", -1)];
+}
+
+/* Nearest rect edge to point P among `edges`, considering only edges P sits OUTSIDE of (P on the
+ * edge's outward side) unless facingOnly:false. Returns { edge, pt (clamped nearest point on the
+ * edge), dist } or null. */
+export function nearestRectEdge(P, edges, opts = {}) {
+  let best = null;
+  for (const e of edges || []) {
+    if (opts.facingOnly !== false && dot(e.outN, sub(P, e.mid)) <= 0) continue;
+    const q = nearestOnSeg(P, e.a, e.b);
+    const dd = Math.hypot(q.x - P.x, q.y - P.y);
+    if (!best || dd < best.dist) best = { edge: e, pt: q, dist: dd };
+  }
+  return best;
+}
+
 /* Curb / border stroke width in PIXELS for a true real-world curb of `curbFt` feet at the
  * current `ppf` (pixels-per-foot), floored to `minPx` so it stays visible when the true
  * width goes sub-pixel at overview zoom. NO ceiling — a 6" curb SHOULD read thicker as you
