@@ -1840,6 +1840,15 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
   3. Normal load (no drift, e.g. today's data) shows **no** banner — confirm it doesn't false-fire on pinned tasks or parent roll-ups.
 - **NOT ATTEMPTED (2026-07-21, Cowork round):** creating a genuine drift scenario requires a non-pinned task's stored start to differ from the engine's cascade — but the app auto-heals this on every real load path, so reproducing it live means writing a "fossil" date directly to the DB, bypassing normal app logic. That conflicts with the round's read-only-Supabase discipline, so it wasn't done. The detector + banner are fully unit-covered (see Self-verified above). Kept ⏳ — needs a safe seeded/test way to create the fossil state, or a signed-in load of an older export that still carries one.
 
+### V423 — B842: the Site map / MapFinder aerial no longer flashes on a reveal (map↔plan flip + workspace-tab return) ⏳ **LIVE APP (planyr.io), aerial ON** (zoom-/data-density render class — a one-frame tile re-sync needs real tiles + a human eye)
+- **Added** 2026-07-22 · **Cadence** once (bug-fix acceptance)
+- **Self-verified (sandbox):** the reveal `invalidateSize` on both surfaces (`MapFinder.jsx` `[visible, isActive]`; `SitePlanner.jsx` `[active, origin]`) is now a synchronous `useLayoutEffect` (before paint) instead of a passive `setTimeout(…, 60)`, so a re-shown map is correctly sized in the first visible frame. MapFinder smoke — the finder Leaflet map renders on load AND survives a workspace tab round-trip (Library→Site, exercising the `isActive` reveal) with zero page errors. Site-canvas regressions all green (`panel-toggle-flash` / `panel-toggle-viewport` / `panel-open-squish` / `yield-panel-layout`). Full unit suite (5023) + lint + build green. Real Esri/USGS tiles can't load in the sandbox (egress blocks the map hosts), so the on-aerial look can't be seen headless.
+- **⏳ Owed (LIVE, planyr.io, aerial ON):**
+  1. Open a saved site with the aerial ON. Flip Site **map ↔ plan** a few times; switch to another workspace tab (Schedule / Review / Library) and back to Site.
+  2. **Expect:** on each reveal the aerial is already correctly sized/positioned in the first frame — **no** one-frame tile re-sync flash / reposition snap.
+  3. Repeat at a couple of zoom levels (the wipe, if any, is zoom-/tile-density dependent).
+- **Blocker: live-GIS** — needs real map tiles (the sandbox egress blocks the Esri/USGS hosts); the size-sync timing is code-verified above.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
