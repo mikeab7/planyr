@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _65 open · 89 awaiting live verification._
+> _65 open · 88 awaiting live verification._
 
 ## 🔲 Open
 
@@ -154,7 +154,6 @@
 | B712 | Floodplain surfacing & integration: mitigation/buildability card, combined detention readout, inputs, cost lines, print | [Site Planner] | #site-planner #ui #yield #export #gis | ⏳ live — awaiting |
 | B699 | Whole content pane is the drop target; drag-onto-folder files into it; ONE empty state; folder drops preserve your subfolder structure | [Library / storage] | #library #files #filing #drive | ⏳ live — awaiting |
 | B701 | Honest Drive-sync footer: backend-driven resting status, "Synced · N min ago", loud failure | [Library / storage] | #library #drive #persistence | ⏳ live — awaiting |
-| B695 | Name the boundaries: hover/click identify + zoom-gated county/city name labels | [Site Planner / map] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B692 | ROOT-CAUSE fix for the B690 husk-parcel crash: sanitize the model funnel so a null/points-less entry can never be manufactured, persisted, or re-ingested | [Site Planner / model] | #site-planner #persistence | ⏳ live — awaiting |
 | B684 | Export to Google Earth (KMZ) via right-click, in both the map viewer and the canvas | [Site Planner / Map] | #site-planner #export #coordinates | ⏳ live — awaiting |
 | B682 | Dragging a parcel's acreage label spawns a "bunch of copies" (id-less parcels + value-based union merge) | [Site Planner] | #site-planner #persistence #selection | ⏳ live — awaiting |
@@ -183,7 +182,7 @@
 - **#filing** — B411, B364, B273, B699, B664, B659
 - **#floodplain** — B906, B885, B884, B882, B883, B878, B868, B870, B871, B861, B862, B802, B789
 - **#gantt** — B818, B816
-- **#gis** — B810, B776, B777, B752, B753, B722, B723, B724, B726, B629, B370, B309, B178, B171, B147, B13, B95, B885, B884, B882, B883, B879, B860, B861, B839, B840, B832, B691, B789, B787, B625, B751, B745, B738, B707, B712, B695
+- **#gis** — B810, B776, B777, B752, B753, B722, B723, B724, B726, B629, B370, B309, B178, B171, B147, B13, B95, B885, B884, B882, B883, B879, B860, B861, B839, B840, B832, B691, B789, B787, B625, B751, B745, B738, B707, B712
 - **#grading** — B888, B871
 - **#infra** — B916, B917, B778, B735, B726, B406, B179, B63, B864, B786, B812, B811, B759, B756, B748, B675, B669
 - **#library** — B663, B662, B792, B699, B701, B676, B668, B664, B659
@@ -194,9 +193,9 @@
 - **#road** — B945, B946, B742
 - **#scheduler** — B908, B818, B778, B495, B865, B863, B864, B836, B816
 - **#selection** — B948, B912, B880, B820, B746, B742, B743, B737, B682, B651
-- **#site-planner** — B944, B943, B937, B936, B934, B906, B842, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B947, B948, B945, B946, B919, B911, B912, B913, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B880, B879, B878, B868, B870, B871, B860, B861, B862, B839, B840, B837, B832, B821, B691, B820, B802, B793, B789, B787, B784, B785, B786, B812, B811, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B738, B737, B716, B707, B712, B695, B692, B684, B682, B651, B673, B674, B714
+- **#site-planner** — B944, B943, B937, B936, B934, B906, B842, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B947, B948, B945, B946, B919, B911, B912, B913, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B880, B879, B878, B868, B870, B871, B860, B861, B862, B839, B840, B837, B832, B821, B691, B820, B802, B793, B789, B787, B784, B785, B786, B812, B811, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B738, B737, B716, B707, B712, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413, B839
 - **#testing** — B269, B63, B878, B863, B836, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B944, B943, B937, B936, B934, B917, B842, B810, B735, B723, B115, B947, B948, B945, B946, B928, B914, B911, B912, B913, B909, B903, B902, B901, B900, B882, B880, B879, B865, B862, B837, B821, B820, B802, B746, B742, B712, B695, B669, B668, B673, B674
+- **#ui** — B944, B943, B937, B936, B934, B917, B842, B810, B735, B723, B115, B947, B948, B945, B946, B928, B914, B911, B912, B913, B909, B903, B902, B901, B900, B882, B880, B879, B865, B862, B837, B821, B820, B802, B746, B742, B712, B669, B668, B673, B674
 - **#yield** — B944, B943, B937, B936, B934, B906, B724, B909, B888, B885, B884, B882, B883, B878, B868, B870, B871, B860, B861, B862, B832, B802, B751, B712, B651
