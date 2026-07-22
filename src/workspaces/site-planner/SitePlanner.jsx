@@ -7874,7 +7874,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const { pondFullyInundated, unanchoredInTrigger, anchoredNoWseInTrigger, autoAnchored: pondAutoAnchored, excavationCf: pondExcavationCf } = pondLedger;
   // NEW-9 — an unknown dead-storage split demotes usable to null (rendered as "usable
   // unknown — re-check"), NEVER gross-as-usable.
-  const providedUsableCf = siteDeadCf == null ? null : Math.max(0, providedDetCf - siteDeadCf);
+  // F1 (D-followup, owner live-verify 2026-07-22) — the site usable MUST be the SAME number the
+  // pond's "Usable detention (above flood WSE)" row shows. Use the ledger's usable (the sum of each
+  // pond's INWARD-model usableCf, from pondSplitFor→usablePondVolume with gradeFt) directly — the
+  // old `providedDetCf − siteDeadCf` mixed a DRAWN-ring gross (providedDetCf, no inward crest) with
+  // the inward dead, so a bermed pond's headline overstated usable (20.9 vs the row's 15.3). The
+  // ledger's usableCf is already null when any split is unknown, so the null guard is preserved.
+  const providedUsableCf = pondLedger.usableCf;
 
   // ---- B707/B712: the floodplain-mitigation ledger — a SEPARATE ledger from
   // detention; nothing here nets the two (the same acre-foot can't count twice).
@@ -17061,7 +17067,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             const onApply = () => setDet({ depth: a.depthFt });
                             body.push(actApply(`→ deepen the floor to ${f1(a.depthFt)}′ design depth → +${f2(a.addCf / 43560)} ac-ft below the WSE (pinch-off ceiling ${f1(a.maxDepthFt)}′).`, "assist-deepen", false, applyChip(onApply, preview, false)));
                           }
-                          else if (a.kind === "pinch-off") body.push(actLine(`→ ${a.label} — the floor can only add ${f2((a.ceilingCf || 0) / 43560)} ac-ft more.`, "assist-pinch", true));
+                          else if (a.kind === "pinch-off") body.push(actLine(`→ ${a.label}: the floor can only add ${f2((a.ceilingCf || 0) / 43560)} ac-ft more.`, "assist-pinch", true));
                           else if (a.kind === "grow") {
                             const candRing = scaleRing(ring, a.factor);
                             const hits = els.filter((e2) => e2.id !== selEl.id && ["building", "parking", "trailer"].includes(e2.type) && ringsOverlap(candRing, ringOf(e2)));
@@ -17071,13 +17077,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             const onApply = () => { pushHistory(); if (selEl.points) setSelEl({ points: candRing }); else setSelEl({ w: selEl.w * a.factor, h: selEl.h * a.factor }); };
                             body.push(actApply(`→ or grow the footprint ~+${f2(a.addAcres)} ac (at the current depth) to reach the mitigation target.`, "assist-grow", false, applyChip(onApply, preview, !!collideReason, collideReason || "")));
                           }
-                          else if (a.kind === "grow-infeasible") body.push(actLine("→ even ~3× the footprint can't reach the mitigation target at these slopes — rethink the basin.", "assist-grow-inf", true));
+                          else if (a.kind === "grow-infeasible") body.push(actLine("→ even ~3× the footprint can't reach the mitigation target at these slopes. Rethink the basin.", "assist-grow-inf", true));
                         }
                         if (assist.ok && assist.mitigation.covered && assist.detention.covered && !assist.actions.length) {
-                          body.push(actLine("Both bands cover their remaining site targets — no resize needed.", "assist-ok"));
+                          body.push(actLine("Both bands cover their remaining site targets. No resize needed.", "assist-ok"));
                         }
                         if (mitTargetCf > 0 && eff.role === "detention") {
-                          body.push(actLine("This pond's purpose is Detention — its below-WSE cut is NOT credited to mitigation. Switch the purpose to Mitigation or Hybrid to count it.", "assist-role", true));
+                          body.push(actLine("This pond's purpose is Detention: its below-WSE cut is NOT credited to mitigation. Switch the purpose to Mitigation or Hybrid to count it.", "assist-role", true));
                         }
                         if (split.inTrigger && floodJurKey === "waller" && assist.actions.some((a) => a.kind === "raise-tob")) {
                           body.push(<div key="assist-waller" style={smallNote}>Unincorporated Waller: berms are fill — the 1:1 offset applies; the no-structural-fill rule (Art. 5 §A(9)) targets structures, but confirm berm treatment with the County Engineer.</div>);
