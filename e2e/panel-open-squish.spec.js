@@ -32,7 +32,7 @@ const SITE = {
 const canvas = (p) => p.locator('[data-testid="planner-canvas"]').first();
 
 test.describe("panel open must not squish the drawing (B962)", () => {
-  test("selecting an element then opening Yield keeps the viewBox welded to the canvas width every frame", async ({ page }) => {
+  test("selecting an element then opening ANY left panel (open / switch / close) keeps the viewBox welded to the canvas width every frame", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.addInitScript((s) => { try { localStorage.setItem("planarfit:sites:v1", s); } catch (_) {} }, JSON.stringify({ [SITE.id]: SITE }));
@@ -54,54 +54,72 @@ test.describe("panel open must not squish the drawing (B962)", () => {
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
 
-    // Start from the real scenario: every panel CLOSED. Click any active rail tab to close it.
-    for (let i = 0; i < 8; i++) {
-      const closed = await page.evaluate(() => { const b = document.querySelector('.dbtn[aria-pressed="true"]'); if (b) { b.click(); return false; } return true; });
-      if (closed) break;
+    // Helper: close every open panel (click each active rail tab).
+    const closeAllPanels = async () => {
+      for (let i = 0; i < 8; i++) {
+        const closed = await page.evaluate(() => { const b = document.querySelector('.dbtn[aria-pressed="true"]'); if (b) { b.click(); return false; } return true; });
+        if (closed) break;
+        await page.waitForTimeout(140);
+      }
       await page.waitForTimeout(150);
-    }
-    await page.waitForTimeout(200);
+    };
+    // Helper: record the SVG clientWidth/viewBoxW ratio + a fixed feet point every animation frame
+    // across `action`, then return the worst squish + worst jump seen.
+    const recordDuring = async (action) => {
+      await page.evaluate(() => {
+        window.__f = []; let n = 0; const FX = 900;
+        const tick = () => {
+          const svg = document.querySelector('[data-testid="planner-canvas"]');
+          if (svg) {
+            const offX = parseFloat(svg.getAttribute("data-view-offx"));
+            const ppf = parseFloat(svg.getAttribute("data-view-ppf"));
+            const vb = svg.getAttribute("viewBox").split(" ").map(Number);
+            const r = svg.getBoundingClientRect();
+            window.__f.push({ ratio: r.width / vb[2], feetX: r.left + ((FX * ppf + offX) / vb[2]) * r.width });
+          }
+          if (n++ < 34) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      await action();
+      await page.waitForTimeout(700);
+      const frames = await page.evaluate(() => window.__f);
+      expect(frames.length, "frames were recorded").toBeGreaterThan(5);
+      const settledX = frames[frames.length - 1].feetX;
+      return {
+        worstRatio: Math.max(...frames.map((f) => Math.abs(f.ratio - 1))),
+        worstJump: Math.max(...frames.map((f) => Math.abs(f.feetX - settledX))),
+      };
+    };
+    const clickTab = (title) => () => page.locator(`button[title="${title}"]`).first().click();
+    const assertNoFlash = (label, r) => {
+      expect(r.worstRatio, `${label}: SVG squished a frame (worst clientWidth/viewBoxW deviation ${r.worstRatio.toFixed(3)}; pre-B962 ≈0.31)`).toBeLessThan(0.03);
+      expect(r.worstJump, `${label}: fixed feet point jumped ${Math.round(r.worstJump)}px (pre-B962 ≈146px)`).toBeLessThanOrEqual(3);
+    };
+
+    await closeAllPanels();
     // Panel really closed (canvas hard against the 54px rail).
     expect(await page.evaluate(() => Math.round(document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect().left))).toBeLessThan(60);
 
-    // Select the building (plain click on its center).
+    // Every left panel, opened from closed with the element selected (the owner's flow), must stay
+    // welded frame-by-frame — Yield was the reported case, but the squish was shared by all of them.
+    for (const title of ["Parcel", "Analysis", "Yield", "Properties", "References", "Standards"]) {
+      await closeAllPanels();
+      await page.mouse.click(bx + 120, by + 85); // select the building
+      await page.waitForTimeout(150);
+      assertNoFlash(`open ${title}`, await recordDuring(clickTab(title)));
+      // The panel actually opened (guards a trivially-passing no-op).
+      expect(await page.evaluate(() => Math.round(document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect().left)), `${title} panel opened`).toBeGreaterThan(300);
+    }
+
+    // A switch (panel→panel) and a close must also stay welded.
+    await closeAllPanels();
     await page.mouse.click(bx + 120, by + 85);
-    await page.waitForTimeout(300);
-
-    // Arm a per-animation-frame recorder of the SVG's clientWidth/viewBoxW ratio + a fixed feet point.
-    await page.evaluate(() => {
-      window.__f = [];
-      const FX = 900; // a fixed feet point (within the parcel)
-      let n = 0;
-      const tick = () => {
-        const svg = document.querySelector('[data-testid="planner-canvas"]');
-        if (svg) {
-          const offX = parseFloat(svg.getAttribute("data-view-offx"));
-          const ppf = parseFloat(svg.getAttribute("data-view-ppf"));
-          const vb = svg.getAttribute("viewBox").split(" ").map(Number);
-          const r = svg.getBoundingClientRect();
-          window.__f.push({ ratio: r.width / vb[2], feetX: r.left + ((FX * ppf + offX) / vb[2]) * r.width });
-        }
-        if (n++ < 40) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    });
-
-    await page.locator('button[title="Yield"]').first().click();
-    await page.waitForTimeout(800);
-
-    const frames = await page.evaluate(() => window.__f);
-    expect(frames.length, "frames were recorded").toBeGreaterThan(5);
-    const settledX = frames[frames.length - 1].feetX;
-
-    // No frame may squish the drawing (ratio must stay ≈1) or jump the fixed feet point.
-    const worstRatio = Math.max(...frames.map((f) => Math.abs(f.ratio - 1)));
-    const worstJump = Math.max(...frames.map((f) => Math.abs(f.feetX - settledX)));
-    expect(worstRatio, `SVG squished a frame (worst clientWidth/viewBoxW deviation ${worstRatio.toFixed(3)}; pre-B962 ≈0.31)`).toBeLessThan(0.03);
-    expect(worstJump, `fixed feet point jumped ${Math.round(worstJump)}px during the open (pre-B962 ≈146px)`).toBeLessThanOrEqual(3);
-
-    // The panel actually opened (guards a trivially-passing no-op).
-    expect(await page.evaluate(() => Math.round(document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect().left))).toBeGreaterThan(300);
+    await page.waitForTimeout(150);
+    await clickTab("Parcel")();
+    await page.waitForTimeout(500);
+    assertNoFlash("switch Parcel→Yield", await recordDuring(clickTab("Yield")));
+    assertNoFlash("close Yield", await recordDuring(clickTab("Yield")));
     expect(errors, errors.join("\n")).toEqual([]);
   });
 });
