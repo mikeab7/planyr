@@ -3,6 +3,7 @@ import {
   roadCenterline, minRadiusOfCurvature, roadMinRadius, polylineLength,
   insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx,
   findRoadConnect, roadsMergeCompatible, concatRoads, planRoadConnect, fixRoadRadii,
+  teeGeometry,
 } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import {
   speedMinRadius, classMinRadius, classDefaultRadius, roadClassOf, ROAD_CLASS_SEEDS,
@@ -507,3 +508,75 @@ describe("fixRoadRadii — tier 3 nudge + tier 4 located residual", () => {
     expect(vtx).toEqual(vtxCopy);
   });
 });
+
+// ---------------------------------------------------------------------------------------
+// B953/NEW-1 — clean T-intersection geometry at a road tee
+// ---------------------------------------------------------------------------------------
+const distToLine = (p, a, d) => Math.abs((p.x - a.x) * -d.y + (p.y - a.y) * d.x); // signed→abs perp dist to line (a,dir d)
+
+describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
+  // Through road east-west through origin; side road tees in from the north.
+  const base = { T: { x: 0, y: 0 }, throughDir: { x: 1, y: 0 }, sideDir: { x: 0, y: 1 }, phT: 12, phS: 12, R: 20, curbT: 0.5, curbS: 0.5 };
+
+  it("perpendicular tee: throat widens to side width + 2R and returns are tangent to both edges", () => {
+    const g = teeGeometry(base);
+    expect(g).toBeTruthy();
+    // throat opening ≈ 2*(phS + R) = 2*(12+20) = 64 (wider than the 24 ft side road)
+    expect(g.throatWidth).toBeCloseTo(64, 3);
+    expect(g.throatWidth).toBeGreaterThan(2 * base.phS);
+    // through tangents sit on the through near edge (y = phT = 12); side tangents on the side edges (x = ±12)
+    for (const p of g.throughTangents) expect(p.y).toBeCloseTo(12, 3);
+    expect(g.sideTangents.map((p) => Math.abs(p.x)).sort()).toEqual([12, 12]);
+    // each return arc runs from its through tangent to its side tangent (tangency)
+    for (let i = 0; i < 2; i++) {
+      const arc = g.returns[i];
+      expect(arc.length).toBeGreaterThanOrEqual(2);
+      const ends = [arc[0], arc[arc.length - 1]];
+      // one end is on the through edge (y≈12), the other on a side edge (x≈±12)
+      expect(ends.some((p) => Math.abs(p.y - 12) < 1e-3)).toBe(true);
+      expect(ends.some((p) => Math.abs(Math.abs(p.x) - 12) < 1e-3)).toBe(true);
+    }
+  });
+
+  it("a larger return radius widens the throat further", () => {
+    const small = teeGeometry({ ...base, R: 10 });
+    const large = teeGeometry({ ...base, R: 40 });
+    expect(large.throatWidth).toBeGreaterThan(small.throatWidth);
+    expect(small.throatWidth).toBeCloseTo(2 * (12 + 10), 2);
+    expect(large.throatWidth).toBeCloseTo(2 * (12 + 40), 2);
+  });
+
+  it("flare widens the throat beyond the returns alone", () => {
+    const noFlare = teeGeometry(base);
+    const flared = teeGeometry({ ...base, flare: 10 });
+    expect(flared.throatWidth).toBeGreaterThan(noFlare.throatWidth);
+  });
+
+  it("feasibility clamp: a short side road shrinks the returns (no runaway throat)", () => {
+    const clamped = teeGeometry({ ...base, sideAvail: 8 });
+    const free = teeGeometry(base);
+    expect(clamped.R).toBeLessThan(free.R);
+    expect(clamped.throatWidth).toBeLessThan(free.throatWidth);
+  });
+
+  it("acute tee still connects and degrades gracefully (finite, no NaN, positive throat)", () => {
+    const acute = teeGeometry({ ...base, sideDir: unitv(2, 1) }); // ~27° from the through road
+    expect(acute).toBeTruthy();
+    for (const arc of acute.returns) for (const p of arc) { expect(Number.isFinite(p.x)).toBe(true); expect(Number.isFinite(p.y)).toBe(true); }
+    expect(acute.throatWidth).toBeGreaterThan(0);
+    expect(acute.cover.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
+  });
+
+  it("returns null when the side road is parallel to the through road (not a tee)", () => {
+    expect(teeGeometry({ ...base, sideDir: { x: 1, y: 0 } })).toBeNull();
+  });
+
+  it("produces a non-degenerate cover polygon that spans the throat", () => {
+    const g = teeGeometry(base);
+    expect(g.cover.length).toBeGreaterThanOrEqual(5);
+    const xs = g.cover.map((p) => p.x);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(2 * base.phS); // wider than the raw side strip
+  });
+});
+
+function unitv(x, y) { const l = Math.hypot(x, y) || 1; return { x: x / l, y: y / l }; }

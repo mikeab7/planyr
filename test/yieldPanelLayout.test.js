@@ -13,21 +13,20 @@ const at = (needle) => {
 };
 
 describe("A1/A2/A5/A6 — top-to-bottom order", () => {
-  it("verdict strip → LAND USE → BUILDINGS → BUILDABILITY render in order", () => {
+  it("verdict strip → LAND USE → BUILDINGS render in order (Buildability is now a strip row, B2)", () => {
     const order = [
       'data-testid="yield-verdict-strip"',
       'sectionId="yield-land"',
       'sectionId="yield-buildings"',
-      'sectionId="yield-buildability"',
     ].map(at);
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
-  it("the groups carry the v3 titles", () => {
+  it("the groups carry the v3 titles (the Buildability GROUP is deleted, B2)", () => {
     expect(src).toContain('title="Land use"');
     expect(src).toContain('title="Buildings"');
-    expect(src).toContain('title="Buildability"');
     expect(src).toContain('title="Costs"');
+    expect(src.includes('sectionId="yield-buildability"')).toBe(false);
   });
 });
 
@@ -89,10 +88,11 @@ describe("punch 2 — the verdict sentence never ellipsizes; the strip carries n
     expect(strip.includes("yield-verdict-sentence")).toBe(true);
     expect(strip.includes('textOverflow: "ellipsis"')).toBe(false);
   });
-  it("no Optimize-pond button wiring inside the strip block", () => {
-    // The comment explains the button lives in DETENTION DETAIL; the WIRING must be absent here.
-    expect(strip.includes("onClick={drainage.onDesignPond}")).toBe(false);
-    expect(strip.includes("<button")).toBe(false);
+  it("no Optimize-pond button wiring inside the strip block (the B2 ↻ re-check button is allowed)", () => {
+    // The ⚡ Optimize-pond button lives in DETENTION DETAIL; its onDesignPond WIRING must be
+    // absent from the strip. (B2 adds a ↻ re-check <button> to the Buildability row, and the
+    // strip comment mentions "⚡ Optimize pond", so we match the wiring, not those strings.)
+    expect(/onClick=\{[^}]*onDesignPond\}/.test(strip)).toBe(false);
   });
 });
 
@@ -126,11 +126,81 @@ describe("punch 5 — the cited em dashes are swept to colons / middots", () => 
 });
 
 describe("punch 6/7/8 — group summaries", () => {
-  it("BUILDINGS is '{n} · {sf} sf'; COSTS is 'not priced yet' when unpriced; BUILDABILITY is gated", () => {
+  it("BUILDINGS is '{n} · {sf} sf'; COSTS is 'not priced yet' when unpriced; the BUILDABILITY group is gone (B2)", () => {
     expect(src).toContain("${buildingCount || 0} · ${f0(bldg)} sf");
     expect(src).toContain('"not priced yet"');
     expect(src.includes('summary="road + earthwork"')).toBe(false);
-    // the BUILDABILITY group renders only when it has FFE detail
-    expect(src).toContain("drainageBlocks.ffeR.length > 0");
+    // v3 B2 — the BUILDABILITY group was deleted; its verdict is a permanent strip row.
+    expect(src.includes('sectionId="yield-buildability"')).toBe(false);
+  });
+});
+
+// ── v3 post-ship audit — PR-A ───────────────────────────────────────────────────────
+describe("A1 — the 'Assumptions & method' disclosure is a real accessible <button> that opens", () => {
+  it("a module-scope InlineDisclosure carries aria-expanded on a real button", () => {
+    const i = src.indexOf("function InlineDisclosure(");
+    expect(i, "InlineDisclosure component defined").toBeGreaterThan(-1);
+    const body = src.slice(i, i + 900);
+    expect(body).toContain('type="button"');
+    expect(body).toContain("aria-expanded={open}");
+    expect(body).toContain('data-testid="assumptions-method-toggle"');
+    expect(body).toContain('data-testid="assumptions-method-body"');
+    // the chevron flips with open state
+    expect(body).toContain('{open ? "▾" : "▸"}');
+  });
+  it("groupFold renders the method fold through InlineDisclosure, not the old bare button", () => {
+    expect(src).toContain("<InlineDisclosure");
+    expect(src).toContain('label="Assumptions & method"');
+    // the pre-audit inline button (no aria-expanded) is gone
+    expect(src.includes('{methodShown ? "▾" : "▸"} Assumptions &amp; method')).toBe(false);
+  });
+});
+
+describe("A2 — the Optimize pond tooltip never promises the drawn outline 'grows'", () => {
+  it("carries the exact has-pond and no-pond titles", () => {
+    expect(src).toContain("One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed.");
+    expect(src).toContain("One click: draws a right-sized pond and solves its outlet.");
+  });
+  it("none of the banned '(or grows)' Optimize-pond promises remain", () => {
+    expect(src.includes("Draws (or grows)")).toBe(false);
+    expect(src.includes("(or grows) ONE pond")).toBe(false);
+    expect(src.includes("Creates (or grows)")).toBe(false);
+  });
+});
+
+// ── v3 post-ship audit — PR-B ───────────────────────────────────────────────────────
+describe("PR-B — Yield panel + shared copy fixes", () => {
+  it("B1 — the swept em-dash strings are colons now", () => {
+    expect(src).toContain("Overall: Post ≤ Pre");
+    expect(src).toContain('"PASS: every storm"');
+    expect(src).toContain("Criteria values are unverified placeholders: confirm in Standards against the county criteria manual (PCPM / DCM).");
+    expect(src).toContain('title="Pin in place: prevents accidental moves/edits"');
+    expect(src.includes("Overall — Post")).toBe(false);
+    expect(src.includes("PASS — every storm")).toBe(false);
+  });
+  it("B3 — freshness unknown-age reads 'Flood data: not checked'; with age '{age} ago'", () => {
+    expect(src).toContain('"Flood data: not checked"');
+    expect(src).toContain("`Flood data ${formatAge(floodAgeMs)} ago`");
+  });
+  it("B4 — the requirement basis reads the appendix off source.section too (Waller Co. App. E)", () => {
+    expect(src).toContain("req.rule.governingManual?.section || req.rule.source?.section");
+    expect(src).toContain("Adopted criteria.");
+    expect(src).toContain("Screening range ${f1(req.bandAcFt[0])} to ${f1(req.bandAcFt[1])} ac-ft; planned to the conservative end.");
+    expect(src).toContain("Criteria values still unverified: confirm in Standards.");
+  });
+  it("B6 — the COSTS body is two flat CostDisclosure rows, Earthwork before Road, no '(screening)' sub-headers", () => {
+    const e = src.indexOf('<CostDisclosure label="Earthwork">');
+    const r = src.indexOf('<CostDisclosure label="Road">');
+    expect(e).toBeGreaterThan(-1);
+    expect(r).toBeGreaterThan(-1);
+    expect(e).toBeLessThan(r); // Earthwork first (B6 order)
+    expect(src.includes('title="Road cost (screening)"')).toBe(false);
+    expect(src.includes('title="Earthwork cost (screening)"')).toBe(false);
+    expect(src).toContain("Set unit prices →");
+  });
+  it("B7 — SURVEY is in the ONE shared provenance legend, rendered in both the Yield footer and pond panel", () => {
+    expect(src).toContain('["SURVEY", "from terrain data"]');
+    const uses = src.match(/<ProvenanceLegend/g) || [];
+    expect(uses.length).toBeGreaterThanOrEqual(2);
   });
 });

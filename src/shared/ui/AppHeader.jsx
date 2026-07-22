@@ -77,7 +77,7 @@ function SettingsMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Settings"
-        title="Settings — display theme"
+        title="Settings: display theme"
         style={{
           display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: 7,
           border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
@@ -388,7 +388,7 @@ export default function AppHeader({
               Also a secondary route to the Dashboard (the labeled crumb is primary, B192). */}
           <button
             onClick={onDashboard || undefined}
-            title={onDashboard ? "Dashboard — all projects" : undefined}
+            title={onDashboard ? "Dashboard: all projects" : undefined}
             style={{
               display: "flex", alignItems: "center", flex: "none",
               background: "transparent", border: "none",

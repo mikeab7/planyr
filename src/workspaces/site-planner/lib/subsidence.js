@@ -60,7 +60,7 @@ export function subsidenceFlag(counties = []) {
   return {
     districts: hits.map((d) => d.key),
     severity: "info",
-    message: `In the ${hits.map((d) => d.name).join(" + ")} — groundwater pumping (dewatering / wells) needs a district permit${hits.some((d) => d.regulates.includes("conversion")) ? " and surface-water conversion is regulated" : ""}. Screening flag; confirm with the district.`,
+    message: `In the ${hits.map((d) => d.name).join(" + ")}: groundwater pumping (dewatering / wells) needs a district permit${hits.some((d) => d.regulates.includes("conversion")) ? " and surface-water conversion is regulated" : ""}. Screening flag; confirm with the district.`,
     citations: hits.map((d) => d.citation),
   };
 }
