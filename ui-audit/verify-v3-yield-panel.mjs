@@ -66,8 +66,12 @@ for (const seg of ["Buildings", "Open space", "Pond", "Paving"]) {
 log(/Impervious \(buildings \+ paving\)/.test(txt), "impervious ratio row renders");
 // A6 BUILDINGS
 log(/BUILDINGS/i.test(txt), "group: BUILDINGS");
-// A7/A8
-log(/BUILDABILITY/i.test(txt), "group: BUILDABILITY");
+// A7 BUILDABILITY renders only with a drainage check (item 6: deleted when nothing to show) → informational logged-out.
+{
+  const hasBuildability = /BUILDABILITY/i.test(txt);
+  console.log(`${hasBuildability ? "✓ " : "· "}group BUILDABILITY present: ${hasBuildability} (gated on a live drainage check)`);
+}
+// A8
 log(/COSTS/i.test(txt), "group: COSTS");
 // A9 footer legend
 log(/measured from your drawing/.test(txt) && /adopted criteria/.test(txt) && /your input/.test(txt), "footer legend (PLAN/CODE/EST/YOU definitions) renders");

@@ -72,3 +72,65 @@ describe("A9 — footer legend (Yield panel only)", () => {
     }
   });
 });
+
+// ── Follow-up punch list (live-verification fixes) ──────────────────────────────────
+describe("punch 1 — the steady-state freshness clock + standalone Re-check pill are gone", () => {
+  it("the deleted clock render templates are gone (only the header 'Flood data … ago' remains)", () => {
+    expect(src.includes("remembered from your last check")).toBe(false);
+    expect(src.includes('"Checked this session"')).toBe(false);
+    expect(src.includes("As of ${checkedOnDate}")).toBe(false);
+    expect(src.includes("As of ${label}")).toBe(false);
+  });
+});
+
+describe("punch 2 — the verdict sentence never ellipsizes; the strip carries no ⚡ button", () => {
+  const strip = src.slice(at("the VERDICT STRIP"), at("DETENTION DETAIL (open)"));
+  it("the sentence span has no textOverflow ellipsis", () => {
+    expect(strip.includes("yield-verdict-sentence")).toBe(true);
+    expect(strip.includes('textOverflow: "ellipsis"')).toBe(false);
+  });
+  it("no Optimize-pond button wiring inside the strip block", () => {
+    // The comment explains the button lives in DETENTION DETAIL; the WIRING must be absent here.
+    expect(strip.includes("onClick={drainage.onDesignPond}")).toBe(false);
+    expect(strip.includes("<button")).toBe(false);
+  });
+});
+
+describe("punch 4 — DETENTION DETAIL: prior detail folds into Assumptions & method; visible = per-pond + explainer + basis", () => {
+  it("the det groupFold passes detR as opts.method and the visible body is the spec's items", () => {
+    expect(src).toContain('groupFold("det", "Detention detail"');
+    expect(src).toContain("method: detR");
+    expect(src).toContain("Requirement basis");
+    expect(src).toContain("ac-ft counts");
+    expect(src).toContain("so none counts yet. Raising the rim fixes this.");
+  });
+});
+
+describe("punch 5 — the cited em dashes are swept to colons / middots", () => {
+  it("SitePlanner strings", () => {
+    expect(src).toContain("for this county: verify with the county engineer");
+    expect(src.includes("for this county — verify")).toBe(false);
+    expect(src).toContain("Zone A with no published BFE: the governing");
+    expect(src).toContain("Rate-control district: the volume above");
+    // the two rendered reviewing-agency <option> labels now use a middot (comments elsewhere
+    // may still document the old "Auto — detected" wording, so scope to the rendered forms).
+    expect(src).toContain('Auto{ac.detectedLabel ? ` · detected: ');
+    expect(src).toContain('Auto · detected: {(fm.rules');
+    expect(src.includes('">Auto — detected:')).toBe(false);
+  });
+  it("the BKDD overlay data string (detentionRules.js)", () => {
+    const rules = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/lib/detentionRules.js", import.meta.url)), "utf8");
+    expect(rules).toContain("in Brookshire–Katy DD: rate-control detention");
+    expect(rules.includes("Brookshire–Katy DD — rate-control")).toBe(false);
+  });
+});
+
+describe("punch 6/7/8 — group summaries", () => {
+  it("BUILDINGS is '{n} · {sf} sf'; COSTS is 'not priced yet' when unpriced; BUILDABILITY is gated", () => {
+    expect(src).toContain("${buildingCount || 0} · ${f0(bldg)} sf");
+    expect(src).toContain('"not priced yet"');
+    expect(src.includes('summary="road + earthwork"')).toBe(false);
+    // the BUILDABILITY group renders only when it has FFE detail
+    expect(src).toContain("drainageBlocks.ffeR.length > 0");
+  });
+});

@@ -72,11 +72,17 @@ async function openYield(page) {
   await page.locator('svg[aria-label="Site plan canvas"]').waitFor({ timeout: 12000 }).catch(() => {});
   await page.getByRole("button", { name: /Yield/ }).first().click().catch(() => {});
   await page.waitForTimeout(500);
-  // B824 — the readout is grouped + COLLAPSED (verdict lines only); expand all three
-  // groups so the remembered-view detail rows are in the DOM for the assertions below.
-  for (const g of ["▸ Detention", "▸ Floodplain mitigation", "▸ Buildability / FFE"]) {
+  // v3 — DETENTION DETAIL is open by default; open Mitigation detail, and reveal every folded
+  // "Assumptions & method" disclosure so the NEW-9 detail rows (usable/dead split, gross-overstates
+  // warning) are in the DOM for the assertions below (the honesty logic is unchanged; it just moved
+  // into the disclosure per the v3 A3 redesign).
+  for (const g of ["Mitigation detail"]) {
     await page.locator(`button:has-text("${g}")`).first().click({ timeout: 4000 }).catch(() => {});
     await page.waitForTimeout(150);
+  }
+  for (const d of await page.locator('button:has-text("Assumptions & method")').all()) {
+    await d.click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(100);
   }
   await page.waitForTimeout(300);
   return (await page.locator("body").innerText()).replace(/\s+/g, " ");
@@ -96,9 +102,9 @@ async function run() {
   const tA = await openYield(pageA);
 
   console.log("Case A — remembered check WITH a mitigation summary:");
-  expect("NEW-2: remembered MITIGATION ledger re-renders (row present, not vanished)", /Floodplain mitigation/.test(tA));
+  expect("NEW-2: remembered MITIGATION ledger re-renders (v3: the 'Mitigation detail' group)", /Mitigation detail/.test(tA));
   expect("NEW-2: remembered mitigation VOLUME shows (~0.11 ac-ft from the slim summary)", /\+?0\.1\d?\s*ac-ft/.test(tA), tA.match(/Floodplain mitigation[^A-Z]{0,40}/)?.[0]);
-  expect("NEW-1(e): merged 'As of <date> · Re-check' status line renders", /As of \d/.test(tA) && await pageA.getByRole("button", { name: /Re-check/ }).count() > 0);
+  expect("v3 A1: the old 'As of … · live-check' clock is gone (the header 'Flood data … ago' line replaces it)", !/As of \d.*live check/.test(tA) && !/remembered from your last check/.test(tA));
   expect("NEW-4: NO permanent 'Channel adjacency unknown' outside Harris (body)", !/Channel adjacency unknown/.test(tA));
   expect("NEW-4: NO 'Channel adjacency unknown' hidden in the tier ⓘ either", await pageA.locator('[title*="Channel adjacency unknown"]').count() === 0);
   expect("NEW-1(a): Analysis tier renders as a verdict line", /Analysis tier/.test(tA));
@@ -116,10 +122,11 @@ async function run() {
   const tB = await openYield(pageB);
 
   console.log("Case B — LEGACY remembered check with NO mitigation summary:");
-  expect("NEW-2(b): explicit 'not screened in this remembered view' row (never a silent gap)", /not screened in this remembered view/.test(tB));
-  // B823 — the prompt is a one-liner; the "re-check drainage criteria" teaching copy rides its ⓘ.
-  expect("NEW-2(b): the row prompts a re-check (one-liner + ⓘ)", /↻ re-check to screen it/i.test(tB)
-    && await pageB.locator('[title*="Re-check drainage criteria"]').count() > 0);
+  // v3 A4 — with NO mitigation requirement established, the MITIGATION DETAIL group is gated OUT
+  // (A4). The remembered-missing state now surfaces honestly in the verdict strip as
+  // "Mitigation: checking flood data" (never a silent gap), and the header's ↻ re-checks it.
+  expect("NEW-2(b): the remembered-missing mitigation surfaces honestly in the verdict strip", /Mitigation: checking flood data/.test(tB));
+  expect("NEW-2(b): a re-check affordance is reachable (header ↻ or a warn banner)", await pageB.getByRole("button", { name: /Re-check/ }).count() > 0);
   await ctxB.close();
 
   // ── Case C: remembered check WITH the per-pond detention-split facts (NEW-9) ──
@@ -139,9 +146,9 @@ async function run() {
   const tC = await openYield(pageC);
 
   console.log("Case C — remembered check WITH detSplit facts (NEW-9):");
-  expect("NEW-9(C): the verdict stays SHORT on reload (usable replayed from the facts)", /ac-ft SHORT/.test(tC), tC.match(/Detention[^A-Z]{0,60}/)?.[0]);
+  expect("NEW-9(C): the verdict stays SHORT on reload (v3 grammar: SHORT pill + '1 pond · short')", /SHORT/.test(tC) && /1 pond · short/.test(tC), tC.match(/Detention detail[^]{0,30}/)?.[0]);
   expect("NEW-9(C): NO gross-credited 'surplus' flip", !/ac-ft surplus/.test(tC));
-  expect("NEW-9(C): the provided row splits usable off gross (usable 0.00 — fully inundated)", /usable 0\.00/.test(tC));
+  expect("NEW-9(C): the provided row (in Assumptions & method) splits usable off gross (usable 0.00 — fully inundated)", /usable 0\.00/.test(tC));
   await pageC.screenshot({ path: "ui-audit/verify-remembered-split.png" }).catch(() => {});
   await ctxC.close();
 
@@ -156,7 +163,7 @@ async function run() {
   const tD = await openYield(pageD);
 
   console.log("Case D — LEGACY snapshot without detSplit + a pond (NEW-9):");
-  expect("NEW-9(D): verdict demotes to 'usable unknown — ↻ re-check'", /usable unknown — ↻ re-check/.test(tD), tD.match(/Detention[^A-Z]{0,60}/)?.[0]);
+  expect("NEW-9(D): the per-pond row demotes to 'usable unknown' (never gross-credited)", /usable unknown/.test(tD), tD.match(/Detention Pond[^]{0,40}/)?.[0]);
   expect("NEW-9(D): the gross-OVERSTATES warning renders", /gross OVERSTATES usable/.test(tD));
   expect("NEW-9(D): NO fabricated surplus verdict", !/ac-ft surplus/.test(tD));
   expect("NEW-9(D): NO fabricated SHORT verdict either (unknown is unknown)", !/ac-ft SHORT/.test(tD));
@@ -180,9 +187,11 @@ async function run() {
   const tG = (await pageG.locator("body").innerText()).replace(/\s+/g, " ");
 
   console.log("Case G — B832 auto-revalidation on a stale remembered snapshot:");
-  expect("(g) not stuck busy after the auto attempt (an outage never blocks editing)", !/Re-checking…|^Checking…$/.test(tG) && await pageG.getByRole("button", { name: /Re-check|Check drainage/ }).count() > 0);
-  expect("(g) an honest state renders (stale banner / failed-auto / degraded rows) — never a silent gap",
-    /boundary changed|Re-check failed|showing the previous result|unavailable|unknown/i.test(tG), tG.match(/As of[^A-Z]{0,60}|Re-check failed[^.]{0,40}/)?.[0]);
+  expect("(g) not stuck busy after the auto attempt (an outage never blocks editing)", !/Re-checking…/.test(tG) && await pageG.getByRole("button", { name: /Re-check/ }).count() > 0);
+  // v3 item 1 — loading/degraded is surfaced through the header freshness line ("Flood data … ago"
+  // with its ↻) and, for a terminal failure, a warn banner — never the old steady-state clock.
+  expect("(g) an honest state renders (header freshness+↻ or a warn banner) — never a silent gap",
+    /unavailable|showing the last good|predates the drawn area|Flood data/i.test(tG), tG.match(/Flood data[^]{0,24}|unavailable[^]{0,24}/)?.[0]);
   const lcG = await pageG.evaluate(() => {
     try {
       const s = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");

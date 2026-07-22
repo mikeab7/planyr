@@ -49,10 +49,11 @@ test.describe("Yield panel — v3 UI SPEC Part A top-level groups", () => {
     // A1 header.
     await expect(page.getByText("Site Yield", { exact: true })).toBeVisible();
 
-    // The top-level groups (LAND USE open · BUILDINGS · BUILDABILITY · COSTS closed).
+    // The top-level groups (LAND USE open · BUILDINGS · COSTS closed). BUILDABILITY renders only
+    // once a live drainage check has run (v3 item 6: the group is deleted when it has nothing to
+    // show), so it is not asserted here — that path is a live-verify item.
     await expect(page.getByRole("button", { name: /Land use/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /Buildings/i }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /Buildability/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /Costs/i }).first()).toBeVisible();
 
     // A5 LAND USE is open by default → its legend labels show (Buildings/Open space/Pond/Paving).

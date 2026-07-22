@@ -165,7 +165,7 @@ import { optimizePond } from "./lib/pondOptimizer.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt, pondAutoValues,
-  resolveDrainageContext, ruleBadge,
+  resolveDrainageContext, ruleBadge, AUTHORITY_SHORT,
   computeRateBasedDetention, computePumpedCredit, DESIGN_STORM_PERIODS,
   effectiveChannelDischarge, effectiveReviewer, DETENTION_AUTHORITY_CHOICES,
   slimDrainageContext, hydrateDrainageContext,
@@ -8545,6 +8545,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : drainViewCtx?.restored ? (settings.drainage?.lastCheck?.fetch?.mode ?? null) : null,
     acres: acresActive,
     providedCf: providedDetCf, providedUsableCf, deadCf: siteDeadCf, pondCount,
+    // v3 A3 — the per-pond detention breakdown for the DETENTION DETAIL group's per-pond rows:
+    // {counts} = usable (above the flood), {holds} = gross stored; ↗ selects the pond.
+    ponds: pondLedgerEntries.map((p, i) => ({
+      id: p.id,
+      label: pondCount === 1 ? "Detention Pond" : (p.name || `Pond ${i + 1}`),
+      countsAcFt: p.usableCf != null ? p.usableCf / 43560 : null,
+      holdsAcFt: (p.grossCf != null ? p.grossCf : 0) / 43560,
+    })),
+    onSelectPond: (id) => revealPondInspector(id),
     req: detReq, reqCandidates: detReqCandidates,
     // B907 — the typical screening pond depth used ONLY to ESTIMATE additional land take
     // from a detention shortfall (never to size a pond) — criteria-configurable.
@@ -12533,6 +12542,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {_pid === "yield" && (<>
           <YieldPanel
             projectName={siteLabel} conceptName={planLabel}
+            buildingCount={els.filter((e) => e.type === "building" && !e.dogEar).length}
             siteSqft={siteSqft} bldg={bldg} cov={cov} stalls={stalls} ratio={ratio}
             providedDetCf={providedDetCf} pondCount={pondCount}
             trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
@@ -12543,8 +12553,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
             onMitOpenChange={setFmMitOpen}
           />
-          {/* FINAL UI SPEC B1.2 — ④ Costs: the road + earthwork cards fold into one top-level group. */}
-          <Collapse sectionId="yield-costs" title="Costs" defaultOpen={false} summary="road + earthwork">
+          {/* v3 A8 — ④ Costs: the road + earthwork cards fold into one group. Closed summary is
+              "not priced yet" until unit prices are entered; once priced it shows the totals. */}
+          {(() => {
+          const costP = settings.prices || {};
+          const costRoad = costRollup(els, roadTravel, roadLengthOf, costP).total;
+          const costEarthPriced = Number.isFinite(costP.earthworkCy) && +costP.earthworkCy > 0;
+          const costSummary = (costRoad == null && !costEarthPriced) ? "not priced yet"
+            : (costRoad != null ? `$${Math.round(costRoad).toLocaleString()} road${costEarthPriced ? " + earthwork" : ""}` : "earthwork priced");
+          return (
+          <Collapse sectionId="yield-costs" title="Costs" defaultOpen={false} summary={costSummary}>
           {(() => {
             // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
             // (LF, both sides), split by curb type so each rides its own unit price.
@@ -12729,6 +12747,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
           </Collapse>
+          ); })()}
           {/* v3 A8→A9 — the panel FOOTER renders after the COSTS group (last, per the spec order):
               the ONE screening disclaimer + the provenance legend (four quiet outlined chips with a
               muted plain-English definition; Yield panel only). */}
@@ -18365,6 +18384,7 @@ function DesignChangeSummaryCard({ summary, onDismiss, onUndo }) {
 
 function YieldPanel({
   projectName, conceptName, // v3 A1 — the header subtitle "{project} · {concept}"
+  buildingCount, // v3 A6 — the BUILDINGS closed summary "{n} · {sf} sf"
   siteSqft, bldg, cov, stalls, ratio, trailers, impPct, pondArea, detPct, open,
   providedDetCf, pondCount, // B719: site-wide provided detention VOLUME (cf) + pond count — the same accumulator the drainage screen uses
   bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
@@ -18519,7 +18539,7 @@ function YieldPanel({
                   <span style={{ fontSize: 11, color: Y.rowLabel }}>Reviewing agency</span>
                   <select value={ac.override || ""} onChange={(e) => ac.onSet(e.target.value || null)}
                     style={{ fontSize: 11, padding: "2px 6px", borderRadius: 6, border: `1px solid ${Y.border}`, background: Y.cardBg, color: Y.text, fontFamily: "inherit", maxWidth: 180 }}>
-                    <option value="">Auto{ac.detectedLabel ? ` — detected: ${ac.detectedLabel}` : ""}</option>
+                    <option value="">Auto{ac.detectedLabel ? ` · detected: ${ac.detectedLabel}` : ""}</option>
                     {ac.choices.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                   </select>
                 </div>
@@ -18621,42 +18641,24 @@ function YieldPanel({
             // fresh edit shows a transient "Recomputing…" then the changed verdicts flash. The
             // fetched flood data's age rides every line so a stale pull is never mistaken for now.
             {
+              // v3 A1 — the steady-state "As of … · live check · {mode}" clock and its standalone
+              // "↻ Re-check" pill are DELETED: the header's single "Flood data {age} ago · ↻" line
+              // is the only freshness element, and it turns amber while a verdict is blocked loading
+              // (state D). The retry behavior stays: a genuine FAILURE / stale-pull state still
+              // surfaces LOUD (LOUD-FAILURE) as a warn banner here, with its own ↻ retry.
               const busy = d.status === "busy";
-              const ageChip = d.floodAgeMs != null ? ` · flood data ${formatAge(d.floodAgeMs)}` : "";
-              let statusText, statusWarn = false;
-              if (busy && !d.showingPrior) statusText = "Checking drainage criteria…";
-              else if (d.showingPrior && !busy) { statusText = `Couldn't refresh — showing the last good result${checkedOnDate ? ` (as of ${checkedOnDate})` : ""}${ageChip}`; statusWarn = true; }
-              else if (busy) statusText = `Refreshing flood data…${ageChip}`;
-              // The drawn footprint outgrew the fetched flood envelope but auto-refresh is off:
-              // the flood-dependent numbers screen a smaller area until a manual ↻ — say so loudly.
-              else if (d.fetchStale && !d.autoEnabled) { statusText = `⚠ The flood pull predates the drawn area — ↻ re-check to screen the new footprint${ageChip}`; statusWarn = true; }
-              // B874 — STALLED: a refetch is wanted but its single auto attempt is spent and nothing
-              // is in flight. A TERMINAL state (never an endless spinner) — the numbers stay live off
-              // the cached facts; ↻ Re-check re-arms the pull. B909 §2d — softened for a first-time
-              // user: an explanation ("still loading"), not an alarming error to fix — the auto-retry
-              // already happened silently before this line ever shows.
-              else if (d.autoStalled) { statusText = `Flood data is temporarily unavailable — estimates shown may update once it loads.${ageChip}`; statusWarn = true; }
-              // Auto refresh pending / in flight (geometry outgrew the envelope, or refresh-on-open):
-              // the numbers are already live — this only says the flood pull is catching up.
-              else if (d.autoRefreshing) statusText = `Refreshing flood data for the drawn area…${ageChip}`;
-              else if (drainRecomputing) statusText = "Recomputing…";
-              // B832/B895 — the steady-state facts line follows ONE template across both ways
-              // facts can be current ("As of {date} · {source} · {domain} data {age}"), so the
-              // freshness readout looks the same whether it's a remembered or a live check; the
-              // Re-check control rides the same row rather than a second sentence.
-              else if (d.restored && checkedOnDate) statusText = `As of ${checkedOnDate} · remembered from your last check${d.checkMode ? ` · ${d.checkMode}` : ""}${ageChip}`;
-              else if (d.lastCheckedAt) {
-                const w = new Date(d.lastCheckedAt);
-                const label = w.toDateString() === new Date().toDateString() ? w.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : checkedOnDate;
-                statusText = `As of ${label} · live check${d.checkMode ? ` · ${d.checkMode}` : ""}${ageChip}`;
+              let statusText = null;
+              if (d.showingPrior && !busy) statusText = `Couldn't refresh: showing the last good result${checkedOnDate ? ` (as of ${checkedOnDate})` : ""}.`;
+              else if (d.fetchStale && !d.autoEnabled) statusText = "⚠ The flood pull predates the drawn area: re-check to screen the new footprint.";
+              else if (d.autoStalled) statusText = "Flood data is temporarily unavailable: estimates shown may update once it loads.";
+              if (statusText) {
+                out.push(
+                  <div key="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "7px 0 2px", border: `1px solid ${Y.warnText}`, borderRadius: 8, padding: "6px 9px", background: Y.cardBg }}>
+                    <span title={d.showingPrior && d.error ? `Refresh error: ${d.error}` : ""} style={{ fontSize: 11, color: Y.warnText, fontWeight: 700, lineHeight: 1.4, cursor: d.showingPrior && d.error ? "help" : undefined }}>{statusText}</span>
+                    <ActionLink onClick={d.onCheck} disabled={busy} title="Refresh the GIS fetch (flood zones + reviewing authority). The detention / mitigation / pond numbers already recompute live on every edit; this only re-pulls the map data.">↻ Re-check</ActionLink>
+                  </div>
+                );
               }
-              else statusText = "Checked this session";
-              out.push(
-                <div key="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "7px 0 2px", ...(statusWarn ? { border: `1px solid ${Y.warnText}`, borderRadius: 8, padding: "6px 9px", background: Y.cardBg } : {}) }}>
-                  <span title={d.showingPrior && d.error ? `Refresh error: ${d.error}` : ""} style={{ fontSize: statusWarn ? 11 : 10.5, color: statusWarn ? Y.warnText : Y.muted, fontWeight: statusWarn ? 700 : 400, lineHeight: 1.4, cursor: d.showingPrior && d.error ? "help" : undefined }}>{statusText}</span>
-                  <ActionLink onClick={d.onCheck} disabled={busy} title="Refresh the GIS fetch (flood zones + reviewing authority). The detention / mitigation / pond numbers already recompute live on every edit — this only re-pulls the map data.">↻ Re-check</ActionLink>
-                </div>
-              );
             }
             // B824 — ONE drainage home. Below the status line the readout is organized as
             // three COLLAPSED verdict groups (Detention · Floodplain mitigation · Buildability
@@ -18673,11 +18675,13 @@ function YieldPanel({
               // v3 A3 — a group may default OPEN (opts.open); a stored user toggle still wins.
               const open = drainGroupOpen[gKey] != null ? !!drainGroupOpen[gKey] : !!opts.open;
               const vColor = tone === "danger" ? Y.dangerText : tone === "warn" ? Y.warnText : tone === "good" ? "var(--success-text)" : Y.text;
-              const { chip, bar, action } = opts;
+              const { chip, bar, action, method } = opts;
               // Partition the group's children: method notes (keyedNote → data-note="method")
               // collapse into the fold; everything else (data rows, verdict rows, actionable
-              // warnings, inputs, bars) stays inline.
-              const inlineKids = [], methodKids = [];
+              // warnings, inputs, bars) stays inline. v3 A3 — opts.method is an EXPLICIT list that
+              // always folds into the "Assumptions & method" disclosure (used to relocate the prior
+              // detention detail there so the visible body is just the spec's four items).
+              const inlineKids = [], methodKids = [...(method || [])];
               for (const k of (kids || [])) {
                 if (k && k.props && k.props["data-note"] === "method") methodKids.push(k); else inlineKids.push(k);
               }
@@ -18757,7 +18761,7 @@ function YieldPanel({
                   ? warnNote("Harris minimum depends on the outfall type — set it under Assumptions for one number.", "band",
                       "Unincorporated Harris County's minimum detention: 0.75 ac-ft/ac to a storm sewer, 1.0 to a roadside ditch. A formal Method-2 analysis can lower it, but never below 0.75.")
                   : req.flags.includes("verify-with-county-engineer")
-                  ? warnNote("No published flat rate for this county — verify with the county engineer.", "band")
+                  ? warnNote("No published flat rate for this county: verify with the county engineer.", "band")
                   : warnNote("Exact criteria tables pending transcription — treat as a screening band only.", "band"));
             } else if (req && req.kind === "unknown") {
               detR.push(row("Detention required", "unknown"));
@@ -19089,7 +19093,7 @@ function YieldPanel({
               if (d.regime.regime === "unknown") {
                 const fl = d.regime.flags || [];
                 if (fl.includes("no-published-bfe")) {
-                  detR.push(actionWarn("Cause: Zone A with no published BFE — the governing water surface can't be read from the map.", "regime-unk-bfe",
+                  detR.push(actionWarn("Cause: Zone A with no published BFE: the governing water surface can't be read from the map.", "regime-unk-bfe",
                     "Enter a 1% BFE (inputs below), or accept the boundary-grade estimate, so the regime and the usable/dead split can resolve. On Fort Bend Zone A the DRAFT Atlas-14 raster usually supplies it automatically.", () => jumpToDrainField("bfeFt"), "Enter BFE →"));
                 } else if (fl.includes("bfe-datum-unpublished")) {
                   detR.push(warnNote("Cause: the published BFE has no vertical datum — confirm it before comparing elevations.", "regime-unk-datum", "An elevation without its datum (usually NAVD88) can be off by feet; confirm against the FIRM panel."));
@@ -19110,7 +19114,7 @@ function YieldPanel({
             // The county's volumetric number renders as usual — stamp it a PROXY inside a
             // rate-control district (final sizing is hydrograph routing, not a volume).
             if (d.districtOverlays.length && req && (req.kind === "point" || req.kind === "band")) {
-              detR.push(warnNote("Rate-control district — the volume above is a screening proxy, not the sizing basis.", "district-proxy", "Inside the Brookshire–Katy DD detention is sized by RATE (post-development peak ≤ pre-development at the 2/10/100-yr storms, offsite areas included) via hydrograph routing (HEC-HMS) — there is no volumetric ac-ft/ac rule. The number above is the county's volumetric screening estimate; treat it as a scale proxy only, and let the district engineer's routing govern."));
+              detR.push(warnNote("Rate-control district: the volume above is a screening proxy, not the sizing basis.", "district-proxy", "Inside the Brookshire–Katy DD detention is sized by RATE (post-development peak ≤ pre-development at the 2/10/100-yr storms, offsite areas included) via hydrograph routing (HEC-HMS) — there is no volumetric ac-ft/ac rule. The number above is the county's volumetric screening estimate; treat it as a scale proxy only, and let the district engineer's routing govern."));
             }
             if (d.districtFailed) detR.push(warnNote("Drainage-district membership unverified — the boundary source didn't answer.", "districtfail", "The Brookshire–Katy DD boundary layer didn't respond, so district membership couldn't be confirmed on this check — an outage is never a 'not in a district'. ↻ Re-check shortly."));
             // NEW-1(d) — suppress the "district criteria may ALSO apply" note for any district
@@ -19228,7 +19232,7 @@ function YieldPanel({
                         selecting it writes jurKey:null so detection re-engages; a hand-pick
                         sticks until the user returns to Auto. */}
                     <select value={fm.jurKeyOverride || ""} onChange={(e) => fm.onChange({ jurKey: e.target.value || null })} style={{ ...fmInputStyle, width: 168, textAlign: "left", cursor: "pointer" }}>
-                      <option value="">Auto — detected: {(fm.rules[fm.detectedJurKey] || fm.rules.generic).label}</option>
+                      <option value="">Auto · detected: {(fm.rules[fm.detectedJurKey] || fm.rules.generic).label}</option>
                       {Object.entries(fm.rules).map(([k, r2]) => <option key={k} value={k}>{r2.label}</option>)}
                     </select>
                   </div>
@@ -19623,7 +19627,58 @@ function YieldPanel({
             // when a mitigation requirement exists (req rounds above zero); otherwise nothing
             // about mitigation shows in the panel beyond the verdict-strip "not required" row.
             const mitRequired = !!(mitV && mitV.volumeCf != null && mitV.volumeAcFt > ACFT_EPS);
-            out.push(groupFold("det", "Detention detail", detVerdict, detTone, detR, detSub, { chip: detChip, action: detShort ? designAction : null, open: true }));
+            // v3 A3 — the DETENTION DETAIL body is EXACTLY: per-pond row(s) · the explainer (when
+            // storage below the flood earns no credit yet) · the Requirement basis row. The ⚡
+            // Optimize pond button is the action. ALL prior detail (required/provided/tier/regime/
+            // assumptions block + reviewing-agency select/flood-WSE diagram/district warnings)
+            // relocates verbatim into "Assumptions & method" via opts.method (nothing lost). The
+            // header shows "N pond · short/ok" — the requirement range lives ONLY in the basis tag.
+            const detVisible = (() => {
+              const rows = [];
+              for (const p of (d.ponds || [])) {
+                rows.push(
+                  <div key={`pp-${p.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
+                    <button type="button" onClick={() => d.onSelectPond && d.onSelectPond(p.id)} title="Select this pond" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 12, color: "var(--accent)", fontWeight: 600, textAlign: "left" }}>{p.label} ↗</button>
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
+                      <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: Y.text, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS }}>{p.countsAcFt == null ? "usable unknown" : `${f1(p.countsAcFt)} ac-ft counts`}</span>
+                      <span title={`${f0(p.holdsAcFt * 43560)} cf stored`} style={{ fontSize: 10.5, color: Y.muted, cursor: "help" }}>holds {f1(p.holdsAcFt)}</span>
+                    </span>
+                  </div>
+                );
+              }
+              const siteCounts = d.providedUsableCf == null ? null : d.providedUsableCf / 43560;
+              const siteHolds = (d.providedCf || 0) / 43560;
+              if (siteCounts != null && siteCounts < siteHolds - ACFT_EPS) {
+                rows.push(
+                  <div key="det-explainer" style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 12.5, color: Y.rowLabel, lineHeight: 1.5, padding: "4px 0" }}>
+                    <span>All of its storage sits below the flood level, so none counts yet. Raising the rim fixes this.</span>
+                    <RowInfo label="Storage below the flood level" sections={[{ text: "Storage above the flood level is empty when the design storm arrives and earns credit. Storage below is already occupied by the flood." }]} />
+                  </div>
+                );
+              }
+              if (req && req.rule) {
+                const shortAuth = AUTHORITY_SHORT[req.rule.authority] || req.rule.authorityLabel || "criteria";
+                const appM = (req.rule.governingManual?.section || "").match(/Appendix\s+([A-Z])/);
+                const basisVal = appM ? `${shortAuth} App. ${appM[1]}` : shortAuth;
+                const rangeTxt = req.kind === "band" ? `Screening range ${f1(req.bandAcFt[0])} to ${f1(req.bandAcFt[1])} ac-ft; planned to the conservative end.`
+                  : (req.requiredAcFt != null ? `Required ${f1(req.requiredAcFt)} ac-ft.` : "");
+                const unverified = req.kind === "band" || req.rule.verified === false;
+                const basisTitle = `Adopted criteria. ${rangeTxt}${unverified ? " Criteria values still unverified: confirm in Standards." : ""}`.replace(/\s+/g, " ").trim();
+                rows.push(
+                  <div key="det-basis" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "5px 0" }}>
+                    <span style={{ fontSize: 12, color: Y.rowLabel }}>Requirement basis</span>
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                      <span style={{ fontSize: 12, color: Y.text, fontWeight: 600, whiteSpace: "nowrap" }}>{basisVal}</span>
+                      <SourceTag code="code" label="Requirement basis" basis={basisTitle} />
+                    </span>
+                  </div>
+                );
+              }
+              return rows;
+            })();
+            const detCount = d.pondCount || 0;
+            const detClosed = `${detCount} pond${detCount === 1 ? "" : "s"} · ${detShort ? "short" : detChip === "COVERED" ? "ok" : "check"}`;
+            out.push(groupFold("det", "Detention detail", detClosed, detShort ? "danger" : detChip === "COVERED" ? "good" : "warn", detVisible, "", { action: detShort ? designAction : null, open: true, method: detR }));
             if (mitRequired) out.push(groupFold("mit", "Mitigation detail", mitVerdict, mitTone, mitR, mitSub, { chip: mitChip, action: mitShort ? designAction : null }));
             // NEW-10/B830 — the ledger balancer: one card of ranked screening moves that
             // close detention + mitigation together. Every move is one line + ⓘ; nothing
@@ -19689,10 +19744,13 @@ function YieldPanel({
             <span style={{ fontSize: 10.5, color: Y.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[projectName, conceptName].filter(Boolean).join(" · ")}</span>
           )}
         </span>
-        {openPanel && drainage && floodAgeMs != null && (
+        {openPanel && drainage && drainage.onCheck && (
+          // v3 A1 — the ONE freshness element. The ↻ (re-check) is ALWAYS reachable when there's a
+          // drainage context; the age shows when known ("Flood data 16h ago"), and the line goes
+          // amber while a verdict is blocked loading (state D).
           <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: verdictLoading ? Y.warnText : Y.muted, whiteSpace: "nowrap", flex: "none" }}>
-            <span>Flood data {formatAge(floodAgeMs)}</span>
-            {drainage.onCheck ? <button type="button" onClick={drainage.onCheck} title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1 }} aria-label="Re-check flood data">↻</button> : null}
+            <span>Flood data{floodAgeMs != null ? ` ${formatAge(floodAgeMs)}` : ""}</span>
+            <button type="button" onClick={drainage.onCheck} title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1 }} aria-label="Re-check flood data">↻</button>
           </span>
         )}
         <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10, flex: "none" }}>▶</span>
@@ -19709,32 +19767,32 @@ function YieldPanel({
               <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} ac of overlap). Site area counts the shared ground once — but if one is a duplicate or stray outline, make it inactive in the Parcel panel.</div>
             </div>
           )}
-          {/* v3 A2 — the VERDICT STRIP: one row per verdict, grid [48px pill | 1fr sentence |
-              auto action]. Word-only equal-width SHORT/OK/… pills (G5); the provided/required
-              pair is bold+nowrap and renders ONCE per panel here (G1). A detention/mitigation
-              shortfall hangs a ⚡ Optimize pond button; a loading row shows "↻ retrying". Sorted
-              shortfalls-first by yieldVerdictStrip. The freshness line lives in the header (A1). */}
+          {/* v3 A2 — the VERDICT STRIP: one row per verdict, grid [40px pill | 1fr sentence |
+              auto]. Word-only equal-width SHORT/OK/… pills (G5); the provided/required pair is
+              bold+nowrap and renders ONCE per panel here (G1). The sentence NEVER ellipsizes — it
+              renders single-line in full (item 2); the ⚡ Optimize pond button is NOT in the strip
+              (the open DETENTION DETAIL below carries the labeled button), so the sentence always
+              fits. A loading row shows "↻ retrying". Sorted shortfalls-first by yieldVerdictStrip.
+              The freshness line lives in the header (A1). */}
           {verdictStrip.length > 0 && (() => {
             const pillCol = { danger: ["var(--danger-bg)", "var(--danger-text)"], good: ["var(--success-bg)", "var(--success-text)"], neutral: ["var(--planner-panel)", Y.muted] };
             const pillStyle = (tone) => {
               const [bg, fg] = pillCol[tone] || pillCol.neutral;
-              return { width: 48, boxSizing: "border-box", flex: "none", textAlign: "center", fontSize: 9, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: fg, background: bg, borderRadius: 5, padding: "3px 0", whiteSpace: "nowrap" };
+              return { width: 40, boxSizing: "border-box", flex: "none", textAlign: "center", fontSize: 9, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: fg, background: bg, borderRadius: 5, padding: "3px 0", whiteSpace: "nowrap" };
             };
             return (
               <div style={{ margin: "10px 0 6px" }} data-testid="yield-verdict-strip">
                 {verdictStrip.map((v) => (
-                  <div key={v.key} style={{ display: "grid", gridTemplateColumns: "48px 1fr auto", alignItems: "center", gap: 8, minHeight: 26 }}>
+                  <div key={v.key} style={{ display: "grid", gridTemplateColumns: "40px 1fr", alignItems: "center", gap: 8, minHeight: 26 }}>
                     <span style={pillStyle(v.tone)}>{v.pill}</span>
-                    <span style={{ fontSize: 12, color: Y.text, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+                    {/* The sentence takes the full remaining width and NEVER ellipsizes (item 2).
+                        The "…" pill + "checking flood data" already convey a loading row, so no
+                        competing "↻ retrying" element squeezes the sentence into an overflow. */}
+                    <span data-testid={`yield-verdict-sentence-${v.key}`} style={{ fontSize: 12.5, color: Y.text, lineHeight: 1.35, whiteSpace: "nowrap", minWidth: 0 }}>
                       {v.label}: {v.pair
                         ? <b style={{ whiteSpace: "nowrap", fontWeight: 750 }}>{v.sentence}</b>
                         : <span style={{ color: v.loading ? Y.muted : Y.text }}>{v.sentence}</span>}
                     </span>
-                    {v.action && drainage.onDesignPond ? (
-                      <button type="button" onClick={drainage.onDesignPond} title="Draws (or grows) a right-sized pond and solves its outlet: one click, no map skill required." style={{ flex: "none", padding: "3px 9px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Optimize pond</button>
-                    ) : v.loading ? (
-                      <span style={{ flex: "none", fontSize: 10.5, color: Y.muted, whiteSpace: "nowrap" }}>↻ retrying</span>
-                    ) : <span style={{ flex: "none" }} />}
                   </div>
                 ))}
               </div>
@@ -19802,20 +19860,28 @@ function YieldPanel({
           {/* v3 A6 — BUILDINGS (closed). Aggregates only (per-building rows need building-level data
               not threaded to this panel); coverage lives here as a building fact, and the parking
               stall counts ride along so no drawn number is lost. */}
-          <Collapse sectionId="yield-buildings" title="Buildings" defaultOpen={false} summary={hasSite ? `${f0(bldg)} sf` : "none"}>
+          <Collapse sectionId="yield-buildings" title="Buildings" defaultOpen={false} summary={hasSite ? `${buildingCount || 0} · ${f0(bldg)} sf` : "none"}>
             {row("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
             {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} sf`, bumpsUniform ? `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′` : `${bumpCount} bump-out${bumpCount > 1 ? "s" : ""} · sizes vary`, true)}
             {row("Coverage", `${f0(cov)}%`)}
             {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
             {row("Trailer stalls", f0(trailers))}
           </Collapse>
-          {/* FINAL UI SPEC B1.2 — ③ Buildability/FFE is its own top-level group; its verdict is
-              the closed summary and the status badge rides the header. */}
-          <Collapse sectionId="yield-buildability" title="Buildability" defaultOpen={false}
-            summary={drainageBlocks ? drainageBlocks.ffeVerdict : "run a drainage check"}
-            headerRight={drainageBlocks && drainageBlocks.ffeChip ? <StatusChip label={drainageBlocks.ffeChip} tone={drainageBlocks.ffeTone} /> : null}>
-            {drainageBlocks ? drainageBlocks.ffeR : <div style={{ fontSize: 11, color: Y.muted, padding: "4px 2px" }}>Run a drainage check to screen finished-floor elevations.</div>}
-          </Collapse>
+          {/* v3 A7 — BUILDABILITY: its closed summary is the VERDICT TEXT (never a bare "—", item
+              6). The group renders ONLY when it has FFE detail beyond the verdict; with nothing to
+              add, the verdict-strip "Buildability: …" line already covers it, so the group is
+              deleted entirely. */}
+          {drainageBlocks && drainageBlocks.ffeR && drainageBlocks.ffeR.length > 0 && (() => {
+            const ffeRow = verdictStrip.find((v) => v.key === "ffe");
+            const summary = ffeRow ? ffeRow.sentence
+              : (drainageBlocks.ffeVerdict && drainageBlocks.ffeVerdict !== "—" ? drainageBlocks.ffeVerdict : "not assessed");
+            return (
+              <Collapse sectionId="yield-buildability" title="Buildability" defaultOpen={false} summary={summary}
+                headerRight={drainageBlocks.ffeChip ? <StatusChip label={drainageBlocks.ffeChip} tone={drainageBlocks.ffeTone} /> : null}>
+                {drainageBlocks.ffeR}
+              </Collapse>
+            );
+          })()}
 
           {easeAll.length > 0 && (<>
             {groupHead(Y.faint, "Easements")}

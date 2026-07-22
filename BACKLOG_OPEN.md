@@ -10,7 +10,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B944 | v3 UI SPEC Part A: Yield panel redesign (PR 2) | [Site Planner / yield] | #site-planner #yield #ui | live |
+| B944 | v3 UI SPEC Part A: Yield panel redesign (PR 2) (×2) | [Site Planner / yield] | #site-planner #yield #ui | live |
 | B943 | v3 UI SPEC Part B: Pond properties inspector redesign (PR 1) | [Site Planner / pond] | #site-planner #pond #ui #yield | live |
 | B937 | Pond inspector: collapsed-group summaries were ellipsizing at panel width (B934 follow-up) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | sandbox |
 | B936 | FINAL UI SPEC Part B: Yield-panel verdict strip + number format (PR 2) | [Site Planner / yield] | #site-planner #yield #ui | live |
