@@ -48,11 +48,14 @@ describe("D3 — the berm ring is drawn INWARD, over the pond, inside the outlin
     expect(src).toContain("const annulus = [ringPath(toe), ...crestRings.map(ringPath)].join(\" \");");
     expect(src).toContain("berm {(Math.round(bermH * 10) / 10).toFixed(1)} ft");
   });
-  it("it renders AFTER the elements map (so it sits on top of the pond water, not under it)", () => {
-    const elsMap = src.indexOf("].sort(byZ).map((el) => renderElPx(");
+  it("it renders AFTER the ground-surface elements pass (so it sits on top of the pond water, not under it)", () => {
+    // The element pass is split at the building layer (B959); the berm ring follows the ground pass.
+    const groundPass = src.indexOf("zOrder(el) < BUILDING_Z).map((el) => renderElPx(");
     const bermLayer = src.indexOf('data-testid="pond-berm-ring-layer"');
-    expect(elsMap).toBeGreaterThan(-1);
-    expect(bermLayer).toBeGreaterThan(elsMap); // drawn after → on top
+    const buildingPass = src.indexOf("zOrder(el) >= BUILDING_Z).map((el) => renderElPx(");
+    expect(groundPass).toBeGreaterThan(-1);
+    expect(bermLayer).toBeGreaterThan(groundPass); // over the pond (a ground surface)
+    expect(buildingPass).toBeGreaterThan(bermLayer); // buildings still paint on top of it
   });
 });
 

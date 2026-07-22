@@ -3,7 +3,7 @@ import {
   roadCenterline, minRadiusOfCurvature, roadMinRadius, polylineLength,
   insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx,
   findRoadConnect, roadsMergeCompatible, concatRoads, planRoadConnect, fixRoadRadii,
-  teeGeometry, rectEdges, nearestRectEdge,
+  teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon,
 } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import {
   speedMinRadius, classMinRadius, classDefaultRadius, roadClassOf, ROAD_CLASS_SEEDS,
@@ -335,6 +335,35 @@ describe("findRoadConnect — endpoint / interior candidate search", () => {
     const hit = findRoadConnect({ x: 100, y: 0 }, { id: "m", index: 1 }, [near, far], { tolFt: 12 });
     expect(hit.roadId).toBe("near");
   });
+
+  // B961/NEW-3 — connect by reaching the visible pavement EDGE (curb line), not the hidden centerline.
+  it("connects when the point reaches a wide road's EDGE, though it is outside centerline tolerance", () => {
+    // Endpoint at (106,0); a road 40 ft wide (halfW 20) has its curb line 20 ft off the centerline.
+    const wide = { id: "b", pts: [{ x: 106, y: 30 }, { x: 200, y: 30 }], halfW: 20 };
+    // Query 24 ft below the centerline endpoint → only 4 ft from the curb edge. Centerline distance
+    // (24) exceeds tolFt(6); edge distance (4) is within it → connects.
+    const hit = findRoadConnect({ x: 106, y: 6 }, { id: "m", index: 1 }, [wide], { tolFt: 6 });
+    expect(hit).toBeTruthy();
+    expect(hit.roadId).toBe("b");
+    expect(hit.kind).toBe("endpoint");
+    expect(hit.pt).toEqual({ x: 106, y: 30 });     // still RESOLVES to the centerline point
+    expect(hit.dist).toBeCloseTo(4);               // returned dist is EDGE-relative (24 - halfW 20)
+  });
+
+  it("with no halfW, the same far point does NOT connect (edge == centerline)", () => {
+    const thin = { id: "b", pts: [{ x: 106, y: 30 }, { x: 200, y: 30 }] };   // halfW defaults 0
+    expect(findRoadConnect({ x: 106, y: 6 }, { id: "m", index: 1 }, [thin], { tolFt: 6 })).toBeNull();
+  });
+
+  it("honors halfW on an interior (tee) edge hit too, still projecting onto the centerline", () => {
+    const through = { id: "t", pts: [{ x: 0, y: 40 }, { x: 200, y: 40 }], halfW: 15 };
+    // 22 ft below the centerline → 7 ft past the curb edge; within tolFt 8 → interior tee.
+    const hit = findRoadConnect({ x: 100, y: 18 }, { id: "m", index: 1 }, [through], { tolFt: 8, allowInterior: true });
+    expect(hit.kind).toBe("interior");
+    expect(hit.pt.x).toBeCloseTo(100);
+    expect(hit.pt.y).toBeCloseTo(40);              // projected onto the centerline, not the edge
+    expect(hit.dist).toBeCloseTo(7);               // edge-relative (22 - halfW 15)
+  });
 });
 
 describe("roadsMergeCompatible — same class + travel width + curb", () => {
@@ -648,5 +677,74 @@ describe("teeGeometry reused for a road→drive connect (edge as 'through', no t
       const ends = [arc[0], arc[arc.length - 1]];
       expect(ends.some((p) => Math.abs(p.y) < 1e-3)).toBe(true);
     }
+  });
+
+  // B959/NEW-1 — driveJunctionsOf feasibility-clamps the WB-62 ≈50 ft truck return by passing a TIGHT
+  // throughAvail (= min(connect-edge length, court depth)). This is the teeGeometry primitive the clamp
+  // leans on: a roomy drive keeps the ≈50 ft default, a compact drive shrinks BOTH the realized return
+  // radius and the throat so the single fillet fits the actual space (never spanning the whole court).
+  it("a tight available run clamps the realized WB-62 return radius + throat down", () => {
+    const common = { T: { x: 0, y: 0 }, throughDir: { x: 1, y: 0 }, sideDir: { x: 0, y: 1 }, phT: 0, phS: 12, curbT: 0, curbS: 0.5, R: 50 };
+    const roomy = teeGeometry({ ...common, throughAvail: 300, sideAvail: 300 });
+    const tight = teeGeometry({ ...common, throughAvail: 40, sideAvail: 40 });
+    expect(roomy).toBeTruthy();
+    expect(tight).toBeTruthy();
+    expect(roomy.R).toBeCloseTo(50, 0);                          // a roomy drive keeps the ≈50 ft default
+    expect(tight.R).toBeLessThan(roomy.R);                       // return radius clamped down to fit
+    expect(tight.throatWidth).toBeLessThan(roomy.throatWidth);   // throat only as wide as it can fit
+  });
+});
+
+describe("weldCoverPolygon — seamless road-to-road weld patch (B960/NEW-2)", () => {
+  const pointInRing = (p, ring) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const yi = ring[i].y, xi = ring[i].x, yj = ring[j].y, xj = ring[j].x;
+      if (((yi > p.y) !== (yj > p.y)) && (p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  };
+
+  it("collinear same-width weld → a patch straddling the join that covers the seam point", () => {
+    // Road A runs in from the left (body neighbor at -x → dir +x toward P); road B runs in from
+    // the right (dir -x). Both 25 ft edge-to-edge → halfW 12.5.
+    const cover = weldCoverPolygon({ x: 0, y: 0 }, [
+      { dir: { x: 1, y: 0 }, halfW: 12.5 },
+      { dir: { x: -1, y: 0 }, halfW: 12.5 },
+    ]);
+    expect(cover).toBeTruthy();
+    expect(cover.length).toBeGreaterThanOrEqual(4);
+    expect(pointInRing({ x: 0, y: 0 }, cover)).toBe(true);      // the seam point is covered
+    expect(pointInRing({ x: 0, y: 12 }, cover)).toBe(true);     // near-edge on the perpendicular seam covered
+    // the patch extends a little into BOTH roads (not just one side)
+    expect(pointInRing({ x: 3, y: 0 }, cover)).toBe(true);
+    expect(pointInRing({ x: -3, y: 0 }, cover)).toBe(true);
+  });
+
+  it("bridges a width step: the wider road's full cross-section at the join is covered", () => {
+    const cover = weldCoverPolygon({ x: 0, y: 0 }, [
+      { dir: { x: 1, y: 0 }, halfW: 20 },     // wide road
+      { dir: { x: -1, y: 0 }, halfW: 8 },     // narrow road
+    ]);
+    expect(cover).toBeTruthy();
+    expect(pointInRing({ x: 0, y: 18 }, cover)).toBe(true);     // out to the wide road's half-width
+  });
+
+  it("miters a bent weld — the outer corner between two flat caps is filled", () => {
+    // A comes from the west (dir +x), B leaves to the north (its body is north, dir −y toward P).
+    const cover = weldCoverPolygon({ x: 0, y: 0 }, [
+      { dir: { x: 1, y: 0 }, halfW: 10 },
+      { dir: { x: 0, y: -1 }, halfW: 10 },
+    ]);
+    expect(cover).toBeTruthy();
+    // the join point and a point just inside the wedge are covered (no open notch/seam)
+    expect(pointInRing({ x: 0, y: 0 }, cover)).toBe(true);
+  });
+
+  it("returns null when under-specified (one arm, or zero width)", () => {
+    expect(weldCoverPolygon({ x: 0, y: 0 }, [{ dir: { x: 1, y: 0 }, halfW: 10 }])).toBeNull();
+    expect(weldCoverPolygon({ x: 0, y: 0 }, [
+      { dir: { x: 1, y: 0 }, halfW: 0 }, { dir: { x: -1, y: 0 }, halfW: 0 },
+    ])).toBeNull();
   });
 });

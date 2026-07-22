@@ -109,7 +109,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge } from "./lib/roadGeometry.js";
+import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon } from "./lib/roadGeometry.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
@@ -1001,6 +1001,10 @@ const curbAreaOf = (el, allEls) => (el.points ? 0 : curbEdgesOf(el, allEls).redu
  * geometry dependency. The legacy rotated-rect road (no `pts`) keeps the old render. */
 const isCenterlineRoad = (el) => !!el && el.type === "road" && Array.isArray(el.pts) && el.pts.length >= 2;
 const roadCurbWidth = (el) => (Number.isFinite(el && el.curb) ? el.curb : CURB);
+// The paint-layer of a building — the highest ground/structure band. The clean-intersection overlay
+// (road tee / drive / weld covers) renders BELOW this so a building ALWAYS paints over it: connection
+// pavement can never overlap a building (B959/NEW-1 hard rule, "building always wins").
+const BUILDING_Z = zOrder({ type: "building" });
 // Snap-and-connect (B945/NEW-1): a road endpoint magnet engages within ~12 screen px of a
 // candidate endpoint, but never welds across more than this in real-world feet (so it can't
 // bridge a large gap when zoomed out). ROAD_FIX_MAX_NUDGE_FT bounds NEW-2's tier-3 corner nudge.
@@ -1074,6 +1078,12 @@ function teeJunctionsOf(els, settings) {
 // el.driveTee (set at connect), locates the connected endpoint on the target rect's facing edge, and
 // reuses teeGeometry with the target edge as the "through" edge (no through curb; return radius scaled
 // by target type). Returns [{ sideId, targetId, kind, geom }]. Pure over (els, settings); memoized.
+// B959/NEW-1 — truck-court entrance sized by STANDARD CIVIL DRIVEWAY PRACTICE, design vehicle WB-62:
+// a SINGLE curb-return fillet of ≈50 ft (matches the truck's ~45 ft outer swept path), NOT the
+// public-street 120–125 ft simple-curve-with-taper or 400–440 ft 3-centered compound-curve templates
+// (those are what balloon the junction). Editable; both types then feasibility-clamp to the actual
+// drive via the tight throughAvail below, so the return can neither span the whole connect edge nor
+// reach across the court's depth to the building.
 const DRIVE_RETURN_SEED = { parking: 20, truckcourt: 50 };
 function driveJunctionsOf(els, settings) {
   const out = [];
@@ -1095,13 +1105,61 @@ function driveJunctionsOf(els, settings) {
     const kind = S.driveTee.kind === "truckcourt" ? "truckcourt" : "parking";
     const R = S.driveTee.returnR > 0 ? S.driveTee.returnR : DRIVE_RETURN_SEED[kind];
     const flare = S.driveTee.flare > 0 ? S.driveTee.flare : 0;
+    // B959/NEW-1 feasibility clamp — the single curb-return fillet must FIT the actual drive, not sprawl:
+    // teeGeometry already clamps the return to the run it's given, so feed it the court's real limits —
+    // min(connect-edge length, court depth behind that edge). A roomy court keeps the ≈50 ft default; a
+    // shallow/short court shrinks it to fit (and it never reaches the building — that's also z-order-guarded).
+    const perpDepth = hit.edge.axis === "y" ? T.h : T.w;           // court depth behind the connect edge (see rectEdges axis)
     const geom = teeGeometry({
       T: { x: P.x, y: P.y }, throughDir: hit.edge.dir, sideDir,
       phT: 0, phS: Math.max(0, (+S.travelW || 0) / 2),
       R, flare, curbT: 0.5, curbS: roadCurbWidth(S),              // curbT covers any parking/court curb across the mouth
-      throughAvail: hit.edge.len, sideAvail: Math.hypot(sideDir.x, sideDir.y),
+      throughAvail: Math.min(hit.edge.len, perpDepth), sideAvail: Math.hypot(sideDir.x, sideDir.y),
     });
     if (geom) out.push({ sideId: S.id, targetId: T.id, kind, geom });
+  }
+  return out;
+}
+// B960/NEW-2 — road↔road END-TO-END weld junctions for the seamless-weld render. A weld = one
+// road's ENDPOINT coincident with ANOTHER road's ENDPOINT (a plain weld or the two ends of a loop),
+// as opposed to a tee (endpoint on an interior vertex, handled by teeJunctionsOf). Each such join
+// otherwise shows a seam — two flat end caps butting, each drawing its back-of-curb edge stroke
+// across the join. Returns [{ ids, P, cover }] with an opaque cover patch (weldCoverPolygon) that
+// unifies the pavement. Pure over (els); memoized at the call site.
+const roadOuterHalf = (el) => Math.max(0, (+el.travelW || 0) / 2) + roadCurbWidth(el); // centerline → back-of-curb
+function weldJunctionsOf(els) {
+  const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+  const armAt = (R, ei) => {                                         // road R's endpoint ei → { dir(neighbor→P), halfW }
+    const P = R.pts[ei];
+    const nb = R.pts[ei === 0 ? 1 : R.pts.length - 2];
+    return { dir: { x: P.x - nb.x, y: P.y - nb.y }, halfW: roadOuterHalf(R) };
+  };
+  const out = [];
+  const seen = new Set();
+  for (let a = 0; a < roads.length; a++) {
+    const A = roads[a];
+    for (const aei of [0, A.pts.length - 1]) {
+      const PA = A.pts[aei];
+      // gather every OTHER endpoint (incl. A's own other end for a loop close) coincident with PA
+      const arms = [armAt(A, aei)];
+      const members = [`${A.id}:${aei}`];
+      for (let b = 0; b < roads.length; b++) {
+        const B = roads[b];
+        for (const bei of [0, B.pts.length - 1]) {
+          if (B.id === A.id && bei === aei) continue;
+          if (Math.hypot(B.pts[bei].x - PA.x, B.pts[bei].y - PA.y) <= TEE_COINCIDE_FT) {
+            arms.push(armAt(B, bei));
+            members.push(`${B.id}:${bei}`);
+          }
+        }
+      }
+      if (arms.length < 2) continue;
+      const key = [...members].sort().join("|");                    // dedupe: found once per member endpoint
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const cover = weldCoverPolygon({ x: PA.x, y: PA.y }, arms);
+      if (cover) out.push({ ids: members.map((m) => m.split(":")[0]), P: { x: PA.x, y: PA.y }, cover });
+    }
   }
   return out;
 }
@@ -2934,7 +2992,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!wrapRef.current) return;
     const ro = new ResizeObserver((ents) => {
       const r = ents[0].contentRect;
-      setSize({ w: Math.max(320, r.width), h: Math.max(360, r.height), rawW: r.width });
+      const w = Math.max(320, r.width), h = Math.max(360, r.height);
+      // Bail when unchanged — the B962 layout effect often syncs the same width one frame earlier
+      // (on a panel toggle), so an identical RO callback would otherwise force a redundant re-render.
+      setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
     });
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
@@ -2981,7 +3042,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      (`altSnapOffRef.current`), which places an endpoint freely without connecting. This is
      independent of the separate grid/45° snap-during-draw, which stays gated on `settings.snap`. */
   const connectTolFt = () => Math.min(12 / (view.ppf || 1), ROAD_CONNECT_MAX_FT);
-  const connectableRoads = () => els.filter((x) => x.type === "road" && isCenterlineRoad(x) && !x.attachedTo).map((x) => ({ id: x.id, pts: x.pts }));
+  // halfW = centerline → outer curb line (travelW/2 + curb): findRoadConnect measures the connect
+  // tolerance to the visible pavement EDGE (B961/NEW-3), not the hidden centerline.
+  const connectableRoads = () => els.filter((x) => x.type === "road" && isCenterlineRoad(x) && !x.attachedTo).map((x) => ({ id: x.id, pts: x.pts, halfW: Math.max(0, (+x.travelW || 0) / 2) + roadCurbWidth(x) }));
   // Apply a planRoadConnect() result (merge / weld / tee) in ONE setEls. The caller has already
   // pushed history, so the whole connect is a single undo. A merge absorbs the target road
   // (tombstoned so a later sync can't resurrect it — TOMBSTONE-DELETES) and rounds the fresh
@@ -3018,7 +3081,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const driveTargetKind = (el) => (el && !el.points && typeof el.cx === "number" && el.w > 0 && el.h > 0
     ? (el.type === "parking" ? "parking" : (el.type === "paving" && el.truckCourt ? "truckcourt" : null)) : null);
   const driveTargetsOf = () => els.filter((x) => driveTargetKind(x)).map((x) => ({ id: x.id, kind: driveTargetKind(x), edges: rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0) }));
-  const DRIVE_RETURN = { parking: 20, truckcourt: 50 }; // curb-return seed (ft) by target vehicle scale
+  const DRIVE_RETURN = { parking: 20, truckcourt: 50 }; // curb-return seed (ft): car ≈20, truck WB-62 driveway ≈50 (single fillet, feasibility-clamped in driveJunctionsOf)
   // Nearest parking/truck-court edge to a moving road endpoint, within `tolFt`.
   const findDriveConnect = (P, tolFt) => {
     let best = null;
@@ -3222,6 +3285,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    const r = el.getBoundingClientRect();
+    // B962 — weld the SVG viewBox to the canvas's REAL width in the SAME pre-paint frame as the
+    // panel reflow. `size` is otherwise fed ONLY by the ResizeObserver, which reports the new width
+    // one frame LATER; for that frame the old (wider) viewBox renders into the freshly-narrowed
+    // element, so the whole drawing squishes sideways — the "screen flash" the owner sees when a
+    // left-rail panel (Yield, Parcel, …) opens or switches. Measuring here (a LAYOUT effect, before
+    // paint) and setting `size` synchronously lands the correct viewBox in the SAME commit as the
+    // offX pan-compensation below, so the drawing neither squishes nor jumps. Same clamp as the
+    // ResizeObserver; the functional bail keeps steady-state re-runs a no-op (VIEWPORT-STABLE (a):
+    // measure the real edge, fold the delta in the same frame — the panel-open twin of the B837 pan).
+    const w = Math.max(320, r.width), h = Math.max(360, r.height);
+    setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
     const left = Math.round(el.offsetLeft);
     if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
     const delta = left - panelShiftRef.current;
@@ -13398,6 +13473,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const teeJunctions = useMemo(() => teeJunctionsOf(els, settings), [els, settings]);
   // B955/NEW-1 — road → parking-drive / truck-court junctions (world feet); same overlay pass as tees.
   const driveJunctions = useMemo(() => driveJunctionsOf(els, settings), [els, settings]);
+  // B960/NEW-2 — road↔road end-to-end weld covers (world feet); same overlay pass, so the seam patch
+  // paints over the two butting caps and reads as one continuous surface.
+  const weldJunctions = useMemo(() => weldJunctionsOf(els), [els]);
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
   const renderMarkupNode = (m) => {
@@ -14039,12 +14117,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
               {markupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
+              {/* Split the element pass at the building layer so the clean-intersection overlay can
+                  render BETWEEN ground surfaces and buildings: it paints over roads/parking/paving
+                  (hiding the raw butting curbs) yet buildings paint over IT (B959/NEW-1 — connection
+                  pavement can never overlap a building). */}
+              {[...els].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
               {/* v3 D3 — INWARD pond berm ring: the earthen embankment sits INSIDE the drawn outline
                   (the fixed outer toe), between the boundary and the inset crest (where the water
-                  begins). Drawn OVER the pond so the water shows only in the crest hole; the annulus
-                  (drawn ring minus crest ring, even-odd) is the berm. Replaces C4's outward apron.
-                  Warm-earth hatch + darker outline + a "berm {h} ft" tag. Needs real grade; inert. */}
+                  begins). Drawn OVER the pond (a ground surface, below the building layer) so the water
+                  shows only in the crest hole; the annulus (drawn ring minus crest ring, even-odd) is the
+                  berm. Replaces C4's outward apron. Warm-earth hatch + "berm {h} ft" tag. Needs real grade. */}
               {Number.isFinite(fmElev.existGradeFt) && (
                 <g data-testid="pond-berm-ring-layer" pointerEvents="none">
                   {els.filter((e) => e.type === "pond").map((e) => {
@@ -14073,11 +14155,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </g>
               )}
-              {/* B953/NEW-1 + B955 — clean intersection overlay: an opaque pavement patch unifies each
-                  road tee (road→road) AND each road→parking-drive / road→truck-court junction (hiding the
-                  raw butting curbs across the throat) with the curb-return fillets drawn on top. Roads are
-                  the lowest layer so this reads correctly; a rare paving/building overlap is a v1 z-order note. */}
-              {(teeJunctions.length > 0 || driveJunctions.length > 0) && (() => {
+              {/* B953/NEW-1 + B955 + B960 — clean intersection overlay: an opaque pavement patch unifies
+                  each road tee (road→road), each road→parking-drive / road→truck-court junction (hiding
+                  the raw butting curbs across the throat, with the curb-return fillets drawn on top), AND
+                  each road↔road end-to-end WELD (B960/NEW-2 — a seam-hiding cover so two connected roads
+                  read as one continuous surface). Rendered under the building layer (B959/NEW-1). */}
+              {(teeJunctions.length > 0 || driveJunctions.length > 0 || weldJunctions.length > 0) && (() => {
                 const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
                 const toD = (poly) => poly && poly.length >= 3
                   ? poly.map((p, k) => { const q = f2p(p); return `${k ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z"
@@ -14088,6 +14171,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 ];
                 return (
                   <g data-testid="road-tee-layer" pointerEvents="none">
+                    {/* weld covers first (plain seam patches, no returns) */}
+                    {weldJunctions.map((wj) => {
+                      // style from the WIDEST welded road (its fill reads as the merged surface)
+                      const styleEl = wj.ids.map((id) => els.find((x) => x.id === id)).filter(Boolean)
+                        .sort((a, b) => roadOuterHalf(b) - roadOuterHalf(a))[0];
+                      const st = styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings);
+                      const coverD = toD(wj.cover);
+                      return coverD ? (
+                        <path key={`weld-${wj.ids.join("-")}-${wj.P.x.toFixed(1)},${wj.P.y.toFixed(1)}`} data-testid="road-weld-cover" data-export="road-tee-cover"
+                          d={coverD} fill={st.fill} fillOpacity={st.fillOpacity ?? 1} stroke="none" />
+                      ) : null;
+                    })}
                     {all.map((j) => {
                       const g = j.geom;
                       const styleEl = els.find((x) => x.id === j.styleId);
@@ -14111,6 +14206,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </g>
                 );
               })()}
+              {/* buildings + any layer at/above the building band, painted OVER the overlay. */}
+              {[...els].sort(byZ).filter((el) => zOrder(el) >= BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {markupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
