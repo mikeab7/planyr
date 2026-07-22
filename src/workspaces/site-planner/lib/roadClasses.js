@@ -68,3 +68,12 @@ export function classMinRadius(cls) {
 export function classDefaultRadius(cls) {
   return cls && +cls.defaultRadius > 0 ? +cls.defaultRadius : 50;
 }
+
+/* Curb-return radius seed (ft) for a road teeing into another (B953/NEW-1). Reuses the class
+ * min turning radius, clamped to a sane curb-return band: auto aisle ≈ 24, fire ≈ 28, truck ≈ 50,
+ * a speed-based/public class clamps to 75, and Custom (no threshold) → 25. Editable per junction. */
+export function classReturnRadius(cls) {
+  const m = classMinRadius(cls);
+  const r = m > 0 ? m : 25;
+  return Math.max(15, Math.min(75, r));
+}
