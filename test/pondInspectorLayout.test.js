@@ -52,7 +52,7 @@ describe("B5 — the four collapsed groups in fixed order with the v3 titles", (
   });
 
   it("titles are exactly the v3 strings (Flood & datum loses 'notes')", () => {
-    expect(src).toContain('title="Sizing & criteria"');
+    expect(src).toContain('title="Engineering assumptions"'); // PR-I (I2) — was "Sizing & criteria"
     expect(src).toContain('title="Outlet & storms"');
     expect(src).toContain('title="Flood & datum"');
     expect(src).toContain('title="Appearance"');
@@ -155,8 +155,10 @@ describe("A4 — the sizing-assistant zero-detention line + 'no targets' line ar
 
 // ── v3 post-ship audit — PR-B ───────────────────────────────────────────────────────
 describe("PR-B — pond inspector fixes", () => {
-  it("B4 — the status-card heading drops 'the' (SHORT: X of Y ac-ft required)", () => {
-    expect(pondBody).toContain("SHORT: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required");
+  it("B4/I5 — the status-card is a HEADLINE + a separate achieved/required sub-line, never 'of the'", () => {
+    // PR-I (I5) restructured the verdict: the outcome is the headline; the figure is its own sub-line.
+    expect(pondBody).toContain("`Short of ${f1(detReqAcFt)} ac-ft required`");
+    expect(pondBody).toContain("subline: unbuildable && short");
     expect(pondBody.includes("of the ${f1(detReqAcFt)}")).toBe(false);
   });
   it("B5 — the OUTLET & STORMS summary is fed the real routed fail count", () => {

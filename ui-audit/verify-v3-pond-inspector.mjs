@@ -87,7 +87,7 @@ log(/PLAN/.test(txt) && /EST/.test(txt), "provenance tags PLAN + EST render on t
   console.log(`${hasReq ? "✓ " : "· "}status card pair present: ${hasReq} (no drainage requirement in a logged-out seed → live-verify)`);
 }
 // B5 groups (closed by default) — titles + summaries
-for (const t of ["SIZING & CRITERIA", "OUTLET & STORMS", "FLOOD & DATUM", "APPEARANCE"]) {
+for (const t of ["ENGINEERING ASSUMPTIONS", "OUTLET & STORMS", "FLOOD & DATUM", "APPEARANCE"]) {
   log(new RegExp(t).test(txt), `group title: ${t}`);
 }
 log(/criteria & drainage/.test(txt), "sizing summary reads 'criteria & drainage'");

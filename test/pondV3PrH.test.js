@@ -41,7 +41,9 @@ describe("H2/H4 — the VERDICT floodway gate keys off the same split.inTrigger 
     expect(src).toContain("const inFw = !!split.inTrigger;");
     expect(src).toContain("const envelopeBlocked = short && inFw;");
     expect(src).toContain("const unbuildable = !bld.buildable || envelopeBlocked;");
-    expect(src).toContain("`Not buildable to reach ${f1(detReqAcFt)} ac-ft (${f1(provAcFt)} of ${f1(detReqAcFt)})`");
+    // PR-I (I5) split the achieved-vs-required off the headline into its own sub-line (no dangling paren).
+    expect(src).toContain("`Not buildable to reach ${f1(detReqAcFt)} ac-ft`");
+    expect(src).toContain("`${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft achievable`");
   });
 });
 

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-22 @ `449f86d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-23 @ `369593e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_306 source files mapped._
+_307 source files mapped._
 
 ## infra
 
@@ -477,6 +477,8 @@ _306 source files mapped._
   - _exports_: `evaluateCandidate`, `optimizePond`, `solveScaleForVolume`
 - **`src/workspaces/site-planner/lib/pondRouting.js`** — Screening reservoir routing (modified-Puls / storage-indication) proving Post ≤ Pre peak per storm (NEW-A4): Modified-Rational inflow hydrographs from the transcribed Atlas-14 IDF, level-pool routing over the stage-storage-discharge curve, per-storm PASS/SHORT verdict vs the pre-development Rational peak. Pure.
   - _exports_: `assessRoutedDetention`, `autoSizeCompoundOutlet`, `DEFAULT_PRE_RUNOFF_C`, `DEFAULT_TC_MIN`, `modifiedRationalHydrograph`, `rationalPeakCfs`, `routeHydrograph`, `routeStorm`, `suggestedPreDevReleaseCfs`
+- **`src/workspaces/site-planner/lib/pondScreeningDefaults.js`** — PR-I "compute, don't interrogate": pre-filled screening ESTIMATES for the pond criteria a developer can't know (depth to water, receiving-water tailwater, max excavation depth) + `poolRelevantForRole` (permanent pool only for wet ponds). Exports `estDepthToWaterFt`, `estTailwaterElevFt`, `estMaxExcavDepthFt`, `poolRelevantForRole`, `REGIONAL_SEASONAL_HIGH_DTW_FT`, `DEFAULT_MAX_EXCAV_DEPTH_FT`.
+  - _exports_: `DEFAULT_MAX_EXCAV_DEPTH_FT`, `estDepthToWaterFt`, `estMaxExcavDepthFt`, `estTailwaterElevFt`, `poolRelevantForRole`, `REGIONAL_SEASONAL_HIGH_DTW_FT`
 - **`src/workspaces/site-planner/lib/pondScreeningGuards.js`** — v3 C3 pond screening guards (warnings only): when the rim sits above grade, surfaces the gravity-inflow (inlets-through-the-berm) chip and, from the routed peak water surface, an FFE-proximity chip naming the lowest building within 1 ft of freeboard. Pure decision layer — no fetch, no geometry, no value/solver change.
   - _exports_: `FFE_FREEBOARD_REQ_FT`, `pondScreeningGuards`
 - **`src/workspaces/site-planner/lib/pondSizing.js`** — NEW-4 pond sizing assistant: solves an anchored pond's two banded targets (below-WSE mitigation depth/footprint growth, above-WSE usable via TOB raise) through the same pondGeom bands the audit reads, with the berm-as-fill fixed-point feedback and honest pinch-off/inundated/estimated states

@@ -78,7 +78,7 @@ describe("B5 — the four collapsed groups + summaries", () => {
   it("exactly four groups, in fixed order, with the v3 titles", () => {
     expect(POND_GROUPS.map((g) => g.id)).toEqual(["sizing", "outlet", "flood", "appearance"]);
     expect(POND_GROUPS.map((g) => g.title)).toEqual([
-      "Sizing & criteria", "Outlet & storms", "Flood & datum", "Appearance",
+      "Engineering assumptions", "Outlet & storms", "Flood & datum", "Appearance",
     ]);
   });
 
