@@ -526,6 +526,22 @@ export function wse1pctForRing(ring, zones, { bfeFt = null, bfeSrc = null, exist
   return { wseFt: best, provider };
 }
 
+/* Does a ring intersect a regulatory FLOODWAY zone? (PR-G buildable-envelope helper.)
+ * Fill in the floodway is prohibited, so the pond solver may add NO berm/fill there and
+ * the buildable verdict can never call a bermed floodway design "OK". Distinct from
+ * ringInTrigger, which also fires on the 1% floodplain (where fill IS allowed with
+ * mitigation). Pure. */
+export function ringInFloodway(ring, zones) {
+  if (!Array.isArray(ring) || ring.length < 3 || !Array.isArray(zones)) return false;
+  const fb = ringBBox(ring);
+  for (const z of zones) {
+    if (z.cls !== "floodway") continue;
+    if (!bboxOverlap(fb, z.bbox)) continue;
+    if (gridIntersect(ring, z, null, { maxCells: 400 }).areaSf > 0) return true;
+  }
+  return false;
+}
+
 /* Does a ring intersect any trigger-class zone for this rule? (B708/B712 helper.) */
 export function ringInTrigger(ring, zones, rule) {
   const classes = new Set(triggerClasses(rule));

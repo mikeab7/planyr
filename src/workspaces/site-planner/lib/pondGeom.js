@@ -285,7 +285,7 @@ const BAND_MEMO_MAX = 32;
  * only the pool band splits (a wet-bottom pond outside the floodplain still earns
  * no credit below its outlet). Returns null when unanchored — the caller falls back
  * to the Regime-B estimate, NEVER silently to gross. Pure + memoized. */
-export function bandedStorage(ring, det, { wseFt = null, gradeFt = null } = {}) {
+export function bandedStorage(ring, det, { wseFt = null, gradeFt = null, deadFloorFt = null } = {}) {
   const tob = det && det.tobElev;
   if (tob == null || !isFinite(tob)) return null;
   const { depth, freeboard, slope } = detOf(det);
@@ -303,7 +303,10 @@ export function bandedStorage(ring, det, { wseFt = null, gradeFt = null } = {}) 
     ring = crest;
   }
   const poolElev = det.poolElev != null && isFinite(det.poolElev) ? det.poolElev : null;
-  const sig = `${depth}|${freeboard}|${slope}|${tob}|${poolElev}|${wseFt}|${ring.length}|` +
+  // PR-G (c) — storage below the 100-yr receiving water (tailwater) can't discharge by
+  // gravity, so it's DEAD: the usable band floors at the tailwater elevation too.
+  const deadFloor = Number.isFinite(deadFloorFt) ? deadFloorFt : null;
+  const sig = `${depth}|${freeboard}|${slope}|${tob}|${poolElev}|${wseFt}|${deadFloor}|${ring.length}|` +
     `${ring[0] ? `${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}` : ""}|${polyArea(ring).toFixed(1)}`;
   if (_bandMemo.has(sig)) {
     const hit = _bandMemo.get(sig);
@@ -323,8 +326,8 @@ export function bandedStorage(ring, det, { wseFt = null, gradeFt = null } = {}) 
   const candLo = Math.max(floorElev, poolTop != null ? poolTop : floorElev);
   const candHi = wseFt != null ? Math.min(wseFt, waterSurf) : candLo;
   const mitigationCandidateCf = candHi > candLo ? volumeBetween(ring, det, candLo, candHi) : 0;
-  const usableLo = Math.max(wseFt != null ? wseFt : floorElev, poolTop != null ? poolTop : floorElev, floorElev);
-  const usableCf = volumeBetween(ring, det, usableLo, waterSurf);
+  const usableLo = Math.max(wseFt != null ? wseFt : floorElev, poolTop != null ? poolTop : floorElev, floorElev, deadFloor != null ? deadFloor : -Infinity);
+  const usableCf = usableLo < waterSurf ? volumeBetween(ring, det, usableLo, waterSurf) : 0;
   const val = {
     usableCf,
     mitigationCandidateCf,
@@ -353,7 +356,7 @@ export function bandedStorage(ring, det, { wseFt = null, gradeFt = null } = {}) 
  *               are missing lands HERE — it must never silently zero its dead band.
  *   gross     — no flood/pool information at all → everything counts.
  * Pure. */
-export function usablePondVolume(ring, det = {}, { wseFt = null, estimatePoolDepthFt = null, gradeFt = null } = {}) {
+export function usablePondVolume(ring, det = {}, { wseFt = null, estimatePoolDepthFt = null, gradeFt = null, deadFloorFt = null } = {}) {
   const { depth, freeboard, slope } = detOf(det);
   const anchored = det.tobElev != null && isFinite(det.tobElev);
   // D1 — INWARD berm: a rim above grade shrinks the effective top-of-bank to the crest ring
@@ -364,8 +367,8 @@ export function usablePondVolume(ring, det = {}, { wseFt = null, estimatePoolDep
   const effRing = bermH > 0 ? crestTopRing(ring, bermH) : ring;
   if (bermH > 0 && !effRing) return { mode: "closed", usableCf: 0, deadCf: 0, grossCf: 0, bands: null, closed: true };
   const grossCf = detentionStorage(effRing, depth, freeboard, slope).vol;
-  if (anchored && (wseFt != null || (det.poolElev != null && isFinite(det.poolElev)))) {
-    const bands = bandedStorage(effRing, det, { wseFt }); // effRing is already the crest → no gradeFt
+  if (anchored && (wseFt != null || (det.poolElev != null && isFinite(det.poolElev)) || Number.isFinite(deadFloorFt))) {
+    const bands = bandedStorage(effRing, det, { wseFt, deadFloorFt }); // effRing is already the crest → no gradeFt
     return { mode: "anchored", usableCf: bands.usableCf, deadCf: Math.max(0, grossCf - bands.usableCf), grossCf, bands };
   }
   if (estimatePoolDepthFt != null && estimatePoolDepthFt > 0) {

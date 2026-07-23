@@ -40,7 +40,9 @@ describe("E1 — Optimize NEVER creates geometry when a pond already exists", ()
   });
 
   it("the create-path toast tells the user a pond was drawn (never silent geometry)", () => {
-    expect(dp).toContain('${isNew ? "Placed a pond — " : "This pond was "}');
+    // G4 — detMsg/mitMsg are now complete sentences, so the assembly leads with "Placed a pond."
+    // on the create path (no shared "This pond was …" verb prefix that read ungrammatically).
+    expect(dp).toContain('${isNew ? "Placed a pond. " : ""}');
   });
 });
 
@@ -51,11 +53,12 @@ describe("E2 — mitigation status-card regression at requirement 0", () => {
     expect(src).toContain("mit.volumeCf > 0 && mit.volumeAcFt >= 0.05 ? mit.volumeAcFt : null");
   });
 
-  it("(c) EXACTLY ONE Optimize button: it rides only the first short card", () => {
-    expect(src).toContain("const optimizeIdx = statusCards.findIndex((c) => c.short);");
-    expect(src).toContain("c.short && i === optimizeIdx");
-    // the old per-card render (a button for every short card) is gone
-    expect(src.includes("{c.short && (\n                              <button")).toBe(false);
+  it("(c) EXACTLY ONE Optimize button: it rides only the first NON-OK card (short or PR-G amber)", () => {
+    // PR-G — the button now rides the first non-OK card (short OR the AMBER "not buildable").
+    expect(src).toContain('const optimizeIdx = statusCards.findIndex((c) => (c.tone ?? (c.short ? "short" : "ok")) !== "ok");');
+    expect(src).toContain('i === optimizeIdx && (c.tone ?? (c.short ? "short" : "ok")) !== "ok"');
+    // still exactly one button (a single conditional, not one per card)
+    expect(src.split("⚡ Optimize pond</button>").length - 1).toBe(1);
   });
 
   it("cards carry a kind so detention leads (findIndex → detention when it is short)", () => {

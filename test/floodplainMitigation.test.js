@@ -12,6 +12,7 @@ import {
   computeMitigation,
   wse1pctForRing,
   ringInTrigger,
+  ringInFloodway,
   pickWorstCase,
   floodGeoBbox,
   EXPERT_BYPASS_LABEL,
@@ -370,6 +371,17 @@ describe("straddle + pond-side helpers", () => {
     expect(ringInTrigger(rect(0, 0, 50, 50), [z02], coh)).toBe(true);
     expect(ringInTrigger(rect(0, 0, 50, 50), [zfw], oneOnly)).toBe(true);
     expect(triggerClasses(coh)).toEqual(["1pct", "02pct"]);
+  });
+  it("ringInFloodway (PR-G) fires ONLY on a regulatory floodway zone — never a 1%/0.2% floodplain where fill IS allowed", () => {
+    const zfw = mkZone("floodway", [rect(0, 0, 100, 100)]);
+    const z1 = mkZone("1pct", [rect(0, 0, 100, 100)]);
+    const z02 = mkZone("02pct", [rect(0, 0, 100, 100)]);
+    expect(ringInFloodway(rect(10, 10, 30, 30), [zfw])).toBe(true);
+    expect(ringInFloodway(rect(10, 10, 30, 30), [z1])).toBe(false); // the 1% floodplain is NOT the floodway
+    expect(ringInFloodway(rect(10, 10, 30, 30), [z1, z02])).toBe(false);
+    expect(ringInFloodway(rect(5000, 0, 10, 10), [zfw])).toBe(false); // not touching the floodway
+    expect(ringInFloodway(rect(0, 0, 50, 50), [])).toBe(false);
+    expect(ringInFloodway(null, [zfw])).toBe(false);
   });
   it("floodGeoBbox pads the site envelope and rejects empties", () => {
     const bb = floodGeoBbox([[[-95.6, 29.8], [-95.59, 29.81]]], 0.001);
