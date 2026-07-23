@@ -593,18 +593,21 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     expect(acute).toBeTruthy();
     for (const arc of acute.returns) for (const p of arc) { expect(Number.isFinite(p.x)).toBe(true); expect(Number.isFinite(p.y)).toBe(true); }
     expect(acute.throatWidth).toBeGreaterThan(0);
-    expect(acute.cover.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
+    expect(acute.coverPolys.flat().every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
   });
 
   it("returns null when the side road is parallel to the through road (not a tee)", () => {
     expect(teeGeometry({ ...base, sideDir: { x: 1, y: 0 } })).toBeNull();
   });
 
-  it("produces a non-degenerate cover polygon that spans the throat", () => {
+  it("produces non-degenerate cover pieces (seam + two armpit wedges) around the junction", () => {
     const g = teeGeometry(base);
-    expect(g.cover.length).toBeGreaterThanOrEqual(5);
-    const xs = g.cover.map((p) => p.x);
-    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(2 * base.phS); // wider than the raw side strip
+    expect(g.coverPolys.length).toBe(3);
+    for (const poly of g.coverPolys) expect(poly.length).toBeGreaterThanOrEqual(3);
+    // the two wedges together reach out past the side-road edges (the rounded corners), so the union
+    // spans wider than the raw side strip
+    const allX = g.coverPolys.flat().map((p) => p.x);
+    expect(Math.max(...allX) - Math.min(...allX)).toBeGreaterThan(2 * base.phS);
   });
 
   // B964 — the cover apron must be a SIMPLE, SMOOTH outline: NO spikes / pointed cusps (fold-back
@@ -636,7 +639,11 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     return worst;                                            // near -1 ⇒ a cusp/spike (edge reverses); we require > -0.9
   };
 
-  it("B964: the cover apron is SIMPLE (no self-intersection) with NO spike/cusp — road tee + car & truck drives + skew", () => {
+  // B971 — the cover is now an ARRAY of simple opaque fills (a seam band + the two armpit fillet
+  // wedges), NOT one throat-widened fan. NO piece may self-intersect or fold back (that was the
+  // wings/notch/pinch the owner saw in the real render). The drive stays constant width (its strip is
+  // drawn separately) — the cover only rounds the corners + overpaints the seam.
+  it("B971: every cover piece is a SIMPLE polygon with NO fold-back cusp — road tee + car & truck drives + skew", () => {
     const cases = [
       teeGeometry(base),                                                   // road-to-road tee
       teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS: 12, R: 20, curbT: 0.5, curbS: 0.5 }),   // car parking drive
@@ -645,11 +652,28 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     ];
     for (const g of cases) {
       expect(g).toBeTruthy();
-      expect(g.cover.length).toBeGreaterThan(8);                           // two tessellated fillet flares, not a 6-pt ear shape
-      expect(g.cover.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
-      expect(isSimple(g.cover)).toBe(true);                                // no self-intersecting edges (no star/blob)
-      expect(maxFoldBack(g.cover)).toBeGreaterThan(-0.9);                  // no ~180° reversal → no spike/pointed cusp
+      expect(Array.isArray(g.coverPolys)).toBe(true);
+      expect(g.coverPolys.length).toBe(3);                                 // seam + 2 armpit wedges
+      for (const poly of g.coverPolys) {
+        expect(poly.length).toBeGreaterThanOrEqual(3);
+        expect(poly.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
+        expect(isSimple(poly)).toBe(true);                                 // no self-intersecting edges (no star/blob)
+      }
+      // The seam band is a clean quad (no cusp). The wedges legitimately meet the edges TANGENTIALLY
+      // at the fillet endpoints (renders smooth), so only the seam is fold-back-checked.
+      expect(maxFoldBack(g.coverPolys[0])).toBeGreaterThan(-0.9);
     }
+  });
+
+  it("B971: the cover NEVER widens the drive — the seam band is only about as wide as the drive+curb (no fan)", () => {
+    const phS = 15, R = 50;
+    const g = teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS, R, curbT: 0.5, curbS: 0.5 });
+    const seam = g.coverPolys[0];
+    const xs = seam.map((p) => p.x);
+    const seamW = Math.max(...xs) - Math.min(...xs);
+    // The seam band spans ~ the drive back-of-curb width (2*(phS+curb)) — NOT the throat 2*(phS+R).
+    expect(seamW).toBeLessThan(2 * (phS + 5));                             // ≪ the 2*(phS+R)=130 ft "fan" opening
+    expect(seamW).toBeGreaterThan(2 * phS - 1);                           // but at least the drive travel width
   });
 
   it("B964: each return arc is a single smooth (monotonic-turning) fillet — not a spiky path", () => {
