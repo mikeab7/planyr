@@ -630,40 +630,36 @@ export function teeGeometry(params) {
   };
   const fA = fillet(cornerA);
   const fB = fillet(cornerB);
-  // Cover polygon (B964 rewrite). The old code inserted perpendicular "ears" (outA/outB) at the mouth,
-  // whose polygon order folded back on itself — a spike + concave notch + a self-overlapping top edge
-  // (a star/blob). A curb return is LEGITIMATELY concave where it rounds the reflex corner between the
-  // two roads, so the apron is NOT convex — the fix is a SIMPLE, SMOOTH outline with no fold-back cusps.
-  // Walk: throat-left (on the through/court edge, pushed a hair INTO that pavement) → left return fillet
-  // (the exact face arc) → mouth-left (up the side road AND out to back-of-curb) → mouth-right → right
-  // return fillet → throat-right. The mouth corners extend ALONG the side road (never a perpendicular
-  // ear), so the outline can't fold back; the small into-court / up-road / out-to-curb pushes make the
-  // opaque fill reach back-of-curb on every side → it hides each butting edge stroke (seamless). The
-  // return arcs are still drawn on top at the pavement FACE (the visible curb line).
+  // Cover (B971 rewrite — the throat-widening "fan" is GONE). The old cover replaced the drive with a
+  // wide trapezoid whose concave sides read as a funnel / batwing with a seam; the owner's real-render
+  // screenshots showed exactly that. Instead the drive (or side road) STAYS a constant-width strip
+  // (drawn separately by renderElPx); here we only (a) round each of the two armpit corners with ONE
+  // simple tangent fillet WEDGE, and (b) overpaint the butting edge strokes across the mouth with a
+  // seam band. Union = road/court strip + constant-width drive + the two corner fillets — no fan, no
+  // wings, no concave pinch, no self-overlap possible (each piece is its own SIMPLE polygon). The fillet
+  // arcs are still drawn on top as the visible curb line.
   const mT = curbT * 1.75 + 0.05, mS = curbS * 1.75 + 0.05;
-  const intoThrough = mul(nTee, -mT);                        // push the throat edge INTO the through/court pavement, past its near curb
-  // The mouth is the DIRECT edge between the two return tangent points (tan2_A → tan2_B): the cover's
-  // interior already includes the side road's wedge below the tangent height, so it overlaps the road
-  // strip (same fill) — no collar, hence no fold-back cusp at any tee angle. The road strip (opaque, to
-  // back-of-curb) covers the road part; this covers the throat + flares + the wedge, hiding the butting
-  // cap/curb strokes across the junction. (An up-the-road "collar" folded back on a skewed tee — B964.)
-  const cover = [
-    add(fA.tan1, intoThrough),
-    ...fA.arc,                                              // left return (face fillet), tan1 → tan2
-    ...[...fB.arc].reverse(),                               // right return (face fillet), tan2 → tan1 (mouth = the tan2_A→tan2_B edge between them)
-    add(fB.tan1, intoThrough),
+  // One armpit fillet as a small wedge: corner → tangent on the through/court edge → arc → tangent on
+  // the drive edge → back to corner. Fills only the rounded corner (never widens the drive).
+  // The arc already runs tan1 → … → tan2, so the wedge is just [corner, ...arc] (closing tan2→corner).
+  // Adding tan1/tan2 again would make a zero-length edge (a false fold-back cusp).
+  const wedge = (f, corner) => (f.arc && f.arc.length >= 2 && f.R > EPS)
+    ? [{ x: corner.x, y: corner.y }, ...f.arc.map((p) => ({ x: p.x, y: p.y }))]
+    : null;
+  const wedgeA = wedge(fA, cornerA);
+  const wedgeB = wedge(fB, cornerB);
+  // Seam band across the mouth: back-of-curb wide, reaching from the near edge DOWN past the tee point
+  // (into the through road by phT for a road tee; just a hair into the court for a drive, phT=0) and a
+  // hair down the drive — so it hides the drive cap + the through/court edge stroke + the side road's
+  // curb stubs, with no throat widening.
+  const inThrough = phT + mS;
+  const seam = [
+    add(add(cornerA, mul(perpS, mS)), mul(nTee, -inThrough)),
+    add(add(cornerB, mul(perpS, -mS)), mul(nTee, -inThrough)),
+    add(add(cornerB, mul(perpS, -mS)), mul(d, mS)),
+    add(add(cornerA, mul(perpS, mS)), mul(d, mS)),
   ];
-  // STEM — the side road's real (un-flared) pavement footprint where it overlaps INTO the through
-  // road (from the near edge down to just past the tee point). Filling it opaque hides the side
-  // road's curb stubs that otherwise draw across the through pavement (the little "box" at the mouth).
-  const realCornerA = lineX(add(T, mul(perpS, phS)), d, E0, u);
-  const realCornerB = lineX(add(T, mul(perpS, -phS)), d, E0, u);
-  const stem = (realCornerA && realCornerB) ? [
-    add(realCornerA, mul(perpS, mS)),
-    add(realCornerB, mul(perpS, -mS)),
-    add(add(T, mul(perpS, -(phS + mS))), mul(nTee, -mS)),
-    add(add(T, mul(perpS, phS + mS)), mul(nTee, -mS)),
-  ] : null;
+  const coverPolys = [seam, wedgeA, wedgeB].filter(Boolean);
   const throatWidth = len(sub(fA.tan1, fB.tan1));
   return {
     R: Math.max(fA.R, fB.R),
@@ -671,8 +667,8 @@ export function teeGeometry(params) {
     throughTangents: [fA.tan1, fB.tan1],
     sideTangents: [fA.tan2, fB.tan2],
     returns: [fA.arc, fB.arc],
-    cover,
-    stem,
+    coverPolys,                        // ARRAY of simple opaque fills (seam + 2 armpit wedges)
+    cover: seam,                       // legacy single-polygon field (kept for old consumers/tests)
     throatMid: E0,
     nTee,
   };
