@@ -10805,7 +10805,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // back to the inline "+/−" increment so the delta still shows.
       // D4 — the pond's on-screen NOUN follows its resolved purpose (Detention / Mitigation /
       // Detention + Mitigation Pond), so a mitigation pond is never mislabeled "Detention Pond".
-      const pondName = pondDisplayNameFor(detWithAuto(el.det), pondSplitFor(el));
+      const pondSplit = pondSplitFor(el);
+      const pondName = pondDisplayNameFor(detWithAuto(el.det), pondSplit);
       const base = el.det?.baseline;
       if (base?.ring?.length >= 3) {
         const exA = polyArea(base.ring), addA = area - exA;
@@ -10814,12 +10815,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // whole-pond centre — so it reads over the old pond and clears the "+added" label.
         fc = centroid(base.ring);
         lines = [`Existing ${pondName}`];
-        if (showAreas) lines.push(`${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`);
+        // PR-Q/O4 — no bare acreage: the pond area IS the drawn footprint at the outer toe (label it).
+        if (showAreas) lines.push(`footprint ${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`);
         if (pt) pondAdd = { pt, addA };
-        else if (showAreas) { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`); }
+        else if (showAreas) { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac footprint · ${s}${f0(m)} sf`); }
       } else {
         lines = [pondName];
-        if (showAreas) lines.push(`${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`);
+        if (showAreas) lines.push(`footprint ${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`);
         // Stage-storage line, seated on the pond with its name (rides the same LOD/collision
         // pool). Same detentionStorage() the side panel reads, so the two can never disagree.
         // Gated on the contours toggle (default on) AND the same zoom floor as the depth-ring
@@ -10830,13 +10832,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             ? (() => { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } return Math.min(hi - lo, hi2 - lo2); })()
             : Math.min(el.w, el.h);
           if (detailLabelVisible(pminFt, view.ppf)) {
-            const d = el.det || {};
-            const fb = d.freeboard ?? 1;
-            const r = detentionStorage(poly ? el.points : elCorners(el), d.depth ?? 8, fb, d.slope ?? 3);
-            // When the footprint can't grade to the design depth, report the ACHIEVABLE water
-            // depth (max gradeable − freeboard), not the over-stated design depth.
-            const achievableDw = r.feasible ? r.dw : Math.max(0, r.maxDepth - fb);
-            if (r.vol > 0) lines.push(`Holds ${f2(r.vol / SQFT_PER_ACRE)} ac-ft · ${f1(achievableDw)}′ deep${r.feasible ? "" : " (max)"}`);
+            // PR-Q/O3 — ONE source of truth: the map "Holds" reports the SAME USABLE/achievable storage
+            // the panel + verdict report (pondSplitFor.usableCf), NOT the gross geometric tub volume
+            // (which over-stated it ~4x). Depth is the rim-to-floor the SECTION shows (det.depth), so
+            // the map, the panel, and the section can never disagree. 1dp everywhere (matches the panel).
+            const dw = detWithAuto(el.det);
+            const usableAcFt = Number.isFinite(pondSplit.usableCf) ? pondSplit.usableCf / 43560 : null;
+            const rimToFloorFt = Number.isFinite(dw.depth) ? dw.depth : null;
+            if (usableAcFt != null && usableAcFt >= 0.05 && rimToFloorFt != null) {
+              lines.push(`Holds ${f1(usableAcFt)} ac-ft usable · ${f1(rimToFloorFt)}′ rim to floor`);
+            }
           }
         }
       }
@@ -10905,7 +10910,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (pc.active === false) return null; // inactive parcel shows no chip (B213) → not an obstacle
     const base = centroid(pc.points), off = pc.labelOffset || { x: 0, y: 0 };
     const c = f2p({ x: base.x + off.x, y: base.y + off.y });
-    const txt = `${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
+    // PR-Q/O4 — the parcel badge is labeled "Parcel", so a large parcel acreage sitting near a pond
+    // (the "15.35 ac" chip) can't be mistaken for a pond water/footprint area. No bare acreage.
+    const txt = `Parcel ${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
     const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
     const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
     return { pc, c, txt, fs, padX, padY, boxW, boxH, box: boxOf(c.x, c.y, boxW, boxH) };
@@ -16831,7 +16838,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         {det.tobElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={pondAuto.tobElev ? `Clear: back to auto (${pondAuto.tobElev.source})` : "Clear: label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>}
                       </span>,
                       "Set the top-of-bank elevation to label rings as real elevations instead of depths. Rim vs grade and the flood level read to the right.")}
-                    {g_glanceRow("Holds", g_glanceNum(`${f1(g_holdsAcFt)} ac-ft`), null, `${f0(r.vol)} cf stored`)}
+                    {g_glanceRow("Holds (gross)", g_glanceNum(`${f1(g_holdsAcFt)} ac-ft`), "The full geometric tub volume before the flood / tailwater dead-storage split. The USABLE / achievable storage (what counts toward detention, and what the map + verdict report) is lower; see the verdict.", `${f0(r.vol)} cf stored`)}
                     {g_glanceRow(
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>Purpose <RowInfo label="Purpose" sections={[{ text: POND_PURPOSE_TOOLTIP }]} /></span>,
                       <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
@@ -16892,7 +16899,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
                     {/* v3 UI SPEC B1 — header: subtitle (water area) + ⓘ geometry help · pin · Delete. */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                      <span style={{ fontSize: 11.5, color: PAL.muted, whiteSpace: "nowrap" }}>{f2(g_waterSf / SQFT_PER_ACRE)} ac water area</span>
+                      <span style={{ fontSize: 11.5, color: PAL.muted, whiteSpace: "nowrap" }} title="The open-water surface at the design water level (shrinks as the berm rises); distinct from the drawn footprint at the outer toe.">{f2(g_waterSf / SQFT_PER_ACRE)} ac water surface</span>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
                         <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; click + on an edge to add a point; Shift-click to delete one." }]} />
                         <button style={{ ...chip, padding: "3px 8px" }} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
