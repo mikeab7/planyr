@@ -52,12 +52,17 @@ export default function PondSection({ facts, width = DESIGN_W, height = DESIGN_H
           fill={bandFill[b.kind]} opacity={bandOpacity[b.kind]} stroke={b.kind === "freeboard" ? "var(--planner-border)" : "none"} strokeDasharray={b.kind === "freeboard" ? "3 3" : undefined} strokeWidth={b.kind === "freeboard" ? 1 : 0} />
       ))}
 
-      {/* berm fill above grade (distinct hatch) */}
-      {m.berms.map((tri, i) => (
-        <polygon key={`berm-${i}`} points={tri.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} fill="url(#pondsec-berm-hatch)" stroke="var(--warn-border)" strokeWidth="1" />
+      {/* berm fill above grade (distinct hatch), bounded by outer face · crest · inner face · grade */}
+      {m.berms.map((quad, i) => (
+        <polygon key={`berm-${i}`} points={quad.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} fill="url(#pondsec-berm-hatch)" stroke="none" />
+      ))}
+      {/* berm OUTER face + flat crest top (light outline; the inner face is drawn as the dark slope below) */}
+      {(m.bermOutlines || []).map((pts, i) => (
+        <polyline key={`bo-${i}`} points={pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} fill="none" stroke="var(--warn-border)" strokeWidth="1.2" strokeLinejoin="round" />
       ))}
 
-      {/* pond inner faces + floor (the excavation outline) */}
+      {/* pond inner faces + floor — the dark side slope is ONE colinear line crest→floor (runs along
+          the berm fill's inner edge above grade, then the excavation slope below; never through the hatch) */}
       {m.faces.map((seg, i) => (
         <line key={`face-${i}`} x1={seg[0].x} y1={seg[0].y} x2={seg[1].x} y2={seg[1].y} stroke="var(--text-secondary)" strokeWidth="1.6" />
       ))}
@@ -89,12 +94,24 @@ export default function PondSection({ facts, width = DESIGN_W, height = DESIGN_H
         </g>
       )}
 
-      {/* depth dimension (rim → floor) */}
-      <g stroke="var(--text-secondary)" strokeWidth="1">
-        <line x1={m.depthDim.x} y1={m.depthDim.y1} x2={m.depthDim.x} y2={m.depthDim.y2} />
-        <line x1={m.depthDim.x - 3} y1={m.depthDim.y1} x2={m.depthDim.x + 3} y2={m.depthDim.y1} />
-        <line x1={m.depthDim.x - 3} y1={m.depthDim.y2} x2={m.depthDim.x + 3} y2={m.depthDim.y2} />
-      </g>
+      {/* PR-M depth dimension: extension lines touching each measured level + a vertical dimension
+          line with end ticks at RIM and FLOOR and a small tick where it crosses GRADE. */}
+      {(() => {
+        const d = m.depthDim;
+        return (
+          <g stroke="var(--text-secondary)" strokeWidth="1" fill="none">
+            {/* extension lines from the measured levels out to the dimension line */}
+            <line x1={d.extRim.x1} y1={d.extRim.y} x2={d.extRim.x2} y2={d.extRim.y} strokeWidth="0.7" opacity="0.7" />
+            <line x1={d.extFloor.x1} y1={d.extFloor.y} x2={d.extFloor.x2} y2={d.extFloor.y} strokeWidth="0.7" opacity="0.7" />
+            {d.extGrade && <line x1={d.extGrade.x1} y1={d.extGrade.y} x2={d.extGrade.x2} y2={d.extGrade.y} strokeWidth="0.7" opacity="0.7" />}
+            {/* the dimension line + end ticks */}
+            <line x1={d.x} y1={d.yRim} x2={d.x} y2={d.yFloor} />
+            <line x1={d.x - 3.5} y1={d.yRim} x2={d.x + 3.5} y2={d.yRim} />
+            <line x1={d.x - 3.5} y1={d.yFloor} x2={d.x + 3.5} y2={d.yFloor} />
+            {d.yGrade != null && <line x1={d.x - 2.5} y1={d.yGrade} x2={d.x + 2.5} y2={d.yGrade} />}
+          </g>
+        );
+      })()}
 
       {/* leader lines for any label that had to move off its anchor */}
       {m.labels.filter((l) => l.leaderX != null && Math.abs(l.y - l.anchorY) > 1).map((l, i) => {

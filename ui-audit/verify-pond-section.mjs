@@ -100,10 +100,12 @@ const hasLabel = (re) => texts.some((t) => re.test(t.s));
 log(hasLabel(/grade 153\.1'/), "shows existing grade 153.1'");
 log(hasLabel(/floor 145\.1'/), "shows the floor 145.1'");
 log(hasLabel(/rim 157\.1'.*\+4\.0/), "shows the rim 157.1' (+4.0 ft berm)");
-log(hasLabel(/12\.0 ft/), "shows the depth dimension 12.0 ft");
+log(hasLabel(/\+4\.0 ft berm/), "M2 — the dimension's above-grade segment reads +4.0 ft berm");
+log(hasLabel(/8\.0 ft cut/), "M2 — the dimension's below-grade segment reads 8.0 ft cut");
 log(hasLabel(/flood 153\.1'/), "shows the flood level 153.1'");
 log(hasLabel(/outlet 145\.1'/), "shows the outlet 145.1'");
 log(hasLabel(/receiving 153\.1'/), "shows the receiving water 153.1'");
+log(!texts.some((t) => /CY/.test(t.s)), "M3 — NO earthwork CY numbers on the drawing");
 log(!texts.some((t) => t.s.includes("—")), "no em dash in any section label");
 
 // the gravity problem is VISIBLE: the receiving line sits ABOVE the outlet marker

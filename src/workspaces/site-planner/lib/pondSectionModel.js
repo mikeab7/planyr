@@ -14,7 +14,6 @@
 
 const AC_FT = 43560;
 export const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
-const f0 = (n) => Math.round(n).toLocaleString();
 
 // ── label geometry (pure bbox estimate; no DOM/canvas) ──
 const CHAR_PX = 5.4;   // ~0.58em per glyph at the ~10px label size
@@ -89,33 +88,59 @@ export function pondSectionModel(facts = {}, { w = 520, h = 260 } = {}) {
   const yOf = (e) => TOP + ((hi - e) / (hi - lo)) * drawH;
 
   // ── horizontal geometry (schematic; vertical exaggeration is fine) ──
+  // PR-M — CORRECT outside-in berm geometry (fixed-outer-toe model). On each bank, from the outside:
+  //   grade runs to the OUTER TOE (the footprint edge) → the berm OUTER FACE rises from the toe up to
+  //   the CREST at rim → a small flat crest top (nominal maintenance width) → the INNER FACE descends
+  //   in ONE CONTINUOUS STRAIGHT LINE from the crest THROUGH the grade plane to the pond FLOOR.
+  //   The inner face above grade and the pond side slope below grade are the SAME colinear line (no
+  //   kink at grade, no dark slope line crossing the fill). Both faces use one design slope so the
+  //   berm reads symmetric. When berm = 0 the crest/outer-face vanish and the slope runs grade→floor.
   const MARGIN_L = 86, MARGIN_R = 96;
   const sxL = MARGIN_L, sxR = w - MARGIN_R;
   const cx = (sxL + sxR) / 2;
   const sw = sxR - sxL;
-  const floorHalf = sw * 0.15, openHalf = sw * 0.27;
-  const bw = berm > 0.05 ? sw * 0.11 : 0;   // berm face run (schematic)
-  const xFloorL = cx - floorHalf, xFloorR = cx + floorHalf;
-  const xEdgeL = cx - openHalf, xEdgeR = cx + openHalf;       // pond lip at grade
-  const xCrestL = xEdgeL - bw, xCrestR = xEdgeR + bw;         // berm crest (=lip when no berm)
-  const xBermOutL = xCrestL - bw, xBermOutR = xCrestR + bw;   // outer toe of the berm at grade
+  const floorHalf = sw * 0.14;
+  const crestW = berm > 0.05 ? sw * 0.035 : 0;   // flat crest maintenance top (never a knife point)
+  const outerGap = sw * 0.05;                     // native ground shown outside the toe
 
   const yGrade = yOf(grade), yRim = yOf(rimFt), yFloor = yOf(floorFt);
+  const hRimGrade = Math.max(0, yGrade - yRim);   // berm height, design px (0 when no berm)
+  const hRimFloor = yFloor - yRim;                // full rim→floor depth, design px
 
-  // inner faces run straight from the floor edge up to the crest; interpolate x at any elevation.
-  const leftX = (e) => lerp(xFloorL, xCrestL, (e - floorFt) / (rimFt - floorFt));
-  const rightX = (e) => lerp(xFloorR, xCrestR, (e - floorFt) / (rimFt - floorFt));
+  // ONE design slope s (horizontal px per vertical px) for BOTH faces, chosen so the outer toe lands
+  // just inside the native-ground margin. Both faces then read as matching (mirror) side slopes.
+  const availHalf = (cx - sxL) - outerGap;
+  const denom = hRimFloor + hRimGrade;
+  const s = denom > 0 ? Math.max(0, (availHalf - floorHalf - crestW) / denom) : 0;
 
-  // ground mass (earth below grade, across the whole section, minus the pit void)
+  const xFloorL = cx - floorHalf, xFloorR = cx + floorHalf;
+  const xCrestInL = xFloorL - s * hRimFloor;      // crest inner edge (top of the inner face)
+  const xCrestOutL = xCrestInL - crestW;          // crest outer edge (top of the outer face)
+  const xToeL = xCrestOutL - s * hRimGrade;       // outer toe at grade (footprint edge)
+  const xInGradeL = xCrestInL + s * hRimGrade;    // where the inner face crosses the grade plane
+  const xCrestInR = xFloorR + s * hRimFloor;
+  const xCrestOutR = xCrestInR + crestW;
+  const xToeR = xCrestOutR + s * hRimGrade;
+  const xInGradeR = xCrestInR - s * hRimGrade;
+
+  // inner faces are ONE straight line each (crest inner → floor); interpolate x at any elevation.
+  const leftX = (e) => lerp(xFloorL, xCrestInL, (e - floorFt) / (rimFt - floorFt));
+  const rightX = (e) => lerp(xFloorR, xCrestInR, (e - floorFt) / (rimFt - floorFt));
+
+  // native ground below grade, across the section, with the pond void carved out (toe→crest is
+  // native flat grade; the berm fill sits ABOVE it, drawn separately).
   const ground = [
-    { x: sxL, y: yGrade }, { x: xBermOutL, y: yGrade }, { x: xCrestL, y: yRim },
-    { x: xFloorL, y: yFloor }, { x: xFloorR, y: yFloor }, { x: xCrestR, y: yRim },
-    { x: xBermOutR, y: yGrade }, { x: sxR, y: yGrade }, { x: sxR, y: h - BOT }, { x: sxL, y: h - BOT },
+    { x: sxL, y: yGrade }, { x: xInGradeL, y: yGrade }, { x: xFloorL, y: yFloor },
+    { x: xFloorR, y: yFloor }, { x: xInGradeR, y: yGrade }, { x: sxR, y: yGrade },
+    { x: sxR, y: h - BOT }, { x: sxL, y: h - BOT },
   ];
-  // berm fill above grade (distinct hatch) — one triangle per bank
+  // berm fill (hatched): exactly the area bounded by the OUTER FACE, the flat CREST, the INNER FACE,
+  // and the grade line — one quad per bank. Point order: outer toe · crest outer · crest inner ·
+  // inner-face-at-grade. The crest-inner and inner-at-grade points lie ON the inner-face line, so the
+  // dark inner face runs along the fill's inner edge (it never crosses through the hatch).
   const berms = berm > 0.05 ? [
-    [{ x: xBermOutL, y: yGrade }, { x: xCrestL, y: yRim }, { x: xEdgeL, y: yGrade }],
-    [{ x: xBermOutR, y: yGrade }, { x: xCrestR, y: yRim }, { x: xEdgeR, y: yGrade }],
+    [{ x: xToeL, y: yGrade }, { x: xCrestOutL, y: yRim }, { x: xCrestInL, y: yRim }, { x: xInGradeL, y: yGrade }],
+    [{ x: xToeR, y: yGrade }, { x: xCrestOutR, y: yRim }, { x: xCrestInR, y: yRim }, { x: xInGradeR, y: yGrade }],
   ] : [];
 
   // ── water / storage bands (trapezoids following the inner faces) ──
@@ -131,55 +156,77 @@ export function pondSectionModel(facts = {}, { w = 520, h = 260 } = {}) {
   if (usableTopFt > usableLoFt + 0.05) bands.push({ kind: "usable", pts: bandTrap(usableLoFt, usableTopFt), midFt: (usableLoFt + usableTopFt) / 2 });
   if (rimFt > usableTopFt + 0.05) bands.push({ kind: "freeboard", pts: bandTrap(usableTopFt, rimFt), midFt: (usableTopFt + rimFt) / 2 });
 
-  // inner faces (drawn as the pond outline)
+  // inner faces (the dark pond side slope) — ONE colinear line crest→floor on each bank.
   const faces = [
-    [{ x: xCrestL, y: yRim }, { x: xFloorL, y: yFloor }],
-    [{ x: xFloorR, y: yFloor }, { x: xCrestR, y: yRim }],
+    [{ x: xCrestInL, y: yRim }, { x: xFloorL, y: yFloor }],
+    [{ x: xCrestInR, y: yRim }, { x: xFloorR, y: yFloor }],
   ];
+  // berm outer faces + crest tops (the visible outside of the berm), drawn as light outline.
+  const bermOutlines = berm > 0.05 ? [
+    [{ x: xToeL, y: yGrade }, { x: xCrestOutL, y: yRim }, { x: xCrestInL, y: yRim }],
+    [{ x: xToeR, y: yGrade }, { x: xCrestOutR, y: yRim }, { x: xCrestInR, y: yRim }],
+  ] : [];
   const floor = { x1: xFloorL, x2: xFloorR, y: yFloor };
 
   // ── horizontal reference lines ──
   const lines = [];
-  lines.push({ role: "grade", x1: sxL, x2: sxR, y: yGrade });
-  if (finite(wseFt) && wseFt > floorFt) lines.push({ role: "flood", x1: sxL, x2: xBermOutR, y: yOf(wseFt) });
+  // grade runs to the OUTER TOE on each side (under the berm it is hidden by fill); none across the void.
+  lines.push({ role: "grade", x1: sxL, x2: xToeL, y: yGrade });
+  lines.push({ role: "grade", x1: xToeR, x2: sxR, y: yGrade });
+  if (finite(wseFt) && wseFt > floorFt) lines.push({ role: "flood", x1: sxL, x2: xToeR, y: yOf(wseFt) });
   if (finite(groundwaterFt) && groundwaterFt > floorFt && groundwaterFt < rimFt) lines.push({ role: "groundwater", x1: leftX(groundwaterFt), x2: rightX(groundwaterFt), y: yOf(groundwaterFt) });
 
   // ── outlet (right bank at the invert) + receiving water beyond the berm ──
   const outlet = finite(outletInvertFt) ? { x: xFloorR, y: yOf(outletInvertFt) } : null;
-  const receiving = finite(tailwaterFt) ? { x1: xBermOutR + 6, x2: sxR, y: yOf(tailwaterFt) } : null;
+  const receiving = finite(tailwaterFt) ? { x1: xToeR + 6, x2: sxR, y: yOf(tailwaterFt) } : null;
 
-  // ── depth dimension (rim → floor) just inside the left floor edge ──
-  const depthDim = { x: xFloorL + 10, y1: yRim, y2: yFloor };
-  const slopeMarks = finite(slopeRatio) ? [{ x: (xFloorR + xCrestR) / 2 + 6, y: (yFloor + yRim) / 2 }] : [];
+  // ── PR-M depth dimension: a vertical dimension line with end ticks at RIM and FLOOR, a small tick
+  //    where it crosses GRADE, extension lines touching each measured level, and two stacked segment
+  //    labels (+berm above grade, cut below grade). Placed just inside the left floor edge. ──
+  const xDim = xFloorL + 12;
+  const cutFt = finite(gradeFt) ? Math.max(0, grade - floorFt) : depthFt;
+  const twoSeg = berm > 0.05 && finite(gradeFt);
+  const depthDim = {
+    x: xDim, yRim, yGrade: finite(gradeFt) ? yGrade : null, yFloor,
+    extRim: { x1: xCrestInL, x2: xDim, y: yRim },     // touches the rim (crest inner)
+    extFloor: { x1: xFloorL, x2: xDim, y: yFloor },   // touches the floor
+    extGrade: finite(gradeFt) ? { x1: xInGradeL, x2: xDim, y: yGrade } : null, // touches the grade plane
+    twoSeg,
+  };
+  const slopeMarks = finite(slopeRatio) ? [{ x: (xFloorR + xCrestInR) / 2 + 6, y: (yFloor + yRim) / 2 }] : [];
 
   // ── labels: LEFT elevation column · RIGHT facts column · in-pit dimensions ──
   const est = (b) => (b ? " EST" : "");
   const left = [];
-  left.push({ key: "rim", anchorY: yRim, s: berm > 0.05 ? `rim ${f1(rimFt)}' (+${f1(berm)} ft)` : `rim ${f1(rimFt)}'`, role: "rim" });
-  if (finite(gradeFt)) left.push({ key: "grade", anchorY: yGrade, s: `grade ${f1(gradeFt)}'`, role: "grade" });
-  if (finite(wseFt) && wseFt > floorFt) left.push({ key: "flood", anchorY: yOf(wseFt), s: `flood ${f1(wseFt)}'${est(wseEst)}`, role: "flood" });
-  if (finite(groundwaterFt) && groundwaterFt > floorFt && groundwaterFt < rimFt) left.push({ key: "gw", anchorY: yOf(groundwaterFt), s: `groundwater ${f1(groundwaterFt)}'${est(groundwaterEst)}`, role: "groundwater" });
-  left.push({ key: "floor", anchorY: yFloor, s: `floor ${f1(floorFt)}'`, role: "floor" });
+  left.push({ key: "rim", anchorY: yRim, s: berm > 0.05 ? `rim ${f1(rimFt)}' (+${f1(berm)} ft)` : `rim ${f1(rimFt)}'`, role: "rim", leaderX: sxL });
+  if (finite(gradeFt)) left.push({ key: "grade", anchorY: yGrade, s: `grade ${f1(gradeFt)}'`, role: "grade", leaderX: sxL });
+  if (finite(wseFt) && wseFt > floorFt) left.push({ key: "flood", anchorY: yOf(wseFt), s: `flood ${f1(wseFt)}'${est(wseEst)}`, role: "flood", leaderX: sxL });
+  if (finite(groundwaterFt) && groundwaterFt > floorFt && groundwaterFt < rimFt) left.push({ key: "gw", anchorY: yOf(groundwaterFt), s: `groundwater ${f1(groundwaterFt)}'${est(groundwaterEst)}`, role: "groundwater", leaderX: sxL });
+  left.push({ key: "floor", anchorY: yFloor, s: `floor ${f1(floorFt)}'`, role: "floor", leaderX: sxL });
 
   const usableName = purpose === "mitigation" ? "mitigation" : "usable";
   const right = [];
   for (const b of bands) {
-    if (b.kind === "usable" && finite(usableAcFt)) right.push({ key: "usable", anchorY: yOf(b.midFt), s: `${usableName} ${f1(usableAcFt)} ac-ft`, role: "usable" });
-    if (b.kind === "dead" && finite(deadAcFt)) right.push({ key: "dead", anchorY: yOf(b.midFt), s: `dead ${f1(deadAcFt)} ac-ft`, role: "dead" });
-    if (b.kind === "freeboard") right.push({ key: "fb", anchorY: yOf(b.midFt), s: `freeboard ${f1(Math.max(0, freeboardFt || 0))} ft`, role: "freeboard" });
+    if (b.kind === "usable" && finite(usableAcFt)) right.push({ key: "usable", anchorY: yOf(b.midFt), s: `${usableName} ${f1(usableAcFt)} ac-ft`, role: "usable", leaderX: rightX(b.midFt) });
+    if (b.kind === "dead" && finite(deadAcFt)) right.push({ key: "dead", anchorY: yOf(b.midFt), s: `dead ${f1(deadAcFt)} ac-ft`, role: "dead", leaderX: rightX(b.midFt) });
+    if (b.kind === "freeboard") right.push({ key: "fb", anchorY: yOf(b.midFt), s: `freeboard ${f1(Math.max(0, freeboardFt || 0))} ft`, role: "freeboard", leaderX: rightX(b.midFt) });
   }
-  if (outlet) right.push({ key: "outlet", anchorY: outlet.y, s: `outlet ${f1(outletInvertFt)}'`, role: "outlet" });
-  if (receiving) right.push({ key: "recv", anchorY: receiving.y, s: `receiving ${f1(tailwaterFt)}'${est(tailwaterEst)}`, role: "receiving" });
+  if (outlet) right.push({ key: "outlet", anchorY: outlet.y, s: `outlet ${f1(outletInvertFt)}'`, role: "outlet", leaderX: xFloorR });
+  if (receiving) right.push({ key: "recv", anchorY: receiving.y, s: `receiving ${f1(tailwaterFt)}'${est(tailwaterEst)}`, role: "receiving", leaderX: sxR });
 
-  const placedLeft = placeColumn(left, { top: TOP, bottom: h - BOT }).map((it) => ({ ...it, x: 6, anchor: "start", leaderX: sxL }));
-  const placedRight = placeColumn(right, { top: TOP, bottom: h - BOT }).map((it) => ({ ...it, x: w - 6, anchor: "end", leaderX: it.role === "receiving" ? sxR : it.role === "outlet" ? xFloorR : xEdgeR }));
+  const placedLeft = placeColumn(left, { top: TOP, bottom: h - BOT }).map((it) => ({ ...it, x: 6, anchor: "start" }));
+  const placedRight = placeColumn(right, { top: TOP, bottom: h - BOT }).map((it) => ({ ...it, x: w - 6, anchor: "end" }));
 
-  // in-pit call-outs (few + spatially separated): depth · slope · earthwork
+  // in-pit call-outs: the depth-dimension segment labels + the slope. NO earthwork numbers (PR-M M3 —
+  // CY quantities live in the panel rows + the what-changed card text, never on the drawing).
   const inpit = [];
-  inpit.push({ key: "depth", x: depthDim.x + 5, y: (yRim + yFloor) / 2, anchor: "start", s: `${f1(depthFt)} ft`, role: "dim" });
+  if (twoSeg) {
+    inpit.push({ key: "dimBerm", x: xDim + 6, y: (yRim + yGrade) / 2, anchor: "start", s: `+${f1(berm)} ft berm`, role: "dim" });
+    inpit.push({ key: "dimCut", x: xDim + 6, y: (yGrade + yFloor) / 2, anchor: "start", s: `${f1(cutFt)} ft cut`, role: "dim" });
+  } else {
+    inpit.push({ key: "dim", x: xDim + 6, y: (yRim + yFloor) / 2, anchor: "start", s: `${f1(depthFt)} ft rim to floor`, role: "dim" });
+  }
   if (finite(slopeRatio)) inpit.push({ key: "slope", x: slopeMarks[0].x, y: slopeMarks[0].y, anchor: "start", s: `${f1(slopeRatio).replace(/\.0$/, "")}:1`, role: "dim" });
-  if (finite(cutCy) && cutCy > 0.5) inpit.push({ key: "cut", x: cx, y: yFloor - 6, anchor: "middle", s: `${f0(cutCy)} CY cut`, role: "earthwork" });
-  if (finite(bermFillCy) && bermFillCy > 0.5 && berm > 0.05) inpit.push({ key: "bermcy", x: xCrestL, y: yRim - 4, anchor: "middle", s: `${f0(bermFillCy)} CY fill`, role: "earthwork" });
 
   // Final safety pass: nudge any in-pit label that still collides with a column label or another
   // in-pit label downward until clear (the columns are authoritative; in-pit labels are few).
@@ -199,5 +246,5 @@ export function pondSectionModel(facts = {}, { w = 520, h = 260 } = {}) {
   const labels = [...placedLeft, ...placedRight, ...placedInpit];
   const note = { x: 6, y: h - 8, s: "schematic, not to scale" };
 
-  return { ok: true, w, h, ground, berms, bands, faces, floor, lines, outlet, receiving, depthDim, slopeMarks, labels, note };
+  return { ok: true, w, h, ground, berms, bermOutlines, bands, faces, floor, lines, outlet, receiving, depthDim, slopeMarks, labels, note };
 }
