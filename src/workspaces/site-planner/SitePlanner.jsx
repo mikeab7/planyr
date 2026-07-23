@@ -16871,7 +16871,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </div>
                       ) : null;
                     })()}
-                    <Collapse sectionId="pond-sizing" title="Engineering assumptions" defaultOpen={false} summary={g_sizingSummary}>
+                    {/* PR-J — "Engineering assumptions" is an ENGINEER-ONLY override section: it must
+                        start CLOSED on every fresh load for every pond, so a developer never sees the
+                        criteria unless they open it. persist={false} ignores any stale stored "open"
+                        (e.g. from when this was "Sizing & criteria") — the in-session toggle still works. */}
+                    <Collapse sectionId="pond-sizing" title="Engineering assumptions" defaultOpen={false} persist={false} summary={g_sizingSummary}>
                     {/* PR-I (I2) — TIER 2: a developer never needs to open this. Every criterion below is
                         pre-filled with a computed screening estimate (EST) and is editable purely as an
                         OVERRIDE. Plain-English header, no em dashes. */}
