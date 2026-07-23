@@ -38,14 +38,17 @@ describe("assessBuildability — hard limits (a, c) block; floodway is a no-rise
     const r = assessBuildability({ tobElev: 100, gradeFt: 100, inFloodway: true });
     expect(r.requirements.length).toBe(0);
   });
-  it("a rim above the drainage cap is NOT buildable", () => {
+  it("PR-O/O2: a rim above the drainage cap IS buildable, with a SOFT inlets-through-berm advisory", () => {
     const r = assessBuildability({ tobElev: 109.3, gradeFt: 100, drainageCapElevFt: 104.5 });
-    expect(r.buildable).toBe(false);
-    expect(r.hard.map((h) => h.code)).toContain("drainage-cap");
-  });
-  it("a rim at/below the drainage cap does not trip it", () => {
-    const r = assessBuildability({ tobElev: 104.4, gradeFt: 100, drainageCapElevFt: 104.5 });
+    expect(r.buildable).toBe(true); // no longer a hard block (inlets through berms are standard)
     expect(r.hard.some((h) => h.code === "drainage-cap")).toBe(false);
+    const adv = r.soft.find((s) => s.code === "drainage-inlets");
+    expect(adv).toBeTruthy();
+    expect(adv.label).toMatch(/inlets through the berm/);
+  });
+  it("a rim at/below the drainage cap raises no advisory", () => {
+    const r = assessBuildability({ tobElev: 104.4, gradeFt: 100, drainageCapElevFt: 104.5 });
+    expect(r.soft.some((s) => s.code === "drainage-inlets")).toBe(false);
   });
   it("an outlet below the 100-yr tailwater is NOT buildable (gravity discharge fails)", () => {
     const r = assessBuildability({ tobElev: 104, floorElev: 92, tailwaterFt: 95, outletInvertFt: 92 });
@@ -84,10 +87,11 @@ describe("assessBuildability — hard limits (a, c) block; floodway is a no-rise
     expect(r.buildable).toBe(true);
     expect(r.hard.length).toBe(0);
   });
-  it("multiple hard limits stack; the floodway rides alongside as a requirement, not a hard block", () => {
+  it("the outfall hard limit blocks; the floodway rides alongside as a requirement, the drainage cap as a SOFT advisory", () => {
     const r = assessBuildability({ tobElev: 110, gradeFt: 100, inFloodway: true, drainageCapElevFt: 104, floorElev: 90, tailwaterFt: 95 });
     expect(r.buildable).toBe(false);
-    expect(r.hard.map((h) => h.code).sort()).toEqual(["drainage-cap", "outfall-tailwater"]);
+    expect(r.hard.map((h) => h.code).sort()).toEqual(["outfall-tailwater"]); // O2 — drainage cap no longer hard
+    expect(r.soft.map((s) => s.code)).toContain("drainage-inlets");
     expect(r.requirements.map((q) => q.code)).toContain("floodway-no-rise");
   });
 });

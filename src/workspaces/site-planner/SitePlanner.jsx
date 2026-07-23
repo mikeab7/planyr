@@ -132,7 +132,7 @@ import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
 import PondSection from "./components/PondSection.jsx";
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
-import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
+import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached, styleFor } from "./lib/vectorLayers.js";
 import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./lib/overlayVectorSvg.js";
@@ -8963,7 +8963,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return Number.isFinite(lo) ? lo : null;
     })();
     const drainCapFt = drainageBermCapFt({ controllingInflowElevFt, gradeAtPondFt: gradeFt, freeboardFt: bermFbFt });
-    const { capFt: bermCapFt, binding: bermBinding } = bindingBermCap({ drainageCapFt: drainCapFt, geometricCapFt: geomCapFt });
+    // PR-O/O2 — the drainage (gravity-inflow) limit is an ADVISORY, not a hard cap; the GEOMETRIC
+    // ceiling alone binds the berm. Berming above the drainage advisory assumes inlets through the
+    // berm (standard practice) — the SAME rule the design evaluator uses, so they can't disagree.
+    const { capFt: bermCapFt, binding: bermBinding, drainageAdvisoryFt } = bindingBermCap({ drainageCapFt: drainCapFt, geometricCapFt: geomCapFt });
     // PR-K — FLOODWAY is NO LONGER a no-fill cap. A mapped regulatory floodway allows a berm WITH a
     // no-rise certification (44 CFR 60.3(d)(3)), so the solver MAY berm here; the verdict flags the
     // no-rise requirement (amber) but never blocks the berm. The precise floodway flag (ZONE_SUBTY =
@@ -9144,7 +9147,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const floodwayNote = pondInFloodway && finalBermH > 0.05
       ? " Because it berms inside a mapped regulatory floodway, plan on a no-rise certification (an engineering study showing the berm adds zero rise to the 100-yr flood level)."
       : "";
-    flashWarn(`${isNew ? "Placed a pond. " : ""}${parts}${outletMsg}${overlapMsg}${gapMsgs ? ` ${gapMsgs}` : ""}${floodwayNote}`.trim(), 9500);
+    // PR-O/O2 — when the applied berm rises above the surface-drainage level, state the inlets-through-
+    // the-berm assumption (the SAME rule the design evaluator shows), instead of the old contradictory
+    // "berm capped at 0.0 ft, can't drain by gravity". Optimizer and evaluator now agree.
+    const inletNote = bermNeedsInlets({ bermHFt: finalBermH, drainageCapHFt: drainageAdvisoryFt })
+      ? ` This berm rises above the surface-drainage level, so it ${INLETS_THROUGH_BERM_NOTE}.`
+      : "";
+    flashWarn(`${isNew ? "Placed a pond. " : ""}${parts}${outletMsg}${overlapMsg}${gapMsgs ? ` ${gapMsgs}` : ""}${floodwayNote}${inletNote}`.trim(), 9500);
   };
   // (B789: drainChannelRelevant now computed up with the drainage inputs — it county-gates
   // the stored channel override too, not just this control's visibility.)

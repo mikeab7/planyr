@@ -4,8 +4,12 @@
  * required volume be met by a design entirely inside it. Pure — the caller (SitePlanner)
  * owns context/memos; nothing here mutates or fetches.
  *
- *   (a) inflow drainage cap  — rim ≤ the elevation the tributary site can still drain
- *                              INTO the pond by gravity (the D5 drainage cap). HARD.
+ *   (a) inflow drainage cap  — SOFT (PR-O/O2): a rim above the elevation the tributary site can
+ *                              drain into by gravity is ALLOWED with inlets through the berm to
+ *                              convey runoff (standard practice) — an advisory, never a hard block.
+ *                              This is the ONE gravity-inflow rule the design evaluator AND the
+ *                              optimizer share, so they can never disagree (was: a hard cap here
+ *                              while the design showed only an advisory chip).
  *   (c) outfall / tailwater  — the low-flow outlet invert must sit AT/ABOVE the 100-yr
  *                              receiving-water (tailwater) elevation; storage below it is
  *                              DEAD (no gravity discharge, so it earns no detention credit). HARD.
@@ -82,11 +86,14 @@ export function assessBuildability({
     });
   }
 
-  // (a) inflow drainage cap — a rim above the elevation the site drains in by gravity.
+  // (a) inflow drainage cap — SOFT advisory (PR-O/O2): a rim above the surface-drainage level is
+  // allowed WITH inlets through the berm to convey runoff (standard practice). Same rule the design
+  // chip uses, so the evaluator and the optimizer agree — never a hard block that contradicts the chip.
   if (Number.isFinite(drainageCapElevFt) && Number.isFinite(tobElev) && tobElev > drainageCapElevFt + tol) {
-    hard.push({
-      code: "drainage-cap",
-      label: `Rim ${F1(tobElev)}′ is above the ${F1(drainageCapElevFt)}′ the site can still drain into the pond by gravity.`,
+    soft.push({
+      code: "drainage-inlets",
+      // O1 — grammatically complete: the elevation is a labeled clause, not a bare number as a noun.
+      label: `Rim ${F1(tobElev)}′ is above ${F1(drainageCapElevFt)}′, the highest rim the site drains into by surface flow; above it, plan on inlets through the berm to convey runoff into the pond (standard practice).`,
     });
   }
 
