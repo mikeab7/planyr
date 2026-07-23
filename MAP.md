@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-23 @ `369593e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-23 @ `d459562` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -228,7 +228,7 @@ _307 source files mapped._
 - **`src/workspaces/site-planner/components/Chip.jsx`** — FINAL UI SPEC compact one-line status chip (≤6 words, amber/neutral tone) whose ⓘ opens a RowInfo popover carrying the full original sentence
   - _exports_: `default (Chip)`
 - **`src/workspaces/site-planner/components/Collapse.jsx`** — FINAL UI SPEC collapsible section primitive (title · count · closed-state summary · chevron) with per-sectionId localStorage open/closed persistence; header is a keyboard-toggleable button
-  - _exports_: `collapseStorageKey`, `default (Collapse)`
+  - _exports_: `collapseStorageKey`, `default (Collapse)`, `readOpen`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker

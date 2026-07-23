@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { collapseStorageKey } from "../src/workspaces/site-planner/components/Collapse.jsx";
+import { collapseStorageKey, readOpen } from "../src/workspaces/site-planner/components/Collapse.jsx";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const collapseSrc = read("../src/workspaces/site-planner/components/Collapse.jsx");
@@ -29,6 +29,34 @@ describe("Collapse — per-section persistence + keyboard accessibility", () => 
 
   it("the one-line summary shows only when closed", () => {
     expect(collapseSrc).toContain("!open && summary");
+  });
+
+  it("PR-J — readOpen: a stored 'open' wins by default, but persist:false ALWAYS uses defaultOpen", () => {
+    const store = { [collapseStorageKey("pond-sizing")]: "1" }; // a STALE persisted 'open'
+    const orig = globalThis.localStorage;
+    globalThis.localStorage = { getItem: (k) => (k in store ? store[k] : null) };
+    try {
+      // default (persist:true) reads the stored "1" → open
+      expect(readOpen("pond-sizing", false, true)).toBe(true);
+      // persist:false IGNORES the stale stored value → the section stays CLOSED on load
+      expect(readOpen("pond-sizing", false, false)).toBe(false);
+      // persist:false still honours an explicit defaultOpen:true
+      expect(readOpen("pond-sizing", true, false)).toBe(true);
+    } finally {
+      globalThis.localStorage = orig;
+    }
+  });
+});
+
+describe("PR-J — the 'Engineering assumptions' section starts CLOSED on every load (persist:false)", () => {
+  const planner = read("../src/workspaces/site-planner/SitePlanner.jsx");
+  it("the Engineering assumptions Collapse is defaultOpen={false} AND persist={false}", () => {
+    expect(planner).toContain('<Collapse sectionId="pond-sizing" title="Engineering assumptions" defaultOpen={false} persist={false}');
+  });
+  it("Collapse supports the persist prop and threads it into the initial state + the write effect", () => {
+    expect(collapseSrc).toContain("persist = true, children");
+    expect(collapseSrc).toContain("useState(() => readOpen(sectionId, defaultOpen, persist))");
+    expect(collapseSrc).toContain("if (!sectionId || !persist) return;");
   });
 });
 

@@ -14,8 +14,12 @@ import { TABULAR_NUMS } from "../../../shared/theme/typography.js";
 
 export const collapseStorageKey = (id) => `planyr:collapse:${id}`;
 
-function readOpen(sectionId, defaultOpen) {
-  if (!sectionId) return defaultOpen;
+/* Initial open state. Normally the persisted per-section choice wins (fold choices survive a
+ * reload). With `persist:false` (PR-J) the section ALWAYS opens from `defaultOpen`, ignoring any
+ * stored value — for an engineer-only override section that must start CLOSED on every load so a
+ * developer never sees it unless they choose to open it, regardless of a stale stored "open". */
+export function readOpen(sectionId, defaultOpen, persist = true) {
+  if (!sectionId || !persist) return defaultOpen;
   try {
     const raw = typeof localStorage !== "undefined" ? localStorage.getItem(collapseStorageKey(sectionId)) : null;
     if (raw === "1") return true;
@@ -25,13 +29,13 @@ function readOpen(sectionId, defaultOpen) {
 }
 
 export default function Collapse({
-  sectionId, title, summary, count, defaultOpen = false, children, headerRight, style,
+  sectionId, title, summary, count, defaultOpen = false, persist = true, children, headerRight, style,
 }) {
-  const [open, setOpen] = useState(() => readOpen(sectionId, defaultOpen));
+  const [open, setOpen] = useState(() => readOpen(sectionId, defaultOpen, persist));
   useEffect(() => {
-    if (!sectionId) return;
+    if (!sectionId || !persist) return; // persist:false → in-session toggle only, never stored
     try { localStorage.setItem(collapseStorageKey(sectionId), open ? "1" : "0"); } catch (_) { /* quota/unavailable — UI state only */ }
-  }, [open, sectionId]);
+  }, [open, sectionId, persist]);
 
   return (
     <div style={{ borderTop: "1px solid var(--planner-border)", ...style }}>

@@ -42,6 +42,10 @@ const site = {
 const seed = `(() => { try {
   localStorage.setItem('planarfit:sites:v1', JSON.stringify({ s_pi: ${JSON.stringify(site)} }));
   localStorage.setItem('planarfit:currentSite:v1', 's_pi');
+  // PR-J regression: seed the STALE persisted "open" for the pond-sizing section (as if the
+  // developer had opened the old "Sizing & criteria" once). The "Engineering assumptions"
+  // section must STILL render collapsed on load (persist:false ignores this stale value).
+  localStorage.setItem('planyr:collapse:pond-sizing', '1');
 } catch (e) {} })();`;
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -117,8 +121,21 @@ else {
   log(sublineHasFigure, `I5 — the achieved/required figure is a separate sub-line :: "${verdict.subline}"`);
 }
 
-// ── I1 — the Engineering assumptions criteria are pre-filled with EST estimates ──
+// ── PR-J (I2) — the "Engineering assumptions" section is CLOSED on load, even with a stale stored "open" ──
 const engBtn = page.locator(`${panelSel} button:has-text("Engineering assumptions")`).first();
+const closedOnLoad = await page.evaluate((sel) => {
+  const panel = document.querySelector(sel);
+  if (!panel) return { ok: false };
+  const btn = Array.from(panel.querySelectorAll("button")).find((b) => (b.textContent || "").includes("Engineering assumptions"));
+  const expanded = btn ? btn.getAttribute("aria-expanded") : null;
+  // the criteria inputs must NOT be in the DOM while collapsed
+  const twVisible = Array.from(panel.querySelectorAll("*")).some((n) => (n.textContent || "").includes("Receiving water (100-yr tailwater) elev. (ft)"));
+  return { ok: true, expanded, twVisible };
+}, panelSel);
+log(closedOnLoad.expanded === "false", `I2/PR-J — 'Engineering assumptions' is COLLAPSED on load despite a stale stored open (aria-expanded=${closedOnLoad.expanded})`);
+log(closedOnLoad.twVisible === false, "I2/PR-J — the criteria inputs are hidden until the developer opens the section");
+
+// ── I1 — the Engineering assumptions criteria are pre-filled with EST estimates (after opening) ──
 await engBtn.click({ timeout: 1500 }).catch(() => {});
 await page.waitForTimeout(400);
 const est = await page.evaluate((sel) => {
