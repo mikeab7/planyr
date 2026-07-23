@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import {
   geometricMaxBermFt, crestRingForBerm, crestTopRing, bermPinched,
   bermWaterAreaSf, bermRingAreaSf, inwardBermSplit, EXT_BERM_SLOPE,
-  drainageBermCapFt, bindingBermCap, INFLOW_HEAD_ALLOWANCE_FT,
+  drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, INFLOW_HEAD_ALLOWANCE_FT,
 } from "../src/workspaces/site-planner/lib/inwardBerm.js";
 import { usablePondVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
 import { polyArea } from "../src/workspaces/site-planner/lib/polygonSplit.js";
@@ -115,22 +115,30 @@ describe("D5 — the COMPUTED berm cap (drainage cap vs geometric ceiling)", () 
     expect(drainageBermCapFt({ controllingInflowElevFt: 105, gradeAtPondFt: null })).toBeNull();
   });
 
-  it("bindingBermCap picks the SMALLER of drainage cap and geometric ceiling and names the binding one", () => {
-    expect(bindingBermCap({ drainageCapFt: 3, geometricCapFt: 6 })).toEqual({ capFt: 3, binding: "drainage" });
-    expect(bindingBermCap({ drainageCapFt: 8, geometricCapFt: 5 })).toEqual({ capFt: 5, binding: "geometry" });
+  it("PR-O/O2: bindingBermCap's HARD cap is the GEOMETRIC ceiling; the drainage cap is only an advisory", () => {
+    // the drainage cap no longer binds the berm — inlets through the berm are standard practice
+    expect(bindingBermCap({ drainageCapFt: 3, geometricCapFt: 6 })).toEqual({ capFt: 6, binding: "geometry", drainageAdvisoryFt: 3 });
+    expect(bindingBermCap({ drainageCapFt: 8, geometricCapFt: 5 })).toEqual({ capFt: 5, binding: "geometry", drainageAdvisoryFt: 8 });
   });
 
-  it("no drainage cap (no terrain) → geometry alone binds", () => {
-    expect(bindingBermCap({ drainageCapFt: null, geometricCapFt: 6.4 })).toEqual({ capFt: 6.4, binding: "geometry" });
+  it("no geometric ceiling → nothing binds; the drainage cap still rides as an advisory", () => {
+    expect(bindingBermCap({ drainageCapFt: 2.5, geometricCapFt: null })).toEqual({ capFt: null, binding: "none", drainageAdvisoryFt: 2.5 });
+    expect(bindingBermCap({ drainageCapFt: null, geometricCapFt: 6.4 })).toEqual({ capFt: 6.4, binding: "geometry", drainageAdvisoryFt: null });
   });
 
-  it("the solver never exceeds min(drainage cap, geometric ceiling)", () => {
+  it("the solver's hard cap = the geometric ceiling (NOT the drainage cap)", () => {
     const ring = square(400);
     const geo = geometricMaxBermFt(ring);
-    const drain = drainageBermCapFt({ controllingInflowElevFt: 102, gradeAtPondFt: 100, freeboardFt: 1 }); // 102−0.5+1−100 = 2.5
-    const { capFt } = bindingBermCap({ drainageCapFt: drain, geometricCapFt: geo });
-    expect(capFt).toBeLessThanOrEqual(geo);
-    expect(capFt).toBeLessThanOrEqual(drain);
-    expect(capFt).toBeCloseTo(2.5, 6); // drainage binds well below the ~66 ft geometric ceiling
+    const drain = drainageBermCapFt({ controllingInflowElevFt: 102, gradeAtPondFt: 100, freeboardFt: 1 }); // 2.5
+    const { capFt, drainageAdvisoryFt } = bindingBermCap({ drainageCapFt: drain, geometricCapFt: geo });
+    expect(capFt).toBeCloseTo(geo, 6);            // geometry binds, ~66 ft
+    expect(drainageAdvisoryFt).toBeCloseTo(2.5, 6); // the drainage level is advisory only
+  });
+
+  it("PR-O/O2: bermNeedsInlets — the ONE shared rule the evaluator and optimizer agree on", () => {
+    expect(bermNeedsInlets({ bermHFt: 4, drainageCapHFt: 2.5 })).toBe(true);  // berm above the surface-drainage level
+    expect(bermNeedsInlets({ bermHFt: 2, drainageCapHFt: 2.5 })).toBe(false); // at/below → surface flow reaches the pond
+    expect(bermNeedsInlets({ bermHFt: 4, drainageCapHFt: null })).toBe(false); // no terrain → no advisory
+    expect(INLETS_THROUGH_BERM_NOTE).toMatch(/inlets through the berm/);
   });
 });

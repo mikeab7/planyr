@@ -44,7 +44,7 @@ describe("C2 — SUPERSEDED by PR-D (D5): the Max berm (ft) input is REMOVED; th
   });
   it("the solve's ceiling is the COMPUTED cap, not a user maxBermFt setting", () => {
     expect(src.includes("baseEl.det?.maxBermFt")).toBe(false);
-    expect(src).toContain("const { capFt: bermCapFt, binding: bermBinding } = bindingBermCap(");
+    expect(src).toContain("const { capFt: bermCapFt, binding: bermBinding, drainageAdvisoryFt } = bindingBermCap(");
   });
 });
 

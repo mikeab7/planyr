@@ -91,15 +91,25 @@ export function drainageBermCapFt({ controllingInflowElevFt = null, gradeAtPondF
   return Math.max(0, maxRimFt - gradeAtPondFt);
 }
 
-/* The binding berm cap = the SMALLER of the drainage cap and the geometric ceiling, plus which
- * one binds (for the plain-English toast). A null drainage cap (no terrain) leaves geometry as the
- * sole limit. Pure. */
+/* PR-O/O2 — the HARD berm cap is the GEOMETRIC ceiling ALONE. The drainage (gravity-inflow) limit is
+ * NOT a hard cap: berming above it is standard practice WITH inlets through the berm to convey runoff.
+ * So it rides along as an ADVISORY (`drainageAdvisoryFt`) surfaced when the berm exceeds it — the ONE
+ * shared rule the design evaluator and the optimizer both read, so they can never disagree (was: the
+ * drainage cap hard-capped the optimizer at 0.0 while the design showed only an advisory chip). A null
+ * geometric cap (no footprint pinch known) leaves nothing binding. Pure. */
 export function bindingBermCap({ drainageCapFt = null, geometricCapFt = null } = {}) {
-  const geo = Number.isFinite(geometricCapFt) && geometricCapFt > 0 ? geometricCapFt : Infinity;
-  const drain = Number.isFinite(drainageCapFt) ? drainageCapFt : Infinity;
-  const capFt = Math.min(geo, drain);
-  const binding = drain <= geo && Number.isFinite(drainageCapFt) ? "drainage" : (Number.isFinite(geometricCapFt) ? "geometry" : "none");
-  return { capFt: Number.isFinite(capFt) ? capFt : null, binding };
+  const geo = Number.isFinite(geometricCapFt) && geometricCapFt > 0 ? geometricCapFt : null;
+  return { capFt: geo, binding: geo != null ? "geometry" : "none", drainageAdvisoryFt: Number.isFinite(drainageCapFt) ? drainageCapFt : null };
+}
+
+/* PR-O/O2 — the ONE shared gravity-inflow rule: is the rim above the surface-drainage level (so it
+ * needs inlets through the berm)? Both the evaluator and the optimizer call this, so their berm stance
+ * is identical by construction. Pure. `drainageCapHFt` is the drainage-capped berm HEIGHT above grade
+ * (from drainageBermCapFt); `bermHFt` is the design/proposed berm height. */
+export const INLETS_THROUGH_BERM_NOTE =
+  "assumes inlets through the berm convey runoff into the pond (standard practice above the surface-drainage level)";
+export function bermNeedsInlets({ bermHFt = null, drainageCapHFt = null, tol = 0.05 } = {}) {
+  return Number.isFinite(bermHFt) && Number.isFinite(drainageCapHFt) && bermHFt > drainageCapHFt + tol;
 }
 
 /* The full inward split at one berm height: the fixed footprint, the (shrunk) water surface, the
