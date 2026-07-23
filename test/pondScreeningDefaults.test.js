@@ -24,19 +24,18 @@ describe("estDepthToWaterFt — a measured value wins, else the regional screeni
   });
 });
 
-describe("estTailwaterElevFt — the flood WSE is the screening tailwater, else grade proxy", () => {
-  it("uses the flood WSE when known", () => {
-    const r = estTailwaterElevFt({ wseFt: 153.1, gradeFt: 150 });
-    expect(r.valueFt).toBe(153.1);
-    expect(r.source).toBe("flood-wse");
+describe("estTailwaterElevFt — PR-N/O5: the channel receiving-water level, NEVER site grade", () => {
+  it("accepts a below-grade channel value", () => {
+    const r = estTailwaterElevFt({ channelWseFt: 145.9, gradeFt: 153.1 });
+    expect(r.valueFt).toBe(145.9);
+    expect(r.source).toBe("channel");
     expect(r.estimated).toBe(true);
   });
-  it("falls back to existing grade when there's no flood WSE", () => {
-    const r = estTailwaterElevFt({ wseFt: null, gradeFt: 150 });
-    expect(r.valueFt).toBe(150);
-    expect(r.source).toBe("grade-proxy");
-  });
-  it("returns null only when nothing at all is known (caller shows a labeled default)", () => {
+  it("NEVER returns site grade — a value at/above grade is rejected as a placeholder (UNKNOWN)", () => {
+    expect(estTailwaterElevFt({ channelWseFt: 153.1, gradeFt: 153.1 }).valueFt).toBeNull();
+    expect(estTailwaterElevFt({ channelWseFt: 155, gradeFt: 153.1 }).valueFt).toBeNull();
+    // no channel value at all → UNKNOWN, never the grade proxy the old version fabricated
+    expect(estTailwaterElevFt({ gradeFt: 153.1 }).valueFt).toBeNull();
     expect(estTailwaterElevFt({}).valueFt).toBeNull();
   });
 });

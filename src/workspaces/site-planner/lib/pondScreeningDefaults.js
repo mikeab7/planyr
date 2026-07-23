@@ -28,16 +28,19 @@ export function estDepthToWaterFt({ measuredFt = null } = {}) {
   return { valueFt: m != null ? m : REGIONAL_SEASONAL_HIGH_DTW_FT, source: m != null ? "measured" : "regional-est", estimated: m == null };
 }
 
-/* Receiving-water (100-yr tailwater) elevation the outfall must discharge above by gravity. The
- * screening estimate is the governing flood water surface at the pond (the receiving channel's
- * 100-yr stage ≈ the mapped flood WSE); with no flood WSE, fall back to existing grade (a
- * conservative "discharge at grade" proxy). Returns null only when NOTHING is known (no WSE, no
- * grade) — the caller then shows a labeled default and its refine-later note. */
-export function estTailwaterElevFt({ wseFt = null, gradeFt = null } = {}) {
-  const w = fin(wseFt);
-  if (w != null) return { valueFt: w, source: "flood-wse", estimated: true };
+/* Receiving-water (tailwater) elevation the outfall must discharge above by gravity.
+ * ⛔ PR-N / O5 ROOT-CAUSE FIX: this is NEVER site grade and NEVER the floodplain-sheet flood WSE. The
+ * old default (flood WSE, else grade) set tailwater ≈ grade on a Zone A site, which DEADLOCKS every
+ * pond by construction (outflow can't fall below tailwater, inflow can't rise above grade → usable
+ * storage squeezed to zero → "not buildable"). The outfall discharges into the receiving CHANNEL,
+ * which is cut BELOW grade — so a real below-grade channel value is required (district / FEMA InFRM /
+ * USGS / terrain flowline, resolved by lib/tailwaterSource.js). `channelWseFt` is that value; it is
+ * accepted only when it sits below grade. With none, the tailwater is UNKNOWN (null) — an honest blank
+ * the UI flags, never a grade placeholder that fabricates a deadlock. */
+export function estTailwaterElevFt({ channelWseFt = null, gradeFt = null } = {}) {
+  const c = fin(channelWseFt);
   const g = fin(gradeFt);
-  if (g != null) return { valueFt: g, source: "grade-proxy", estimated: true };
+  if (c != null && (g == null || c < g - 0.05)) return { valueFt: c, source: "channel", estimated: true };
   return { valueFt: null, source: null, estimated: true };
 }
 

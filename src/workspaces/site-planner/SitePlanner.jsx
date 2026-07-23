@@ -160,7 +160,8 @@ import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
 import { sizePondForTargets, scaleRing, solveTobRaise, applyPondSizingActions } from "./lib/pondSizing.js";
 import { rimCapElevFt, assessBuildability as assessPondEnvelope, unbuildableHeading, makeItBuildableOptions, unbuildableNote, requirementNote, DEFAULT_MAX_EXCAV_DEPTH_FT } from "./lib/buildableEnvelope.js";
-import { estDepthToWaterFt, estTailwaterElevFt, estMaxExcavDepthFt, poolRelevantForRole } from "./lib/pondScreeningDefaults.js";
+import { estDepthToWaterFt, estMaxExcavDepthFt, poolRelevantForRole } from "./lib/pondScreeningDefaults.js";
+import { deriveTailwater, TAILWATER_SOURCES, tailwaterNote } from "./lib/tailwaterSource.js";
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
 import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
@@ -7851,6 +7852,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const estPool = estPoolFor();
     return { ...usablePondVolume(pring, det, { wseFt: null, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt }), wseFt: null, inTrigger: false, estPoolDepthFt: estPool, factsKnown: true };
   };
+  // PR-N / O5 — the ONE outfall TAILWATER source, used by the envelope, the section, and the pond
+  // panel. ⛔ NEVER site grade and NEVER the floodplain-sheet WSE (that placeholder deadlocked every
+  // pond). The value comes from the channel ladder (lib/tailwaterSource.js): the user's outfall
+  // override wins; else the live sources (district channel design WSE / FEMA InFRM est-BFE / USGS
+  // gauge / terrain-derived channel flowline) — none reachable in the sandbox, so the honest result
+  // is UNKNOWN (null), which turns the outfall gate OFF rather than firing on a grade placeholder.
+  // The `gradeFt` guard drops any candidate that equals grade (a leaked placeholder). Live sources
+  // land the real below-grade value (V###).
+  const pondTailwaterResult = (el, gFt) => {
+    const g = Number.isFinite(gFt) ? gFt : null;
+    const override = Number.isFinite(el?.det?.receivingFlowlineElev) ? el.det.receivingFlowlineElev : null;
+    if (override != null) return { valueFt: override, source: "override", sourceLabel: "your entry", sourceTip: "The outfall / receiving-water elevation you entered.", estimated: false, degraded: false, belowGrade: g != null ? override < g : null, rejectedGrade: [], note: null };
+    // Channel-based candidates (live-verify): district channel · FEMA InFRM est-BFE · USGS gauge ·
+    // terrain channel flowline. Empty in the sandbox → deriveTailwater returns UNKNOWN (never grade).
+    return deriveTailwater({}, { gradeFt: g });
+  };
   // PR-G — assess a pond element against the BUILDABLE ENVELOPE (the hard limits a design must
   // live inside + the soft geotech screen). Reused by the top-line verdict (green requires a
   // buildable design) and the pond inspector's watch-out notes. Pure over the pond's context.
@@ -7877,14 +7894,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (Number.isFinite(capH)) drainageCapElevFt = gradeFt + capH;
       }
     }
-    // (c) tailwater + the low-flow (lowest-invert) outlet stage. PR-I (I6): the criterion the solver
-    // uses is the developer's OVERRIDE if entered, else the SAME computed screening estimate the panel
-    // shows pre-filled (the flood WSE → grade proxy), so an unentered value can't silently loosen the
-    // envelope — it stays governed by the honest screening default.
-    const twSplit = pondSplitFor(el);
-    const tailwaterFt = Number.isFinite(el.det?.receivingFlowlineElev)
-      ? el.det.receivingFlowlineElev
-      : estTailwaterElevFt({ wseFt: Number.isFinite(twSplit.wseFt) ? twSplit.wseFt : null, gradeFt }).valueFt;
+    // (c) tailwater + the low-flow (lowest-invert) outlet stage. PR-N / O5: the outfall tailwater is
+    // the CHANNEL receiving-water level (never grade, never the flood-sheet WSE) — the shared ladder
+    // returns the user's override, else a real below-grade source, else UNKNOWN (null → the gate can't
+    // fire on a grade placeholder). Same source the section + panel show, so nothing disagrees.
+    const tailwaterFt = pondTailwaterResult(el, gradeFt).valueFt;
     const stages = el.det?.outlet && Array.isArray(el.det.outlet.stages) ? el.det.outlet.stages : [];
     const inverts = stages.map((s) => s.invertElevFt).filter((n) => Number.isFinite(n));
     const outletInvertFt = inverts.length ? Math.min(...inverts) : null;
@@ -7910,10 +7924,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const stages = el.det?.outlet && Array.isArray(el.det.outlet.stages) ? el.det.outlet.stages : [];
     const inverts = stages.map((s) => s.invertElevFt).filter((n) => Number.isFinite(n));
     const outletInvertFt = inverts.length ? Math.min(...inverts) : floorFt;
-    const tw = estTailwaterElevFt({ wseFt, gradeFt });
-    const hasTwOverride = Number.isFinite(el.det?.receivingFlowlineElev);
-    const tailwaterFt = hasTwOverride ? el.det.receivingFlowlineElev : tw.valueFt;
-    const tailwaterEst = !hasTwOverride && tw.estimated;
+    const twR = pondTailwaterResult(el, gradeFt);
+    const tailwaterFt = twR.valueFt;
+    const tailwaterEst = twR.estimated;
     const dtw = estDepthToWaterFt({ measuredFt: el.det?.depthToWaterFt });
     const groundwaterFt = gradeFt != null && Number.isFinite(dtw.valueFt) ? gradeFt - dtw.valueFt : null;
     const groundwaterEst = dtw.estimated;
@@ -16728,7 +16741,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // the developer's typed value always overrides. These feed the same PR-H envelope (I6).
                 const g_wseForTw = g_split.mode === "anchored" && Number.isFinite(g_split.wseFt) ? g_split.wseFt : null;
                 const g_dtwEst = estDepthToWaterFt({ measuredFt: det.depthToWaterFt });         // depth to water (ft below grade)
-                const g_twEst = estTailwaterElevFt({ wseFt: g_wseForTw, gradeFt: g_gradeFt });   // receiving-water tailwater elev
+                const g_twEst = pondTailwaterResult(selEl, g_gradeFt);   // PR-N/O5 — channel tailwater ladder (never grade)
                 const g_maxExcavEst = estMaxExcavDepthFt({ depthToWaterFt: g_dtwEst.valueFt });  // don't dig below groundwater
                 const g_poolRelevant = poolRelevantForRole(g_roleInfo.role);                    // permanent pool only for wet ponds
                 const estPillStyle = { fontSize: 9.5, color: PAL.muted, fontWeight: 700, letterSpacing: "0.04em", border: `1px solid ${PAL.panelLine}`, borderRadius: 4, padding: "1px 4px", whiteSpace: "nowrap", cursor: "help" };
@@ -17029,7 +17042,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? (Number.isFinite(g_twEst.valueFt) ? Math.round(g_twEst.valueFt * 10) / 10 : "")} placeholder="outfall elev" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
                         {det.receivingFlowlineElev != null
                           ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimate" onClick={() => setDet({ receivingFlowlineElev: null })}>×</button>
-                          : Number.isFinite(g_twEst.valueFt) && <span title={`Screening estimate from the ${g_twEst.source === "flood-wse" ? "mapped flood water surface" : "existing grade"}. The receiving channel's 100-yr stage; refine with the outfall survey. Storage below it can't drain by gravity (dead).`} style={estPillStyle}>EST</span>}
+                          : Number.isFinite(g_twEst.valueFt)
+                            ? <span title={`Estimated from ${g_twEst.sourceLabel || "channel data"}. ${g_twEst.sourceTip || ""} The receiving channel's stage at the outfall; refine with the outfall survey. Storage below it can't drain by gravity (dead).`} style={estPillStyle}>EST</span>
+                            : <span title="The receiving-water level comes from the drainage district channel, FEMA InFRM, a USGS gauge, or a terrain-derived channel flowline (never site grade). None resolved here, so enter the outfall elevation or check the Drainage district group. Leaving it blank means the gravity-discharge check is skipped, not failed." style={{ ...estPillStyle, color: PAL.warn }}>needs channel data</span>}
                       </span>
                     </Field>
                     {/* PR-G/PR-I — SOFT geotech screen: pre-filled with the depth to water ("don't dig
@@ -17874,6 +17889,55 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <Chip tone="neutral" text="Elevations: NAVD88" popover={POND_FLOOD_NOTES.datum} />
                       </div>
                     </Collapse>
+                    {/* PR-N (FOLD IN) — surface the drainage-district data the server already resolves:
+                        which district governs, the criteria it applies, and the receiving-channel /
+                        outfall tailwater SOURCE (EST + source-tagged). No more silent server-side-only
+                        district logic. */}
+                    {(() => {
+                      const dOverlays = (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "drainage-district");
+                      const dFailed = (drainCtxData?.authority?.flags || []).includes("bkdd-unverified");
+                      const inDistrict = dOverlays.length > 0;
+                      const critD = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
+                      const authLabel = dOverlays[0]?.name || detReq?.rule?.authorityLabel || null;
+                      const twR = g_twEst;
+                      const dSummary = inDistrict ? dOverlays[0].name.replace("Drainage District", "DD") : dFailed ? "membership unverified" : "county criteria";
+                      const critRow = (label, cell, unit) => (cell && Number.isFinite(cell.value)) ? (
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: `1px solid ${PAL.panelLine}` }}>
+                          <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontFamily: NUM_FONT, fontSize: 12, color: PAL.ink, fontWeight: 650 }}>{cell.value}{unit}</span>
+                            <SourceTag code={cell.verified ? "code" : "unverified"} label={label} basis={cell.source ? [{ text: String(cell.source) }] : undefined} />
+                          </span>
+                        </div>
+                      ) : null;
+                      return (
+                        <Collapse sectionId="pond-district" title="Drainage district" defaultOpen={false} summary={dSummary}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "2px 0" }}>
+                            <div style={{ fontSize: 11.5, color: PAL.text, lineHeight: 1.5 }}>
+                              {inDistrict ? <>Governing district: <strong>{authLabel}</strong>. {dOverlays[0].short}</>
+                                : dFailed ? "Drainage-district membership could not be verified (the boundary source was unavailable). Confirm with the county."
+                                  : "This parcel is not inside a mapped drainage district; county criteria govern detention."}
+                            </div>
+                            {inDistrict && critRow("Freeboard", critD.freeboardFt, "′")}
+                            {inDistrict && critRow("Max side slope", critD.maxSideSlope, ":1")}
+                            {inDistrict && dOverlays[0].detail && (
+                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45 }}>{dOverlays[0].detail}</div>
+                            )}
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 2 }}>
+                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Receiving water (outfall)</span>
+                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                {Number.isFinite(twR.valueFt)
+                                  ? <><span style={{ fontFamily: NUM_FONT, fontSize: 12, color: PAL.ink, fontWeight: 650 }}>{f1(twR.valueFt)}′</span><SourceTag code={twR.estimated ? "estimate" : "yours"} label={twR.sourceLabel || "Receiving water"} basis={twR.sourceTip ? [{ text: twR.sourceTip }] : undefined} /></>
+                                  : <span style={{ fontSize: 11, color: PAL.warn, fontWeight: 600, cursor: "help" }} title={tailwaterNote(twR)}>needs channel data</span>}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4 }}>
+                              Receiving-water level is sourced from the district channel, FEMA InFRM, a USGS gauge, or a terrain-derived channel flowline. Never site grade.
+                            </div>
+                          </div>
+                        </Collapse>
+                      );
+                    })()}
                     {curStyle && (
                     <Collapse sectionId="pond-appearance" title="Appearance" defaultOpen={false} summary="fill · outline · opacity">
                       <Field label="Fill">
