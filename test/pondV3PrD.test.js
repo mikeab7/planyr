@@ -86,9 +86,9 @@ describe("D5 — the Max berm input is REMOVED; the cap is computed and names th
     expect(src).toContain("const geomCapFt = geometricMaxBermFt(ringOf(baseEl), EXT_BERM_SLOPE);");
     expect(src).toContain("const drainCapFt = drainageBermCapFt({ controllingInflowElevFt, gradeAtPondFt: gradeFt, freeboardFt: bermFbFt });");
     expect(src).toContain("const { capFt: bermCapFt, binding: bermBinding } = bindingBermCap({ drainageCapFt: drainCapFt, geometricCapFt: geomCapFt });");
-    // PR-G folded the FLOODWAY no-fill hard cap in front of the D5 drainage/geometric cap: a
-    // floodway pond gets a hard zero-raise, else the computed berm cap (else the screening clamp).
-    expect(src).toContain("const maxRaiseFt = pondInFloodway ? 0");
+    // PR-K removed the FLOODWAY zero-raise cap (a floodway berm is allowed with a no-rise cert), so
+    // the D5 drainage/geometric cap alone governs the rim (else the screening clamp with no grade).
+    expect(src).toContain("const maxRaiseFt = gradeFt == null ? BERM_MAX_RAISE_FT");
     expect(src).toContain("(Number.isFinite(bermCapFt) ? bermCapFt : BERM_MAX_RAISE_FT);");
   });
   it("the controlling inflow grade is sampled from real per-point terrain (else the drainage cap is null)", () => {

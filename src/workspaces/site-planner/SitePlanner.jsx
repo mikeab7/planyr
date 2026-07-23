@@ -142,6 +142,7 @@ import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFi
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
+  pondFloodplainTier,
   wedgeMitigation, pointInZone,
   floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines,
   crossSectionWselFromFeatureCollection, governingCrossSectionWsel,
@@ -157,7 +158,7 @@ import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js"
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
 import { sizePondForTargets, scaleRing, solveTobRaise, applyPondSizingActions } from "./lib/pondSizing.js";
-import { rimCapElevFt, assessBuildability as assessPondEnvelope, unbuildableHeading, makeItBuildableOptions, unbuildableNote, DEFAULT_MAX_EXCAV_DEPTH_FT } from "./lib/buildableEnvelope.js";
+import { rimCapElevFt, assessBuildability as assessPondEnvelope, unbuildableHeading, makeItBuildableOptions, unbuildableNote, requirementNote, DEFAULT_MAX_EXCAV_DEPTH_FT } from "./lib/buildableEnvelope.js";
 import { estDepthToWaterFt, estTailwaterElevFt, estMaxExcavDepthFt, poolRelevantForRole } from "./lib/pondScreeningDefaults.js";
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
@@ -7859,10 +7860,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const tobElev = Number.isFinite(d.tobElev) ? d.tobElev : null;
     const depthFt = Number.isFinite(d.depth) ? d.depth : null;
     const floorElev = tobElev != null && depthFt != null ? tobElev - depthFt : null;
-    // PR-H — same fix as the solver: key "in the floodway (no fill)" off the SAME split.inTrigger
-    // signal that renders the "In floodway: no fill" chip, so the verdict can't stay green while the
-    // pond shows the chip. The precise ringInFloodway (a distinct floodway polygon) is a strict subset.
-    const inFloodway = !!pondSplitFor(el).inTrigger || ringInFloodway(ring, fmZones);
+    // PR-K — "in the floodway" is now PRECISE: TRUE only when the footprint intersects a mapped
+    // regulatory floodway (NFHL ZONE_SUBTY = "FLOODWAY"), never merely the 1% floodplain / Zone A.
+    // A floodway berm is buildable WITH a no-rise certification (a REQUIREMENT the envelope raises,
+    // not a hard cap), so the verdict stays amber there but is no longer a flat "no fill". Zone A /
+    // AE fringe fill is handled by the mitigation ledger, not this envelope flag.
+    const inFloodway = pondFloodplainTier(ring, fmZones).inFloodway;
     // (a) drainage cap → the max buildable RIM elevation (needs real per-point terrain).
     let drainageCapElevFt = null;
     if (typeof fmGradeAt === "function" && gradeFt != null) {
@@ -8905,23 +8908,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     })();
     const drainCapFt = drainageBermCapFt({ controllingInflowElevFt, gradeAtPondFt: gradeFt, freeboardFt: bermFbFt });
     const { capFt: bermCapFt, binding: bermBinding } = bindingBermCap({ drainageCapFt: drainCapFt, geometricCapFt: geomCapFt });
-    // PR-G (b) / PR-H — FLOODWAY NO-FILL is a HARD envelope limit: fill in the floodway is
-    // prohibited, so Optimize may add NO berm there (rim capped at existing grade). This binds
-    // BEFORE the drainage/geometric caps — it's a legal prohibition, not a gravity/geometry limit.
-    // ⚠ PR-H root cause: PR-G keyed this off ringInFloodway (a distinct cls==="floodway" polygon),
-    // but the pond's "In floodway: no fill" chip fires off split.inTrigger (ANY trigger flood zone —
-    // an AE/1% pond with no separate floodway polygon still shows it). So on the live Tsakiris pond
-    // the gate stayed silent and Optimize bermed +9.3. Gate off the SAME signal the chip uses so the
-    // two can never disagree (the precise ringInFloodway is OR'd in as a strict subset, for clarity).
-    const pondInFloodway = !!splitProbe.inTrigger || ringInFloodway(ringOf(baseEl), fmZones);
+    // PR-K — FLOODWAY is NO LONGER a no-fill cap. A mapped regulatory floodway allows a berm WITH a
+    // no-rise certification (44 CFR 60.3(d)(3)), so the solver MAY berm here; the verdict flags the
+    // no-rise requirement (amber) but never blocks the berm. The precise floodway flag (ZONE_SUBTY =
+    // "FLOODWAY") drives the requirement copy; the broad split.inTrigger still drives the berm-fill
+    // compensating-storage debt below (any fill below the flood level owes storage, floodway or not).
+    const pondTier = pondFloodplainTier(ringOf(baseEl), fmZones);
+    const pondInFloodway = pondTier.inFloodway;
     // PR-G (c) — the 100-yr receiving-water (tailwater) elevation the pond must discharge above by
     // gravity (the editable "Receiving water" input, persisted as receivingFlowlineElev).
     const pondTailwaterFt = Number.isFinite(baseEl.det?.receivingFlowlineElev) ? baseEl.det.receivingFlowlineElev : null;
     // Without a grade there's no berm-above-grade to cap, and the inward model is inactive, so fall
-    // back to the conservative screening clamp rather than the raw geometric ceiling. A floodway pond
-    // gets a HARD zero-raise cap regardless (no fill).
-    const maxRaiseFt = pondInFloodway ? 0
-      : gradeFt == null ? BERM_MAX_RAISE_FT
+    // back to the conservative screening clamp rather than the raw geometric ceiling. PR-K: the
+    // floodway no longer forces a zero-raise cap — only the physical drainage / geometric caps bind.
+    const maxRaiseFt = gradeFt == null ? BERM_MAX_RAISE_FT
       : (Number.isFinite(bermCapFt) ? bermCapFt : BERM_MAX_RAISE_FT);
     const bermDesignWaterFt = controllingInflowElevFt != null ? controllingInflowElevFt - INFLOW_HEAD_ALLOWANCE_FT : null;
 
@@ -8945,18 +8945,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } else {
         const raiseA = pass1.actions.find((a) => a.kind === "raise-tob");
         if (!raiseA) {
-          // No berm was solved. Either the pond ALREADY covers the target, or the buildable
-          // envelope forbids raising the rim at all (PR-G: floodway no-fill, or the rim is
-          // already at the drainage/geometric cap). Never claim "covered" when it isn't.
+          // No berm was solved. Either the pond ALREADY covers the target, or the rim is already at
+          // the drainage/geometric cap (PR-K: the floodway is NO LONGER a no-fill block — a floodway
+          // pond CAN berm, so it never lands here for that reason). Never claim "covered" when it isn't.
           const nowUsableCf = floodAffected ? (pass1.bands ? pass1.bands.usableCf : (splitProbe.usableCf ?? 0)) : (splitProbe.usableCf ?? 0);
           const metNow = Number.isFinite(nowUsableCf) && nowUsableCf >= detTargetCf - 1;
           if (metNow) {
             detMsg = `This pond already covers the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention.`;
-          } else if (pondInFloodway) {
-            // G3 — can't berm in the floodway; nothing is applied. Report AMBER with the reason + options.
-            const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: Number.isFinite(nowUsableCf) ? nowUsableCf : 0, avgDepthFt });
-            detGapNote = unbuildableNote({ hard: [{ code: "floodway-fill", label: "No fill is allowed in the regulatory floodway, so the rim can't be bermed above grade to make usable detention here." }], extraAcres: extraEst?.footprintAc ?? null });
-            detMsg = "This pond can't be bermed to add detention in the floodway (no fill is allowed).";
           } else {
             // Rim already at the computed drainage/geometric cap and still short — nothing to add.
             const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: Number.isFinite(nowUsableCf) ? nowUsableCf : 0, avgDepthFt });
@@ -9087,7 +9082,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // "This pond was raised the rim above …". Sentences join with a space; outlet/overlap/gap notes
     // carry their own leading space.
     const parts = [detMsg, mitMsg].filter(Boolean).join(" ");
-    flashWarn(`${isNew ? "Placed a pond. " : ""}${parts}${outletMsg}${overlapMsg}${gapMsgs ? ` ${gapMsgs}` : ""}`.trim(), 9500);
+    // PR-K — if the applied design berms inside a mapped regulatory floodway, the toast names the
+    // no-rise certification the berm needs (fill is allowed there WITH that study, not prohibited).
+    const finalBermH = Number.isFinite(finalEl.det?.tobElev) && gradeFt != null ? finalEl.det.tobElev - gradeFt : 0;
+    const floodwayNote = pondInFloodway && finalBermH > 0.05
+      ? " Because it berms inside a mapped regulatory floodway, plan on a no-rise certification (an engineering study showing the berm adds zero rise to the 100-yr flood level)."
+      : "";
+    flashWarn(`${isNew ? "Placed a pond. " : ""}${parts}${outletMsg}${overlapMsg}${gapMsgs ? ` ${gapMsgs}` : ""}${floodwayNote}`.trim(), 9500);
   };
   // (B789: drainChannelRelevant now computed up with the drainage inputs — it county-gates
   // the stored channel override too, not just this control's visibility.)
@@ -16606,39 +16607,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   if (detReqAcFt != null && providedUsableCf != null) {
                     const provAcFt = providedUsableCf / 43560;
                     const short = provAcFt < detReqAcFt - 0.005;
-                    // PR-G/PR-H (G2) — GREEN "OK" requires the volume be met by a BUILDABLE design.
-                    // The card is AMBER (never green, never a bare red SHORT) when EITHER the current
-                    // design breaks a hard envelope limit (floodway fill / rim above the drainage cap /
-                    // outlet below the receiving water), OR the pond is SHORT and the floodplain forbids
-                    // the berm that would fix it (Optimize can't raise the rim there). PR-H: assessPond-
-                    // Buildable + this gate now key floodway off split.inTrigger (the chip's signal), so a
-                    // bermed floodplain pond can no longer read a false green.
+                    // PR-K — GREEN "Buildable" requires (1) the volume met, (2) no HARD envelope limit
+                    // broken (rim above the drainage cap, outlet below the 100-yr receiving water), and
+                    // (3) no outstanding REQUIREMENT. The floodway is now case (3): a mapped regulatory
+                    // floodway lets the pond berm WITH a no-rise certification, so it's buildable but the
+                    // verdict stays amber (naming the no-rise study) until that's provided — never the old
+                    // flat "no fill". Zone A / AE fringe fill is compensating-storage debt (the mitigation
+                    // ledger), not a verdict block, so those ponds can read green once the volume is met.
                     const bld = assessPondBuildable(selEl);
-                    const inFw = !!split.inTrigger;
-                    const envelopeBlocked = short && inFw; // short + no fill allowed → can't berm to fix
-                    const unbuildable = !bld.buildable || envelopeBlocked;
-                    const reasons = bld.hard.length
-                      ? bld.hard.map((h) => h.label).join(" ")
-                      : envelopeBlocked
-                        ? "This pond is in the floodplain, where no fill is allowed, so its rim can't be bermed to reach the target."
-                        : "";
-                    const body = short && thisInundated && floodLevel != null && !unbuildable
-                      ? `The basin sits below the flood level (${f1(floodLevel)}′${floodEst ? " est." : ""}), so its ${f1(thisHoldsAcFt)} ac-ft don't count. Raising the rim creates storage that does.`
-                      : unbuildable
-                        ? `${reasons} ${makeItBuildableOptions({})}`
-                        : "";
+                    const inFloodway = pondFloodplainTier(ring, fmZones).inFloodway;
+                    const hardBlocked = !bld.buildable;                 // drainage cap / outfall-tailwater
+                    const needsNoRise = bld.requirements.length > 0;    // floodway berm → no-rise cert
+                    const amber = hardBlocked || needsNoRise;
+                    const hardReasons = bld.hard.map((h) => h.label).join(" ");
+                    const reqReasons = requirementNote({ requirements: bld.requirements });
+                    const body = short && thisInundated && floodLevel != null && !hardBlocked
+                      ? `The basin sits below the flood level (${f1(floodLevel)}′${floodEst ? " est." : ""}), so its ${f1(thisHoldsAcFt)} ac-ft don't count. Raising the rim creates storage that does.${inFloodway ? " Berming inside a mapped regulatory floodway needs a no-rise certification (an engineering study showing the berm adds zero rise to the 100-yr flood level)." : ""}`
+                      : hardBlocked
+                        ? `${hardReasons} ${makeItBuildableOptions({})}${needsNoRise ? ` ${reqReasons}` : ""}`.trim()
+                        : needsNoRise
+                          ? reqReasons
+                          : "";
                     // I5 — the HEADLINE states the outcome; the achieved-vs-required figure is its OWN
                     // styled sub-line (never a wrapped dangling parenthesis). Every card carries both.
                     out.push({
                       kind: "detention",
                       short,
-                      tone: unbuildable ? "amber" : short ? "short" : "ok",
-                      heading: unbuildable
+                      tone: amber ? "amber" : short ? "short" : "ok",
+                      heading: hardBlocked
                         ? (short ? `Not buildable to reach ${f1(detReqAcFt)} ac-ft` : unbuildableHeading({ requiredAcFt: detReqAcFt }))
                         : short
                           ? `Short of ${f1(detReqAcFt)} ac-ft required`
-                          : "Buildable",
-                      subline: unbuildable && short
+                          : needsNoRise
+                            ? "Buildable, needs a no-rise certification"
+                            : "Buildable",
+                      subline: hardBlocked && short
                         ? `${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft achievable`
                         : `${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft`,
                       body,
@@ -16685,11 +16688,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const g_maxExcavEst = estMaxExcavDepthFt({ depthToWaterFt: g_dtwEst.valueFt });  // don't dig below groundwater
                 const g_poolRelevant = poolRelevantForRole(g_roleInfo.role);                    // permanent pool only for wet ponds
                 const estPillStyle = { fontSize: 9.5, color: PAL.muted, fontWeight: 700, letterSpacing: "0.04em", border: `1px solid ${PAL.panelLine}`, borderRadius: 4, padding: "1px 4px", whiteSpace: "nowrap", cursor: "help" };
+                // PR-K — the "In floodway" watch-out now keys off the PRECISE floodway tier (a mapped
+                // ZONE_SUBTY = "FLOODWAY" polygon), not the broad 1% trigger. Approximate Zone A gets
+                // its own "BFE study required" chip. The 1% fringe (Zone AE outside a floodway) shows
+                // neither — its compensating-storage debt lives in the mitigation card, not a chip.
+                const g_tier = pondFloodplainTier(ring, fmZones);
                 const g_facts = {
                   floodEstimated: g_split.mode === "anchored" && isEstimatedWseSrc(g_split.wseSrc),
                   rimBelowFlood: !!(g_split.mode === "anchored" && g_split.bands && g_split.bands.fullyInundated),
                   criteriaUnverified: !!(g_critRule && g_critRule.verified === false),
-                  inFloodway: !!g_split.inTrigger,
+                  inFloodway: g_tier.inFloodway,
+                  zoneA: g_tier.zoneA,
                 };
                 const g_chips = pondInspectorChips(g_facts);
                 const g_chipRow = g_chips.length > 0 && (
@@ -17805,7 +17814,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <Chip tone="neutral" text={`Detention split at ${f1(g_split.wseFt)}′`} popover={POND_FLOOD_NOTES.split} />
                         )}
                         {g_facts.floodEstimated && <Chip tone="neutral" text="Flood level estimated" popover={POND_FLOOD_NOTES.estimate} />}
-                        {g_facts.inFloodway && <Chip tone="amber" text="In floodway: no fill" popover={POND_CHIP_DEFS.find((c) => c.id === "floodway").popover} />}
+                        {g_facts.inFloodway && <Chip tone="amber" text={POND_CHIP_DEFS.find((c) => c.id === "floodway").text} popover={POND_CHIP_DEFS.find((c) => c.id === "floodway").popover} />}
+                        {g_facts.zoneA && <Chip tone="amber" text={POND_CHIP_DEFS.find((c) => c.id === "zonea").text} popover={POND_CHIP_DEFS.find((c) => c.id === "zonea").popover} />}
                         <Chip tone="neutral" text="Elevations: NAVD88" popover={POND_FLOOD_NOTES.datum} />
                       </div>
                     </Collapse>

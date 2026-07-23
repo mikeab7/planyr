@@ -69,8 +69,8 @@ describe("I4 — chips WRAP within the panel, never run off the right edge", () 
 
 describe("I5 — the verdict is a HEADLINE + a separate achieved/required sub-line (no dangling paren)", () => {
   it("the card carries a subline distinct from the heading", () => {
-    expect(src).toContain('heading: unbuildable\n                        ? (short ? `Not buildable to reach ${f1(detReqAcFt)} ac-ft` : unbuildableHeading({ requiredAcFt: detReqAcFt }))');
-    expect(src).toContain("subline: unbuildable && short");
+    expect(src).toContain('heading: hardBlocked\n                        ? (short ? `Not buildable to reach ${f1(detReqAcFt)} ac-ft` : unbuildableHeading({ requiredAcFt: detReqAcFt }))');
+    expect(src).toContain("subline: hardBlocked && short");
     expect(src).toContain("`${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft achievable`");
     // the green case is a plain "Buildable" headline
     expect(src).toContain('  : "Buildable",');

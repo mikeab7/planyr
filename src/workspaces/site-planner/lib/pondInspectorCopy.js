@@ -26,9 +26,20 @@ export const POND_CHIP_DEFS = [
     when: (f) => !!f.criteriaUnverified,
   },
   {
-    id: "floodway", tone: "amber", text: "In floodway: no fill",
-    popover: "Fill and structures in the regulatory floodway are prohibited outright; pond CUT in the floodway can be permissible with a no-rise review. Informational, never a green light.",
+    // PR-K — fires ONLY when the footprint intersects a MAPPED regulatory floodway (NFHL
+    // ZONE_SUBTY = "FLOODWAY"), never merely the 1% floodplain or Zone A. Fill is NOT
+    // prohibited here: it's allowed with a no-rise certification (44 CFR 60.3(d)(3)).
+    id: "floodway", tone: "amber", text: "In floodway: no-rise cert",
+    popover: "The footprint intersects a mapped regulatory floodway. Fill and berming here are allowed WITH a no-rise certification (an engineering study showing the work adds zero rise to the 100-yr flood level). Net-excavation ponds often qualify. Informational, never a green light.",
     when: (f) => !!f.inFloodway,
+  },
+  {
+    // PR-K — approximate Zone A (SFHA, no published BFE, no mapped floodway): fill is allowed
+    // with compensating storage, but every flood number is an ESTIMATE and a BFE study is
+    // required at engineering. Never the "no fill" language.
+    id: "zonea", tone: "amber", text: "Zone A: BFE study required",
+    popover: "This is approximate Zone A: in the 1% floodplain but with no published base flood elevation and no mapped floodway. Fill is allowed with compensating storage, but every flood number here is an estimate. A BFE study (detailed H&H) will be required at engineering to confirm the flood level.",
+    when: (f) => !!f.zoneA,
   },
 ];
 

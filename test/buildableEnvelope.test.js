@@ -7,6 +7,7 @@ import {
   unbuildableHeading,
   makeItBuildableOptions,
   unbuildableNote,
+  requirementNote,
   DEFAULT_MAX_EXCAV_DEPTH_FT,
 } from "../src/workspaces/site-planner/lib/buildableEnvelope.js";
 
@@ -15,26 +16,27 @@ describe("rimCapElevFt — the highest buildable top-of-bank elevation", () => {
     expect(rimCapElevFt({ drainageCapElevFt: 104, geometricCeilingElevFt: 110 })).toBe(104);
     expect(rimCapElevFt({ drainageCapElevFt: 112, geometricCeilingElevFt: 108 })).toBe(108);
   });
-  it("floodway no-fill caps the rim at existing grade (no berm)", () => {
-    expect(rimCapElevFt({ gradeFt: 100, drainageCapElevFt: 109, inFloodway: true })).toBe(100);
-    // not in a floodway → grade doesn't cap
-    expect(rimCapElevFt({ gradeFt: 100, drainageCapElevFt: 109, inFloodway: false })).toBe(109);
+  it("PR-K: the floodway is NOT a rim cap — only the physical caps bound the rim", () => {
+    // A floodway berm is allowed with a no-rise cert, so the drainage cap alone governs the rim.
+    expect(rimCapElevFt({ drainageCapElevFt: 109 })).toBe(109);
   });
   it("null inputs don't constrain; nothing finite → null", () => {
     expect(rimCapElevFt({})).toBeNull();
-    expect(rimCapElevFt({ inFloodway: true })).toBeNull(); // no grade → floodway can't cap
   });
 });
 
-describe("assessBuildability — hard limits (a-c) block; soft (d) only warns", () => {
-  it("a floodway pond bermed above grade is NOT buildable", () => {
+describe("assessBuildability — hard limits (a, c) block; floodway is a no-rise REQUIREMENT; soft (d) warns", () => {
+  it("PR-K: a floodway pond bermed above grade IS buildable, but raises a no-rise REQUIREMENT", () => {
     const r = assessBuildability({ tobElev: 109.3, gradeFt: 100, inFloodway: true });
-    expect(r.buildable).toBe(false);
-    expect(r.hard.map((h) => h.code)).toContain("floodway-fill");
-  });
-  it("a floodway pond with the rim AT grade (no fill) is buildable on that axis", () => {
-    const r = assessBuildability({ tobElev: 100, gradeFt: 100, inFloodway: true });
+    expect(r.buildable).toBe(true); // no longer a hard block
     expect(r.hard.some((h) => h.code === "floodway-fill")).toBe(false);
+    expect(r.requirements.map((q) => q.code)).toContain("floodway-no-rise");
+    expect(r.requirements[0].label).toMatch(/no-rise certification/);
+    expect(r.requirements[0].label).not.toMatch(/prohibited|no fill/i);
+  });
+  it("a floodway pond with the rim AT grade (no fill) raises NO requirement", () => {
+    const r = assessBuildability({ tobElev: 100, gradeFt: 100, inFloodway: true });
+    expect(r.requirements.length).toBe(0);
   });
   it("a rim above the drainage cap is NOT buildable", () => {
     const r = assessBuildability({ tobElev: 109.3, gradeFt: 100, drainageCapElevFt: 104.5 });
@@ -82,10 +84,11 @@ describe("assessBuildability — hard limits (a-c) block; soft (d) only warns", 
     expect(r.buildable).toBe(true);
     expect(r.hard.length).toBe(0);
   });
-  it("multiple hard limits stack in one assessment", () => {
+  it("multiple hard limits stack; the floodway rides alongside as a requirement, not a hard block", () => {
     const r = assessBuildability({ tobElev: 110, gradeFt: 100, inFloodway: true, drainageCapElevFt: 104, floorElev: 90, tailwaterFt: 95 });
     expect(r.buildable).toBe(false);
-    expect(r.hard.map((h) => h.code).sort()).toEqual(["drainage-cap", "floodway-fill", "outfall-tailwater"]);
+    expect(r.hard.map((h) => h.code).sort()).toEqual(["drainage-cap", "outfall-tailwater"]);
+    expect(r.requirements.map((q) => q.code)).toContain("floodway-no-rise");
   });
 });
 
@@ -100,9 +103,21 @@ describe("copy helpers", () => {
     expect(makeItBuildableOptions({})).toMatch(/^To make it buildable: enlarge the pond,/);
   });
   it("unbuildableNote joins the hard reasons with the options and has NO em-dash", () => {
-    const note = unbuildableNote({ hard: [{ code: "floodway-fill", label: "In the regulatory floodway: fill is prohibited." }], extraAcres: 2 });
-    expect(note).toMatch(/floodway/);
+    const note = unbuildableNote({ hard: [{ code: "drainage-cap", label: "Rim is above the elevation the site can drain in by gravity." }], extraAcres: 2 });
+    expect(note).toMatch(/drain in by gravity/);
     expect(note).toMatch(/To make it buildable/);
+    expect(note.includes("—")).toBe(false);
+  });
+});
+
+describe("PR-K — the floodway no-rise requirement copy", () => {
+  it("names the no-rise cert, defines it inline, and never says 'prohibited' / 'no fill'", () => {
+    const r = assessBuildability({ tobElev: 108, gradeFt: 100, inFloodway: true });
+    const note = requirementNote({ requirements: r.requirements });
+    expect(note).toMatch(/no-rise certification/);
+    expect(note).toMatch(/zero rise to the 100-yr flood level/); // the inline definition
+    expect(note).not.toMatch(/prohibited/i);
+    expect(note).not.toMatch(/no fill/i);
     expect(note.includes("—")).toBe(false);
   });
 });

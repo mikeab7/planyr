@@ -158,7 +158,7 @@ describe("PR-B — pond inspector fixes", () => {
   it("B4/I5 — the status-card is a HEADLINE + a separate achieved/required sub-line, never 'of the'", () => {
     // PR-I (I5) restructured the verdict: the outcome is the headline; the figure is its own sub-line.
     expect(pondBody).toContain("`Short of ${f1(detReqAcFt)} ac-ft required`");
-    expect(pondBody).toContain("subline: unbuildable && short");
+    expect(pondBody).toContain("subline: hardBlocked && short"); // PR-K renamed the gate
     expect(pondBody.includes("of the ${f1(detReqAcFt)}")).toBe(false);
   });
   it("B5 — the OUTLET & STORMS summary is fed the real routed fail count", () => {
