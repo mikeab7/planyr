@@ -10,7 +10,7 @@ const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/S
 describe("D1 — the storage recompute threads the inward model (gradeFt) into the canonical split + solver", () => {
   it("pondSplitFor passes gradeFt into usablePondVolume", () => {
     expect(src).toContain("const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;");
-    expect(src).toContain("estimatePoolDepthFt: estPool, gradeFt })");
+    expect(src).toContain("estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt })");
   });
   it("the solver is threaded gradeFt so it sizes against the same inward geometry", () => {
     // sizePondForTargets + solveTobRaise both receive gradeFt in designPond
@@ -86,7 +86,10 @@ describe("D5 — the Max berm input is REMOVED; the cap is computed and names th
     expect(src).toContain("const geomCapFt = geometricMaxBermFt(ringOf(baseEl), EXT_BERM_SLOPE);");
     expect(src).toContain("const drainCapFt = drainageBermCapFt({ controllingInflowElevFt, gradeAtPondFt: gradeFt, freeboardFt: bermFbFt });");
     expect(src).toContain("const { capFt: bermCapFt, binding: bermBinding } = bindingBermCap({ drainageCapFt: drainCapFt, geometricCapFt: geomCapFt });");
-    expect(src).toContain("const maxRaiseFt = gradeFt == null ? BERM_MAX_RAISE_FT : (Number.isFinite(bermCapFt) ? bermCapFt : BERM_MAX_RAISE_FT);");
+    // PR-G folded the FLOODWAY no-fill hard cap in front of the D5 drainage/geometric cap: a
+    // floodway pond gets a hard zero-raise, else the computed berm cap (else the screening clamp).
+    expect(src).toContain("const maxRaiseFt = pondInFloodway ? 0");
+    expect(src).toContain("(Number.isFinite(bermCapFt) ? bermCapFt : BERM_MAX_RAISE_FT);");
   });
   it("the controlling inflow grade is sampled from real per-point terrain (else the drainage cap is null)", () => {
     expect(src).toContain("if (typeof fmGradeAt !== \"function\") return null;");

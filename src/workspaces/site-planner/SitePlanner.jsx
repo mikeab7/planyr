@@ -141,7 +141,7 @@ import { fetchSiteGrid } from "./lib/terrainLayers.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import {
-  zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger,
+  zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
   wedgeMitigation, pointInZone,
   floodGeoBbox, pickWorstCase, effectivePadElev, bfeLinesFromFeatureCollection, deriveBfeFromLines,
   crossSectionWselFromFeatureCollection, governingCrossSectionWsel,
@@ -157,6 +157,7 @@ import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js"
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
 import { sizePondForTargets, scaleRing, solveTobRaise, applyPondSizingActions } from "./lib/pondSizing.js";
+import { rimCapElevFt, assessBuildability as assessPondEnvelope, unbuildableHeading, makeItBuildableOptions, unbuildableNote, DEFAULT_MAX_EXCAV_DEPTH_FT } from "./lib/buildableEnvelope.js";
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
 import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
@@ -7809,6 +7810,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pondSplitFor = (e) => {
     const det = detWithAuto(e.det);
     const pring = ringOf(e);
+    // PR-G (c) — storage below the 100-yr receiving water (tailwater) can't drain by gravity, so it's
+    // DEAD: the usable/dead split floors the usable band at the receiving-water elevation too. Null
+    // (no tailwater entered) leaves the split exactly as before.
+    const twDeadFloorFt = Number.isFinite(e.det?.receivingFlowlineElev) ? e.det.receivingFlowlineElev : null;
     // D1 — the INWARD berm model: a rim above existing grade shrinks the effective top-of-bank to
     // the crest ring, so storage recomputes on the inward-tapering solid. gradeFt is the pond's
     // existing grade; null (no terrain data) leaves the classic drawn-ring model in place.
@@ -7819,7 +7824,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (fmZones.length) {
       const facts = pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, bfeSrc: fmElev.bfeSrc, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt, derivedWse1pctFt: fmElev.derivedWse1pctFt, derivedWse1pctSrc: fmElev.derivedWse1pctSrc }, fmZonesSig);
       const estPool = estPoolFor();
-      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool, gradeFt }), wseFt: facts.wseFt, wseSrc: facts.wseSrc ?? null, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true };
+      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt }), wseFt: facts.wseFt, wseSrc: facts.wseSrc ?? null, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true };
     }
     // NEW-9 — a restored view replays the facts the check persisted for this pond, so
     // the usable/dead split (and the verdict built on it) survives a reload unchanged.
@@ -7827,7 +7832,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (rf) {
       const estPool = Number.isFinite(rf.estPoolDepthFt) ? rf.estPoolDepthFt : estPoolFor(); // check-time measurement wins
       const wseFt = Number.isFinite(rf.wseFt) ? rf.wseFt : null;
-      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool, gradeFt }), wseFt, wseSrc: rf.wseSrc ?? null, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true };
+      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt }), wseFt, wseSrc: rf.wseSrc ?? null, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true };
     }
     // NEW-9 — restored, flood evidence exists, but NO persisted fact for this pond (a
     // legacy snapshot saved before this fix, or a pond drawn after the check): the
@@ -7841,7 +7846,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // No flood evidence at all (an upland site, or no check yet) — the existing
     // estimate/gross precedence is legitimate here.
     const estPool = estPoolFor();
-    return { ...usablePondVolume(pring, det, { wseFt: null, estimatePoolDepthFt: estPool, gradeFt }), wseFt: null, inTrigger: false, estPoolDepthFt: estPool, factsKnown: true };
+    return { ...usablePondVolume(pring, det, { wseFt: null, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt }), wseFt: null, inTrigger: false, estPoolDepthFt: estPool, factsKnown: true };
+  };
+  // PR-G — assess a pond element against the BUILDABLE ENVELOPE (the hard limits a design must
+  // live inside + the soft geotech screen). Reused by the top-line verdict (green requires a
+  // buildable design) and the pond inspector's watch-out notes. Pure over the pond's context.
+  const assessPondBuildable = (el) => {
+    const d = detWithAuto(el.det);
+    const ring = ringOf(el);
+    const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
+    const tobElev = Number.isFinite(d.tobElev) ? d.tobElev : null;
+    const depthFt = Number.isFinite(d.depth) ? d.depth : null;
+    const floorElev = tobElev != null && depthFt != null ? tobElev - depthFt : null;
+    const inFloodway = ringInFloodway(ring, fmZones);
+    // (a) drainage cap → the max buildable RIM elevation (needs real per-point terrain).
+    let drainageCapElevFt = null;
+    if (typeof fmGradeAt === "function" && gradeFt != null) {
+      let lo = Infinity;
+      for (const p of ring) { const g = fmGradeAt(p); if (Number.isFinite(g)) lo = Math.min(lo, g); }
+      if (Number.isFinite(lo)) {
+        const capH = drainageBermCapFt({ controllingInflowElevFt: lo, gradeAtPondFt: gradeFt, freeboardFt: Number.isFinite(d.freeboard) ? d.freeboard : 1 });
+        if (Number.isFinite(capH)) drainageCapElevFt = gradeFt + capH;
+      }
+    }
+    // (c) tailwater + the low-flow (lowest-invert) outlet stage.
+    const tailwaterFt = Number.isFinite(el.det?.receivingFlowlineElev) ? el.det.receivingFlowlineElev : null;
+    const stages = el.det?.outlet && Array.isArray(el.det.outlet.stages) ? el.det.outlet.stages : [];
+    const inverts = stages.map((s) => s.invertElevFt).filter((n) => Number.isFinite(n));
+    const outletInvertFt = inverts.length ? Math.min(...inverts) : null;
+    const maxExcavDepthFt = Number.isFinite(el.det?.maxExcavDepthFt) ? el.det.maxExcavDepthFt : DEFAULT_MAX_EXCAV_DEPTH_FT;
+    return assessPondEnvelope({ tobElev, gradeFt, floorElev, inFloodway, drainageCapElevFt, tailwaterFt, outletInvertFt, waterDepthFt: depthFt, maxExcavDepthFt });
   };
   // NEW-9 — the site fold moved to the pure accumulator (lib/pondLedger.js) so the
   // "unknown facts poison the usable total" honesty rule is unit-testable. Entries are
@@ -8632,14 +8666,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const autoSizeOutletFor = (el, criteria) => {
     const effDet = detWithAuto(el.det);
     if (effDet.tobElev == null) {
-      return { patch: {}, msg: " Its outlet still needs a top-of-bank elevation (site grade wasn't available) — set it in the pond's Properties, then ⚡ Auto-size." };
+      return { patch: {}, msg: " Its outlet still needs a top-of-bank elevation (site grade wasn't available): set it in the pond's Properties, then ⚡ Auto-size." };
     }
     const da = acresActive, imp = impPct;
     const tc = computeTimeOfConcentration({ areaAcres: da, impPct: imp, criteria });
     const suggested = suggestedPreDevReleaseCfs({ requiredStorms: criteria.requiredStorms, areaAcres: da, tcMin: tc?.tcMin });
     const relCap = criteria.allowableReleaseCfsPerAc && da > 0 ? Math.round(criteria.allowableReleaseCfsPerAc.value * da * 100) / 100 : suggested ? suggested.cfs : null;
     const relSource = criteria.allowableReleaseCfsPerAc && da > 0 ? "code" : suggested ? "suggested" : null;
-    if (relCap == null) return { patch: {}, msg: " Its outlet couldn't be sized — no drainage area is set." };
+    if (relCap == null) return { patch: {}, msg: " Its outlet couldn't be sized: no drainage area is set." };
     const splitNow = pondSplitFor(el);
     const r = autoSizeCompoundOutlet({ ring: ringOf(el), det: effDet, criteria, areaAcres: da, impPct: imp, tailwaterElevFt: splitNow.wseFt ?? null, overrideCfs: null, tcMin: tc?.tcMin });
     if (!r.outlet) return { patch: {}, msg: ` ${r.reason || "Its outlet couldn't be auto-sized yet."}` };
@@ -8785,17 +8819,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (needsMit && !floodAffected) {
       // Mitigation was required but no floodplain ground was reachable to place/select against.
       if (isNew) { place({ ...baseEl, det: { ...baseEl.det, role: roleForJob } }); revealPondInspector(baseEl.id); }
-      flashWarn("This site's mapped floodplain wasn't found under open ground, so a pond couldn't be placed inside it automatically — drag the pond onto the flood zone shown on the map, then reopen the Sizing assistant to size it.", 8500);
+      flashWarn("This site's mapped floodplain wasn't found under open ground, so a pond couldn't be placed inside it automatically. Drag the pond onto the flood zone shown on the map, then reopen the Sizing assistant to size it.", 8500);
       return;
     }
 
     if (effDetProbe.tobElev == null) {
       if (isNew) { place({ ...baseEl, det: { ...baseEl.det, role: roleForJob } }); revealPondInspector(baseEl.id); }
-      flashWarn(`${isNew ? "Placed a pond, but it" : "This pond"} needs a top-of-bank elevation before it can be sized — set it in the pond's Properties, then reopen ⚡ Optimize pond.`, 8500);
+      flashWarn(`${isNew ? "Placed a pond, but it" : "This pond"} needs a top-of-bank elevation before it can be sized: set it in the pond's Properties, then reopen ⚡ Optimize pond.`, 8500);
       return;
     }
     if ((needsDet && otherLedger.usableCf == null) || (needsMit && otherLedger.creditedMitCf == null)) {
-      flashWarn("This site's usable/dead pond split isn't fully known — ↻ Re-check first, then Optimize pond can size against real numbers.", 7000);
+      flashWarn("This site's usable/dead pond split isn't fully known: ↻ Re-check first, then Optimize pond can size against real numbers.", 7000);
       return;
     }
 
@@ -8859,9 +8893,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     })();
     const drainCapFt = drainageBermCapFt({ controllingInflowElevFt, gradeAtPondFt: gradeFt, freeboardFt: bermFbFt });
     const { capFt: bermCapFt, binding: bermBinding } = bindingBermCap({ drainageCapFt: drainCapFt, geometricCapFt: geomCapFt });
+    // PR-G (b) — FLOODWAY NO-FILL is a HARD envelope limit: fill in the regulatory floodway is
+    // prohibited, so Optimize may add NO berm there (rim capped at existing grade). This binds
+    // BEFORE the drainage/geometric caps — it's a legal prohibition, not a gravity/geometry limit.
+    const pondInFloodway = ringInFloodway(ringOf(baseEl), fmZones);
+    // PR-G (c) — the 100-yr receiving-water (tailwater) elevation the pond must discharge above by
+    // gravity (the editable "Receiving water" input, persisted as receivingFlowlineElev).
+    const pondTailwaterFt = Number.isFinite(baseEl.det?.receivingFlowlineElev) ? baseEl.det.receivingFlowlineElev : null;
     // Without a grade there's no berm-above-grade to cap, and the inward model is inactive, so fall
-    // back to the conservative screening clamp rather than the raw geometric ceiling.
-    const maxRaiseFt = gradeFt == null ? BERM_MAX_RAISE_FT : (Number.isFinite(bermCapFt) ? bermCapFt : BERM_MAX_RAISE_FT);
+    // back to the conservative screening clamp rather than the raw geometric ceiling. A floodway pond
+    // gets a HARD zero-raise cap regardless (no fill).
+    const maxRaiseFt = pondInFloodway ? 0
+      : gradeFt == null ? BERM_MAX_RAISE_FT
+      : (Number.isFinite(bermCapFt) ? bermCapFt : BERM_MAX_RAISE_FT);
     const bermDesignWaterFt = controllingInflowElevFt != null ? controllingInflowElevFt - INFLOW_HEAD_ALLOWANCE_FT : null;
 
     let finalEl = { ...baseEl, det: { ...baseEl.det, role: roleForJob } };
@@ -8880,11 +8924,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? sizePondForTargets({ ring: ringOf(finalEl), det: effDetProbe, wseFt: splitProbe.wseFt, wseProvider: splitProbe.wseSrc, inTrigger: splitProbe.inTrigger, gradeFt, detTargetCf, mitTargetCf: 0, mitRatio, maxRaiseFt })
         : { ok: true, actions: (() => { const r = solveTobRaise({ ring: ringOf(finalEl), det: effDetProbe, wseFt: null, targetCf: detTargetCf, maxRaiseFt, gradeFt }); return r.hFt > 0 ? [{ kind: "raise-tob", hFt: r.hFt, addCf: r.addCf, partial: r.ok === false }] : []; })() };
       if (!pass1.ok) {
-        detMsg = `detention couldn't be sized: ${pass1.reason}`;
+        detMsg = `Detention couldn't be sized: ${pass1.reason}.`;
       } else {
         const raiseA = pass1.actions.find((a) => a.kind === "raise-tob");
         if (!raiseA) {
-          detMsg = `already covers the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`;
+          // No berm was solved. Either the pond ALREADY covers the target, or the buildable
+          // envelope forbids raising the rim at all (PR-G: floodway no-fill, or the rim is
+          // already at the drainage/geometric cap). Never claim "covered" when it isn't.
+          const nowUsableCf = floodAffected ? (pass1.bands ? pass1.bands.usableCf : (splitProbe.usableCf ?? 0)) : (splitProbe.usableCf ?? 0);
+          const metNow = Number.isFinite(nowUsableCf) && nowUsableCf >= detTargetCf - 1;
+          if (metNow) {
+            detMsg = `This pond already covers the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention.`;
+          } else if (pondInFloodway) {
+            // G3 — can't berm in the floodway; nothing is applied. Report AMBER with the reason + options.
+            const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: Number.isFinite(nowUsableCf) ? nowUsableCf : 0, avgDepthFt });
+            detGapNote = unbuildableNote({ hard: [{ code: "floodway-fill", label: "No fill is allowed in the regulatory floodway, so the rim can't be bermed above grade to make usable detention here." }], extraAcres: extraEst?.footprintAc ?? null });
+            detMsg = "This pond can't be bermed to add detention in the floodway (no fill is allowed).";
+          } else {
+            // Rim already at the computed drainage/geometric cap and still short — nothing to add.
+            const extraEst = detentionLandTakeEstimate({ requiredAcFt: detTargetCf / 43560, providedUsableCf: Number.isFinite(nowUsableCf) ? nowUsableCf : 0, avgDepthFt });
+            detGapNote = bermCapProposalNote({
+              binding: bermBinding === "drainage" ? "drainage" : "geometry",
+              bermFt: 0,
+              controllingGradeFt: controllingInflowElevFt,
+              designWaterFt: bermDesignWaterFt,
+              geometricMaxFt: geomCapFt,
+              extraAcres: extraEst?.footprintAc ?? null,
+            });
+            detMsg = "This pond's rim is already at its buildable limit.";
+          }
         } else {
           // C1 — ALWAYS apply the rim/berm the elevation solve reaches (full OR partial). The
           // footprint is UNTOUCHED (raise-tob writes only tobElev/depth/tobBerm), and a single
@@ -8893,7 +8961,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           finalEl = applyPondSizingActions({ ...finalEl, det: effDetProbe }, pass1.actions);
           detApplied = true;
           if (!raiseA.partial) {
-            detMsg = `raised the rim above the flood level and sized for the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`;
+            detMsg = `This pond's rim was raised above the flood level and sized for the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention.`;
           } else if (isNew) {
             // Creation-time exemption ONLY — nothing is user-owned yet, so this one act may
             // still grow the footprint as a last resort (never again after this click).
@@ -8905,8 +8973,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const growS = solvePondExpansion({ requiredCf: detTargetCf, volumeAt: grownVolumeAt });
             finalEl = grownCandidateEl(growS.ok ? growS.expandFt : 0) || finalEl;
             detMsg = growS.ok
-              ? `raised the rim to its safe limit and grew the footprint to reach the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`
-              : `raised the rim and grew the footprint as far as this site allows but is still short of the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention`;
+              ? `This pond's rim was raised to its safe limit and its footprint grown to reach the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention.`
+              : `This pond's rim was raised and its footprint grown as far as this site allows, but it's still short of the required ${fmtAcFt(detTargetCf / 43560)} ac-ft of detention.`;
           } else {
             // C1/D5 — existing pond: the elevation solve hit the COMPUTED berm cap and a gap
             // remains. The berm IS applied and the footprint stays as drawn; the toast names the
@@ -8922,7 +8990,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               geometricMaxFt: geomCapFt,
               extraAcres: extraEst?.footprintAc ?? null,
             });
-            detMsg = `raised the rim to a ${f1(raiseA.hFt)}-ft berm`;
+            detMsg = `This pond's rim was raised to a ${f1(raiseA.hFt)}-ft berm.`;
           }
         }
       }
@@ -8936,27 +9004,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const effDet2 = detWithAuto(finalEl.det);
       const splitNow = pondSplitFor(finalEl);
       const pass2 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet2, wseFt: splitNow.wseFt ?? splitProbe.wseFt, wseProvider: splitNow.wseSrc ?? splitProbe.wseSrc, inTrigger: splitNow.inTrigger ?? splitProbe.inTrigger, gradeFt, detTargetCf: 0, mitTargetCf, mitRatio, maxRaiseFt });
+      // G4 — a mitigation requirement that ROUNDS TO 0 at the 1dp we display carries no
+      // meaningful "already covers the required 0.0 ac-ft" filler; drop the message entirely.
+      const mitReqShown = mitTargetCf / 43560 >= 0.05;
       if (!pass2.ok) {
-        mitMsg = `mitigation couldn't be sized automatically: ${pass2.reason}`;
+        mitMsg = `Mitigation couldn't be sized automatically: ${pass2.reason}.`;
       } else if (pass2.mitigation.covered && !pass2.actions.some((a) => a.kind === "deepen" || a.kind === "grow")) {
-        mitMsg = `already covers the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`;
+        mitMsg = mitReqShown ? `This pond already covers the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation.` : "";
       } else {
         const needsGrow = pass2.actions.some((a) => a.kind === "grow" || a.kind === "grow-infeasible");
         if (!needsGrow) {
           finalEl = applyPondSizingActions(finalEl, pass2.actions);
           mitApplied = true;
-          mitMsg = `sized toward the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`;
+          mitMsg = `This pond was sized toward the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation.`;
         } else if (isNew) {
           finalEl = applyPondSizingActions(finalEl, pass2.actions);
           mitApplied = true;
           mitMsg = pass2.actions.some((a) => a.kind === "grow-infeasible")
-            ? `deepened and grown as far as this footprint allows but still short of the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`
-            : `sized toward the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`;
+            ? `This pond was deepened and grown as far as its footprint allows, but it's still short of the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation.`
+            : `This pond was sized toward the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation.`;
         } else {
           // C1 — existing pond: apply any elevation-only floor work the solve included; a grow
           // (footprint) is never applied. Name the footprint gap.
           const elevActions = pass2.actions.filter((a) => a.kind === "deepen");
-          if (elevActions.length) { finalEl = applyPondSizingActions(finalEl, elevActions); mitApplied = true; mitMsg = `deepened toward the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation`; }
+          if (elevActions.length) { finalEl = applyPondSizingActions(finalEl, elevActions); mitApplied = true; mitMsg = `This pond was deepened toward the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation.`; }
           const growA = pass2.actions.find((a) => a.kind === "grow");
           mitGapNote = gapProposalNote({ bermFt: null, extraAcres: growA?.addAcres ?? null });
         }
@@ -8969,7 +9040,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // Nothing could be applied without changing the footprint (immutable) — a mitigation
       // grow, or a solve that found no usable elevation remedy. Show what it would take; apply
       // nothing. finalEl never reached React state (place() below is skipped by the return).
-      const stuck = gapMsgs || [detMsg, mitMsg].filter(Boolean).join("; ");
+      const stuck = gapMsgs || [detMsg, mitMsg].filter(Boolean).join(" ");
       finishSummary(finalEl, true, gapMsgs || stuck);
       revealPondInspector(baseEl.id, "assistant");
       flashWarn(`This pond's footprint stays exactly as you drew it. ${stuck}`, 12000);
@@ -8985,15 +9056,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
 
     const overlaps = els.filter((e) => e.id !== finalEl.id && DESIGN_POND_BLOCKER_TYPES.includes(e.type) && ringsOverlap(ringOf(finalEl), ringOf(e)));
-    const overlapMsg = overlaps.length ? ` It now overlaps ${overlaps.length === 1 ? "another element" : `${overlaps.length} other elements`} in your layout — drag it clear.` : "";
+    // G4 — Optimize never moves the drawn footprint (PR-D), so a move-it-away instruction
+    // contradicts that. If a real overlap exists, state it as a NEUTRAL note, not an action.
+    const overlapMsg = overlaps.length ? ` Note: the footprint overlaps ${overlaps.length === 1 ? "another element" : `${overlaps.length} other elements`} in your layout.` : "";
 
     place(finalEl);
     revealPondInspector(finalEl.id, "assistant");
     // C1 — the change is APPLIED; pass any remaining gap so the persistent card shows both what
     // changed AND (C5) what it would still take to close it.
     finishSummary(finalEl, false, gapMsgs || null);
-    const parts = [detMsg, mitMsg].filter(Boolean).join("; ");
-    flashWarn(`${isNew ? "Placed a pond — " : "This pond was "}${parts}.${outletMsg}${overlapMsg}${gapMsgs ? ` ${gapMsgs}` : ""}`, 9500);
+    // G4 — detMsg/mitMsg are now COMPLETE sentences (own subject + terminal period), so the toast
+    // reads grammatically without a shared "This pond was …" verb prefix that produced the broken
+    // "This pond was raised the rim above …". Sentences join with a space; outlet/overlap/gap notes
+    // carry their own leading space.
+    const parts = [detMsg, mitMsg].filter(Boolean).join(" ");
+    flashWarn(`${isNew ? "Placed a pond. " : ""}${parts}${outletMsg}${overlapMsg}${gapMsgs ? ` ${gapMsgs}` : ""}`.trim(), 9500);
   };
   // (B789: drainChannelRelevant now computed up with the drainage inputs — it county-gates
   // the stored channel override too, not just this control's visibility.)
@@ -16512,13 +16589,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   if (detReqAcFt != null && providedUsableCf != null) {
                     const provAcFt = providedUsableCf / 43560;
                     const short = provAcFt < detReqAcFt - 0.005;
+                    // PR-G (G2) — GREEN "OK" requires the volume be met by a BUILDABLE design. If the
+                    // volume is met only by a design that breaks a hard envelope limit (floodway fill,
+                    // rim above the drainage cap, outlet below the receiving water), the card is AMBER
+                    // "Meets the volume, but not buildable as drawn", never green.
+                    const bld = assessPondBuildable(selEl);
+                    const unbuildable = !short && !bld.buildable;
                     const body = short && thisInundated && floodLevel != null
                       ? `The basin sits below the flood level (${f1(floodLevel)}′${floodEst ? " est." : ""}), so its ${f1(thisHoldsAcFt)} ac-ft don't count. Raising the rim creates storage that does.`
-                      : "";
+                      : unbuildable
+                        ? `${bld.hard.map((h) => h.label).join(" ")} ${makeItBuildableOptions({})}`
+                        : "";
                     out.push({
                       kind: "detention",
                       short,
-                      heading: short ? `SHORT: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required` : `OK: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`,
+                      tone: short ? "short" : unbuildable ? "amber" : "ok",
+                      heading: short
+                        ? `SHORT: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`
+                        : unbuildable
+                          ? `${unbuildableHeading({ requiredAcFt: detReqAcFt })} (${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft)`
+                          : `OK: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`,
                       body,
                     });
                   }
@@ -16528,6 +16618,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     out.push({
                       kind: "mitigation",
                       short,
+                      tone: short ? "short" : "ok",
                       heading: short ? `Mitigation SHORT: ${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft required` : `Mitigation OK: ${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft required`,
                       body: "",
                     });
@@ -16695,14 +16786,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         card (the detention card when detention is short), never once per card. One click of
                         it runs the whole solve for every shortfall, so a second button was pure duplication. */}
                     {statusCards.length > 0 && (() => {
-                      const optimizeIdx = statusCards.findIndex((c) => c.short);
+                      // PR-G — the ⚡ Optimize button rides the first NON-OK card (SHORT or the AMBER
+                      // "not buildable as drawn"); re-optimizing an unbuildable pond re-solves to the
+                      // best BUILDABLE design (which then honestly reads short, never a false green).
+                      const optimizeIdx = statusCards.findIndex((c) => (c.tone ?? (c.short ? "short" : "ok")) !== "ok");
+                      const toneColorOf = (c) => { const t = c.tone ?? (c.short ? "short" : "ok"); return t === "short" ? PAL.danger : t === "amber" ? PAL.warn : PAL.success; };
                       return (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 11 }}>
                         {statusCards.map((c, i) => (
-                          <div key={i} style={{ borderLeft: `3px solid ${c.short ? PAL.danger : PAL.success}`, background: "var(--planner-raised)", borderRadius: 8, padding: "9px 11px" }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.4, color: c.short ? PAL.danger : PAL.success }}>{c.heading}</div>
+                          <div key={i} style={{ borderLeft: `3px solid ${toneColorOf(c)}`, background: "var(--planner-raised)", borderRadius: 8, padding: "9px 11px" }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.4, color: toneColorOf(c) }}>{c.heading}</div>
                             {c.body ? <div style={{ fontSize: 11.5, color: PAL.text, lineHeight: 1.5, marginTop: 4 }}>{c.body}</div> : null}
-                            {c.short && i === optimizeIdx && (
+                            {i === optimizeIdx && (c.tone ?? (c.short ? "short" : "ok")) !== "ok" && (
                               <button type="button" onClick={designPond} title="One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed." style={{ marginTop: 8, padding: "5px 11px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Optimize pond</button>
                             )}
                           </div>
@@ -16720,6 +16815,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {g_atAGlance}
                     {g_chipRow}
                     {g_guardRow}
+                    {/* PR-G (d) — SOFT geotech warnings (deep excavation below likely groundwater);
+                        never a hard block, but surfaced so the design isn't silently over-optimistic. */}
+                    {(() => {
+                      const soft = assessPondBuildable(selEl).soft;
+                      return soft.length ? (
+                        <div style={{ margin: "3px 0 2px" }}>
+                          {soft.map((s) => <div key={s.code} style={{ fontSize: 11, color: PAL.warn, lineHeight: 1.45, fontWeight: 600 }}>▲ {s.label}</div>)}
+                        </div>
+                      ) : null;
+                    })()}
                     <Collapse sectionId="pond-sizing" title="Sizing & criteria" defaultOpen={false} summary={g_sizingSummary}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Detention storage</div>
                     {depthSolve && depthSolve.ok && Math.abs(depthSolve.depthFt - depth) > 0.05 && (
@@ -16787,10 +16892,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         {det.poolElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — dry-bottom basin" onClick={() => setDet({ poolElev: null })}>Clear</button>}
                       </span>
                     </Field>
-                    <Field label="Receiving flowline elev. (ft)">
+                    {/* PR-G (c) — the 100-yr receiving-water (tailwater) elevation the pond must
+                        discharge above by gravity. The low-flow outlet invert must sit AT/ABOVE it,
+                        and storage below it is DEAD (no gravity discharge → no detention credit).
+                        Editable; best-available adjacent ditch flowline / conservative estimate. */}
+                    <Field label="Receiving water (100-yr tailwater) elev. (ft)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
                         {det.receivingFlowlineElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear" onClick={() => setDet({ receivingFlowlineElev: null })}>Clear</button>}
+                      </span>
+                    </Field>
+                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, margin: "1px 0 3px" }}>EST: best-available adjacent ditch flowline / conservative estimate. Storage below it is dead (can't drain by gravity).</div>
+                    {/* PR-G (d) — SOFT geotech screen: a water depth beyond this (default 12 ft, editable)
+                        warns of groundwater / dewatering. Never a hard block. */}
+                    <Field label="Max excavation depth (ft)">
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.maxExcavDepthFt ?? ""} placeholder={`${DEFAULT_MAX_EXCAV_DEPTH_FT} (est.)`} onCommit={(n) => setDet({ maxExcavDepthFt: Number.isFinite(n) ? n : null })} />
+                        {det.maxExcavDepthFt != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — back to the 12-ft screen" onClick={() => setDet({ maxExcavDepthFt: null })}>Clear</button>}
                       </span>
                     </Field>
                     <div style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
