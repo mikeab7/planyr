@@ -79,9 +79,11 @@ describe("L1 — the section shows what a developer needs", () => {
     expect(m.berms.length).toBe(2);
     expect(has((l) => l.s === "rim 157.1' (+4.0 ft)")).toBe(true);
   });
-  it("has a depth dimension labeled with the total depth", () => {
+  it("M2 — a two-segment depth dimension: +berm above grade, cut below grade", () => {
     expect(m.depthDim).toBeTruthy();
-    expect(has((l) => l.s === "12.0 ft")).toBe(true);
+    expect(m.depthDim.twoSeg).toBe(true);
+    expect(has((l) => l.s === "+4.0 ft berm")).toBe(true); // rim 157.1 − grade 153.1
+    expect(has((l) => l.s === "8.0 ft cut")).toBe(true);   // grade 153.1 − floor 145.1
   });
   it("has a dashed flood line + EST label", () => {
     expect(m.lines.some((l) => l.role === "flood")).toBe(true);
@@ -108,16 +110,74 @@ describe("L1 — the section shows what a developer needs", () => {
     expect(m.lines.some((l) => l.role === "groundwater")).toBe(true);
     expect(has((l) => l.s === "groundwater 148.1' EST")).toBe(true);
   });
-  it("labels the earthwork: berm fill CY and cut CY, matching the card (whole CY)", () => {
-    expect(has((l) => l.s === "2,063 CY fill")).toBe(true);
-    expect(has((l) => l.s === "4,200 CY cut")).toBe(true);
-  });
   it("labels the side slope once", () => {
     expect(has((l) => l.s === "3:1")).toBe(true);
   });
   it("keeps the not-to-scale note in its own corner, with NO em dash", () => {
     expect(m.note.s).toBe("schematic, not to scale");
     expect(m.note.s.includes("—")).toBe(false);
+  });
+});
+
+describe("M1 — correct outside-in berm geometry (colinear inner face, fill above grade)", () => {
+  const cases = { TSAKIRIS, big: EXTREMES.bigBermGravityProblem, outletHigh: EXTREMES.outletAboveTailwater };
+  for (const [name, facts] of Object.entries(cases)) {
+    const m = pondSectionModel(facts, { w: 520, h: 260 });
+    const gradeY = m.lines.find((l) => l.role === "grade").y;
+    it(`${name}: the inner face above grade is COLINEAR with the side slope below grade (one line)`, () => {
+      for (const side of [0, 1]) {
+        const face = m.faces[side];          // [crestInner, floor] — the whole dark side slope
+        const quad = m.berms[side];          // [toe, crestOut, crestInner, innerAtGrade]
+        // the berm's crest-inner point IS the top of the face
+        expect(quad[2].x).toBeCloseTo(face[0].x, 3);
+        expect(quad[2].y).toBeCloseTo(face[0].y, 3);
+        // the berm's inner-at-grade point lies ON the face line → no kink at grade, no line through fill
+        const inGrade = quad[3];
+        const cross = (face[1].x - face[0].x) * (inGrade.y - face[0].y) - (face[1].y - face[0].y) * (inGrade.x - face[0].x);
+        expect(Math.abs(cross)).toBeLessThan(1); // px^2 — colinear within epsilon
+      }
+    });
+    it(`${name}: the berm fill polygon sits strictly ABOVE grade, bounded by the faces + crest`, () => {
+      for (const quad of m.berms) {
+        // every fill vertex is at or above grade (smaller y = higher on screen)
+        for (const p of quad) expect(p.y).toBeLessThanOrEqual(gradeY + 0.5);
+        // the crest (points 1,2) sits at rim; the toe + inner-at-grade (points 0,3) sit at grade
+        expect(quad[0].y).toBeCloseTo(gradeY, 1);
+        expect(quad[3].y).toBeCloseTo(gradeY, 1);
+        expect(quad[1].y).toBeCloseTo(m.depthDim.yRim, 1);
+        // the crest has a flat top of real width (not a knife point)
+        expect(Math.abs(quad[2].x - quad[1].x)).toBeGreaterThan(2);
+        // the outer toe sits OUTSIDE the crest (the outer face slopes out and down to grade)
+      }
+      // outer toe is outside the crest on each bank
+      expect(m.berms[0][0].x).toBeLessThan(m.berms[0][1].x);
+      expect(m.berms[1][0].x).toBeGreaterThan(m.berms[1][1].x);
+    });
+  }
+});
+
+describe("M2 — the dimension ticks/extension lines land on the measured levels", () => {
+  const m = pondSectionModel(TSAKIRIS, { w: 520, h: 260 });
+  it("rim highest, floor lowest, grade between (on screen)", () => {
+    expect(m.depthDim.yRim).toBeLessThan(m.depthDim.yGrade);
+    expect(m.depthDim.yGrade).toBeLessThan(m.depthDim.yFloor);
+  });
+  it("extension lines touch the rim (crest inner), the floor, and the grade plane", () => {
+    expect(m.depthDim.extRim.y).toBe(m.depthDim.yRim);
+    expect(m.depthDim.extRim.x1).toBeCloseTo(m.faces[0][0].x, 3);   // touches the rim/crest
+    expect(m.depthDim.extFloor.y).toBe(m.depthDim.yFloor);
+    expect(m.depthDim.extFloor.x1).toBeCloseTo(m.floor.x1, 3);       // touches the floor
+    expect(m.depthDim.extGrade.y).toBe(m.depthDim.yGrade);
+    expect(m.depthDim.extGrade.x1).toBeCloseTo(m.berms[0][3].x, 3);  // touches the grade plane
+  });
+});
+
+describe("M3 — NO earthwork CY numbers on the drawing", () => {
+  it("no label contains 'CY' for any fixture", () => {
+    for (const facts of [TSAKIRIS, ...Object.values(EXTREMES)]) {
+      const m = pondSectionModel(facts, { w: 520, h: 260 });
+      expect(m.labels.some((l) => /CY/.test(l.s)), JSON.stringify(m.labels.map((l) => l.s))).toBe(false);
+    }
   });
 });
 
