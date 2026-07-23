@@ -129,7 +129,8 @@ import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, sto
 import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt } from "./lib/yieldVerdicts.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
-import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
+import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
+import PondSection from "./components/PondSection.jsx";
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
@@ -7892,6 +7893,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const maxExcavDepthFt = Number.isFinite(el.det?.maxExcavDepthFt) ? el.det.maxExcavDepthFt : estMaxExcavDepthFt({ depthToWaterFt: dtwEst }).valueFt;
     return assessPondEnvelope({ tobElev, gradeFt, floorElev, inFloodway, drainageCapElevFt, tailwaterFt, outletInvertFt, waterDepthFt: depthFt, maxExcavDepthFt });
   };
+  // PR-L — assemble the plain facts the pond SECTION diagram draws (one source, used by BOTH the
+  // pond inspector and the ⚡ Optimize "what changed" card, so the picture never disagrees with the
+  // panel). All feet NAVD88 / ac-ft / CY, null where unknown. The pure lib/pondSectionModel.js turns
+  // these into a collision-free, labeled schematic. Called only after pondBermById is built (below).
+  const sectionFactsFor = (el) => {
+    const d = detWithAuto(el.det);
+    const ring = ringOf(el);
+    const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
+    const split = pondSplitFor({ ...el, det: d });
+    const rimFt = Number.isFinite(d.tobElev) ? d.tobElev : null;
+    const depthFt = Number.isFinite(d.depth) ? d.depth : null;
+    const floorFt = rimFt != null && depthFt != null ? rimFt - depthFt : null;
+    const wseFt = split.mode === "anchored" && Number.isFinite(split.wseFt) ? split.wseFt : null;
+    const wseEst = wseFt != null && isEstimatedWseSrc(split.wseSrc);
+    const stages = el.det?.outlet && Array.isArray(el.det.outlet.stages) ? el.det.outlet.stages : [];
+    const inverts = stages.map((s) => s.invertElevFt).filter((n) => Number.isFinite(n));
+    const outletInvertFt = inverts.length ? Math.min(...inverts) : floorFt;
+    const tw = estTailwaterElevFt({ wseFt, gradeFt });
+    const hasTwOverride = Number.isFinite(el.det?.receivingFlowlineElev);
+    const tailwaterFt = hasTwOverride ? el.det.receivingFlowlineElev : tw.valueFt;
+    const tailwaterEst = !hasTwOverride && tw.estimated;
+    const dtw = estDepthToWaterFt({ measuredFt: el.det?.depthToWaterFt });
+    const groundwaterFt = gradeFt != null && Number.isFinite(dtw.valueFt) ? gradeFt - dtw.valueFt : null;
+    const groundwaterEst = dtw.estimated;
+    const matBerm = pondBermById.get(el.id) || null;
+    const bermFillCy = matBerm && Number.isFinite(matBerm.volCf) ? matBerm.volCf / 27 : null;
+    const exc = incrementalExcavationCf(ring, d);
+    const cutCy = exc && Number.isFinite(exc.cf) ? exc.cf / 27 : null;
+    const roleInfo = effectivePondRole(d, split);
+    return {
+      gradeFt, rimFt, floorFt,
+      freeboardFt: Number.isFinite(d.freeboard) ? d.freeboard : 0,
+      slopeRatio: Number.isFinite(d.slope) ? d.slope : null,
+      wseFt, wseEst, outletInvertFt, tailwaterFt, tailwaterEst, groundwaterFt, groundwaterEst,
+      deadAcFt: Number.isFinite(split.deadCf) ? split.deadCf / 43560 : null,
+      usableAcFt: Number.isFinite(split.usableCf) ? split.usableCf / 43560 : null,
+      bermFillCy, cutCy,
+      purpose: roleInfo.role === "mitigation" ? "mitigation" : "detention",
+    };
+  };
   // NEW-9 — the site fold moved to the pure accumulator (lib/pondLedger.js) so the
   // "unknown facts poison the usable total" honesty rule is unit-testable. Entries are
   // built here (this component owns detWithAuto/pondAuto and the flood context).
@@ -8889,6 +8930,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         pondId: baseEl.id, infeasible, proposal,
         before: beforeSnapshot, after: snapshotOf(finalEl),
         gradeFt, wseFt: floodAffected ? splitProbe.wseFt : null,
+        // PR-L — the rich section facts for the new PondSection diagram (single source with the panel).
+        sectionFacts: sectionFactsFor(finalEl),
         siteDetReqAcFt, siteDetProvidedOtherAcFt, siteMitReqAcFt, siteMitProvidedOtherAcFt,
       });
     };
@@ -16881,6 +16924,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </div>
                       ) : null;
                     })()}
+                    {/* PR-L — the developer-readable pond SECTION: grade datum, the berm as fill above
+                        grade, the excavation to the floor, storage bands at their true elevations, the
+                        flood + groundwater + receiving-water levels, the outlet, the depth dimension, and
+                        earthwork call-outs. SAME component (+ same facts source) as the ⚡ Optimize card,
+                        so the picture never disagrees with the panel. Open by default (it's the headline
+                        visual); collapsible for space. */}
+                    <Collapse sectionId="pond-section" title="Section" defaultOpen={true} summary="grade · berm · storage bands">
+                      <div style={{ padding: "4px 0 2px" }}>
+                        <PondSection facts={sectionFactsFor(selEl)} />
+                      </div>
+                    </Collapse>
                     {/* PR-J — "Engineering assumptions" is an ENGINEER-ONLY override section: it must
                         start CLOSED on every fresh load for every pond, so a developer never sees the
                         criteria unless they open it. persist={false} ignores any stale stored "open"
@@ -19299,36 +19353,6 @@ function BulletBar({ layout, width = 210, status = null, unit = "ac-ft", Y }) {
   );
 }
 
-// B909 round 4 — the schematic (explicitly NOT-to-scale) pond cross-section: existing
-// grade, the flood water line, the OLD profile (dashed) vs the NEW profile (solid), and
-// the shaded usable-detention band — one picture that explains "raise the rim" instantly.
-// Pure marks come from lib/pondChangeSummary.js (unit-tested without a browser); this
-// just maps them to SVG. Module scope (MODULE-SCOPE-COMPONENTS).
-function PondCrossSection({ before, after, gradeFt, wseFt, width = 280 }) {
-  const { marks, w, h } = pondCrossSectionMarks({ before, after, gradeFt, wseFt, w: width, h: 130 });
-  if (!marks.length) return null;
-  const pathOf = (pts) => pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block", overflow: "visible" }} role="img" aria-label="Schematic pond cross-section, not to scale">
-      {marks.map((m, i) => {
-        if (m.t === "line") return <line key={i} x1={m.x1} y1={m.y1} x2={m.x2} y2={m.y2} style={{ stroke: m.role === "wse" ? "var(--info-text)" : "var(--text-tertiary)", strokeWidth: m.role === "wse" ? 1.5 : 1, strokeDasharray: m.role === "wse" ? "4 3" : "2 3", opacity: m.role === "wse" ? 0.9 : 0.5 }} />;
-        if (m.t === "band") return <polygon key={i} points={`${m.x},${m.yTop} ${m.x2},${m.yTop} ${m.x2},${m.yBottom} ${m.x},${m.yBottom}`} style={{ fill: "var(--success-text)", opacity: 0.13 }} />;
-        if (m.t === "profile") return <path key={i} d={pathOf(m.points)} fill="none" style={{ stroke: m.dashed ? "var(--text-tertiary)" : "var(--accent)", strokeWidth: m.dashed ? 1.5 : 2.5, strokeDasharray: m.dashed ? "5 4" : "none", strokeLinejoin: "round" }} />;
-        if (m.t === "text") {
-          const fill = m.role === "wseLabel" ? "var(--info-text)" : m.role === "usableLabel" ? "var(--success-text)" : m.role === "rimLabel" ? "var(--accent)" : "var(--text-tertiary)";
-          // A5 — the two elevation labels get a halo (matched to the card surface the diagram
-          // sits on, so it reads as a "white" outline in light / slate in dark) via paint-order,
-          // so the text stays legible where it crosses the grade / profile / WSE lines.
-          const halo = m.role === "wseLabel" || m.role === "rimLabel"
-            ? { paintOrder: "stroke", stroke: "var(--planner-raised)", strokeWidth: 2, strokeLinejoin: "round" }
-            : null;
-          return <text key={i} x={m.x} y={m.y} textAnchor={m.anchor || "start"} style={{ fill, fontSize: m.role === "label" ? 9 : 9.5, fontStyle: m.role === "label" ? "italic" : "normal", fontWeight: m.role === "label" ? 400 : 600, ...halo }}>{m.s}</text>;
-        }
-        return null;
-      })}
-    </svg>
-  );
-}
 
 // B909 round 4 (owner spec, upgrading a transient toast + Undo) — the PERSISTENT
 // "what changed" card after ⚡ Design pond runs: every elevation delta in plain before ->
@@ -19369,9 +19393,11 @@ function DesignChangeSummaryCard({ summary, onDismiss, onUndo }) {
           ))}
         </div>
       )}
-      <div style={{ marginTop: 9 }}>
-        <PondCrossSection before={summary.before} after={summary.after} gradeFt={summary.gradeFt} wseFt={summary.wseFt} />
-      </div>
+      {summary.sectionFacts && (
+        <div style={{ marginTop: 9 }}>
+          <PondSection facts={summary.sectionFacts} />
+        </div>
+      )}
       {!summary.infeasible && (
         <button type="button" onClick={onUndo} style={{ marginTop: 8, padding: "6px 12px", border: "1px solid var(--danger-text)", borderRadius: 7, background: "none", color: "var(--danger-text)", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>
           ↶ Undo this change

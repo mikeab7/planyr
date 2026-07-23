@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-23 @ `c105648` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-23 @ `1bcd166` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_308 source files mapped._
+_310 source files mapped._
 
 ## infra
 
@@ -233,6 +233,8 @@ _308 source files mapped._
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
   - _exports_: `default (LayerPanel)`
+- **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
+  - _exports_: `default (PondSection)`
 - **`src/workspaces/site-planner/components/RowInfo.jsx`** — Per-row ⓘ info popover for the Layers panel (source · vintage/age · notes); hover/click, portal via AnchoredMenu (B760)
   - _exports_: `default (RowInfo)`
 - **`src/workspaces/site-planner/components/SiteAnalysis.jsx`** — Site Analysis panel: presence-first environmental/regulatory screening of active parcels with honest present/none/unknown/unavailable states
@@ -464,7 +466,7 @@ _308 source files mapped._
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
   - _exports_: `nearestPointOnSeg`, `polyArea`, `segLineIntersect`, `splitPolygonByLine`, `splitPolygonByPath`
 - **`src/workspaces/site-planner/lib/pondChangeSummary.js`** — Pure "what changed" support for ⚡ Design pond (B909 round 4): plain-English before/after delta rows, the atomic infeasibility gap-proposal sentence, and schematic (not-to-scale) cross-section marks
-  - _exports_: `bermCapProposalNote`, `boxesIntersect`, `buildChangeSummaryRows`, `gapProposalNote`, `pondCrossSectionMarks`, `pondLabelBBox`
+  - _exports_: `bermCapProposalNote`, `buildChangeSummaryRows`, `gapProposalNote`
 - **`src/workspaces/site-planner/lib/pondCriteriaRules.js`** — B709 editable per-jurisdiction pond design criteria (max side slope, min freeboard, maintenance-berm width; all verified:false) + drawn-input conformance checks
   - _exports_: `checkPondCriteria`, `DEFAULT_POND_CRITERIA`, `loadPondCriteria`, `savePondCriteria`
 - **`src/workspaces/site-planner/lib/pondGeom.js`** — Pond expansion label placement (deepest added-ground point) and stage contour rings with elevation/depth labels
@@ -483,6 +485,8 @@ _308 source files mapped._
   - _exports_: `DEFAULT_MAX_EXCAV_DEPTH_FT`, `estDepthToWaterFt`, `estMaxExcavDepthFt`, `estTailwaterElevFt`, `poolRelevantForRole`, `REGIONAL_SEASONAL_HIGH_DTW_FT`
 - **`src/workspaces/site-planner/lib/pondScreeningGuards.js`** — v3 C3 pond screening guards (warnings only): when the rim sits above grade, surfaces the gravity-inflow (inlets-through-the-berm) chip and, from the routed peak water surface, an FFE-proximity chip naming the lowest building within 1 ft of freeboard. Pure decision layer — no fetch, no geometry, no value/solver change.
   - _exports_: `FFE_FREEBOARD_REQ_FT`, `pondScreeningGuards`
+- **`src/workspaces/site-planner/lib/pondSectionModel.js`** — PR-L pure pond-section geometry + collision-free label placement: turns plain pond facts (grade/rim/floor/flood/outlet/tailwater/groundwater/bands/earthwork) into a schematic side-section with reserved-slot labels de-collided per column (leaders when moved); no label ever overlaps another
+  - _exports_: `boxesIntersect`, `f1`, `labelBBox`, `labelWidth`, `placeColumn`, `pondSectionModel`
 - **`src/workspaces/site-planner/lib/pondSizing.js`** — NEW-4 pond sizing assistant: solves an anchored pond's two banded targets (below-WSE mitigation depth/footprint growth, above-WSE usable via TOB raise) through the same pondGeom bands the audit reads, with the berm-as-fill fixed-point feedback and honest pinch-off/inundated/estimated states
   - _exports_: `applyPondSizingActions`, `scaleRing`, `sizePondForTargets`, `solveMitigationDepth`, `solveMitigationGrow`, `solveTobRaise`
 - **`src/workspaces/site-planner/lib/powerScreen.js`** — PHASE 5 power screening (pure): turns HIFLD transmission lines + substations near the parcel into findings — a line crossing the footprint flags a likely transmission easement (present), the nearest substation is a service/interconnect proxy (info); cleans the dataset's withheld voltages and anonymized ("UNKNOWN…") substation names
