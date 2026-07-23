@@ -1,9 +1,15 @@
-/* v3 C1 — Optimize pond must APPLY the rim/berm it reports, not just compute it. Drives the REAL
- * app logged out on a georeferenced site carrying a REMEMBERED drainage check + a pond sitting
- * fully BELOW the flood water surface (tob 94, WSE 95 → usable 0, detention SHORT). Clicking
- * ⚡ Optimize pond must: raise the pond's rim (its top-of-bank elevation goes UP from 94), make its
- * usable detention > 0, and persist a "what changed" card — never a toast that reports a berm the
- * pond never received. Fixture-driven (never pins live-project values).
+/* v3 PR-H (was C1) — Optimize must RESPECT THE BUILDABLE ENVELOPE on the REAL button path.
+ *
+ * ⚠ This harness used to seed an in-floodplain pond and ASSERT that Optimize bermed it up
+ * (94 → 99.4). That expectation was itself the bug the owner reported: a pond flagged
+ * "In floodway: no fill" must NOT be bermed, yet PR-G's gate keyed off a distinct floodway
+ * polygon (ringInFloodway) instead of the split.inTrigger signal the chip actually uses, so on
+ * the live path Optimize still bermed +9.3 and showed a false green "OK". PR-H rewires the gate
+ * to that signal and this harness now drives the REAL ⚡ Optimize button and asserts the FIX:
+ *   • the pond's rim is NOT raised (zero berm — no fill in the floodplain), and
+ *   • the detention verdict is AMBER "not buildable", never a green "OK".
+ * It reproduces the +9.3/green bug on pre-PR-H main (rim rises, green) and passes only once the
+ * gate reads the live signal. Fixture-driven (never pins live-project values).
  * Run: node ui-audit/verify-optimize-applies.mjs   (preview on :4173)
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
@@ -22,6 +28,10 @@ const slim = {
   flood: { zones: [{ zone: "AE", subtype: "", staticBfeFt: 95, vdatum: "NAVD88" }], state: "loaded", ageMs: 0 },
   channel: null, watershed: null, groundElevFt: 90, groundDatum: "NAVD88",
 };
+// A pond fully BELOW the flood water surface (tob 94, WSE 95) AND in the trigger flood zone
+// (inTrigger:true → the "In floodway: no fill" chip). Detention is SHORT (usable 0). The ONLY
+// lever that would add usable detention is berming the rim above the WSE — which is exactly what
+// the floodplain no-fill rule prohibits, so Optimize must add ZERO berm and read AMBER.
 const site = {
   id: "s_opt", groupId: "s_opt", site: "Tsakiris", name: "Concept A", status: "active",
   origin: { lat: 29.55, lon: -95.80 }, county: "fortbend",
@@ -54,8 +64,6 @@ await page.waitForTimeout(2600);
 let fail = 0;
 const log = (ok, msg) => { console.log((ok ? "✓ " : "✗ ") + msg); if (!ok) fail++; };
 
-// Read the pond's stored top-of-bank elevation straight from localStorage (the source of truth
-// the apply writes to) — robust to how the inspector formats it.
 const readTob = () => page.evaluate(() => {
   try {
     const sites = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
@@ -70,23 +78,23 @@ await page.waitForTimeout(700);
 const tobBefore = await readTob();
 log(tobBefore === 94, `before: the pond's rim is at its drawn elevation (${tobBefore})`);
 
-// The ⚡ Optimize pond button appears on the SHORT detention card.
+// The ⚡ Optimize pond button appears on the SHORT / AMBER detention card.
 const optBtn = page.getByRole("button", { name: /Optimize pond/ }).first();
-log((await optBtn.count()) > 0, "the ⚡ Optimize pond button renders (detention is SHORT)");
+log((await optBtn.count()) > 0, "the ⚡ Optimize pond button renders (detention is not covered)");
 await optBtn.click({ timeout: 2000 }).catch((e) => log(false, "clicking Optimize threw: " + e.message));
 await page.waitForTimeout(900);
 
 const tobAfter = await readTob();
-log(tobAfter != null && tobBefore != null && tobAfter > tobBefore + 0.05, `after: the rim was RAISED (${tobBefore} → ${tobAfter}) — the berm was actually applied`);
+// THE PR-H repro/fix assertion: no fill in the floodplain → the rim must NOT rise.
+log(tobAfter != null && Math.abs(tobAfter - tobBefore) < 0.05,
+  `after: the rim was NOT bermed (${tobBefore} → ${tobAfter}) — no fill in the floodplain (pre-PR-H this rose to ~99.4)`);
 
-// The persistent "what changed" card must be on the page (Optimize applied something).
-const cardText = await page.evaluate(() => document.body.innerText || "");
-log(/Optimize pond: what changed/i.test(cardText) || /Optimize pond: couldn't/i.test(cardText), "a persistent 'what changed' card is shown");
-
-// Usable detention now exists: the rim was raised ABOVE the flood water surface (95), so storage
-// between the WSE and the new rim counts. (After Optimize the pond inspector replaces the Yield
-// panel, so this geometric fact is the robust proof rather than scraping the hidden per-pond row.)
-log(tobAfter != null && tobAfter > 95, `after: the rim (${tobAfter}) sits above the flood water surface (95) → usable detention exists`);
+// The result must be AMBER "not buildable", never a green detention "OK".
+const bodyText = await page.evaluate(() => document.body.innerText || "");
+const mentionsUnbuildable = /not buildable|no fill|floodplain|floodway/i.test(bodyText);
+log(mentionsUnbuildable, "the result explains it's not buildable (floodplain / no-fill reason shown)");
+const greenOk = /\bOK:\s*[\d.]+ of [\d.]+ ac-ft required/.test(bodyText);
+log(!greenOk, `no green detention "OK: X of Y" verdict for the unbuildable pond${greenOk ? " :: a false green rendered" : ""}`);
 
 await page.screenshot({ path: OUT + "optimize-applies.png", clip: { x: 0, y: 96, width: 400, height: 940 } });
 log(errors.length === 0, `no console/page errors (${errors.length})` + (errors.length ? ` :: ${errors.slice(0, 2).join(" | ")}` : ""));

@@ -7858,7 +7858,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const tobElev = Number.isFinite(d.tobElev) ? d.tobElev : null;
     const depthFt = Number.isFinite(d.depth) ? d.depth : null;
     const floorElev = tobElev != null && depthFt != null ? tobElev - depthFt : null;
-    const inFloodway = ringInFloodway(ring, fmZones);
+    // PR-H — same fix as the solver: key "in the floodway (no fill)" off the SAME split.inTrigger
+    // signal that renders the "In floodway: no fill" chip, so the verdict can't stay green while the
+    // pond shows the chip. The precise ringInFloodway (a distinct floodway polygon) is a strict subset.
+    const inFloodway = !!pondSplitFor(el).inTrigger || ringInFloodway(ring, fmZones);
     // (a) drainage cap → the max buildable RIM elevation (needs real per-point terrain).
     let drainageCapElevFt = null;
     if (typeof fmGradeAt === "function" && gradeFt != null) {
@@ -8893,10 +8896,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     })();
     const drainCapFt = drainageBermCapFt({ controllingInflowElevFt, gradeAtPondFt: gradeFt, freeboardFt: bermFbFt });
     const { capFt: bermCapFt, binding: bermBinding } = bindingBermCap({ drainageCapFt: drainCapFt, geometricCapFt: geomCapFt });
-    // PR-G (b) — FLOODWAY NO-FILL is a HARD envelope limit: fill in the regulatory floodway is
+    // PR-G (b) / PR-H — FLOODWAY NO-FILL is a HARD envelope limit: fill in the floodway is
     // prohibited, so Optimize may add NO berm there (rim capped at existing grade). This binds
     // BEFORE the drainage/geometric caps — it's a legal prohibition, not a gravity/geometry limit.
-    const pondInFloodway = ringInFloodway(ringOf(baseEl), fmZones);
+    // ⚠ PR-H root cause: PR-G keyed this off ringInFloodway (a distinct cls==="floodway" polygon),
+    // but the pond's "In floodway: no fill" chip fires off split.inTrigger (ANY trigger flood zone —
+    // an AE/1% pond with no separate floodway polygon still shows it). So on the live Tsakiris pond
+    // the gate stayed silent and Optimize bermed +9.3. Gate off the SAME signal the chip uses so the
+    // two can never disagree (the precise ringInFloodway is OR'd in as a strict subset, for clarity).
+    const pondInFloodway = !!splitProbe.inTrigger || ringInFloodway(ringOf(baseEl), fmZones);
     // PR-G (c) — the 100-yr receiving-water (tailwater) elevation the pond must discharge above by
     // gravity (the editable "Receiving water" input, persisted as receivingFlowlineElev).
     const pondTailwaterFt = Number.isFinite(baseEl.det?.receivingFlowlineElev) ? baseEl.det.receivingFlowlineElev : null;
@@ -16589,25 +16597,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   if (detReqAcFt != null && providedUsableCf != null) {
                     const provAcFt = providedUsableCf / 43560;
                     const short = provAcFt < detReqAcFt - 0.005;
-                    // PR-G (G2) — GREEN "OK" requires the volume be met by a BUILDABLE design. If the
-                    // volume is met only by a design that breaks a hard envelope limit (floodway fill,
-                    // rim above the drainage cap, outlet below the receiving water), the card is AMBER
-                    // "Meets the volume, but not buildable as drawn", never green.
+                    // PR-G/PR-H (G2) — GREEN "OK" requires the volume be met by a BUILDABLE design.
+                    // The card is AMBER (never green, never a bare red SHORT) when EITHER the current
+                    // design breaks a hard envelope limit (floodway fill / rim above the drainage cap /
+                    // outlet below the receiving water), OR the pond is SHORT and the floodplain forbids
+                    // the berm that would fix it (Optimize can't raise the rim there). PR-H: assessPond-
+                    // Buildable + this gate now key floodway off split.inTrigger (the chip's signal), so a
+                    // bermed floodplain pond can no longer read a false green.
                     const bld = assessPondBuildable(selEl);
-                    const unbuildable = !short && !bld.buildable;
-                    const body = short && thisInundated && floodLevel != null
+                    const inFw = !!split.inTrigger;
+                    const envelopeBlocked = short && inFw; // short + no fill allowed → can't berm to fix
+                    const unbuildable = !bld.buildable || envelopeBlocked;
+                    const reasons = bld.hard.length
+                      ? bld.hard.map((h) => h.label).join(" ")
+                      : envelopeBlocked
+                        ? "This pond is in the floodplain, where no fill is allowed, so its rim can't be bermed to reach the target."
+                        : "";
+                    const body = short && thisInundated && floodLevel != null && !unbuildable
                       ? `The basin sits below the flood level (${f1(floodLevel)}′${floodEst ? " est." : ""}), so its ${f1(thisHoldsAcFt)} ac-ft don't count. Raising the rim creates storage that does.`
                       : unbuildable
-                        ? `${bld.hard.map((h) => h.label).join(" ")} ${makeItBuildableOptions({})}`
+                        ? `${reasons} ${makeItBuildableOptions({})}`
                         : "";
                     out.push({
                       kind: "detention",
                       short,
-                      tone: short ? "short" : unbuildable ? "amber" : "ok",
-                      heading: short
-                        ? `SHORT: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`
-                        : unbuildable
-                          ? `${unbuildableHeading({ requiredAcFt: detReqAcFt })} (${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft)`
+                      tone: unbuildable ? "amber" : short ? "short" : "ok",
+                      heading: unbuildable
+                        ? (short
+                            ? `Not buildable to reach ${f1(detReqAcFt)} ac-ft (${f1(provAcFt)} of ${f1(detReqAcFt)})`
+                            : `${unbuildableHeading({ requiredAcFt: detReqAcFt })} (${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft)`)
+                        : short
+                          ? `SHORT: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`
                           : `OK: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`,
                       body,
                     });
