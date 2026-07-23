@@ -48,7 +48,7 @@ export const POND_FLOOD_NOTES = {
 
 // ── B5: the four collapsed groups, in fixed top→bottom order, with the exact v3 titles.
 export const POND_GROUPS = [
-  { id: "sizing", title: "Sizing & criteria" },
+  { id: "sizing", title: "Engineering assumptions" },
   { id: "outlet", title: "Outlet & storms" },
   { id: "flood", title: "Flood & datum" },
   { id: "appearance", title: "Appearance" },

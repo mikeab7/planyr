@@ -16,14 +16,19 @@ export default function Chip({ tone = "neutral", text, popover, label, style }) 
   return (
     <span
       style={{
-        display: "inline-flex", alignItems: "center", gap: 4,
-        padding: "2px 8px", borderRadius: 999,
+        // PR-I (I4) — a chip must WRAP within the panel, never run off the right edge. Long
+        // guard sentences (e.g. "Rim above site grade: runoff needs inlets through the berm")
+        // were clipped off-screen because the pill was whiteSpace:nowrap. Cap it at the
+        // container width and let the text wrap; short chips still sit on one line.
+        display: "inline-flex", alignItems: "flex-start", gap: 4,
+        padding: "2px 8px", borderRadius: 12,
         border: `1px solid ${color}`, background: "transparent",
-        fontSize: 10.5, fontWeight: 700, lineHeight: 1.45, color, whiteSpace: "nowrap", ...style,
+        fontSize: 10.5, fontWeight: 700, lineHeight: 1.45, color,
+        whiteSpace: "normal", overflowWrap: "anywhere", maxWidth: "100%", minWidth: 0, ...style,
       }}
     >
-      {amber ? <span aria-hidden="true" style={{ fontSize: 10, flex: "none" }}>⚠</span> : null}
-      <span>{text}</span>
+      {amber ? <span aria-hidden="true" style={{ fontSize: 10, flex: "none", marginTop: 1 }}>⚠</span> : null}
+      <span style={{ minWidth: 0 }}>{text}</span>
       {sections.length ? <RowInfo label={label || text} sections={sections} /> : null}
     </span>
   );

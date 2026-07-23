@@ -97,14 +97,16 @@ describe("G2 — the verdict is GREEN only for a buildable design; else AMBER 'n
 });
 
 describe("G1(c/d) — the tailwater + max-excavation inputs exist in the inspector", () => {
-  it("the receiving-water (tailwater) field is relabeled with the EST note", () => {
+  it("the receiving-water (tailwater) field exists (PR-I pre-fills it with an EST estimate)", () => {
     expect(src).toContain('<Field label="Receiving water (100-yr tailwater) elev. (ft)">');
-    expect(src).toContain("EST: best-available adjacent ditch flowline");
+    // PR-I replaced the standalone EST note with a pre-filled EST-tagged estimate value.
+    expect(src).toContain("setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })");
   });
-  it("the editable max-excavation-depth input exists (soft geotech screen, default 12 ft)", () => {
+  it("the editable max-excavation-depth input exists (soft geotech screen)", () => {
     expect(src).toContain('<Field label="Max excavation depth (ft)">');
     expect(src).toContain("setDet({ maxExcavDepthFt: Number.isFinite(n) ? n : null })");
-    expect(src).toContain("maxExcavDepthFt = Number.isFinite(el.det?.maxExcavDepthFt) ? el.det.maxExcavDepthFt : DEFAULT_MAX_EXCAV_DEPTH_FT;");
+    // PR-I: the envelope's max-excav now defaults to the estimated depth-to-water (don't dig below groundwater).
+    expect(src).toContain("estMaxExcavDepthFt({ depthToWaterFt: dtwEst }).valueFt");
   });
 });
 

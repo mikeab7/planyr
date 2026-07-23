@@ -158,6 +158,7 @@ import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
 import { sizePondForTargets, scaleRing, solveTobRaise, applyPondSizingActions } from "./lib/pondSizing.js";
 import { rimCapElevFt, assessBuildability as assessPondEnvelope, unbuildableHeading, makeItBuildableOptions, unbuildableNote, DEFAULT_MAX_EXCAV_DEPTH_FT } from "./lib/buildableEnvelope.js";
+import { estDepthToWaterFt, estTailwaterElevFt, estMaxExcavDepthFt, poolRelevantForRole } from "./lib/pondScreeningDefaults.js";
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
 import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
@@ -7872,12 +7873,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (Number.isFinite(capH)) drainageCapElevFt = gradeFt + capH;
       }
     }
-    // (c) tailwater + the low-flow (lowest-invert) outlet stage.
-    const tailwaterFt = Number.isFinite(el.det?.receivingFlowlineElev) ? el.det.receivingFlowlineElev : null;
+    // (c) tailwater + the low-flow (lowest-invert) outlet stage. PR-I (I6): the criterion the solver
+    // uses is the developer's OVERRIDE if entered, else the SAME computed screening estimate the panel
+    // shows pre-filled (the flood WSE → grade proxy), so an unentered value can't silently loosen the
+    // envelope — it stays governed by the honest screening default.
+    const twSplit = pondSplitFor(el);
+    const tailwaterFt = Number.isFinite(el.det?.receivingFlowlineElev)
+      ? el.det.receivingFlowlineElev
+      : estTailwaterElevFt({ wseFt: Number.isFinite(twSplit.wseFt) ? twSplit.wseFt : null, gradeFt }).valueFt;
     const stages = el.det?.outlet && Array.isArray(el.det.outlet.stages) ? el.det.outlet.stages : [];
     const inverts = stages.map((s) => s.invertElevFt).filter((n) => Number.isFinite(n));
     const outletInvertFt = inverts.length ? Math.min(...inverts) : null;
-    const maxExcavDepthFt = Number.isFinite(el.det?.maxExcavDepthFt) ? el.det.maxExcavDepthFt : DEFAULT_MAX_EXCAV_DEPTH_FT;
+    // (d) max excavation depth: override, else "don't dig below groundwater" (depth to water est), else 12.
+    const dtwEst = estDepthToWaterFt({ measuredFt: el.det?.depthToWaterFt }).valueFt;
+    const maxExcavDepthFt = Number.isFinite(el.det?.maxExcavDepthFt) ? el.det.maxExcavDepthFt : estMaxExcavDepthFt({ depthToWaterFt: dtwEst }).valueFt;
     return assessPondEnvelope({ tobElev, gradeFt, floorElev, inFloodway, drainageCapElevFt, tailwaterFt, outletInvertFt, waterDepthFt: depthFt, maxExcavDepthFt });
   };
   // NEW-9 — the site fold moved to the pure accumulator (lib/pondLedger.js) so the
@@ -16618,17 +16627,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       : unbuildable
                         ? `${reasons} ${makeItBuildableOptions({})}`
                         : "";
+                    // I5 — the HEADLINE states the outcome; the achieved-vs-required figure is its OWN
+                    // styled sub-line (never a wrapped dangling parenthesis). Every card carries both.
                     out.push({
                       kind: "detention",
                       short,
                       tone: unbuildable ? "amber" : short ? "short" : "ok",
                       heading: unbuildable
-                        ? (short
-                            ? `Not buildable to reach ${f1(detReqAcFt)} ac-ft (${f1(provAcFt)} of ${f1(detReqAcFt)})`
-                            : `${unbuildableHeading({ requiredAcFt: detReqAcFt })} (${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft)`)
+                        ? (short ? `Not buildable to reach ${f1(detReqAcFt)} ac-ft` : unbuildableHeading({ requiredAcFt: detReqAcFt }))
                         : short
-                          ? `SHORT: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`
-                          : `OK: ${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft required`,
+                          ? `Short of ${f1(detReqAcFt)} ac-ft required`
+                          : "Buildable",
+                      subline: unbuildable && short
+                        ? `${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft achievable`
+                        : `${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft`,
                       body,
                     });
                   }
@@ -16639,7 +16651,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       kind: "mitigation",
                       short,
                       tone: short ? "short" : "ok",
-                      heading: short ? `Mitigation SHORT: ${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft required` : `Mitigation OK: ${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft required`,
+                      heading: short ? "Mitigation short" : "Mitigation covered",
+                      subline: `${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft`,
                       body: "",
                     });
                   }
@@ -16662,6 +16675,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const g_bermRingSf = g_inward.bermRingSf;        // interior berm ring (0 with no berm)
                 const g_holdsAcFt = (g_split && g_split.grossCf != null ? g_split.grossCf : r.vol) / 43560;
                 const g_roleInfo = effectivePondRole(det, g_split);
+                // PR-I (I1) — COMPUTE, don't interrogate: every engineering criterion the developer
+                // can't know gets a pre-filled screening ESTIMATE from data the app already holds, so
+                // no input box is ever an empty blank demanding expertise. Shown pre-filled + EST tag;
+                // the developer's typed value always overrides. These feed the same PR-H envelope (I6).
+                const g_wseForTw = g_split.mode === "anchored" && Number.isFinite(g_split.wseFt) ? g_split.wseFt : null;
+                const g_dtwEst = estDepthToWaterFt({ measuredFt: det.depthToWaterFt });         // depth to water (ft below grade)
+                const g_twEst = estTailwaterElevFt({ wseFt: g_wseForTw, gradeFt: g_gradeFt });   // receiving-water tailwater elev
+                const g_maxExcavEst = estMaxExcavDepthFt({ depthToWaterFt: g_dtwEst.valueFt });  // don't dig below groundwater
+                const g_poolRelevant = poolRelevantForRole(g_roleInfo.role);                    // permanent pool only for wet ponds
+                const estPillStyle = { fontSize: 9.5, color: PAL.muted, fontWeight: 700, letterSpacing: "0.04em", border: `1px solid ${PAL.panelLine}`, borderRadius: 4, padding: "1px 4px", whiteSpace: "nowrap", cursor: "help" };
                 const g_facts = {
                   floodEstimated: g_split.mode === "anchored" && isEstimatedWseSrc(g_split.wseSrc),
                   rimBelowFlood: !!(g_split.mode === "anchored" && g_split.bands && g_split.bands.fullyInundated),
@@ -16814,8 +16837,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       return (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 11 }}>
                         {statusCards.map((c, i) => (
-                          <div key={i} style={{ borderLeft: `3px solid ${toneColorOf(c)}`, background: "var(--planner-raised)", borderRadius: 8, padding: "9px 11px" }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.4, color: toneColorOf(c) }}>{c.heading}</div>
+                          <div key={i} data-testid="pond-verdict-card" style={{ borderLeft: `3px solid ${toneColorOf(c)}`, background: "var(--planner-raised)", borderRadius: 8, padding: "9px 11px" }}>
+                            {/* I5 — HEADLINE (outcome) + a separate styled achieved-vs-required sub-line; never a
+                                wrapped dangling parenthesis. overflowWrap keeps it inside the panel at any width. */}
+                            <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.35, color: toneColorOf(c), overflowWrap: "anywhere" }}>{c.heading}</div>
+                            {c.subline ? <div style={{ fontSize: 11, color: PAL.muted, fontWeight: 700, lineHeight: 1.4, marginTop: 2, letterSpacing: "0.02em" }}>{c.subline}</div> : null}
                             {c.body ? <div style={{ fontSize: 11.5, color: PAL.text, lineHeight: 1.5, marginTop: 4 }}>{c.body}</div> : null}
                             {i === optimizeIdx && (c.tone ?? (c.short ? "short" : "ok")) !== "ok" && (
                               <button type="button" onClick={designPond} title="One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed." style={{ marginTop: 8, padding: "5px 11px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Optimize pond</button>
@@ -16845,7 +16871,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </div>
                       ) : null;
                     })()}
-                    <Collapse sectionId="pond-sizing" title="Sizing & criteria" defaultOpen={false} summary={g_sizingSummary}>
+                    <Collapse sectionId="pond-sizing" title="Engineering assumptions" defaultOpen={false} summary={g_sizingSummary}>
+                    {/* PR-I (I2) — TIER 2: a developer never needs to open this. Every criterion below is
+                        pre-filled with a computed screening estimate (EST) and is editable purely as an
+                        OVERRIDE. Plain-English header, no em dashes. */}
+                    <div style={{ fontSize: 11, color: PAL.ink, lineHeight: 1.5, marginBottom: 8 }}>The app estimated these from the site data. Open only if you want to override a value.</div>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Detention storage</div>
                     {depthSolve && depthSolve.ok && Math.abs(depthSolve.depthFt - depth) > 0.05 && (
                       <div style={{ fontSize: 10.5, color: PAL.info, lineHeight: 1.45, margin: "1px 0 3px" }}>
@@ -16906,29 +16936,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {det.availDepth != null && (
                       <div style={{ fontSize: 10.5, color: PAL.info, marginTop: 2, lineHeight: 1.4 }}>LiDAR available depth ≈ {f1(det.availDepth)}′.</div>
                     )}
-                    <Field label="Permanent pool elev. (ft)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.poolElev ?? ""} placeholder="dry bottom" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
-                        {det.poolElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — dry-bottom basin" onClick={() => setDet({ poolElev: null })}>Clear</button>}
-                      </span>
-                    </Field>
-                    {/* PR-G (c) — the 100-yr receiving-water (tailwater) elevation the pond must
-                        discharge above by gravity. The low-flow outlet invert must sit AT/ABOVE it,
-                        and storage below it is DEAD (no gravity discharge → no detention credit).
-                        Editable; best-available adjacent ditch flowline / conservative estimate. */}
+                    {/* I3 — a permanent pool is only meaningful for a WET pond (retention). A dry
+                        Detention basin has no standing water, so this input does NOT render for it. */}
+                    {g_poolRelevant && (() => {
+                      const poolEst = g_gradeFt != null ? Math.round((g_gradeFt - g_dtwEst.valueFt) * 10) / 10 : (g_wseForTw ?? null);
+                      const usingEst = det.poolElev == null && Number.isFinite(poolEst);
+                      return (
+                        <Field label="Permanent pool elev. (ft)">
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.poolElev ?? (Number.isFinite(poolEst) ? poolEst : "")} placeholder="water table" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
+                            {det.poolElev != null
+                              ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimated water-table pool" onClick={() => setDet({ poolElev: null })}>×</button>
+                              : usingEst && <span title="Screening estimate: the seasonal-high water table (grade minus depth to water). Refine with a geotech boring." style={estPillStyle}>EST</span>}
+                          </span>
+                        </Field>
+                      );
+                    })()}
+                    {/* PR-G/PR-I — the 100-yr receiving-water (tailwater) elevation the pond must discharge
+                        above by gravity; storage below it is DEAD. PR-I (I1): pre-filled with a screening
+                        estimate (the flood WSE, else existing grade) so it's never a blank demanding an
+                        expert value — the developer's typed value overrides. */}
                     <Field label="Receiving water (100-yr tailwater) elev. (ft)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
-                        {det.receivingFlowlineElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear" onClick={() => setDet({ receivingFlowlineElev: null })}>Clear</button>}
+                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? (Number.isFinite(g_twEst.valueFt) ? Math.round(g_twEst.valueFt * 10) / 10 : "")} placeholder="outfall elev" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
+                        {det.receivingFlowlineElev != null
+                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimate" onClick={() => setDet({ receivingFlowlineElev: null })}>×</button>
+                          : Number.isFinite(g_twEst.valueFt) && <span title={`Screening estimate from the ${g_twEst.source === "flood-wse" ? "mapped flood water surface" : "existing grade"}. The receiving channel's 100-yr stage; refine with the outfall survey. Storage below it can't drain by gravity (dead).`} style={estPillStyle}>EST</span>}
                       </span>
                     </Field>
-                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, margin: "1px 0 3px" }}>EST: best-available adjacent ditch flowline / conservative estimate. Storage below it is dead (can't drain by gravity).</div>
-                    {/* PR-G (d) — SOFT geotech screen: a water depth beyond this (default 12 ft, editable)
-                        warns of groundwater / dewatering. Never a hard block. */}
+                    {/* PR-G/PR-I — SOFT geotech screen: pre-filled with the depth to water ("don't dig
+                        below groundwater"), else the 12-ft fallback. A warning, never a hard block. */}
                     <Field label="Max excavation depth (ft)">
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.maxExcavDepthFt ?? ""} placeholder={`${DEFAULT_MAX_EXCAV_DEPTH_FT} (est.)`} onCommit={(n) => setDet({ maxExcavDepthFt: Number.isFinite(n) ? n : null })} />
-                        {det.maxExcavDepthFt != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — back to the 12-ft screen" onClick={() => setDet({ maxExcavDepthFt: null })}>Clear</button>}
+                        <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.maxExcavDepthFt ?? (Number.isFinite(g_maxExcavEst.valueFt) ? Math.round(g_maxExcavEst.valueFt * 10) / 10 : "")} placeholder={`${DEFAULT_MAX_EXCAV_DEPTH_FT}`} onCommit={(n) => setDet({ maxExcavDepthFt: Number.isFinite(n) ? n : null })} />
+                        {det.maxExcavDepthFt != null
+                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimate" onClick={() => setDet({ maxExcavDepthFt: null })}>×</button>
+                          : Number.isFinite(g_maxExcavEst.valueFt) && <span title={`Screening estimate: ${g_maxExcavEst.source === "depth-to-water" ? "the seasonal-high depth to water (don't dig below groundwater)" : "a conservative default"}. Refine with a geotech boring.`} style={estPillStyle}>EST</span>}
                       </span>
                     </Field>
                     <div style={{ marginTop: 7, background: "var(--planner-raised)", borderRadius: 8, padding: "8px 10px" }}>
@@ -17038,12 +17081,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const gwCounties = drainCtxData?.authority?.jurisdiction?.county || [];
                         const dtw = Number.isFinite(det.depthToWaterFt) ? det.depthToWaterFt : null;
                         const gw = pondGroundwaterScreen({ depthToWaterFt: dtw, gradeElevFt: fmElev.existGradeFt, tobElevFt: tobEff, pondDepthFt: Number.isFinite(det.depth) ? det.depth : 8 });
+                        // PR-I (I1) — pre-fill with the regional seasonal-high screening estimate so the
+                        // developer never faces a blank; the measured value (SSURGO/TWDB) overrides + drives
+                        // the detailed wet/dry message above.
+                        const dtwEstField = estDepthToWaterFt({ measuredFt: det.depthToWaterFt });
                         out.push(
                           <div key="gw-dtw" style={{ marginTop: 6 }}>
                             <Field label="Depth to water (ft)">
                               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                <NumInput allowClear style={{ ...numInput, width: 64 }} value={dtw ?? ""} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
-                                <RowInfo label="Depth to water (ft)" sections={[{ text: "Seasonal high water table (SSURGO / TWDB well)." }]} />
+                                <NumInput allowClear style={{ ...numInput, width: 64 }} value={dtw ?? (Number.isFinite(dtwEstField.valueFt) ? dtwEstField.valueFt : "")} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
+                                {dtw == null && dtwEstField.estimated && <span title="Screening estimate: a shallow Gulf-Coast seasonal-high water table. Refine with SSURGO / a TWDB well / a geotech boring." style={estPillStyle}>EST</span>}
+                                <RowInfo label="Depth to water (ft)" sections={[{ text: "Seasonal high water table (SSURGO / TWDB well). Pre-filled with a regional screening estimate until a measured value is entered." }]} />
                               </span>
                             </Field>
                           </div>
