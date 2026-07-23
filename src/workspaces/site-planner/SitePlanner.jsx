@@ -14302,11 +14302,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const roadEl = els.find((x) => x.id === j.roadId);
                       const cw = curbStrokePx(roadCurbWidth(roadEl || {}), ppf, CURB_STROKE_MIN_PX);
                       const fOp = st.fillOpacity ?? 1;
-                      const coverD = toD(g.cover), stemD = toD(g.stem);
+                      // B971 — the cover is now an ARRAY of simple opaque fills (seam band + the two
+                      // armpit fillet wedges), NOT one throat-widened fan. Each is its own simple polygon.
+                      const polys = (g.coverPolys && g.coverPolys.length ? g.coverPolys : [g.cover]).map(toD).filter(Boolean);
                       return (
                         <g key={j.key} data-tee={j.tag}>
-                          {stemD && <path d={stemD} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-stem" />}
-                          {coverD && <path d={coverD} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-cover" />}
+                          {polys.map((dPoly, k) => <path key={`cp${k}`} d={dPoly} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-cover" />)}
                           {g.returns.map((arc, k) => arc.length >= 2 ? (
                             <polyline key={k} data-testid="road-tee-return"
                               points={arc.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")}
