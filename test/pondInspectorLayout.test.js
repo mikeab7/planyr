@@ -19,7 +19,7 @@ const pondBody = src.slice(pondStart, pondEnd);
 describe("B1/B2 — header + status card sit above the Dimensions rows", () => {
   it("header (water area) → status card → design-change card → Dimensions render in order", () => {
     const order = [
-      "ac water area",
+      "ac water surface",
       "statusCards.length > 0",
       "<DesignChangeSummaryCard",
       "{g_atAGlance}",
@@ -64,7 +64,7 @@ describe("B3 — Dimensions rows carry the v3 labels (not the old ones)", () => 
   it("has Water area / Land take / Total depth / Rim / Holds / Purpose", () => {
     // v3 B7 — the top row reads "Total depth" (water depth + freeboard), distinct from the
     // sizing group's "Water depth" row.
-    for (const label of ['g_glanceRow("Water area"', 'g_glanceRow("Total depth"', 'g_glanceRow("Rim"', 'g_glanceRow("Holds"']) {
+    for (const label of ['g_glanceRow("Water area"', 'g_glanceRow("Total depth"', 'g_glanceRow("Rim"', 'g_glanceRow("Holds (gross)"']) {
       expect(pondBody, label).toContain(label);
     }
     expect(pondBody).toContain("Land take ");

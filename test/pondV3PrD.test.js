@@ -64,7 +64,7 @@ describe("D4 — the on-screen pond noun follows the resolved purpose at every r
     expect(src).toContain('selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitFor(selEl))');
   });
   it("the map/canvas label uses the resolved pond noun (never a hardcoded 'Detention Pond')", () => {
-    expect(src).toContain("const pondName = pondDisplayNameFor(detWithAuto(el.det), pondSplitFor(el));");
+    expect(src).toContain("const pondName = pondDisplayNameFor(detWithAuto(el.det), pondSplit);"); // PR-Q hoisted pondSplit
     expect(src).toContain("lines = [pondName];");
     expect(src).toContain("lines = [`Existing ${pondName}`];");
     expect(src.includes('lines = ["Detention Pond"]')).toBe(false);
