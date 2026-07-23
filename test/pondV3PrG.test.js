@@ -49,7 +49,9 @@ describe("G1(c) — storage below the receiving-water (tailwater) is DEAD, not u
 
 describe("G1(a/b) — the Optimize solver enforces the buildable envelope on the rim", () => {
   it("a FLOODWAY pond gets a HARD zero-raise cap (no berm/fill), ahead of the drainage/geometric cap", () => {
-    expect(dp).toContain("const pondInFloodway = ringInFloodway(ringOf(baseEl), fmZones);");
+    // PR-H — the gate keys off the SAME split.inTrigger signal the "In floodway: no fill" chip uses
+    // (the precise floodway polygon is OR'd in), so it can't stay silent on an AE-zone floodplain pond.
+    expect(dp).toContain("const pondInFloodway = !!splitProbe.inTrigger || ringInFloodway(ringOf(baseEl), fmZones);");
     expect(dp).toContain("const maxRaiseFt = pondInFloodway ? 0");
   });
   it("the drainage cap still binds when NOT in the floodway (D5 preserved under the new gate)", () => {
@@ -80,8 +82,11 @@ describe("G1(c) — pondSplitFor threads the tailwater dead-floor into EVERY rea
 describe("G2 — the verdict is GREEN only for a buildable design; else AMBER 'not buildable as drawn'", () => {
   it("the status card computes buildability and demotes a volume-met-but-unbuildable design to amber", () => {
     expect(src).toContain("const bld = assessPondBuildable(selEl);");
-    expect(src).toContain("const unbuildable = !short && !bld.buildable;");
-    expect(src).toContain('tone: short ? "short" : unbuildable ? "amber" : "ok",');
+    // PR-H — amber when the current design is unbuildable OR the pond is short and the floodplain
+    // forbids the berm that would fix it (never a bare red SHORT for an envelope-blocked pond).
+    expect(src).toContain("const envelopeBlocked = short && inFw;");
+    expect(src).toContain("const unbuildable = !bld.buildable || envelopeBlocked;");
+    expect(src).toContain('tone: unbuildable ? "amber" : short ? "short" : "ok",');
     // the amber heading uses the pure helper and never reads "OK"
     expect(src).toContain("unbuildableHeading({ requiredAcFt: detReqAcFt })");
   });
