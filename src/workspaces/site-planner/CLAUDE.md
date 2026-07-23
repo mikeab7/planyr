@@ -50,6 +50,10 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   easement flag). All pure/Node-tested.
 - Public-data inputs tier (NEW-B, Phase B): `curveNumber.js` (SCS CN runoff), `soils.js` (SSURGO
   Soil Data Access — HSG + seasonal-high water table; SDA proxy-blocked in sandbox → live-verify),
+  `tailwaterSource.js` (PR-N/O5 — the outfall receiving-water source ladder: district channel →
+  FEMA InFRM est-BFE → USGS gauge → normal-depth → terrain channel-flowline, NEVER site grade;
+  the grade placeholder deadlocked every pond, so `deriveTailwater` rejects any grade-equal
+  candidate and returns UNKNOWN when no real below-grade source resolves),
   `groundwater.js` (wet-vs-dry pond feasibility from combined SSURGO + TWDB depth-to-water),
   `subsidence.js` (Harris-Galveston / Fort Bend subsidence-district cited flag registry),
   `pfdsClient.js` (NOAA Atlas-14 rainfall via the `functions/api/pfds.js` proxy — live-reachable),

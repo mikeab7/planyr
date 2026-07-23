@@ -15,8 +15,9 @@ const chip = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/
 
 describe("I1 — every engineering criterion is pre-filled with a computed estimate (never a blank)", () => {
   it("the screening-defaults are computed for the panel", () => {
-    expect(src).toContain('import { estDepthToWaterFt, estTailwaterElevFt, estMaxExcavDepthFt, poolRelevantForRole } from "./lib/pondScreeningDefaults.js";');
-    expect(src).toContain("const g_twEst = estTailwaterElevFt({ wseFt: g_wseForTw, gradeFt: g_gradeFt });");
+    expect(src).toContain('import { estDepthToWaterFt, estMaxExcavDepthFt, poolRelevantForRole } from "./lib/pondScreeningDefaults.js";');
+    // PR-N/O5 — the receiving-water tailwater now comes from the never-grade channel ladder helper.
+    expect(src).toContain("const g_twEst = pondTailwaterResult(selEl, g_gradeFt);");
     expect(src).toContain("const g_maxExcavEst = estMaxExcavDepthFt({ depthToWaterFt: g_dtwEst.valueFt });");
   });
   it("the Receiving-water field VALUE falls back to the estimate (not an empty string)", () => {
@@ -34,7 +35,9 @@ describe("I1 — every engineering criterion is pre-filled with a computed estim
     expect((src.match(/style=\{estPillStyle\}/g) || []).length).toBeGreaterThanOrEqual(3);
   });
   it("the estimates FEED the buildable envelope (I6 — an unentered value can't loosen the gate)", () => {
-    expect(src).toContain("estTailwaterElevFt({ wseFt: Number.isFinite(twSplit.wseFt) ? twSplit.wseFt : null, gradeFt }).valueFt");
+    // PR-N/O5 — tailwater into the envelope is the never-grade channel ladder (override, else a real
+    // below-grade source, else UNKNOWN → the gate can't fire on a grade placeholder).
+    expect(src).toContain("const tailwaterFt = pondTailwaterResult(el, gradeFt).valueFt;");
     expect(src).toContain("estMaxExcavDepthFt({ depthToWaterFt: dtwEst }).valueFt");
   });
 });

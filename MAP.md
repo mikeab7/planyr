@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-23 @ `1bcd166` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-23 @ `f9d29f8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_310 source files mapped._
+_311 source files mapped._
 
 ## infra
 
@@ -533,6 +533,8 @@ _310 source files mapped._
   - _exports_: `problems`, `SUBSIDENCE_DISTRICTS`, `subsidenceFlag`, `subsidenceFor`
 - **`src/workspaces/site-planner/lib/supabase.js`** — Supabase anon client factory from build-time env, connection/health test, and synchronous access-token read for the keepalive cloud push
   - _exports_: `connectionInfo`, `currentAccessToken`, `supabase`, `supabaseConfigured`, `supabaseRest`, `testConnection`
+- **`src/workspaces/site-planner/lib/tailwaterSource.js`** — PR-N/O5 outfall tailwater source ladder (district channel → FEMA InFRM est-BFE → USGS gauge → normal-depth → terrain channel-flowline), NEVER site grade: `deriveTailwater` priority pick with a grade-placeholder guard, `normalDepthWse` (Manning), `channelTerrainWse` (below-grade flowline), `resolveTailwater` async orchestrator (injectable, graceful degradation), all EST + source-tagged
+  - _exports_: `channelTerrainWse`, `deriveTailwater`, `GRADE_PLACEHOLDER_EPS_FT`, `normalDepthWse`, `resolveTailwater`, `TAILWATER_SOURCES`, `tailwaterNote`
 - **`src/workspaces/site-planner/lib/teams.js`** — Team-workspace I/O over the anon Supabase client: create/list teams, roster + role management, email invites and claim, all RLS-scoped with SECURITY DEFINER RPC preferred paths
   - _exports_: `cancelInvite`, `claimInvites`, `createTeam`, `currentIdentity`, `deleteTeam`, `inviteByEmail`, `leaveTeam`, `listInvites`, `listMembers`, `listMyTeams`, `removeMember`, `renameTeam`, `setRole`
 - **`src/workspaces/site-planner/lib/terrainLayers.js`** — Main-thread terrain glue (B704/B705/B706): view-driven contour + drainage-arrow layerGroups (canvas renderer, swr last-good, proxy-direct fallback), singleton terrain worker with crash rebuild, shared grid LRU sampled by the hover readout
