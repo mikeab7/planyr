@@ -12,17 +12,27 @@ const words = (s) => String(s).trim().split(/\s+/).filter(Boolean).length;
 const EM_DASH = "—";
 
 describe("B4 — top warning chips (exact copy + gating)", () => {
-  it("has exactly the three watch-out chips, each ≤6 visible words with a non-empty ⓘ popover", () => {
+  it("has the watch-out chips, each ≤6 visible words with a non-empty ⓘ popover", () => {
+    // PR-K — the floodway chip is reworded to the no-rise-cert reality (fill allowed WITH a study,
+    // never a flat prohibition), and a distinct approximate-Zone-A "BFE study required" chip is added.
     expect(POND_CHIP_DEFS.map((c) => c.text)).toEqual([
       "Flood level estimated",
       "Criteria unverified",
-      "In floodway: no fill",
+      "In floodway: no-rise cert",
+      "Zone A: BFE study required",
     ]);
     for (const c of POND_CHIP_DEFS) {
       expect(words(c.text), c.text).toBeLessThanOrEqual(6);
       expect(c.popover && c.popover.length, c.text).toBeGreaterThan(20);
       expect(c.tone, c.text).toBe("amber");
     }
+  });
+
+  it("PR-K — the floodway chip never says 'no fill' / 'prohibited'; it names the no-rise cert", () => {
+    const fw = POND_CHIP_DEFS.find((c) => c.id === "floodway");
+    expect(fw.text).not.toMatch(/no fill/i);
+    expect(fw.popover).not.toMatch(/prohibited|no fill/i);
+    expect(fw.popover).toMatch(/no-rise certification/);
   });
 
   it("the deleted 'Rim below flood level' and 'Elevations: NAVD88' chips are gone from the top set", () => {
@@ -33,9 +43,10 @@ describe("B4 — top warning chips (exact copy + gating)", () => {
 
   it("only true conditions render; nothing flagged → no chips", () => {
     expect(pondInspectorChips({})).toEqual([]);
-    const all = pondInspectorChips({ floodEstimated: true, criteriaUnverified: true, inFloodway: true });
-    expect(all.map((c) => c.id)).toEqual(["flood-est", "crit-unv", "floodway"]);
+    const all = pondInspectorChips({ floodEstimated: true, criteriaUnverified: true, inFloodway: true, zoneA: true });
+    expect(all.map((c) => c.id)).toEqual(["flood-est", "crit-unv", "floodway", "zonea"]);
     expect(pondInspectorChips({ inFloodway: true }).map((c) => c.id)).toEqual(["floodway"]);
+    expect(pondInspectorChips({ zoneA: true }).map((c) => c.id)).toEqual(["zonea"]);
   });
 
   it("no em dash in any chip text or popover (G2)", () => {

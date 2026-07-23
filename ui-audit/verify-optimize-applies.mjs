@@ -1,15 +1,16 @@
-/* v3 PR-H (was C1) — Optimize must RESPECT THE BUILDABLE ENVELOPE on the REAL button path.
+/* v3 PR-K — Optimize RESPECTS the corrected floodplain rule ladder on the REAL button path.
  *
- * ⚠ This harness used to seed an in-floodplain pond and ASSERT that Optimize bermed it up
- * (94 → 99.4). That expectation was itself the bug the owner reported: a pond flagged
- * "In floodway: no fill" must NOT be bermed, yet PR-G's gate keyed off a distinct floodway
- * polygon (ringInFloodway) instead of the split.inTrigger signal the chip actually uses, so on
- * the live path Optimize still bermed +9.3 and showed a false green "OK". PR-H rewires the gate
- * to that signal and this harness now drives the REAL ⚡ Optimize button and asserts the FIX:
- *   • the pond's rim is NOT raised (zero berm — no fill in the floodplain), and
- *   • the detention verdict is AMBER "not buildable", never a green "OK".
- * It reproduces the +9.3/green bug on pre-PR-H main (rim rises, green) and passes only once the
- * gate reads the live signal. Fixture-driven (never pins live-project values).
+ * ⚠ HISTORY: PR-G/PR-H made this harness assert the pond was NOT bermed (a flat "no fill in the
+ * floodplain"). The owner then checked FEMA and found NO mapped regulatory floodway under the
+ * Tsakiris pond — it sits in an approximate/fringe SFHA where fill IS allowed (with compensating
+ * storage; a real floodway would allow it too, with a no-rise certification). So the old block was
+ * itself the bug. PR-K reverses it: on a pond that is NOT in a mapped floodway, Optimize MAY berm
+ * the rim to create usable detention, and NO "no fill" / "fill prohibited" / floodway reason may
+ * appear. This harness drives the REAL ⚡ Optimize button and asserts the FIX:
+ *   • the pond's rim IS raised (a berm is applied — fill is allowed here), and
+ *   • no floodway / "no fill" prohibition reason is shown for this non-floodway pond.
+ * It reproduces the STUCK-rim regression on PR-H main (rim frozen at 94, blocked) and passes only
+ * once the false gate is removed. Fixture-driven (never pins live-project values).
  * Run: node ui-audit/verify-optimize-applies.mjs   (preview on :4173)
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
@@ -25,13 +26,15 @@ const PARCEL = [{ x: -H, y: -H }, { x: H, y: -H }, { x: H, y: H }, { x: -H, y: H
 const POND = [{ x: -520, y: -520 }, { x: 120, y: -520 }, { x: 120, y: 120 }, { x: -520, y: 120 }];
 const slim = {
   authority: { primaryReviewerId: "fortbend", channelAuthority: null, overlays: [], ambiguous: [], flags: [], mudState: null, jurisdiction: { city: [], county: ["Fort Bend"], etj: [] } },
-  flood: { zones: [{ zone: "AE", subtype: "", staticBfeFt: 95, vdatum: "NAVD88" }], state: "loaded", ageMs: 0 },
+  // Approximate Zone A (no published BFE) — the fixture (1) class: in the 1% floodplain but NOT a
+  // mapped regulatory floodway, so fill is allowed with compensating storage.
+  flood: { zones: [{ zone: "A", subtype: "", staticBfeFt: null, vdatum: "NAVD88" }], state: "loaded", ageMs: 0 },
   channel: null, watershed: null, groundElevFt: 90, groundDatum: "NAVD88",
 };
-// A pond fully BELOW the flood water surface (tob 94, WSE 95) AND in the trigger flood zone
-// (inTrigger:true → the "In floodway: no fill" chip). Detention is SHORT (usable 0). The ONLY
-// lever that would add usable detention is berming the rim above the WSE — which is exactly what
-// the floodplain no-fill rule prohibits, so Optimize must add ZERO berm and read AMBER.
+// A pond fully BELOW the estimated flood water surface (tob 94, WSE 95) AND in the trigger flood
+// zone (inTrigger:true). Detention is SHORT (usable 0). The lever that adds usable detention is
+// berming the rim above the WSE — which PR-K now ALLOWS (this is not a mapped floodway), so Optimize
+// must raise the rim, and the berm-fill below the WSE becomes compensating-storage (mitigation) debt.
 const site = {
   id: "s_opt", groupId: "s_opt", site: "Tsakiris", name: "Concept A", status: "active",
   origin: { lat: 29.55, lon: -95.80 }, county: "fortbend",
@@ -85,17 +88,18 @@ await optBtn.click({ timeout: 2000 }).catch((e) => log(false, "clicking Optimize
 await page.waitForTimeout(900);
 
 const tobAfter = await readTob();
-// THE PR-H repro/fix assertion: no fill in the floodplain → the rim must NOT rise.
-log(tobAfter != null && Math.abs(tobAfter - tobBefore) < 0.05,
-  `after: the rim was NOT bermed (${tobBefore} → ${tobAfter}) — no fill in the floodplain (pre-PR-H this rose to ~99.4)`);
+// THE PR-K reversal assertion: fill is allowed here → Optimize RAISES the rim (a berm is applied).
+// On PR-H main the false floodway gate froze the rim at 94; PR-K removes it.
+log(tobAfter != null && tobAfter > tobBefore + 0.05,
+  `after: the rim WAS bermed (${tobBefore} → ${tobAfter}) — fill is allowed in this non-floodway SFHA (PR-H froze it at 94)`);
 
-// The result must be AMBER "not buildable", never a green detention "OK".
+// No floodway / "no fill" prohibition reason may appear for a pond that is NOT in a mapped floodway.
 const bodyText = await page.evaluate(() => document.body.innerText || "");
-const mentionsUnbuildable = /not buildable|no fill|floodplain|floodway/i.test(bodyText);
-log(mentionsUnbuildable, "the result explains it's not buildable (floodplain / no-fill reason shown)");
-const greenOk = /\bOK:\s*[\d.]+ of [\d.]+ ac-ft required/.test(bodyText);
-log(!greenOk, `no green detention "OK: X of Y" verdict for the unbuildable pond${greenOk ? " :: a false green rendered" : ""}`);
+const badCopy = bodyText.match(/no fill is allowed|fill is prohibited|In floodway: no fill|can't be bermed to add detention in the floodway/i);
+log(!badCopy, `no floodway "no-fill" prohibition copy for this non-floodway pond${badCopy ? ` :: found "${badCopy[0]}"` : ""}`);
 
+// A false unconditional green must not appear on the raw seed either; but with the berm applied and
+// no hard limit, a "Buildable" verdict is legitimate. The key is simply that no floodway block fired.
 await page.screenshot({ path: OUT + "optimize-applies.png", clip: { x: 0, y: 96, width: 400, height: 940 } });
 log(errors.length === 0, `no console/page errors (${errors.length})` + (errors.length ? ` :: ${errors.slice(0, 2).join(" | ")}` : ""));
 console.log(fail === 0 ? "\nALL PASS" : `\n${fail} CHECK(S) FAILED`);

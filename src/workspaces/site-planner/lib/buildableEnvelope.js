@@ -5,14 +5,21 @@
  * owns context/memos; nothing here mutates or fetches.
  *
  *   (a) inflow drainage cap  — rim ≤ the elevation the tributary site can still drain
- *                              INTO the pond by gravity (the D5 drainage cap).
- *   (b) floodway no-fill     — a pond in the regulatory floodway may add NO berm/fill:
- *                              the rim is capped at existing grade (fill is prohibited).
+ *                              INTO the pond by gravity (the D5 drainage cap). HARD.
  *   (c) outfall / tailwater  — the low-flow outlet invert must sit AT/ABOVE the 100-yr
  *                              receiving-water (tailwater) elevation; storage below it is
- *                              DEAD (no gravity discharge, so it earns no detention credit).
+ *                              DEAD (no gravity discharge, so it earns no detention credit). HARD.
  *   (d) max excavation depth — SOFT: a water depth beyond the screen (default 12 ft)
  *                              warns of groundwater / dewatering, never a hard block.
+ *
+ * PR-K — the FLOODWAY case is no longer a hard geometric cap. A mapped regulatory floodway
+ * (NFHL ZONE_SUBTY = "FLOODWAY") does NOT prohibit fill: 44 CFR 60.3(d)(3) allows fill/berm
+ * WITH a no-rise certification (an engineering study proving the work adds zero rise to the
+ * 100-yr flood level). So a berm in the floodway is BUILDABLE, but it raises a REQUIREMENT
+ * that keeps the verdict amber until the study is provided — it never caps the rim or blocks
+ * the solver. Approximate Zone A and the 1% fringe (Zone AE outside a floodway) allow fill
+ * with compensating storage and don't belong here at all (the caller handles that debt via
+ * the mitigation ledger).
  *
  * Elevations are feet NAVD88; depths are feet. A `null`/non-finite input simply doesn't
  * constrain (unknown ≠ violated) — LOUD-FAILURE is the caller's job (it surfaces the
@@ -21,6 +28,11 @@
 
 const F1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 
+/* PR-K — the plain-English definition of a no-rise certification, spelled out inline the
+ * first time the term appears (owner copy rule). Reused by the requirement label + chip. */
+export const NO_RISE_CERT_DEF =
+  "a no-rise certification (an engineering study showing the berm adds zero rise to the 100-yr flood level)";
+
 // Soft geotech screen: water deeper than this likely sits below seasonal groundwater.
 export const DEFAULT_MAX_EXCAV_DEPTH_FT = 12;
 // A design is judged "at" a cap within this tolerance (survey/rounding noise).
@@ -28,18 +40,22 @@ export const ENVELOPE_TOL_FT = 0.05;
 
 /* The highest top-of-bank ELEVATION a buildable design may reach — the intersection of
  * every hard rim limit. Any finite input caps it; null inputs don't constrain. Returns
- * null when nothing constrains the rim (the caller then falls back to its own clamp). */
-export function rimCapElevFt({ gradeFt = null, drainageCapElevFt = null, geometricCeilingElevFt = null, inFloodway = false } = {}) {
+ * null when nothing constrains the rim (the caller then falls back to its own clamp).
+ * PR-K: the floodway is NOT a rim cap — a floodway berm is allowed with a no-rise cert, so
+ * only the physical drainage / geometric ceilings bound the rim here. */
+export function rimCapElevFt({ drainageCapElevFt = null, geometricCeilingElevFt = null } = {}) {
   const caps = [];
-  if (inFloodway && Number.isFinite(gradeFt)) caps.push(gradeFt); // no fill → rim ≤ grade
   if (Number.isFinite(drainageCapElevFt)) caps.push(drainageCapElevFt);
   if (Number.isFinite(geometricCeilingElevFt)) caps.push(geometricCeilingElevFt);
   return caps.length ? Math.min(...caps) : null;
 }
 
 /* Assess a concrete design against the envelope.
- * Returns { buildable, hard[], soft[] } where each entry is { code, label }.
- * `buildable` is false iff any HARD limit (a-c) is violated. Soft (d) never blocks. */
+ * Returns { buildable, hard[], soft[], requirements[] } where each entry is { code, label }.
+ * `buildable` is false iff any HARD limit (a or c) is violated. Soft (d) never blocks.
+ * PR-K: a floodway berm is a REQUIREMENT (no-rise cert), not a hard block — the design is
+ * buildable, but a top-line green verdict must wait on the requirement being cleared. The
+ * caller keeps the verdict amber while `requirements` is non-empty. */
 export function assessBuildability({
   tobElev = null,
   gradeFt = null,
@@ -54,12 +70,15 @@ export function assessBuildability({
 } = {}) {
   const hard = [];
   const soft = [];
+  const requirements = [];
 
-  // (b) floodway fill — a rim bermed above existing grade in the regulatory floodway.
+  // (b) floodway berm — a rim bermed above existing grade inside a MAPPED regulatory floodway.
+  // NOT a hard cap: fill is allowed here with a no-rise certification (44 CFR 60.3(d)(3)). It's a
+  // REQUIREMENT that keeps the verdict amber until the study is provided; the solver may still berm.
   if (inFloodway && Number.isFinite(tobElev) && Number.isFinite(gradeFt) && tobElev > gradeFt + tol) {
-    hard.push({
-      code: "floodway-fill",
-      label: `In the regulatory floodway: fill is prohibited, so the rim can't be bermed above existing grade (${F1(gradeFt)}′).`,
+    requirements.push({
+      code: "floodway-no-rise",
+      label: `The berm sits in a mapped regulatory floodway, so it needs ${NO_RISE_CERT_DEF}. Net-excavation ponds often qualify; plan on the study before this is approvable.`,
     });
   }
 
@@ -88,7 +107,14 @@ export function assessBuildability({
     });
   }
 
-  return { buildable: hard.length === 0, hard, soft };
+  return { buildable: hard.length === 0, hard, soft, requirements };
+}
+
+/* PR-K — one flat AMBER sentence for a floodway (or other) REQUIREMENT that blocks a green
+ * verdict without capping the design: names the requirement(s), no "make it buildable" escape
+ * list (the design already IS buildable — it just needs the certification). Pure copy. */
+export function requirementNote({ requirements = [] } = {}) {
+  return requirements.map((r) => r.label).join(" ");
 }
 
 /* The AMBER "not buildable as drawn" heading (G2): the volume is met but only by a design

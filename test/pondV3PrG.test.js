@@ -48,11 +48,14 @@ describe("G1(c) — storage below the receiving-water (tailwater) is DEAD, not u
 });
 
 describe("G1(a/b) — the Optimize solver enforces the buildable envelope on the rim", () => {
-  it("a FLOODWAY pond gets a HARD zero-raise cap (no berm/fill), ahead of the drainage/geometric cap", () => {
-    // PR-H — the gate keys off the SAME split.inTrigger signal the "In floodway: no fill" chip uses
-    // (the precise floodway polygon is OR'd in), so it can't stay silent on an AE-zone floodplain pond.
-    expect(dp).toContain("const pondInFloodway = !!splitProbe.inTrigger || ringInFloodway(ringOf(baseEl), fmZones);");
-    expect(dp).toContain("const maxRaiseFt = pondInFloodway ? 0");
+  it("PR-K: the floodway is NO LONGER a rim cap — the solver may berm (only the physical caps bind)", () => {
+    // PR-K reverses PR-H's inTrigger no-fill gate: a mapped floodway allows a berm WITH a no-rise
+    // certification (44 CFR 60.3(d)(3)), so the old `maxRaiseFt = pondInFloodway ? 0` cap is gone;
+    // the precise floodway tier only drives the no-rise requirement copy, not the rim clamp.
+    expect(dp).toContain("const pondTier = pondFloodplainTier(ringOf(baseEl), fmZones);");
+    expect(dp).toContain("const pondInFloodway = pondTier.inFloodway;");
+    expect(dp.includes("maxRaiseFt = pondInFloodway ? 0")).toBe(false);
+    expect(dp).toContain("const maxRaiseFt = gradeFt == null ? BERM_MAX_RAISE_FT");
   });
   it("the drainage cap still binds when NOT in the floodway (D5 preserved under the new gate)", () => {
     expect(dp).toContain("(Number.isFinite(bermCapFt) ? bermCapFt : BERM_MAX_RAISE_FT);");
@@ -62,11 +65,11 @@ describe("G1(a/b) — the Optimize solver enforces the buildable envelope on the
   });
 });
 
-describe("G3 — Optimize returns AMBER (never a false 'covered') when the envelope forbids the raise", () => {
-  it("a floodway pond that stays short reports the floodway reason + make-it-buildable options, applies nothing", () => {
-    expect(dp).toContain("} else if (pondInFloodway) {");
-    expect(dp).toContain("detGapNote = unbuildableNote({ hard: [{ code: \"floodway-fill\"");
-    expect(dp).toContain('detMsg = "This pond can\'t be bermed to add detention in the floodway (no fill is allowed).";');
+describe("G3 — PR-K: the floodway no longer blocks the berm (the old no-fill branch is gone)", () => {
+  it("the '} else if (pondInFloodway) {' no-berm branch is removed, and no 'no fill' copy remains", () => {
+    expect(dp.includes("} else if (pondInFloodway) {")).toBe(false);
+    expect(dp.includes("no fill is allowed")).toBe(false);
+    expect(dp.includes('code: "floodway-fill"')).toBe(false);
     // the no-berm case must NOT claim "already covers" unless the target is genuinely met
     expect(dp).toContain("const metNow = Number.isFinite(nowUsableCf) && nowUsableCf >= detTargetCf - 1;");
   });
@@ -82,11 +85,13 @@ describe("G1(c) — pondSplitFor threads the tailwater dead-floor into EVERY rea
 describe("G2 — the verdict is GREEN only for a buildable design; else AMBER 'not buildable as drawn'", () => {
   it("the status card computes buildability and demotes a volume-met-but-unbuildable design to amber", () => {
     expect(src).toContain("const bld = assessPondBuildable(selEl);");
-    // PR-H — amber when the current design is unbuildable OR the pond is short and the floodplain
-    // forbids the berm that would fix it (never a bare red SHORT for an envelope-blocked pond).
-    expect(src).toContain("const envelopeBlocked = short && inFw;");
-    expect(src).toContain("const unbuildable = !bld.buildable || envelopeBlocked;");
-    expect(src).toContain('tone: unbuildable ? "amber" : short ? "short" : "ok",');
+    // PR-K — amber when a HARD limit is broken (drainage cap / outfall-tailwater) OR a no-rise
+    // requirement is outstanding (a floodway berm). The old "floodplain forbids the berm" gate is gone.
+    expect(src).toContain("const hardBlocked = !bld.buildable;");
+    expect(src).toContain("const needsNoRise = bld.requirements.length > 0;");
+    expect(src).toContain("const amber = hardBlocked || needsNoRise;");
+    expect(src).toContain('tone: amber ? "amber" : short ? "short" : "ok",');
+    expect(src.includes("const envelopeBlocked = short && inFw;")).toBe(false);
     // the amber heading uses the pure helper and never reads "OK"
     expect(src).toContain("unbuildableHeading({ requiredAcFt: detReqAcFt })");
   });

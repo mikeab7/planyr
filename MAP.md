@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-23 @ `d459562` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-23 @ `c105648` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_307 source files mapped._
+_308 source files mapped._
 
 ## infra
 
@@ -272,7 +272,7 @@ _307 source files mapped._
 - **`src/workspaces/site-planner/lib/buildability.js`** — B710 buildability pathway: editable per-jurisdiction required-FFE rules (0.2% WSE + 2 ft seeds, verified-flagged), fill-to-elevate pathway flags, LOMR-F + wetlands-§404 copy flags
   - _exports_: `assessBuildability`, `DEFAULT_BUILDABILITY_RULES`, `loadBuildabilityRules`, `LOMR_NOTE`, `OUTSIDE_FLOODPLAIN_FFE_NOTE`, `requiredFfe`, `saveBuildabilityRules`, `SITE_BASED_FFE_NOTE`, `siteBasisFfe`, `suggestedFfe`, `WETLANDS_404_NOTE`
 - **`src/workspaces/site-planner/lib/buildableEnvelope.js`** — PR-G buildable envelope: the hard limits a detention pond must live inside (drainage cap · floodway no-fill · outfall/tailwater) + a soft excavation screen; gates the Optimize solver and the green verdict. Exports `rimCapElevFt`, `assessBuildability`, `unbuildableHeading`, `makeItBuildableOptions`, `unbuildableNote`, `DEFAULT_MAX_EXCAV_DEPTH_FT`.
-  - _exports_: `assessBuildability`, `DEFAULT_MAX_EXCAV_DEPTH_FT`, `ENVELOPE_TOL_FT`, `makeItBuildableOptions`, `rimCapElevFt`, `unbuildableHeading`, `unbuildableNote`
+  - _exports_: `assessBuildability`, `DEFAULT_MAX_EXCAV_DEPTH_FT`, `ENVELOPE_TOL_FT`, `makeItBuildableOptions`, `NO_RISE_CERT_DEF`, `requirementNote`, `rimCapElevFt`, `unbuildableHeading`, `unbuildableNote`
 - **`src/workspaces/site-planner/lib/buildingGrid.js`** — Pure structural column-grid + dock-door layout: uniform in-band bays, pinned speed bays, doors avoiding column lines
   - _exports_: `computeBuildingGrid`, `divideSpan`, `GRID_DEFAULTS`, `placeDockDoors`, `resolveGridSettings`
 - **`src/workspaces/site-planner/lib/buildingProps.js`** — Pure tiered building-property rules: sf-driven clear-height + slab-thickness defaults with per-building manual overrides
@@ -313,6 +313,8 @@ _307 source files mapped._
   - _exports_: `assessAnalysisTier`, `assessHydraulicRegime`, `AUTHORITY_SHORT`, `authorityForJurisdiction`, `BKDD_OVERLAY_DETAIL`, `BKDD_OVERLAY_SHORT`, `computePumpedCredit`, `computeRateBasedDetention`, `computeRequiredDetention`, `COUNTY_AUTHORITY`, `deadStoragePoolDepthFt`, `DESIGN_STORM_PERIODS`, `DESIGN_STORMS`, `designStorm24hrDepthIn`, `DETENTION_AUTHORITY_CHOICES`, `DETENTION_RULES`, `DETENTION_SOURCES`, `effectiveChannelDischarge`, `effectiveReviewer`, `governingRequirement`, `hydrateDrainageContext`, `interpolateCurve`, `MUNICIPAL_OVERLAYS`, `PARCEL_DISTRICT_TYPES`, `pondAutoValues`, `pondDefaultsFor`, `rateFromImpervious`, `resolveDrainageAuthority`, `resolveDrainageContext`, `ruleBadge`, `ruleFor`, `runoffCoefficient`, `SCREENING_CAVEAT`, `screenOutfall`, `slimDrainageContext`, `solvePondDepth`, `solvePondExpansion`, `SQFT_PER_ACRE`, `stormIntensity`, `TIER_THRESHOLDS`, `WATERSHED_OVERLAYS`
 - **`src/workspaces/site-planner/lib/dimSlide.js`** — Pure geometry constraining a footprint dimension callout to slide along the long axis, off dog-ear bumps, with collision AABB
   - _exports_: `clampDimOffset`, `DIM_POS_F_DEFAULT`, `DIM_POS_F_ROAD`, `dimNumberBox`, `dimSlideRange`
+- **`src/workspaces/site-planner/lib/districtFacilities.js`** — PR-K/K7 drainage-district facilities ingest scaffold: discover BKDD ArcGIS REST services behind its Web AppBuilder viewer (injectable fetch, graceful degradation), classify a DISTRICT floodway/ROW distinct from a FEMA floodway, name the receiving channel
+  - _exports_: `ASSUMED_CHANNEL_TAG`, `BKDD_APPVIEWER`, `classifyDistrictFacilities`, `discoverDistrictServices`, `districtFloodwayNote`, `districtIdNote`, `facilityKind`
 - **`src/workspaces/site-planner/lib/dockZones.js`** — Building-anchored dock-zone stack geometry: outward court/trailer/buffer chain, catalog layers, dock-side axes, stranded-zone pruning
   - _exports_: `catalogDepthDefault`, `DOCK_ZONES`, `dockSidesFor`, `footprintAxes`, `footprintDepth`, `footprintLength`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `pruneStrandedZones`, `strandedZoneIds`, `usableCourtSpan`, `ZONE_CATALOG`, `zoneDepthDefault`, `zoneDepthDefaults`
 - **`src/workspaces/site-planner/lib/dogEar.js`** — Corner bump-out geometry: box placement flush at a dock-wall corner, resize round-trip, and sidewalk span extension it causes
@@ -360,7 +362,7 @@ _307 source files mapped._
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
-  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
+  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
   - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed

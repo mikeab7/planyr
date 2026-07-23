@@ -526,11 +526,11 @@ export function wse1pctForRing(ring, zones, { bfeFt = null, bfeSrc = null, exist
   return { wseFt: best, provider };
 }
 
-/* Does a ring intersect a regulatory FLOODWAY zone? (PR-G buildable-envelope helper.)
- * Fill in the floodway is prohibited, so the pond solver may add NO berm/fill there and
- * the buildable verdict can never call a bermed floodway design "OK". Distinct from
- * ringInTrigger, which also fires on the 1% floodplain (where fill IS allowed with
- * mitigation). Pure. */
+/* Does a ring intersect a DESIGNATED REGULATORY FLOODWAY zone (NFHL ZONE_SUBTY = "FLOODWAY")?
+ * PR-K: this is TRUE only for a mapped floodway polygon — NOT the 1% floodplain (Zone AE fringe),
+ * NOT approximate Zone A (which by definition has no mapped floodway), and NOT a drainage channel.
+ * A real floodway does NOT flatly prohibit fill: fill is allowed with a no-rise certification
+ * (44 CFR 60.3(d)(3)). The pond logic reads this precise flag, never `inTrigger`. Pure. */
 export function ringInFloodway(ring, zones) {
   if (!Array.isArray(ring) || ring.length < 3 || !Array.isArray(zones)) return false;
   const fb = ringBBox(ring);
@@ -540,6 +540,38 @@ export function ringInFloodway(ring, zones) {
     if (gridIntersect(ring, z, null, { maxCells: 400 }).areaSf > 0) return true;
   }
   return false;
+}
+
+/* PR-K — classify a pond footprint into the THREE-TIER floodplain rule ladder (44 CFR 60.3),
+ * so the pond logic stops treating every floodplain touch as a "no-fill floodway":
+ *   "floodway" — intersects a mapped regulatory floodway (ZONE_SUBTY=FLOODWAY). Fill is allowed
+ *                WITH a no-rise certification; the verdict flags that requirement (amber), never
+ *                a flat prohibition.
+ *   "zoneA"    — intersects an approximate Zone A (SFHA, no BFE, no mapped floodway). Fill allowed
+ *                with compensating storage; every flood number is an ESTIMATE and a BFE study is
+ *                required at engineering.
+ *   "fringe"   — intersects the 1% floodplain (e.g. Zone AE) outside any floodway. Fill allowed
+ *                with compensating storage (cut-for-fill).
+ *   "none"     — no trigger-class floodplain touch.
+ * Floodway wins over fringe/zoneA (a floodway is inside the 1%). Pure. */
+export function pondFloodplainTier(ring, zones) {
+  if (!Array.isArray(ring) || ring.length < 3 || !Array.isArray(zones)) return { tier: "none", inFloodway: false, zoneA: false, in1pct: false };
+  const fb = ringBBox(ring);
+  const hits = (pred) => {
+    for (const z of zones) {
+      if (!pred(z)) continue;
+      if (!bboxOverlap(fb, z.bbox)) continue;
+      if (gridIntersect(ring, z, null, { maxCells: 400 }).areaSf > 0) return true;
+    }
+    return false;
+  };
+  const inFloodway = hits((z) => z.cls === "floodway");
+  if (inFloodway) return { tier: "floodway", inFloodway: true, zoneA: false, in1pct: true };
+  const zoneA = hits((z) => z.cls === "1pct" && z.unstudiedA);
+  const in1pct = zoneA || hits((z) => z.cls === "1pct");
+  if (zoneA) return { tier: "zoneA", inFloodway: false, zoneA: true, in1pct: true };
+  if (in1pct) return { tier: "fringe", inFloodway: false, zoneA: false, in1pct: true };
+  return { tier: "none", inFloodway: false, zoneA: false, in1pct: false };
 }
 
 /* Does a ring intersect any trigger-class zone for this rule? (B708/B712 helper.) */
