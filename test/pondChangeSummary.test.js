@@ -1,6 +1,6 @@
 // B909 round 4 — the persistent "what changed" card's pure delta rows + cross-section marks.
 import { describe, it, expect } from "vitest";
-import { buildChangeSummaryRows, pondCrossSectionMarks, gapProposalNote, bermCapProposalNote } from "../src/workspaces/site-planner/lib/pondChangeSummary.js";
+import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "../src/workspaces/site-planner/lib/pondChangeSummary.js";
 
 const AF = 43560;
 
@@ -68,43 +68,8 @@ describe("buildChangeSummaryRows", () => {
   });
 });
 
-describe("pondCrossSectionMarks — the schematic (not-to-scale) cross-section", () => {
-  it("draws grade, WSE, old (dashed) + new (solid) profiles, and shades the usable band", () => {
-    const before = { depthFt: 8, tobElevFt: 100 };
-    const after = { depthFt: 12, tobElevFt: 104 };
-    const { marks } = pondCrossSectionMarks({ gradeFt: 100, wseFt: 103, before, after });
-    expect(marks.some((m) => m.role === "grade")).toBe(true);
-    expect(marks.some((m) => m.role === "wse")).toBe(true);
-    const profiles = marks.filter((m) => m.t === "profile");
-    expect(profiles).toHaveLength(2);
-    expect(profiles.some((p) => p.dashed === true)).toBe(true);
-    expect(profiles.some((p) => p.dashed === false)).toBe(true);
-    expect(marks.some((m) => m.role === "usable")).toBe(true);
-    expect(marks.some((m) => m.role === "label" && /schematic/.test(m.s))).toBe(true);
-  });
-
-  it("no WSE (upland pond) shades the usable band against grade instead", () => {
-    const before = { depthFt: 8, tobElevFt: 100 };
-    const after = { depthFt: 12, tobElevFt: 100 };
-    const { marks } = pondCrossSectionMarks({ gradeFt: 100, wseFt: null, before, after });
-    expect(marks.some((m) => m.role === "wse")).toBe(false);
-    // rim at grade -> no usable band above grade (a plain-dug pond doesn't berm above grade)
-    expect(marks.some((m) => m.role === "usable")).toBe(false);
-  });
-
-  it("no usable data at all -> empty marks, never a throw", () => {
-    expect(pondCrossSectionMarks({})).toEqual({ marks: [], w: 320, h: 160 });
-    expect(pondCrossSectionMarks({ after: null })).toEqual({ marks: [], w: 320, h: 160 });
-  });
-
-  it("a brand-new pond (no before snapshot) still draws just the new profile", () => {
-    const after = { depthFt: 8, tobElevFt: 100 };
-    const { marks } = pondCrossSectionMarks({ gradeFt: 100, wseFt: null, before: null, after });
-    const profiles = marks.filter((m) => m.t === "profile");
-    expect(profiles).toHaveLength(1);
-    expect(profiles[0].dashed).toBe(false);
-  });
-});
+// PR-L — the schematic cross-section moved from pondChangeSummary (`pondCrossSectionMarks`) to the
+// richer lib/pondSectionModel.js (`pondSectionModel`); its tests live in test/pondSectionModel.test.js.
 
 describe("gapProposalNote — v3 A5: the atomic infeasibility proposal (exact concise form)", () => {
   it("matches the owner's exact v3 sentence: 'To close the gap: keep the {x}-ft berm and enlarge the pond by about {y} ac, or add a second basin.'", () => {

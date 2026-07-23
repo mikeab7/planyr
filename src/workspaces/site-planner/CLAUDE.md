@@ -73,9 +73,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   estimator + the NEW-3 HAG proxy), `pondCriteriaRules.js` (berm/slope/freeboard criteria),
   `buildability.js` (FFE/LOMR-F; `when`-conditioned multi-basis rows + `suggestedFfe`),
   `pondSizing.js` (NEW-4 two-target pond sizing assistant over the B708 bands),
-  `pondChangeSummary.js` (B909 round 4 — pure before/after delta rows, the atomic gap-proposal
-  sentence, and schematic cross-section marks for the persistent "what changed" card after ⚡
-  Design pond),
+  `pondChangeSummary.js` (B909 round 4 — pure before/after delta rows + the atomic gap-proposal
+  sentence for the persistent "what changed" card after ⚡ Design pond),
+  `pondSectionModel.js` + `components/PondSection.jsx` (PR-L — the ONE developer-readable pond
+  cross-section: pure geometry + collision-free labels → responsive SVG, used by BOTH the Optimize
+  card and the pond inspector),
   surfaced via the Yield → Stormwater collapsed verdict groups (B824 — ONE drainage home; the old Site Analysis sibling card was merged in and deleted; Analysis keeps a link row).
   Estimated-BFE providers for unstudied Zone A (B882): `wseProviders.js` (pure pluggable registry +
   precedence resolver: district → FEMA InFRM EBFE → grade) + `ebfe.js` (FEMA InFRM EBFE /identify
