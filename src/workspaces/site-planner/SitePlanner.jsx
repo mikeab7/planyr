@@ -141,7 +141,7 @@ import { gridRequest, sampleAtLatLng } from "./lib/demGrid.js";
 import { fetchSiteGrid } from "./lib/terrainLayers.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
-import { solveBalanceFfe, truckloadLabel, ffeDualDisplay } from "./lib/ffeBalance.js";
+import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
   pondFloodplainTier,
@@ -13333,9 +13333,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // the mitigation requirement above).
             const bermCy = pondBermFillCf / 27;
             const netCy = gsPriced ? netImportCy({ fillCy: gsG.fillCy + bermCy, cutCy: gsG.cutCy, borrowCy, shrinkFactor }) : null;
-            // DECISION 2 (grading milestone) — the net residual in haul terms the developer
-            // can picture: truckloads (one tandem dump ≈ 12–14 bank CY, screening range).
-            const netHaulLabel = netCy != null ? truckloadLabel(Math.round(netCy)) : "";
             const setGrading = (patch) => setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), ...patch } }));
             // B895 — "Set unit prices" jumps to + focuses the (one shared) $/CY bid field below.
             const jumpToEarthPrice = () => {
@@ -13357,7 +13354,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {metricRow("Graded surface — fill", `${f0(gsG.fillCy)} CY`, "placed (compacted)", { code: "plan" })}
                   {gsG.wedgeFillCy > 0.5 && metricRow("· incl. transition wedges", `${f0(gsG.wedgeFillCy)} CY`, `daylight fringe @ ${gsApronRatio}:1`)}
                   {metricRow("Net dirt (screening)", `${f0(Math.abs(netCy))} CY ${netCy > 0 ? "import" : "export"}`,
-                    `${netHaulLabel ? netHaulLabel + " · " : ""}${gsShrinkPct == null ? "no shrink applied" : `@ ${gsShrinkPct}% shrink`}`, { code: "plan" })}
+                    gsShrinkPct == null ? "no shrink applied" : `@ ${gsShrinkPct}% shrink`, { code: "plan" })}
                 </>) : (
                   metricRow("Graded surface cut / fill", "UNKNOWN", "no ground elevation — ↻ re-check drainage")
                 ))}

@@ -82,7 +82,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B978 | Grading engine: balance-optimal finished-floor float (DECISION 3) + net earthwork residual in truckloads (DECISION 2) | [Site Planner / yield · pond · floodplain] | #site-planner #yield #pond #floodplain #ui | ⏳ live — awaiting |
+| B978 | Grading engine: balance-optimal finished-floor float (DECISION 3) + net earthwork residual (DECISION 2) | [Site Planner / yield · pond · floodplain] | #site-planner #yield #pond #floodplain #ui | ⏳ live — awaiting |
 | B977 | Map/panel storage+depth consistency (O3) + label every acreage (O4) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
 | B976 | Pond buildability copy + berm rule: fix the garbled drainage warning (O1) and UNIFY the design-vs-optimizer berm stance (O2) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
 | B975 | Outfall TAILWATER source ladder + never-grade root-cause fix + Drainage district surfaced (PR-N / grading DECISION 4 + FOLD IN + PR-O O5) | [Site Planner / yield · pond · floodplain · gis] | #site-planner #yield #pond #floodplain #gis #ui | ⏳ live — awaiting |
