@@ -12,7 +12,9 @@ describe("NEW-20(a) — the re-check affordances show a BUSY state", () => {
     expect(src).toContain('const drainRefreshing = !!drainage && (drainage.status === "busy" || drainage.autoRefreshing);');
   });
   it("the header line reads 'checking…' and its ↻ spins + disables while refreshing", () => {
-    expect(src).toContain('{drainRefreshing ? "Flood data: checking…" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)} ago` : "Flood data: not checked"}');
+    // NEW-19 restructured the not-checked branch through floodChecked; the checking… branch + the
+    // spin/disable are what NEW-20(a) owns.
+    expect(src).toContain('{drainRefreshing ? "Flood data: checking…" :');
     expect(src).toContain('onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing}');
     expect(src).toContain('animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined');
   });

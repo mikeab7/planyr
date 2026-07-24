@@ -9335,7 +9335,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     autoRefreshing: drainAutoRefreshing,
     autoStalled: drainAutoStalled, // B874 — a wanted refetch whose one attempt is spent + not in flight (terminal, offer ↻)
     autoEnabled: drainAutoEnabled,
-    floodAgeMs: floodGeo && floodGeo.ts != null ? Date.now() - floodGeo.ts : null,
+    // NEW-19 — ONE source of truth for "have flood facts been ESTABLISHED?" A live fetch
+    // (floodGeo loaded) OR a remembered/restored check (drainViewCtx.checkedAt) both count.
+    // The header keys its checked-state off THIS, so it can never say "not checked" over the
+    // definite pond/berm/mitigation numbers that a remembered check drives — the numbers and
+    // the header now read one truth. floodAgeMs is the effective facts VINTAGE: the live fetch
+    // ts, else the remembered check's timestamp (so a restored plan shows "as of <date>", not
+    // "not checked"). Genuinely-null (never checked, no memory) → not checked, and the
+    // WSE-dependent numbers are already unknown there (no zones → no split → no berm WSE).
+    floodChecked: !!(floodGeo && floodGeo.state === "loaded") || Number.isFinite(drainViewCtx?.checkedAt),
+    floodAgeMs: floodGeo && floodGeo.ts != null ? Date.now() - floodGeo.ts
+      : Number.isFinite(drainViewCtx?.checkedAt) ? Date.now() - drainViewCtx.checkedAt : null,
     multiParcel: !!drainViewCtx?.multiParcel,
     showingPrior: !!(drainCtx && !drainCtx.ctx && drainViewCtx), // a busy/error state over a preserved prior answer (live or restored)
     // B750 — the reviewing authority the number is priced against (detected or overridden),
@@ -20962,7 +20972,7 @@ function YieldPanel({
           <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: verdictLoading ? Y.warnText : Y.muted, whiteSpace: "nowrap", flex: "none" }}>
             {/* NEW-20(a) — while a fetch is in flight the line says so ("checking…") instead of an
                 unchanging "not checked", and the ↻ spins + disables so the click is never silent. */}
-            <span>{drainRefreshing ? "Flood data: checking…" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)} ago` : "Flood data: not checked"}</span>
+            <span>{drainRefreshing ? "Flood data: checking…" : !drainage.floodChecked ? "Flood data: not checked" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)} ago` : "Flood data: checked"}</span>
             <span aria-hidden="true" style={{ color: Y.faint }}>·</span>
             <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }} aria-label="Re-check flood data">↻</button>
           </span>
