@@ -600,6 +600,12 @@ export function teeGeometry(params) {
   const {
     T, throughDir, sideDir, phT, phS, R, flare = 0,
     curbT = 0, curbS = 0, throughAvail = Infinity, sideAvail = Infinity, tessDeg = DEFAULT_TESS_DEG,
+    // NEW-1 — how far the through edge RUNS from T in each direction (+throughDir / -throughDir).
+    // A single symmetric `throughAvail` is wrong whenever the two sides differ, and the difference is
+    // not academic: a drive meeting a parking field near the END of its edge has ~50 ft of edge one way
+    // and a couple of feet the other, so a symmetric clamp let the short-side return sweep off the end
+    // of the field and hang in open ground. Defaults keep the old symmetric behaviour for old callers.
+    throughAvailPos = undefined, throughAvailNeg = undefined,
   } = params || {};
   if (!T || !throughDir || !sideDir || !(phT >= 0) || !(phS >= 0)) return null;
   const u = unit(throughDir), d = unit(sideDir);
@@ -623,42 +629,89 @@ export function teeGeometry(params) {
   // So the return reach is ALWAYS ≤ R at ANY angle — a small default seed reads as a tidy rounded
   // corner, and a user who needs a genuine WB-62 turn dials returnR up per-junction. Still bounded by
   // the actual road/drive run available (a short drive shrinks the return further).
-  const tMax = Math.max(0, Math.min(throughAvail * 0.9, sideAvail * 0.9, R > 0 ? R : 0));
+  const availPos = Number.isFinite(throughAvailPos) ? throughAvailPos : throughAvail;
+  const availNeg = Number.isFinite(throughAvailNeg) ? throughAvailNeg : throughAvail;
   // Fillet one corner: rays go ALONG the through edge away from the throat, and ALONG the side edge into
   // the body. Clamp R down so the tangent run fits tMax (acute angle → tiny arc, never a sweep).
   const fillet = (corner) => {
-    const awayThrough = mul(u, Math.sign(dot(sub(corner, E0), u)) || 1);
+    const awaySign = Math.sign(dot(sub(corner, E0), u)) || 1;
+    const awayThrough = mul(u, awaySign);
+    // The corner already sits `along` feet toward that end of the through edge, so only what is LEFT
+    // beyond it can carry the return's tangent run.
+    const along = Math.abs(dot(sub(corner, E0), u));
+    const tMax = Math.max(0, Math.min(((awaySign > 0 ? availPos : availNeg) - along) * 0.9, sideAvail * 0.9, R > 0 ? R : 0));
     const cAng = Math.max(-1, Math.min(1, dot(awayThrough, d)));
     const phi = Math.acos(cAng);
-    if (phi < 1e-3 || phi > Math.PI - 1e-3) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null };
+    // No run left past the corner (the drive is as wide as the edge it lands on, or wider) → an honest
+    // SHARP corner. The old code only applied the clamp when tMax > 0, so a zero reach silently fell
+    // through and kept the FULL requested radius — the one case where "no room" produced the biggest
+    // possible return.
+    if (!(tMax > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough };
+    if (phi < 1e-3 || phi > Math.PI - 1e-3) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough };
     let Rc = R > 0 ? R : 0;
     let f = rayFillet(corner, awayThrough, d, Rc, tessDeg);
     if (f && f.t > tMax && tMax > EPS) { Rc = tMax * Math.tan(phi / 2); f = rayFillet(corner, awayThrough, d, Rc, tessDeg); }
-    if (!f || !(Rc > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null }; // degenerate → sharp corner
-    return f;
+    if (!f || !(Rc > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough }; // degenerate → sharp corner
+    return { ...f, u1: awayThrough };
   };
   const fA = fillet(cornerA);
   const fB = fillet(cornerB);
-  // ---- Clean flare cover (B1006 / NEW-2) -----------------------------------------------
-  // ONE simple rounded-trapezoid "flare" spanning the mouth: up return-arc A onto drive edge A, straight
-  // across to drive edge B (the chord), down return-arc B, then closed along the through/court edge. This
-  // supersedes B989's "climb to a common hTop, then chord" cover, whose two-sided climb dipped into a
-  // NOTCH at oblique angles and whose cap-height guess could poke a step past the strip. Because the top
-  // is a single chord between the two returns and the base is the straight through edge, the polygon is
-  // SIMPLE (never self-crossing) at EVERY angle — road-road tee, car/truck drive, hard skew — so the
-  // pavement reads as one uniform region with a single continuous curb line (the two arcs), with no
-  // internal seam/blotch once the fill layer composites at a single opacity (the tee-layer group).
+  // ---- ADDITIVE curb-return WEDGES (NEW-1, supersedes the B1006 "mouth cover") -----------
+  // Every cover shipped from B953 through B1006 was a patch PAINTED OVER the seam: a mouth polygon
+  // whose base sat exactly ON the through road's near edge and whose top was a straight chord between
+  // the two tangent points. Three defects fell out of that shape and none of them could be tuned away:
+  //   • the base stopped at the near edge, so the side road's stub between that edge and the through
+  //     CENTERLINE — its flat end cap and both back-of-curb strokes — stayed painted on the through
+  //     road ("a rectangle intersecting a rectangle");
+  //   • the top chord joined tangent points that sit at DIFFERENT distances along the side road at any
+  //     skew, so the cover crossed the drive on a slant — the chamfer / chevron / notch;
+  //   • traced on its own the fillet arc is concave toward the corner, so the patch read as a scooped
+  //     lobe in the armpit instead of a corner being rounded.
+  // The fix is to stop patching and hand the renderer an ADDITIVE piece instead: the wedge bounded by
+  // corner→tan1, the arc, and tan2→corner. That wedge is exactly the pavement a curb return ADDS to the
+  // 270° reflex corner where the two strips meet. Unioned with the two strip rings (roadNetwork.js), the
+  // junction becomes one dissolved surface with one continuous outline — no seam to hide, nothing to
+  // knock out, no translucent fill stacking. The wedge is a simple polygon at EVERY angle (a triangle
+  // with one concave side), so the union is always well-defined: straight, curved, or acute road-road.
+  // The wedge is deliberately THICK: past the two tangent points it continues INTO both pavements by
+  // `deep` before closing. Only the arc side is a real boundary — everything behind it is interior to
+  // the union and therefore invisible — and the depth is what makes the union robust on a CURVED
+  // through road, which is the case that broke every previous attempt. The corner math treats the
+  // through edge as the straight tangent line at T; on a curve the real (tessellated) strip edge
+  // departs from that line by up to a foot within the return's reach, and a wedge that stopped at the
+  // assumed line left an uncovered band along the real edge — a hair-thin hole that strokes as exactly
+  // the faint curved seam the owner kept reporting. Reaching well inside both strips bridges that, and
+  // any tessellation mismatch with it, without changing the rendered outline by so much as an inch.
+  // `deep` is capped at half the pavement so it can never punch out the far side of a narrow drive,
+  // and is 0 on the through side of a DRIVE junction (phT = 0 there — the "through edge" is a parking
+  // field / truck-court boundary, and pavement pushed past it would paint road over the court).
+  const deepT = phT > EPS ? Math.min(phT * 0.5, 12) : 0;
+  const deepS = Math.max(1, Math.min(phS * 0.5, 12));
+  const inT = mul(nTee, -1);                            // through near edge → through centerline
+  const wedge = (f, corner, inS) => {
+    if (!f || !(f.R > EPS) || !Array.isArray(f.arc) || f.arc.length < 2) return null;
+    const back1 = add(f.tan1, mul(inT, deepT));         // tan1 pushed into the through pavement
+    const back2 = add(f.tan2, mul(inS, deepS));         // tan2 pushed into the side pavement
+    const heel = add(add(corner, mul(inT, deepT)), mul(inS, deepS));
+    const poly = [...f.arc.map((p) => ({ x: p.x, y: p.y })), back2, heel, back1];
+    return poly.length >= 3 ? poly : null;
+  };
+  // Corner A sits on the +perpS edge, so its pavement lies toward -perpS; corner B is the mirror.
+  const wedges = [wedge(fA, cornerA, mul(perpS, -1)), wedge(fB, cornerB, perpS)].filter(Boolean);
+  // Legacy mouth polygon — no longer painted, kept so older consumers/tests still resolve.
   const mouth = [...fA.arc, ...fB.arc.slice().reverse()].map((p) => ({ x: p.x, y: p.y }));
   const coverPolys = mouth.length >= 3 ? [mouth] : [];
   const throatWidth = len(sub(fA.tan1, fB.tan1));
   return {
     R: Math.max(fA.R, fB.R),
     throatWidth,
+    corners: [cornerA, cornerB],
     throughTangents: [fA.tan1, fB.tan1],
     sideTangents: [fA.tan2, fB.tan2],
     returns: [fA.arc, fB.arc],
-    coverPolys,                        // ONE simple opaque fill (the mouth) — no self-overlap → no blotch
-    cover: mouth,                      // legacy single-polygon field (kept for old consumers/tests)
+    wedges,                            // ADDITIVE curb-return pavement — union these, don't overpaint
+    coverPolys,                        // legacy (pre-union) cover — retained for old consumers
+    cover: mouth,                      // legacy single-polygon field
     throatMid: E0,
     nTee,
   };

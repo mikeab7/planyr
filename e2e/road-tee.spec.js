@@ -1,14 +1,17 @@
 /* B953/NEW-1 — clean T-intersection at a road tee. Drives the REAL canvas LOGGED OUT (no account,
- * no GIS) with Snap OFF, teeing one road into another's side and asserting the clean-tee overlay
- * renders (the two curb-return fillets + the merged-pavement cover), and that editing the curb-return
- * radius re-solves the geometry. The intersection geometry itself is unit-tested in
- * test/roadGeometry.test.js (teeGeometry); this is the render + wiring guard. */
+ * no GIS) with Snap OFF, teeing one road into another's side.
+ *
+ * REWRITTEN for the dissolved-network render (NEW-1/NEW-2): the junction is a boolean UNION of the two
+ * strips plus the curb-return wedges, not a patch over a seam, so these assert the DISSOLVED result —
+ * one pavement region, no slivers, two real returns — instead of counting cover/return elements. The
+ * old element-counting assertions passed on every broken build the owner reported. */
 import { test, expect } from "@playwright/test";
+import { armPlannerHooks, roadNetwork, netSurfaces, ringArea } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
-const teeReturns = (p) => p.locator('[data-testid="road-tee-return"]');
 
 async function startBlank(page) {
+  await armPlannerHooks(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Start blank/i }).click();
   await expect(canvas(page)).toBeVisible();
@@ -43,10 +46,15 @@ test.describe("B953 — clean tee intersection", () => {
     await page.keyboard.press("Enter");
     await page.keyboard.press("Escape");
 
-    // The clean-tee overlay renders: exactly two return fillets + a cover patch.
-    await expect(page.locator('[data-testid="road-tee-layer"]')).toBeVisible();
-    await expect(teeReturns(page)).toHaveCount(2);
-    await expect(page.locator('[data-export="road-tee-cover"]').first()).toBeAttached();
+    // The two roads dissolve into ONE pavement region with ONE outline, and the tee contributes two
+    // real curb-return wedges. A sliver hole would stroke as the faint seam this render exists to kill.
+    await expect(page.locator('[data-testid="road-network-layer"]')).toBeAttached();
+    await expect.poll(async () => (await roadNetwork(page))?.tees.length ?? 0).toBe(1);
+    await expect(netSurfaces(page)).toHaveCount(1);
+    const net = await roadNetwork(page);
+    expect(net.tees[0].wedges).toBe(2);
+    expect(net.tees[0].R).toBeGreaterThan(0);
+    for (const h of net.regions[0].holes) expect(ringArea(h)).toBeGreaterThan(200);
     // The through road gained a vertex at the tee (B949 topology), and both roads remain.
     await expect.poll(() => roads(page).then((r) => r.length)).toBe(2);
     await expect.poll(() => roads(page).then((r) => Math.max(...r.map((x) => x.pts.length)))).toBe(3);
@@ -65,7 +73,9 @@ test.describe("B953 — clean tee intersection", () => {
     await page.mouse.click(box.x + 720, box.y + 480);
     await page.keyboard.press("Enter");
     await expect.poll(() => roads(page).then((r) => r.length)).toBe(2);
-    await expect(teeReturns(page)).toHaveCount(0);
+    // No junction → no tee, and the two roads stay as two separate dissolved regions.
+    await expect.poll(async () => (await roadNetwork(page))?.tees.length ?? -1).toBe(0);
+    await expect(netSurfaces(page)).toHaveCount(2);
   });
 
   test("editing the curb-return radius re-solves the return geometry", async ({ page }) => {
@@ -80,9 +90,9 @@ test.describe("B953 — clean tee intersection", () => {
     await page.mouse.click(box.x + 490, box.y + 160);
     await page.mouse.click(box.x + 490, box.y + 340);
     await page.keyboard.press("Enter");
-    await expect(teeReturns(page)).toHaveCount(2);
+    await expect.poll(async () => (await roadNetwork(page))?.tees.length ?? 0).toBe(1);
 
-    const before = await teeReturns(page).first().getAttribute("points");
+    const before = (await roadNetwork(page)).tees[0].R;
 
     // Open the SIDE road's Properties (double-click its stub away from the mid-span dim label at y≈250),
     // then set a much larger curb return — the return polyline must change.
@@ -95,7 +105,7 @@ test.describe("B953 — clean tee intersection", () => {
     await curbReturn.press("Enter");
     await page.waitForTimeout(200);
 
-    const after = await teeReturns(page).first().getAttribute("points");
-    expect(after).not.toEqual(before);
+    const after = (await roadNetwork(page)).tees[0].R;
+    expect(after).toBeGreaterThan(before);   // a bigger requested radius really solves a bigger return
   });
 });

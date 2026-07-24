@@ -53,3 +53,19 @@ export async function openModule(page, moduleId) {
     await expect(tab).toHaveAttribute("aria-current", "page", { timeout: 3_000 });
   }).toPass({ timeout: 30_000 });
 }
+
+/* ---- Dissolved road network (NEW-1/NEW-2) ------------------------------------------------
+ * The road connection is no longer a cover patch painted over a seam — it is a boolean UNION of
+ * pavement (see src/workspaces/site-planner/lib/roadNetwork.js). So a spec should not ask "is there a
+ * cover element / a mask hole"; it should ask what the owner actually sees: how many pavement regions
+ * the junction dissolved to, whether any sliver holes survived, and how big the curb returns came out.
+ * `armPlannerHooks` must run BEFORE page.goto — it arms the same `window.__PLANYR_E2E` gate the geo-map
+ * hook uses, which exposes `window.__plannerRoadNet()`. */
+export async function armPlannerHooks(page) {
+  await page.addInitScript(() => { window.__PLANYR_E2E = true; });
+}
+export const roadNetwork = (page) => page.evaluate(() => (window.__plannerRoadNet ? window.__plannerRoadNet() : null));
+export const netSurfaces = (p) => p.locator('[data-testid="road-network-surface"]');
+export const netEdges = (p) => p.locator('[data-testid="road-network-edge"]');
+/* |ring| area, for "did a sliver survive the dissolve" assertions. */
+export const ringArea = (r) => Math.abs(r.reduce((s, p, i) => { const q = r[(i + 1) % r.length]; return s + p.x * q.y - q.x * p.y; }, 0) / 2);

@@ -110,6 +110,7 @@ import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon } from "./lib/roadGeometry.js";
+import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD } from "./lib/roadNetwork.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
@@ -1044,6 +1045,29 @@ const roadStripArea = (el, settings) => {
 // The return radius seeds from the side road's class (classReturnRadius) unless the side road stores
 // an explicit el.tee override for this through road. Pure over (els, settings); memoized at the call site.
 const TEE_COINCIDE_FT = 0.75;
+// How far a road RUNS from vertex `i` in direction `step` (+1/-1) along its own polyline, and the
+// first point far enough away to give an honest tangent.
+//
+// NEW-1 — this replaces "distance to the immediately adjacent vertex", and it is the specific reason
+// the curb returns vanished on the owner's real plan while every mock passed. `throughAvail` clamps
+// the return radius; on a clean two-click mock the neighbouring vertex is hundreds of feet away, so
+// nothing clamps. The owner's through road carries a run of near-duplicate vertices (0.02–2 ft apart,
+// left by repeated connect attempts — three of them literally identical), so the adjacent-vertex
+// distance collapsed to ~1.9 ft, the return was clamped to ~1.7 ft, and the junction rendered with
+// SQUARE corners. Walking the polyline (and skipping sub-tolerance neighbours for the tangent) makes
+// the reach reflect the road that is actually there, and makes the tangent immune to vertex clutter.
+const VERTEX_NOISE_FT = 1.5;   // below this two stored vertices are clutter, not a real segment
+const RUN_CAP_FT = 1000;
+function roadRunFrom(pts, i, step) {
+  let dist = 0, far = null;
+  for (let k = i + step; k >= 0 && k < pts.length; k += step) {
+    const prev = pts[k - step], cur = pts[k];
+    dist += Math.hypot(cur.x - prev.x, cur.y - prev.y);
+    if (!far && Math.hypot(cur.x - pts[i].x, cur.y - pts[i].y) > VERTEX_NOISE_FT) far = cur;
+    if (dist >= RUN_CAP_FT) break;
+  }
+  return { dist, far: far || pts[i + step] || pts[i] };
+}
 function teeJunctionsOf(els, settings) {
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
   const out = [];
@@ -1059,9 +1083,10 @@ function teeJunctionsOf(els, settings) {
         if (G) break;
       }
       if (!G) continue;
-      const nb = S.pts[ei === 0 ? 1 : S.pts.length - 2];                 // the side road's next vertex (into its body)
-      const sideDir = { x: nb.x - P.x, y: nb.y - P.y };
-      const a = G.pts[gvi - 1], b = G.pts[gvi + 1];
+      const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1);         // into the side road's body
+      const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
+      const backRun = roadRunFrom(G.pts, gvi, -1), fwdRun = roadRunFrom(G.pts, gvi, 1);
+      const a = backRun.far, b = fwdRun.far;
       const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangent at the vertex
       const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;
       const throughDir = { x: din.x / li + dout.x / lo, y: din.y / li + dout.y / lo };
@@ -1071,9 +1096,14 @@ function teeJunctionsOf(els, settings) {
       const flare = teeOverride && teeOverride.flare > 0 ? teeOverride.flare : 0;
       const geom = teeGeometry({
         T: { x: P.x, y: P.y }, throughDir, sideDir,
-        phT: Math.max(0, (+G.travelW || 0) / 2), phS: Math.max(0, (+S.travelW || 0) / 2),
+        // NEW-1 — half-widths at BACK OF CURB (roadOuterHalf), not face of curb. The union takes the
+        // curb-return wedge tangent to the strip OUTLINES, so measuring to the face of curb left the
+        // wedge starting a curb-width inside the painted edge and the dissolved outline showed a small
+        // step where each return landed. driveJunctionsOf already used back-of-curb for the same reason.
+        phT: roadOuterHalf(G), phS: roadOuterHalf(S),
         R, flare, curbT: roadCurbWidth(G), curbS: roadCurbWidth(S),
-        throughAvail: Math.min(li, lo), sideAvail: Math.hypot(sideDir.x, sideDir.y),
+        // `throughDir` points a→b (backRun.far → fwdRun.far), so +u is the forward run and -u the back run.
+        throughAvailPos: fwdRun.dist, throughAvailNeg: backRun.dist, sideAvail: sideRun.dist,
       });
       if (geom) out.push({ sideId: S.id, throughId: G.id, T: { x: P.x, y: P.y }, geom });
     }
@@ -1106,24 +1136,35 @@ function driveJunctionsOf(els, settings) {
     }
     if (!hit) continue;
     const P = S.pts[ei];                                            // the road's welded endpoint
-    const nb = S.pts[ei === 0 ? 1 : S.pts.length - 2];
-    const sideDir = { x: nb.x - P.x, y: nb.y - P.y };
+    // NEW-1 — run ALONG the drive's polyline (skipping sub-tolerance vertex clutter) rather than
+    // trusting the adjacent vertex; see roadRunFrom.
+    const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1);
+    const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
     const kind = S.driveTee.kind === "truckcourt" ? "truckcourt" : "parking";
-    const R = S.driveTee.returnR > 0 ? S.driveTee.returnR : DRIVE_RETURN_SEED[kind];
+    const Rseed = S.driveTee.returnR > 0 ? S.driveTee.returnR : DRIVE_RETURN_SEED[kind];
     const flare = S.driveTee.flare > 0 ? S.driveTee.flare : 0;
     // B959/NEW-1 feasibility clamp — the single curb-return fillet must FIT the actual drive, not sprawl:
     // teeGeometry already clamps the return to the run it's given, so feed it the court's real limits —
     // min(connect-edge length, court depth behind that edge). A roomy court keeps the ≈50 ft default; a
     // shallow/short court shrinks it to fit (and it never reaches the building — that's also z-order-guarded).
     const perpDepth = hit.edge.axis === "y" ? T.h : T.w;           // court depth behind the connect edge (see rectEdges axis)
+    const edgeRunPos = (hit.edge.b.x - P.x) * hit.edge.dir.x + (hit.edge.b.y - P.y) * hit.edge.dir.y;   // T → edge end b
+    const edgeRunNeg = (P.x - hit.edge.a.x) * hit.edge.dir.x + (P.y - hit.edge.a.y) * hit.edge.dir.y;   // T → edge end a
     const geom = teeGeometry({
       T: { x: P.x, y: P.y }, throughDir: hit.edge.dir, sideDir,
       // phS at BACK-OF-CURB (roadOuterHalf), not face-of-curb: the cover unions with the drive's
       // back-of-curb strip, so the fillet must round the STRIP's outer corner — else the wider strip
       // corner sits outside the fillet and the union shows a sharp (un-rounded) acute edge (B989).
       phT: 0, phS: roadOuterHalf(S),
-      R, flare, curbT: 0.5, curbS: roadCurbWidth(S),              // curbT covers any parking/court curb across the mouth
-      throughAvail: Math.min(hit.edge.len, perpDepth), sideAvail: Math.hypot(sideDir.x, sideDir.y),
+      // B959's court-depth guard now caps the RADIUS rather than the along-edge run: the return sweeps
+      // ALONG the connect edge, so depth was never the right units for it, and folding depth into the run
+      // could zero out a legitimate return on a shallow court.
+      R: Math.min(Rseed, Math.max(1, perpDepth)), flare, curbT: 0.5, curbS: roadCurbWidth(S),
+      // Per-direction run along the target EDGE from the weld point — a drive landing near the end of a
+      // parking field has plenty of edge one way and a couple of feet the other, and a symmetric clamp
+      // let the short-side return sweep off the end of the field into open ground (owner shot 1).
+      throughAvailPos: Math.max(0, edgeRunPos), throughAvailNeg: Math.max(0, edgeRunNeg),
+      sideAvail: sideRun.dist,
     });
     if (geom) out.push({ sideId: S.id, targetId: T.id, kind, geom });
   }
@@ -3025,6 +3066,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Feet<->screen via the shared viewport engine (B329). { ppf, offX, offY } maps to the
   // engine's { scale, tx, ty }; the math is identical to the old inline form (unit-tested).
   const f2p = useCallback((p) => worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, p), [view]);
+  // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the geo-map hook above; never runs in
+  // production). Lets a headless harness park the viewport on an EXACT world point at an EXACT
+  // scale, so a junction screenshot is reproducible instead of "wheel-scroll and hope".
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
+    window.__plannerView = {
+      get: () => ({ ...view, w: size.w, h: size.h }),
+      centerOn: (fx, fy, ppf) => setView(() => ({ ppf, offX: size.w / 2 - fx * ppf, offY: size.h / 2 - fy * ppf })),
+    };
+  }, [view, size.w, size.h]);
   const p2f = useCallback((cx, cy) => {
     const r = svgRef.current.getBoundingClientRect();
     return screenToWorld({ scale: view.ppf, tx: view.offX, ty: view.offY }, { x: cx - r.left, y: cy - r.top });
@@ -13818,6 +13869,79 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B960/NEW-2 — road↔road end-to-end weld covers (world feet); same overlay pass, so the seam patch
   // paints over the two butting caps and reads as one continuous surface.
   const weldJunctions = useMemo(() => weldJunctionsOf(els), [els]);
+  // NEW-1/NEW-2 — the DISSOLVED road network. Every centerline road's back-of-curb strip, plus the
+  // additive curb-return wedges of every junction it takes part in, plus any weld patch, unioned per
+  // connected cluster (roadNetwork.js / clipper). This REPLACES the strip-per-road + cover-patch render:
+  // a junction is now a topological union, so there is no butting cap to hide, no curb line running
+  // through the intersection, and no second translucent fill stacking on the first. See roadNetwork.js
+  // for why every patch-based attempt (B953…B1006) had to fail on topologies it wasn't tuned for.
+  const roadNet = useMemo(() => {
+    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+    if (!roads.length) return { regions: [], stripes: new Map(), memberIds: new Set() };
+    const byId = new Map(roads.map((r) => [r.id, r]));
+    const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings)]));
+    // Extra pavement contributed by each junction, indexed by the road that owns the junction.
+    const extra = new Map(roads.map((r) => [r.id, []]));
+    // Stripe-only cutters: regions that must INTERRUPT a curb stripe without adding pavement. The one
+    // case is the through road's near face-of-curb stripe, which otherwise draws a curb line straight
+    // across the throat between the two returns — the strip of the side road only covers the middle of
+    // that span, so clipping against pavement alone leaves a stub under each return.
+    const stripeCut = [];
+    const pairs = [];
+    const addExtra = (id, polys) => { const a = extra.get(id); if (a) for (const p of polys || []) if (p && p.length >= 3) a.push(p); };
+    for (const tj of teeJunctions) {
+      addExtra(tj.sideId, tj.geom.wedges);
+      pairs.push([tj.sideId, tj.throughId]);
+      const G = byId.get(tj.throughId), n = tj.geom.nTee, [t1, t2] = tj.geom.throughTangents || [];
+      const depth = G ? roadOuterHalf(G) : 0;                 // back-of-curb → centerline: near stripe only
+      if (t1 && t2 && n && depth > 0) stripeCut.push([t1, t2, { x: t2.x - n.x * depth, y: t2.y - n.y * depth }, { x: t1.x - n.x * depth, y: t1.y - n.y * depth }]);
+    }
+    for (const dj of driveJunctions) addExtra(dj.sideId, dj.geom.wedges);   // target is a rect element, not a road
+    for (const wj of weldJunctions) {
+      addExtra(wj.ids[0], [wj.cover]);
+      for (let i = 1; i < wj.ids.length; i++) pairs.push([wj.ids[0], wj.ids[i]]);
+    }
+    const cluster = clusterIds(roads.map((r) => r.id), pairs);
+    const groups = new Map();
+    for (const r of roads) {
+      const k = cluster.get(r.id);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r.id);
+    }
+    const regions = [];
+    const stripes = new Map();
+    for (const ids of groups.values()) {
+      const parts = [];
+      for (const id of ids) { const s = strip.get(id); if (s && s.length >= 3) parts.push(s); parts.push(...extra.get(id)); }
+      // Style + paint order from the WIDEST member (its surface reads as the merged pavement) — the
+      // same rule the weld cover already used. `zKey` keeps the cluster in the element z-sequence.
+      const styleEl = ids.map((id) => byId.get(id)).filter(Boolean).sort((a, b) => roadOuterHalf(b) - roadOuterHalf(a))[0];
+      const zKey = Math.min(...ids.map((id) => byId.get(id)?.z ?? 0));
+      for (const region of dissolveRings(parts)) regions.push({ region, styleEl, zKey, ids });
+      // A road's inner curb stripes are trimmed against the OTHER pavement in its cluster, so a stripe
+      // ends where it runs into the junction instead of drawing a curb straight through the intersection.
+      for (const id of ids) {
+        const others = [];
+        for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
+        for (const oid of ids) others.push(...extra.get(oid));
+        others.push(...stripeCut);
+        stripes.set(id, roadCurbLines(byId.get(id), settings).flatMap((cl) => clipPolylineOutside(cl, others)));
+      }
+    }
+    regions.sort((a, b) => a.zKey - b.zKey);
+    return { regions, stripes, memberIds: new Set(roads.map((r) => r.id)) };
+  }, [els, settings, teeJunctions, driveJunctions, weldJunctions]);
+  // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as above; never runs in production) — lets the
+  // headless regression assert the DISSOLVED geometry (region count, holes, curb-return radii) directly
+  // instead of inferring it from pixels.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
+    window.__plannerRoadNet = () => ({
+      regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
+      tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length) })),
+      drives: driveJunctions.map((d) => ({ sideId: d.sideId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length })),
+    });
+  }, [roadNet, teeJunctions, driveJunctions]);
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
   const renderMarkupNode = (m) => {
@@ -14459,43 +14583,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
               {markupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
-              {/* Split the element pass at the building layer so the clean-intersection overlay can
-                  render BETWEEN ground surfaces and buildings: it paints over roads/parking/paving
-                  (hiding the raw butting curbs) yet buildings paint over IT (B959/NEW-1 — connection
-                  pavement can never overlap a building). */}
-              {(() => {
-                const surfaces = [...els].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed));
-                // B1006/NEW-2 — FLATTEN the junction to one uniform tone. The clean-tee overlay below the
-                // buildings paints a cover patch over each junction to hide the raw butting curbs, but when a
-                // road/court fill is SEMI-TRANSPARENT (to show the aerial) that translucent cover just STACKS
-                // on the base strips: the two strips already double where they overlap, the cover doubles
-                // again on top, and the butting curb stubs peek through — the owner's darker patch + faint
-                // curved seam. Fix: KNOCK the exact cover polygons OUT of the ground-surface fills+strokes
-                // (an SVG mask), so the overlay's single cover fill (drawn next, at the SAME opacity) REPLACES
-                // that pavement instead of stacking — one uniform tone, aerial still showing through, and the
-                // two return arcs the only curb line across the mouth. Buildings are a separate later pass, so
-                // their z-clip is untouched. Export clones this live SVG, so the knockout carries to PDF/print.
-                const toDcover = (poly) => (poly && poly.length >= 3)
-                  ? poly.map((p, k) => { const q = f2p(p); return `${k ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
-                const coverDs = [
-                  ...teeJunctions.flatMap((tj) => (tj.geom.coverPolys && tj.geom.coverPolys.length ? tj.geom.coverPolys : (tj.geom.cover ? [tj.geom.cover] : []))),
-                  ...driveJunctions.flatMap((dj) => (dj.geom.coverPolys && dj.geom.coverPolys.length ? dj.geom.coverPolys : (dj.geom.cover ? [dj.geom.cover] : []))),
-                  ...weldJunctions.map((wj) => wj.cover),
-                ].map(toDcover).filter(Boolean);
-                if (!coverDs.length) return surfaces;
-                // Mask region + white "show everything" rect span a HUGE area (not just the live viewport),
-                // so a differently-cropped export viewBox (buildExportSvg re-crops the cloned SVG) can never
-                // fall outside the mask and blank the surfaces — only the small cover holes are cut.
-                return (
-                  <>
-                    <mask id="tee-cover-knockout" maskUnits="userSpaceOnUse" x="-100000" y="-100000" width="200000" height="200000">
-                      <rect x="-100000" y="-100000" width="200000" height="200000" fill="#fff" />
-                      {coverDs.map((d, i) => <path key={i} d={d} fill="#000" />)}
-                    </mask>
-                    <g mask="url(#tee-cover-knockout)">{surfaces}</g>
-                  </>
-                );
-              })()}
+              {/* The element pass is split at the building layer so a building always paints over ground
+                  pavement (B959/NEW-1 — connection pavement can never overlap a building). */}
+              {/* NEW-1/NEW-2 — DISSOLVED ROAD NETWORK. Roads share the bottom paint layer (Z_LAYER.road = 0),
+                  so the whole network paints first, in cluster z order, as ONE region per connected cluster:
+                  one fill at one opacity, one continuous curb outline. Each member road then renders only its
+                  hit target, its trimmed inner curb stripes, and its labels (renderElPx). This replaces the
+                  strip-per-road + cover-patch + knockout-mask stack that B953…B1006 kept re-patching. */}
+              {roadNet.regions.length > 0 && (
+                <g data-testid="road-network-layer">
+                  {roadNet.regions.map(({ region, styleEl, ids }, i) => {
+                    const st = styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings);
+                    const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
+                    const d = regionPathD(region, f2p);
+                    if (!d) return null;
+                    return (
+                      <g key={`rn${i}-${ids[0]}`} data-road-cluster={ids.join(",")} pointerEvents="none">
+                        <path data-testid="road-network-surface" data-export="road-network" d={d} fillRule="evenodd"
+                          fill={st.fill} fillOpacity={st.fillOpacity ?? 1} stroke="none" />
+                        <path data-testid="road-network-edge" d={d} fillRule="evenodd" fill="none"
+                          stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(styleEl || {}), ppf, CURB_STROKE_MIN_PX)}
+                          strokeLinejoin="round" />
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
+              {[...els].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet))}
               {/* v3 D3 — INWARD pond berm ring: the earthen embankment sits INSIDE the drawn outline
                   (the fixed outer toe), between the boundary and the inset crest (where the water
                   begins). Drawn OVER the pond (a ground surface, below the building layer) so the water
@@ -14529,58 +14643,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </g>
               )}
-              {/* B953/NEW-1 + B955 + B960 — clean intersection overlay: an opaque pavement patch unifies
-                  each road tee (road→road), each road→parking-drive / road→truck-court junction (hiding
-                  the raw butting curbs across the throat, with the curb-return fillets drawn on top), AND
-                  each road↔road end-to-end WELD (B960/NEW-2 — a seam-hiding cover so two connected roads
-                  read as one continuous surface). Rendered under the building layer (B959/NEW-1). */}
-              {(teeJunctions.length > 0 || driveJunctions.length > 0 || weldJunctions.length > 0) && (() => {
-                const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
-                const toD = (poly) => poly && poly.length >= 3
-                  ? poly.map((p, k) => { const q = f2p(p); return `${k ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z"
-                  : null;
-                const all = [
-                  ...teeJunctions.map((tj) => ({ geom: tj.geom, styleId: tj.throughId, roadId: tj.sideId, key: `tee-${tj.sideId}-${tj.throughId}`, tag: `${tj.sideId}→${tj.throughId}` })),
-                  ...driveJunctions.map((dj) => ({ geom: dj.geom, styleId: dj.sideId, roadId: dj.sideId, key: `drv-${dj.sideId}-${dj.targetId}`, tag: `${dj.sideId}→${dj.kind}` })),
-                ];
-                return (
-                  <g data-testid="road-tee-layer" pointerEvents="none">
-                    {/* weld covers first (plain seam patches, no returns) */}
-                    {weldJunctions.map((wj) => {
-                      // style from the WIDEST welded road (its fill reads as the merged surface)
-                      const styleEl = wj.ids.map((id) => els.find((x) => x.id === id)).filter(Boolean)
-                        .sort((a, b) => roadOuterHalf(b) - roadOuterHalf(a))[0];
-                      const st = styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings);
-                      const coverD = toD(wj.cover);
-                      return coverD ? (
-                        <path key={`weld-${wj.ids.join("-")}-${wj.P.x.toFixed(1)},${wj.P.y.toFixed(1)}`} data-testid="road-weld-cover" data-export="road-tee-cover"
-                          d={coverD} fill={st.fill} fillOpacity={st.fillOpacity ?? 1} stroke="none" />
-                      ) : null;
-                    })}
-                    {all.map((j) => {
-                      const g = j.geom;
-                      const styleEl = els.find((x) => x.id === j.styleId);
-                      const st = styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings);
-                      const roadEl = els.find((x) => x.id === j.roadId);
-                      const cw = curbStrokePx(roadCurbWidth(roadEl || {}), ppf, CURB_STROKE_MIN_PX);
-                      const fOp = st.fillOpacity ?? 1;
-                      // B971 — the cover is now an ARRAY of simple opaque fills (seam band + the two
-                      // armpit fillet wedges), NOT one throat-widened fan. Each is its own simple polygon.
-                      const polys = (g.coverPolys && g.coverPolys.length ? g.coverPolys : [g.cover]).map(toD).filter(Boolean);
-                      return (
-                        <g key={j.key} data-tee={j.tag}>
-                          {polys.map((dPoly, k) => <path key={`cp${k}`} d={dPoly} fill={st.fill} fillOpacity={fOp} stroke="none" data-export="road-tee-cover" />)}
-                          {g.returns.map((arc, k) => arc.length >= 2 ? (
-                            <polyline key={k} data-testid="road-tee-return"
-                              points={arc.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")}
-                              fill="none" stroke={st.stroke} strokeWidth={cw} strokeLinecap="round" />
-                          ) : null)}
-                        </g>
-                      );
-                    })}
-                  </g>
-                );
-              })()}
+              {/* (Removed) B953/B955/B960 clean-intersection overlay — the cover patches, the curb-return
+                  strokes and the tee-cover knockout mask are all superseded by the dissolved road network
+                  painted above: a junction is now a boolean union of pavement, not a patch over a seam. */}
               {/* buildings + any layer at/above the building band, painted OVER the overlay. */}
               {[...els].sort(byZ).filter((el) => zOrder(el) >= BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
@@ -18943,7 +19008,7 @@ function dimSlideFor(el, allEls) {
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet) {
   // B617 — zoom multiplier (px/ft ÷ the default 0.35) so a road's curb/edge stroke holds constant
   // relative to the drawing across zoom, exactly like the in-component markup/utility strokes.
   const zk = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x) / 0.35;
@@ -19069,20 +19134,33 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const dPath = ring.length >= 3 ? ring.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
     const stroke = st.stroke; // B619: no accent recolor on select — blue vertex handles cue the selection
     const rparts = [];
+    // NEW-1/NEW-2 — a road that belongs to the dissolved network (every centerline road does, even a
+    // lone one — it is simply a one-member cluster) does NOT paint its own strip fill or back-of-curb
+    // edge here: the network layer already painted the whole cluster as one region with one continuous
+    // outline. Painting the strip again would put the butting cap and the through-curb line straight
+    // back on top of the union. What stays per-road is the invisible HIT TARGET (so the road is still
+    // clickable/draggable — pointerEvents="all" hits an unpainted path), the texture overlay, and the
+    // trimmed inner curb stripes.
+    const inNetwork = !!(roadNet && roadNet.memberIds && roadNet.memberIds.has(el.id));
     if (dPath) {
-      // Pavement+curb surface = bufferPolyline of the tessellated centerline at travelW + 2 curbs.
-      rparts.push(<path key="surf" d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />);
+      if (inNetwork) {
+        rparts.push(<path key="hit" d={dPath} fill="none" stroke="none" pointerEvents="all" />);
+      } else {
+        // Pavement+curb surface = bufferPolyline of the tessellated centerline at travelW + 2 curbs.
+        rparts.push(<path key="surf" d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />);
+        // B719: the pavement edge (back-of-curb) is drawn as a TO-SCALE 6" curb line (curbFt × ppf,
+        // floored), not a fixed pixel weight — so the road border reads as a thin curb at site zoom
+        // and grows proportionally on zoom-in, instead of the old fat ~5–7px band. Selection is cued
+        // by the blue vertex handles (B619), so no on-select weight bump here.
+        rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX)} />);
+      }
       if (texFill) rparts.push(<path key="tex" d={dPath} fill={texFill} stroke="none" pointerEvents="none" />);
-      // B719: the pavement edge (back-of-curb) is drawn as a TO-SCALE 6" curb line (curbFt × ppf,
-      // floored), not a fixed pixel weight — so the road border reads as a thin curb at site zoom
-      // and grows proportionally on zoom-in, instead of the old fat ~5–7px band. Selection is cued
-      // by the blue vertex handles (B619), so no on-select weight bump here.
-      rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX)} />);
     }
-    // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges),
-    // so the striping follows the offset edges — NOT the old w>=h axis logic (B70 contract held:
-    // a 24′ travel road still reads 25′ wide because the strip ring is travelW + a curb each side).
-    roadCurbLines(el, settings).forEach((cl, i) => {
+    // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges), TRIMMED
+    // against the rest of the cluster's pavement (roadNet.stripes) so a stripe stops at the junction
+    // instead of drawing a curb straight through the intersection.
+    const stripeLines = inNetwork ? (roadNet.stripes.get(el.id) || []) : roadCurbLines(el, settings);
+    stripeLines.forEach((cl, i) => {
       if (!cl || cl.length < 2) return;
       rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX)} pointerEvents="none" />);
     });

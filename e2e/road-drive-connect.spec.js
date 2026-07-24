@@ -5,11 +5,12 @@
  * nearestRectEdge / teeGeometry car-vs-truck); this is the connect + render + wiring guard. The
  * truck-court variant shares this exact path with a truck-scale radius (see V415, live-verify). */
 import { test, expect } from "@playwright/test";
+import { armPlannerHooks, roadNetwork, netSurfaces } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
-const teeReturns = (p) => p.locator('[data-testid="road-tee-return"]');
 
 async function startBlank(page) {
+  await armPlannerHooks(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Start blank/i }).click();
   await expect(canvas(page)).toBeVisible();
@@ -55,8 +56,13 @@ test.describe("B955 — road → parking-drive connect", () => {
     expect(road).toBeTruthy();
     expect(road.driveTee.kind).toBe("parking");
     expect(road.driveTee.returnR).toBe(15); // car-scale seed (B989 — lowered 20→15, tidy default)
-    await expect(teeReturns(page)).toHaveCount(2);
-    await expect(page.locator('[data-export="road-tee-cover"]').first()).toBeAttached();
+    // NEW-1/NEW-2 — the drive + its two curb-return wedges dissolve into one pavement region.
+    await expect.poll(async () => (await roadNetwork(page))?.drives.length ?? 0).toBe(1);
+    const net = await roadNetwork(page);
+    expect(net.drives[0].kind).toBe("parking");
+    expect(net.drives[0].wedges).toBe(2);
+    expect(net.drives[0].R).toBeGreaterThan(0);
+    await expect(netSurfaces(page)).toHaveCount(1);
   });
 
   test("editing the drive curb-return radius re-solves the returns", async ({ page }) => {
@@ -64,8 +70,8 @@ test.describe("B955 — road → parking-drive connect", () => {
     await canvas(page).click({ position: { x: 20, y: 20 } });
     const box = await canvas(page).boundingBox();
     await drawParkingThenRoad(page, box);
-    await expect(teeReturns(page)).toHaveCount(2);
-    const before = await teeReturns(page).first().getAttribute("points");
+    await expect.poll(async () => (await roadNetwork(page))?.drives.length ?? 0).toBe(1);
+    const before = (await roadNetwork(page)).drives[0].R;
 
     // Open the road's Properties (double-click its stub away from the mid-span dim label), bump the
     // Drive curb return, and confirm the return polyline changes.
@@ -76,7 +82,7 @@ test.describe("B955 — road → parking-drive connect", () => {
     await curbReturn.press("Enter");
     await page.waitForTimeout(200);
 
-    const after = await teeReturns(page).first().getAttribute("points");
-    expect(after).not.toEqual(before);
+    const after = (await roadNetwork(page)).drives[0].R;
+    expect(after).toBeGreaterThan(before);
   });
 });
