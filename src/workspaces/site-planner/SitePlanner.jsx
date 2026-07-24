@@ -165,7 +165,7 @@ import { estDepthToWaterFt, estMaxExcavDepthFt, poolRelevantForRole } from "./li
 import { deriveTailwater, TAILWATER_SOURCES, tailwaterNote } from "./lib/tailwaterSource.js";
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
-import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy } from "./lib/detentionCriteria.js";
+import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy, pumpAllowance } from "./lib/detentionCriteria.js";
 import { selectDetentionMethod } from "./lib/detentionMethod.js";
 import { computeTimeOfConcentration } from "./lib/timeOfConcentration.js";
 import { outletProblems } from "./lib/outletStructure.js";
@@ -17889,6 +17889,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <SourceTag code={tc.lengthEstimated || tc.slopeEstimated ? "estimate" : "code"} label="Time of concentration" basis={tc.basis} />
                         </div>
                       ) : null;
+                      // NEW-27 (owner directive 2026-07-24) — PUMPED OUTFALL, criteria-DERIVED so the
+                      // developer is never asked for a pump discharge he doesn't know ("that's not
+                      // something I need to be calculating"). The allowed pump rate = the jurisdiction's
+                      // pumped share of the allowable release; an OPTIONAL advanced override is honored +
+                      // flagged. The gravity-vs-pump feasibility line consumes the derived value. All copy
+                      // is em-dash-free (this renders in the property panel, which the harness scans).
+                      const pumpAllow = pumpAllowance(criteria, {
+                        releaseRateCfs: relCap,
+                        overrideCfs: Number.isFinite(det.pumpRateCfs) ? det.pumpRateCfs : null,
+                      });
+                      const gravityImpaired = Number.isFinite(tailwaterElevFt) && floorApprox < tailwaterElevFt;
+                      const pumpBlock = relCap != null && pumpAllow.sharePct != null ? (
+                        <div style={{ marginTop: 10, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                            <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Pumped outfall (screening)</span>
+                            {pumpAllow.overridden
+                              ? <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 5, color: "var(--on-accent)", background: PAL.accent }}>YOUR RATE</span>
+                              : <SourceTag code={pumpAllow.verified ? "code" : "estimate"} label="Pumped share of the allowable release" basis={pumpAllow.source} />}
+                          </div>
+                          <div style={{ fontSize: 11, color: PAL.text, lineHeight: 1.4 }}>
+                            Up to <b>{f1(pumpAllow.allowedPumpCfs)} cfs</b> can be pumped
+                            {pumpAllow.overridden
+                              ? " (the rate you entered)."
+                              : `: ${pumpAllow.sharePct}% of the ${relCap} cfs allowable release for ${criteria.label}${pumpAllow.verified ? "." : " (ASSUMED)."}`}
+                            {" "}The rest leaves by gravity.
+                          </div>
+                          <div style={smallNote}>You don't calculate this; it comes from the criteria. A pump is a reviewer exception (reliability, backup power). Confirm with your engineer.</div>
+                          <div style={{ ...smallNote, color: gravityImpaired ? PAL.warn : PAL.muted, marginTop: 3 }}>
+                            {gravityImpaired
+                              ? `Gravity outfall looks unlikely here (the pond floor sits below the receiving water), so a pump up to ${f1(pumpAllow.allowedPumpCfs)} cfs is indicated.`
+                              : `Gravity outfall looks feasible here, so a pump is optional (up to ${f1(pumpAllow.allowedPumpCfs)} cfs if used).`}
+                          </div>
+                          <Field label="Override pump rate (cfs, optional)">
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <NumInput allowClear style={{ ...numInput, width: 72 }} value={det.pumpRateCfs ?? ""} placeholder={`≈${f1(pumpAllow.derivedCfs)}`} min={0} onCommit={(n) => setDet({ pumpRateCfs: Number.isFinite(n) && n >= 0 ? n : null })} />
+                              {pumpAllow.overridden && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the criteria-derived rate" onClick={() => setDet({ pumpRateCfs: null })}>×</button>}
+                            </span>
+                          </Field>
+                        </div>
+                      ) : null;
 
                       if (!outlet) {
                         const primaryLabel = relSource === "suggested" ? "⚡ Auto-size detention" : "+ Propose outlet";
@@ -17918,6 +17958,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             {critLine}
                             {methodLine}
                             {tcLine}
+                            {pumpBlock}
                           </>
                         );
                       }
@@ -18046,6 +18087,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               ...(routed.caveat ? [{ text: routed.caveat }] : []),
                             ]} />
                           </div>
+                          {pumpBlock}
                         </>
                       );
                     })()}
