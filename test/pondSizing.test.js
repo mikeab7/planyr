@@ -137,8 +137,8 @@ describe("sizePondForTargets — the assistant", () => {
     expect(r.actions[0].kind).toBe("inundated");
   });
   it("mitigation target beyond the pinch-off reports the geometric ceiling + the grow fallback", () => {
-    // NEW-21 — sizing a pond FOR mitigation means it's a Mitigation/Hybrid pond (a Detention-role pond's
-    // below-flood cut earns no credit, so the solver correctly gates it instead of a futile deepen).
+    // NEW-26 — an ungated pond credits its below-flood cut regardless of role (connected through the
+    // outfall by default), so the solver sizes toward the target and hits the geometric pinch-off ceiling.
     const r = sizePondForTargets({ ring: SQ(60), det: { ...det0, role: "mitigation" }, wseFt: 95, mitTargetCf: 5 * AC_FT, detTargetCf: 0 });
     expect(r.ok).toBe(true);
     const pinch = r.actions.find((a) => a.kind === "pinch-off");

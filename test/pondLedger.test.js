@@ -171,24 +171,38 @@ describe("effectivePondRole — the owner's pick wins; absent = auto (NEW-8)", (
   });
 });
 
-describe("accumulatePondLedger — the role credit gate (NEW-8)", () => {
+describe("accumulatePondLedger — the outfall credit gate (NEW-26, supersedes the NEW-8 role gate)", () => {
   const candOf = (e) => e.bands.mitigationCandidateCf;
-  it("mitigation/dual roles credit the candidate band; detention role leaves it uncredited", () => {
+  it("EVERY connected (ungated) pond credits its candidate band regardless of role — the flood backs in through the outfall", () => {
     const mitPond = { ...splitAt(97.5), id: "m", role: "mitigation" };
     const dualPond = { ...splitAt(97.5), id: "d", role: "dual" };
     const detPond = { ...splitAt(97.5), id: "det", role: "detention" };
     const led = accumulatePondLedger([mitPond, dualPond, detPond]);
-    expect(led.creditedMitCf).toBeCloseTo(candOf(mitPond) + candOf(dualPond), 6);
-    expect(led.uncreditedMitCf).toBeCloseTo(candOf(detPond), 6);
+    expect(led.creditedMitCf).toBeCloseTo(candOf(mitPond) + candOf(dualPond) + candOf(detPond), 6);
+    expect(led.uncreditedMitCf).toBe(0);
     expect(led.mitCandidateCf).toBeCloseTo(led.creditedMitCf + led.uncreditedMitCf, 6);
-    expect(led.creditedPondCount).toBe(2);
+    expect(led.creditedPondCount).toBe(3);
+    expect(led.mitGatedReason).toBe(null);
   });
-  it("auto role credits a mostly-inundated pond (suggested mitigation) without an owner pick", () => {
+  it("a GATED outfall withholds the credit (reason outlet-gated) even for a detention pond", () => {
+    const gated = { ...splitAt(97.5), id: "g", role: "detention", outletGated: true };
+    const led = accumulatePondLedger([gated]);
+    expect(led.creditedMitCf).toBe(0);
+    expect(led.uncreditedMitCf).toBeCloseTo(candOf(gated), 6);
+    expect(led.mitGatedReason).toBe("outlet-gated");
+  });
+  it("NO outfall (hasOutfall:false) withholds the credit (reason no-outfall)", () => {
+    const isolated = { ...splitAt(97.5), id: "i", role: "detention", hasOutfall: false };
+    const led = accumulatePondLedger([isolated]);
+    expect(led.creditedMitCf).toBe(0);
+    expect(led.mitGatedReason).toBe("no-outfall");
+  });
+  it("auto role credits a mostly-inundated pond (connected by default) without an owner pick", () => {
     const led = accumulatePondLedger([{ ...splitAt(100.5), role: null }]);
     expect(led.creditedMitCf).toBeGreaterThan(0);
     expect(led.uncreditedMitCf).toBe(0);
   });
-  it("role NEVER moves usable/dead — only which ledger the candidate band credits (no double-count)", () => {
+  it("role NEVER moves usable/dead — only whether the candidate band credits (no double-count)", () => {
     for (const role of ["detention", "mitigation", "dual", null]) {
       // coincidentStorm:true so usable/candidate/poolDead partition the column exclusively (R1 —
       // by default the recovered column overlaps the below-WSE candidate band).

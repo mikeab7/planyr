@@ -1,8 +1,13 @@
-// NEW-21 (owner live-verify 2026-07-24) — the ONE shared mitigationCredit() so the site ledger, the
-// Yield verdict, the pond-sizing optimizer, and the ⚡ Optimize card can never compute "provided
-// mitigation" two different ways (the SHORT 0.0 verdict vs the card's "already covers 0.2" — the exact
-// contradiction the owner caught). A below-WSE cut credits ONLY when the floodplain can use it:
-// hydraulically open (not berm-sealed) AND the pond is designated Mitigation/Hybrid.
+// NEW-21 / NEW-26 (owner live-verify 2026-07-24) — the ONE shared mitigationCredit() so the site
+// ledger, the Yield verdict, the pond-sizing optimizer, and the ⚡ Optimize card can never compute
+// "provided mitigation" two different ways (the SHORT 0.0 verdict vs the card's "already covers 0.2"
+// — the exact contradiction the owner caught).
+//
+// NEW-26 supersedes the NEW-21 berm-seal + role gates: a below-WSE cut is compensating storage BY
+// DEFAULT, because every detention pond is hydraulically connected to the floodplain through its own
+// outfall (the flood backs in through the outlet). Credit is ZERO in exactly two cases: the outfall
+// is GATED (a flap valve, `split.outletGated` / `det.outletGated`) or there is NO outfall
+// (`split.hasOutfall === false`). Neither the pond's ROLE nor its BERM gates any more.
 // Pure + a SitePlanner source-scan for the wiring (vitest is DOM-free). Fixture-driven.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -14,104 +19,128 @@ import { sizePondForTargets } from "../src/workspaces/site-planner/lib/pondSizin
 const SQ = (s = 200) => [{ x: 0, y: 0 }, { x: s, y: 0 }, { x: s, y: s }, { x: 0, y: s }];
 const AC = 43560;
 // A pond anchored at TOB 100 (floor ~90, water surface ~99) with a mid-column flood at 95 → a real
-// below-WSE mitigation candidate. bermed:false unless a test says otherwise.
+// below-WSE mitigation candidate. Outfall ungated + present unless a test says otherwise.
 const det = { depth: 10, freeboard: 1, slope: 3, tobElev: 100 };
 const bands = bandedStorage(SQ(200), det, { wseFt: 95 });
-const splitOpen = { mode: "anchored", bands, wseFt: 95, grossCf: bands.grossCf, bermed: false };
+const splitOpen = { mode: "anchored", bands, wseFt: 95, grossCf: bands.grossCf };
 
-describe("mitigationCredit — the ONE shared gate (role + hydraulic seal)", () => {
-  it("candidate exists but a DETENTION pond credits nothing (reason role-detention)", () => {
-    const c = mitigationCredit({ role: "detention" }, splitOpen);
+describe("mitigationCredit — connected by DEFAULT (NEW-26)", () => {
+  it("an ungated, connected pond credits the FULL candidate regardless of role (reason null)", () => {
     expect(bands.mitigationCandidateCf).toBeGreaterThan(0);
-    expect(c.candidateCf).toBeCloseTo(bands.mitigationCandidateCf, 6);
-    expect(c.creditedCf).toBe(0);
-    expect(c.reason).toBe("role-detention");
-  });
-
-  it("a MITIGATION or HYBRID pond credits the full candidate (reason null)", () => {
-    for (const role of ["mitigation", "dual"]) {
+    for (const role of ["detention", "mitigation", "dual", null, undefined]) {
       const c = mitigationCredit({ role }, splitOpen);
+      expect(c.candidateCf).toBeCloseTo(bands.mitigationCandidateCf, 6);
       expect(c.creditedCf).toBeCloseTo(bands.mitigationCandidateCf, 6);
       expect(c.reason).toBe(null);
     }
   });
 
-  it("a BERMED pond whose rim clears the flood WSE is sealed → zero credit even as Mitigation (berm-sealed)", () => {
-    // rim (TOB 100) above the flood WSE (95) + bermed → the berm keeps the flood out.
-    const sealed = { ...splitOpen, bermed: true };
-    const c = mitigationCredit({ role: "mitigation" }, sealed);
+  it("a GATED outfall on the split → zero credit, reason outlet-gated", () => {
+    const c = mitigationCredit({ role: "detention" }, { ...splitOpen, outletGated: true });
     expect(c.candidateCf).toBeGreaterThan(0);
     expect(c.creditedCf).toBe(0);
-    expect(c.reason).toBe("berm-sealed");
+    expect(c.reason).toBe("outlet-gated");
   });
 
-  it("a BERMED pond OVERTOPPED by the flood (rim below WSE) is NOT sealed — the role gate governs", () => {
-    // TOB 94 below the flood WSE 96 → the flood overtops the berm, so the cut IS wetted.
-    const det2 = { depth: 10, freeboard: 1, slope: 3, tobElev: 94 };
-    const bands2 = bandedStorage(SQ(200), det2, { wseFt: 96 });
-    const overtopped = { mode: "anchored", bands: bands2, wseFt: 96, grossCf: bands2.grossCf, bermed: true };
-    expect(mitigationCredit({ role: "mitigation" }, overtopped).reason).toBe(null); // credits
-    expect(mitigationCredit({ role: "detention" }, overtopped).reason).toBe("role-detention");
+  it("a GATED outfall passed on the det arg → zero credit, reason outlet-gated", () => {
+    const c = mitigationCredit({ role: "mitigation", outletGated: true }, splitOpen);
+    expect(c.creditedCf).toBe(0);
+    expect(c.reason).toBe("outlet-gated");
+  });
+
+  it("NO outfall (hasOutfall === false) → zero credit, reason no-outfall", () => {
+    const c = mitigationCredit({ role: "detention" }, { ...splitOpen, hasOutfall: false });
+    expect(c.candidateCf).toBeGreaterThan(0);
+    expect(c.creditedCf).toBe(0);
+    expect(c.reason).toBe("no-outfall");
+  });
+
+  it("the BERM no longer gates — a bermed, connected pond still credits (NEW-26 supersedes NEW-21)", () => {
+    // Under NEW-21 a bermed rim above the flood WSE zeroed the credit; NEW-26 credits it (the flood
+    // reaches the cut through the outfall, not over the berm).
+    const c = mitigationCredit({ role: "mitigation" }, { ...splitOpen, bermed: true });
+    expect(c.creditedCf).toBeCloseTo(bands.mitigationCandidateCf, 6);
+    expect(c.reason).toBe(null);
   });
 
   it("no candidate → zero credit, no reason", () => {
-    const dry = { mode: "anchored", bands: { mitigationCandidateCf: 0, elevations: {} }, wseFt: 95, grossCf: 1, bermed: false };
+    const dry = { mode: "anchored", bands: { mitigationCandidateCf: 0, elevations: {} }, wseFt: 95, grossCf: 1 };
     expect(mitigationCredit({ role: "mitigation" }, dry)).toEqual({ creditedCf: 0, candidateCf: 0, reason: null });
   });
 });
 
-describe("NEW-21 — the ledger and the optimizer AGREE (both read mitigationCredit)", () => {
-  const entry = (role) => ({
+describe("NEW-26 — the ledger and the optimizer AGREE (both read mitigationCredit)", () => {
+  const entry = (extra = {}) => ({
     id: "p1", mode: "anchored", usableCf: bands.usableCf, deadCf: 0, grossCf: bands.grossCf, bands,
-    wseFt: 95, inTrigger: true, factsKnown: true, role, bermed: false,
+    wseFt: 95, inTrigger: true, factsKnown: true, role: "detention", ...extra,
   });
 
-  it("the ledger credits a detention pond ZERO and records the gate reason", () => {
-    const led = accumulatePondLedger([entry("detention")]);
+  it("the ledger credits an ungated detention pond the FULL candidate, no gate reason", () => {
+    const led = accumulatePondLedger([entry()]);
+    expect(led.creditedMitCf).toBeCloseTo(bands.mitigationCandidateCf, 6);
+    expect(led.uncreditedMitCf).toBe(0);
+    expect(led.mitGatedReason).toBe(null);
+    expect(led.creditedPondCount).toBe(1);
+  });
+
+  it("the ledger credits ZERO and records outlet-gated when the split is gated", () => {
+    const led = accumulatePondLedger([entry({ outletGated: true })]);
     expect(led.creditedMitCf).toBe(0);
     expect(led.uncreditedMitCf).toBeCloseTo(bands.mitigationCandidateCf, 6);
-    expect(led.mitGatedReason).toBe("role-detention");
+    expect(led.mitGatedReason).toBe("outlet-gated");
   });
 
-  it("the ledger credits a mitigation pond the full candidate, no gate reason", () => {
-    const led = accumulatePondLedger([entry("mitigation")]);
-    expect(led.creditedMitCf).toBeCloseTo(bands.mitigationCandidateCf, 6);
-    expect(led.mitGatedReason).toBe(null);
+  it("the ledger records no-outfall when the split has no outfall", () => {
+    const led = accumulatePondLedger([entry({ hasOutfall: false })]);
+    expect(led.creditedMitCf).toBe(0);
+    expect(led.mitGatedReason).toBe("no-outfall");
   });
 
-  it("sizePondForTargets on a DETENTION pond GATES mitigation (never 'covered'), matching the ledger's 0", () => {
+  it("sizePondForTargets on a connected (ungated) pond is NOT gated — it credits + covers", () => {
     const r = sizePondForTargets({ ring: SQ(200), det: { ...det, role: "detention" }, wseFt: 95, mitTargetCf: 0.2 * AC, detTargetCf: 0 });
     expect(r.ok).toBe(true);
+    expect(r.mitigation.gated).toBe(null);
+    expect(r.mitigation.providedCf).toBeGreaterThan(0);
+    expect(r.mitigation.covered).toBe(true); // the candidate dwarfs the small 0.2 ac-ft target
+  });
+
+  it("sizePondForTargets on a GATED outfall GATES mitigation (never 'covered'), matching the ledger's 0", () => {
+    const r = sizePondForTargets({ ring: SQ(200), det: { ...det, role: "detention", outletGated: true }, wseFt: 95, mitTargetCf: 0.2 * AC, detTargetCf: 0 });
+    expect(r.ok).toBe(true);
     expect(r.mitigation.providedCf).toBe(0);       // SAME zero the ledger/verdict show (not the raw candidate)
-    expect(r.mitigation.covered).toBe(false);      // never the false "already covers"
-    expect(r.mitigation.gated).toBe("role-detention");
+    expect(r.mitigation.covered).toBe(false);      // never a false "already covers"
+    expect(r.mitigation.gated).toBe("outlet-gated");
     expect(r.actions.some((a) => a.kind === "mitigation-gated")).toBe(true);
     expect(r.actions.some((a) => a.kind === "deepen")).toBe(false); // no futile dig on a gated pond
   });
-
-  it("sizePondForTargets on a MITIGATION pond is NOT gated (credits + sizes as before)", () => {
-    const r = sizePondForTargets({ ring: SQ(200), det: { ...det, role: "mitigation" }, wseFt: 95, mitTargetCf: 0.2 * AC, detTargetCf: 0 });
-    expect(r.mitigation.gated).toBe(null);
-    expect(r.mitigation.providedCf).toBeGreaterThan(0);
-  });
 });
 
-describe("NEW-21/22/23 — SitePlanner wiring (source scan)", () => {
+describe("NEW-26 / 22 / 23 — SitePlanner wiring (source scan)", () => {
   const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 
-  it("NEW-21 — the Optimize card names the gate reason + options (never a false 'sized toward'/'already covers')", () => {
+  it("NEW-26 — the Optimize card names the outfall gate reason + fix (never a false 'sized toward'/'already covers')", () => {
     expect(src).toContain("} else if (pass2.mitigation.gated) {");
-    expect(src).toContain('mitGapNote = pass2.mitigation.gated === "berm-sealed"');
-    expect(src).toContain("its berm seals it off from the floodplain");
-    expect(src).toContain("set its purpose to Hybrid (Detention + Mitigation)");
+    expect(src).toContain('mitGapNote = pass2.mitigation.gated === "no-outfall"');
+    expect(src).toContain("This pond has no outfall to the floodplain");
+    expect(src).toContain("This pond's outfall is marked gated");
   });
 
-  it("NEW-21 — the pond ledger stamps `bermed`, and the drainage object exposes the gate reason", () => {
-    expect(src).toContain("const bermed = gradeFt != null && Number.isFinite(det.tobElev) && det.tobElev > gradeFt + 0.02;");
+  it("NEW-26 — pondSplitFor stamps `outletGated`, and the drainage object exposes the gate reason", () => {
+    expect(src).toContain("const outletGated = !!(e.det && e.det.outletGated);");
+    expect(src).toContain("factsKnown: true, outletGated };");
     expect(src).toContain("gatedReason: pondLedger.mitGatedReason");
     // the Mitigation-detail panel explains a gated SHORT (not just the card)
-    expect(src).toContain('d.mitProvided.gatedReason');
+    expect(src).toContain("d.mitProvided.gatedReason");
     expect(src).toContain('"mit-gated"');
+  });
+
+  it("NEW-26 — the pond inspector carries an `outletGated` toggle (default off = connected)", () => {
+    expect(src).toContain("setDet({ outletGated: e.target.checked ? true : null })");
+  });
+
+  it("NEW-26 — the credited cut flags its ASSUMED open-outfall connection (BKDD citation target)", () => {
+    expect(src).toContain("Credited cut assumes an OPEN (ungated) outfall connection");
+    expect(src).toContain("BKDD Rules 22-01");
   });
 
   it("NEW-22 — the freshness line no longer duplicates 'ago' (formatAge already supplies it)", () => {
