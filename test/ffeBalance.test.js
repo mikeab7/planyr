@@ -1,37 +1,8 @@
-// Grading milestone (PR-N DECISION 2 + 3) — the finished-floor / earthwork balance layer.
-// Pure module; synthetic monotone net functions (no engine, no DOM).
+// Grading milestone (PR-N DECISION 3) — the finished-floor / earthwork balance layer.
+// Pure module; synthetic monotone net functions (no engine, no DOM). The net earthwork
+// residual is reported in CY (owner preference 2026-07-24), not truckloads.
 import { describe, it, expect } from "vitest";
-import {
-  TRUCK_CY_MIN, TRUCK_CY_MAX, truckloads, truckloadLabel,
-  solveBalanceFfe, ffeDualDisplay,
-} from "../src/workspaces/site-planner/lib/ffeBalance.js";
-
-describe("DECISION 2 — the net residual in truckloads", () => {
-  it("bigger loads (max CY/truck) need FEWER trucks: lo = ceil(cy/max), hi = ceil(cy/min)", () => {
-    // 1400 CY: 1400/14 = 100 (lo), 1400/12 = 116.7 → 117 (hi)
-    expect(truckloads(1400)).toEqual({ lo: 100, hi: 117 });
-  });
-  it("sign is ignored — import and export both take trucks", () => {
-    expect(truckloads(-1400)).toEqual(truckloads(1400));
-  });
-  it("zero / non-finite volume → no trucks", () => {
-    expect(truckloads(0)).toEqual({ lo: 0, hi: 0 });
-    expect(truckloads(NaN)).toEqual({ lo: 0, hi: 0 });
-    expect(truckloads(null)).toEqual({ lo: 0, hi: 0 });
-  });
-  it("a tiny non-zero volume is at least one truckload", () => {
-    expect(truckloads(3)).toEqual({ lo: 1, hi: 1 });
-  });
-  it("the label collapses to a single count when lo === hi, else a range", () => {
-    expect(truckloadLabel(3)).toBe("≈ 1 truckload");
-    expect(truckloadLabel(1400)).toBe("≈ 100–117 truckloads");
-    expect(truckloadLabel(0)).toBe("");
-  });
-  it("the CY/truck range is the documented 12–14", () => {
-    expect(TRUCK_CY_MIN).toBe(12);
-    expect(TRUCK_CY_MAX).toBe(14);
-  });
-});
+import { solveBalanceFfe, ffeDualDisplay } from "../src/workspaces/site-planner/lib/ffeBalance.js";
 
 describe("DECISION 3 — solveBalanceFfe never drops below the regulatory floor", () => {
   // A linear net model: 1 ft of pad raise adds `perFtCy` of fill (net rises by perFtCy).

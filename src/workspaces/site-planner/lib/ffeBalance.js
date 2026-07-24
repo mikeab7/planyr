@@ -1,7 +1,7 @@
-/* Grading milestone (PR-N DECISION 2 + 3) — the finished-floor / earthwork balance layer.
+/* Grading milestone (PR-N DECISION 3) — the finished-floor / earthwork balance layer.
  *
- * TWO pure pieces, no DOM, feet + cubic yards everywhere. Screening only — confirm final
- * grading with your civil engineer.
+ * Pure, no DOM, feet + cubic yards everywhere. Screening only — confirm final grading with
+ * your civil engineer.
  *
  * DECISION 3 — the balance-optimal FFE float. The regulatory MINIMUM finished-floor is the
  * hard floor (BFE + the jurisdiction's freeboard, from lib/buildability.js requiredFfe).
@@ -16,31 +16,9 @@
  * monotone increasing in the floor (higher pad → more fill → less export) — so the solver
  * stays engine-agnostic and testable with a synthetic net function.
  *
- * DECISION 2 — the net residual in plain haul terms: truckloads. One tandem dump hauls
- * ~12–14 bank CY (a screening range, not a spec), so a CY residual maps to a truckload
- * COUNT the developer can picture. Bigger loads (max CY/truck) → the LOW count.
+ * DECISION 2 — the net earthwork residual is reported in CUBIC YARDS (owner preference,
+ * 2026-07-24: "I want CY, not truckloads"), on the Earthwork "Net dirt" row.
  */
-
-// One tandem/off-road dump ≈ 12–14 bank CY (screening range — label it, never a spec).
-export const TRUCK_CY_MIN = 12;
-export const TRUCK_CY_MAX = 14;
-
-/* Truckloads to move `cy` bank cubic yards, as a { lo, hi } range. Bigger loads (max
- * CY/truck) need FEWER trucks → lo; smaller loads → hi. Sign is ignored (import and
- * export both take trucks). A non-finite / zero volume → { lo:0, hi:0 }. Pure. */
-export function truckloads(cy, { min = TRUCK_CY_MIN, max = TRUCK_CY_MAX } = {}) {
-  const q = Math.abs(Number.isFinite(cy) ? cy : 0);
-  if (!(q > 0) || !(min > 0) || !(max > 0)) return { lo: 0, hi: 0 };
-  return { lo: Math.ceil(q / max), hi: Math.ceil(q / min) };
-}
-
-/* "≈ 8–10 truckloads" | "≈ 1 truckload" | "" (nothing to haul). Pure. */
-export function truckloadLabel(cy, opts) {
-  const { lo, hi } = truckloads(cy, opts);
-  if (hi <= 0) return "";
-  if (lo === hi) return `≈ ${lo.toLocaleString("en-US")} truckload${lo === 1 ? "" : "s"}`;
-  return `≈ ${lo.toLocaleString("en-US")}–${hi.toLocaleString("en-US")} truckloads`;
-}
 
 /* Solve the balance-optimal finished floor. Inputs:
  *   netAtFfe(ffeFt) → net dirt CY at that trial floor (+ import / − export), or null when

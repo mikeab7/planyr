@@ -1,6 +1,7 @@
-// v3 grading milestone (PR-P) — the balance-optimal FFE float (DECISION 3) + the net
-// residual in truckloads (DECISION 2). Behavior lives in the pure module
-// (ffeBalance.test.js); this guards the SitePlanner wiring by source scan (vitest is DOM-free).
+// v3 grading milestone (PR-P) — the balance-optimal FFE float (DECISION 3). The net
+// earthwork residual is reported in CY (owner preference 2026-07-24), not truckloads.
+// Behavior lives in the pure module (ffeBalance.test.js); this guards the SitePlanner
+// wiring by source scan (vitest is DOM-free).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -9,7 +10,7 @@ const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/S
 
 describe("DECISION 3 — the finished floor floats off the regulatory code minimum, never below", () => {
   it("imports the pure ffeBalance layer", () => {
-    expect(src).toContain('import { solveBalanceFfe, truckloadLabel, ffeDualDisplay } from "./lib/ffeBalance.js";');
+    expect(src).toContain('import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";');
   });
   it("fmEffectivePadFt folds the balance uplift onto the AUTO code floor (manual pad still wins)", () => {
     expect(src).toContain("const fmBalanceRaiseFt = fmManualPadFt == null && Number.isFinite(gradingSettings.ffeBalanceRaiseFt) && gradingSettings.ffeBalanceRaiseFt > 0");
@@ -36,9 +37,10 @@ describe("DECISION 3 — the finished floor floats off the regulatory code minim
   });
 });
 
-describe("DECISION 2 — the net earthwork residual is reported in truckloads", () => {
-  it("the net-dirt row carries a truckload haul count off the residual CY", () => {
-    expect(src).toContain("const netHaulLabel = netCy != null ? truckloadLabel(Math.round(netCy)) : \"\";");
-    expect(src).toContain("${netHaulLabel ? netHaulLabel + \" · \" : \"\"}");
+describe("DECISION 2 — the net earthwork residual is reported in CY, not truckloads", () => {
+  it("the net-dirt row shows the residual in CY (import/export), no truckload count", () => {
+    expect(src).toContain('metricRow("Net dirt (screening)", `${f0(Math.abs(netCy))} CY ${netCy > 0 ? "import" : "export"}`');
+    expect(src.includes("truckloadLabel")).toBe(false);
+    expect(src.includes("netHaulLabel")).toBe(false);
   });
 });
