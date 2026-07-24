@@ -183,7 +183,8 @@ describe("PR-B — Yield panel + shared copy fixes", () => {
   });
   it("B3 — freshness unknown-age reads 'Flood data: not checked'; with age '{age} ago'", () => {
     expect(src).toContain('"Flood data: not checked"');
-    expect(src).toContain("`Flood data ${formatAge(floodAgeMs)} ago`");
+    // NEW-22 — formatAge already returns "…ago" (e.g. "2d ago"); no duplicate suffix.
+    expect(src).toContain("`Flood data ${formatAge(floodAgeMs)}`");
   });
   it("B4 — the requirement basis reads the appendix off source.section too (Waller Co. App. E)", () => {
     expect(src).toContain("req.rule.governingManual?.section || req.rule.source?.section");
