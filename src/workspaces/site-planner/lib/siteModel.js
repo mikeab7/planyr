@@ -16,7 +16,7 @@
  */
 
 import { dogEarGeom, dogEarSize, isDogEarSide } from "./dogEar.js";
-import { roadCenterline } from "./roadGeometry.js";
+import { roadCenterline, dedupeRoadVertices, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS } from "./roadClasses.js";
 import { ensureZ } from "./zOrder.js";
@@ -641,12 +641,20 @@ export function roadStripBBox(pts, vtx, travelW, curb, opts = {}) {
 // left as a rect — the relayout engine still owns its geometry.
 function migrateRoad(el) {
   if (!el || el.type !== "road" || el.attachedTo != null) return el;
-  if (Array.isArray(el.pts) && el.pts.length >= 2) return el; // already a centerline
-  if (!Number.isFinite(el.cx) || !Number.isFinite(el.cy) ||
-      !Number.isFinite(el.w) || !Number.isFinite(el.h)) return el;
-  const curb = Number.isFinite(el.curb) ? el.curb : 0.5;
-  const travelW = Math.max(1, roadTravelWidth(el.w, el.h, curb));
-  return { ...el, pts: rectRoadEndpoints(el), vtx: [], travelW, curb, roadClass: el.roadClass || DEFAULT_ROAD_CLASS };
+  let out = el;
+  if (!(Array.isArray(el.pts) && el.pts.length >= 2)) {       // legacy rotated-rect → centerline
+    if (!Number.isFinite(el.cx) || !Number.isFinite(el.cy) ||
+        !Number.isFinite(el.w) || !Number.isFinite(el.h)) return el;
+    const curb = Number.isFinite(el.curb) ? el.curb : 0.5;
+    const travelW = Math.max(1, roadTravelWidth(el.w, el.h, curb));
+    out = { ...el, pts: rectRoadEndpoints(el), vtx: [], travelW, curb, roadClass: el.roadClass || DEFAULT_ROAD_CLASS };
+  }
+  // NEW-3 — collapse near-duplicate control-point clutter left by earlier connect attempts (the
+  // B1005/B1006 root cause), keeping pts/vtx index-aligned. Idempotent: a clean road returns null → no
+  // churn, so `out === el` stays reference-stable for already-migrated data.
+  const deduped = dedupeRoadVertices(out.pts, out.vtx, ROAD_VERTEX_COLLAPSE_FT);
+  if (deduped) out = { ...out, pts: deduped.pts, vtx: deduped.vtx };
+  return out;
 }
 function migrateRoads(els) {
   let changed = false;

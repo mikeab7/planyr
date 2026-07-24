@@ -94,10 +94,12 @@ test.describe("NEW-1/NEW-2 — road connections on the owner's real plan", () =>
   test("vertex clutter on the through road no longer squares off the return (the real-plan trap)", async ({ page }) => {
     await loadOwnerPlan(page);
     const net = await roadNetwork(page);
-    // e38duuwgj carries a run of near-duplicate vertices (three identical, others 0.4–2 ft apart) left by
-    // repeated connect attempts. The reach clamp used to read the ADJACENT vertex distance, so it saw
-    // ~1.9 ft of road and clamped the return to nothing. A mock road never has this. The straight tee
-    // sits right in that clutter, so its radius is the canary.
+    // e38duuwgj shipped with a run of near-duplicate vertices (three identical, others 0.4–2 ft apart)
+    // left by repeated connect attempts. The reach clamp used to read the ADJACENT vertex distance, so it
+    // saw ~1.9 ft of road and clamped the return to nothing. A mock road never has this. Two layers now
+    // defend the straight tee's radius (the canary): the render walk STEPS OVER sub-1.5 ft clutter, and
+    // NEW-3's load migration (dedupeRoadVertices) COLLAPSES the stored clutter on open, so the seeded plan
+    // is already clean here — either way the return must be a real radius, not a squared-off corner.
     const tee = net.tees.find((t) => t.sideId === STRAIGHT_TEE.side && t.throughId === STRAIGHT_TEE.through);
     expect(tee.R).toBeGreaterThan(15);
   });

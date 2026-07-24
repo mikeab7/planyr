@@ -24,6 +24,13 @@
 
 export const DEFAULT_TESS_DEG = 6;       // ~1 tessellation point per 6° of arc / curve
 export const DEFAULT_ARC_RADIUS = 50;    // ft — fallback Arc radius when none is supplied
+// NEW-3 — a connect that lands within this distance of an existing control point REUSES it instead of
+// appending a near-duplicate, and the load migration (dedupeRoadVertices) collapses stored near-dup
+// clutter to the same tolerance. The B1005/B1006 root cause: the owner's through road carried a run of
+// near-duplicate vertices left by earlier connect attempts (some byte-identical, others within ~2 ft),
+// which starved the curb-return reach clamp to ~1.9 ft and squared off every corner. B1005/B1006 taught
+// the reach walk to STEP OVER sub-1.5 ft clutter; this stops the clutter being created / kept at all.
+export const ROAD_VERTEX_COLLAPSE_FT = 1.5;
 const EPS = 1e-9;
 
 const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
@@ -230,10 +237,25 @@ function normVtx(pts, vtx) {
  * vertex, so `treatmentAt` resolves it to the default "arc" (which renders straight until
  * dragged, because the inserted point is collinear on its sparse segment → no jump).
  * Returns `null` when the edge index is out of range. */
-export function insertRoadVertex(pts, vtx, edgeIndex, pt) {
+export function insertRoadVertex(pts, vtx, edgeIndex, pt, opts = {}) {
   if (!Array.isArray(pts) || pts.length < 2) return null;
   if (!(edgeIndex >= 0 && edgeIndex < pts.length - 1)) return null;
   if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null;
+  // NEW-3 — when the caller opts in (opts.collapseFt, the connect path), a point landing within collapse
+  // distance of THIS segment's endpoint REUSES that existing vertex instead of splicing a near-duplicate.
+  // Returns the arrays unchanged (endpoint treatment preserved) with `index` pointing at the reused vertex
+  // + `collapsed:true`. The interactive "add a control point" path passes no opts, so a user placing a
+  // point deliberately still always gets one.
+  const collapseFt = opts.collapseFt > 0 ? opts.collapseFt : 0;
+  if (collapseFt > 0) {
+    const a = pts[edgeIndex], b = pts[edgeIndex + 1];
+    const da = Math.hypot(a.x - pt.x, a.y - pt.y);
+    const db = Math.hypot(b.x - pt.x, b.y - pt.y);
+    if ((da <= collapseFt || db <= collapseFt)) {
+      const reuse = da <= db ? edgeIndex : edgeIndex + 1;   // nearer existing endpoint wins
+      return { pts: pts.map((p) => ({ x: p.x, y: p.y })), vtx: normVtx(pts, vtx), index: reuse, collapsed: true };
+    }
+  }
   const at = edgeIndex + 1;
   const nextPts = [...pts];
   nextPts.splice(at, 0, { x: pt.x, y: pt.y });
@@ -258,6 +280,36 @@ export function removeRoadVertex(pts, vtx, index) {
  * enabled/"min reached" state). Interior-only + above the 2-point minimum. */
 export function canRemoveRoadVertex(pts, index) {
   return Array.isArray(pts) && pts.length > 2 && index > 0 && index < pts.length - 1;
+}
+
+/* ---- One-shot near-duplicate vertex cleanup (NEW-3) ----------------------------------
+ * Collapse runs of near-coincident control points on a stored centerline road, keeping the parallel
+ * `pts` and `vtx` arrays INDEX-ALIGNED. Earlier connect attempts left clutter on the owner's real plan —
+ * a run of vertices within ~1.5 ft of one another (some byte-identical) — which starved the curb-return
+ * reach clamp to a couple of feet and squared off every corner (the B1005/B1006 root cause). ENDPOINTS
+ * are always preserved (they anchor welds + other roads' tees); only INTERIOR near-dups are dropped, each
+ * collapsing onto the previous KEPT point (whose treatment survives). If the last kept interior point
+ * hugs the far endpoint within tol, the endpoint wins (that clutter is dropped too) — but index 0 never
+ * goes. Idempotent: a cleaned road has no sub-tol interior gap, so a re-run returns null (no churn).
+ * Returns a fresh { pts, vtx } when it collapsed anything, else null. Pure — unit-tested. */
+export function dedupeRoadVertices(pts, vtx, tol = ROAD_VERTEX_COLLAPSE_FT) {
+  if (!Array.isArray(pts) || pts.length < 3) return null;   // a 2-pt road has no interior to collapse
+  const t = tol > 0 ? tol : ROAD_VERTEX_COLLAPSE_FT;
+  const v = normVtx(pts, vtx);
+  const last = pts.length - 1;
+  const keep = [0];
+  for (let i = 1; i < last; i++) {
+    const prev = pts[keep[keep.length - 1]];
+    if (Math.hypot(pts[i].x - prev.x, pts[i].y - prev.y) > t) keep.push(i);  // else: drop interior near-dup
+  }
+  // The far endpoint always survives; peel back any kept interior clutter hugging it (never index 0).
+  while (keep.length >= 2 && keep[keep.length - 1] !== 0 &&
+         Math.hypot(pts[last].x - pts[keep[keep.length - 1]].x, pts[last].y - pts[keep[keep.length - 1]].y) <= t) {
+    keep.pop();
+  }
+  keep.push(last);
+  if (keep.length === pts.length) return null;              // nothing collapsed → no new object
+  return { pts: keep.map((i) => ({ x: pts[i].x, y: pts[i].y })), vtx: keep.map((i) => ({ ...(v[i] || {}) })) };
 }
 
 /* ---- Snap-and-connect road endpoints (NEW-1) -----------------------------------------
@@ -388,15 +440,19 @@ export function planRoadConnect(movingEl, movingIndex, targetEl, candidate, join
   const mPts = movingEl.pts, mLast = mPts.length - 1;
   if (movingIndex !== 0 && movingIndex !== mLast) return null;
   const weldPt = candidate.pt;
-  const weldMoving = () => ({
-    pts: mPts.map((p, i) => (i === movingIndex ? { x: weldPt.x, y: weldPt.y } : { x: p.x, y: p.y })),
+  const weldMovingTo = (wp) => ({
+    pts: mPts.map((p, i) => (i === movingIndex ? { x: wp.x, y: wp.y } : { x: p.x, y: p.y })),
     vtx: normVtx(mPts, movingEl.vtx),
   });
+  const weldMoving = () => weldMovingTo(weldPt);
   if (candidate.kind === "interior") {
     if (!targetEl || !Array.isArray(targetEl.pts)) return null;
-    const ins = insertRoadVertex(targetEl.pts, targetEl.vtx, candidate.index, weldPt);
+    // NEW-3 — reuse an existing through-road vertex within collapse distance instead of near-duplicating
+    // one, and weld the moving endpoint to that RESOLVED node so both roads meet at a single point.
+    const ins = insertRoadVertex(targetEl.pts, targetEl.vtx, candidate.index, weldPt, { collapseFt: ROAD_VERTEX_COLLAPSE_FT });
     if (!ins) return { action: "weld", moving: weldMoving() };   // out-of-range → fall back to a plain weld
-    return { action: "tee", moving: weldMoving(), target: { pts: ins.pts, vtx: ins.vtx } };
+    const teePt = ins.pts[ins.index];
+    return { action: "tee", moving: weldMovingTo(teePt), target: { pts: ins.pts, vtx: ins.vtx } };
   }
   // Endpoint candidate: merge two MATCHING, DIFFERENT roads end-to-end; else weld (incl. loop close).
   const sameRoad = targetEl && candidate.roadId === movingEl.id;
