@@ -34,7 +34,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   ⌘/Ctrl+]/[ chords in `SitePlanner.jsx`.
 - `labelLayout.js` — LOD label tiering + the shared dimension-number zoom→font scale (`dimFontPx`, B911).
   `calloutLayout.js` — pure text-box/callout box geometry: auto-size or wrap-to-width (B913).
-  `roadGeometry.js` — centerline road curves (pure).
+  `roadGeometry.js` — centerline road curves + junction primitives (pure): `teeGeometry` returns the
+  ADDITIVE curb-return `wedges` a junction contributes. `roadNetwork.js` — the DISSOLVED road surface
+  (clipper union of every connected strip + wedge → one region, one outline, per cluster) plus the
+  curb-stripe trimmer. A road connection is a boolean union, NOT a patch painted over a seam — read
+  roadNetwork.js's header before touching anything junction-shaped.
 - Terrain pipeline (B703–B706): `demGrid.js` / `contours.js` / `flowField.js` (pure math,
   worker-safe) + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
   + `terrainLayers.js` (Leaflet glue, grid LRU for the hover elevation readout);

@@ -47,14 +47,16 @@ export default defineConfig({
       testMatch: /auth\.setup\.js/,
       use: {
         ...devices["Desktop Chrome"],
-        launchOptions: { args: ["--no-sandbox", "--ignore-certificate-errors"] },
+        launchOptions: { args: ["--no-sandbox", "--ignore-certificate-errors"], ...(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {}) },
       },
     },
     {
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        launchOptions: { args: ["--no-sandbox", "--ignore-certificate-errors"] },
+        // PW_CHROME lets a sandbox point at the pre-installed Chromium instead of the exact build the
+        // installed @playwright/test expects (the same escape hatch every ui-audit harness already uses).
+        launchOptions: { args: ["--no-sandbox", "--ignore-certificate-errors"], ...(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {}) },
       },
       // setup runs first (one sign-in). A skipped setup (no seeded account) doesn't block this.
       dependencies: ["setup"],

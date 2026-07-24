@@ -4,6 +4,7 @@ import {
   insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx,
   findRoadConnect, roadsMergeCompatible, concatRoads, planRoadConnect, fixRoadRadii,
   teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon,
+  dedupeRoadVertices, ROAD_VERTEX_COLLAPSE_FT,
 } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import {
   speedMinRadius, classMinRadius, classDefaultRadius, roadClassOf, ROAD_CLASS_SEEDS,
@@ -851,5 +852,98 @@ describe("weldCoverPolygon — seamless road-to-road weld patch (B960/NEW-2)", (
     expect(weldCoverPolygon({ x: 0, y: 0 }, [
       { dir: { x: 1, y: 0 }, halfW: 0 }, { dir: { x: -1, y: 0 }, halfW: 0 },
     ])).toBeNull();
+  });
+});
+
+/* NEW-3 — connect/insert collapse a control point onto an existing one within ~1.5 ft instead of
+ * appending a near-duplicate, and a load migration cleans stored clutter. The B1005/B1006 root cause was
+ * a run of near-duplicate vertices on the owner's through road (some byte-identical, others within ~2 ft)
+ * that starved the curb-return reach clamp and squared off every corner. */
+describe("insertRoadVertex — near-duplicate collapse (NEW-3)", () => {
+  const pts = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
+  const vtx = [{}, { treatment: "arc", radius: 30 }, {}];
+
+  it("without opts, still always splices a new vertex (interactive add is unchanged)", () => {
+    const r = insertRoadVertex(pts, vtx, 0, { x: 100.8, y: 0 }); // ~0.8 ft from pts[1], but no collapseFt
+    expect(r.pts).toHaveLength(4);
+    expect(r.collapsed).toBeUndefined();
+    expect(r.index).toBe(1);
+  });
+
+  it("collapses onto the nearer existing endpoint of the segment (no near-dup spliced)", () => {
+    const r = insertRoadVertex(pts, vtx, 0, { x: 100.8, y: 0 }, { collapseFt: ROAD_VERTEX_COLLAPSE_FT });
+    expect(r.collapsed).toBe(true);
+    expect(r.pts).toHaveLength(3);                    // nothing spliced
+    expect(r.index).toBe(1);                          // reused the existing vertex at (100,0)
+    expect(r.vtx[1]).toEqual({ treatment: "arc", radius: 30 }); // its treatment survives untouched
+  });
+
+  it("collapses onto the SEGMENT-START vertex when it is the nearer one", () => {
+    const r = insertRoadVertex(pts, vtx, 1, { x: 100.5, y: 1 }, { collapseFt: ROAD_VERTEX_COLLAPSE_FT });
+    expect(r.collapsed).toBe(true);
+    expect(r.index).toBe(1);                          // pts[1] is nearer than pts[2]
+    expect(r.pts).toHaveLength(3);
+  });
+
+  it("splices normally when the point is beyond collapse distance", () => {
+    const r = insertRoadVertex(pts, vtx, 0, { x: 50, y: 0 }, { collapseFt: ROAD_VERTEX_COLLAPSE_FT });
+    expect(r.collapsed).toBeUndefined();
+    expect(r.pts).toHaveLength(4);
+    expect(r.index).toBe(1);
+  });
+});
+
+describe("planRoadConnect — tee reuses a near-existing through-road vertex (NEW-3)", () => {
+  it("welds BOTH roads to the reused node instead of near-duplicating the through vertex", () => {
+    // The through road already carries an interior vertex at (100,0); the tee lands 0.6 ft away.
+    const through = { id: "t", pts: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }], vtx: [{}, {}, {}], roadClass: "aisle", travelW: 24, curb: 0.5 };
+    const moving = { id: "m", pts: [{ x: 100.6, y: 50 }, { x: 100.6, y: 6 }], vtx: [{}, {}], roadClass: "aisle", travelW: 24, curb: 0.5 };
+    const cand = { roadId: "t", kind: "interior", index: 1, pt: { x: 100.6, y: 0 } }; // projects onto seg 1, near (100,0)
+    const plan = planRoadConnect(moving, 1, through, cand, 40);
+    expect(plan.action).toBe("tee");
+    expect(plan.target.pts).toHaveLength(3);                 // NO extra near-dup vertex on the through road
+    expect(plan.target.pts).toEqual(through.pts);            // through road unchanged
+    expect(plan.moving.pts[1]).toEqual({ x: 100, y: 0 });    // moving endpoint welded to the REUSED node
+  });
+
+  it("still inserts a genuine vertex when the tee is not near any existing one", () => {
+    const through = { id: "t", pts: [{ x: 0, y: 0 }, { x: 200, y: 0 }], vtx: [{}, {}], roadClass: "aisle", travelW: 24, curb: 0.5 };
+    const moving = { id: "m", pts: [{ x: 100, y: 50 }, { x: 100, y: 8 }], vtx: [{}, {}], roadClass: "aisle", travelW: 24, curb: 0.5 };
+    const cand = { roadId: "t", kind: "interior", index: 0, pt: { x: 100, y: 0 } };
+    const plan = planRoadConnect(moving, 1, through, cand, 40);
+    expect(plan.target.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }]); // vertex inserted
+    expect(plan.moving.pts[1]).toEqual({ x: 100, y: 0 });
+  });
+});
+
+describe("dedupeRoadVertices — one-shot load cleanup (NEW-3)", () => {
+  it("collapses a run of interior near-duplicates onto one representative, keeping arrays aligned", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100.5, y: 0 }, { x: 100.5, y: 0 }, { x: 101, y: 0 }, { x: 200, y: 0 }];
+    const vtx = [{}, { treatment: "arc", radius: 40 }, {}, {}, {}, {}];
+    const r = dedupeRoadVertices(pts, vtx);
+    expect(r.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }]);
+    expect(r.vtx).toHaveLength(r.pts.length);
+    expect(r.vtx[1]).toEqual({ treatment: "arc", radius: 40 }); // the kept representative's treatment survives
+  });
+
+  it("preserves BOTH endpoints even when clutter hugs the end (endpoint wins)", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 199, y: 0 }, { x: 199.4, y: 0 }, { x: 200, y: 0 }];
+    const r = dedupeRoadVertices(pts, [{}, {}, {}, {}, {}]);
+    expect(r.pts[0]).toEqual({ x: 0, y: 0 });                 // start endpoint kept
+    expect(r.pts[r.pts.length - 1]).toEqual({ x: 200, y: 0 }); // far endpoint kept, the 199/199.4 clutter dropped
+    expect(r.pts).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }]);
+  });
+
+  it("is idempotent and returns null (no churn) for a clean road", () => {
+    const clean = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
+    expect(dedupeRoadVertices(clean, [{}, {}, {}])).toBeNull();
+    const r = dedupeRoadVertices(
+      [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 100, y: 0 }], [{}, {}, {}],
+    );
+    expect(dedupeRoadVertices(r.pts, r.vtx)).toBeNull();       // re-run is a no-op
+  });
+
+  it("leaves a 2-point road untouched (no interior to collapse)", () => {
+    expect(dedupeRoadVertices([{ x: 0, y: 0 }, { x: 0.2, y: 0 }], [{}, {}])).toBeNull();
   });
 });

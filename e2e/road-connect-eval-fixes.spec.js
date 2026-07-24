@@ -9,9 +9,11 @@
  * The truck-court sizing (WB-62 ≈50 ft return, feasibility-clamped) shares the parking-drive render
  * path (road-drive-connect.spec.js) and is unit-tested; its live render parks in VERIFICATION.md. */
 import { test, expect } from "@playwright/test";
+import { armPlannerHooks, netSurfaces } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
-const weldCovers = (p) => p.locator('[data-testid="road-weld-cover"]');
+// NEW-2 — a weld no longer paints a seam patch; the two roads DISSOLVE into a single region. So the
+// signal for "these connected" is region count (1 region = welded, 2 = still separate), not a patch.
 
 function roadsData(page) {
   return page.evaluate(() => {
@@ -24,6 +26,7 @@ function roadsData(page) {
 }
 
 async function startBlank(page) {
+  await armPlannerHooks(page);
   await page.goto("/");
   await page.getByRole("button", { name: /Start blank/i }).click();
   await expect(canvas(page)).toBeVisible();
@@ -57,7 +60,7 @@ test.describe("B959/B960/B961 — road connect evaluation fixes", () => {
     await page.keyboard.press("Escape");
 
     await expect.poll(() => roadsData(page).then((r) => r.length)).toBe(2); // welded (not merged into one)
-    await expect(weldCovers(page).first()).toBeAttached();
+    await expect(netSurfaces(page)).toHaveCount(1);              // welded → ONE dissolved pavement, no seam
   });
 
   test("NEW-3: a road connects at a wide road's CURB EDGE, beyond its centerline tolerance (Snap OFF)", async ({ page }) => {
@@ -87,7 +90,7 @@ test.describe("B959/B960/B961 — road connect evaluation fixes", () => {
     await page.keyboard.press("Escape");
 
     await expect.poll(() => roadsData(page).then((r) => r.length)).toBe(2); // connected at the edge → weld
-    await expect(weldCovers(page).first()).toBeAttached();
+    await expect(netSurfaces(page)).toHaveCount(1);              // welded → ONE dissolved pavement, no seam
   });
 
   test("NEW-3 control: an endpoint BEYOND the curb edge does not connect (Snap OFF)", async ({ page }) => {
@@ -113,7 +116,7 @@ test.describe("B959/B960/B961 — road connect evaluation fixes", () => {
     await page.keyboard.press("Escape");
 
     await expect.poll(() => roadsData(page).then((r) => r.length)).toBe(2);
-    await expect(weldCovers(page)).toHaveCount(0);               // no connect → no weld cover
+    await expect(netSurfaces(page)).toHaveCount(2);              // no connect → two separate pavements
   });
 
   test("NEW-1: a building over a road junction paints ON TOP of the connection overlay (building always wins)", async ({ page }) => {
@@ -121,7 +124,7 @@ test.describe("B959/B960/B961 — road connect evaluation fixes", () => {
     await canvas(page).click({ position: { x: 20, y: 20 } });
     const box = await canvas(page).boundingBox();
 
-    // A road tee → the clean-intersection overlay (road-tee-layer) renders.
+    // A road tee → the dissolved road-network layer renders.
     await pickRoad(page);
     await page.mouse.click(box.x + 260, box.y + 340);
     await page.mouse.click(box.x + 720, box.y + 340);
@@ -131,7 +134,7 @@ test.describe("B959/B960/B961 — road connect evaluation fixes", () => {
     await page.mouse.click(box.x + 490, box.y + 340);
     await page.keyboard.press("Enter");
     await page.keyboard.press("Escape");
-    await expect(page.locator('[data-testid="road-tee-layer"]')).toBeVisible();
+    await expect(page.locator('[data-testid="road-network-layer"]')).toBeAttached();
 
     // A building dragged over the junction.
     await page.getByRole("button", { name: "Building", exact: true }).click();
@@ -146,7 +149,7 @@ test.describe("B959/B960/B961 — road connect evaluation fixes", () => {
     // paints on top — connection pavement can never overlap a building.
     const buildingPaintsOnTop = await page.evaluate(() => {
       const svg = document.querySelector('[data-testid="planner-canvas"]');
-      const tee = svg && svg.querySelector('[data-testid="road-tee-layer"]');
+      const tee = svg && svg.querySelector('[data-testid="road-network-layer"]');
       const bldg = svg && svg.querySelector('g[filter="url(#bldgShadow)"]');
       if (!tee || !bldg) return null;
       return !!(tee.compareDocumentPosition(bldg) & Node.DOCUMENT_POSITION_FOLLOWING);

@@ -1,131 +1,135 @@
-/* B1005/B1006 — OBLIQUE road→drive tee: the recurrence guard. Prior fixes (B945/B946/B949/B953/B964/
- * B971/B989) all verified against a perpendicular (90°) mock while the owner's real OBLIQUE / curved
- * drives rendered a giant concave scoop / batwing with a notch, plus a faint seam where the translucent
- * pavement doubled at the junction. This drives the REAL canvas LOGGED OUT (Snap OFF) with drives teeing
- * onto a parking court at ACUTE angles — the exact case the mock never exercised — and asserts:
- *   • the drive connects and renders exactly two curb-return arcs (the render path is wired at oblique
- *     angles, not just perpendicular);
- *   • the returns stay TIDY — their reach past the drive edge is bounded (no scoop / batwing);
- *   • the B1006 opacity-flatten mask ("tee-cover-knockout") is wired with one hole per junction so the
- *     junction reads as one tone (no doubled translucent patch);
- *   • a building over the junction paints OVER the pavement (z-clip preserved).
- * The precise reach-≤-R geometry is unit-tested in test/roadGeometry.test.js; this is the real-render
- * wiring + no-scoop guard that the mock-only tests could not provide. */
+/* NEW-1/NEW-2 — the road-connection recurrence guard, driven against the OWNER'S REAL PLAN.
+ *
+ * Nine prior attempts (B945/B946/B949/B953/B964/B971/B989/B1005/B1006) shipped green and rendered
+ * broken. They all shared one testing mistake: they built a MOCK — a straight drive onto a rectangular
+ * Car Parking field — and asserted that cover/return ELEMENTS existed. Both halves were wrong.
+ *   • The mock never contained the topologies that actually broke: a tee onto a CURVED through road,
+ *     a ROAD-TO-ROAD oblique tee, or a through road carrying near-duplicate vertices left behind by
+ *     earlier connect attempts (which collapsed the return's reach clamp to ~2 ft and squared off
+ *     every corner on the real plan while the mock's clean geometry sailed through).
+ *   • Counting elements proves the render path ran, not that the junction LOOKS right. A cover patch
+ *     exists in every broken screenshot the owner sent.
+ * So this spec seeds the owner's actual Tsakiris / Concept A element set (pulled from the production
+ * site record; see ui-audit/fixtures/tsakiris-concept-a.json) and asserts the DISSOLVED geometry:
+ * connected roads become ONE pavement region, sliver-free, with real rounded curb returns at every
+ * junction — straight, oblique, curved, road-to-road and road-to-drive alike.
+ *
+ * Run: npx playwright test e2e/road-tee-oblique.spec.js
+ */
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { armPlannerHooks, roadNetwork, netSurfaces, netEdges, ringArea } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
-const teeReturns = (p) => p.locator('[data-testid="road-tee-return"]');
+const FIXTURE = JSON.parse(readFileSync(new URL("../ui-audit/fixtures/tsakiris-concept-a.json", import.meta.url), "utf8"));
+const SITE_ID = "e2e-tsakiris-concept-a";
 
-async function startBlank(page) {
+// The junction ids under test, and what each one is (they are the three the owner screenshotted).
+const STRAIGHT_TEE = { side: "e1454683splyoj", through: "e38duuwgj" };  // 40' aisle → 40' truck loop, ~90°
+const OBLIQUE_TEE = { side: "e1454692rfhccx", through: "e1454683splyoj" }; // 36' aisle → 40' aisle, ~57°
+const CURVED_TEE = { side: "e1454692rfhccx", through: "e38duuwgj" };   // 36' aisle → the loop, on its curve
+const BIG_CLUSTER = ["e54duuwgj", "e38duuwgj", "e1454683splyoj", "e1454692rfhccx"];
+
+async function loadOwnerPlan(page) {
+  await armPlannerHooks(page);
+  const site = {
+    id: SITE_ID, groupId: SITE_ID, site: "Tsakiris", name: "Concept A", origin: null, county: "waller",
+    parcels: [], els: FIXTURE.els, measures: [], callouts: [], markups: [], settings: {},
+    underlay: null, parcelDrawings: [], updatedAt: Date.now(),
+  };
+  await page.addInitScript(([id, rec]) => {
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [id]: rec }));
+    localStorage.setItem("planarfit:currentSite:v1", id);
+  }, [SITE_ID, site]);
   await page.goto("/");
-  await page.getByRole("button", { name: /Start blank/i }).click();
   await expect(canvas(page)).toBeVisible();
-}
-async function pickRoadPreset(page) {
-  await page.getByRole("button", { name: "Road", exact: true }).click();
-  await page.getByRole("button", { name: "Road presets" }).click();
-  await page.getByRole("button", { name: /travel — click points/i }).first().click();
-}
-function driveRoads(page) {
-  return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
-    const site = map[Object.keys(map)[0]] || {};
-    return (site.els || []).filter((e) => e.type === "road" && e.driveTee);
-  });
+  await expect.poll(async () => (await roadNetwork(page))?.regions.length ?? 0, { timeout: 20_000 }).toBeGreaterThan(0);
 }
 
-test.describe("B1005/B1006 — oblique road→drive tee (no scoop, flat junction)", () => {
-  test("an OBLIQUE (~45°) drive onto a parking court renders two tidy returns + the knockout mask", async ({ page }) => {
-    await startBlank(page);
-    await canvas(page).click({ position: { x: 20, y: 20 } });   // Snap stays OFF
-    const box = await canvas(page).boundingBox();
+test.describe("NEW-1/NEW-2 — road connections on the owner's real plan", () => {
+  test("every connected road dissolves into ONE pavement region with ONE outline", async ({ page }) => {
+    await loadOwnerPlan(page);
+    const net = await roadNetwork(page);
 
-    // Wide parking court, flat top edge at y≈470.
-    await page.getByRole("button", { name: "Car Parking", exact: true }).click();
-    await page.mouse.move(box.x + 180, box.y + 470);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 1260, box.y + 760, { steps: 12 });
-    await page.mouse.up();
-    await page.keyboard.press("Escape");
+    // The four connected roads (truck loop + aisle + skew aisle + welded stub) are ONE surface. Before
+    // this change they rendered as four overlapping strips plus patches: the owner's "rectangle
+    // intersecting a rectangle", and — because road fills are semi-transparent — a darker junction.
+    const big = net.regions.filter((r) => BIG_CLUSTER.every((id) => r.ids.includes(id)));
+    expect(big).toHaveLength(1);
 
-    // Drive teeing onto the top edge at a clearly OBLIQUE angle (dx 200, dy 330 → ~59° off the edge).
-    await pickRoadPreset(page);
-    await page.mouse.click(box.x + 700, box.y + 140);
-    await page.mouse.click(box.x + 900, box.y + 470);
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Escape");
+    // One fill and one stroke per region: no second curb line anywhere in a junction.
+    await expect(netSurfaces(page)).toHaveCount(net.regions.length);
+    await expect(netEdges(page)).toHaveCount(net.regions.length);
 
-    // It connected as a parking drive and rendered exactly two curb returns.
-    await expect.poll(() => driveRoads(page).then((r) => r.length)).toBe(1);
-    await expect(teeReturns(page)).toHaveCount(2);
-    await expect(page.locator('[data-export="road-tee-cover"]').first()).toBeAttached();
-
-    // B1006 — the opacity-flatten knockout mask is wired with one hole for this junction.
-    const mask = page.locator("#tee-cover-knockout");
-    await expect(mask).toBeAttached();
-    await expect(mask.locator('path[fill="#000"]')).toHaveCount(1);
-
-    // NO SCOOP: the curb return must stay near the drive, not sweep far along the court edge. Measure the
-    // widest return's horizontal span and compare it to the drive's own on-screen travel width — a tidy
-    // rounded corner spans at most ~2 drive widths; the old scoop spanned 4–6×.
-    const spans = await teeReturns(page).evaluateAll((nodes) =>
-      nodes.map((n) => {
-        const pts = n.getAttribute("points").trim().split(/\s+/).map((s) => s.split(",").map(Number));
-        const xs = pts.map((p) => p[0]);
-        return Math.max(...xs) - Math.min(...xs);
-      }),
-    );
-    const driveWidthPx = await page.evaluate(() => {
-      const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
-      const site = map[Object.keys(map)[0]] || {};
-      const d = (site.els || []).find((e) => e.type === "road" && e.driveTee);
-      return d ? d.travelW : 24;      // world ft; screen px ≈ travelW * ppf, but we only need a ratio bound
-    });
-    // Each return arc's own horizontal span is at most a bit over one drive width (in px the drive is
-    // travelW*ppf; a scoop of R≈30ft at ppf~0.35 would span >>). Use a generous absolute-px ceiling that
-    // still fails on the old batwing (which swept 120+ px here).
-    for (const s of spans) expect(s).toBeLessThan(60);
-    expect(driveWidthPx).toBeGreaterThan(0);
+    // The legacy patch render is gone for good — its presence is what let the seam survive.
+    await expect(page.locator('[data-export="road-tee-cover"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="road-tee-return"]')).toHaveCount(0);
+    await expect(page.locator("#tee-cover-knockout")).toHaveCount(0);
   });
 
-  test("a building over the junction paints OVER the connection pavement (z-clip)", async ({ page }) => {
-    await startBlank(page);
-    await canvas(page).click({ position: { x: 20, y: 20 } });
-    const box = await canvas(page).boundingBox();
+  test("no sliver holes survive the dissolve — only real enclosed ground", async ({ page }) => {
+    await loadOwnerPlan(page);
+    const net = await roadNetwork(page);
+    for (const region of net.regions) {
+      for (const hole of region.holes) {
+        // A courtyard genuinely enclosed by roads is thousands of sf. A hole of a few sf is a numerical
+        // sliver between a tessellated strip and an analytic wedge, and it strokes as a hairline seam.
+        expect(ringArea(hole)).toBeGreaterThan(200);
+      }
+    }
+  });
 
-    await page.getByRole("button", { name: "Car Parking", exact: true }).click();
-    await page.mouse.move(box.x + 180, box.y + 470);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 1260, box.y + 760, { steps: 12 });
-    await page.mouse.up();
-    await page.keyboard.press("Escape");
-    await pickRoadPreset(page);
-    await page.mouse.click(box.x + 700, box.y + 140);
-    await page.mouse.click(box.x + 900, box.y + 470);
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Escape");
-    await expect(teeReturns(page)).toHaveCount(2);
+  test("all three real tee topologies solve a REAL rounded curb return", async ({ page }) => {
+    await loadOwnerPlan(page);
+    const net = await roadNetwork(page);
+    for (const j of [STRAIGHT_TEE, OBLIQUE_TEE, CURVED_TEE]) {
+      const tee = net.tees.find((t) => t.sideId === j.side && t.throughId === j.through);
+      expect(tee, `tee ${j.side}→${j.through} not detected`).toBeTruthy();
+      expect(tee.wedges).toBe(2);                       // two additive curb-return wedges
+      expect(tee.R).toBeGreaterThan(4);                 // a real radius, not a squared-off corner
+      for (const n of tee.returns) expect(n).toBeGreaterThan(3);  // tessellated arcs, not 2-point chamfers
+    }
+  });
 
-    // Building straddling the junction.
-    await page.getByRole("button", { name: "Building", exact: true }).click();
-    await page.mouse.move(box.x + 820, box.y + 430);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 1020, box.y + 560, { steps: 8 });
-    await page.mouse.up();
-    await page.keyboard.press("Escape");
+  test("vertex clutter on the through road no longer squares off the return (the real-plan trap)", async ({ page }) => {
+    await loadOwnerPlan(page);
+    const net = await roadNetwork(page);
+    // e38duuwgj shipped with a run of near-duplicate vertices (three identical, others 0.4–2 ft apart)
+    // left by repeated connect attempts. The reach clamp used to read the ADJACENT vertex distance, so it
+    // saw ~1.9 ft of road and clamped the return to nothing. A mock road never has this. Two layers now
+    // defend the straight tee's radius (the canary): the render walk STEPS OVER sub-1.5 ft clutter, and
+    // NEW-3's load migration (dedupeRoadVertices) COLLAPSES the stored clutter on open, so the seeded plan
+    // is already clean here — either way the return must be a real radius, not a squared-off corner.
+    const tee = net.tees.find((t) => t.sideId === STRAIGHT_TEE.side && t.throughId === STRAIGHT_TEE.through);
+    expect(tee.R).toBeGreaterThan(15);
+  });
 
-    // The connection cover renders BEFORE the building in document order (buildings are the later pass),
-    // so the building paints over the pavement — never the reverse.
+  test("drive junctions onto a court / parking field stay inside the target edge", async ({ page }) => {
+    await loadOwnerPlan(page);
+    const net = await roadNetwork(page);
+    expect(net.drives.length).toBeGreaterThanOrEqual(1);
+    for (const d of net.drives) {
+      expect(d.wedges).toBe(2);
+      expect(d.R).toBeGreaterThan(0);
+    }
+    // The fire lane meets its parking field a couple of feet from the field's END. A symmetric reach
+    // clamp let that return sweep off the end of the field and hang in open ground (owner shot 1); the
+    // per-direction clamp shrinks it instead.
+    const fire = net.drives.find((d) => d.sideId === "e1454682splyoj");
+    expect(fire).toBeTruthy();
+    expect(fire.R).toBeLessThan(20);        // clamped down from the 20 ft stored seed
+    expect(fire.R).toBeGreaterThan(2);      // but still a rounded corner, not a square one
+  });
+
+  test("a building over a junction still paints OVER the pavement (z-clip preserved)", async ({ page }) => {
+    await loadOwnerPlan(page);
     const order = await page.evaluate(() => {
-      const cover = document.querySelector('[data-export="road-tee-cover"]');
-      // a building surface: the renderElPx building <path> carries the poché fill; find any node after the cover
-      const all = [...document.querySelectorAll('[data-testid="planner-canvas"] *')];
-      const ci = all.indexOf(cover);
-      // the building fill path is drawn in the >= BUILDING_Z pass, strictly after the tee cover
-      const bldg = all.find((n, i) => i > ci && n.tagName === "rect" && n.getAttribute("fill") === "#f3ece1");
-      return { coverFound: !!cover, buildingAfter: !!bldg };
+      const svg = document.querySelector('[data-testid="planner-canvas"]');
+      const net = svg && svg.querySelector('[data-testid="road-network-layer"]');
+      const bldg = svg && svg.querySelector('g[filter="url(#bldgShadow)"]');
+      if (!net || !bldg) return null;
+      return !!(net.compareDocumentPosition(bldg) & Node.DOCUMENT_POSITION_FOLLOWING);
     });
-    expect(order.coverFound).toBe(true);
-    expect(order.buildingAfter).toBe(true);
+    expect(order).toBe(true);
   });
 });

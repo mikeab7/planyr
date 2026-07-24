@@ -24,6 +24,13 @@
 
 export const DEFAULT_TESS_DEG = 6;       // ~1 tessellation point per 6° of arc / curve
 export const DEFAULT_ARC_RADIUS = 50;    // ft — fallback Arc radius when none is supplied
+// NEW-3 — a connect that lands within this distance of an existing control point REUSES it instead of
+// appending a near-duplicate, and the load migration (dedupeRoadVertices) collapses stored near-dup
+// clutter to the same tolerance. The B1005/B1006 root cause: the owner's through road carried a run of
+// near-duplicate vertices left by earlier connect attempts (some byte-identical, others within ~2 ft),
+// which starved the curb-return reach clamp to ~1.9 ft and squared off every corner. B1005/B1006 taught
+// the reach walk to STEP OVER sub-1.5 ft clutter; this stops the clutter being created / kept at all.
+export const ROAD_VERTEX_COLLAPSE_FT = 1.5;
 const EPS = 1e-9;
 
 const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
@@ -230,10 +237,25 @@ function normVtx(pts, vtx) {
  * vertex, so `treatmentAt` resolves it to the default "arc" (which renders straight until
  * dragged, because the inserted point is collinear on its sparse segment → no jump).
  * Returns `null` when the edge index is out of range. */
-export function insertRoadVertex(pts, vtx, edgeIndex, pt) {
+export function insertRoadVertex(pts, vtx, edgeIndex, pt, opts = {}) {
   if (!Array.isArray(pts) || pts.length < 2) return null;
   if (!(edgeIndex >= 0 && edgeIndex < pts.length - 1)) return null;
   if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null;
+  // NEW-3 — when the caller opts in (opts.collapseFt, the connect path), a point landing within collapse
+  // distance of THIS segment's endpoint REUSES that existing vertex instead of splicing a near-duplicate.
+  // Returns the arrays unchanged (endpoint treatment preserved) with `index` pointing at the reused vertex
+  // + `collapsed:true`. The interactive "add a control point" path passes no opts, so a user placing a
+  // point deliberately still always gets one.
+  const collapseFt = opts.collapseFt > 0 ? opts.collapseFt : 0;
+  if (collapseFt > 0) {
+    const a = pts[edgeIndex], b = pts[edgeIndex + 1];
+    const da = Math.hypot(a.x - pt.x, a.y - pt.y);
+    const db = Math.hypot(b.x - pt.x, b.y - pt.y);
+    if ((da <= collapseFt || db <= collapseFt)) {
+      const reuse = da <= db ? edgeIndex : edgeIndex + 1;   // nearer existing endpoint wins
+      return { pts: pts.map((p) => ({ x: p.x, y: p.y })), vtx: normVtx(pts, vtx), index: reuse, collapsed: true };
+    }
+  }
   const at = edgeIndex + 1;
   const nextPts = [...pts];
   nextPts.splice(at, 0, { x: pt.x, y: pt.y });
@@ -258,6 +280,36 @@ export function removeRoadVertex(pts, vtx, index) {
  * enabled/"min reached" state). Interior-only + above the 2-point minimum. */
 export function canRemoveRoadVertex(pts, index) {
   return Array.isArray(pts) && pts.length > 2 && index > 0 && index < pts.length - 1;
+}
+
+/* ---- One-shot near-duplicate vertex cleanup (NEW-3) ----------------------------------
+ * Collapse runs of near-coincident control points on a stored centerline road, keeping the parallel
+ * `pts` and `vtx` arrays INDEX-ALIGNED. Earlier connect attempts left clutter on the owner's real plan —
+ * a run of vertices within ~1.5 ft of one another (some byte-identical) — which starved the curb-return
+ * reach clamp to a couple of feet and squared off every corner (the B1005/B1006 root cause). ENDPOINTS
+ * are always preserved (they anchor welds + other roads' tees); only INTERIOR near-dups are dropped, each
+ * collapsing onto the previous KEPT point (whose treatment survives). If the last kept interior point
+ * hugs the far endpoint within tol, the endpoint wins (that clutter is dropped too) — but index 0 never
+ * goes. Idempotent: a cleaned road has no sub-tol interior gap, so a re-run returns null (no churn).
+ * Returns a fresh { pts, vtx } when it collapsed anything, else null. Pure — unit-tested. */
+export function dedupeRoadVertices(pts, vtx, tol = ROAD_VERTEX_COLLAPSE_FT) {
+  if (!Array.isArray(pts) || pts.length < 3) return null;   // a 2-pt road has no interior to collapse
+  const t = tol > 0 ? tol : ROAD_VERTEX_COLLAPSE_FT;
+  const v = normVtx(pts, vtx);
+  const last = pts.length - 1;
+  const keep = [0];
+  for (let i = 1; i < last; i++) {
+    const prev = pts[keep[keep.length - 1]];
+    if (Math.hypot(pts[i].x - prev.x, pts[i].y - prev.y) > t) keep.push(i);  // else: drop interior near-dup
+  }
+  // The far endpoint always survives; peel back any kept interior clutter hugging it (never index 0).
+  while (keep.length >= 2 && keep[keep.length - 1] !== 0 &&
+         Math.hypot(pts[last].x - pts[keep[keep.length - 1]].x, pts[last].y - pts[keep[keep.length - 1]].y) <= t) {
+    keep.pop();
+  }
+  keep.push(last);
+  if (keep.length === pts.length) return null;              // nothing collapsed → no new object
+  return { pts: keep.map((i) => ({ x: pts[i].x, y: pts[i].y })), vtx: keep.map((i) => ({ ...(v[i] || {}) })) };
 }
 
 /* ---- Snap-and-connect road endpoints (NEW-1) -----------------------------------------
@@ -388,15 +440,19 @@ export function planRoadConnect(movingEl, movingIndex, targetEl, candidate, join
   const mPts = movingEl.pts, mLast = mPts.length - 1;
   if (movingIndex !== 0 && movingIndex !== mLast) return null;
   const weldPt = candidate.pt;
-  const weldMoving = () => ({
-    pts: mPts.map((p, i) => (i === movingIndex ? { x: weldPt.x, y: weldPt.y } : { x: p.x, y: p.y })),
+  const weldMovingTo = (wp) => ({
+    pts: mPts.map((p, i) => (i === movingIndex ? { x: wp.x, y: wp.y } : { x: p.x, y: p.y })),
     vtx: normVtx(mPts, movingEl.vtx),
   });
+  const weldMoving = () => weldMovingTo(weldPt);
   if (candidate.kind === "interior") {
     if (!targetEl || !Array.isArray(targetEl.pts)) return null;
-    const ins = insertRoadVertex(targetEl.pts, targetEl.vtx, candidate.index, weldPt);
+    // NEW-3 — reuse an existing through-road vertex within collapse distance instead of near-duplicating
+    // one, and weld the moving endpoint to that RESOLVED node so both roads meet at a single point.
+    const ins = insertRoadVertex(targetEl.pts, targetEl.vtx, candidate.index, weldPt, { collapseFt: ROAD_VERTEX_COLLAPSE_FT });
     if (!ins) return { action: "weld", moving: weldMoving() };   // out-of-range → fall back to a plain weld
-    return { action: "tee", moving: weldMoving(), target: { pts: ins.pts, vtx: ins.vtx } };
+    const teePt = ins.pts[ins.index];
+    return { action: "tee", moving: weldMovingTo(teePt), target: { pts: ins.pts, vtx: ins.vtx } };
   }
   // Endpoint candidate: merge two MATCHING, DIFFERENT roads end-to-end; else weld (incl. loop close).
   const sameRoad = targetEl && candidate.roadId === movingEl.id;
@@ -600,6 +656,12 @@ export function teeGeometry(params) {
   const {
     T, throughDir, sideDir, phT, phS, R, flare = 0,
     curbT = 0, curbS = 0, throughAvail = Infinity, sideAvail = Infinity, tessDeg = DEFAULT_TESS_DEG,
+    // NEW-1 — how far the through edge RUNS from T in each direction (+throughDir / -throughDir).
+    // A single symmetric `throughAvail` is wrong whenever the two sides differ, and the difference is
+    // not academic: a drive meeting a parking field near the END of its edge has ~50 ft of edge one way
+    // and a couple of feet the other, so a symmetric clamp let the short-side return sweep off the end
+    // of the field and hang in open ground. Defaults keep the old symmetric behaviour for old callers.
+    throughAvailPos = undefined, throughAvailNeg = undefined,
   } = params || {};
   if (!T || !throughDir || !sideDir || !(phT >= 0) || !(phS >= 0)) return null;
   const u = unit(throughDir), d = unit(sideDir);
@@ -623,42 +685,89 @@ export function teeGeometry(params) {
   // So the return reach is ALWAYS ≤ R at ANY angle — a small default seed reads as a tidy rounded
   // corner, and a user who needs a genuine WB-62 turn dials returnR up per-junction. Still bounded by
   // the actual road/drive run available (a short drive shrinks the return further).
-  const tMax = Math.max(0, Math.min(throughAvail * 0.9, sideAvail * 0.9, R > 0 ? R : 0));
+  const availPos = Number.isFinite(throughAvailPos) ? throughAvailPos : throughAvail;
+  const availNeg = Number.isFinite(throughAvailNeg) ? throughAvailNeg : throughAvail;
   // Fillet one corner: rays go ALONG the through edge away from the throat, and ALONG the side edge into
   // the body. Clamp R down so the tangent run fits tMax (acute angle → tiny arc, never a sweep).
   const fillet = (corner) => {
-    const awayThrough = mul(u, Math.sign(dot(sub(corner, E0), u)) || 1);
+    const awaySign = Math.sign(dot(sub(corner, E0), u)) || 1;
+    const awayThrough = mul(u, awaySign);
+    // The corner already sits `along` feet toward that end of the through edge, so only what is LEFT
+    // beyond it can carry the return's tangent run.
+    const along = Math.abs(dot(sub(corner, E0), u));
+    const tMax = Math.max(0, Math.min(((awaySign > 0 ? availPos : availNeg) - along) * 0.9, sideAvail * 0.9, R > 0 ? R : 0));
     const cAng = Math.max(-1, Math.min(1, dot(awayThrough, d)));
     const phi = Math.acos(cAng);
-    if (phi < 1e-3 || phi > Math.PI - 1e-3) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null };
+    // No run left past the corner (the drive is as wide as the edge it lands on, or wider) → an honest
+    // SHARP corner. The old code only applied the clamp when tMax > 0, so a zero reach silently fell
+    // through and kept the FULL requested radius — the one case where "no room" produced the biggest
+    // possible return.
+    if (!(tMax > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough };
+    if (phi < 1e-3 || phi > Math.PI - 1e-3) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough };
     let Rc = R > 0 ? R : 0;
     let f = rayFillet(corner, awayThrough, d, Rc, tessDeg);
     if (f && f.t > tMax && tMax > EPS) { Rc = tMax * Math.tan(phi / 2); f = rayFillet(corner, awayThrough, d, Rc, tessDeg); }
-    if (!f || !(Rc > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null }; // degenerate → sharp corner
-    return f;
+    if (!f || !(Rc > EPS)) return { tan1: corner, tan2: corner, arc: [corner], R: 0, t: 0, centre: null, u1: awayThrough }; // degenerate → sharp corner
+    return { ...f, u1: awayThrough };
   };
   const fA = fillet(cornerA);
   const fB = fillet(cornerB);
-  // ---- Clean flare cover (B1006 / NEW-2) -----------------------------------------------
-  // ONE simple rounded-trapezoid "flare" spanning the mouth: up return-arc A onto drive edge A, straight
-  // across to drive edge B (the chord), down return-arc B, then closed along the through/court edge. This
-  // supersedes B989's "climb to a common hTop, then chord" cover, whose two-sided climb dipped into a
-  // NOTCH at oblique angles and whose cap-height guess could poke a step past the strip. Because the top
-  // is a single chord between the two returns and the base is the straight through edge, the polygon is
-  // SIMPLE (never self-crossing) at EVERY angle — road-road tee, car/truck drive, hard skew — so the
-  // pavement reads as one uniform region with a single continuous curb line (the two arcs), with no
-  // internal seam/blotch once the fill layer composites at a single opacity (the tee-layer group).
+  // ---- ADDITIVE curb-return WEDGES (NEW-1, supersedes the B1006 "mouth cover") -----------
+  // Every cover shipped from B953 through B1006 was a patch PAINTED OVER the seam: a mouth polygon
+  // whose base sat exactly ON the through road's near edge and whose top was a straight chord between
+  // the two tangent points. Three defects fell out of that shape and none of them could be tuned away:
+  //   • the base stopped at the near edge, so the side road's stub between that edge and the through
+  //     CENTERLINE — its flat end cap and both back-of-curb strokes — stayed painted on the through
+  //     road ("a rectangle intersecting a rectangle");
+  //   • the top chord joined tangent points that sit at DIFFERENT distances along the side road at any
+  //     skew, so the cover crossed the drive on a slant — the chamfer / chevron / notch;
+  //   • traced on its own the fillet arc is concave toward the corner, so the patch read as a scooped
+  //     lobe in the armpit instead of a corner being rounded.
+  // The fix is to stop patching and hand the renderer an ADDITIVE piece instead: the wedge bounded by
+  // corner→tan1, the arc, and tan2→corner. That wedge is exactly the pavement a curb return ADDS to the
+  // 270° reflex corner where the two strips meet. Unioned with the two strip rings (roadNetwork.js), the
+  // junction becomes one dissolved surface with one continuous outline — no seam to hide, nothing to
+  // knock out, no translucent fill stacking. The wedge is a simple polygon at EVERY angle (a triangle
+  // with one concave side), so the union is always well-defined: straight, curved, or acute road-road.
+  // The wedge is deliberately THICK: past the two tangent points it continues INTO both pavements by
+  // `deep` before closing. Only the arc side is a real boundary — everything behind it is interior to
+  // the union and therefore invisible — and the depth is what makes the union robust on a CURVED
+  // through road, which is the case that broke every previous attempt. The corner math treats the
+  // through edge as the straight tangent line at T; on a curve the real (tessellated) strip edge
+  // departs from that line by up to a foot within the return's reach, and a wedge that stopped at the
+  // assumed line left an uncovered band along the real edge — a hair-thin hole that strokes as exactly
+  // the faint curved seam the owner kept reporting. Reaching well inside both strips bridges that, and
+  // any tessellation mismatch with it, without changing the rendered outline by so much as an inch.
+  // `deep` is capped at half the pavement so it can never punch out the far side of a narrow drive,
+  // and is 0 on the through side of a DRIVE junction (phT = 0 there — the "through edge" is a parking
+  // field / truck-court boundary, and pavement pushed past it would paint road over the court).
+  const deepT = phT > EPS ? Math.min(phT * 0.5, 12) : 0;
+  const deepS = Math.max(1, Math.min(phS * 0.5, 12));
+  const inT = mul(nTee, -1);                            // through near edge → through centerline
+  const wedge = (f, corner, inS) => {
+    if (!f || !(f.R > EPS) || !Array.isArray(f.arc) || f.arc.length < 2) return null;
+    const back1 = add(f.tan1, mul(inT, deepT));         // tan1 pushed into the through pavement
+    const back2 = add(f.tan2, mul(inS, deepS));         // tan2 pushed into the side pavement
+    const heel = add(add(corner, mul(inT, deepT)), mul(inS, deepS));
+    const poly = [...f.arc.map((p) => ({ x: p.x, y: p.y })), back2, heel, back1];
+    return poly.length >= 3 ? poly : null;
+  };
+  // Corner A sits on the +perpS edge, so its pavement lies toward -perpS; corner B is the mirror.
+  const wedges = [wedge(fA, cornerA, mul(perpS, -1)), wedge(fB, cornerB, perpS)].filter(Boolean);
+  // Legacy mouth polygon — no longer painted, kept so older consumers/tests still resolve.
   const mouth = [...fA.arc, ...fB.arc.slice().reverse()].map((p) => ({ x: p.x, y: p.y }));
   const coverPolys = mouth.length >= 3 ? [mouth] : [];
   const throatWidth = len(sub(fA.tan1, fB.tan1));
   return {
     R: Math.max(fA.R, fB.R),
     throatWidth,
+    corners: [cornerA, cornerB],
     throughTangents: [fA.tan1, fB.tan1],
     sideTangents: [fA.tan2, fB.tan2],
     returns: [fA.arc, fB.arc],
-    coverPolys,                        // ONE simple opaque fill (the mouth) — no self-overlap → no blotch
-    cover: mouth,                      // legacy single-polygon field (kept for old consumers/tests)
+    wedges,                            // ADDITIVE curb-return pavement — union these, don't overpaint
+    coverPolys,                        // legacy (pre-union) cover — retained for old consumers
+    cover: mouth,                      // legacy single-polygon field
     throatMid: E0,
     nTee,
   };

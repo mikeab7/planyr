@@ -348,3 +348,44 @@ describe("Stable parcel ids heal the acreage-label duplication (B682)", () => {
     expect(m.parcels[0].labelOffset).toEqual({ x: 5, y: 5 }); // keeps the first (the edited one)
   });
 });
+
+/* NEW-3 — the load migration dedupes near-duplicate control-point clutter left on stored roads by earlier
+ * connect attempts (the B1005/B1006 root cause). Driven against the OWNER'S REAL element set (pulled from
+ * the production Tsakiris / Concept A site record) so the fix is proven on the actual data, not a mock. */
+import { readFileSync } from "node:fs";
+const CONCEPT_A = JSON.parse(readFileSync(new URL("../ui-audit/fixtures/tsakiris-concept-a.json", import.meta.url), "utf8"));
+
+describe("Road near-duplicate vertex cleanup on load (NEW-3)", () => {
+  const nearDupRuns = (pts, tol = 1.5) => {
+    let n = 0;
+    for (let i = 1; i < pts.length; i++) if (Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y) <= tol) n++;
+    return n;
+  };
+
+  it("the owner's real through road e38duuwgj carries near-dup clutter BEFORE migration", () => {
+    const raw = CONCEPT_A.els.find((e) => e.id === "e38duuwgj");
+    expect(raw).toBeTruthy();
+    expect(nearDupRuns(raw.pts)).toBeGreaterThan(0); // the clutter that starved the reach clamp
+  });
+
+  it("createSiteModel collapses that clutter and keeps pts/vtx index-aligned", () => {
+    const m = createSiteModel({ els: CONCEPT_A.els });
+    const road = m.els.find((e) => e.id === "e38duuwgj");
+    expect(nearDupRuns(road.pts)).toBe(0);                 // no consecutive sub-1.5 ft gap survives
+    expect(road.vtx).toHaveLength(road.pts.length);        // arrays stay length-matched
+    expect(road.pts.length).toBeLessThan(CONCEPT_A.els.find((e) => e.id === "e38duuwgj").pts.length); // clutter removed
+    // Endpoints are preserved (they anchor welds + other roads' tees).
+    const raw = CONCEPT_A.els.find((e) => e.id === "e38duuwgj");
+    expect(road.pts[0]).toEqual({ x: raw.pts[0].x, y: raw.pts[0].y });
+    expect(road.pts[road.pts.length - 1]).toEqual({ x: raw.pts[raw.pts.length - 1].x, y: raw.pts[raw.pts.length - 1].y });
+  });
+
+  it("is idempotent — a second migrate pass changes nothing further", () => {
+    const once = createSiteModel({ els: CONCEPT_A.els });
+    const twice = createSiteModel({ els: once.els });
+    const a = once.els.find((e) => e.id === "e38duuwgj");
+    const b = twice.els.find((e) => e.id === "e38duuwgj");
+    expect(b.pts).toEqual(a.pts);
+    expect(b.vtx).toEqual(a.vtx);
+  });
+});

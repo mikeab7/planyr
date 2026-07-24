@@ -1,0 +1,47 @@
+{
+  "note": "REAL owner plan — Tsakiris / Concept A (Supabase site smrjdgmlinea, pulled 2026-07-24). Used to reproduce the road-connection render defect against the owner's actual topology instead of a mock.",
+  "els": [
+    {"h":135,"w":763,"z":1024,"cx":1124.7,"cy":-334.35,"id":"e26duuwgj","zd":135,"rot":0,"type":"paving","attachedTo":"e25duuwgj","truckCourt":{"side":"top"}},
+    {"h":50,"w":763,"z":2048,"cx":1124.7,"cy":-426.85,"id":"e27duuwgj","zd":50,"cfg":{"single":true,"trailerL":50,"trailerW":12,"trailerAisle":0},"rot":0,"type":"trailer","noFit":true,"forCourt":"e26duuwgj","prevZone":"e26duuwgj","attachedTo":"e25duuwgj"},
+    {"h":135,"w":818,"z":3072,"cx":1097.2,"cy":306.65,"id":"e28duuwgj","zd":135,"rot":0,"type":"paving","attachedTo":"e25duuwgj","truckCourt":{"side":"bottom"}},
+    {"h":50,"w":818,"z":4096,"cx":1097.2,"cy":399.15,"id":"e29duuwgj","zd":50,"cfg":{"single":true,"trailerL":50,"trailerW":12,"trailerAisle":0},"rot":0,"type":"trailer","noFit":true,"forCourt":"e28duuwgj","prevZone":"e28duuwgj","attachedTo":"e25duuwgj"},
+    {"h":626,"w":5,"z":5120,"cx":1563.7,"cy":-13.85,"id":"e30duuwgj","rot":0,"type":"sidewalk","attachedTo":"e25duuwgj","sidewalkSide":"right"},
+    {"h":130,"w":445,"z":11264,"cx":-1026.66,"cy":214.88,"id":"e37duuwgj","zd":130,"rot":180,"type":"paving","attachedTo":"e36duuwgj","truckCourt":{"side":"bottom"}},
+    {"h":160,"w":5,"z":17408,"cx":-801.66,"cy":359.88,"id":"e43duuwgj","rot":180,"type":"sidewalk","attachedTo":"e36duuwgj","sidewalkSide":"left"},
+    {"h":160,"w":5,"z":19456,"cx":-1251.66,"cy":359.88,"id":"e45duuwgj","rot":180,"type":"sidewalk","attachedTo":"e36duuwgj","sidewalkSide":"right"},
+    {"h":210,"w":5,"z":21504,"cx":-247.65,"cy":338.19,"id":"e48duuwgj","rot":180,"type":"sidewalk","attachedTo":"e47duuwgj","sidewalkSide":"left"},
+    {"h":135,"w":335,"z":22528,"cx":-472.65,"cy":225.69,"id":"e49duuwgj","zd":135,"rot":180,"type":"paving","attachedTo":"e47duuwgj","truckCourt":{"side":"bottom"}},
+    {"h":210,"w":5,"z":23552,"cx":-698.13,"cy":330.7,"id":"e50duuwgj","rot":180,"type":"sidewalk","attachedTo":"e47duuwgj","sidewalkSide":"right"},
+    {"h":566,"w":5,"z":29696,"cx":685.7,"cy":-43.85,"id":"e56lohfeu","rot":0,"type":"sidewalk","attachedTo":"e25duuwgj","sidewalkSide":"left"},
+    {"h":5,"w":445,"z":44032,"cx":-1026.66,"cy":442.38,"id":"e1454691kortko","rot":180,"type":"landscape","attachedTo":"e36duuwgj","sidewalkSide":"top"},
+
+    {"h":506,"w":873,"z":0,"cx":1124.7,"cy":-13.85,"id":"e25duuwgj","rot":0,"dock":"cross","type":"building","dockSide":"bottom"},
+    {"h":42,"w":615,"z":6144,"cx":1587.2,"cy":-14.35,"id":"e31duuwgj","rot":270,"type":"parking","attachedTo":"e25duuwgj","sideParkSide":"right"},
+    {"h":150,"w":445,"z":9216,"cx":-473.13,"cy":360.7,"id":"e47duuwgj","rot":180,"dock":"single","type":"building","dockSide":"bottom"},
+    {"h":160,"w":445,"z":9216,"cx":-1026.66,"cy":359.88,"id":"e36duuwgj","rot":180,"dock":"single","type":"building","dockSide":"bottom"},
+    {"h":42,"w":160,"z":18432,"cx":-778.16,"cy":359.88,"id":"e44duuwgj","rot":270,"type":"parking","attachedTo":"e36duuwgj","sideParkSide":"left"},
+    {"h":42,"w":160,"z":20480,"cx":-1275.16,"cy":359.88,"id":"e46duuwgj","rot":90,"type":"parking","attachedTo":"e36duuwgj","sideParkSide":"right"},
+    {"h":42,"w":150,"z":25600,"cx":-224.63,"cy":360.7,"id":"e52duuwgj","rot":270,"type":"parking","attachedTo":"e47duuwgj","sideParkSide":"left"},
+
+    {"h":67.23409195625504,"w":215.20060229700493,"z":27648,"cx":635.800003718963,"cy":-354.89587377796164,"id":"e54duuwgj","pts":[{"x":743.2,"y":-366.33140067578245},{"x":548.2471272690436,"y":-368.23637011753624},{"x":549.1645218987567,"y":-321.6827261362135}],"rot":0,"vtx":[{},{"radius":22.89042438108635,"treatment":"arc"},{}],"curb":0.5,"type":"road","travelW":40,"driveTee":{"kind":"truckcourt","flare":0,"returnR":50,"targetId":"e26duuwgj"},"dimOffset":{"x":15.900744200969484,"y":1.135756654725128},"roadClass":"truck"},
+
+    {"h":867.9499294029886,"w":3228.196810722357,"z":28672,"cx":54.37,"cy":46.18632857905524,"id":"e38duuwgj","pts":[{"x":-1545.9805713476353,"y":237.07569149463765},{"x":-1424.3761363205354,"y":127.13826044885744},{"x":-130.48809079419328,"y":104.73906741915687},{"x":231.65727708769091,"y":298.09563188590823},{"x":301.1172770876909,"y":450.2056318859082},{"x":389.33660106112353,"y":450.177235419192},{"x":506.73352879351347,"y":450.1394471229233},{"x":539.402921214274,"y":450.44426276007533},{"x":539.402921214274,"y":450.44426276007533},{"x":539.402921214274,"y":450.44426276007533},{"x":540.1426835050812,"y":450.45116497334914},{"x":540.5885282091351,"y":450.45532484371915},{"x":541.7455679510152,"y":450.4661203859683},{"x":543.8876603486411,"y":450.4861067772244},{"x":545.7715705940823,"y":450.50368424834494},{"x":545.7878334536249,"y":450.50383598590497},{"x":559.4300003788783,"y":450.63112166510894},{"x":563.2060151025862,"y":450.66635306210213},{"x":1648.8372770876908,"y":460.7956318859082},{"x":1642.917277087691,"y":-367.4143681140918},{"x":1506.2,"y":-367.15506558377007}],"rot":0,"vtx":[{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{"radius":120,"treatment":"arc"},{"radius":67.1596415825674,"treatment":"arc"},{}],"curb":0.5,"type":"road","travelW":40,"driveTee":{"kind":"truckcourt","flare":0,"returnR":50,"targetId":"e26duuwgj"},"roadClass":"truck"},
+
+    {"h":102,"w":628,"z":30720,"cx":632.2,"cy":-11.85,"id":"e57lohfeu","rot":90,"type":"parking","attachedTo":"e25duuwgj","sideParkSide":"left"},
+    {"h":42,"w":150,"z":32768,"cx":-726.95,"cy":357.74,"id":"e59hzrjsn","rot":90,"type":"parking","attachedTo":"e47duuwgj","sideParkSide":"right"},
+    {"h":60,"w":55,"z":35840,"cx":1533.7,"cy":-296.85,"id":"e62sascnh","rot":0,"dock":"none","type":"building","noFit":true,"dogEar":{"side":"top","sign":1},"noLabel":true,"attachedTo":"e25duuwgj"},
+    {"h":60,"w":55,"z":36864,"cx":1533.7,"cy":269.15,"id":"e63sascnh","rot":0,"dock":"none","type":"building","noFit":true,"dogEar":{"side":"bottom","sign":1},"noLabel":true,"attachedTo":"e25duuwgj"},
+    {"h":60,"w":55,"z":37888,"cx":715.7,"cy":-296.85,"id":"e64cglxqv","rot":0,"dock":"none","type":"building","noFit":true,"dogEar":{"side":"top","sign":-1},"noLabel":true,"attachedTo":"e25duuwgj"},
+
+    {"h":39.12809274840782,"w":1133.2830907672367,"z":38912,"cx":-770.764834533759,"cy":455.03854858153693,"id":"e1454682splyoj","pts":[{"x":-1337.377490523913,"y":462.1026283396676},{"x":-971.3071754042275,"y":461.2565821305925},{"x":-283.4840526620525,"y":458.9571562959496},{"x":-217.02,"y":457.8},{"x":-216.6212550144525,"y":435.7}],"rot":0,"vtx":[{},{"radius":50,"treatment":"arc"},{},{"radius":28.037922478198777,"treatment":"arc"},{}],"curb":0.5,"type":"road","travelW":24,"driveTee":{"kind":"parking","flare":0,"returnR":20,"targetId":"e52duuwgj"},"roadClass":"fire"},
+
+    {"h":772.4368166607533,"w":46.70119870742303,"z":39936,"cx":546.7384954875897,"cy":64.36602005752346,"id":"e1454683splyoj","pts":[{"x":543.8876603486411,"y":450.4861067772244},{"x":544.8731534596527,"y":245.01371599581472},{"x":545.1969126252957,"y":206.11475092140822},{"x":549.5898048592915,"y":-321.6817710595634}],"rot":0,"vtx":[{},{},{},{}],"curb":0.5,"type":"road","travelW":40,"roadClass":"aisle"},
+
+    {"z":40960,"id":"e1454684splyoj","det":{"role":"detention","depth":16.2,"slope":3,"outlet":{"stages":[{"kind":"orifice","role":"primary","coeff":0.6,"count":1,"diameterIn":35.68,"invertElevFt":145.1},{"kind":"weir","role":"spillway","coeff":3.33,"lengthFt":720.8,"crestElevFt":160.3}]},"tobBerm":{"h":1,"applied":161.3},"tobElev":161.3,"poolElev":null,"freeboard":1,"releaseRateCfs":92.15},"rot":0,"type":"pond","points":[{"x":503.72,"y":-421.41},{"x":502.54,"y":412.42},{"x":365.47,"y":415.41},{"x":290.22,"y":285.88},{"x":211.36,"y":240.72},{"x":108.25,"y":-10.5},{"x":74.88,"y":-82.45},{"x":60.32,"y":-187.32},{"x":116.51,"y":-327.18},{"x":194.52,"y":-423.79}]},
+
+    {"h":60,"w":55,"z":41984,"cx":-283.45,"cy":252.74,"id":"e1454688yfsvff","rot":180,"dock":"none","type":"building","noFit":true,"dogEar":{"side":"bottom","sign":-1},"noLabel":true,"attachedTo":"e47duuwgj"},
+    {"h":60,"w":55,"z":43008,"cx":-668.13,"cy":255.7,"id":"e1454689yfsvff","rot":180,"dock":"none","type":"building","noFit":true,"dogEar":{"side":"bottom","sign":1},"noLabel":true,"attachedTo":"e47duuwgj"},
+
+    {"h":263.97667227185957,"w":187.04404330523948,"z":45056,"cx":467.2667568432096,"cy":328.14599317030013,"id":"e1454692rfhccx","pts":[{"x":545.1969126252957,"y":206.11475092140822},{"x":389.33660106112353,"y":450.177235419192}],"rot":0,"vtx":[{},{}],"curb":0.5,"type":"road","travelW":36,"roadClass":"aisle"}
+  ]
+}
