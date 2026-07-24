@@ -56,17 +56,19 @@ export const DETENTION_CRITERIA = {
     authorityRuleId: "waller",
     provider: "Waller County (Subdivision & Development Regulations)",
     governingManual: {
-      name: "Waller County Subdivision & Development Regulations (rev. 2023-12-06), Appendix E — Detention",
-      section: "Appendix E, Volume Requirements",
+      name: "Waller County Subdivision & Development Regulations (rev. 2023-12-06), Appendix E — Drainage Criteria Manual, Sec 5 (Detention Facilities)",
+      section: "Appendix E DCM Sec 5 — Detention Facilities (INDUSTRIAL; the rural 5-ac-lot ditch-drained exemption per the 2023 Item 15 memo does NOT apply)",
       url: "https://www.co.waller.tx.us/upload/page/0263/Subdivision%20-%20Development%20Regulations%20REVISED_FINAL-12-06-2023.pdf",
       effectiveDate: "2023-12-06",
     },
     postLePre: true, // Small-Watershed / HEC-HMS hydrograph governs above the coefficient method
-    lastVerified: "2026-07-18",
+    lastVerified: "2026-07-24",
     criteria: {
       // Release / storms / freeboard reference the rule record where present, else a screening default.
-      freeboardFt: c(1, false, "regional practice — verify with the County Engineer"),
-      maxSideSlope: c(3, false, "3:1 interior — commonly cited; verify"),
+      // Citation TARGET named (cowork 2026-07-24): the quantitative detention criteria live in Appendix E
+      // DCM Sec 5; full text not machine-reachable (co.waller.tx.us 403), so these stay ASSUMED (verify:false).
+      freeboardFt: c(1, false, "Appendix E DCM Sec 5 (Detention Facilities) — value pending confirmation; verify with the County Engineer"),
+      maxSideSlope: c(3, false, "3:1 interior — Appendix E DCM Sec 5 pending; commonly cited, verify"),
       maintBermFt: c(30, false, "maintenance shelf — screening convention; verify"),
       orificeC: c(STD_ORIFICE_C, true, "sharp-edged orifice (standard hydraulics)"),
       weirC: c(STD_WEIR_C, true, "rectangular weir (standard hydraulics)"),
@@ -89,17 +91,19 @@ export const DETENTION_CRITERIA = {
     authorityRuleId: "bkdd",
     provider: "Brookshire–Katy Drainage District",
     governingManual: {
-      name: "Brookshire–Katy Drainage District Rules & Regulations (signed 2022-02-28) + Drainage & Detention Summary Tables template",
-      section: "Detention = rate-match (no increase in post-development peak discharge, offsite areas included)",
+      name: "BKDD Rules & Regulations 22-01 (signed 2022-02-28) + Order Amending 2023-03-27 + Master Drainage Plan (2023-06-20)",
+      section: "Detention = rate-match (no increase in post-development peak discharge, offsite areas included). Quantitative criteria pending — only the cover pages of these PDFs are machine-reachable (cowork 2026-07-24).",
       url: "https://www.bkdd.dst.tx.us/page/BKDD.RulesRegulations",
       effectiveDate: "2022-02-28",
     },
     postLePre: true, // the defining criterion — RATE control, no volumetric rate
     secondarySource: true,
-    lastVerified: "2026-07-16",
+    lastVerified: "2026-07-24",
     criteria: {
-      freeboardFt: c(1, false, "1-ft freeboard from the 100-yr WSE — regional practice; verify"),
-      maxSideSlope: c(3, false, "3:1 interior — commonly cited; verify"),
+      // Citation TARGETS named (cowork 2026-07-24): BKDD Rules & Regulations 22-01 + Order Amending 3-27-23
+      // + Master Drainage Plan 6-20-23. Full text not machine-reachable (only cover pages), so ASSUMED.
+      freeboardFt: c(1, false, "1-ft freeboard from the 100-yr WSE — BKDD Rules & Regulations 22-01 pending (regional practice); verify"),
+      maxSideSlope: c(3, false, "3:1 interior — BKDD Rules & Regulations 22-01 pending; commonly cited, verify"),
       maintBermFt: c(30, false, "maintenance shelf — screening convention; verify"),
       orificeC: c(STD_ORIFICE_C, true, "sharp-edged orifice (standard hydraulics)"),
       weirC: c(STD_WEIR_C, true, "rectangular weir (standard hydraulics)"),

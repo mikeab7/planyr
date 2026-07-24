@@ -230,15 +230,20 @@ describe("pathway, LOMR-F, and the wetlands cross-flag", () => {
 // NEW-1 (Waller) — `when`-conditioned bases + the hag basis + fillToElevate "prohibited".
 describe("NEW-1 — Waller record: conditioned bases, HAG, prohibited pathway", () => {
   const waller = DEFAULT_BUILDABILITY_RULES.waller;
-  it("ships verified with the Art. 5 provenance and the prohibited pathway", () => {
+  it("ships verified with the confirmed 2023 Subdivision Regs provenance and the prohibited pathway", () => {
     expect(waller.verified).toBe(true);
-    expect(waller.sourceDate).toBe("2026-07-15");
+    // B986 — citation upgraded to the confirmed current source (cowork 2026-07-24 browser read).
+    expect(waller.sourceDate).toBe("2026-07-24");
+    expect(waller.source).toMatch(/Subdivision & Development Regulations/);
+    expect(waller.source).toMatch(/Appendix B Item 8/);
+    expect(waller.source).toMatch(/500-YEAR/i);       // FFE keys to the 500-yr WSE, not BFE+freeboard
     expect(waller.fillToElevate).toBe("prohibited");
     expect(waller.pathwayNote).toMatch(/open foundations/i);
     expect(waller.pathwayNote).toMatch(/non-starter/i);
     expect(waller.note).toMatch(/§C\(3\)/);           // Atlas-14 study threshold
     expect(waller.note).toMatch(/§D\(5\)/);           // HAG placement note (AO/AH section, A-Zone catch-all)
     expect(waller.note).toMatch(/Brookshire–Katy|BKDD/);
+    expect(waller.note).toMatch(/Acceptable Outfall/); // Sec 2.1 definition (cowork-confirmed)
   });
   it("in the 1% floodplain: 500-yr WSE + 2 governs (the +1 row is redundant there)", () => {
     const r = requiredFfe(waller, { wse02Ft: 100 }, { in1pct: true, in02pct: true });
