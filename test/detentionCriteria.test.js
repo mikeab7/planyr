@@ -64,11 +64,11 @@ describe("requiredStormsFor — references the rule record's storm list", () => 
 });
 
 describe("criteriaFor — composition + overrides", () => {
-  it("BKDD is rate-control (postLePre) with no volumetric release rate", () => {
+  it("BKDD is rate-control (postLePre) with no volumetric release rate; VERIFIED against Rules 22-01 full text", () => {
     const c = criteriaFor("bkdd");
     expect(c.postLePre).toBe(true);
     expect(c.allowableReleaseCfsPerAc).toBeNull();
-    expect(c.secondarySource).toBe(true);
+    expect(c.secondarySource).toBe(false); // now VERIFIED against the primary signed document (owner-read 2026-07-24)
   });
   it("standard weir/orifice coefficients are verified physics", () => {
     const c = criteriaFor("waller");
