@@ -11,6 +11,7 @@ import {
   drawdownWarning,
   bermAsFillHeight,
   bermFillCells,
+  pointInRing,
 } from "../src/workspaces/site-planner/lib/pondGeom.js";
 
 // 100×100 ft square at the origin. With slope 3, the stage area at `down` ft below
@@ -171,19 +172,31 @@ describe("NEW-6 — bermFillCells: materialize an above-grade berm as modeled fi
   const ring = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 200 }, { x: 0, y: 200 }];
   const flat96 = () => 96;
 
-  it("TOB above grade → cells, a positive fill volume, a toe ring and a land take", () => {
+  it("TOB above grade → cells, a positive fill volume, the drawn ring as toe, and NO land take (B982 inward)", () => {
     const bc = bermFillCells(ring, { tobElev: 100 }, { gradeAt: flat96, ratio: 3 });
     expect(bc).toBeTruthy();
     expect(bc.maxHeightFt).toBeCloseTo(4, 6);
     expect(bc.crestElevFt).toBe(100);
     expect(bc.volCf).toBeGreaterThan(0);
     expect(bc.cells.length).toBeGreaterThan(0);
-    expect(bc.toeRing).toBeTruthy();
-    expect(bc.landTakeSf).toBeGreaterThan(0);
-    // The screening embankment volume is in the ballpark of perimeter × h²·ratio/2.
+    // B982 (NEW-17) INWARD model: the drawn ring IS the outer toe and the berm adds NO land.
+    expect(bc.toeRing).toBe(ring);
+    expect(bc.landTakeSf).toBe(0);
+    // The screening embankment volume is in the ballpark of perimeter × h²·ratio/2 (same
+    // triangular cross-section as the old outward prism, just placed inside the footprint).
     const perim = 800, approx = perim * 16 * 3 / 2; // 19,200 cf
     expect(bc.volCf).toBeGreaterThan(approx * 0.4);
     expect(bc.volCf).toBeLessThan(approx * 1.8);
+  });
+
+  it("B982 (NEW-17) — every berm cell sits INSIDE the drawn footprint (nothing outside the toe)", () => {
+    const bc = bermFillCells(ring, { tobElev: 100 }, { gradeAt: flat96, wseFt: 99, ratio: 3, triggerClassAt: () => "1pct", fpId: "berm:p1" });
+    expect(bc.cells.length).toBeGreaterThan(0);
+    expect(bc.cells.every((c) => pointInRing({ x: c.x, y: c.y }, ring))).toBe(true);
+    // the below-WSE heat cells (which drive the mitigation requirement) are inside the zone-covered
+    // footprint too — the exact fix for a floodplain pond reading ~0 berm fill on the old outward model.
+    expect(bc.heatCells.length).toBeGreaterThan(0);
+    expect(bc.heatCells.every((c) => pointInRing({ x: c.x, y: c.y }, ring))).toBe(true);
   });
 
   it("TOB at/below grade → no berm (dormant), never a zero-height ring polluting ledgers", () => {
