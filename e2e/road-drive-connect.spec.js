@@ -54,7 +54,7 @@ test.describe("B955 — road → parking-drive connect", () => {
     const road = await driveRoad(page);
     expect(road).toBeTruthy();
     expect(road.driveTee.kind).toBe("parking");
-    expect(road.driveTee.returnR).toBe(20); // car-scale seed
+    expect(road.driveTee.returnR).toBe(15); // car-scale seed (B989 — lowered 20→15, tidy default)
     await expect(teeReturns(page)).toHaveCount(2);
     await expect(page.locator('[data-export="road-tee-cover"]').first()).toBeAttached();
   });
