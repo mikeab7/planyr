@@ -614,7 +614,14 @@ export function teeGeometry(params) {
   const cornerA = lineX(add(T, mul(perpS, phSm)), d, E0, u);
   const cornerB = lineX(add(T, mul(perpS, -phSm)), d, E0, u);
   if (!cornerA || !cornerB) return null;
-  const tMax = Math.max(0, Math.min(throughAvail, sideAvail) * 0.9);
+  // B989 — WIDTH-cap the fillet, not just the road length. throughAvail/sideAvail are the road/drive
+  // LENGTHS (100+ ft), so `min(throughAvail, sideAvail)*0.9` was effectively unbounded: at an OBLIQUE
+  // armpit (phi small) the fillet tangent run t = R/tan(phi/2) blew up, sweeping the corner far past the
+  // road as a concave scoop / balloon / batwing (the owner's real-render bug). Cap the run to ~ONE
+  // drive-width so the corner stays a TIDY round at ANY angle, acute included: capW ≈ full pavement
+  // width (2·half-width) + a small curb margin. Both corners honour this — they run through this one closure.
+  const capW = Math.max(2 * phS, 2 * phT) + 4;
+  const tMax = Math.max(0, Math.min(throughAvail, sideAvail, capW) * 0.9);
   // Fillet one corner: rays go ALONG the through edge away from the throat, and ALONG the side edge
   // into the body. Clamp R down so the tangent run fits the available road (acute angle → tiny arc).
   const fillet = (corner) => {
@@ -630,36 +637,34 @@ export function teeGeometry(params) {
   };
   const fA = fillet(cornerA);
   const fB = fillet(cornerB);
-  // Cover (B971 rewrite — the throat-widening "fan" is GONE). The old cover replaced the drive with a
-  // wide trapezoid whose concave sides read as a funnel / batwing with a seam; the owner's real-render
-  // screenshots showed exactly that. Instead the drive (or side road) STAYS a constant-width strip
-  // (drawn separately by renderElPx); here we only (a) round each of the two armpit corners with ONE
-  // simple tangent fillet WEDGE, and (b) overpaint the butting edge strokes across the mouth with a
-  // seam band. Union = road/court strip + constant-width drive + the two corner fillets — no fan, no
-  // wings, no concave pinch, no self-overlap possible (each piece is its own SIMPLE polygon). The fillet
-  // arcs are still drawn on top as the visible curb line.
-  const mT = curbT * 1.75 + 0.05, mS = curbS * 1.75 + 0.05;
-  // One armpit fillet as a small wedge: corner → tangent on the through/court edge → arc → tangent on
-  // the drive edge → back to corner. Fills only the rounded corner (never widens the drive).
-  // The arc already runs tan1 → … → tan2, so the wedge is just [corner, ...arc] (closing tan2→corner).
-  // Adding tan1/tan2 again would make a zero-length edge (a false fold-back cusp).
-  const wedge = (f, corner) => (f.arc && f.arc.length >= 2 && f.R > EPS)
-    ? [{ x: corner.x, y: corner.y }, ...f.arc.map((p) => ({ x: p.x, y: p.y }))]
-    : null;
-  const wedgeA = wedge(fA, cornerA);
-  const wedgeB = wedge(fB, cornerB);
-  // Seam band across the mouth: back-of-curb wide, reaching from the near edge DOWN past the tee point
-  // (into the through road by phT for a road tee; just a hair into the court for a drive, phT=0) and a
-  // hair down the drive — so it hides the drive cap + the through/court edge stroke + the side road's
-  // curb stubs, with no throat widening.
-  const inThrough = phT + mS;
-  const seam = [
-    add(add(cornerA, mul(perpS, mS)), mul(nTee, -inThrough)),
-    add(add(cornerB, mul(perpS, -mS)), mul(nTee, -inThrough)),
-    add(add(cornerB, mul(perpS, -mS)), mul(d, mS)),
-    add(add(cornerA, mul(perpS, mS)), mul(d, mS)),
-  ];
-  const coverPolys = [seam, wedgeA, wedgeB].filter(Boolean);
+  // Cover (B989) — ONE simple mouth polygon, replacing B971's seam band + two detached armpit wedges.
+  // The 3-piece cover had two real tells on the owner's render: (a) a NOTCH at the ACUTE armpit of an
+  // oblique drive — the seam band is a fixed strip, so the acute toe reached past it and the underlying
+  // court-edge stroke peeked through; and (b) three overlapping fills STACKED (when the pavement is
+  // semi-transparent to show the aerial) into a darker blotch with visible internal outlines. This
+  // single polygon traces the WHOLE mouth boundary: up fillet-arc A onto drive edge A, straight across
+  // the drive to edge B, down fillet-arc B onto the court edge, then back along the court edge — so it is
+  // gap-free (no notch at ANY angle) and never overlaps itself (no opacity build-up between cover pieces).
+  // The drive/court strips are still drawn separately at constant width; this only fills the joint + the
+  // two rounded armpits, staying within the drive's own edges (no throat widening). The two arcs are also
+  // returned as `returns`, drawn on top as the continuous curb line (they meet the straight curbs exactly
+  // at their tangent points).
+  // The mouth's TOP does NOT jump straight across at the fillet tangents (fA.tan2 → fB.tan2): the side
+  // road is drawn separately as a constant-width strip whose FLAT END-CAP corner (offset ±ph from the
+  // centerline end) can sit ABOVE that chord and poke a small STEP past the cover at oblique angles. So
+  // first run each side STRAIGHT UP its own drive edge (direction d) to a common height `hTop` — chosen
+  // to clear the strip's end-cap corner (cap height ≤ ph) — then chord across there, burying the cap
+  // inside the cover. The sides follow the drive's own edges (no throat widening); only the joint fills.
+  const hOf = (p) => dot(sub(p, E0), nTee);                     // height above the through/court edge (into the side body)
+  const climb = dot(d, nTee) > EPS ? dot(d, nTee) : 1;          // height gained per unit along d
+  const capClear = 1.75 * Math.max(curbS, curbT) + 2;          // clear the drive's back-of-curb end cap
+  const hTop = Math.max(hOf(fA.tan2), hOf(fB.tan2), Math.max(phS, phT) + capClear);
+  const extA = Math.max(0, (hTop - hOf(fA.tan2)) / climb);      // how far each side must run UP its edge…
+  const extB = Math.max(0, (hTop - hOf(fB.tan2)) / climb);      // …to reach the common top (≈0 on the taller side)
+  const topA = extA > EPS ? [add(fA.tan2, mul(d, extA))] : [];  // skip a zero-length step (it reads as a cusp)
+  const topB = extB > EPS ? [add(fB.tan2, mul(d, extB))] : [];
+  const mouth = [...fA.arc, ...topA, ...topB, ...fB.arc.slice().reverse()].map((p) => ({ x: p.x, y: p.y }));
+  const coverPolys = mouth.length >= 3 ? [mouth] : [];
   const throatWidth = len(sub(fA.tan1, fB.tan1));
   return {
     R: Math.max(fA.R, fB.R),
@@ -667,8 +672,8 @@ export function teeGeometry(params) {
     throughTangents: [fA.tan1, fB.tan1],
     sideTangents: [fA.tan2, fB.tan2],
     returns: [fA.arc, fB.arc],
-    coverPolys,                        // ARRAY of simple opaque fills (seam + 2 armpit wedges)
-    cover: seam,                       // legacy single-polygon field (kept for old consumers/tests)
+    coverPolys,                        // ONE simple opaque fill (the mouth) — no self-overlap → no blotch
+    cover: mouth,                      // legacy single-polygon field (kept for old consumers/tests)
     throatMid: E0,
     nTee,
   };
