@@ -56,32 +56,39 @@ export function effectivePondRole(det, split) {
   return { role: owner || suggested.role, source: owner ? "owner" : "auto", suggested };
 }
 
-/* NEW-21 (owner live-verify 2026-07-24) — the ONE mitigation-credit function EVERY consumer shares
- * (the site ledger, the Yield verdict, the pond-sizing optimizer, and the ⚡ Optimize card), so a pond's
- * "provided mitigation" can never be computed two different ways (the SHORT 0.0 verdict vs the card's
- * "already covers 0.2 ac-ft" — the exact contradiction the owner caught). A pond's below-WSE cut
- * (`bands.mitigationCandidateCf`) is compensating storage ONLY when the floodplain can actually use it:
+/* NEW-21/NEW-26 (owner live-verify 2026-07-24) — the ONE mitigation-credit function EVERY consumer
+ * shares (the site ledger, the Yield verdict, the pond-sizing optimizer, and the ⚡ Optimize card), so a
+ * pond's "provided mitigation" can never be computed two different ways (the SHORT 0.0 verdict vs the
+ * card's "already covers 0.2 ac-ft" — the exact contradiction the owner caught).
  *
- *   (a) HYDRAULIC SEAL — a pond whose rim (top of bank) sits ABOVE the flood WSE is walled off by its
- *       own berm; the flood can't reach the cut, so it compensates for NOTHING (until an opening / weir
- *       through the berm on the flood side is modeled — not yet). reason "berm-sealed". A rim BELOW the
- *       WSE is overtopped by the flood, so the cut IS wetted and this gate does not fire.
- *   (b) ROLE — a Detention-only pond's below-flood cut is the mitigation CANDIDATE but is not CREDITED
- *       to the mitigation ledger until the owner designates the pond Mitigation or Hybrid (the NEW-8
- *       opt-in that stops the tool silently claiming one basin for both ledgers). reason "role-detention".
+ * NEW-26 (owner directive, supersedes the NEW-21 berm-seal + role gates): a pond's below-WSE cut
+ * (`bands.mitigationCandidateCf`) is compensating storage BY DEFAULT, because every detention pond is
+ * HYDRAULICALLY CONNECTED to the floodplain through its own OUTFALL — the same outlet the pond drains
+ * through. During a flood the receiving water backs IN through that outlet and occupies the below-WSE
+ * storage, so it compensates like any open flood storage. This holds regardless of the pond's berm (the
+ * flood reaches the cut through the outfall, not over the berm) and regardless of the pond's detention/
+ * mitigation ROLE (the physics doesn't care what we labeled it). The credit is ZERO in exactly two cases:
  *
- * Otherwise the full candidate credits (reason null). Returns { creditedCf, candidateCf, reason }. Pure. */
+ *   (a) OUTLET GATED — the outfall carries a flap valve / backflow preventer (or the connection is
+ *       deliberately closed), so the flood can't back in. reason "outlet-gated". `split.outletGated`.
+ *   (b) NO OUTFALL — the pond has no outlet to the floodplain at all (an isolated pit). reason
+ *       "no-outfall". `split.hasOutfall === false` (default is CONNECTED — an unmarked pond credits).
+ *
+ * ⚠ The connected DEFAULT is an ASSUMPTION (some districts require a dedicated opening or restrict in-pond
+ * mitigation credit — BKDD Rules 22-01, ASSUMED until the code text lands); the caller flags it in the
+ * verdict / card (the "credited cut … engineer confirms" note). The accessible band is the below-WSE
+ * candidate reachable through the outfall invert (storage above the invert / permanent pool, below the
+ * governing WSE) — the per-slice foot-for-foot refinement is a later hook. Returns
+ * { creditedCf, candidateCf, reason }. Pure. */
 export function mitigationCredit(det, split) {
   const bands = split && split.bands;
   const candidateCf = bands && Number.isFinite(bands.mitigationCandidateCf) ? bands.mitigationCandidateCf : 0;
   if (!(candidateCf > 0)) return { creditedCf: 0, candidateCf: 0, reason: null };
-  const el = (bands && bands.elevations) || {};
-  // (a) berm seal: rim above the flood WSE → the berm keeps the flood out (no hydraulic connection).
-  const sealed = !!split.bermed && Number.isFinite(el.tobElev) && Number.isFinite(el.wseFt) && el.tobElev > el.wseFt + 1e-6;
-  if (sealed) return { creditedCf: 0, candidateCf, reason: "berm-sealed" };
-  // (b) role: only a Mitigation/Hybrid pond credits its candidate to the mitigation ledger.
-  const role = effectivePondRole(det, split).role;
-  if (role !== "mitigation" && role !== "dual") return { creditedCf: 0, candidateCf, reason: "role-detention" };
+  // (a) a gated outfall (flap valve) keeps the flood out — no backflow, no in-pond compensating storage.
+  if (split.outletGated || (det && det.outletGated)) return { creditedCf: 0, candidateCf, reason: "outlet-gated" };
+  // (b) genuinely no outfall to the floodplain (an isolated pit). Default (undefined) is CONNECTED.
+  if (split.hasOutfall === false) return { creditedCf: 0, candidateCf, reason: "no-outfall" };
+  // Connected through the outfall (the default) → the below-WSE storage IS compensating storage.
   return { creditedCf: candidateCf, candidateCf, reason: null };
 }
 
@@ -92,16 +99,18 @@ export function accumulatePondLedger(entries = []) {
     usableCf: 0,
     deadCf: 0,
     mitCandidateCf: 0,
-    // NEW-8 — the role gate: candidate (below-WSE) volume is CREDITED to the
-    // mitigation Provided ledger only from ponds whose effective role is
-    // mitigation or dual; detention-role ponds' candidate volume stays visible
-    // as uncredited. Role NEVER touches usableCf/deadCf — the exclusive bands
-    // already partition each pond's gross exactly once (no double-count).
+    // NEW-26 — candidate (below-WSE) cut is CREDITED to the mitigation Provided ledger
+    // BY DEFAULT: every detention pond is hydraulically connected to the floodplain
+    // through its own outfall, so the flood backs in and the below-flood storage
+    // compensates. Credit is withheld ONLY when the outfall is gated or absent (see
+    // mitigationCredit). Neither role nor berm gates any more. Crediting NEVER touches
+    // usableCf/deadCf — the exclusive bands already partition each pond's gross exactly
+    // once (no double-count).
     creditedMitCf: 0,
     uncreditedMitCf: 0,
     creditedPondCount: 0,
-    // NEW-21 — WHY the largest below-flood cut earns no mitigation credit ("role-detention" |
-    // "berm-sealed" | null), so the panel + verdict can explain the SHORT, not just show 0.0.
+    // NEW-26 — WHY a below-flood cut earns no mitigation credit ("outlet-gated" |
+    // "no-outfall" | null), so the panel + verdict can explain the SHORT, not just show 0.0.
     mitGatedReason: null,
     excavationCf: 0,
     unknownIds: [],
@@ -124,8 +133,9 @@ export function accumulatePondLedger(entries = []) {
     if (p.mode === "anchored" && p.bands) {
       const cand = p.bands.mitigationCandidateCf || 0;
       out.mitCandidateCf += cand;
-      // NEW-21 — the ONE shared credit gate (role + hydraulic seal), so the ledger, verdict,
-      // optimizer, and card can never disagree on "provided mitigation".
+      // NEW-26 — the ONE shared credit function (connected-by-default; zero only on a gated /
+      // absent outfall), so the ledger, verdict, optimizer, and card can never disagree on
+      // "provided mitigation". The outfall-gated flag rides the stamped split (p.outletGated).
       const mc = mitigationCredit({ role: p.role }, p);
       out.creditedMitCf += mc.creditedCf;
       if (mc.creditedCf > 0) out.creditedPondCount++;

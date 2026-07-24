@@ -7859,17 +7859,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the crest ring, so storage recomputes on the inward-tapering solid. gradeFt is the pond's
     // existing grade; null (no terrain data) leaves the classic drawn-ring model in place.
     const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
-    // NEW-21 — is this pond BERMED (rim above existing grade)? A bermed pond whose rim clears the flood
-    // WSE is hydraulically sealed from the floodplain, so its below-WSE cut earns no mitigation credit
-    // (mitigationCredit reads this + the flood WSE). Null grade / rim at grade → not bermed.
-    const bermed = gradeFt != null && Number.isFinite(det.tobElev) && det.tobElev > gradeFt + 0.02;
+    // NEW-26 — is the pond's OUTFALL gated (a flap valve / backflow preventer, or deliberately closed)?
+    // The flood backs INTO a pond through its outfall by default, so its below-WSE cut earns mitigation
+    // credit UNLESS the outfall is gated (then the flood can't reach it). `det.outletGated` is the pond's
+    // own flag; default (undefined) = CONNECTED. mitigationCredit reads this.
+    const outletGated = !!(e.det && e.det.outletGated);
     const estPoolFor = () => (detRegime && detRegime.regime === "B"
       ? deadStoragePoolDepthFt({ bfeFt: detRegime.elevations?.bfeFt, groundElevFt: detRegime.elevations?.groundFt, depthFt: det.depth ?? 8, freeboardFt: det.freeboard ?? 1 })
       : null);
     if (fmZones.length) {
       const facts = pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, bfeSrc: fmElev.bfeSrc, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt, derivedWse1pctFt: fmElev.derivedWse1pctFt, derivedWse1pctSrc: fmElev.derivedWse1pctSrc }, fmZonesSig);
       const estPool = estPoolFor();
-      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt, coincidentStorm }), wseFt: facts.wseFt, wseSrc: facts.wseSrc ?? null, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true, bermed };
+      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt, coincidentStorm }), wseFt: facts.wseFt, wseSrc: facts.wseSrc ?? null, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true, outletGated };
     }
     // NEW-9 — a restored view replays the facts the check persisted for this pond, so
     // the usable/dead split (and the verdict built on it) survives a reload unchanged.
@@ -7877,7 +7878,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (rf) {
       const estPool = Number.isFinite(rf.estPoolDepthFt) ? rf.estPoolDepthFt : estPoolFor(); // check-time measurement wins
       const wseFt = Number.isFinite(rf.wseFt) ? rf.wseFt : null;
-      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt, coincidentStorm }), wseFt, wseSrc: rf.wseSrc ?? null, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true, bermed };
+      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt, coincidentStorm }), wseFt, wseSrc: rf.wseSrc ?? null, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true, outletGated };
     }
     // NEW-9 — restored, flood evidence exists, but NO persisted fact for this pond (a
     // legacy snapshot saved before this fix, or a pond drawn after the check): the
@@ -9131,13 +9132,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!pass2.ok) {
         mitMsg = `Mitigation couldn't be sized automatically: ${pass2.reason}.`;
       } else if (pass2.mitigation.gated) {
-        // NEW-21 — the pond has a below-flood cut but earns NO mitigation credit (the SAME shared gate
-        // the verdict reads), so digging can't close it. Name WHY + the ungate options — NEVER a false
-        // "already covers" or "sized toward" (the contradiction the owner caught). mitApplied stays false;
-        // the explanation rides the persistent "what changed" card (mitGapNote → proposal), not a toast.
-        mitGapNote = pass2.mitigation.gated === "berm-sealed"
-          ? "This pond's berm seals it off from the floodplain, so its below-flood cut doesn't count as mitigation. Options: model an opening or weir through the berm on the flood side, relocate the berm out of the zone, or add an open in-zone cut."
-          : "This pond's purpose is Detention, so its below-flood cut isn't credited to mitigation. Options: set its purpose to Hybrid (Detention + Mitigation) so the cut counts, or add a separate mitigation cut.";
+        // NEW-21/NEW-26 — the pond has a below-flood cut but earns NO mitigation credit because its
+        // outfall is GATED (the flood can't back in), so digging can't close it. Name WHY + the fix —
+        // NEVER a false "already covers"/"sized toward". mitApplied stays false; the explanation rides
+        // the persistent "what changed" card (mitGapNote → proposal), not a toast.
+        mitGapNote = pass2.mitigation.gated === "no-outfall"
+          ? "This pond has no outfall to the floodplain, so the flood can't reach its below-flood cut and it doesn't count as mitigation. Add an open outfall connection, or provide the mitigation in a connected basin."
+          : "This pond's outfall is marked gated (a flap valve keeps the flood out), so its below-flood cut doesn't count as mitigation. Turn off the outfall-gated setting if the outlet is open, or provide the mitigation elsewhere.";
       } else if (pass2.mitigation.covered && !pass2.actions.some((a) => a.kind === "deepen" || a.kind === "grow")) {
         mitMsg = mitReqShown ? `This pond already covers the required ${fmtAcFt(mitTargetCf / 43560)} ac-ft of mitigation.` : "";
       } else {
@@ -17209,6 +17210,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             : <span title="The receiving-water level comes from the drainage district channel, FEMA InFRM, a USGS gauge, or a terrain-derived channel flowline (never site grade). None resolved here, so enter the outfall elevation or check the Drainage district group. Leaving it blank means the gravity-discharge check is skipped, not failed." style={{ ...estPillStyle, color: PAL.warn }}>needs channel data</span>}
                       </span>
                     </Field>
+                    {/* NEW-26 (owner directive 2026-07-24) — the outfall's flood connection. By DEFAULT a pond
+                        is hydraulically CONNECTED to the floodplain through this outfall: during a flood the
+                        receiving water backs IN through the outlet and its below-flood cut counts as
+                        compensating (mitigation) storage. Ticking this marks the outfall as GATED (a flap
+                        valve / backflow preventer keeps the flood out), which zeroes that in-pond mitigation
+                        credit. Stored only when true — an unmarked pond stays connected. */}
+                    <div style={{ marginTop: 6 }}>
+                      <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.ink, cursor: "pointer", alignItems: "center" }} title="Tick only if the outfall carries a flap valve or backflow preventer (or is otherwise sealed against the receiving water). Sealed means the flood cannot back into the pond, so the pond's below-flood storage no longer counts as compensating (mitigation) storage. Left unticked, the pond is treated as an open, connected outfall (the default) and its below-flood cut is credited.">
+                        <input type="checkbox" checked={!!det.outletGated} onChange={(e) => setDet({ outletGated: e.target.checked ? true : null })} /> Outfall gated (flap valve, no floodplain backflow)
+                      </label>
+                    </div>
                     {/* PR-G/PR-I — SOFT geotech screen: pre-filled with the depth to water ("don't dig
                         below groundwater"), else the 12-ft fallback. A warning, never a hard block. */}
                     <Field label="Max excavation depth (ft)">
@@ -20165,23 +20177,26 @@ function YieldPanel({
                         <span style={{ fontFamily: NUM_FONT, fontSize: 13, fontWeight: 750, fontVariantNumeric: TABULAR_NUMS, color: balColor }}>{balText}</span>
                       </div>
                     );
-                    // NEW-21 — when the site is SHORT because a below-flood cut EXISTS but earns no
-                    // credit (the SAME shared gate the verdict + Optimize card use), name WHY + the
-                    // ungate options, so "0.0 provided" over a real cut is never left unexplained.
+                    // NEW-21/NEW-26 — when the site is SHORT because a below-flood cut EXISTS but earns
+                    // no credit (the SAME shared gate the verdict + Optimize card use), name WHY + the
+                    // fix, so "0.0 provided" over a real cut is never left unexplained. Post-NEW-26 the
+                    // only reason is a GATED / absent outfall (the default is connected → credits).
                     if (bal < 0 && d.mitProvided.uncreditedCf > 0.02 * 43560 && d.mitProvided.gatedReason) {
                       const uncAcFt = d.mitProvided.uncreditedCf / 43560;
                       mitR.push(warnNote(
-                        d.mitProvided.gatedReason === "berm-sealed"
-                          ? `A pond has ${f1(uncAcFt)} ac-ft of below-flood cut that earns NO credit: its berm seals it off from the floodplain. Options: an opening or weir through the berm on the flood side, relocate the berm out of the zone, or an open in-zone cut.`
-                          : `A pond has ${f1(uncAcFt)} ac-ft of below-flood cut that earns NO credit: its purpose is Detention. Set it to Hybrid (Detention + Mitigation) in the pond inspector so the cut counts, or add a separate mitigation cut.`,
+                        d.mitProvided.gatedReason === "no-outfall"
+                          ? `A pond has ${f1(uncAcFt)} ac-ft of below-flood cut that earns NO credit: it has no outfall to the floodplain, so the flood can't reach it. Add an open outfall connection, or provide the mitigation in a connected basin.`
+                          : `A pond has ${f1(uncAcFt)} ac-ft of below-flood cut that earns NO credit: its outfall is marked gated (a flap valve keeps the flood out). Turn off "outfall gated" in the pond inspector if the outlet is open.`,
                         "mit-gated",
-                        "The SAME credit rule the verdict and the Optimize card use: a below-flood cut only compensates when the floodplain can actually reach and use it (hydraulically connected at flood stages) and the pond is designated to provide mitigation."));
+                        "The SAME credit rule the verdict and the Optimize card use: a below-flood cut compensates when the floodplain can reach it. A detention pond is connected through its outfall by default (the flood backs in), so it credits, unless the outfall is gated or absent."));
                     }
                     // NEW-2 — surplus cut is a quiet efficiency note (method fold), never a warning:
                     // extra below-WSE cut is dirt cost with no yield; the balancer ranks shrink moves.
                     if (overBy > 0) mitR.push(keyedNote(`Surplus: provided ${f2(provAcFt)} vs required ${f2(mit.volumeAcFt)} — ~${f0(bal)} ac-ft of cut beyond the requirement earns no extra credit (dirt cost only; the ledger balancer ranks shrink options).`, "mit-overdug"));
-                    if (provCf > 0) mitR.push(warnNote("Credited cut needs hydraulic connection + same-watershed stage distribution — engineer confirms.", "mit-prov-confirm",
-                      "Compensating storage must fill and drain with the floodplain at flood stages (hydraulic connection) and offset storage in the same watershed — both are design-level judgments."));
+                    // NEW-26 — the credit rides an ASSUMED open (ungated) outfall connection; flag it with
+                    // its citation target so the assumption never silently drives the number.
+                    if (provCf > 0) mitR.push(warnNote("Credited cut assumes an OPEN (ungated) outfall connection; engineer confirms.", "mit-prov-confirm",
+                      "A detention pond drains to the floodplain through its outfall; during a flood the receiving water backs in through that same outlet, occupying the below-WSE storage (compensating storage). So the below-flood cut is credited by default. ASSUMED per BKDD Rules 22-01 (citation target, unverified until the code text lands); some districts require a dedicated opening or restrict in-pond credit. If the outfall is gated / flap-valved, mark it in the pond inspector; then the cut earns no credit. The cut must also fill and drain with the floodplain in the same watershed (a design-level judgment)."));
                   }
                 }
                 // B809 — the heat-map affordance rides the group: Auto follows this group's

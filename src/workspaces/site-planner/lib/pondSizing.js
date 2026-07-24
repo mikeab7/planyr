@@ -188,17 +188,16 @@ export function sizePondForTargets({
   const bands = bandsAt(ring, det, wseFt, gradeFt, coincidentStorm);
   const mit0 = bands ? bands.mitigationCandidateCf : 0; // raw below-WSE candidate cut (geometry only)
   const use0 = bands ? bands.usableCf : 0;
-  // NEW-21 — the CREDITED mitigation is the raw candidate through the ONE shared gate (role + hydraulic
-  // seal), so the optimizer/card agree with the ledger/verdict (the "SHORT 0.0" vs "already covers 0.2"
-  // contradiction the owner caught). A GATED pond (Detention role, or a berm-sealed rim above the flood)
-  // credits ZERO no matter how deep it digs — deepening only adds gated candidate — so its cure is to
-  // UNGATE (designate Hybrid / open the berm / relocate), never a deepen the tool would falsely apply.
-  const bermedS = gradeFt != null && isFinite(gradeFt) && Number.isFinite(det.tobElev) && det.tobElev > gradeFt + 0.02;
+  // NEW-21/NEW-26 — the CREDITED mitigation is the raw candidate through the ONE shared gate, so the
+  // optimizer/card agree with the ledger/verdict (the "SHORT 0.0" vs "already covers 0.2" contradiction
+  // the owner caught). NEW-26: the pond is HYDRAULICALLY CONNECTED to the floodplain through its outfall
+  // BY DEFAULT, so its below-WSE cut credits — ZERO only when the outfall is GATED (a flap valve keeps the
+  // flood out; deepening can't help a gated pond, so the cure is to UNGATE / open the outfall, not dig).
   const mitCred = bands
-    ? mitigationCredit({ role: det.role ?? null }, { mode: "anchored", bands, wseFt, grossCf: bands.grossCf, bermed: bermedS })
+    ? mitigationCredit(det, { mode: "anchored", bands, wseFt, grossCf: bands.grossCf, outletGated: !!(det && det.outletGated) })
     : { creditedCf: 0, candidateCf: 0, reason: null };
   const mitProvided = mitCred.creditedCf;
-  const mitGated = mitCred.reason; // "role-detention" | "berm-sealed" | null
+  const mitGated = mitCred.reason; // "outlet-gated" | "no-outfall" | null
 
   const actions = [];
   let mitTarget = Math.max(0, mitTargetCf || 0);
