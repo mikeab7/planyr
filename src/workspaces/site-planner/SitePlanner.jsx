@@ -1090,7 +1090,7 @@ function teeJunctionsOf(els, settings) {
 // (those are what balloon the junction). Editable; both types then feasibility-clamp to the actual
 // drive via the tight throughAvail below, so the return can neither span the whole connect edge nor
 // reach across the court's depth to the building.
-const DRIVE_RETURN_SEED = { parking: 15, truckcourt: 30 }; // B989 — tidy default (was 20/50, oversized on a 24–40 ft drive); still editable up per-junction, width-capped in teeGeometry
+const DRIVE_RETURN_SEED = { parking: 15, truckcourt: 24 }; // B1005 — tidy default; teeGeometry now caps the return REACH to R itself (≤ half a drive-width here), so a small seed reads as a rounded corner, not a scoop. Editable up per-junction for a real WB-62 turn.
 function driveJunctionsOf(els, settings) {
   const out = [];
   const byId = new Map((els || []).map((e) => [e.id, e]));
@@ -3101,7 +3101,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const driveTargetKind = (el) => (el && !el.points && typeof el.cx === "number" && el.w > 0 && el.h > 0
     ? (el.type === "parking" ? "parking" : (el.type === "paving" && el.truckCourt ? "truckcourt" : null)) : null);
   const driveTargetsOf = () => els.filter((x) => driveTargetKind(x)).map((x) => ({ id: x.id, kind: driveTargetKind(x), edges: rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0) }));
-  const DRIVE_RETURN = { parking: 15, truckcourt: 30 }; // B989 — curb-return seed (ft): car ≈15, truck WB-62 driveway ≈30 (single fillet, width-capped in teeGeometry to ~one drive-width at any angle)
+  const DRIVE_RETURN = { parking: 15, truckcourt: 24 }; // B1005 — curb-return seed (ft): car ≈15, truck ≈24 (single fillet; teeGeometry caps the reach to R at any angle, so it stays a tidy rounded corner — dial up per-junction for a genuine WB-62 turn)
   // Nearest parking/truck-court edge to a moving road endpoint, within `tolFt`.
   const findDriveConnect = (P, tolFt) => {
     let best = null;
@@ -14452,7 +14452,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   render BETWEEN ground surfaces and buildings: it paints over roads/parking/paving
                   (hiding the raw butting curbs) yet buildings paint over IT (B959/NEW-1 — connection
                   pavement can never overlap a building). */}
-              {[...els].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
+              {(() => {
+                const surfaces = [...els].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed));
+                // B1006/NEW-2 — FLATTEN the junction to one uniform tone. The clean-tee overlay below the
+                // buildings paints a cover patch over each junction to hide the raw butting curbs, but when a
+                // road/court fill is SEMI-TRANSPARENT (to show the aerial) that translucent cover just STACKS
+                // on the base strips: the two strips already double where they overlap, the cover doubles
+                // again on top, and the butting curb stubs peek through — the owner's darker patch + faint
+                // curved seam. Fix: KNOCK the exact cover polygons OUT of the ground-surface fills+strokes
+                // (an SVG mask), so the overlay's single cover fill (drawn next, at the SAME opacity) REPLACES
+                // that pavement instead of stacking — one uniform tone, aerial still showing through, and the
+                // two return arcs the only curb line across the mouth. Buildings are a separate later pass, so
+                // their z-clip is untouched. Export clones this live SVG, so the knockout carries to PDF/print.
+                const toDcover = (poly) => (poly && poly.length >= 3)
+                  ? poly.map((p, k) => { const q = f2p(p); return `${k ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
+                const coverDs = [
+                  ...teeJunctions.flatMap((tj) => (tj.geom.coverPolys && tj.geom.coverPolys.length ? tj.geom.coverPolys : (tj.geom.cover ? [tj.geom.cover] : []))),
+                  ...driveJunctions.flatMap((dj) => (dj.geom.coverPolys && dj.geom.coverPolys.length ? dj.geom.coverPolys : (dj.geom.cover ? [dj.geom.cover] : []))),
+                  ...weldJunctions.map((wj) => wj.cover),
+                ].map(toDcover).filter(Boolean);
+                if (!coverDs.length) return surfaces;
+                // Mask region + white "show everything" rect span a HUGE area (not just the live viewport),
+                // so a differently-cropped export viewBox (buildExportSvg re-crops the cloned SVG) can never
+                // fall outside the mask and blank the surfaces — only the small cover holes are cut.
+                return (
+                  <>
+                    <mask id="tee-cover-knockout" maskUnits="userSpaceOnUse" x="-100000" y="-100000" width="200000" height="200000">
+                      <rect x="-100000" y="-100000" width="200000" height="200000" fill="#fff" />
+                      {coverDs.map((d, i) => <path key={i} d={d} fill="#000" />)}
+                    </mask>
+                    <g mask="url(#tee-cover-knockout)">{surfaces}</g>
+                  </>
+                );
+              })()}
               {/* v3 D3 — INWARD pond berm ring: the earthen embankment sits INSIDE the drawn outline
                   (the fixed outer toe), between the boundary and the inset crest (where the water
                   begins). Drawn OVER the pond (a ground surface, below the building layer) so the water

@@ -567,17 +567,18 @@ describe("teeGeometry — clean tee (curb returns, width-capped)", () => {
     }
   });
 
-  it("B989: a small return is honored, but a large one is WIDTH-CAPPED (no runaway throat)", () => {
-    // capW = max(2·phT, 2·phS) + 4 = 28; tMax = capW·0.9 = 25.2. A return whose tangent run fits
-    // (R=10 → t=10 ≤ tMax) is honored exactly; a big one (R=40 → t=40) is clamped to the width cap.
-    const capW = 2 * Math.max(base.phT, base.phS) + 4;
-    const tMax = capW * 0.9;
-    const small = teeGeometry({ ...base, R: 10 });
-    const large = teeGeometry({ ...base, R: 40 });
-    expect(small.throatWidth).toBeCloseTo(2 * (12 + 10), 2);           // small return honored
-    expect(large.throatWidth).toBeGreaterThan(small.throatWidth);      // still grows with R…
-    expect(large.throatWidth).toBeLessThanOrEqual(2 * (base.phS + tMax) + 1e-6); // …but only to the cap
-    expect(large.throatWidth).toBeLessThan(2 * (12 + 40));             // NOT the raw 2·(phS+R) fan
+  it("B1005: the return reach is the REQUESTED radius R itself (dial-up honored — supersedes B989's drive-width cap)", () => {
+    // B989 capped the reach to ~one drive-width (capW ≈ 2·phS) regardless of R, so a user could NOT
+    // dial a genuine WB-62 turn AND the DEFAULT still opened ~3 drive-widths. B1005 ties the reach to R:
+    // at a perpendicular tee the run is exactly R, so the throat is exactly 2·(phS + R) at ANY R.
+    for (const R of [10, 20, 40]) {
+      const g = teeGeometry({ ...base, phT: 0, phS: 15, R });
+      expect(g.throatWidth).toBeCloseTo(2 * (15 + R), 3);             // reach == R, honored small AND large
+    }
+    // The old B989 drive-width cap (capW·0.9 ≈ 25) would have held R=40 well below 2·(15+40)=110 — this
+    // linear growth is exactly what fails on the pre-B1005 code.
+    const large = teeGeometry({ ...base, phT: 0, phS: 15, R: 40 });
+    expect(large.throatWidth).toBeGreaterThan(2 * (15 + 25));         // NOT clamped to the old ~capW
   });
 
   it("flare widens the throat beyond the returns alone", () => {
@@ -662,16 +663,37 @@ describe("teeGeometry — clean tee (curb returns, width-capped)", () => {
     }
   });
 
-  it("B989: the mouth is WIDTH-CAPPED — a big return can't open a runaway fan", () => {
-    const phS = 15, R = 50;
-    const g = teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS, R, curbT: 0.5, curbS: 0.5 });
-    const xs = g.coverPolys[0].map((p) => p.x);
-    const mouthW = Math.max(...xs) - Math.min(...xs);
-    const capW = 2 * phS + 4;                                              // phT=0 → capW = 2·phS + margin
-    // bounded by the drive + a ≈one-drive-width return each side (drive + 2·tMax), NOT the raw
-    // 2·(phS+R)=130 ft "fan" the un-clamped return used to open.
-    expect(mouthW).toBeLessThan(2 * (phS + capW));
-    expect(mouthW).toBeLessThan(2 * (phS + R));
+  // B1005 / NEW-1 REGRESSION — the owner's giant concave scoop was the curb return SWEEPING far past the
+  // road at an OBLIQUE / acute tee: the acute armpit has a small wedge angle, so t = R/tan(phi/2) blows
+  // up, and B989 only held it to ~one full drive-width (capW ≈ 2·phS ≈ 30 ft). The fix caps the reach to
+  // the requested radius R itself at EVERY angle. This test measures the actual reach of each curb return
+  // (its tangent run from the corner) at oblique tees and asserts it never exceeds R — it FAILS on the
+  // pre-B1005 code, where the acute reach clamped to ~capW (≈ 30) instead of R (≈ 15).
+  const reachOfReturns = (g, dHat) => {
+    const uHat = { x: 1, y: 0 };                                         // throughDir in these cases
+    const X = (p1, d1, p2, d2) => {                                      // line×line (through-edge ∩ drive-edge = the corner)
+      const den = d1.x * d2.y - d1.y * d2.x; if (Math.abs(den) < 1e-9) return null;
+      const t = ((p2.x - p1.x) * d2.y - (p2.y - p1.y) * d2.x) / den;
+      return { x: p1.x + d1.x * t, y: p1.y + d1.y * t };
+    };
+    return g.returns.map((arc) => {
+      const a = arc[0], b = arc[arc.length - 1];
+      const corner = X(a, uHat, b, dHat);
+      return corner ? Math.min(dist(a, corner), dist(b, corner)) : 0;
+    });
+  };
+  it("B1005: at an OBLIQUE / acute tee the curb return NEVER sweeps past its radius R (the owner's scoop)", () => {
+    for (const deg of [60, 45, 30, 22]) {
+      const th = (deg * Math.PI) / 180;
+      const dHat = { x: Math.cos(th), y: Math.sin(th) };
+      const R = 15;
+      const g = teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: dHat, phT: 0, phS: 15.5, R, curbT: 0.5, curbS: 0.5, throughAvail: 150, sideAvail: 120 });
+      for (const reach of reachOfReturns(g, dHat)) {
+        expect(reach).toBeLessThanOrEqual(R + 1e-6);                     // pre-B1005: acute reach ≈ capW·0.9 ≈ 28 ≫ 15
+      }
+      // and the cover stays a single simple polygon (no batwing / notch) at every oblique angle
+      expect(g.coverPolys.length).toBe(1);
+    }
   });
 
   it("B964: each return arc is a single smooth (monotonic-turning) fillet — not a spiky path", () => {
@@ -763,18 +785,16 @@ describe("teeGeometry reused for a road→drive connect (edge as 'through', no t
     }
   });
 
-  // B989 — the WIDTH cap now bounds the WB-62 ≈50 ft return to ≈one drive-width even on a ROOMY drive
-  // (the owner's fix: throughAvail/sideAvail are the road LENGTHS, so the old length-only clamp left the
-  // oblique return unbounded). A genuinely TIGHT run (shorter than the width cap) clamps it further still.
-  it("B989: the return is WIDTH-CAPPED even on a roomy drive, and clamps FURTHER on a tight run", () => {
+  // B1005 — a ROOMY drive HONORS the requested WB-62 ≈50 ft return (dial-up: the owner can build a genuine
+  // truck turn), while a genuinely TIGHT run (shorter than the requested radius) clamps it down to fit. A
+  // small DEFAULT seed still reads tidy because the reach never exceeds R; a big seed is only as big as asked.
+  it("B1005: a roomy drive HONORS the requested radius; a tight run clamps it down to fit", () => {
     const common = { T: { x: 0, y: 0 }, throughDir: { x: 1, y: 0 }, sideDir: { x: 0, y: 1 }, phT: 0, phS: 12, curbT: 0, curbS: 0.5, R: 50 };
     const roomy = teeGeometry({ ...common, throughAvail: 300, sideAvail: 300 });
     const tight = teeGeometry({ ...common, throughAvail: 10, sideAvail: 10 });
-    const capW = 2 * 12 + 4;                                     // phT=0 → capW = 2·phS + margin
     expect(roomy).toBeTruthy();
     expect(tight).toBeTruthy();
-    expect(roomy.R).toBeLessThan(50);                           // NOT the raw 50 — the width cap bites
-    expect(roomy.R).toBeLessThanOrEqual(capW);                  // ≈ one drive-width (perpendicular ⇒ Rc = tMax ≤ capW)
+    expect(roomy.R).toBeCloseTo(50, 3);                         // roomy drive honors the full requested WB-62 turn
     expect(tight.R).toBeLessThan(roomy.R);                      // a short run clamps further
     expect(tight.throatWidth).toBeLessThan(roomy.throatWidth);
   });
