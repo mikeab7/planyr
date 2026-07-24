@@ -165,7 +165,7 @@ import { estDepthToWaterFt, estMaxExcavDepthFt, poolRelevantForRole } from "./li
 import { deriveTailwater, TAILWATER_SOURCES, tailwaterNote } from "./lib/tailwaterSource.js";
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
-import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy, pumpAllowance } from "./lib/detentionCriteria.js";
+import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy, pumpAllowance, jurKeyForAuthority } from "./lib/detentionCriteria.js";
 import { selectDetentionMethod } from "./lib/detentionMethod.js";
 import { computeTimeOfConcentration } from "./lib/timeOfConcentration.js";
 import { outletProblems } from "./lib/outletStructure.js";
@@ -7560,6 +7560,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "Auto — detected: <X>" and a hand-picked rule can be compared against the map.
   const floodJurDetected = drainAuthorityId ? defaultFloodJurForAuthority(drainAuthorityId) : defaultFloodJurForCounty(restored?.county);
   const floodJurKey = fmSettings.jurKey || floodJurDetected;
+  // DETENTION criteria are governed by the drainage AUTHORITY (a drainage district like BKDD), NOT
+  // the floodplain county — the two are different keys. `floodJurKey` is the FLOODPLAIN key (county:
+  // Waller for Tsakiris), correct for flood zones / FFE. But `criteriaFor()` returns DETENTION criteria,
+  // and for a Brookshire–Katy site `defaultFloodJurForAuthority("bkdd")` falls back to "generic"/"waller"
+  // — so the BKDD row (freeboard, side slope, orifice C, pumped share, coincident policy, all now
+  // VERIFIED against Rules 22-01) NEVER surfaced. `critJurKey` fixes that: a drainage-district overlay
+  // means BKDD governs detention (the app already equates the two — see the fmBuild `bkdd` flag), else
+  // the resolved authority (hcfcd→harris, fortbend→fortbend, …), else the floodplain key. BKDD is the
+  // only drainage district modeled in the criteria registry today.
+  const critInDrainageDistrict = (drainCtxData?.authority?.overlays || []).some((o) => o.kind === "drainage-district");
+  const critJurKey = critInDrainageDistrict ? "bkdd" : (drainAuthorityId ? jurKeyForAuthority(drainAuthorityId) : floodJurKey);
   const fmRule = floodRules[floodJurKey] || floodRules.generic;
   // Derived BFE (B755): the FEMA-BFE-line estimate computed at check time. It NEVER
   // overwrites the manual bfeFt (which would masquerade as user entry) — it rides its
@@ -7839,7 +7850,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // default NO: the pond recovers to normal (dry-weather) tailwater between storms, so the whole
   // recovered column is usable detention and the 100-yr flood WSE is only a routing / outfall condition.
   // When the policy is ASSUMED (unverified) the verdict states the assumption (coincidentAssumed).
-  const coincidentPolicy = coincidentStormPolicy(criteriaFor(floodJurKey, { overrides: criteriaOverrides }));
+  const coincidentPolicy = coincidentStormPolicy(criteriaFor(critJurKey, { overrides: criteriaOverrides }));
   const coincidentStorm = coincidentPolicy.coincident;
   // The policy is ASSUMED (either way) until the governing code text lands — verified:false. The verdict
   // states the assumption whenever it MATERIALLY drives the usable number (a flood-affected pond whose
@@ -8865,7 +8876,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const needsMit = mitDeficitCf != null && mitDeficitCf > 0;
     if (!needsDet && !needsMit) return;
 
-    const criteria = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
+    const criteria = criteriaFor(critJurKey, { overrides: criteriaOverrides });
     const avgDepthFt = criteria.screeningPondDepthFt?.value ?? 8;
     const mitRatio = fmRule && Number.isFinite(fmRule.ratio) ? fmRule.ratio : 1;
     const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
@@ -9267,7 +9278,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     req: detReq, reqCandidates: detReqCandidates,
     // B907 — the typical screening pond depth used ONLY to ESTIMATE additional land take
     // from a detention shortfall (never to size a pond) — criteria-configurable.
-    screeningPondDepthFt: criteriaFor(floodJurKey, { overrides: criteriaOverrides }).screeningPondDepthFt?.value ?? 8,
+    screeningPondDepthFt: criteriaFor(critJurKey, { overrides: criteriaOverrides }).screeningPondDepthFt?.value ?? 8,
     tier: detTier, regime: detRegime, outfall: outfallNote,
     // B707/B708/B710/B712 — the floodplain-mitigation ledger + pond split + buildability.
     // NEW-2 — the DISPLAY ledger holds last-known-good while the fetch is stale (never a fresh
@@ -17044,7 +17055,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   if (g_outletStages === 0) return null;
                   const effDetO = detWithAuto(selEl.det);
                   if (!(effDetO.tobElev != null && Number.isFinite(effDetO.tobElev))) return null;
-                  const critO = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
+                  const critO = criteriaFor(critJurKey, { overrides: criteriaOverrides });
                   const daO = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
                   const impO = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
                   const tcO = computeTimeOfConcentration({ areaAcres: daO, impPct: impO, criteria: critO });
@@ -17584,7 +17595,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // B902 — AUTO-SUGGEST: the site's own pre-development peak discharge (a
                       // screening estimate), offered as a placeholder + one-click "Use" for districts
                       // (Waller, BKDD) that publish no cfs/ac cap. Never overrides a stored release.
-                      const detCriteria = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
+                      const detCriteria = criteriaFor(critJurKey, { overrides: criteriaOverrides });
                       // B905 — COMPUTED time of concentration (Kirpich) — see the RATE CONTROL
                       // section below for the full explanation; used here so this card's suggested
                       // release agrees with the one the outlet solver actually targets.
@@ -17813,7 +17824,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {(() => {
                       const effDet = detWithAuto(selEl.det);
                       const split = pondSplitFor(selEl);
-                      const criteria = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
+                      const criteria = criteriaFor(critJurKey, { overrides: criteriaOverrides });
                       const da = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
                       const imp = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
                       // B905 — COMPUTED time of concentration (Kirpich), replacing the flat 15-min
@@ -18146,7 +18157,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const dOverlays = (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "drainage-district");
                       const dFailed = (drainCtxData?.authority?.flags || []).includes("bkdd-unverified");
                       const inDistrict = dOverlays.length > 0;
-                      const critD = criteriaFor(floodJurKey, { overrides: criteriaOverrides });
+                      const critD = criteriaFor(critJurKey, { overrides: criteriaOverrides });
                       const authLabel = dOverlays[0]?.name || detReq?.rule?.authorityLabel || null;
                       const twR = g_twEst;
                       const dSummary = inDistrict ? dOverlays[0].name.replace("Drainage District", "DD") : dFailed ? "membership unverified" : "county criteria";

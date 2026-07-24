@@ -168,8 +168,11 @@ describe("R1 — a verdict driven by the assumed policy CARRIES the assumption (
 
 describe("R1 — SitePlanner wires the policy into the split, the solvers, and the verdict line", () => {
   it("imports the policy resolver and computes it from the jurisdiction criteria", () => {
-    expect(src).toContain('import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy, pumpAllowance } from "./lib/detentionCriteria.js";');
-    expect(src).toContain("const coincidentPolicy = coincidentStormPolicy(criteriaFor(floodJurKey, { overrides: criteriaOverrides }));");
+    expect(src).toContain('import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy, pumpAllowance, jurKeyForAuthority } from "./lib/detentionCriteria.js";');
+    // B1005 — detention criteria key off the drainage AUTHORITY (critJurKey), not the floodplain county
+    // (floodJurKey), so a Brookshire–Katy site shows the BKDD criteria row (not the generic/Waller fallback).
+    expect(src).toContain('const critJurKey = critInDrainageDistrict ? "bkdd" : (drainAuthorityId ? jurKeyForAuthority(drainAuthorityId) : floodJurKey);');
+    expect(src).toContain("const coincidentPolicy = coincidentStormPolicy(criteriaFor(critJurKey, { overrides: criteriaOverrides }));");
     expect(src).toContain("const coincidentStorm = coincidentPolicy.coincident;");
     expect(src).toContain("const coincidentAssumed = !coincidentPolicy.verified;");
   });
