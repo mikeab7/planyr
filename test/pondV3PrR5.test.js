@@ -163,7 +163,7 @@ describe("R1 — a verdict driven by the assumed policy CARRIES the assumption (
 
 describe("R1 — SitePlanner wires the policy into the split, the solvers, and the verdict line", () => {
   it("imports the policy resolver and computes it from the jurisdiction criteria", () => {
-    expect(src).toContain('import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy } from "./lib/detentionCriteria.js";');
+    expect(src).toContain('import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy, pumpAllowance } from "./lib/detentionCriteria.js";');
     expect(src).toContain("const coincidentPolicy = coincidentStormPolicy(criteriaFor(floodJurKey, { overrides: criteriaOverrides }));");
     expect(src).toContain("const coincidentStorm = coincidentPolicy.coincident;");
     expect(src).toContain("const coincidentAssumed = !coincidentPolicy.verified;");

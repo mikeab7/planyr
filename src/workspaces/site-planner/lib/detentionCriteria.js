@@ -58,6 +58,18 @@ const STD_WEIR_C = 3.33;
 const COINCIDENT_ASSUMED = (target) =>
   c(0, false, `coincident-storm design policy (${target}). ASSUMED non-coincident: the pond recovers to normal (dry-weather) tailwater between storms, so the whole recovered column is usable detention and the 100-yr flood WSE is only a routing / outfall condition. Stated in the verdict; swap to VERIFIED when the code text lands.`);
 
+/* NEW-27 (owner directive 2026-07-24) — the PUMPED-SHARE design policy: the fraction of the
+ * allowable release a jurisdiction lets a PUMP provide (the rest must leave by gravity). The
+ * owner should NEVER be asked to type a pump discharge he doesn't know — the allowed pump rate is
+ * DERIVED as this share × the allowable release (see pumpAllowance()). Pumped detention is an
+ * EXCEPTION most reviewers allow only with engineer-confirmed reliability + backup power, so the
+ * derived rate is a screening CEILING, not an approval. ASSUMED (verified:false) until the
+ * governing code text lands; stated wherever it drives a number. (TxDOT-outfall cases — a pump
+ * discharging to a TxDOT facility — additionally invoke the TxDOT Houston District Pumped Discharge
+ * Criteria (July 2025), a named search target not yet encoded as its own row.) */
+const PUMPED_SHARE_ASSUMED = (pct, target) =>
+  c(pct, false, `pumped share of the allowable release — ASSUMED ${pct}% (${target}). Pumped detention is a reviewer exception; the derived rate is a screening ceiling, not an approval — the engineer confirms reliability + backup power. Swap to VERIFIED when the code text lands.`);
+
 // ---------------------------------------------------------------------------
 // The registry. Task order: Waller, Brookshire–Katy DD, Fort Bend, Harris/HCFCD first.
 // ---------------------------------------------------------------------------
@@ -94,6 +106,7 @@ export const DETENTION_CRITERIA = {
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
       coincidentStorm: COINCIDENT_ASSUMED("Waller Appendix E DCM Sec 5 + BKDD Rules & Regulations 22-01 pending"),
+      pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search targets: Waller Appendix E DCM Sec 5 + BKDD Rules & Regulations 22-01"),
     },
     note: "Waller publishes volumetric rates (0.55 ac-ft/ac floor .. 0.65 coefficient); the RATE proof (Post ≤ Pre) is hydrograph-derived above small sites — verify with the county engineer.",
   },
@@ -131,6 +144,7 @@ export const DETENTION_CRITERIA = {
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
       coincidentStorm: COINCIDENT_ASSUMED("BKDD Rules & Regulations 22-01 + Waller Appendix E Sec 5 pending"),
+      pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search targets: BKDD Rules & Regulations 22-01 + Waller Appendix E Sec 5"),
     },
     note: "RATE-control district: detention is proven by hydrograph routing (Post ≤ Pre at 2/10/100-yr, offsite included), NOT a volumetric ac-ft/ac rule. The routing here is a SCREENING proxy; the district engineer's HEC-HMS governs.",
   },
@@ -166,6 +180,7 @@ export const DETENTION_CRITERIA = {
       weirC: c(STD_WEIR_C, true, "rectangular weir (standard hydraulics)"),
       drawdownMaxHr: null,
       coincidentStorm: COINCIDENT_ASSUMED("FBCDD DCM Ch. 6 coincident-storm / tailwater provision pending"),
+      pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "bounded by FBCDD Interim §5's ≥50% gravity-drain rule (VERIFIED), so the pumped share is at most 50% of the release; the ceiling itself is ASSUMED. FBCDD DCM Ch. 6 / Interim §5"),
     },
     note: "FBCDD publishes both a volumetric rate (Table 6-1) and a 0.125 cfs/ac release cap; the routing proves Post ≤ Pre at 10/100-yr. Tailwater convention (§6.4.1/§6.4.5) can drown the outlet — see the hydraulic-regime gate.",
   },
@@ -203,6 +218,7 @@ export const DETENTION_CRITERIA = {
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
       coincidentStorm: COINCIDENT_ASSUMED("HCFCD PCPM / HCED coincident-storm provision pending"),
+      pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "owner recollection: HCFCD allows ~50% of detention outflow to be pumped. Named search targets: HCFCD Policy, Criteria & Procedure Manual + 2016 Supplemental Guidelines (pumped-detention allowance)"),
     },
     note: "Unincorporated Harris uses HCED outfall-type volumetric minimums (storm-sewer 0.75 / roadside-ditch 1.0 ac-ft/ac); the PCPM rate method proves no peak increase. Restrictor sizing per HCED (C ≈ 0.8, 4-day drawdown).",
   },
@@ -236,6 +252,7 @@ export const DETENTION_CRITERIA = {
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
       coincidentStorm: COINCIDENT_ASSUMED("City of Houston IDM Ch. 9 coincident-storm provision pending"),
+      pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(25, "City of Houston IDM Ch. 9 restricts pumped detention more tightly; conservative screening ceiling ASSUMED. Named search target: City of Houston Infrastructure Design Manual Ch. 9 (Stormwater Detention) pumped-detention provisions"),
     },
     note: "COH uses a volumetric rate (0.8 ac-ft/ac × proposed impervious ≤20 ac); the routing proves no peak increase. Verify outlet criteria against IDM Ch. 9.",
   },
@@ -269,6 +286,7 @@ export const DETENTION_CRITERIA = {
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
       coincidentStorm: COINCIDENT_ASSUMED("Montgomery County DCM §6.3 coincident-storm provision pending"),
+      pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search target: Montgomery County Drainage Criteria Manual"),
     },
     note: "MoCo requires zero increase in peak flow and WSEL; the routing proves Post ≤ Pre. Verify outlet criteria against the DCM.",
   },
@@ -302,6 +320,7 @@ export const DETENTION_CRITERIA = {
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
       coincidentStorm: COINCIDENT_ASSUMED("Chambers County DCM coincident-storm provision pending"),
+      pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search target: Chambers County Drainage Criteria Manual"),
     },
     note: "Chambers publishes no flat rate — strict zero-impact (no downstream peak or upstream WSEL increase). The routing proves Post ≤ Pre; volume is calculation-derived.",
   },
@@ -330,6 +349,7 @@ export const DETENTION_CRITERIA = {
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
       coincidentStorm: COINCIDENT_ASSUMED("no jurisdiction matched — confirm the reviewing authority's coincident-storm provision"),
+      pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "no jurisdiction matched; regional Houston-MSA screening practice ~50%. Confirm the reviewing authority's pumped-detention policy"),
     },
     note: "No jurisdiction matched — screening conventions only. Confirm the reviewing authority and its criteria.",
   },
@@ -404,6 +424,7 @@ export function criteriaFor(jurKey, { onDate = null, overrides = null } = {}) {
     tcFlowPathKFactor: pick("tcFlowPathKFactor", null, cr.tcFlowPathKFactor),
     screeningPondDepthFt: pick("screeningPondDepthFt", null, cr.screeningPondDepthFt),
     coincidentStorm: pick("coincidentStorm", null, cr.coincidentStorm),
+    pumpedShareOfReleasePct: pick("pumpedShareOfReleasePct", null, cr.pumpedShareOfReleasePct),
     drawdownMaxHr: cr.drawdownMaxHr ? pick("drawdownMaxHr", null, cr.drawdownMaxHr) : (ov.drawdownMaxHr != null ? { value: ov.drawdownMaxHr, verified: false, source: "user override", overridden: true } : null),
     gravityDrainFraction: cr.gravityDrainFraction ? pick("gravityDrainFraction", rp.gravityDrainFraction, cr.gravityDrainFraction) : null,
     caveat: SCREENING_CAVEAT,
@@ -505,5 +526,30 @@ export function coincidentStormPolicy(criteria) {
     coincident: !!(car && Number(car.value) > 0),
     verified: !!(car && car.verified),
     source: (car && car.source) || null,
+  };
+}
+
+/* NEW-27 — DERIVE the allowed pump discharge from the criteria (never ask the user for a CFS he
+ * doesn't know). `allowedPumpCfs` = pumpedShareOfReleasePct% × the pond's allowable release
+ * (`releaseRateCfs`). A finite `overrideCfs` (an optional advanced user entry) wins and is flagged
+ * `overridden`. `verified:false` means the share is ASSUMED and the caller must say so. Returns
+ * { sharePct, derivedCfs, overrideCfs, allowedPumpCfs, overridden, verified, source, label }.
+ * `sharePct` is null when the jurisdiction carries no pumped-share row (no derivation possible).
+ * Pure. */
+export function pumpAllowance(criteria, { releaseRateCfs = null, overrideCfs = null } = {}) {
+  const car = criteria && criteria.pumpedShareOfReleasePct;
+  const sharePct = car && Number.isFinite(car.value) ? car.value : null;
+  const rel = Number.isFinite(releaseRateCfs) ? releaseRateCfs : null;
+  const derivedCfs = sharePct != null && rel != null ? Math.round((sharePct / 100) * rel * 100) / 100 : null;
+  const override = Number.isFinite(overrideCfs) && overrideCfs >= 0 ? overrideCfs : null;
+  return {
+    sharePct,
+    derivedCfs,
+    overrideCfs: override,
+    allowedPumpCfs: override != null ? override : derivedCfs,
+    overridden: override != null,
+    verified: !!(car && car.verified),
+    source: (car && car.source) || null,
+    label: (criteria && criteria.label) || null,
   };
 }
