@@ -9274,6 +9274,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // way. A single pond can serve both ledgers, so this is deliberately not two separate
     // detention/mitigation buttons/handlers.
     onDesignPond: designPond,
+    // NEW-18 (B983) — a MITIGATION shortfall routes to the pond's Sizing assistant (which lays out the
+    // honest deepen-vs-enlarge options with Apply chips), NOT the one-click ⚡ Optimize. Rationale: the
+    // one-click reliably closes DETENTION (raise the rim above the flood), but MITIGATION often can't be
+    // closed without a bigger FOOTPRINT the tool won't redraw for you — so a ⚡ click on a mitigation-only
+    // shortfall would deepen what it can and then still report a gap, reading as a near-no-op. Opening the
+    // assistant makes the real options explicit. With no pond drawn yet there's nothing to open, so fall
+    // back to designPond (which draws a right-sized one) — never a one-click that silently no-ops.
+    onSeeMitigationOptions: () => {
+      const firstPond = els.find((e) => e.type === "pond");
+      if (firstPond) revealPondInspector(firstPond.id, "assistant");
+      else designPond();
+    },
     // NEW-5 — the fully-inundated crisis remedy: a one-click TOB raise (materializing the berm)
     // that closes the site detention deficit, mounted on the NEW-1 warning row. Null when there
     // are no inundated ponds or no honest deficit to solve against.
@@ -20849,6 +20861,16 @@ function YieldPanel({
                 ⚡ Optimize pond
               </button>
             ) : null;
+            // NEW-18 (B983) — the MITIGATION card does NOT hang the one-click ⚡ (which reliably closes
+            // detention but often can't close mitigation without a bigger footprint the tool won't
+            // redraw — a near-no-op that reads as an action). Instead it offers "See mitigation options",
+            // opening the pond's Sizing assistant where deepen vs. enlarge are laid out with Apply chips.
+            // With NO pond yet, the ⚡ (draw a right-sized one) stays honest, so it falls through to it.
+            const mitigationAction = mitShort
+              ? (hasPond && d.onSeeMitigationOptions
+                  ? <ActionLink onClick={d.onSeeMitigationOptions} title="Open the pond's sizing helper, which lays out the honest ways to add compensating storage (deepen the pond, or enlarge its footprint) with one-click Apply. Mitigation usually needs a bigger pond, so there is no reliable single-click cure the way detention has.">See mitigation options →</ActionLink>
+                  : designAction)
+              : null;
             // Each card only shows the button for ITS OWN shortfall — "Optimize pond" on
             // the Detention card when detention alone is fine but mitigation is short
             // would read as a false alarm on that card.
@@ -20935,7 +20957,7 @@ function YieldPanel({
               </>
             );
             out.push(groupFold("det", "Detention detail", detClosed, detShort ? "danger" : detChip === "COVERED" ? "good" : "warn", detVisible, "", { action: detShort ? designAction : null, open: true, method: detR }));
-            if (mitRequired) out.push(groupFold("mit", "Mitigation detail", mitVerdict, mitTone, mitR, mitSub, { chip: mitChip, action: mitShort ? designAction : null }));
+            if (mitRequired) out.push(groupFold("mit", "Mitigation detail", mitVerdict, mitTone, mitR, mitSub, { chip: mitChip, action: mitigationAction }));
             // NEW-10/B830 — the ledger balancer: one card of ranked screening moves that
             // close detention + mitigation together. Every move is one line + ⓘ; nothing
             // is applied without a click — the ONE apply affordance is the berm move
