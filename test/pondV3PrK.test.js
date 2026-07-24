@@ -104,7 +104,10 @@ describe("K2(a) — a floodway berm is BUILDABLE but raises a no-rise REQUIREMEN
 
 describe("K3 — berm fill below the flood level folds into the mitigation requirement at the Standards ratio", () => {
   const det0 = { depth: 8, freeboard: 1, slope: 3, tobElev: 94 };
-  const base = { ring: SQ(200), det: det0, wseFt: 96, detTargetCf: 2 * AC, mitTargetCf: 0, gradeFt: 93, inTrigger: true };
+  // R1 — coincidentStorm:true: this case is a rim BELOW the flood WSE that must be bermed UP through
+  // the flood level (the berm-fill-below-WSE debt). By default the pond recovers to normal tailwater
+  // (usable is the whole column, no raise needed); the coincident-storm policy is what forces the raise.
+  const base = { ring: SQ(200), det: det0, wseFt: 96, detTargetCf: 2 * AC, mitTargetCf: 0, gradeFt: 93, inTrigger: true, coincidentStorm: true };
   it("an in-trigger (fringe) berm below the WSE adds compensating-storage debt scaled by the ratio", () => {
     const r1 = sizePondForTargets({ ...base, mitRatio: 1 });
     const r2 = sizePondForTargets({ ...base, mitRatio: 2 });

@@ -33,13 +33,17 @@ export function pondDisplayNameFor(det, split) { return pondDisplayName(effectiv
 export const ROLE_SHARE = 0.8; // ≥80% of volume below the WSE → mitigation-primary; ≥80% above → detention
 
 /* NEW-8 — auto-suggest a pond's role from its elevation split. Screening share =
- * (gross − usable) / gross, defined only when the pond is anchored WITH a known
+ * (gross − above-WSE) / gross, defined only when the pond is anchored WITH a known
  * flood WSE (otherwise there is no elevation evidence and the suggestion defaults
- * to detention with belowShare null — the caller says so). Pure. */
+ * to detention with belowShare null — the caller says so). R1 — the share is the
+ * flood-OCCUPANCY (below the flood WSE), so it reads `aboveWseCf` (the geometric
+ * volume above the flood, independent of the coincident-storm policy), NOT `usableCf`
+ * (which now floats with that policy). Pure. */
 export function suggestPondRole(split) {
   const hasEvidence = split && split.mode === "anchored" && split.bands && split.wseFt != null && split.grossCf > 0;
   if (!hasEvidence) return { role: "detention", belowShare: null };
-  const belowShare = Math.max(0, Math.min(1, 1 - split.usableCf / split.grossCf));
+  const aboveWse = Number.isFinite(split.bands.aboveWseCf) ? split.bands.aboveWseCf : split.usableCf;
+  const belowShare = Math.max(0, Math.min(1, 1 - aboveWse / split.grossCf));
   const role = belowShare >= ROLE_SHARE ? "mitigation" : belowShare <= 1 - ROLE_SHARE ? "detention" : "dual";
   return { role, belowShare };
 }

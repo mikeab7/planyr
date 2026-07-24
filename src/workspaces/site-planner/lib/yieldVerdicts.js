@@ -79,7 +79,19 @@ function detentionVerdict(d) {
   }
   if (usableAcFt == null) return loadingRow("det", "Detention");
   const short = usableAcFt < requiredAcFt - EPS || inundated;
-  return pairRow("det", "Detention", usableAcFt, requiredAcFt, short);
+  const v = pairRow("det", "Detention", usableAcFt, requiredAcFt, short);
+  // R1 — when the (ASSUMED) coincident-storm policy MATERIALLY drives this usable number, the
+  // verdict carries the assumption (R-PRINCIPLE: an assumed criterion never silently drives a
+  // number). The default ship is non-coincident (the pond recovers to normal tailwater between
+  // storms); an override to coincident reads the other way. The citation target rides `assumptionSource`.
+  if (d.coincidentAssumption) {
+    v.assumption = d.coincidentAssumption.coincident
+      ? "the design storm coincides with the flood, so usable is credited only above the flood level; confirm the coincident-storm rule"
+      : "the pond recovers to normal tailwater between storms (design storm not coincident with the flood); confirm the coincident-storm rule";
+    v.assumptionSource = d.coincidentAssumption.source || null;
+    v.text = `${v.text} (${v.assumption})`;
+  }
+  return v;
 }
 
 function mitigationVerdict(d) {

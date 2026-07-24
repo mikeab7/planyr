@@ -45,18 +45,37 @@ describe("bandedStorage — the exclusive WSE/pool split", () => {
     expect(b.poolDeadCf).toBe(0);
     expect(b.fullyInundated).toBe(false);
   });
-  it("mid-basin WSE splits usable vs mitigation-candidate; bands sum to gross", () => {
+  // R1 — by DEFAULT (non-coincident storms) the pond recovers to normal tailwater between storms, so
+  // the 100-yr flood WSE is NOT a permanent dead floor: the whole column above the floor is usable
+  // detention, and the below-WSE band is a SEPARATE (overlapping) mitigation-candidate measure.
+  it("R1 default (non-coincident): a mid-basin flood WSE does NOT floor usable; the below-WSE band is still the mitigation candidate", () => {
     const b = bandedStorage(SQ, DET, { wseFt: 97.5 });
+    expect(b.usableCf).toBeCloseTo(GROSS, 6);                                    // recovers to normal tailwater → whole column usable
+    expect(b.mitigationCandidateCf).toBeCloseTo(volumeBetween(SQ, DET, 96, 97.5), 6); // still the below-WSE displaced band
+    expect(b.fullyInundated).toBe(false);
+  });
+  it("coincidentStorm:true reproduces the exclusive split (usable above WSE, candidate below); bands sum to gross", () => {
+    const b = bandedStorage(SQ, DET, { wseFt: 97.5, coincidentStorm: true });
     expect(b.usableCf).toBeGreaterThan(0);
     expect(b.mitigationCandidateCf).toBeGreaterThan(0);
     expect(b.usableCf + b.mitigationCandidateCf).toBeCloseTo(GROSS, -3); // split-slab tolerance
     expect(b.usableCf).toBeCloseTo(volumeBetween(SQ, DET, 97.5, 99), 6);
     expect(b.mitigationCandidateCf).toBeCloseTo(volumeBetween(SQ, DET, 96, 97.5), 6);
   });
-  it("WSE above the top of bank → fully inundated, usable 0", () => {
+  it("R1 — a flood WSE above the rim does NOT permanently inundate by default (recovers to normal tailwater)", () => {
     const b = bandedStorage(SQ, DET, { wseFt: 100.5 });
+    expect(b.fullyInundated).toBe(false);
+    expect(b.usableCf).toBeCloseTo(GROSS, 6);
+  });
+  it("coincidentStorm:true — WSE above the top of bank → fully inundated, usable 0 (the coincident case)", () => {
+    const b = bandedStorage(SQ, DET, { wseFt: 100.5, coincidentStorm: true });
     expect(b.fullyInundated).toBe(true);
     expect(b.usableCf).toBe(0);
+  });
+  it("R1 — a NORMAL-tailwater dead floor DOES floor usable, independent of the coincident policy", () => {
+    // deadFloorFt (dry-weather receiving level) at 97 → usable is only above it; below it is dead.
+    const b = bandedStorage(SQ, DET, { wseFt: 90, deadFloorFt: 97 });
+    expect(b.usableCf).toBeCloseTo(volumeBetween(SQ, DET, 97, 99), 6);
   });
   it("permanent pool without a flood WSE still earns no credit below the outlet", () => {
     const b = bandedStorage(SQ, { ...DET, poolElev: 97 }, {});
@@ -64,8 +83,10 @@ describe("bandedStorage — the exclusive WSE/pool split", () => {
     expect(b.usableCf).toBeCloseTo(volumeBetween(SQ, DET, 97, 99), 6);
     expect(b.mitigationCandidateCf).toBe(0);
   });
-  it("pool below the WSE: dead → candidate → usable, exclusive and summing to gross", () => {
-    const b = bandedStorage(SQ, { ...DET, poolElev: 96.5 }, { wseFt: 98 });
+  it("pool below the WSE (coincidentStorm): dead → candidate → usable, exclusive and summing to gross", () => {
+    // The exclusive three-band partition only holds when the flood WSE floors usable — i.e. under the
+    // coincident-storm policy (R1). By default the candidate band overlaps the recovered usable column.
+    const b = bandedStorage(SQ, { ...DET, poolElev: 96.5 }, { wseFt: 98, coincidentStorm: true });
     expect(b.poolDeadCf).toBeGreaterThan(0);
     expect(b.mitigationCandidateCf).toBeGreaterThan(0);
     expect(b.usableCf).toBeGreaterThan(0);
@@ -104,10 +125,12 @@ describe("usablePondVolume — the ONE shared precedence helper", () => {
     expect(u.deadCf).toBe(0);
   });
   it("figures aggregate across ponds by plain summation", () => {
-    const a = usablePondVolume(SQ, DET, { wseFt: 97 });
-    const b = usablePondVolume(SQ, DET, { wseFt: 98 });
+    // R1 — a bare flood WSE no longer floors usable, so use a NORMAL-tailwater dead floor to make the
+    // usable partial (below the flowline is dead); the two ponds still sum by plain addition.
+    const a = usablePondVolume(SQ, DET, { wseFt: 90, deadFloorFt: 97 });
+    const b = usablePondVolume(SQ, DET, { wseFt: 90, deadFloorFt: 98 });
     expect(a.usableCf + b.usableCf).toBeGreaterThan(0);
-    expect(a.usableCf + b.usableCf).toBeLessThan(2 * GROSS);
+    expect(a.usableCf + b.usableCf).toBeLessThan(2 * GROSS); // both floored above the basin floor → each < gross
   });
 });
 

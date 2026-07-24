@@ -285,7 +285,7 @@ const BAND_MEMO_MAX = 32;
  * only the pool band splits (a wet-bottom pond outside the floodplain still earns
  * no credit below its outlet). Returns null when unanchored — the caller falls back
  * to the Regime-B estimate, NEVER silently to gross. Pure + memoized. */
-export function bandedStorage(ring, det, { wseFt = null, gradeFt = null, deadFloorFt = null } = {}) {
+export function bandedStorage(ring, det, { wseFt = null, gradeFt = null, deadFloorFt = null, coincidentStorm = false } = {}) {
   const tob = det && det.tobElev;
   if (tob == null || !isFinite(tob)) return null;
   const { depth, freeboard, slope } = detOf(det);
@@ -303,10 +303,16 @@ export function bandedStorage(ring, det, { wseFt = null, gradeFt = null, deadFlo
     ring = crest;
   }
   const poolElev = det.poolElev != null && isFinite(det.poolElev) ? det.poolElev : null;
-  // PR-G (c) — storage below the 100-yr receiving water (tailwater) can't discharge by
-  // gravity, so it's DEAD: the usable band floors at the tailwater elevation too.
+  // R1 (dead-storage model) — the permanent DEAD-storage floor is the NORMAL (dry-weather) tailwater
+  // (`deadFloorFt`, from the channel-flowline / normal-depth chain), OR the pond floor where the outlet
+  // is lower. The pond recovers to that level between storms, so storage above it IS usable detention.
+  // The 100-yr flood WSE (`wseFt`) is a COINCIDENT-storm condition, not a permanent dead floor: it caps
+  // the usable band ONLY when the jurisdiction's coincident-storm policy says the pond's design storm
+  // coincides with the flood (ASSUMED, default false — pond recovers to normal tailwater). `wseFt` still
+  // drives the compensating-storage candidate + the fully-inundated flag either way.
   const deadFloor = Number.isFinite(deadFloorFt) ? deadFloorFt : null;
-  const sig = `${depth}|${freeboard}|${slope}|${tob}|${poolElev}|${wseFt}|${deadFloor}|${ring.length}|` +
+  const stormFloor = coincidentStorm && wseFt != null ? wseFt : null; // 100-yr floor, only under a coincident-storm policy
+  const sig = `${depth}|${freeboard}|${slope}|${tob}|${poolElev}|${wseFt}|${deadFloor}|${stormFloor}|${ring.length}|` +
     `${ring[0] ? `${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}` : ""}|${polyArea(ring).toFixed(1)}`;
   if (_bandMemo.has(sig)) {
     const hit = _bandMemo.get(sig);
@@ -326,14 +332,26 @@ export function bandedStorage(ring, det, { wseFt = null, gradeFt = null, deadFlo
   const candLo = Math.max(floorElev, poolTop != null ? poolTop : floorElev);
   const candHi = wseFt != null ? Math.min(wseFt, waterSurf) : candLo;
   const mitigationCandidateCf = candHi > candLo ? volumeBetween(ring, det, candLo, candHi) : 0;
-  const usableLo = Math.max(wseFt != null ? wseFt : floorElev, poolTop != null ? poolTop : floorElev, floorElev, deadFloor != null ? deadFloor : -Infinity);
+  // R1 — usable floor = NORMAL tailwater (deadFloor) / pond floor / pool top, and the 100-yr storm
+  // floor ONLY under a coincident-storm policy. The bare 100-yr wseFt is no longer a permanent floor.
+  const usableLo = Math.max(stormFloor != null ? stormFloor : floorElev, poolTop != null ? poolTop : floorElev, floorElev, deadFloor != null ? deadFloor : -Infinity);
   const usableCf = usableLo < waterSurf ? volumeBetween(ring, det, usableLo, waterSurf) : 0;
+  // R1 — the geometric volume ABOVE the flood WSE, ALWAYS computed (regardless of the coincident-storm
+  // policy). This is the flood-OCCUPANCY measure the pond-ROLE suggestion needs (how much of the pond
+  // sits below the flood, i.e. is compensating-storage territory) — a property of geometry + the flood,
+  // not of the storm-coincidence assumption, so it must not move when usableCf floats with the policy.
+  const aboveWseLo = Math.max(wseFt != null ? wseFt : floorElev, poolTop != null ? poolTop : floorElev, floorElev);
+  const aboveWseCf = aboveWseLo < waterSurf ? volumeBetween(ring, det, aboveWseLo, waterSurf) : 0;
   const val = {
     usableCf,
+    aboveWseCf,
     mitigationCandidateCf,
     poolDeadCf,
     grossCf,
-    fullyInundated: wseFt != null && wseFt >= tob - EPS_ELEV,
+    // R1 — "fully inundated for detention" now follows the EFFECTIVE usable floor (no usable band left),
+    // not the raw 100-yr WSE: a pond whose rim sits below the 100-yr flood but recovers to normal
+    // tailwater between storms is NOT permanently useless (unless the coincident-storm policy applies).
+    fullyInundated: usableLo >= waterSurf - EPS_ELEV,
     anchored: true,
     elevations: { tobElev: tob, waterSurfElev: waterSurf, floorElev, poolElev, wseFt },
   };
@@ -356,7 +374,7 @@ export function bandedStorage(ring, det, { wseFt = null, gradeFt = null, deadFlo
  *               are missing lands HERE — it must never silently zero its dead band.
  *   gross     — no flood/pool information at all → everything counts.
  * Pure. */
-export function usablePondVolume(ring, det = {}, { wseFt = null, estimatePoolDepthFt = null, gradeFt = null, deadFloorFt = null } = {}) {
+export function usablePondVolume(ring, det = {}, { wseFt = null, estimatePoolDepthFt = null, gradeFt = null, deadFloorFt = null, coincidentStorm = false } = {}) {
   const { depth, freeboard, slope } = detOf(det);
   const anchored = det.tobElev != null && isFinite(det.tobElev);
   // D1 — INWARD berm: a rim above grade shrinks the effective top-of-bank to the crest ring
@@ -368,7 +386,7 @@ export function usablePondVolume(ring, det = {}, { wseFt = null, estimatePoolDep
   if (bermH > 0 && !effRing) return { mode: "closed", usableCf: 0, deadCf: 0, grossCf: 0, bands: null, closed: true };
   const grossCf = detentionStorage(effRing, depth, freeboard, slope).vol;
   if (anchored && (wseFt != null || (det.poolElev != null && isFinite(det.poolElev)) || Number.isFinite(deadFloorFt))) {
-    const bands = bandedStorage(effRing, det, { wseFt, deadFloorFt }); // effRing is already the crest → no gradeFt
+    const bands = bandedStorage(effRing, det, { wseFt, deadFloorFt, coincidentStorm }); // effRing is already the crest → no gradeFt
     return { mode: "anchored", usableCf: bands.usableCf, deadCf: Math.max(0, grossCf - bands.usableCf), grossCf, bands };
   }
   if (estimatePoolDepthFt != null && estimatePoolDepthFt > 0) {

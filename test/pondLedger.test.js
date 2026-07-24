@@ -36,9 +36,9 @@ const GROSS = detentionStorage(SQ, 4, 1, 3).vol;
 
 // Mirror of SitePlanner's pondSplitFor entry construction (the component owns the
 // flood context; the entry is what reaches the accumulator).
-const liveEntry = (id, det, { wseFt = null, estPool = null, inTrigger = false } = {}) => ({
+const liveEntry = (id, det, { wseFt = null, estPool = null, inTrigger = false, coincidentStorm = false } = {}) => ({
   id,
-  ...usablePondVolume(SQ, det, { wseFt, estimatePoolDepthFt: estPool }),
+  ...usablePondVolume(SQ, det, { wseFt, estimatePoolDepthFt: estPool, coincidentStorm }),
   wseFt, inTrigger, estPoolDepthFt: estPool, factsKnown: true,
   anchoredTob: det.tobElev != null, autoAnchored: false, excavationCf: 0, role: null,
 });
@@ -54,7 +54,7 @@ const slimFacts = (e) => ({
   inTrigger: !!e.inTrigger,
   estPoolDepthFt: Number.isFinite(e.estPoolDepthFt) ? Math.round(e.estPoolDepthFt * 100) / 100 : null,
 });
-const restoredEntry = (id, det, rf) => liveEntry(id, det, { wseFt: rf.wseFt, estPool: rf.estPoolDepthFt, inTrigger: rf.inTrigger });
+const restoredEntry = (id, det, rf, coincidentStorm = false) => liveEntry(id, det, { wseFt: rf.wseFt, estPool: rf.estPoolDepthFt, inTrigger: rf.inTrigger, coincidentStorm });
 
 describe("accumulatePondLedger — slim-record round-trip (NEW-9)", () => {
   it("a restored check replays the exact live usable/dead split across the WSE sweep", () => {
@@ -91,8 +91,9 @@ describe("accumulatePondLedger — unknown facts poison the usable total (LOUD-F
     expect(led.unknownIds).toEqual(["mystery"]);
   });
   it("restored usable is NEVER a number greater than the live usable (the flipped-verdict bug)", () => {
-    // Live: anchored split at a mid-basin WSE — most of the column is flood-occupied.
-    const live = accumulatePondLedger([liveEntry("p1", DET, { wseFt: 98.9, inTrigger: true })]);
+    // Live: anchored split at a mid-basin WSE under a coincident storm — most of the column is
+    // flood-occupied, so usable is a partial number (the scenario the flipped-verdict guard is about).
+    const live = accumulatePondLedger([liveEntry("p1", DET, { wseFt: 98.9, inTrigger: true, coincidentStorm: true })]);
     expect(live.usableCf).toBeGreaterThan(0);
     expect(live.usableCf).toBeLessThan(GROSS);
     // Restored WITHOUT the facts: the old code credited GROSS here (usable > live). The
@@ -100,8 +101,8 @@ describe("accumulatePondLedger — unknown facts poison the usable total (LOUD-F
     const restored = accumulatePondLedger([unknownEntry("p1", DET)]);
     expect(restored.usableCf).toBeNull();
     // And with the facts persisted, restored usable equals live exactly (never exceeds it).
-    const rf = slimFacts(liveEntry("p1", DET, { wseFt: 98.9, inTrigger: true }));
-    const replay = accumulatePondLedger([restoredEntry("p1", DET, rf)]);
+    const rf = slimFacts(liveEntry("p1", DET, { wseFt: 98.9, inTrigger: true, coincidentStorm: true }));
+    const replay = accumulatePondLedger([restoredEntry("p1", DET, rf, true)]);
     expect(replay.usableCf).toBeLessThanOrEqual(live.usableCf + 1e-6);
   });
   it("gross keeps summing regardless of demotion — it is a geometric fact", () => {
@@ -119,9 +120,11 @@ describe("accumulatePondLedger — counters fold through unchanged (the B822 hon
     expect(led.anchoredNoWseInTrigger).toBe(1);
     expect(led.unanchoredInTrigger).toBe(1);
   });
-  it("fully-inundated and mitigation-candidate ride the anchored bands", () => {
-    const led = accumulatePondLedger([liveEntry("a", DET, { wseFt: 100.5, inTrigger: true })]);
+  it("fully-inundated (coincident storm) and mitigation-candidate ride the anchored bands", () => {
+    // R1 — the pond is only fully inundated when the design storm coincides with the flood.
+    const led = accumulatePondLedger([liveEntry("a", DET, { wseFt: 100.5, inTrigger: true, coincidentStorm: true })]);
     expect(led.pondFullyInundated).toBe(true);
+    // The mitigation candidate (below-WSE displaced band) rides through regardless of the policy.
     const led2 = accumulatePondLedger([liveEntry("b", DET, { wseFt: 97.5, inTrigger: true })]);
     expect(led2.mitCandidateCf).toBeGreaterThan(0);
   });
@@ -137,7 +140,7 @@ describe("accumulatePondLedger — counters fold through unchanged (the B822 hon
 
 // A WSE that puts the below share right where we want it: with the SQ/DET fixture the
 // share is monotonic in wseFt, so probe for threshold behavior via computed shares.
-const splitAt = (wseFt) => liveEntry("p", DET, { wseFt, inTrigger: true });
+const splitAt = (wseFt, coincidentStorm = false) => liveEntry("p", DET, { wseFt, inTrigger: true, coincidentStorm });
 
 describe("suggestPondRole — elevation auto-suggestion (NEW-8)", () => {
   it("no WSE evidence → detention default with a null share (never a fabricated %)", () => {
@@ -187,7 +190,9 @@ describe("accumulatePondLedger — the role credit gate (NEW-8)", () => {
   });
   it("role NEVER moves usable/dead — only which ledger the candidate band credits (no double-count)", () => {
     for (const role of ["detention", "mitigation", "dual", null]) {
-      const e = { ...splitAt(97.5), role };
+      // coincidentStorm:true so usable/candidate/poolDead partition the column exclusively (R1 —
+      // by default the recovered column overlaps the below-WSE candidate band).
+      const e = { ...splitAt(97.5, true), role };
       const led = accumulatePondLedger([e]);
       expect(led.usableCf).toBeCloseTo(e.usableCf, 6);
       expect(led.deadCf).toBeCloseTo(e.deadCf, 6);

@@ -59,7 +59,7 @@ const ringAreaSf = (ring) => {
 // D1 — gradeFt threads the INWARD berm model into the solve: a rim above grade shrinks the
 // effective ring to the crest, so the solver sizes against the same diminishing-returns storage
 // the panel recomputes. gradeFt null (no terrain) → the classic drawn-ring bands.
-const bandsAt = (ring, det, wseFt, gradeFt = null) => bandedStorage(ring, det, { wseFt, gradeFt });
+const bandsAt = (ring, det, wseFt, gradeFt = null, coincidentStorm = false) => bandedStorage(ring, det, { wseFt, gradeFt, coincidentStorm });
 
 /* Solve the smallest design depth (det.depth, TOB held) whose below-WSE
  * mitigation-candidate band meets targetCf. Bounded by the pinch-off ceiling
@@ -107,11 +107,11 @@ export function solveMitigationGrow({ ring, det, wseFt, targetCf, maxFactor = 3,
 /* Solve the smallest TOB raise h (floor HELD: depth grows with the TOB, the
  * ledgerBalancer pondUsableAt convention) whose above-WSE usable band meets
  * targetCf. Clamped at maxRaiseFt (screening convention, labeled). */
-export function solveTobRaise({ ring, det, wseFt, targetCf, maxRaiseFt = BERM_MAX_RAISE_FT, gradeFt = null }) {
+export function solveTobRaise({ ring, det, wseFt, targetCf, maxRaiseFt = BERM_MAX_RAISE_FT, gradeFt = null, coincidentStorm = false }) {
   const { depth } = detOf(det);
   const usableAt = (h) => {
     const d2 = { ...det, depth: depth + h, tobElev: det.tobElev + h };
-    const b = bandsAt(ring, d2, wseFt, gradeFt);
+    const b = bandsAt(ring, d2, wseFt, gradeFt, coincidentStorm);
     return b ? b.usableCf : 0;
   };
   const now = usableAt(0);
@@ -172,6 +172,7 @@ export function sizePondForTargets({
   detTargetCf = 0,
   mitRatio = 1,
   maxRaiseFt = BERM_MAX_RAISE_FT,
+  coincidentStorm = false, // R1 — the flood WSE only submerges/floors usable under a coincident-storm policy
 } = {}) {
   if (!Array.isArray(ring) || ring.length < 3) return { ok: false, reason: "no pond footprint", estimated: false, actions: [] };
   if (det == null || det.tobElev == null || !isFinite(det.tobElev)) {
@@ -183,7 +184,7 @@ export function sizePondForTargets({
   }
   const estimated = EST_PROVIDERS.has(wseProvider);
   const { depth, freeboard, slope } = detOf(det);
-  const bands = bandsAt(ring, det, wseFt, gradeFt);
+  const bands = bandsAt(ring, det, wseFt, gradeFt, coincidentStorm);
   const mit0 = bands ? bands.mitigationCandidateCf : 0;
   const use0 = bands ? bands.usableCf : 0;
 
@@ -191,12 +192,13 @@ export function sizePondForTargets({
   let mitTarget = Math.max(0, mitTargetCf || 0);
   const detTarget = Math.max(0, detTargetCf || 0);
 
-  // Fully-inundated pond: the design storm already fills it — usable is ZERO and no
-  // floor work changes that. Lead with the TOB fix, not a delta table.
-  const fullyInundated = wseFt >= det.tobElev - 1e-9;
+  // Fully-inundated pond: under a COINCIDENT-storm policy the flood already fills it — usable is ZERO
+  // and no floor work changes that (lead with the TOB fix). R1 — by default the pond recovers to
+  // normal tailwater between storms, so a flood WSE above the rim does NOT inundate it.
+  const fullyInundated = coincidentStorm && wseFt >= det.tobElev - 1e-9;
   let tob = null;
   if (detTarget > use0) {
-    tob = solveTobRaise({ ring, det, wseFt, targetCf: detTarget, maxRaiseFt, gradeFt });
+    tob = solveTobRaise({ ring, det, wseFt, targetCf: detTarget, maxRaiseFt, gradeFt, coincidentStorm });
     // Berm-as-fill feedback (the fixed-point pass): a raised TOB above existing grade
     // inside the trigger floodplain is NEW fill; the prism below the WSE displaces
     // flood storage and raises the mitigation requirement this pond is solving.

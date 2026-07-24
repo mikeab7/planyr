@@ -10,11 +10,11 @@ const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/S
 describe("D1 — the storage recompute threads the inward model (gradeFt) into the canonical split + solver", () => {
   it("pondSplitFor passes gradeFt into usablePondVolume", () => {
     expect(src).toContain("const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;");
-    expect(src).toContain("estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt })");
+    expect(src).toContain("estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt, coincidentStorm })");
   });
   it("the solver is threaded gradeFt so it sizes against the same inward geometry", () => {
     // sizePondForTargets + solveTobRaise both receive gradeFt in designPond
-    expect(src).toContain("targetCf: detTargetCf, maxRaiseFt, gradeFt })");
+    expect(src).toContain("targetCf: detTargetCf, maxRaiseFt, gradeFt, coincidentStorm })");
     expect(src.match(/gradeFt, detTargetCf/g) || []).not.toHaveLength(0);
   });
 });

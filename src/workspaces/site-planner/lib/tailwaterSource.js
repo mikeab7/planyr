@@ -30,12 +30,17 @@ export const GRADE_PLACEHOLDER_EPS_FT = 0.05;
 
 // The ordered source registry — id, priority (lower = higher confidence), a short UI label, and the
 // tooltip that names WHERE the number came from. `estimated` is always true (screening tailwater).
+// R1 — each source carries a REGIME: "storm" = the design-storm / 100-yr receiving level (feeds the
+// routing + outfall-feasibility checks), "normal" = the dry-weather receiving level (the channel
+// flowline / normal-depth — the STARTING water surface the pond recovers to between storms, which
+// sets the permanent DEAD-storage floor). The dead-storage floor must use the NORMAL regime, never a
+// storm level, or the pond's usable volume is wrongly squeezed by a flood it isn't sitting in.
 export const TAILWATER_SOURCES = Object.freeze([
-  { id: "district", priority: 1, label: "district channel", tip: "Design water surface from the Brookshire-Katy Drainage District's channel data (screening)." },
-  { id: "femaFis", priority: 2, label: "FEMA InFRM (est BFE)", tip: "FEMA/USGS InFRM Base Level Engineering modeled 100-yr water surface for the receiving stream (webapps.usgs.gov/infrm/estbfe, screening)." },
-  { id: "usgs", priority: 3, label: "USGS gauge", tip: "Statistics from the nearest USGS stream gauge (screening)." },
-  { id: "normalDepth", priority: 4, label: "normal depth (est)", tip: "Normal-depth estimate from channel geometry and terrain slope (Manning's equation, screening)." },
-  { id: "channelTerrain", priority: 5, label: "channel flowline (terrain est)", tip: "Receiving-channel flowline sampled from terrain along the channel centerline (below grade); the last-resort estimate, never site grade." },
+  { id: "district", priority: 1, regime: "storm", label: "district channel", tip: "Design water surface from the Brookshire-Katy Drainage District's channel data (screening)." },
+  { id: "femaFis", priority: 2, regime: "storm", label: "FEMA InFRM (est BFE)", tip: "FEMA/USGS InFRM Base Level Engineering modeled 100-yr water surface for the receiving stream (webapps.usgs.gov/infrm/estbfe, screening)." },
+  { id: "usgs", priority: 3, regime: "storm", label: "USGS gauge", tip: "Statistics from the nearest USGS stream gauge (screening)." },
+  { id: "normalDepth", priority: 4, regime: "normal", label: "normal depth (est)", tip: "Normal-depth estimate from channel geometry and terrain slope (Manning's equation, screening) — the dry-weather receiving level." },
+  { id: "channelTerrain", priority: 5, regime: "normal", label: "channel flowline (terrain est)", tip: "Receiving-channel flowline sampled from terrain along the channel centerline (below grade); the dry-weather flowline, never site grade." },
 ]);
 
 const SOURCE_BY_ID = Object.fromEntries(TAILWATER_SOURCES.map((s) => [s.id, s]));
@@ -47,9 +52,12 @@ const finite = (n) => n != null && Number.isFinite(n);
  * candidate whose value equals site grade is skipped (it's the grade placeholder, not real data), and
  * the guard's rejections are reported in `rejectedGrade`. `degraded` is true when we fell through to
  * the terrain fallback. Returns valueFt:null (UNKNOWN, never grade) when nothing real is available. */
-export function deriveTailwater(candidates = {}, { gradeFt = null } = {}) {
+export function deriveTailwater(candidates = {}, { gradeFt = null, regime = null } = {}) {
   const rejectedGrade = [];
   for (const src of TAILWATER_SOURCES) {
+    // R1 — a regime filter ("normal" for the dead-storage floor, "storm" for routing/outfall) lets
+    // the caller pick the dry-weather receiving level distinctly from the design-storm level.
+    if (regime && src.regime !== regime) continue;
     const c = candidates[src.id];
     if (!c || !finite(c.valueFt)) continue;
     if (finite(gradeFt) && Math.abs(c.valueFt - gradeFt) < GRADE_PLACEHOLDER_EPS_FT) {
@@ -61,6 +69,7 @@ export function deriveTailwater(candidates = {}, { gradeFt = null } = {}) {
       source: src.id,
       sourceLabel: src.label,
       sourceTip: src.tip,
+      regime: src.regime,
       estimated: true,
       degraded: src.id === "channelTerrain",
       belowGrade: finite(gradeFt) ? c.valueFt < gradeFt : null,
@@ -68,7 +77,7 @@ export function deriveTailwater(candidates = {}, { gradeFt = null } = {}) {
       note: c.note || null,
     };
   }
-  return { valueFt: null, source: null, sourceLabel: null, sourceTip: null, estimated: true, degraded: true, belowGrade: null, rejectedGrade, note: null };
+  return { valueFt: null, source: null, sourceLabel: null, sourceTip: null, regime: null, estimated: true, degraded: true, belowGrade: null, rejectedGrade, note: null };
 }
 
 /* Source (e) — the receiving-channel flowline estimated from terrain. The caller samples the DEM along

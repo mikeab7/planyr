@@ -92,11 +92,14 @@ describe("F3 — the non-monotonic (inward berm) peak solve updates the APPLIED 
   // detention rises then FALLS to zero as the crest ring pinches the footprint closed (~20 ft). The
   // solver must report the interior PEAK raise, never the clamped/closed ceiling — and that peak
   // must be the height actually applied to the pond's top of bank.
+  // R1 — coincidentStorm:true so the usable band is the ABOVE-flood-WSE storage (the flood-occupancy
+  // scenario this peak solve exercises); by default the pond recovers to normal tailwater and the
+  // whole column is usable, which is not the non-monotonic-above-flood curve this case is about.
   const ring = SQ(120), gradeFt = 100, wseFt = 100;
   const det = { depth: 8, freeboard: 0, slope: 3, tobElev: 100 };
 
   const usableAt = (h) => {
-    const b = bandedStorage(ring, { ...det, depth: det.depth + h, tobElev: det.tobElev + h }, { wseFt, gradeFt });
+    const b = bandedStorage(ring, { ...det, depth: det.depth + h, tobElev: det.tobElev + h }, { wseFt, gradeFt, coincidentStorm: true });
     return b ? b.usableCf : 0;
   };
 
@@ -111,7 +114,7 @@ describe("F3 — the non-monotonic (inward berm) peak solve updates the APPLIED 
   it("solveTobRaise returns the interior peak (well below the clamp), not the maxed-out ceiling", () => {
     const maxRaiseFt = 20; // the geometric ceiling; the pinch closes right about here
     const target = usableAt(4.5) * 1.5; // beyond anything the footprint can reach
-    const r = solveTobRaise({ ring, det, wseFt, targetCf: target, maxRaiseFt, gradeFt });
+    const r = solveTobRaise({ ring, det, wseFt, targetCf: target, maxRaiseFt, gradeFt, coincidentStorm: true });
     expect(r.ok).toBe(false);      // unreachable
     expect(r.partial).toBe(true);  // partial gain, honestly flagged
     expect(r.hFt).toBeGreaterThan(0);
@@ -123,7 +126,7 @@ describe("F3 — the non-monotonic (inward berm) peak solve updates the APPLIED 
   it("the peak raise flows through the raise-tob action into the applied tobElev/depth (the rim moves)", () => {
     const maxRaiseFt = 20;
     const target = usableAt(4.5) * 1.5;
-    const result = sizePondForTargets({ ring, det, wseFt, gradeFt, detTargetCf: target, mitTargetCf: 0, maxRaiseFt });
+    const result = sizePondForTargets({ ring, det, wseFt, gradeFt, detTargetCf: target, mitTargetCf: 0, maxRaiseFt, coincidentStorm: true });
     expect(result.ok).toBe(true);
     const raiseA = result.actions.find((a) => a.kind === "raise-tob");
     expect(raiseA).toBeTruthy();
