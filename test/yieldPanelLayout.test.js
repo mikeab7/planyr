@@ -102,7 +102,10 @@ describe("punch 4 — DETENTION DETAIL: prior detail folds into Assumptions & me
     expect(src).toContain("method: detR");
     expect(src).toContain("Requirement basis");
     expect(src).toContain("ac-ft counts");
-    expect(src).toContain("so none counts yet. Raising the rim fixes this.");
+    // NEW-15 — the explainer now has partial + total variants; the total-dead branch keeps the
+    // original "none counts yet" wording (the rim clause is feasibility-gated, not unconditional).
+    expect(src).toContain("All of its storage sits below the flood level, so none counts yet.");
+    expect(src).toContain("sits below the flood level and doesn't count.");
   });
 });
 

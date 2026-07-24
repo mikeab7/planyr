@@ -19,6 +19,10 @@
 
 const AC_FT = 43560;
 const EPS = 0.005; // an ac-ft residue inside display precision is "met", never a phantom SHORT
+// NEW-16 — a MATERIALITY floor for a mitigation requirement. Below this the "requirement" is
+// grid-cell crumbs at a flood-zone edge (≈0.05 ac-ft ≈ 80 yd³ — engineering noise), not a real
+// obligation, so it reads "not required (trace)" with the raw value in the ⓘ, never a red SHORT.
+export const TRACE_ACFT = 0.05;
 
 // B2/B3 — one decimal for ac-ft; a sub-0.05 residue collapses to a clean "0.0" so a signed
 // zero ("−0.00") can never render.
@@ -43,12 +47,23 @@ export function fmtSignedAcFt(v) {
 const finish = (v) => ({ ...v, text: `${v.label}: ${v.sentence}` });
 const loadingRow = (key, label) => finish({ key, label, pill: "…", tone: "neutral", sentence: "checking flood data", loading: true, sortRank: 1 });
 const okRow = (key, label, sentence) => finish({ key, label, pill: "OK", tone: "good", sentence, sortRank: 2 });
-const pairRow = (key, label, provided, required, short) => finish({
-  key, label,
-  pill: short ? "SHORT" : "OK", tone: short ? "danger" : "good",
-  pair: { provided, required }, sentence: fmtProvidedOfRequired(provided, required),
-  short, action: short, sortRank: short ? 0 : 2,
-});
+const pairRow = (key, label, provided, required, short) => {
+  // NEW-16 display invariant: a SHORT pair must NEVER show two identical numbers (the
+  // "0.0 of 0.0" danger pill). When the 1-dp strings collide on a real shortfall, bump both
+  // sides to 2 dp so the gap is visible; if even 2 dp ties (sub-cent residue) fall back to 1 dp.
+  let provStr = fmtAcFt(provided), reqStr = fmtAcFt(required);
+  if (short && provStr === reqStr) {
+    const p2 = (Math.round(provided * 100) / 100).toFixed(2);
+    const r2 = (Math.round(required * 100) / 100).toFixed(2);
+    if (p2 !== r2) { provStr = p2; reqStr = r2; }
+  }
+  return finish({
+    key, label,
+    pill: short ? "SHORT" : "OK", tone: short ? "danger" : "good",
+    pair: { provided, required }, sentence: `${provStr} of ${reqStr} ac-ft`,
+    short, action: short, sortRank: short ? 0 : 2,
+  });
+};
 
 // Detention: the required number is the point requirement, or the CONSERVATIVE (upper) end of a
 // screening band — a single number in the strip (the band range moves into the A3 basis tag).
@@ -74,7 +89,15 @@ function mitigationVerdict(d) {
   if (mitV && mitV.intersectAcres === 0) return notRequired();
   if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) return notRequired();
   if (mitV && mitV.intersectAcres > 0 && mitV.volumeCf != null) {
-    if (!(mitV.volumeAcFt > EPS)) return notRequired();
+    // NEW-16 — below the materiality floor the requirement is trace noise, never a red SHORT:
+    // exact zero reads "not required"; a sub-0.05 crumb reads "not required (trace)" with the
+    // raw ac-ft carried for the ⓘ. Only a requirement ABOVE the floor is a real obligation.
+    if (!(mitV.volumeAcFt > TRACE_ACFT)) {
+      const isTrace = mitV.volumeAcFt > EPS;
+      return finish({ key: "mit", label: "Mitigation", pill: "OK", tone: "good",
+        sentence: isTrace ? "not required (trace)" : "not required",
+        trace: isTrace, traceAcFt: isTrace ? mitV.volumeAcFt : null, sortRank: 2 });
+    }
     const provCf = d.mitProvided ? d.mitProvided.creditedCf : 0;
     if (provCf == null) return loadingRow("mit", "Mitigation");
     if (mitV.flags && mitV.flags.includes("floodway_intersect")) {
