@@ -92,19 +92,20 @@ describe("R1 — the tailwater ladder tags a REGIME so the dead floor uses NORMA
 });
 
 describe("R1 — the coincident-storm policy is an ASSUMED criteria-registry entry (default non-coincident)", () => {
-  it("every jurisdiction carries a finite coincidentStorm flag, ASSUMED (value 0, verified:false)", () => {
+  it("every jurisdiction carries a finite coincidentStorm flag (value 0; BKDD VERIFIED, the rest ASSUMED)", () => {
     for (const [k, row] of Object.entries(DETENTION_CRITERIA)) {
       const car = row.criteria.coincidentStorm;
       expect(car, `${k} missing coincidentStorm carrier`).toBeTruthy();
-      expect(car.value).toBe(0);        // 0 = non-coincident, the honest default
-      expect(car.verified).toBe(false); // ASSUMED until the code text lands
+      expect(car.value).toBe(0);        // 0 = non-coincident (BKDD §5.D.2/3 confirms it; the rest default to it)
+      if (k === "bkdd") expect(car.verified).toBe(true);   // VERIFIED — owner read Rules 22-01 full text (2026-07-24)
+      else expect(car.verified).toBe(false);               // ASSUMED until the code text lands
     }
     // the finite-value audit still passes with the new flag
     expect(problems()).toEqual([]);
   });
 
-  it("criteriaFor exposes it and coincidentStormPolicy resolves the default to non-coincident + assumed", () => {
-    for (const k of ["waller", "bkdd", "generic"]) {
+  it("criteriaFor exposes it and coincidentStormPolicy resolves non-coincident (ASSUMED for the rest, VERIFIED for BKDD)", () => {
+    for (const k of ["waller", "generic"]) {
       const crit = criteriaFor(k);
       expect(crit.coincidentStorm.value).toBe(0);
       const pol = coincidentStormPolicy(crit);
@@ -112,14 +113,18 @@ describe("R1 — the coincident-storm policy is an ASSUMED criteria-registry ent
       expect(pol.verified).toBe(false);
       expect(pol.source).toMatch(/coincident-storm/i);
     }
+    const bkdd = coincidentStormPolicy(criteriaFor("bkdd"));
+    expect(bkdd.coincident).toBe(false);
+    expect(bkdd.verified).toBe(true); // VERIFIED non-coincident (25-yr receiving tailwater, §5.D.2/§5.D.3)
   });
 
-  it("the Waller + BKDD citation target names BKDD Rules 22-01 + Waller Appendix E (owner's target)", () => {
-    for (const k of ["waller", "bkdd"]) {
-      const src2 = coincidentStormPolicy(criteriaFor(k)).source;
-      expect(src2).toMatch(/BKDD Rules & Regulations 22-01/);
-      expect(src2).toMatch(/Waller Appendix E/);
-    }
+  it("the Waller citation target still names BKDD Rules 22-01 + Waller Appendix E; BKDD itself is VERIFIED to §5.D", () => {
+    const waller = coincidentStormPolicy(criteriaFor("waller")).source;
+    expect(waller).toMatch(/BKDD Rules & Regulations 22-01/);
+    expect(waller).toMatch(/Waller Appendix E/);
+    const bkdd = coincidentStormPolicy(criteriaFor("bkdd")).source;
+    expect(bkdd).toMatch(/5\.D\.2/);
+    expect(bkdd).toMatch(/25-YR receiving/);
   });
 
   it("a user override flips it to coincident (and the policy reads coincident:true)", () => {
