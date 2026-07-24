@@ -543,7 +543,7 @@ describe("fixRoadRadii — tier 3 nudge + tier 4 located residual", () => {
 // ---------------------------------------------------------------------------------------
 const distToLine = (p, a, d) => Math.abs((p.x - a.x) * -d.y + (p.y - a.y) * d.x); // signed→abs perp dist to line (a,dir d)
 
-describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
+describe("teeGeometry — clean tee (curb returns, width-capped)", () => {
   // Through road east-west through origin; side road tees in from the north.
   const base = { T: { x: 0, y: 0 }, throughDir: { x: 1, y: 0 }, sideDir: { x: 0, y: 1 }, phT: 12, phS: 12, R: 20, curbT: 0.5, curbS: 0.5 };
 
@@ -567,12 +567,17 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     }
   });
 
-  it("a larger return radius widens the throat further", () => {
+  it("B989: a small return is honored, but a large one is WIDTH-CAPPED (no runaway throat)", () => {
+    // capW = max(2·phT, 2·phS) + 4 = 28; tMax = capW·0.9 = 25.2. A return whose tangent run fits
+    // (R=10 → t=10 ≤ tMax) is honored exactly; a big one (R=40 → t=40) is clamped to the width cap.
+    const capW = 2 * Math.max(base.phT, base.phS) + 4;
+    const tMax = capW * 0.9;
     const small = teeGeometry({ ...base, R: 10 });
     const large = teeGeometry({ ...base, R: 40 });
-    expect(large.throatWidth).toBeGreaterThan(small.throatWidth);
-    expect(small.throatWidth).toBeCloseTo(2 * (12 + 10), 2);
-    expect(large.throatWidth).toBeCloseTo(2 * (12 + 40), 2);
+    expect(small.throatWidth).toBeCloseTo(2 * (12 + 10), 2);           // small return honored
+    expect(large.throatWidth).toBeGreaterThan(small.throatWidth);      // still grows with R…
+    expect(large.throatWidth).toBeLessThanOrEqual(2 * (base.phS + tMax) + 1e-6); // …but only to the cap
+    expect(large.throatWidth).toBeLessThan(2 * (12 + 40));             // NOT the raw 2·(phS+R) fan
   });
 
   it("flare widens the throat beyond the returns alone", () => {
@@ -600,13 +605,14 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     expect(teeGeometry({ ...base, sideDir: { x: 1, y: 0 } })).toBeNull();
   });
 
-  it("produces non-degenerate cover pieces (seam + two armpit wedges) around the junction", () => {
+  it("B989: produces ONE simple mouth cover polygon spanning the junction (no seam+wedge trio)", () => {
     const g = teeGeometry(base);
-    expect(g.coverPolys.length).toBe(3);
-    for (const poly of g.coverPolys) expect(poly.length).toBeGreaterThanOrEqual(3);
-    // the two wedges together reach out past the side-road edges (the rounded corners), so the union
-    // spans wider than the raw side strip
-    const allX = g.coverPolys.flat().map((p) => p.x);
+    expect(g.coverPolys.length).toBe(1);                        // single mouth, not seam + 2 wedges
+    const mouth = g.coverPolys[0];
+    expect(mouth.length).toBeGreaterThanOrEqual(3);
+    expect(mouth.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
+    // the mouth rounds out past the raw side strip (the two curb returns), so it spans wider than 2·phS
+    const allX = mouth.map((p) => p.x);
     expect(Math.max(...allX) - Math.min(...allX)).toBeGreaterThan(2 * base.phS);
   });
 
@@ -629,51 +635,43 @@ describe("teeGeometry — clean tee (curb returns + widened throat)", () => {
     }
     return true;
   };
-  const maxFoldBack = (ring) => {                            // most-reversed vertex: min dot of consecutive unit edge dirs
-    const n = ring.length; let worst = 1;
-    const dir = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1; return { x: dx / L, y: dy / L }; };
-    for (let i = 0; i < n; i++) {
-      const din = dir(ring[(i - 1 + n) % n], ring[i]), dout = dir(ring[i], ring[(i + 1) % n]);
-      worst = Math.min(worst, din.x * dout.x + din.y * dout.y);
-    }
-    return worst;                                            // near -1 ⇒ a cusp/spike (edge reverses); we require > -0.9
-  };
-
-  // B971 — the cover is now an ARRAY of simple opaque fills (a seam band + the two armpit fillet
-  // wedges), NOT one throat-widened fan. NO piece may self-intersect or fold back (that was the
-  // wings/notch/pinch the owner saw in the real render). The drive stays constant width (its strip is
-  // drawn separately) — the cover only rounds the corners + overpaints the seam.
-  it("B971: every cover piece is a SIMPLE polygon with NO fold-back cusp — road tee + car & truck drives + skew", () => {
+  // B989 — the cover is ONE simple mouth polygon (up one fillet, straight along the drive edges to a
+  // common height that buries the strip end-cap, then down the other fillet, back along the through/court
+  // edge), NOT B971's seam band + two wedges. It must NOT self-intersect or fold back (that was the
+  // wings/notch/pinch/spike the owner saw), at ANY angle including a hard skew.
+  it("B989: the mouth cover is ONE SIMPLE polygon with NO fold-back cusp — road tee + car & truck drives + skew", () => {
     const cases = [
       teeGeometry(base),                                                   // road-to-road tee
       teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS: 12, R: 20, curbT: 0.5, curbS: 0.5 }),   // car parking drive
-      teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS: 15, R: 50, curbT: 0.5, curbS: 0.5 }),   // truck-court drive (WB-62 ~50 ft)
+      teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS: 15, R: 50, curbT: 0.5, curbS: 0.5 }),   // truck-court drive (WB-62)
       teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: unitv(1, 2), phT: 0, phS: 15, R: 40, curbT: 0.5, curbS: 0.5 }),    // skewed drive
+      teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: unitv(3, 1), phT: 0, phS: 15, R: 50, curbT: 0.5, curbS: 0.5 }),    // hard skew (~18°, glancing)
     ];
     for (const g of cases) {
       expect(g).toBeTruthy();
       expect(Array.isArray(g.coverPolys)).toBe(true);
-      expect(g.coverPolys.length).toBe(3);                                 // seam + 2 armpit wedges
-      for (const poly of g.coverPolys) {
-        expect(poly.length).toBeGreaterThanOrEqual(3);
-        expect(poly.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
-        expect(isSimple(poly)).toBe(true);                                 // no self-intersecting edges (no star/blob)
-      }
-      // The seam band is a clean quad (no cusp). The wedges legitimately meet the edges TANGENTIALLY
-      // at the fillet endpoints (renders smooth), so only the seam is fold-back-checked.
-      expect(maxFoldBack(g.coverPolys[0])).toBeGreaterThan(-0.9);
+      expect(g.coverPolys.length).toBe(1);                                 // ONE mouth
+      const mouth = g.coverPolys[0];
+      expect(mouth.length).toBeGreaterThanOrEqual(3);
+      expect(mouth.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))).toBe(true);
+      expect(isSimple(mouth)).toBe(true);                                  // no self-intersecting edges (no star/blob/spike)
+      // NB: maxFoldBack is deliberately NOT asserted on the mouth. A curb return meets the through/court
+      // edge TANGENTIALLY at its two fillet endpoints (tan1A / tan1B), which reads as a ~180° reversal to
+      // the fold-back metric but renders as a smooth tangent — exactly the B971 carve-out. isSimple (no
+      // self-crossing) is the real "no wings/spike/star" guard here.
     }
   });
 
-  it("B971: the cover NEVER widens the drive — the seam band is only about as wide as the drive+curb (no fan)", () => {
+  it("B989: the mouth is WIDTH-CAPPED — a big return can't open a runaway fan", () => {
     const phS = 15, R = 50;
     const g = teeGeometry({ T: base.T, throughDir: base.throughDir, sideDir: base.sideDir, phT: 0, phS, R, curbT: 0.5, curbS: 0.5 });
-    const seam = g.coverPolys[0];
-    const xs = seam.map((p) => p.x);
-    const seamW = Math.max(...xs) - Math.min(...xs);
-    // The seam band spans ~ the drive back-of-curb width (2*(phS+curb)) — NOT the throat 2*(phS+R).
-    expect(seamW).toBeLessThan(2 * (phS + 5));                             // ≪ the 2*(phS+R)=130 ft "fan" opening
-    expect(seamW).toBeGreaterThan(2 * phS - 1);                           // but at least the drive travel width
+    const xs = g.coverPolys[0].map((p) => p.x);
+    const mouthW = Math.max(...xs) - Math.min(...xs);
+    const capW = 2 * phS + 4;                                              // phT=0 → capW = 2·phS + margin
+    // bounded by the drive + a ≈one-drive-width return each side (drive + 2·tMax), NOT the raw
+    // 2·(phS+R)=130 ft "fan" the un-clamped return used to open.
+    expect(mouthW).toBeLessThan(2 * (phS + capW));
+    expect(mouthW).toBeLessThan(2 * (phS + R));
   });
 
   it("B964: each return arc is a single smooth (monotonic-turning) fillet — not a spiky path", () => {
@@ -748,8 +746,10 @@ describe("nearestRectEdge — connect-target edge for a road endpoint", () => {
 });
 
 describe("teeGeometry reused for a road→drive connect (edge as 'through', no through curb)", () => {
-  it("car-scale (parking) vs truck-scale returns: bigger radius → wider throat", () => {
-    // Target edge along +x at y=0 (a parking-field / court edge); road tees from the north.
+  it("car-scale (parking) vs truck-scale (flared) returns: truck court reads wider", () => {
+    // Target edge along +x at y=0 (a parking-field / court edge); road tees from the north. The truck
+    // court's wider read comes from its throat FLARE (B989 caps the return radius itself to ≈one
+    // drive-width, so the flare — not a runaway 50 ft radius — is what opens the dock-court mouth).
     const common = { T: { x: 0, y: 0 }, throughDir: { x: 1, y: 0 }, sideDir: { x: 0, y: 1 }, phT: 0, phS: 12, curbT: 0, curbS: 0.5 };
     const car = teeGeometry({ ...common, R: 20 });
     const truck = teeGeometry({ ...common, R: 50, flare: 20 });
@@ -763,19 +763,20 @@ describe("teeGeometry reused for a road→drive connect (edge as 'through', no t
     }
   });
 
-  // B959/NEW-1 — driveJunctionsOf feasibility-clamps the WB-62 ≈50 ft truck return by passing a TIGHT
-  // throughAvail (= min(connect-edge length, court depth)). This is the teeGeometry primitive the clamp
-  // leans on: a roomy drive keeps the ≈50 ft default, a compact drive shrinks BOTH the realized return
-  // radius and the throat so the single fillet fits the actual space (never spanning the whole court).
-  it("a tight available run clamps the realized WB-62 return radius + throat down", () => {
+  // B989 — the WIDTH cap now bounds the WB-62 ≈50 ft return to ≈one drive-width even on a ROOMY drive
+  // (the owner's fix: throughAvail/sideAvail are the road LENGTHS, so the old length-only clamp left the
+  // oblique return unbounded). A genuinely TIGHT run (shorter than the width cap) clamps it further still.
+  it("B989: the return is WIDTH-CAPPED even on a roomy drive, and clamps FURTHER on a tight run", () => {
     const common = { T: { x: 0, y: 0 }, throughDir: { x: 1, y: 0 }, sideDir: { x: 0, y: 1 }, phT: 0, phS: 12, curbT: 0, curbS: 0.5, R: 50 };
     const roomy = teeGeometry({ ...common, throughAvail: 300, sideAvail: 300 });
-    const tight = teeGeometry({ ...common, throughAvail: 40, sideAvail: 40 });
+    const tight = teeGeometry({ ...common, throughAvail: 10, sideAvail: 10 });
+    const capW = 2 * 12 + 4;                                     // phT=0 → capW = 2·phS + margin
     expect(roomy).toBeTruthy();
     expect(tight).toBeTruthy();
-    expect(roomy.R).toBeCloseTo(50, 0);                          // a roomy drive keeps the ≈50 ft default
-    expect(tight.R).toBeLessThan(roomy.R);                       // return radius clamped down to fit
-    expect(tight.throatWidth).toBeLessThan(roomy.throatWidth);   // throat only as wide as it can fit
+    expect(roomy.R).toBeLessThan(50);                           // NOT the raw 50 — the width cap bites
+    expect(roomy.R).toBeLessThanOrEqual(capW);                  // ≈ one drive-width (perpendicular ⇒ Rc = tMax ≤ capW)
+    expect(tight.R).toBeLessThan(roomy.R);                      // a short run clamps further
+    expect(tight.throatWidth).toBeLessThan(roomy.throatWidth);
   });
 });
 

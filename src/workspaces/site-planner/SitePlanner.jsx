@@ -1090,7 +1090,7 @@ function teeJunctionsOf(els, settings) {
 // (those are what balloon the junction). Editable; both types then feasibility-clamp to the actual
 // drive via the tight throughAvail below, so the return can neither span the whole connect edge nor
 // reach across the court's depth to the building.
-const DRIVE_RETURN_SEED = { parking: 20, truckcourt: 50 };
+const DRIVE_RETURN_SEED = { parking: 15, truckcourt: 30 }; // B989 — tidy default (was 20/50, oversized on a 24–40 ft drive); still editable up per-junction, width-capped in teeGeometry
 function driveJunctionsOf(els, settings) {
   const out = [];
   const byId = new Map((els || []).map((e) => [e.id, e]));
@@ -1118,7 +1118,10 @@ function driveJunctionsOf(els, settings) {
     const perpDepth = hit.edge.axis === "y" ? T.h : T.w;           // court depth behind the connect edge (see rectEdges axis)
     const geom = teeGeometry({
       T: { x: P.x, y: P.y }, throughDir: hit.edge.dir, sideDir,
-      phT: 0, phS: Math.max(0, (+S.travelW || 0) / 2),
+      // phS at BACK-OF-CURB (roadOuterHalf), not face-of-curb: the cover unions with the drive's
+      // back-of-curb strip, so the fillet must round the STRIP's outer corner — else the wider strip
+      // corner sits outside the fillet and the union shows a sharp (un-rounded) acute edge (B989).
+      phT: 0, phS: roadOuterHalf(S),
       R, flare, curbT: 0.5, curbS: roadCurbWidth(S),              // curbT covers any parking/court curb across the mouth
       throughAvail: Math.min(hit.edge.len, perpDepth), sideAvail: Math.hypot(sideDir.x, sideDir.y),
     });
@@ -3098,7 +3101,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const driveTargetKind = (el) => (el && !el.points && typeof el.cx === "number" && el.w > 0 && el.h > 0
     ? (el.type === "parking" ? "parking" : (el.type === "paving" && el.truckCourt ? "truckcourt" : null)) : null);
   const driveTargetsOf = () => els.filter((x) => driveTargetKind(x)).map((x) => ({ id: x.id, kind: driveTargetKind(x), edges: rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0) }));
-  const DRIVE_RETURN = { parking: 20, truckcourt: 50 }; // curb-return seed (ft): car ≈20, truck WB-62 driveway ≈50 (single fillet, feasibility-clamped in driveJunctionsOf)
+  const DRIVE_RETURN = { parking: 15, truckcourt: 30 }; // B989 — curb-return seed (ft): car ≈15, truck WB-62 driveway ≈30 (single fillet, width-capped in teeGeometry to ~one drive-width at any angle)
   // Nearest parking/truck-court edge to a moving road endpoint, within `tolFt`.
   const findDriveConnect = (P, tolFt) => {
     let best = null;
