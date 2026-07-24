@@ -27,6 +27,7 @@
 import { bandedStorage, bermFillVolume } from "./pondGeom.js";
 import { maxInwardOffset } from "./pondOffset.js";
 import { BERM_MAX_RAISE_FT } from "./ledgerBalancer.js";
+import { mitigationCredit } from "./pondLedger.js";
 
 const AC_FT = 43560;
 const EST_PROVIDERS = new Set(["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext"]); // B882 — every estimate provider stamps
@@ -185,8 +186,19 @@ export function sizePondForTargets({
   const estimated = EST_PROVIDERS.has(wseProvider);
   const { depth, freeboard, slope } = detOf(det);
   const bands = bandsAt(ring, det, wseFt, gradeFt, coincidentStorm);
-  const mit0 = bands ? bands.mitigationCandidateCf : 0;
+  const mit0 = bands ? bands.mitigationCandidateCf : 0; // raw below-WSE candidate cut (geometry only)
   const use0 = bands ? bands.usableCf : 0;
+  // NEW-21 — the CREDITED mitigation is the raw candidate through the ONE shared gate (role + hydraulic
+  // seal), so the optimizer/card agree with the ledger/verdict (the "SHORT 0.0" vs "already covers 0.2"
+  // contradiction the owner caught). A GATED pond (Detention role, or a berm-sealed rim above the flood)
+  // credits ZERO no matter how deep it digs — deepening only adds gated candidate — so its cure is to
+  // UNGATE (designate Hybrid / open the berm / relocate), never a deepen the tool would falsely apply.
+  const bermedS = gradeFt != null && isFinite(gradeFt) && Number.isFinite(det.tobElev) && det.tobElev > gradeFt + 0.02;
+  const mitCred = bands
+    ? mitigationCredit({ role: det.role ?? null }, { mode: "anchored", bands, wseFt, grossCf: bands.grossCf, bermed: bermedS })
+    : { creditedCf: 0, candidateCf: 0, reason: null };
+  const mitProvided = mitCred.creditedCf;
+  const mitGated = mitCred.reason; // "role-detention" | "berm-sealed" | null
 
   const actions = [];
   let mitTarget = Math.max(0, mitTargetCf || 0);
@@ -218,9 +230,11 @@ export function sizePondForTargets({
     }
   }
 
-  const mitShort = Math.max(0, mitTarget - mit0);
+  const mitShort = Math.max(0, mitTarget - mitProvided);
   let deepen = null, grow = null;
-  if (mitShort > 0) {
+  // Only SIZE (deepen/grow) when the candidate actually CREDITS — a gated pond can't earn mitigation
+  // credit by digging, so we never fabricate a deepen that wouldn't move the number.
+  if (mitShort > 0 && !mitGated) {
     deepen = solveMitigationDepth({ ring, det, wseFt, targetCf: mitTarget, gradeFt });
     if (!deepen.ok) grow = solveMitigationGrow({ ring, det: { ...det, depth: deepen.maxDepthFt ?? depth }, wseFt, targetCf: mitTarget, gradeFt });
   }
@@ -256,13 +270,20 @@ export function sizePondForTargets({
     if (grow && grow.ok && grow.addAcres > 0) actions.push({ kind: "grow", addAcres: grow.addAcres, factor: grow.factor });
     if (grow && !grow.ok) actions.push({ kind: "grow-infeasible" });
   }
+  // NEW-21 — the pond has a below-flood cut but it earns NO mitigation credit (role or berm seal).
+  // No dig closes it; the caller names the reason + the ungate options (never a false "sized toward").
+  if (mitShort > 0 && mitGated) {
+    actions.push({ kind: "mitigation-gated", reason: mitGated, candidateAcFt: mit0 / AC_FT, targetAcFt: mitTarget / AC_FT });
+  }
 
   return {
     ok: true,
     estimated,
     fullyInundated,
     bands: bands ? { usableCf: use0, mitigationCandidateCf: mit0, poolDeadCf: bands.poolDeadCf, grossCf: bands.grossCf } : null,
-    mitigation: { targetCf: mitTarget, providedCf: mit0, shortCf: mitShort, covered: mitShort <= 0 },
+    // NEW-21 — providedCf is the CREDITED mitigation (shared gate), candidateCf the raw below-flood cut,
+    // gated the reason it earns no credit (null when it credits). The card/verdict read providedCf.
+    mitigation: { targetCf: mitTarget, providedCf: mitProvided, candidateCf: mit0, gated: mitGated, shortCf: mitShort, covered: mitShort <= 0 },
     detention: { targetCf: detTarget, providedCf: use0, shortCf: Math.max(0, detTarget - use0), covered: detTarget <= use0 },
     freeboardFt: freeboard,
     actions,

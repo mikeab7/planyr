@@ -137,7 +137,9 @@ describe("sizePondForTargets — the assistant", () => {
     expect(r.actions[0].kind).toBe("inundated");
   });
   it("mitigation target beyond the pinch-off reports the geometric ceiling + the grow fallback", () => {
-    const r = sizePondForTargets({ ring: SQ(60), det: det0, wseFt: 95, mitTargetCf: 5 * AC_FT, detTargetCf: 0 });
+    // NEW-21 — sizing a pond FOR mitigation means it's a Mitigation/Hybrid pond (a Detention-role pond's
+    // below-flood cut earns no credit, so the solver correctly gates it instead of a futile deepen).
+    const r = sizePondForTargets({ ring: SQ(60), det: { ...det0, role: "mitigation" }, wseFt: 95, mitTargetCf: 5 * AC_FT, detTargetCf: 0 });
     expect(r.ok).toBe(true);
     const pinch = r.actions.find((a) => a.kind === "pinch-off");
     expect(pinch).toBeTruthy();
@@ -246,7 +248,7 @@ describe("applyPondSizingActions (B909/B910) — apply the assistant's actions o
   });
 
   it("end-to-end against the real solver: a pinch-off + grow result from sizePondForTargets applies cleanly and reaches the target", () => {
-    const el = { id: "p3", type: "pond", cx: 30, cy: 30, w: 60, h: 60, rot: 0, det: { ...det0 } };
+    const el = { id: "p3", type: "pond", cx: 30, cy: 30, w: 60, h: 60, rot: 0, det: { ...det0, role: "mitigation" } };
     const result = sizePondForTargets({ ring: SQ(60), det: el.det, wseFt: 95, mitTargetCf: 5 * AC_FT, detTargetCf: 0 });
     expect(result.ok).toBe(true);
     const out = applyPondSizingActions(el, result.actions);

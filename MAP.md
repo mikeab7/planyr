@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-24 @ `073ab96` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-24 @ `0daf24a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -476,7 +476,7 @@ _312 source files mapped._
 - **`src/workspaces/site-planner/lib/pondInspectorCopy.js`** — FINAL UI SPEC Part A pond-inspector visible copy as pure data (chip vocabulary A3, collapsed-group titles/summaries, at-a-glance labels, purpose tooltips) so the chip set and word budget unit-test without a browser
   - _exports_: `POND_CHIP_DEFS`, `POND_DIMENSION_LABELS`, `POND_FLOOD_NOTES`, `POND_GROUPS`, `POND_PURPOSE_DESCRIPTOR`, `POND_PURPOSE_TOOLTIP`, `pondGroupSummary`, `pondInspectorChips`
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
-  - _exports_: `accumulatePondLedger`, `effectivePondRole`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`
+  - _exports_: `accumulatePondLedger`, `effectivePondRole`, `mitigationCredit`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
 - **`src/workspaces/site-planner/lib/pondOptimizer.js`** — Pond economics optimizer (NEW-D / Phase D): searches depth × placement pond configurations under constraints (max depth, groundwater ceiling, maintenance berm, pipeline-corridor exclusions) and ranks by earthwork $, land-take, and buildable-SF recovered. Exports `solveScaleForVolume`, `evaluateCandidate`, `optimizePond`.

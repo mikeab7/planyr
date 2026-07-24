@@ -19,7 +19,7 @@ describe("NEW-19 — one flood-facts truth: header state == the facts the number
     expect(src).toContain("Number.isFinite(drainViewCtx?.checkedAt) ? Date.now() - drainViewCtx.checkedAt : null,");
   });
   it("the header reads 'not checked' ONLY when floodChecked is false (never over definite remembered numbers)", () => {
-    expect(src).toContain('!drainage.floodChecked ? "Flood data: not checked" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)} ago` : "Flood data: checked"');
+    expect(src).toContain('!drainage.floodChecked ? "Flood data: not checked" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked"');
   });
   it("AUDIT — a restored view with no per-pond fact still returns UNKNOWN, never a fabricated definite split", () => {
     // The B804/NEW-9 guard: flood evidence but no persisted pond fact → factsKnown:false, not gross.
