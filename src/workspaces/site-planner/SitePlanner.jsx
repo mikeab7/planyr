@@ -20929,6 +20929,10 @@ function YieldPanel({
   // strip itself read one source.
   const verdictStrip = drainage ? yieldVerdictStrip(drainage) : [];
   const verdictLoading = verdictStrip.some((v) => v.loading);
+  // NEW-20(a) — is a flood-data fetch actually in flight (live ↻ OR the B832 auto-revalidation)?
+  // Drives the ↻ affordances' BUSY state so a click (or the on-load auto-check) is never silent:
+  // the row reads "checking…", the ↻ spins and is disabled while running.
+  const drainRefreshing = !!drainage && (drainage.status === "busy" || drainage.autoRefreshing);
   const floodAgeMs = drainage ? drainage.floodAgeMs : null;
 
   return (
@@ -20956,9 +20960,11 @@ function YieldPanel({
           // amber while a verdict is blocked loading (state D). v3 B3 — an unknown age reads
           // "Flood data: not checked" (never a bare "Flood data"); a "·" separates the ↻.
           <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: verdictLoading ? Y.warnText : Y.muted, whiteSpace: "nowrap", flex: "none" }}>
-            <span>{floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)} ago` : "Flood data: not checked"}</span>
+            {/* NEW-20(a) — while a fetch is in flight the line says so ("checking…") instead of an
+                unchanging "not checked", and the ↻ spins + disables so the click is never silent. */}
+            <span>{drainRefreshing ? "Flood data: checking…" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)} ago` : "Flood data: not checked"}</span>
             <span aria-hidden="true" style={{ color: Y.faint }}>·</span>
-            <button type="button" onClick={drainage.onCheck} title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1 }} aria-label="Re-check flood data">↻</button>
+            <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }} aria-label="Re-check flood data">↻</button>
           </span>
         )}
         <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10, flex: "none" }}>▶</span>
@@ -20999,11 +21005,14 @@ function YieldPanel({
                     <span data-testid={`yield-verdict-sentence-${v.key}`} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 12.5, color: Y.text, lineHeight: 1.35, whiteSpace: "nowrap", minWidth: 0 }}>
                       <span style={{ minWidth: 0 }}>{v.label}: {v.pair
                         ? <b style={{ whiteSpace: "nowrap", fontWeight: 750 }}>{v.sentence}</b>
-                        : <span style={{ color: v.loading ? Y.muted : Y.text }}>{v.sentence}</span>}</span>
+                        // NEW-20(a) — a recheck row reads "checking…" while its fetch is in flight,
+                        // never a frozen "not checked yet" that looks like the click did nothing.
+                        : <span style={{ color: v.loading || (v.recheck && drainRefreshing) ? Y.muted : Y.text }}>{v.recheck && drainRefreshing ? "checking…" : v.sentence}</span>}</span>
                       {/* v3 B2 — an unassessed Buildability row (and the "set BFE" state) hangs a ↻
-                          that re-pulls the flood data, since its own group was deleted. */}
+                          that re-pulls the flood data, since its own group was deleted. NEW-20(a): the
+                          ↻ spins + disables while a fetch is in flight so the click is never silent. */}
                       {v.recheck && drainage && drainage.onCheck && (
-                        <button type="button" onClick={drainage.onCheck} aria-label="Re-check flood data" title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, flex: "none" }}>↻</button>
+                        <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} aria-label="Re-check flood data" title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, flex: "none", display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }}>↻</button>
                       )}
                       {/* NEW-16 — a trace mitigation requirement carries the raw ac-ft in the ⓘ,
                           so "not required (trace)" is honest, not a hidden number. */}
