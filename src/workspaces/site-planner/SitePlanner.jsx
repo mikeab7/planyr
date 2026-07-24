@@ -141,6 +141,7 @@ import { gridRequest, sampleAtLatLng } from "./lib/demGrid.js";
 import { fetchSiteGrid } from "./lib/terrainLayers.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
+import { solveBalanceFfe, truckloadLabel, ffeDualDisplay } from "./lib/ffeBalance.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
   pondFloodplainTier,
@@ -7678,7 +7679,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // still overrides in effectivePadElev). padIsAuto drives the "assumed" buildability verdict
   // + the greyed input placeholder + the DRAFT/assumed tags on card and print (PDF-PARITY).
   const fmPadIsAuto = fmManualPadFt == null && fmAutoFfeFt != null;
-  const fmEffectivePadFt = fmManualPadFt ?? fmAutoFfeFt;
+  // DECISION 3 (grading milestone) — the finished floor may float UP off the regulatory
+  // code floor (fmAutoFfeFt) to reuse basin spoil as pad fill, and is NEVER below it. The
+  // uplift is a persisted per-site grading setting (0 = sit at the floor) solved on demand
+  // by ⚖ Raise FFE to balance in Earthwork; it rides ONLY the AUTO pad — a manually typed
+  // pad FFE wins outright. The regulatory floor itself (fmAutoFfeFt) is unchanged, so the
+  // code-compliance verdict still measures against the true minimum.
+  const gradingSettings = settings.grading || {};
+  const fmBalanceRaiseFt = fmManualPadFt == null && Number.isFinite(gradingSettings.ffeBalanceRaiseFt) && gradingSettings.ffeBalanceRaiseFt > 0
+    ? gradingSettings.ffeBalanceRaiseFt : 0;
+  const fmEffectivePadFt = fmManualPadFt != null
+    ? fmManualPadFt
+    : (fmAutoFfeFt != null ? Math.round((fmAutoFfeFt + fmBalanceRaiseFt) * 100) / 100 : null);
   const fmElev = {
     padElevFt: fmEffectivePadFt,
     existGradeFt: Number.isFinite(fmSettings.existGradeFt) ? fmSettings.existGradeFt : (drainCtxData?.groundElevFt ?? null),
@@ -7788,6 +7800,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // one CLICK, never per render (a per-frame bisection would jank drags).
   const gsBuildAtT = (t) => {
     const s = buildProposedSurface({ ...gsInputs, fieldT: t });
+    return s ? s.grid : null;
+  };
+  // DECISION 3 — the same re-build, sweeping the finished FLOOR (not the paving field) so
+  // solveBalanceFfe can bisect the balance-optimal pad raise off the regulatory floor. One
+  // CLICK (⚖ Raise FFE to balance), never per render — a per-frame FFE bisection would jank.
+  const gsBuildAtFfe = (ffe) => {
+    const s = buildProposedSurface({ ...gsInputs, ffeFt: ffe });
     return s ? s.grid : null;
   };
   // B822 — auto pond engineering, layer (a)+(b): criteria records drive freeboard/side
@@ -13314,6 +13333,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // the mitigation requirement above).
             const bermCy = pondBermFillCf / 27;
             const netCy = gsPriced ? netImportCy({ fillCy: gsG.fillCy + bermCy, cutCy: gsG.cutCy, borrowCy, shrinkFactor }) : null;
+            // DECISION 2 (grading milestone) — the net residual in haul terms the developer
+            // can picture: truckloads (one tandem dump ≈ 12–14 bank CY, screening range).
+            const netHaulLabel = netCy != null ? truckloadLabel(Math.round(netCy)) : "";
             const setGrading = (patch) => setSettings((sx) => ({ ...sx, grading: { ...(sx.grading || {}), ...patch } }));
             // B895 — "Set unit prices" jumps to + focuses the (one shared) $/CY bid field below.
             const jumpToEarthPrice = () => {
@@ -13335,7 +13357,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {metricRow("Graded surface — fill", `${f0(gsG.fillCy)} CY`, "placed (compacted)", { code: "plan" })}
                   {gsG.wedgeFillCy > 0.5 && metricRow("· incl. transition wedges", `${f0(gsG.wedgeFillCy)} CY`, `daylight fringe @ ${gsApronRatio}:1`)}
                   {metricRow("Net dirt (screening)", `${f0(Math.abs(netCy))} CY ${netCy > 0 ? "import" : "export"}`,
-                    gsShrinkPct == null ? "no shrink applied" : `@ ${gsShrinkPct}% shrink`, { code: "plan" })}
+                    `${netHaulLabel ? netHaulLabel + " · " : ""}${gsShrinkPct == null ? "no shrink applied" : `@ ${gsShrinkPct}% shrink`}`, { code: "plan" })}
                 </>) : (
                   metricRow("Graded surface cut / fill", "UNKNOWN", "no ground elevation — ↻ re-check drainage")
                 ))}
@@ -13368,6 +13390,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {gsFieldT > 0 && <span style={{ fontSize: 10.5, color: PAL.muted }}>field slopes at {Math.round(gsFieldT * 100)}% of class band</span>}
                   </div>
                 )}
+                {/* DECISION 3 (grading milestone) — the balance-optimal finished floor. The pad
+                    floats UP off its regulatory code minimum (fmAutoFfeFt) to reuse basin spoil
+                    as fill, never below it; the dual readout decomposes floor + balance uplift.
+                    Auto pad only — a manually typed pad FFE wins outright. */}
+                {gsG && fmManualPadFt == null && Number.isFinite(fmAutoFfeFt) && (() => {
+                  const ffeDual = ffeDualDisplay({ ffeFt: fmEffectivePadFt, regMinFfeFt: fmAutoFfeFt });
+                  const applied = fmBalanceRaiseFt > 0.05;
+                  const exporting = gsPriced && netCy != null && netCy < -10; // hauling spoil off at the current floor
+                  const raiseFfeToBalance = () => {
+                    const netAtFfe = (ffe) => {
+                      const g = gsBuildAtFfe(ffe);
+                      return g && g.fillCy != null ? netImportCy({ fillCy: g.fillCy + bermCy, cutCy: g.cutCy, borrowCy, shrinkFactor }) : null;
+                    };
+                    const sol = solveBalanceFfe({ netAtFfe, regMinFfeFt: fmAutoFfeFt });
+                    if (sol && sol.balanceRaiseFt > 0.05) { pushHistory(); setGrading({ ffeBalanceRaiseFt: sol.balanceRaiseFt }); }
+                    else if (sol && sol.clamped === "imports-at-floor") flashWarn("The site already needs fill trucked in; raising the finished floor only adds more. No balance raise made.", 5000);
+                    else flashWarn("The finished floor already balances the on-site dirt.", 5000);
+                  };
+                  return (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        {!applied && exporting && (
+                          <button style={chip}
+                            title="One click: raises the finished floor off its regulatory code minimum just enough to reuse the basin spoil as pad fill instead of hauling it off. It never drops below the code floor; × Reset floor returns it to the minimum."
+                            onClick={raiseFfeToBalance}>⚖ Raise FFE to balance</button>
+                        )}
+                        {applied && (
+                          <button style={chip} title="Return the finished floor to its regulatory code minimum (BFE + the jurisdiction's freeboard)."
+                            onClick={() => { pushHistory(); setGrading({ ffeBalanceRaiseFt: null }); }}>× Reset floor to code min</button>
+                        )}
+                      </div>
+                      {ffeDual && (
+                        <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }} title="The finished floor sits at the regulatory code minimum (the base-flood elevation plus the jurisdiction's required freeboard). When the site would haul spoil off, raising it for balance reuses that dirt on the pads as fill.">{ffeDual.full}</div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {gsG && (
                   <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer", marginTop: 8 }}
                     title="Paints proposed − existing per cell over the plan — warm = fill, cool = cut, grey hatch = no ground data. Same cells these rows summed (engine truth). Turns the fill-depth heat map off while on — one exhibit at a time. The dashed daylight line (where fill/cut tapers to existing ground) rides either exhibit.">
