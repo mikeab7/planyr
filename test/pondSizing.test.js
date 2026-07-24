@@ -130,8 +130,8 @@ describe("sizePondForTargets — the assistant", () => {
     expect(lowTob.bermFillBelowWseCf).toBeGreaterThan(0);
     expect(low.mitigation.targetCf).toBeGreaterThan(b.mitigationCandidateCf); // folded back in
   });
-  it("fully-inundated pond leads with the raise-TOB message, not a delta table", () => {
-    const r = sizePondForTargets({ ring: SQ(), det: det0, wseFt: 101, detTargetCf: AC_FT, mitTargetCf: 0 });
+  it("fully-inundated pond (coincident storm) leads with the raise-TOB message, not a delta table", () => {
+    const r = sizePondForTargets({ ring: SQ(), det: det0, wseFt: 101, detTargetCf: AC_FT, mitTargetCf: 0, coincidentStorm: true });
     expect(r.ok).toBe(true);
     expect(r.fullyInundated).toBe(true);
     expect(r.actions[0].kind).toBe("inundated");
@@ -338,13 +338,18 @@ describe("applyPondSizingActions (B909/B910) — apply the assistant's actions o
 // (no SitePlanner.jsx orchestration involved — that's the routing fix; this is proof the
 // routing fix targets a REAL, provable failure mode, and that its alternative — raising
 // the top of bank — actually works).
-describe("B909 round 2 — footprint growth alone cannot fix a submerged pond; raising the TOB can", () => {
+// R1 — "submerged" (usable ZERO below the flood WSE) is now the COINCIDENT-storm case: the pond
+// only fills to the flood level when the design storm coincides with the regional flood. By DEFAULT
+// the pond recovers to normal tailwater between storms, so these tests pass coincidentStorm:true to
+// exercise the submerged/raise-TOB behavior. (The default non-coincident release is covered in
+// pondGeom.bands.test.js.)
+describe("B909 round 2 — footprint growth alone cannot fix a submerged pond; raising the TOB can (coincident-storm case)", () => {
   const submergedDet = { depth: 8, freeboard: 1, slope: 3, tobElev: 100 }; // TOB 100, WSE 102 → fully below the flood
   const wseFt = 102; // within the 4′ BERM_MAX_RAISE_FT screening clamp of the TOB
 
   it("a pond anchored below the flood WSE earns ZERO usable detention no matter how large its footprint grows", () => {
     for (const side of [60, 200, 600, 2000]) {
-      const u = usablePondVolume(SQ(side), submergedDet, { wseFt });
+      const u = usablePondVolume(SQ(side), submergedDet, { wseFt, coincidentStorm: true });
       expect(u.usableCf).toBe(0);
       expect(u.bands.fullyInundated).toBe(true);
     }
@@ -352,22 +357,22 @@ describe("B909 round 2 — footprint growth alone cannot fix a submerged pond; r
 
   it("raising the top of bank above the flood WSE (a berm) — NOT growing the footprint — is what unlocks usable detention", () => {
     const ring = SQ(200);
-    const before = usablePondVolume(ring, submergedDet, { wseFt });
+    const before = usablePondVolume(ring, submergedDet, { wseFt, coincidentStorm: true });
     expect(before.usableCf).toBe(0);
 
-    const raised = solveTobRaise({ ring, det: submergedDet, wseFt, targetCf: 20000 });
+    const raised = solveTobRaise({ ring, det: submergedDet, wseFt, targetCf: 20000, coincidentStorm: true });
     expect(raised.ok).toBe(true);
     expect(raised.hFt).toBeGreaterThan(0); // TOB must actually go up
 
     const afterDet = { ...submergedDet, tobElev: submergedDet.tobElev + raised.hFt, depth: submergedDet.depth + raised.hFt };
-    const after = usablePondVolume(ring, afterDet, { wseFt });
+    const after = usablePondVolume(ring, afterDet, { wseFt, coincidentStorm: true });
     expect(after.usableCf).toBeGreaterThan(0);
     expect(after.usableCf).toBeGreaterThanOrEqual(20000 - 1);
     expect(after.bands.fullyInundated).toBe(false);
   });
 
   it("sizePondForTargets, asked ONLY for detention (mitTargetCf: 0) on a submerged pond, proposes raise-tob — never a footprint-only remedy that can't work", () => {
-    const result = sizePondForTargets({ ring: SQ(200), det: submergedDet, wseFt, detTargetCf: 20000, mitTargetCf: 0 });
+    const result = sizePondForTargets({ ring: SQ(200), det: submergedDet, wseFt, detTargetCf: 20000, mitTargetCf: 0, coincidentStorm: true });
     expect(result.ok).toBe(true);
     expect(result.fullyInundated).toBe(true);
     const raiseA = result.actions.find((a) => a.kind === "raise-tob");
@@ -386,7 +391,7 @@ describe("B909 round 2 — footprint growth alone cannot fix a submerged pond; r
   it("when the submergence exceeds the raise clamp, raise-tob reports a PARTIAL result — the signal that a footprint-growth follow-up is required", () => {
     const deepSubmergedDet = { depth: 8, freeboard: 1, slope: 3, tobElev: 100 };
     const deepWseFt = 153.1; // far beyond the 4′ clamp — the reported Tsakiris figure
-    const result = sizePondForTargets({ ring: SQ(200), det: deepSubmergedDet, wseFt: deepWseFt, detTargetCf: 20000, mitTargetCf: 0 });
+    const result = sizePondForTargets({ ring: SQ(200), det: deepSubmergedDet, wseFt: deepWseFt, detTargetCf: 20000, mitTargetCf: 0, coincidentStorm: true });
     expect(result.ok).toBe(true);
     const raiseA = result.actions.find((a) => a.kind === "raise-tob");
     expect(raiseA).toBeTruthy();
@@ -394,7 +399,7 @@ describe("B909 round 2 — footprint growth alone cannot fix a submerged pond; r
     // Even the clamped raise still leaves the pond fully inundated at this gap size —
     // confirming a footprint-only remedy (the pre-fix behavior) truly had nothing to work with.
     const stillSubmergedDet = { ...deepSubmergedDet, tobElev: deepSubmergedDet.tobElev + raiseA.hFt, depth: deepSubmergedDet.depth + raiseA.hFt };
-    const afterClampedRaise = usablePondVolume(SQ(200), stillSubmergedDet, { wseFt: deepWseFt });
+    const afterClampedRaise = usablePondVolume(SQ(200), stillSubmergedDet, { wseFt: deepWseFt, coincidentStorm: true });
     expect(afterClampedRaise.usableCf).toBe(0);
   });
 });

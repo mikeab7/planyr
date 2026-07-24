@@ -46,6 +46,18 @@ const c = (value, verified, section, extra = {}) => ({ value, verified: !!verifi
 const STD_ORIFICE_C = 0.6;
 const STD_WEIR_C = 3.33;
 
+/* R1 (dead-storage-vs-tailwater) — the COINCIDENT-STORM design policy. Does the jurisdiction
+ * require the pond's design storm to be assumed COINCIDENT with the receiving flood (so the
+ * 100-yr flood WSE permanently floors the usable detention band — usable is only the storage
+ * ABOVE the flood), or does the pond RECOVER to normal (dry-weather) tailwater between storms
+ * (the whole recovered water column is usable detention; the flood is only a routing / outfall
+ * condition)? Stored as a numeric flag so it passes the finite-value audit: 0 = non-coincident,
+ * 1 = coincident. ASSUMED non-coincident (0, verified:false) until the governing code text lands
+ * — the honest default (a pond does recover between storms unless the code says otherwise) — and
+ * the assumption is stated in the verdict line whenever it drives a number. */
+const COINCIDENT_ASSUMED = (target) =>
+  c(0, false, `coincident-storm design policy (${target}). ASSUMED non-coincident: the pond recovers to normal (dry-weather) tailwater between storms, so the whole recovered column is usable detention and the 100-yr flood WSE is only a routing / outfall condition. Stated in the verdict; swap to VERIFIED when the code text lands.`);
+
 // ---------------------------------------------------------------------------
 // The registry. Task order: Waller, Brookshire–Katy DD, Fort Bend, Harris/HCFCD first.
 // ---------------------------------------------------------------------------
@@ -81,6 +93,7 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      coincidentStorm: COINCIDENT_ASSUMED("Waller Appendix E DCM Sec 5 + BKDD Rules & Regulations 22-01 pending"),
     },
     note: "Waller publishes volumetric rates (0.55 ac-ft/ac floor .. 0.65 coefficient); the RATE proof (Post ≤ Pre) is hydrograph-derived above small sites — verify with the county engineer.",
   },
@@ -117,6 +130,7 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      coincidentStorm: COINCIDENT_ASSUMED("BKDD Rules & Regulations 22-01 + Waller Appendix E Sec 5 pending"),
     },
     note: "RATE-control district: detention is proven by hydrograph routing (Post ≤ Pre at 2/10/100-yr, offsite included), NOT a volumetric ac-ft/ac rule. The routing here is a SCREENING proxy; the district engineer's HEC-HMS governs.",
   },
@@ -151,6 +165,7 @@ export const DETENTION_CRITERIA = {
       orificeC: c(STD_ORIFICE_C, true, "sharp-edged orifice (standard hydraulics)"),
       weirC: c(STD_WEIR_C, true, "rectangular weir (standard hydraulics)"),
       drawdownMaxHr: null,
+      coincidentStorm: COINCIDENT_ASSUMED("FBCDD DCM Ch. 6 coincident-storm / tailwater provision pending"),
     },
     note: "FBCDD publishes both a volumetric rate (Table 6-1) and a 0.125 cfs/ac release cap; the routing proves Post ≤ Pre at 10/100-yr. Tailwater convention (§6.4.1/§6.4.5) can drown the outlet — see the hydraulic-regime gate.",
   },
@@ -187,6 +202,7 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      coincidentStorm: COINCIDENT_ASSUMED("HCFCD PCPM / HCED coincident-storm provision pending"),
     },
     note: "Unincorporated Harris uses HCED outfall-type volumetric minimums (storm-sewer 0.75 / roadside-ditch 1.0 ac-ft/ac); the PCPM rate method proves no peak increase. Restrictor sizing per HCED (C ≈ 0.8, 4-day drawdown).",
   },
@@ -219,6 +235,7 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      coincidentStorm: COINCIDENT_ASSUMED("City of Houston IDM Ch. 9 coincident-storm provision pending"),
     },
     note: "COH uses a volumetric rate (0.8 ac-ft/ac × proposed impervious ≤20 ac); the routing proves no peak increase. Verify outlet criteria against IDM Ch. 9.",
   },
@@ -251,6 +268,7 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      coincidentStorm: COINCIDENT_ASSUMED("Montgomery County DCM §6.3 coincident-storm provision pending"),
     },
     note: "MoCo requires zero increase in peak flow and WSEL; the routing proves Post ≤ Pre. Verify outlet criteria against the DCM.",
   },
@@ -283,6 +301,7 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      coincidentStorm: COINCIDENT_ASSUMED("Chambers County DCM coincident-storm provision pending"),
     },
     note: "Chambers publishes no flat rate — strict zero-impact (no downstream peak or upstream WSEL increase). The routing proves Post ≤ Pre; volume is calculation-derived.",
   },
@@ -310,6 +329,7 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      coincidentStorm: COINCIDENT_ASSUMED("no jurisdiction matched — confirm the reviewing authority's coincident-storm provision"),
     },
     note: "No jurisdiction matched — screening conventions only. Confirm the reviewing authority and its criteria.",
   },
@@ -383,6 +403,7 @@ export function criteriaFor(jurKey, { onDate = null, overrides = null } = {}) {
     tcUrbanAdjustment: pick("tcUrbanAdjustment", null, cr.tcUrbanAdjustment),
     tcFlowPathKFactor: pick("tcFlowPathKFactor", null, cr.tcFlowPathKFactor),
     screeningPondDepthFt: pick("screeningPondDepthFt", null, cr.screeningPondDepthFt),
+    coincidentStorm: pick("coincidentStorm", null, cr.coincidentStorm),
     drawdownMaxHr: cr.drawdownMaxHr ? pick("drawdownMaxHr", null, cr.drawdownMaxHr) : (ov.drawdownMaxHr != null ? { value: ov.drawdownMaxHr, verified: false, source: "user override", overridden: true } : null),
     gravityDrainFraction: cr.gravityDrainFraction ? pick("gravityDrainFraction", rp.gravityDrainFraction, cr.gravityDrainFraction) : null,
     caveat: SCREENING_CAVEAT,
@@ -472,4 +493,17 @@ export function jurKeyForAuthority(authorityId) {
 export function criteriaAuthorityShort(jurKey) {
   const row = DETENTION_CRITERIA[jurKey];
   return (row && (AUTHORITY_SHORT[row.authorityRuleId] || row.label)) || "Unknown";
+}
+
+/* R1 — resolve a criteriaFor() result's coincident-storm carrier into a plain
+ * { coincident, verified, source } the pond split + verdict line read. The stored flag is
+ * numeric (0 = non-coincident, the honest default; >0 = coincident), interpreted here as a
+ * boolean. `verified:false` means the policy is ASSUMED and the verdict must say so. Pure. */
+export function coincidentStormPolicy(criteria) {
+  const car = criteria && criteria.coincidentStorm;
+  return {
+    coincident: !!(car && Number(car.value) > 0),
+    verified: !!(car && car.verified),
+    source: (car && car.source) || null,
+  };
 }

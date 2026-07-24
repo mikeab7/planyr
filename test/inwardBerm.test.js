@@ -82,7 +82,9 @@ describe("D1 — the storage integrates on the inward solid, not a straight pris
     const areaAtElev = (e) => ringsArea(offsetInward(crest, det.slope * (det.tobElev - e)));
     const aTop = areaAtElev(waterSurfElev), aBot = areaAtElev(wseFt);
     const handFrustumCf = ((aTop + aBot) / 2) * (waterSurfElev - wseFt);
-    const inward = usablePondVolume(ring, det, { wseFt, gradeFt });
+    // coincidentStorm:true so usable == the above-flood-WSE band (R1 — by default usable is the whole
+    // recovered column; this test checks the above-flood frustum integrates on the inward solid).
+    const inward = usablePondVolume(ring, det, { wseFt, gradeFt, coincidentStorm: true });
     expect(inward.usableCf).toBeGreaterThan(0);
     expect(Math.abs(inward.usableCf - handFrustumCf) / handFrustumCf).toBeLessThan(0.12);
   });

@@ -75,8 +75,10 @@ describe("E3 — the pond→yield recompute is live (pure engine reflects a rim 
   const wseFt = 100; // design flood water surface
 
   it("a rim AT the flood level counts ~zero usable; RAISING the rim recomputes MORE usable", () => {
-    const low = usablePondVolume(ring, { depth: 8, freeboard: 1, slope: 3, tobElev: 100 }, { wseFt });
-    const high = usablePondVolume(ring, { depth: 8, freeboard: 1, slope: 3, tobElev: 104 }, { wseFt });
+    // R1 — the rim matters for usable only when the flood floors it (coincident storm); by default the
+    // pond recovers to normal tailwater and the whole column is usable regardless of rim vs flood.
+    const low = usablePondVolume(ring, { depth: 8, freeboard: 1, slope: 3, tobElev: 100 }, { wseFt, coincidentStorm: true });
+    const high = usablePondVolume(ring, { depth: 8, freeboard: 1, slope: 3, tobElev: 104 }, { wseFt, coincidentStorm: true });
     // The only change is the rim elevation — the recompute must move with it (no stale value).
     expect(high.usableCf).toBeGreaterThan(low.usableCf + 1);
     // and a rim buried at/below the WSE credits essentially nothing
@@ -84,8 +86,8 @@ describe("E3 — the pond→yield recompute is live (pure engine reflects a rim 
   });
 
   it("the same geometry with a higher rim never returns an unchanged (cached) result", () => {
-    const a = usablePondVolume(ring, { depth: 8, freeboard: 1, slope: 3, tobElev: 101 }, { wseFt });
-    const b = usablePondVolume(ring, { depth: 8, freeboard: 1, slope: 3, tobElev: 105 }, { wseFt });
+    const a = usablePondVolume(ring, { depth: 8, freeboard: 1, slope: 3, tobElev: 101 }, { wseFt, coincidentStorm: true });
+    const b = usablePondVolume(ring, { depth: 8, freeboard: 1, slope: 3, tobElev: 105 }, { wseFt, coincidentStorm: true });
     expect(b.usableCf).not.toBe(a.usableCf);
   });
 });

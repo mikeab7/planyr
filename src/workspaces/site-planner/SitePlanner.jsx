@@ -165,7 +165,7 @@ import { estDepthToWaterFt, estMaxExcavDepthFt, poolRelevantForRole } from "./li
 import { deriveTailwater, TAILWATER_SOURCES, tailwaterNote } from "./lib/tailwaterSource.js";
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
 import { subsidenceFlag } from "./lib/subsidence.js";
-import { criteriaFor, loadCriteriaOverrides } from "./lib/detentionCriteria.js";
+import { criteriaFor, loadCriteriaOverrides, coincidentStormPolicy } from "./lib/detentionCriteria.js";
 import { selectDetentionMethod } from "./lib/detentionMethod.js";
 import { computeTimeOfConcentration } from "./lib/timeOfConcentration.js";
 import { outletProblems } from "./lib/outletStructure.js";
@@ -7833,12 +7833,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       tobElev: d0.tobElev ?? (pondAuto.tobElev ? pondAuto.tobElev.value : null),
     };
   };
+  // R1 (dead-storage-vs-tailwater) — the coincident-storm DESIGN POLICY from the jurisdiction criteria
+  // registry (ASSUMED non-coincident by default, verified:false). Does the pond's design storm coincide
+  // with the receiving flood, so the 100-yr flood WSE permanently floors the usable detention band? By
+  // default NO: the pond recovers to normal (dry-weather) tailwater between storms, so the whole
+  // recovered column is usable detention and the 100-yr flood WSE is only a routing / outfall condition.
+  // When the policy is ASSUMED (unverified) the verdict states the assumption (coincidentAssumed).
+  const coincidentPolicy = coincidentStormPolicy(criteriaFor(floodJurKey, { overrides: criteriaOverrides }));
+  const coincidentStorm = coincidentPolicy.coincident;
+  // The policy is ASSUMED (either way) until the governing code text lands — verified:false. The verdict
+  // states the assumption whenever it MATERIALLY drives the usable number (a flood-affected pond whose
+  // usable band we credit BELOW the flood WSE because we assumed the pond recovers to normal tailwater).
+  const coincidentAssumed = !coincidentPolicy.verified;
   const pondSplitFor = (e) => {
     const det = detWithAuto(e.det);
     const pring = ringOf(e);
-    // PR-G (c) — storage below the 100-yr receiving water (tailwater) can't drain by gravity, so it's
-    // DEAD: the usable/dead split floors the usable band at the receiving-water elevation too. Null
-    // (no tailwater entered) leaves the split exactly as before.
+    // R1 — the permanent DEAD-storage floor is the NORMAL (dry-weather) tailwater: the receiving
+    // channel's flowline / normal-depth stage the pond recovers to between storms (from the tailwater
+    // source chain; the user's receivingFlowlineElev entry is that normal stage). Storage below it can't
+    // drain by gravity, so it's dead. The 100-yr STORM tailwater is NOT this floor — it only caps usable
+    // under a coincident-storm policy (above) and otherwise drives routing / outfall checks. Null (no
+    // normal tailwater entered) leaves the split exactly as before.
     const twDeadFloorFt = Number.isFinite(e.det?.receivingFlowlineElev) ? e.det.receivingFlowlineElev : null;
     // D1 — the INWARD berm model: a rim above existing grade shrinks the effective top-of-bank to
     // the crest ring, so storage recomputes on the inward-tapering solid. gradeFt is the pond's
@@ -7850,7 +7865,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (fmZones.length) {
       const facts = pondFloodFacts(pring, fmZones, fmRule, { bfeFt: fmElev.bfeFt, bfeSrc: fmElev.bfeSrc, existGradeFt: fmElev.existGradeFt, derivedBfeFt: fmElev.derivedBfeFt, derivedXsWselFt: fmElev.derivedXsWselFt, derivedWse1pctFt: fmElev.derivedWse1pctFt, derivedWse1pctSrc: fmElev.derivedWse1pctSrc }, fmZonesSig);
       const estPool = estPoolFor();
-      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt }), wseFt: facts.wseFt, wseSrc: facts.wseSrc ?? null, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true };
+      return { ...usablePondVolume(pring, det, { wseFt: facts.wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt, coincidentStorm }), wseFt: facts.wseFt, wseSrc: facts.wseSrc ?? null, inTrigger: facts.inTrigger, estPoolDepthFt: estPool, factsKnown: true };
     }
     // NEW-9 — a restored view replays the facts the check persisted for this pond, so
     // the usable/dead split (and the verdict built on it) survives a reload unchanged.
@@ -7858,7 +7873,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (rf) {
       const estPool = Number.isFinite(rf.estPoolDepthFt) ? rf.estPoolDepthFt : estPoolFor(); // check-time measurement wins
       const wseFt = Number.isFinite(rf.wseFt) ? rf.wseFt : null;
-      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt }), wseFt, wseSrc: rf.wseSrc ?? null, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true };
+      return { ...usablePondVolume(pring, det, { wseFt, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt, coincidentStorm }), wseFt, wseSrc: rf.wseSrc ?? null, inTrigger: !!rf.inTrigger, estPoolDepthFt: estPool, factsKnown: true, restoredFacts: true };
     }
     // NEW-9 — restored, flood evidence exists, but NO persisted fact for this pond (a
     // legacy snapshot saved before this fix, or a pond drawn after the check): the
@@ -7872,7 +7887,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // No flood evidence at all (an upland site, or no check yet) — the existing
     // estimate/gross precedence is legitimate here.
     const estPool = estPoolFor();
-    return { ...usablePondVolume(pring, det, { wseFt: null, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt }), wseFt: null, inTrigger: false, estPoolDepthFt: estPool, factsKnown: true };
+    return { ...usablePondVolume(pring, det, { wseFt: null, estimatePoolDepthFt: estPool, gradeFt, deadFloorFt: twDeadFloorFt, coincidentStorm }), wseFt: null, inTrigger: false, estPoolDepthFt: estPool, factsKnown: true };
   };
   // PR-N / O5 — the ONE outfall TAILWATER source, used by the envelope, the section, and the pond
   // panel. ⛔ NEVER site grade and NEVER the floodplain-sheet WSE (that placeholder deadlocked every
@@ -9019,8 +9034,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     //      doesn't know about. ----
     if (detTargetCf > 0) {
       const pass1 = floodAffected
-        ? sizePondForTargets({ ring: ringOf(finalEl), det: effDetProbe, wseFt: splitProbe.wseFt, wseProvider: splitProbe.wseSrc, inTrigger: splitProbe.inTrigger, gradeFt, detTargetCf, mitTargetCf: 0, mitRatio, maxRaiseFt })
-        : { ok: true, actions: (() => { const r = solveTobRaise({ ring: ringOf(finalEl), det: effDetProbe, wseFt: null, targetCf: detTargetCf, maxRaiseFt, gradeFt }); return r.hFt > 0 ? [{ kind: "raise-tob", hFt: r.hFt, addCf: r.addCf, partial: r.ok === false }] : []; })() };
+        ? sizePondForTargets({ ring: ringOf(finalEl), det: effDetProbe, wseFt: splitProbe.wseFt, wseProvider: splitProbe.wseSrc, inTrigger: splitProbe.inTrigger, gradeFt, detTargetCf, mitTargetCf: 0, mitRatio, maxRaiseFt, coincidentStorm })
+        : { ok: true, actions: (() => { const r = solveTobRaise({ ring: ringOf(finalEl), det: effDetProbe, wseFt: null, targetCf: detTargetCf, maxRaiseFt, gradeFt, coincidentStorm }); return r.hFt > 0 ? [{ kind: "raise-tob", hFt: r.hFt, addCf: r.addCf, partial: r.ok === false }] : []; })() };
       if (!pass1.ok) {
         detMsg = `Detention couldn't be sized: ${pass1.reason}.`;
       } else {
@@ -9096,7 +9111,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (needsMit) {
       const effDet2 = detWithAuto(finalEl.det);
       const splitNow = pondSplitFor(finalEl);
-      const pass2 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet2, wseFt: splitNow.wseFt ?? splitProbe.wseFt, wseProvider: splitNow.wseSrc ?? splitProbe.wseSrc, inTrigger: splitNow.inTrigger ?? splitProbe.inTrigger, gradeFt, detTargetCf: 0, mitTargetCf, mitRatio, maxRaiseFt });
+      const pass2 = sizePondForTargets({ ring: ringOf(finalEl), det: effDet2, wseFt: splitNow.wseFt ?? splitProbe.wseFt, wseProvider: splitNow.wseSrc ?? splitProbe.wseSrc, inTrigger: splitNow.inTrigger ?? splitProbe.inTrigger, gradeFt, detTargetCf: 0, mitTargetCf, mitRatio, maxRaiseFt, coincidentStorm });
       // G4 — a mitigation requirement that ROUNDS TO 0 at the 1dp we display carries no
       // meaningful "already covers the required 0.0 ac-ft" filler; drop the message entirely.
       const mitReqShown = mitTargetCf / 43560 >= 0.05;
@@ -9179,6 +9194,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // (B789: drainChannelRelevant now computed up with the drainage inputs — it county-gates
   // the stored channel override too, not just this control's visibility.)
+  // R1 — does the ASSUMED coincident-storm policy MATERIALLY drive the usable-detention number?
+  // TRUE when an anchored, flood-affected pond has a below-flood band inside its usable column
+  // (the flood WSE sits above the pond floor and below the design water surface): that band is
+  // exactly what the coincident-vs-normal-tailwater assumption toggles, so the verdict must carry
+  // the assumption. The R-PRINCIPLE gate: an assumed criterion never silently drives a number.
+  const coincidentMaterial = pondLedgerEntries.some((p) => {
+    if (!p || p.factsKnown === false || p.mode !== "anchored" || !p.bands || p.wseFt == null) return false;
+    const el = p.bands.elevations || {};
+    return Number.isFinite(el.wseFt) && Number.isFinite(el.floorElev) && Number.isFinite(el.waterSurfElev)
+      && el.wseFt > el.floorElev + 1e-6 && el.wseFt < el.waterSurfElev - 1e-6;
+  });
+  const coincidentAssumption = coincidentAssumed && coincidentMaterial
+    ? { coincident: coincidentStorm, source: coincidentPolicy.source }
+    : null;
   const drainage = siteSqft > 0 && origin ? {
     status: drainCtx?.busy ? "busy" : drainCtx?.error ? "error" : drainViewCtx ? "ready" : "idle",
     error: drainCtx?.error || null,
@@ -9254,6 +9283,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       totalSf: pondEncumbrances.reduce((s, c) => s + c.totalSf, 0),
     },
     pondFullyInundated,
+    // R1 — the ASSUMED coincident-storm policy, present only when it materially drives usable
+    // detention (a flood-affected pond crediting below-flood storage). The verdict states it.
+    coincidentAssumption,
     unanchoredInTrigger,
     anchoredNoWseInTrigger, // B822 — anchored (manual or auto TOB) but the reach WSE is unknown
     pondAutoAnchored, // B822 — ponds anchored by the AUTO top-of-bank (3DEP site median)
@@ -17372,6 +17404,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         gradeFt: fmElev.existGradeFt,
                         mitTargetCf, detTargetCf,
                         mitRatio: fmRule && isFinite(fmRule.ratio) ? fmRule.ratio : 1,
+                        coincidentStorm, // R1 — solver honors the same coincident-storm policy as the split
                       });
                       const smallNote = { fontSize: 10, color: PAL.muted, lineHeight: 1.45, margin: "3px 0 0" };
                       const actLine = (txt, key, warn) => (
@@ -21015,6 +21048,7 @@ function YieldPanel({
                     {/* The sentence takes the full remaining width and NEVER ellipsizes (item 2).
                         The "…" pill + "checking flood data" already convey a loading row, so no
                         competing "↻ retrying" element squeezes the sentence into an overflow. */}
+                    <div style={{ minWidth: 0 }}>
                     <span data-testid={`yield-verdict-sentence-${v.key}`} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 12.5, color: Y.text, lineHeight: 1.35, whiteSpace: "nowrap", minWidth: 0 }}>
                       <span style={{ minWidth: 0 }}>{v.label}: {v.pair
                         ? <b style={{ whiteSpace: "nowrap", fontWeight: 750 }}>{v.sentence}</b>
@@ -21033,6 +21067,15 @@ function YieldPanel({
                         <RowInfo label="Trace mitigation requirement" sections={[{ text: `The mapped floodplain clips this site by only about ${v.traceAcFt.toFixed(3)} ac-ft of storage — grid-cell crumbs where the zone edge grazes the boundary, below the ${TRACE_ACFT.toFixed(2)}-ac-ft materiality floor. Treated as not required; if the flood boundary runs close to your work area, confirm with your engineer.` }]} />
                       )}
                     </span>
+                    {/* R1 — the ASSUMED coincident-storm policy stated on the verdict line whenever it
+                        materially drives the usable number (never silently). Amber = ASSUMED. Hover shows
+                        the citation target (BKDD Rules 22-01 + Waller Appendix E Sec 5) until it verifies. */}
+                    {v.assumption && (
+                      <div data-testid={`yield-verdict-assumption-${v.key}`} title={v.assumptionSource || undefined} style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 2, whiteSpace: "normal" }}>
+                        Assumed: {v.assumption}.
+                      </div>
+                    )}
+                    </div>
                   </div>
                 ))}
               </div>
