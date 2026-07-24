@@ -92,6 +92,43 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
     expect(short.sentence).toBe("12.4 of 20.0 ac-ft");
   });
 
+  // NEW-16 — a TRACE mitigation requirement (grid-cell crumbs at a zone edge) must never
+  // render as a red SHORT over two identical zeros; it reads "not required (trace)" and
+  // carries the raw ac-ft for the ⓘ.
+  it("a trace mitigation requirement (< 0.05 ac-ft) reads 'not required (trace)', never a SHORT", () => {
+    const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
+    const [, mit] = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 0.3, volumeCf: 0.01 * AC_FT, volumeAcFt: 0.01 }, mitProvided: { creditedCf: 0 } });
+    expect(mit.pill).toBe("OK");
+    expect(mit.tone).toBe("good");
+    expect(mit.sentence).toBe("not required (trace)");
+    expect(mit.pair).toBeUndefined();
+    expect(mit.short).toBeFalsy();
+    expect(mit.trace).toBe(true);
+    expect(mit.traceAcFt).toBeCloseTo(0.01, 5); // the raw value survives for the ⓘ
+  });
+  it("an exact-zero requirement stays plain 'not required' (no trace tag)", () => {
+    const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
+    const [, mit] = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 0.3, volumeCf: 0, volumeAcFt: 0 }, mitProvided: { creditedCf: 0 } });
+    expect(mit.sentence).toBe("not required");
+    expect(mit.trace).toBeFalsy();
+  });
+  it("a real requirement just above the floor still reads SHORT with distinct numbers", () => {
+    const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
+    const short = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: 0.4 * AC_FT, volumeAcFt: 0.4 }, mitProvided: { creditedCf: 0 } })[0];
+    expect(short.pill).toBe("SHORT");
+    expect(short.sentence).toBe("0.0 of 0.4 ac-ft");
+  });
+  it("DISPLAY INVARIANT — a SHORT pair never shows two identical numbers (1-dp collision bumps to 2 dp)", () => {
+    const base = { req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT };
+    // provided 10.41 vs required 10.44 both round to "10.4" at 1 dp but differ by > EPS → real SHORT.
+    const short = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: 10.44 * AC_FT, volumeAcFt: 10.44 }, mitProvided: { creditedCf: 10.41 * AC_FT } })[0];
+    expect(short.pill).toBe("SHORT");
+    expect(short.sentence).toBe("10.41 of 10.44 ac-ft");
+    // the two sides are never string-identical on a SHORT
+    const [p, q] = short.sentence.replace(" ac-ft", "").split(" of ");
+    expect(p).not.toBe(q);
+  });
+
   it("buildability: pads outside floodplain → OK pill", () => {
     const strip = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34 * AC_FT, buildability: { ffe: { status: "no_rule", outsideFloodplain: true } } });
     const ffe = strip.find((v) => v.key === "ffe");

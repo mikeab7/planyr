@@ -126,7 +126,7 @@ import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
 import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
-import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt } from "./lib/yieldVerdicts.js";
+import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt, TRACE_ACFT } from "./lib/yieldVerdicts.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
@@ -9198,6 +9198,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       holdsAcFt: (p.grossCf != null ? p.grossCf : 0) / 43560,
     })),
     onSelectPond: (id) => revealPondInspector(id),
+    // NEW-15 — is "raising the rim fixes this" an honest suggestion? Only when at least one
+    // pond WITH dead storage sits OUTSIDE the flood trigger, where a rim raise is a clean upland
+    // berm. A dead pond inside the floodplain can't just raise its rim (that's floodplain fill —
+    // needs mitigation / a no-rise cert), so the explainer drops the rim clause there.
+    rimRaiseFeasible: pondLedgerEntries.some((p) => {
+      const holds = p.grossCf != null ? p.grossCf : 0;
+      const counts = p.usableCf != null ? p.usableCf : 0;
+      return holds - counts > 0.05 * 43560 && !p.inTrigger;
+    }),
     req: detReq, reqCandidates: detReqCandidates,
     // B907 — the typical screening pond depth used ONLY to ESTIMATE additional land take
     // from a detention shortfall (never to size a pond) — criteria-configurable.
@@ -20823,10 +20832,21 @@ function YieldPanel({
               }
               const siteCounts = d.providedUsableCf == null ? null : d.providedUsableCf / 43560;
               const siteHolds = (d.providedCf || 0) / 43560;
-              if (siteCounts != null && siteCounts < siteHolds - ACFT_EPS) {
+              const deadAcFt = siteCounts != null ? siteHolds - siteCounts : null;
+              // NEW-15 — the explainer must MATCH the numbers above it. The gate fires on ANY dead
+              // storage, so the copy has two honest variants: TOTAL-dead keeps "none counts yet";
+              // PARTIAL names the dead share ("X of its Y ac-ft…doesn't count") so it can't claim
+              // "none counts" over a row that says 34.0 counts. The rim clause appears only when a
+              // rim raise is a feasible fix (rimRaiseFeasible) — never an empty promise.
+              if (siteCounts != null && deadAcFt != null && deadAcFt > ACFT_EPS) {
+                const totalDead = siteCounts < ACFT_EPS;
+                const rimClause = d.rimRaiseFeasible ? " Raising the rim adds storage above the flood level." : "";
+                const body = totalDead
+                  ? `All of its storage sits below the flood level, so none counts yet.${rimClause}`
+                  : `${f1(deadAcFt)} of its ${f1(siteHolds)} ac-ft sits below the flood level and doesn't count.${rimClause}`;
                 rows.push(
                   <div key="det-explainer" style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 12.5, color: Y.rowLabel, lineHeight: 1.5, padding: "4px 0" }}>
-                    <span>All of its storage sits below the flood level, so none counts yet. Raising the rim fixes this.</span>
+                    <span>{body}</span>
                     <RowInfo label="Storage below the flood level" sections={[{ text: "Storage above the flood level is empty when the design storm arrives and earns credit. Storage below is already occupied by the flood." }]} />
                   </div>
                 );
@@ -20984,6 +21004,11 @@ function YieldPanel({
                           that re-pulls the flood data, since its own group was deleted. */}
                       {v.recheck && drainage && drainage.onCheck && (
                         <button type="button" onClick={drainage.onCheck} aria-label="Re-check flood data" title="Re-pull the GIS flood data for the drawn area." style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, flex: "none" }}>↻</button>
+                      )}
+                      {/* NEW-16 — a trace mitigation requirement carries the raw ac-ft in the ⓘ,
+                          so "not required (trace)" is honest, not a hidden number. */}
+                      {v.trace && v.traceAcFt != null && (
+                        <RowInfo label="Trace mitigation requirement" sections={[{ text: `The mapped floodplain clips this site by only about ${v.traceAcFt.toFixed(3)} ac-ft of storage — grid-cell crumbs where the zone edge grazes the boundary, below the ${TRACE_ACFT.toFixed(2)}-ac-ft materiality floor. Treated as not required; if the flood boundary runs close to your work area, confirm with your engineer.` }]} />
                       )}
                     </span>
                   </div>
