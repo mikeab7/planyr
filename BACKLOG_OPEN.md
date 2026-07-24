@@ -15,7 +15,7 @@
 | B982 | NEW-17: berm fill is invisible to the mitigation ledger (the berm ring is floodplain fill) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | live |
 | B983 | NEW-18: ⚡ Optimize pond has no mitigation objective, but the button hangs on the mitigation shortfall row (no-op → success toast) | [Site Planner / stormwater] | #site-planner #yield #pond | live |
 | B984 | NEW-19: definite pond/berm numbers render under a "Flood data: not checked" header (pick one truth) | [Site Planner / yield · persistence] | #site-planner #yield #floodplain #persistence | live |
-| B985 | NEW-20: Re-check gives no feedback; first-load of a drawn plan should auto-check; pond callout too bulky | [Site Planner / yield · ui] | #site-planner #yield #ui | live |
+| B985 | NEW-20: Re-check gives no feedback; first-load of a drawn plan should auto-check; pond callout too bulky | [Site Planner / yield · ui] | #site-planner #yield #ui | — |
 | B988 | REMAINING criteria-truth critique items (backlog per R-PRINCIPLE: implement what the governing code requires, cited; flag assumptions; no generic best-practice as a site rule) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | — |
 | B966 | `verify-pond-roles-ledger.mjs` harness drifted: its logged-out seed no longer triggers the detention/ledger-balancer render (17 stale assertions) | [Site Planner / tests] | #site-planner #testing #yield | sandbox |
 | B954 | v3 post-ship audit: spec-violations + polish (PR-B) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | live |
