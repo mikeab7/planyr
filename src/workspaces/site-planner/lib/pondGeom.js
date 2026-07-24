@@ -11,7 +11,7 @@
 // interior point of the new ground farthest from any edge. A coarse grid finds the deepest
 // cell, then a local grid refines it. Pure (world-feet in / world-feet out), no React/DOM,
 // so it unit-tests without a browser. Screening-grade placement, not survey geometry.
-import { offsetInward, offsetOutward, ringsArea, maxInwardOffset } from "./pondOffset.js";
+import { offsetInward, ringsArea, maxInwardOffset } from "./pondOffset.js";
 import { polyArea } from "./polygonSplit.js";
 import { crestTopRing } from "./inwardBerm.js";
 
@@ -464,27 +464,34 @@ export function bermAsFillHeight(det = {}, existGradeFt = null) {
   return h > 0.25 ? h : null;
 }
 
-/* NEW-6 — MATERIALIZE an above-grade berm (top of bank above existing grade) as modeled
- * proposed-fill cells, so an applied/entered TOB raise becomes real dirt everywhere fill
- * matters (mitigation ledger, fill-depth heat map, land take, earthwork).
+/* NEW-6 / B982 (NEW-17) — MATERIALIZE an above-grade berm (top of bank above existing grade)
+ * as modeled proposed-fill cells, so an applied/entered TOB raise becomes real dirt everywhere
+ * fill matters (mitigation ledger, fill-depth heat map, earthwork).
  *
- * The berm is the embankment ring OUTSIDE the drawn bank line: the crest sits at the TOB
- * over the bank, and the OUTER face slopes down at `ratio:1` to meet existing grade at the
- * toe (≈ h·ratio outside the bank). Unlike the single-number bermFillVolume screening
- * approximation, the height here is PER-CELL: h = TOB − LOCAL grade sampled off the 3DEP
- * grid, so on a sloped reach the berm is tall on the low side and absent on the high side
- * (where grade already meets/clears the TOB). Cells that fall below the flood WSE inside a
- * trigger zone are the compensating-fill contribution; the rest are earthwork-only.
+ * v3 D1 INWARD model (owner 2026-07-22): the drawn ring is the FIXED OUTER TOE and the berm
+ * occupies the annulus INSIDE it — the exterior face rises inward at `ratio:1` from existing
+ * grade at the toe to the crest (TOB), so NOTHING is fill outside the drawn line (mirrors
+ * inwardBerm.js + the pond section). This REPLACES the old outward-embankment model (B833),
+ * which placed the berm dirt OUTSIDE the drawn footprint — where, on a floodplain pond, the
+ * cells fell outside the mapped flood zone and the below-WSE fill read ~0 even though the real
+ * (inward) berm dirt sits squarely in the zone. Cells beyond the crest, toward the middle, are
+ * open pond water, not berm. The berm therefore adds NO land (it is inside the fixed footprint).
+ *
+ * The height is PER-CELL: h = TOB − LOCAL grade sampled off the 3DEP grid, so on a sloped reach
+ * the berm is tall on the low side and absent on the high side (where grade already meets/clears
+ * the TOB). Cells that fall below the flood WSE inside a trigger zone are the compensating-fill
+ * contribution; the rest are earthwork-only.
  *
  * Inputs: `gradeAt(pt)` → existing grade ft (null when off-grid — that cell is skipped, never
- * priced as 0); `wseFt` the governing flood WSE (null → no below-WSE split); `ratio` the outer
- * side slope; `triggerClassAt(pt)` → "1pct"|"02pct"|null (null → no floodplain fill priced);
- * `fpId` the heat-cell footprint id. Returns { cells, heatCells, volCf, floodCf, toeRing,
- * landTakeSf, maxHeightFt, crestElevFt, cellFt } or null on degenerate input. Pure. */
+ * priced as 0); `wseFt` the governing flood WSE (null → no below-WSE split); `ratio` the exterior
+ * berm-face side slope; `triggerClassAt(pt)` → "1pct"|"02pct"|null (null → no floodplain fill
+ * priced); `fpId` the heat-cell footprint id. Returns { cells, heatCells, volCf, floodCf, toeRing
+ * (the drawn ring), landTakeSf (0 — inward), maxHeightFt, crestElevFt, cellFt } or null on
+ * degenerate input. Pure. */
 export function bermFillCells(ring, det = {}, { gradeAt = null, wseFt = null, ratio = 3, triggerClassAt = null, fpId = "berm", cellFt = null, maxCells = 6000 } = {}) {
   const tob = det.tobElev;
   if (!Array.isArray(ring) || ring.length < 3 || tob == null || !isFinite(tob) || typeof gradeAt !== "function" || !(ratio > 0)) return null;
-  // Max local berm height (grade sampled at the bank vertices) → the toe reach.
+  // Max local berm height (grade sampled at the bank vertices) → the inward face run.
   let maxH = 0;
   for (const p of ring) {
     const g = gradeAt(p);
@@ -494,15 +501,11 @@ export function bermFillCells(ring, det = {}, { gradeAt = null, wseFt = null, ra
   }
   const empty = { cells: [], heatCells: [], volCf: 0, floodCf: 0, toeRing: null, landTakeSf: 0, maxHeightFt: Math.max(0, maxH), crestElevFt: tob, cellFt: 0 };
   if (!(maxH > 0.25)) return empty; // at/below grade → no berm (dormant, never a zero-height ring polluting ledgers)
-  const toeReach = maxH * ratio;
-  const toeArr = offsetOutward(ring, toeReach);
-  const toeRing = toeArr && toeArr[0] ? toeArr[0] : null;
-  const size = cellFt && cellFt > 0 ? cellFt : Math.max(4, Math.min(20, toeReach / 4));
-  const bbSrc = toeRing || ring;
+  const size = cellFt && cellFt > 0 ? cellFt : Math.max(4, Math.min(20, (maxH * ratio) / 4));
   let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
-  for (const p of bbSrc) { if (p.x < mnX) mnX = p.x; if (p.x > mxX) mxX = p.x; if (p.y < mnY) mnY = p.y; if (p.y > mxY) mxY = p.y; }
+  for (const p of ring) { if (p.x < mnX) mnX = p.x; if (p.x > mxX) mxX = p.x; if (p.y < mnY) mnY = p.y; if (p.y > mxY) mxY = p.y; }
   const cells = [], heatCells = [];
-  let volCf = 0, floodCf = 0, bermSf = 0, count = 0;
+  let volCf = 0, floodCf = 0, count = 0;
   const nx = Math.min(300, Math.ceil((mxX - mnX) / size));
   const ny = Math.min(300, Math.ceil((mxY - mnY) / size));
   const a = size * size;
@@ -511,14 +514,16 @@ export function bermFillCells(ring, det = {}, { gradeAt = null, wseFt = null, ra
       if (++count > maxCells) break;
       const x = mnX + (ix + 0.5) * size, y = mnY + (iy + 0.5) * size;
       const pt = { x, y };
-      if (pointInRing(pt, ring)) continue;            // inside the basin — that's excavation, not berm
-      if (toeRing && !pointInRing(pt, toeRing)) continue; // beyond the toe — not berm
+      if (!pointInRing(pt, ring)) continue;           // outside the drawn footprint — nothing is fill past the toe
       const g = gradeAt(pt);
       if (g == null || !isFinite(g)) continue;        // off-grid — skip, never price as 0
-      const bermSurf = tob - distToRing(pt, ring) / ratio; // outer face sloping down from the crest
+      const localH = tob - g;
+      if (!(localH > 0.05)) continue;                 // grade already clears the crest here — no berm
+      const dIn = distToRing(pt, ring);               // distance inward from the outer toe
+      if (dIn >= localH * ratio) continue;            // past the crest → open pond water, not berm fill
+      const bermSurf = Math.min(tob, g + dIn / ratio); // exterior face rising inward from grade to the crest
       const fill = bermSurf - g;
-      if (!(fill > 0.05)) continue;                   // the face has met grade — no fill here
-      bermSf += a;
+      if (!(fill > 0.05)) continue;                   // right at the toe — no fill yet
       volCf += a * fill;
       const cls = triggerClassAt ? triggerClassAt(pt) : null;
       const belowWse = wseFt != null && isFinite(wseFt) ? Math.max(0, Math.min(bermSurf, wseFt) - g) : 0;
@@ -529,8 +534,8 @@ export function bermFillCells(ring, det = {}, { gradeAt = null, wseFt = null, ra
       cells.push({ x, y, wFt: size, hFt: size, fillDepthFt: fill, belowWseFt: belowWse, cls: cls || null });
     }
   }
-  const landTakeSf = toeRing ? Math.max(0, ringsArea([toeRing]) - polyArea(ring)) : bermSf;
-  return { cells, heatCells, volCf, floodCf, toeRing, landTakeSf, maxHeightFt: maxH, crestElevFt: tob, cellFt: size };
+  // INWARD berm adds NO land (it sits inside the fixed drawn footprint); the drawn ring IS the outer toe.
+  return { cells, heatCells, volCf, floodCf, toeRing: ring, landTakeSf: 0, maxHeightFt: maxH, crestElevFt: tob, cellFt: size };
 }
 
 /* B907 — CE roadmap #7: tie detention SIZING to LAND TAKE + EARTHWORK $. Two gaps closed:

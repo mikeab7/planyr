@@ -8068,8 +8068,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (a) The surface engine's wedge cells price against the same zones/WSE chain as the
   // footprints (wedgeMitigation) — the old footprint-only figure was a FLOOR.
   // (e) A bermed pond's above-grade embankment: upland berms are earthwork only (not
-  // mitigable), but the below-WSE share of a berm whose toe crosses the mapped
-  // floodplain displaces storage and joins the requirement — flagged loudly.
+  // mitigable), but the below-WSE share of the berm inside the mapped floodplain displaces
+  // storage and joins the requirement — flagged loudly. B982 (NEW-17): bermFillCells now uses
+  // the D1 INWARD model (the drawn ring is the outer toe; the berm rises INWARD inside the
+  // footprint), so those below-WSE cells land in the same flood zone the footprint sits in —
+  // the outward-embankment model priced them OUTSIDE the drawn line, where a floodplain pond's
+  // berm read ~0 fill even though its real dirt sits squarely in the zone.
   const wedgeMitRule = fmWorst ? fmWorst.rule : fmRule;
   const wedgeCellsIn = gradeSurface && gradeSurface.grid ? gradeSurface.grid.cells : null;
   const wedgeMitSig = [gradeSurface ? gradeSurface.surfaceKey : "", fmZonesSig, wedgeMitRule ? `${wedgeMitRule.label}:${wedgeMitRule.ratio}:${wedgeMitRule.trigger}` : "",
@@ -13413,8 +13417,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   metricRow("Graded surface cut / fill", "UNKNOWN", "no ground elevation — ↻ re-check drainage")
                 ))}
                 {pondBermFloodCount > 0 && (
-                  <WatchOutChip info="A berm's toe (the outer foot of its embankment) reaches into the mapped floodplain — that face displaces flood storage. Its below-WSE share already joined the mitigation requirement (screening: sampled toe share × the below-WSE slice); the crossing itself is the loud fact. Engineer confirms.">
-                    {pondBermFloodCount} pond berm{pondBermFloodCount > 1 ? "s" : ""} toe{pondBermFloodCount > 1 ? "" : "s"} into the mapped floodplain — its fill is priced into mitigation.
+                  <WatchOutChip info="This pond's earthen berm sits inside the drawn footprint, in the mapped floodplain (the drawn outline is the berm's outer toe; the embankment rises inward from it). The part of that fill below the flood water surface displaces flood storage, so its below-WSE share already joined the mitigation requirement (screening: sampled berm cells times the below-WSE slice). Engineer confirms.">
+                    {pondBermFloodCount} pond berm{pondBermFloodCount > 1 ? "s" : ""} in the mapped floodplain: {pondBermFloodCount > 1 ? "their" : "its"} below-flood fill is priced into mitigation.
                   </WatchOutChip>
                 )}
                 {!drainageChecked && (
@@ -20235,8 +20239,8 @@ function YieldPanel({
                     "Past every graded edge the fill continues as a daylight wedge (3:1 default, 4:1 with the mowable toggle) down to existing ground; inside the mapped floodplain that wedge displaces storage too, so it joins the required volume. Priced from the auto-graded surface's transition cells — screening; the wedge fringe renders on the cut/fill map."));
                   if (mit.wedgeUnknownSf > 0.02 * SQFT_PER_ACRE) mitR.push(warnNote(`~${f2(mit.wedgeUnknownSf / SQFT_PER_ACRE)} ac of wedge sits on unpriceable cells — the wedge share is a floor.`, "mit-wedge-unk",
                     "Part of the transition fringe crosses DEM voids or zones without a usable water surface — those cells price nothing (never zero-as-a-number). Enter a BFE or re-check to close the gap."));
-                  if (mit.bermAcFt > 0) mitR.push(warnNote(`+${f1(mit.bermAcFt)} ac-ft from pond berms whose toe crosses the mapped floodplain.`, "mit-berm",
-                    "A bermed pond's embankment is placed fill; the below-WSE share of a berm face inside the floodplain displaces storage, so it joins the requirement (sampled toe share × the below-WSE slice — screening; upland berms price as earthwork only, never here)."));
+                  if (mit.bermAcFt > 0) mitR.push(warnNote(`+${f1(mit.bermAcFt)} ac-ft from pond berms whose fill sits in the mapped floodplain.`, "mit-berm",
+                    "A bermed pond's embankment is placed fill inside the drawn footprint (the outline is the berm's outer toe; it rises inward to the crest); the below-WSE share of that fill inside the floodplain displaces storage, so it joins the requirement (sampled berm cells times the below-WSE slice, screening; upland berms price as earthwork only, never here)."));
                 } else {
                   mitR.push(warnNote("Fill priced at element footprints — daylight/transition slopes aren't counted here; treat as a floor.", "mit-wedge-floor",
                     "Past a pad or court edge, fill continues as a graded wedge (3:1 default) down to existing grade; inside the mapped floodplain that wedge displaces storage too. Wedges price automatically once the auto-graded surface exists — enter an FFE (or let the code-minimum auto-pad engage) to generate it."));
