@@ -32,10 +32,11 @@ describe("B986 — assumed detention entries name their citation TARGET (never a
     expect(w.criteria.freeboardFt.section).toMatch(/Appendix E DCM Sec 5/);
     expect(w.governingManual.section).toMatch(/rural.*exemption.*does NOT apply/i);
   });
-  it("BKDD detention names the target docs (Rules 22-01 + Order 3-27-23 + MDP 6-20-23), still ASSUMED", () => {
+  it("BKDD detention is now VERIFIED against Rules 22-01 full text (owner-read 2026-07-24)", () => {
     const b = DETENTION_CRITERIA.bkdd;
-    expect(b.criteria.freeboardFt.verified).toBe(false);         // still assumed
-    expect(b.criteria.freeboardFt.section).toMatch(/BKDD Rules & Regulations 22-01/);
+    expect(b.criteria.freeboardFt.verified).toBe(true);          // VERIFIED — §5.B.4.f / §5.B.5.e (12" above max WSE)
+    expect(b.criteria.freeboardFt.section).toMatch(/BKDD Rules 22-01/);
+    expect(b.criteria.freeboardFt.section).toMatch(/5\.B\.4\.f/);
     expect(b.governingManual.name).toMatch(/Order Amending 2023-03-27/);
     expect(b.governingManual.name).toMatch(/Master Drainage Plan \(2023-06-20\)/);
   });

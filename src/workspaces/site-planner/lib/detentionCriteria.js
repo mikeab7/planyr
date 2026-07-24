@@ -117,36 +117,46 @@ export const DETENTION_CRITERIA = {
     authorityRuleId: "bkdd",
     provider: "Brookshire–Katy Drainage District",
     governingManual: {
-      name: "BKDD Rules & Regulations 22-01 (signed 2022-02-28) + Order Amending 2023-03-27 + Master Drainage Plan (2023-06-20)",
-      section: "Detention = rate-match (no increase in post-development peak discharge, offsite areas included). Quantitative criteria pending — only the cover pages of these PDFs are machine-reachable (cowork 2026-07-24).",
+      name: "BKDD Rules & Regulations 22-01 (adopted 2022-02-22, board-signed 2022-02-28) + Order Amending 2023-03-27 (procedural only) + Master Drainage Plan (2023-06-20)",
+      section: "Rules 22-01 FULL TEXT READ (owner-supplied signed PDFs, 2026-07-24): detention volume §5.C, geometry §5.B, pumped §5.B.7, outfall/tailwater §5.D, storms §3, floodplain §1.B/§Art-VI-1.B. The 3-27-23 amendment is PROCEDURAL ONLY (permit-application expiration) — zero technical changes, so 22-01 is the technical authority.",
       url: "https://www.bkdd.dst.tx.us/page/BKDD.RulesRegulations",
       effectiveDate: "2022-02-28",
     },
-    postLePre: true, // the defining criterion — RATE control, no volumetric rate
-    secondarySource: true,
+    postLePre: true, // the defining criterion — RATE control (zero net increase, §5.D.1)
+    secondarySource: false, // VERIFIED against the primary signed document (owner-read full text 2026-07-24)
     lastVerified: "2026-07-24",
     criteria: {
-      // Citation TARGETS named (cowork 2026-07-24): BKDD Rules & Regulations 22-01 + Order Amending 3-27-23
-      // + Master Drainage Plan 6-20-23. Full text not machine-reachable (only cover pages), so ASSUMED.
-      freeboardFt: c(1, false, "1-ft freeboard from the 100-yr WSE — BKDD Rules & Regulations 22-01 pending (regional practice); verify"),
-      maxSideSlope: c(3, false, "3:1 interior — BKDD Rules & Regulations 22-01 pending; commonly cited, verify"),
-      maintBermFt: c(30, false, "maintenance shelf — screening convention; verify"),
-      orificeC: c(STD_ORIFICE_C, true, "sharp-edged orifice (standard hydraulics)"),
-      weirC: c(STD_WEIR_C, true, "rectangular weir (standard hydraulics)"),
+      // VERIFIED against BKDD Rules & Regulations 22-01 full text (owner-supplied signed PDF, read 2026-07-24).
+      freeboardFt: c(1, true, "BKDD Rules 22-01 §5.B.4.f (dry) / §5.B.5.e (wet) — twelve inches (12\") above the maximum WSE"),
+      maxSideSlope: c(3, true, "BKDD Rules 22-01 §5.B.2 / §5.B.5.b — 3:1 minimum interior side slope (steeper needs structural walls + fencing + sealed geotech, §5.B.6)"),
+      // §5.B.2 Table C (single property owner) is DEPTH+SLOPE dependent (bkddMaintBermWidthFt); the flat
+      // screening value here is the single-owner deep-basin maximum (20 ft, >9 ft deep). Public/multi-owner
+      // basins run 15–30 ft (Table D). Reconciling the CONSUMER (optimizer land-take) to the depth table is B999.
+      maintBermFt: c(20, true, "BKDD Rules 22-01 §5.B.2 Table C (single-owner) — 20 ft for basins >9 ft deep (or >6 ft at 3:1); 10–15 ft shallower. Public/multi-owner up to 30 ft (Table D §5.B.3). Concrete paved parking/drives may share the single-owner berm (§5.B.2 note)."),
+      orificeC: c(0.8, true, "BKDD Rules 22-01 §5.D.2 — outlet orifice discharge coeff C = 0.8, ≥6 in diameter (restrictor pipe ≥6 in, §5.D.3)"),
+      weirC: c(STD_WEIR_C, true, "rectangular weir (standard hydraulics); BKDD §5.D.4 uses a Cipoletti weir Q=3.367·B·H^1.5 for >100-yr emergency overflow"),
       drawdownMaxHr: null,
       gravityDrainFraction: null,
-      // Referenced from the BKDD rule record's designStorms [2,10,100] (single source of truth).
-      requiredStorms: c([2, 10, 100], false, "Post ≤ Pre at the 2/10/100-yr storms (rule record; verify)", { ref: true }),
-      rationalMethodMaxAcres: c(200, false, "NRCS/TxDOT screening rule of thumb — Rational method ceiling; verify vs the governing manual"),
-      tcFloorMin: c(10, false, "screening Tc floor — many manuals use 5–10 min"),
+      // §3.B — improvements designed for the 2/10/100-yr storms (NOAA Atlas 14 mandatory, §1.A).
+      requiredStorms: c([2, 10, 100], true, "BKDD Rules 22-01 §3.B — designed for the 2/10/100-yr storms; NOAA Atlas 14 mandatory (§1.A)", { ref: true }),
+      rationalMethodMaxAcres: c(200, true, "BKDD Rules 22-01 §5.C.2 — Small-Watershed/Malcom's method ≤200 ac; HEC-HMS + Atlas 14 required >200 ac (§5.C.3); Rational method <200 ac (Table A)"),
+      tcFloorMin: c(10, true, "BKDD Rules 22-01 Table B — Tc = L/(V·60)+10, or 10·A^0.1761+15 for sewered areas; basin Tc = 0 (§5.B.1)"),
       tcDefaultSlopePct: c(1.0, false, "flat-industrial-site screening default — grade not resolved from DEM"),
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
-      coincidentStorm: COINCIDENT_ASSUMED("BKDD Rules & Regulations 22-01 + Waller Appendix E Sec 5 pending"),
-      pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search targets: BKDD Rules & Regulations 22-01 + Waller Appendix E Sec 5"),
+      // §5.D.2/§5.D.3 — outfall design head H = 100-yr facility WSE MINUS the 25-YR receiving-ditch WSE
+      // (or the orifice centroid for a roadside ditch / storm sewer). So the basin is NOT designed
+      // coincident with the 100-yr receiving flood — the receiving tailwater is the 25-yr level.
+      coincidentStorm: c(0, true, "BKDD Rules 22-01 §5.D.2/§5.D.3 — outfall design head = 100-yr facility WSE minus the 25-YR receiving-ditch WSE; the basin is NOT designed coincident with the 100-yr receiving flood (25-yr receiving tailwater). VERIFIED non-coincident."),
+      // §5.B.7.g — no more than 50% of basin capacity may be pumped (75% to a TxDOT ditch with TxDOT approval).
+      pumpedShareOfReleasePct: c(50, true, "BKDD Rules 22-01 §5.B.7.g — no more than 50% of basin capacity may be pumped; gravity outflow required for the volume above pumped storage. EXCEPTION: discharge to a TxDOT ditch with TxDOT approval up to 75% (Tsakiris fronts I-10/TxDOT). Lead+lag pumps; lead ≤50% of max allowable, combined ≤ allowable (§5.B.7.a)."),
+      // NEW (owner full-text payload 2026-07-24) — VERIFIED rows the registry didn't carry:
+      minDetentionRateAcFtPerAc: c(0.65, true, "BKDD Rules 22-01 §5.C.2/§5.C.3 — in no case shall the detention storage rate be less than 0.65 ac-ft per acre (hard floor, all methods). Coefficient Method (Storage = 0.65 × modified-cover ac) only for <5 ac commercial / <10 ac residential, and NOT allowed with pumped detention (§5.B.7.j)"),
+      emergencySpillwayRequired: c(1, true, "BKDD Rules 22-01 §5.B.4.e (dry) / §5.B.5.d (wet) / §5.B.7.d (pumped) — every basin shall have an emergency spillway designed to pass the 100-yr release rate within the freeboard"),
+      sedimentWqRequired: c(0, true, "NOT required — BKDD Rules 22-01 has no sediment / water-quality-volume provision (full text code-searched 2026-07-24). County / TCEQ remain separate questions"),
     },
-    note: "RATE-control district: detention is proven by hydrograph routing (Post ≤ Pre at 2/10/100-yr, offsite included), NOT a volumetric ac-ft/ac rule. The routing here is a SCREENING proxy; the district engineer's HEC-HMS governs.",
+    note: "RATE-control district (zero net increase, §5.D.1), VERIFIED against Rules 22-01 full text (owner-read 2026-07-24). Detention proven by hydrograph routing (Post ≤ Pre at 2/10/100-yr, offsite included) with a 0.65 ac-ft/ac hard floor (§5.C); the routing here is a SCREENING proxy, the district engineer's HEC-HMS governs. Floodplain fill (100-yr AND 500-yr) needs compensating storage per Waller County (Art VI §1.B). Deeper model reconciliations (25-yr outfall head, 500-yr mitigation banding, Table-C berm consumer, spillway warning, full §5.B.7 pump formulas) are backlogged B999–B1004 with the code text.",
   },
 
   fortbend: {
@@ -425,6 +435,9 @@ export function criteriaFor(jurKey, { onDate = null, overrides = null } = {}) {
     screeningPondDepthFt: pick("screeningPondDepthFt", null, cr.screeningPondDepthFt),
     coincidentStorm: pick("coincidentStorm", null, cr.coincidentStorm),
     pumpedShareOfReleasePct: pick("pumpedShareOfReleasePct", null, cr.pumpedShareOfReleasePct),
+    minDetentionRateAcFtPerAc: pick("minDetentionRateAcFtPerAc", null, cr.minDetentionRateAcFtPerAc),
+    emergencySpillwayRequired: pick("emergencySpillwayRequired", null, cr.emergencySpillwayRequired),
+    sedimentWqRequired: pick("sedimentWqRequired", null, cr.sedimentWqRequired),
     drawdownMaxHr: cr.drawdownMaxHr ? pick("drawdownMaxHr", null, cr.drawdownMaxHr) : (ov.drawdownMaxHr != null ? { value: ov.drawdownMaxHr, verified: false, source: "user override", overridden: true } : null),
     gravityDrainFraction: cr.gravityDrainFraction ? pick("gravityDrainFraction", rp.gravityDrainFraction, cr.gravityDrainFraction) : null,
     caveat: SCREENING_CAVEAT,
@@ -552,4 +565,25 @@ export function pumpAllowance(criteria, { releaseRateCfs = null, overrideCfs = n
     source: (car && car.source) || null,
     label: (criteria && criteria.label) || null,
   };
+}
+
+/* BKDD Rules 22-01 §5.B.2 Table C (single property owner) / §5.B.3 Table D (public / multi-owner) —
+ * the maintenance-berm width is DEPTH + SIDE-SLOPE dependent, not a flat number. Pure lookup, used by
+ * the pond land-take math (B999 wires the consumer). Returns the berm width in feet.
+ *   Single-owner (Table C):  <3.0 ft → 10 ; 3.1–6.0 → 15 ; 6.1–9.0 → (3:1) 20 / (4:1) 15 ; >9.0 → 20
+ *   Public/multi (Table D):  15 base, up to 30 for a deep (>9 ft) 3:1 basin
+ * `sideSlope` is the run in an N:1 slope (3 or 4). Pure. */
+export function bkddMaintBermWidthFt(depthFt, sideSlope = 3, { multiOwner = false } = {}) {
+  const d = Number.isFinite(depthFt) ? depthFt : 0;
+  const flatter = Number.isFinite(sideSlope) && sideSlope >= 4; // 4:1 or flatter
+  if (multiOwner) {
+    // Table D — public / multi-owner basins: 15 ft base, 30 ft for a deep 3:1 basin.
+    if (d > 9.0 && !flatter) return 30;
+    return d > 6.0 ? 20 : 15;
+  }
+  // Table C — single property owner.
+  if (d <= 3.0) return 10;
+  if (d <= 6.0) return 15;
+  if (d <= 9.0) return flatter ? 15 : 20; // 6.1–9.0: 3:1 → 20, 4:1 → 15
+  return 20; // >9.0 ft → 20 (either slope)
 }
