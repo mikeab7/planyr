@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import {
   cornerShares, roadCornerRadii, roadRadiusConflicts, cornerApproachShortfall,
-  fitRoadCorners, roadCenterline, minRadiusOfCurvature,
+  fitRoadCorners, roadCenterline, minRadiusOfCurvature, repairBakedRadii,
 } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 
 const L = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -119,5 +119,50 @@ describe("fitRoadCorners — the self-fix", () => {
   it("a 2-point straight road has no corner to fit", () => {
     const r = fitRoadCorners([{ x: 0, y: 0 }, { x: 100, y: 0 }], [{}, {}], 50);
     expect(r.changed).toBe(false);
+  });
+});
+
+/* NEW-6 — the pre-B1013 auto-fixer wrote CLAMPED radii back onto vertices, so a corner drew as a
+ * blob forever and read as a radius the owner had chosen. His live fire lane carries
+ * radius: 11.532635922052066. Repairing that on load is what makes the plan look right with no
+ * clicks at all — the owner's standing rule ("the software should self fix"). */
+describe("repairBakedRadii — undo a radius the machine baked in", () => {
+  const pts = [{ x: -283.5, y: 459 }, { x: -216.4, y: 459 }, { x: -216.4, y: 436.1 }];
+  const baked = [{}, { treatment: "arc", radius: 11.532635922052066 }, {}];
+
+  it("raises a below-class, non-round radius to the class radius", () => {
+    const r = repairBakedRadii(pts, baked, 28, { targetRadius: 50 });
+    expect(r).not.toBeNull();
+    expect(r.repaired).toEqual([1]);
+    expect(r.vtx[1].radius).toBe(50);
+  });
+  it("never moves a point — it is a data repair, not a reshape", () => {
+    const r = repairBakedRadii(pts, baked, 28, { targetRadius: 50 });
+    expect(r.pts).toEqual(pts);
+  });
+  it("the drawn corner improves but is still honestly clamped to what fits", () => {
+    const r = repairBakedRadii(pts, baked, 28, { targetRadius: 50 });
+    const [c] = roadCornerRadii(r.pts, r.vtx, { defaultRadius: 50 });
+    expect(c.rendered).toBeCloseTo(22.9, 1);                 // the 22.9 ft terminal leg, not 11.5
+    expect(roadRadiusConflicts(r.pts, r.vtx, 28).length).toBe(1); // still flagged — it is still short
+  });
+  it("leaves a ROUND radius alone — that is a value a person chose", () => {
+    expect(repairBakedRadii(pts, [{}, { treatment: "arc", radius: 12 }, {}], 28, { targetRadius: 50 })).toBeNull();
+    expect(repairBakedRadii(pts, [{}, { treatment: "arc", radius: 11.5 }, {}], 28, { targetRadius: 50 })).toBeNull();
+  });
+  it("leaves an at-or-above-class radius alone, round or not", () => {
+    expect(repairBakedRadii(pts, [{}, { treatment: "arc", radius: 28.4137 }, {}], 28, { targetRadius: 50 })).toBeNull();
+  });
+  it("leaves a sharp corner and a radius-less vertex alone", () => {
+    expect(repairBakedRadii(pts, [{}, { treatment: "sharp" }, {}], 28, { targetRadius: 50 })).toBeNull();
+    expect(repairBakedRadii(pts, [{}, {}, {}], 28, { targetRadius: 50 })).toBeNull();
+  });
+  it("is idempotent — a repaired road returns null on a second pass (no churn)", () => {
+    const r = repairBakedRadii(pts, baked, 28, { targetRadius: 50 });
+    expect(repairBakedRadii(r.pts, r.vtx, 28, { targetRadius: 50 })).toBeNull();
+  });
+  it("no-ops on a 2-point road and on a class with no minimum", () => {
+    expect(repairBakedRadii([pts[0], pts[1]], [{}, {}], 28)).toBeNull();
+    expect(repairBakedRadii(pts, baked, 0)).toBeNull();
   });
 });
