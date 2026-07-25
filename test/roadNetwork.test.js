@@ -181,14 +181,16 @@ describe("clusterIds — connected roads render as one surface", () => {
 /* NEW-4 — the three defects the owner reported off his live plan, and the silent clamp behind them. */
 describe("roadCornerRadii / roadRadiusConflicts — a corner the app had to shrink must SAY SO", () => {
   it("reports the DRAWN radius, not the requested one, when the leg is too short to hold it", () => {
-    // A 28 ft corner (a fire lane's inside minimum) on a leg far too short to carry it. arcCorner
-    // silently clamps the run to half the shorter leg; this is what surfaces that.
+    // A 28 ft corner (a fire lane's inside minimum) on a leg too short to carry it. arcCorner clamps
+    // the run to the leg's share; this is what surfaces that. NEW-2 amended the share: a leg running
+    // to the road's own END is no longer halved (nothing shares it), so this draws at the full 22 ft
+    // rather than 11 — the clamp that made the owner's fire-lane corner look half as good as it was.
     const pts = [{ x: -200, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 22 }];
     const vtx = [{}, { treatment: "arc", radius: 28 }, {}];
     const [corner] = roadCornerRadii(pts, vtx);
     expect(corner.requested).toBe(28);
     expect(corner.rendered).toBeLessThan(28);
-    expect(corner.rendered).toBeCloseTo(11, 0);      // half the 22 ft leg, at a 90° deflection
+    expect(corner.rendered).toBeCloseTo(22, 0);      // the whole 22 ft terminal leg, at a 90° deflection
     expect(corner.limited).toBe(true);
   });
 

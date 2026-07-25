@@ -65,7 +65,19 @@ function radiusAt(vtx, i, fallback) {
 /* The dense tessellated points of an ARC fillet at vertex P between neighbours A and C.
  * Returns { entry, exit, pts } where `pts` runs entry→…→exit (inclusive). Falls back to
  * a sharp corner ({ entry:P, exit:P, pts:[P] }) when the geometry is degenerate. */
-function arcCorner(A, P, C, radius, tessDeg) {
+/* How much of each adjacent leg a corner at interior vertex `i` may consume (NEW-2).
+ *
+ * A leg BETWEEN two interior vertices is shared by two corners, so each may take at most half —
+ * that is the invariant that keeps neighbouring fillets from overlapping. A leg that runs to the
+ * road's own ENDPOINT has no neighbouring corner to share with, so the whole leg is available.
+ * The old code halved every leg unconditionally, which silently cut the achievable radius of any
+ * corner near the end of a road IN HALF — on the owner's real plan a 28 ft fire-lane corner drew
+ * at 11 ft purely because of this, and the app then flagged the geometry rather than the clamp. */
+export function cornerShares(i, n) {
+  return { a: i - 1 <= 0 ? 1 : 0.5, c: i + 1 >= n - 1 ? 1 : 0.5 };
+}
+
+function arcCorner(A, P, C, radius, tessDeg, shareA = 0.5, shareC = 0.5) {
   const vA = sub(A, P), vC = sub(C, P);
   const lA = len(vA), lC = len(vC);
   if (lA < EPS || lC < EPS) return { entry: P, exit: P, pts: [P] };
@@ -78,8 +90,9 @@ function arcCorner(A, P, C, radius, tessDeg) {
   // Nearly straight (θ≈0) or folded back on itself (θ≈π) → no usable fillet, keep sharp.
   if (theta < 1e-4 || theta > Math.PI - 1e-4) return { entry: P, exit: P, pts: [P] };
   const tanHalf = Math.tan(theta / 2);
-  // Feasibility clamp: the run-up T must not exceed half the shorter adjacent segment.
-  const maxT = 0.5 * Math.min(lA, lC);
+  // Feasibility clamp: the run-up T must not exceed each leg's share (half of a leg shared with a
+  // neighbouring corner; ALL of a leg that runs to the road's own endpoint — see cornerShares).
+  const maxT = Math.min(shareA * lA, shareC * lC);
   let T = radius * tanHalf;
   if (T > maxT) T = maxT;
   const R = T / tanHalf;                    // radius actually used after the clamp
@@ -173,10 +186,12 @@ export function roadCenterline(pts, vtx, opts = {}) {
   const N = clean.length;
   // Per interior vertex, compute its corner geometry (entry anchor, dense pts, exit anchor).
   const corners = [];
+  const shareAt = typeof opts.shareAt === "function" ? opts.shareAt : (i) => cornerShares(i, N);
   for (let i = 1; i < N - 1; i++) {
     const A = clean[i - 1], P = clean[i], C = clean[i + 1];
     const t = treatmentAt(vtx, i);
-    if (t === "arc") corners.push(arcCorner(A, P, C, radiusAt(vtx, i, defR), tessDeg));
+    const sh = shareAt(i) || { a: 0.5, c: 0.5 };
+    if (t === "arc") corners.push(arcCorner(A, P, C, radiusAt(vtx, i, defR), tessDeg, sh.a, sh.c));
     else if (t === "smooth") corners.push(smoothCorner(A, P, C, tessDeg));
     else corners.push({ entry: P, exit: P, pts: [P] }); // sharp
   }
@@ -529,7 +544,10 @@ export function fixRoadRadii(pts, vtx, threshold, opts = {}) {
   // triple). Sharp corners → ∞ (deliberate hard corners are not "sub-min radius" here).
   const cornerR = (i) => {
     if (treatmentAt(wvtx, i) === "sharp") return Infinity;
-    const local = roadCenterline([work[i - 1], work[i], work[i + 1]], [{}, wvtx[i], {}], { defaultRadius: target, tessDeg });
+    // Measure the triple with THIS road's real leg shares (NEW-2) — a 3-point probe would
+    // otherwise grant both legs in full and over-report a corner in the middle of a long road.
+    const sh = cornerShares(i, N);
+    const local = roadCenterline([work[i - 1], work[i], work[i + 1]], [{}, wvtx[i], {}], { defaultRadius: target, tessDeg, shareAt: () => sh });
     return minRadiusOfCurvature(local);
   };
   // Max feasible arc radius at i given the current adjacent SPARSE segments + deflection.
@@ -541,7 +559,8 @@ export function fixRoadRadii(pts, vtx, threshold, opts = {}) {
     const cosPhi = Math.max(-1, Math.min(1, dot(mul(vA, 1 / lA), mul(vC, 1 / lC))));
     const theta = Math.PI - Math.acos(cosPhi);
     if (theta < 1e-4) return Infinity;                     // ~straight → no corner
-    return (0.5 * Math.min(lA, lC)) / Math.tan(theta / 2);
+    const sh = cornerShares(i, N);
+    return Math.min(sh.a * lA, sh.c * lC) / Math.tan(theta / 2);
   };
   // Foot of the perpendicular from P onto the infinite line A→C (the nudge target direction).
   const perpFoot = (P, A, C) => {
@@ -642,6 +661,7 @@ export function roadCornerRadii(pts, vtx, opts = {}) {
   const P = Array.isArray(pts) ? pts : [];
   if (P.length < 3) return [];
   const fallback = opts.defaultRadius > 0 ? opts.defaultRadius : DEFAULT_ARC_RADIUS;
+  const P_LEN = P.length;
   const out = [];
   for (let i = 1; i < P.length - 1; i++) {
     const treatment = treatmentAt(vtx, i);
@@ -654,21 +674,123 @@ export function roadCornerRadii(pts, vtx, opts = {}) {
     const theta = Math.PI - Math.acos(c);                 // deflection / turn angle
     if (theta < 1e-4 || theta > Math.PI - 1e-4) { out.push({ i, treatment, requested, rendered: Infinity, limited: false }); continue; }
     const tanHalf = Math.tan(theta / 2);
-    const maxT = 0.5 * Math.min(lA, lC);                  // same feasibility clamp arcCorner applies
+    const sh = cornerShares(i, P_LEN);                    // same leg-share rule arcCorner applies
+    const maxT = Math.min(sh.a * lA, sh.c * lC);
     const T = Math.min(requested * tanHalf, maxT);
     const rendered = tanHalf > EPS ? T / tanHalf : Infinity;
-    out.push({ i, treatment, requested, rendered, limited: rendered < requested - 1e-6 });
+    // NEW-4 — carry the raw ingredients so a caller can say WHAT WOULD FIX IT ("needs ~6 ft more
+    // approach") instead of only that it's wrong. `tight` names the leg doing the clamping, and
+    // `terminal` says whether that leg runs to a road END (extendable) or into another corner.
+    const availA = sh.a * lA, availC = sh.c * lC;
+    const tight = availA <= availC ? "a" : "c";
+    out.push({
+      i, treatment, requested, rendered, limited: rendered < requested - 1e-6,
+      tanHalf, legA: lA, legC: lC, shareA: sh.a, shareC: sh.c, maxT, tight,
+      terminalA: i - 1 <= 0, terminalC: i + 1 >= P_LEN - 1,
+    });
   }
   return out;
 }
 
+/* Extra length the TIGHT leg of corner `c` would need for it to hold `minRadius` (ft, ≥0).
+ * The clamp is T ≤ share × legLength, so leg = minRadius·tan(θ/2) / share. Pure arithmetic on a
+ * roadCornerRadii row — this is the number the owner asked the app to TELL him. */
+export function cornerApproachShortfall(c, minRadius) {
+  if (!c || !(minRadius > 0) || !(c.tanHalf > EPS)) return 0;
+  const share = c.tight === "a" ? c.shareA : c.shareC;
+  const have = c.tight === "a" ? c.legA : c.legC;
+  const need = (minRadius * c.tanHalf) / (share > 0 ? share : 0.5);
+  return Math.max(0, need - have);
+}
+
 /* Interior vertices whose DRAWN corner falls below `minRadius` (a road class's civil threshold).
- * `minRadius <= 0` (the Custom class) never flags. */
+ * `minRadius <= 0` (the Custom class) never flags. Each row carries `shortfallFt` — how much
+ * more approach the tight leg needs — and `extendable` (that leg runs to a road end, so the
+ * one-click fix can simply lengthen it). */
 export function roadRadiusConflicts(pts, vtx, minRadius, opts = {}) {
   if (!(minRadius > 0)) return [];
   return roadCornerRadii(pts, vtx, opts)
     .filter((c) => c.rendered !== null && Number.isFinite(c.rendered) && c.rendered < minRadius - 1e-6)
+    .map((c) => ({
+      ...c,
+      shortfallFt: cornerApproachShortfall(c, minRadius),
+      extendable: c.tight === "a" ? c.terminalA : c.terminalC,
+    }))
     .map((c) => ({ ...c, minRadius, pt: pts[c.i] }));
+}
+
+/* ---- Make a road HOLD its class radius (NEW-3, the owner's "it should just self-fix") -------
+ *
+ * Owner rule, 2026-07-25: "the exclamation point should never become exclamation points, the
+ * software should self fix … if it's on truck route, it should auto go to whatever the minimum
+ * radius is." So picking a class is an INSTRUCTION, not an assertion to be graded. This is the
+ * pure engine behind it; it runs on a class change, on the flag's one-click fix, and on migrate.
+ *
+ * Three moves, in the order a designer would make them:
+ *   1. ASK for the class radius at every interior corner. (An earlier auto-fix used to BAKE the
+ *      clamped value back onto the vertex — so the road then looked like the user had chosen a
+ *      sub-standard corner and nothing would ever raise it again. Never write below-class.)
+ *   2. LENGTHEN THE APPROACH where a corner is starved by a leg that runs to a road END — the
+ *      geometry a site designer actually adjusts. Bounded by `maxExtendFt` (default 25 ft) so a
+ *      road never grows an arbitrary tail; extension runs along the existing leg direction, so
+ *      the alignment's bearing is unchanged and any weld at that end simply slides along it.
+ *   3. Report what's LEFT — per corner, the achievable radius and the approach still missing —
+ *      so the UI can name the remedy instead of drawing a bare "!".
+ *
+ * Pure. `pts` are never moved, only the two ENDPOINTS may be pushed outward along their own leg.
+ * Returns { pts, vtx, extended:[{index, ft}], residual:[{index, achievable, shortfallFt}], changed }. */
+export function fitRoadCorners(pts, vtx, minRadius, opts = {}) {
+  const clean = (pts || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+  const N = clean.length;
+  const base = { pts: clean.map((p) => ({ x: p.x, y: p.y })), vtx: normVtx(clean, vtx), extended: [], residual: [], changed: false };
+  if (N < 3 || !(minRadius > 0)) return base;
+  const target = opts.targetRadius > 0 ? opts.targetRadius : minRadius;
+  const maxExtend = opts.maxExtendFt >= 0 ? opts.maxExtendFt : 25;
+  const work = base.pts;
+  const wvtx = base.vtx;
+  let changed = false;
+
+  // 1 — ask for the class radius wherever the vertex isn't a deliberate sharp corner.
+  for (let i = 1; i < N - 1; i++) {
+    if (treatmentAt(wvtx, i) === "sharp") continue;
+    const cur = wvtx[i] || {};
+    if (cur.treatment !== "arc" || !(cur.radius >= target - 1e-6)) {
+      wvtx[i] = { ...cur, treatment: "arc", radius: target };
+      changed = true;
+    }
+  }
+
+  // 2 — lengthen a starved END approach (bounded), re-measuring after each move.
+  const extended = [];
+  for (let pass = 0; pass < 2; pass++) {
+    const rows = roadCornerRadii(work, wvtx, { defaultRadius: target });
+    let moved = false;
+    for (const c of rows) {
+      if (c.rendered === null || !Number.isFinite(c.rendered)) continue;
+      if (c.rendered >= minRadius - 1e-6) continue;
+      const isA = c.tight === "a";
+      if (!(isA ? c.terminalA : c.terminalC)) continue;         // interior leg — not ours to stretch
+      const end = isA ? c.i - 1 : c.i + 1;                      // the road endpoint on the tight leg
+      const prior = extended.find((e) => e.index === end);
+      const spent = prior ? prior.ft : 0;                       // maxExtend is a TOTAL per end, not per pass
+      const ft = Math.min(cornerApproachShortfall(c, minRadius), maxExtend - spent);
+      if (!(ft > 1e-6)) continue;
+      const from = work[c.i], to = work[end];
+      const d = Math.hypot(to.x - from.x, to.y - from.y);
+      if (!(d > EPS)) continue;
+      work[end] = { x: to.x + ((to.x - from.x) / d) * ft, y: to.y + ((to.y - from.y) / d) * ft };
+      if (prior) prior.ft += ft; else extended.push({ index: end, ft });
+      moved = true; changed = true;
+    }
+    if (!moved) break;
+  }
+
+  // 3 — whatever the two moves could not reach.
+  const residual = roadCornerRadii(work, wvtx, { defaultRadius: target })
+    .filter((c) => c.rendered !== null && Number.isFinite(c.rendered) && c.rendered < minRadius - 1e-6)
+    .map((c) => ({ index: c.i, achievable: c.rendered, shortfallFt: cornerApproachShortfall(c, minRadius) }));
+
+  return { pts: work, vtx: wvtx, extended, residual, changed };
 }
 
 /* ---- Clean T-intersection geometry at a road tee (B953/NEW-1) -------------------------

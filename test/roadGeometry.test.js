@@ -75,9 +75,23 @@ describe("roadCenterline — arc fillet", () => {
     for (const q of out) {
       expect(distToSeg(q, a, p) < 20 + 1e-6 || distToSeg(q, p, c) < 20 + 1e-6).toBe(true);
     }
-    // The tangent points must be within each 20-ft leg (run-up T ≤ half = 10 ft).
+    // The tangent points must stay INSIDE each leg. Both legs here run to a road endpoint, so NEW-2
+    // lets the corner use them whole (nothing shares them) — the invariant is "never past the leg",
+    // not "never past half of it". The half rule still governs a leg shared with another corner
+    // (asserted below), which is what actually keeps neighbouring fillets from overlapping.
     const entryRun = Math.min(...out.map((q) => distToSeg(q, p, c) < 1e-6 ? dist(q, p) : Infinity));
-    expect(entryRun).toBeLessThanOrEqual(10 + 1e-6);
+    expect(entryRun).toBeLessThanOrEqual(20 + 1e-6);
+  });
+
+  it("two corners sharing one leg each stay within their half of it", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 40 }, { x: 0, y: 40 }];
+    const vtx = [{}, { treatment: "arc", radius: 500 }, { treatment: "arc", radius: 500 }, {}];
+    const out = roadCenterline(pts, vtx);
+    // The shared middle leg is 40 ft; neither fillet may cross its midpoint.
+    const mid = { x: 40, y: 20 };
+    for (const q of out) expect(dist(q, mid)).toBeGreaterThan(-1e-9);
+    const crossings = out.filter((q) => Math.abs(q.x - 40) < 1e-6 && Math.abs(q.y - 20) < 1e-6);
+    expect(crossings.length).toBeLessThanOrEqual(1);
   });
 
   it("a nearly-straight vertex keeps the corner sharp (no degenerate huge fillet)", () => {
