@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD } from "../src/workspaces/site-planner/lib/roadNetwork.js";
-import { teeGeometry, roadCornerRadii, roadRadiusConflicts } from "../src/workspaces/site-planner/lib/roadGeometry.js";
+import { teeGeometry, roadCornerRadii, roadRadiusConflicts, dedupeRoadVertices } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import { bufferPolyline } from "../src/workspaces/site-planner/lib/metesAndBounds.js";
 
 const area = (r) => { let s = 0; for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; s += a.x * b.y - b.x * a.y; } return Math.abs(s / 2); };
@@ -218,5 +218,43 @@ describe("roadCornerRadii / roadRadiusConflicts — a corner the app had to shri
   it("the Custom class (no threshold) never flags", () => {
     const pts = [{ x: -200, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 22 }];
     expect(roadRadiusConflicts(pts, [{}, { treatment: "arc", radius: 28 }, {}], 0)).toHaveLength(0);
+  });
+});
+
+/* NEW-5 — connect debris judged by whether the stub can carry its turn, not by raw distance. */
+describe("dedupeRoadVertices — a stub that CARRIES A TURN is debris; a straight one is not", () => {
+  const pinnedNone = { deflectFt: 10, pinned: [] };
+  it("collapses a short stub the alignment turns through", () => {
+    // The owner's live case in miniature: a long run, a 3.4 ft stub, then a ~37° swing.
+    const pts = [{ x: 0, y: 0 }, { x: 180, y: 96 }, { x: 183, y: 97.6 }, { x: 252, y: 250 }];
+    const out = dedupeRoadVertices(pts, [{}, {}, {}, {}], 1.5, pinnedNone);
+    expect(out).toBeTruthy();
+    expect(out.pts).toHaveLength(3);
+    expect(out.pts[1]).toEqual({ x: 180, y: 96 });   // the EARLIER point survives — the tee node
+  });
+
+  it("leaves a short stub alone when the road runs straight through it", () => {
+    // Same length, no deflection: harmless, and collapsing it would edit the drawing for nothing.
+    const pts = [{ x: 0, y: 0 }, { x: 180, y: 0 }, { x: 183, y: 0 }, { x: 400, y: 0 }];
+    expect(dedupeRoadVertices(pts, [{}, {}, {}, {}], 1.5, pinnedNone)).toBeNull();
+  });
+
+  it("NEVER drops a vertex another road is welded to", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 180, y: 96 }, { x: 183, y: 97.6 }, { x: 252, y: 250 }];
+    const out = dedupeRoadVertices(pts, [{}, {}, {}, {}], 1.5, { deflectFt: 10, pinned: [{ x: 183, y: 97.6 }] });
+    // the turning stub's far end is pinned, so it stays put — a tee can never be broken by cleanup
+    expect(out === null || out.pts.some((p) => Math.hypot(p.x - 183, p.y - 97.6) < 0.01)).toBe(true);
+  });
+
+  it("still collapses byte-identical clutter (the B1008 behaviour) with no deflection option set", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }];
+    const out = dedupeRoadVertices(pts, [{}, {}, {}, {}], 1.5);
+    expect(out.pts).toHaveLength(3);
+  });
+
+  it("is idempotent — a cleaned road returns null on a re-run", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 180, y: 96 }, { x: 183, y: 97.6 }, { x: 252, y: 250 }];
+    const once = dedupeRoadVertices(pts, [{}, {}, {}, {}], 1.5, pinnedNone);
+    expect(dedupeRoadVertices(once.pts, once.vtx, 1.5, pinnedNone)).toBeNull();
   });
 });

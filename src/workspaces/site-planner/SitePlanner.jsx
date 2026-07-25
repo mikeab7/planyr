@@ -1058,16 +1058,24 @@ const TEE_COINCIDE_FT = 0.75;
 // the reach reflect the road that is actually there, and makes the tangent immune to vertex clutter.
 const VERTEX_NOISE_FT = 1.5;   // below this two stored vertices are clutter, not a real segment
 const RUN_CAP_FT = 1000;
-function roadRunFrom(pts, i, step) {
+// NEW-5 — `noiseFt` is how far out the TANGENT is read, and it must scale with the road. At a fixed
+// 1.5 ft it stepped over byte-identical duplicates but stood on a 3.4 ft stub — and on the owner's plan
+// the alignment swung 37° across exactly such a stub, so the junction was built square to a direction
+// the road wasn't going and threw a spike. A junction is as wide as the road, so read the tangent over
+// that scale (half the travel width) and a few feet of connect debris can't aim it.
+function roadRunFrom(pts, i, step, noiseFt = VERTEX_NOISE_FT) {
+  const noise = noiseFt > 0 ? noiseFt : VERTEX_NOISE_FT;
   let dist = 0, far = null;
   for (let k = i + step; k >= 0 && k < pts.length; k += step) {
     const prev = pts[k - step], cur = pts[k];
     dist += Math.hypot(cur.x - prev.x, cur.y - prev.y);
-    if (!far && Math.hypot(cur.x - pts[i].x, cur.y - pts[i].y) > VERTEX_NOISE_FT) far = cur;
+    if (!far && Math.hypot(cur.x - pts[i].x, cur.y - pts[i].y) > noise) far = cur;
     if (dist >= RUN_CAP_FT) break;
   }
   return { dist, far: far || pts[i + step] || pts[i] };
 }
+// The tangent-read scale for a road: half its travel width, floored at the bare noise tolerance.
+const roadTangentNoise = (el) => Math.max(VERTEX_NOISE_FT, (+(el && el.travelW) || 0) / 2);
 function teeJunctionsOf(els, settings) {
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
   const out = [];
@@ -1083,9 +1091,9 @@ function teeJunctionsOf(els, settings) {
         if (G) break;
       }
       if (!G) continue;
-      const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1);         // into the side road's body
+      const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));   // into the side road's body
       const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
-      const backRun = roadRunFrom(G.pts, gvi, -1), fwdRun = roadRunFrom(G.pts, gvi, 1);
+      const backRun = roadRunFrom(G.pts, gvi, -1, roadTangentNoise(G)), fwdRun = roadRunFrom(G.pts, gvi, 1, roadTangentNoise(G));
       const a = backRun.far, b = fwdRun.far;
       const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangent at the vertex
       const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;
@@ -1177,7 +1185,7 @@ function driveJunctionsOf(els, settings) {
     const P = S.pts[ei];                                            // the road's welded endpoint
     // NEW-1 — run ALONG the drive's polyline (skipping sub-tolerance vertex clutter) rather than
     // trusting the adjacent vertex; see roadRunFrom.
-    const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1);
+    const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));
     const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
     const kind = S.driveTee.kind === "truckcourt" ? "truckcourt" : "parking";
     // NEW-4 — the curb return is sized by the DESIGN VEHICLE OF THE DRIVE (its road class), the same
