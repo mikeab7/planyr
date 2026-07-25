@@ -109,7 +109,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts } from "./lib/roadGeometry.js";
+import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD } from "./lib/roadNetwork.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
@@ -1017,6 +1017,10 @@ const BUILDING_Z = zOrder({ type: "building" });
 // bridge a large gap when zoomed out). ROAD_FIX_MAX_NUDGE_FT bounds NEW-2's tier-3 corner nudge.
 const ROAD_CONNECT_MAX_FT = 10;
 const ROAD_FIX_MAX_NUDGE_FT = 50;
+// NEW-3 — how far the corner solver may RUN AN APPROACH OUT past a road end so a class turn fits.
+// Bounded so a road never grows an arbitrary tail; the extension follows the leg's own bearing, so
+// the alignment is unchanged and a weld at that end just slides along the pavement it already meets.
+const ROAD_FIX_MAX_EXTEND_FT = 25;
 // Default Arc radius for a road's new vertices = its class default (settings-resolved).
 const roadDefaultRadius = (el, settings) => classDefaultRadius(roadClassOf(settings, el && el.roadClass));
 // The dense, tessellated centerline (the rendered alignment) for a centerline road.
@@ -12493,21 +12497,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // + a small bounded vertex nudge where a corner is too pinched for an arc alone), matching B602's
   // own measurement. Returns the solver result; announces a non-blocking toast unless silenced.
   // One pushHistory → one Undo (Ctrl+Z reverts the whole fix).
+  // NEW-3 — the two solver tiers, chained, so "make this road hold its class" is ONE answer:
+  //   tier A (fixRoadRadii) rounds each corner + nudges a pinched vertex toward the chord;
+  //   tier B (fitRoadCorners) asks for the class radius outright and, where a corner is starved
+  //          by a leg that runs to a road END, LENGTHENS that approach (bounded) — the move a site
+  //          designer actually makes, and the one that finally clears the owner's two flagged
+  //          corners instead of leaving an "!" he can't act on.
+  const solveRoadCorners = (el, cls) => {
+    const threshold = classMinRadius(cls);
+    if (!(threshold > 0)) return null;
+    const target = classDefaultRadius(cls);
+    // EXTENSION FIRST, nudge only as the fallback. Order matters and the owner's plan is why: the
+    // nudge slides a vertex toward the chord, which turns his square fire-lane entry into a skewed
+    // chamfer — a shape no one lays out on a site plan. Running the approach out instead keeps every
+    // bearing exactly as drawn (roads still meet square), so the nudge is now reserved for corners
+    // extension genuinely can't reach — a corner pinched between two INTERIOR legs.
+    const b = fitRoadCorners(el.pts, el.vtx, threshold, { targetRadius: target, maxExtendFt: ROAD_FIX_MAX_EXTEND_FT });
+    let pts = b.pts, vtx = b.vtx, rounded = 0, changed = b.changed;
+    if (b.residual.length) {
+      const a = fixRoadRadii(pts, vtx, threshold, { targetRadius: target, maxNudgeFt: ROAD_FIX_MAX_NUDGE_FT });
+      if (a.changed) { pts = a.pts; vtx = a.vtx; rounded = a.fixed.length; changed = true; }
+    }
+    const residual = roadRadiusConflicts(pts, vtx, threshold, { defaultRadius: target })
+      .map((c) => ({ index: c.i, achievable: c.rendered, shortfallFt: c.shortfallFt }));
+    return { pts, vtx, threshold, extended: b.extended, residual, rounded, changed };
+  };
+  // How the solve READS in plain language — one sentence, no jargon, no "segments too short".
+  const roadSolveToast = (cls, res, prefix) => {
+    const ext = res.extended.reduce((s, e) => s + e.ft, 0);
+    const grew = ext > 0.5 ? ` and ran the approach ${f0(ext)}′ further so the turn fits` : "";
+    if (!res.residual.length) return `${prefix} corners rounded to the ${f0(res.threshold)}′ ${cls.label} minimum${grew}. Ctrl+Z to undo.`;
+    const worst = res.residual.reduce((w, r) => (r.shortfallFt > w.shortfallFt ? r : w), res.residual[0]);
+    return `${prefix} corners rounded${grew}, but one still turns tighter than ${f0(res.threshold)}′ — it needs about ${f0(worst.shortfallFt)}′ more approach than there is room for. Ctrl+Z to undo.`;
+  };
   const fixRoadRadiusFor = (el, { announce = true } = {}) => {
     if (!isCenterlineRoad(el)) return null;
     const cls = roadClassOf(settings, el.roadClass);
-    const threshold = classMinRadius(cls);
-    if (!(threshold > 0)) { if (announce) flashWarn(`${cls.label} has no minimum-radius rule to apply. Set one in Standards → Roads.`, 6000); return null; }
-    const res = fixRoadRadii(el.pts, el.vtx, threshold, { targetRadius: classDefaultRadius(cls), maxNudgeFt: ROAD_FIX_MAX_NUDGE_FT });
-    if (!res.changed) { if (announce) flashWarn(`Already meets the ${f0(threshold)}′ minimum for ${cls.label}.`, 5000); return res; }
+    const res = solveRoadCorners(el, cls);
+    if (!res) { if (announce) flashWarn(`${cls.label} has no minimum-radius rule to apply. Set one in Standards → Roads.`, 6000); return null; }
+    if (!res.changed) { if (announce) flashWarn(`Already meets the ${f0(res.threshold)}′ minimum for ${cls.label}.`, 5000); return res; }
     pushHistory();
     setEls((a) => a.map((x) => x.id === el.id && isCenterlineRoad(x) ? reRoad({ ...x, pts: res.pts, vtx: res.vtx }) : x));
     setRoadVtxSel(res.residual.length ? { id: el.id, idx: res.residual[0].index } : null); // point at the first residual, if any
-    if (announce) {
-      const n = res.fixed.length, m = res.residual.length;
-      if (m === 0) flashWarn(`Rounded ${n} corner${n === 1 ? "" : "s"} to the ${f0(threshold)}′ ${cls.label} minimum. Ctrl+Z to undo.`, 6000);
-      else flashWarn(`Rounded ${n} corner${n === 1 ? "" : "s"}; ${m} couldn’t reach ${f0(threshold)}′ (segment${m === 1 ? "" : "s"} too short to fit an arc). Ctrl+Z to undo.`, 8000);
-    }
+    if (announce) flashWarn(roadSolveToast(cls, res, "Corner fix —"), res.residual.length ? 9000 : 6000);
     return res;
   };
   // Road class (B599/NEW-4) — the arc default radius can change, so re-sync the bbox. NEW-2: assigning
@@ -12519,13 +12551,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let patch = { roadClass: key };
     let toast = null;
     if (threshold > 0 && isCenterlineRoad(el)) {
-      const res = fixRoadRadii(el.pts, el.vtx, threshold, { targetRadius: classDefaultRadius(cls), maxNudgeFt: ROAD_FIX_MAX_NUDGE_FT });
-      if (res.changed) {
+      // NEW-3, owner rule 2026-07-25: picking a class is an INSTRUCTION, not a claim to be graded.
+      // Pick "Truck route" and the road is re-cut to hold a truck route's turn — never warned at.
+      const res = solveRoadCorners(el, cls);
+      if (res && res.changed) {
         patch = { ...patch, pts: res.pts, vtx: res.vtx };
-        const n = res.fixed.length, m = res.residual.length;
-        toast = m === 0
-          ? `Set to ${cls.label} and rounded ${n} corner${n === 1 ? "" : "s"} to its ${f0(threshold)}′ minimum. Ctrl+Z to undo.`
-          : `Set to ${cls.label}; rounded ${n} corner${n === 1 ? "" : "s"}, ${m} couldn’t reach ${f0(threshold)}′ (segments too short). Ctrl+Z to undo.`;
+        toast = roadSolveToast(cls, res, `Set to ${cls.label} —`);
       }
     }
     setEls((a) => a.map((x) => x.id === el.id ? reRoad({ ...x, ...patch }) : x));
@@ -14704,14 +14735,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
               {roadRadiusFlags.length > 0 && (
-                <g data-testid="road-radius-flags" data-export="skip" pointerEvents="none">
+                // NEW-4, owner rule 2026-07-25: "they shouldn't just throw up an exclamation mark.
+                // I don't even know how to fix it." So the mark is replaced by the two things he
+                // actually wanted \u2014 WHAT IT NEEDS (the missing approach, in feet) and a one-click
+                // Fix that applies it. Clickable, so this layer takes pointer events; still
+                // data-export="skip" so it never rides the PDF.
+                <g data-testid="road-radius-flags" data-export="skip">
                   {roadRadiusFlags.map((f, i) => {
                     const q = f2p(f.pt);
+                    const el = (els || []).find((x) => x.id === f.id);
+                    const short = f.shortfallFt > 0.5 ? `needs ${f0(f.shortfallFt)}\u2032 more approach` : `turns tighter than ${f0(f.minRadius)}\u2032`;
+                    const w = 9 + short.length * 5.6 + 30;
                     return (
-                      <g key={`rrf${f.id}-${f.i}-${i}`} data-road-radius-flag={`${f.id}:${f.i}`}>
-                        <title>{`${f.label}: this corner draws at ${Math.round(f.rendered)}\u2032 but needs ${Math.round(f.minRadius)}\u2032 \u2014 the leg after it is too short to hold the turn. Move the corner or lengthen the leg.`}</title>
-                        <circle cx={q.x} cy={q.y} r={8} fill={PAL.paper} stroke={PAL.warn} strokeWidth={2} />
-                        <text x={q.x} y={q.y + 4} textAnchor="middle" style={{ fontSize: 11, fontWeight: 800, fill: PAL.warn }}>!</text>
+                      <g key={`rrf${f.id}-${f.i}-${i}`} data-road-radius-flag={`${f.id}:${f.i}`}
+                         data-road-radius-shortfall={Math.round(f.shortfallFt || 0)}
+                         style={{ cursor: el ? "pointer" : "default" }}
+                         onPointerDown={(e) => { e.stopPropagation(); }}
+                         onClick={(e) => { e.stopPropagation(); if (el) fixRoadRadiusFor(el); }}>
+                        <title>{`${f.label}: this corner turns at ${Math.round(f.rendered)}\u2032 where the class asks for ${Math.round(f.minRadius)}\u2032. Click Fix and the road runs its approach out far enough to hold the turn.`}</title>
+                        <rect x={q.x - 10} y={q.y - 11} width={w} height={22} rx={11} fill={PAL.paper} stroke={PAL.warn} strokeWidth={1.75} />
+                        <text x={q.x - 1} y={q.y + 4} style={{ fontSize: 11, fontWeight: 800, fill: PAL.warn }}>!</text>
+                        <text x={q.x + 7} y={q.y + 4} style={{ fontSize: 10.5, fontWeight: 600, fill: PAL.warn }}>{short}</text>
+                        <text x={q.x + w - 32} y={q.y + 4} style={{ fontSize: 10.5, fontWeight: 800, fill: PAL.accent, textDecoration: "underline" }}>Fix</text>
                       </g>
                     );
                   })}
@@ -15371,7 +15416,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const all = live ? [...draftRoadPts, live] : draftRoadPts;
                 if (all.length < 2) {
                   const c0 = f2p(draftRoadPts[0]);
-                  return <circle cx={c0.x} cy={c0.y} r={5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.75} pointerEvents="none" />;
+                  return (
+                    <g>
+                      <circle cx={c0.x} cy={c0.y} r={5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.75} pointerEvents="none" />
+                      <text x={c0.x} y={c0.y - 14} textAnchor="middle" fontSize="11" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">Click the next point</text>
+                    </g>
+                  );
                 }
                 const curb = +settings.roadCurb || CURB;
                 const travelW = roadWidth !== "free" && +roadWidth > 0 ? +roadWidth : 24;
@@ -15389,6 +15439,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {draftRoadPts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
                     {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ travel · {f0(total)}′</text>}
                     {magnet && (() => { const c = f2p(magnet); return <g><circle cx={c.x} cy={c.y} r={9} fill="none" stroke={SEL_BLUE} strokeWidth={2.5} /><circle cx={c.x} cy={c.y} r={3.5} fill={SEL_BLUE} /></g>; })()}
+                    {/* NEW-1, owner report 2026-07-25: "I should be able to just press three points…
+                        but it doesn't seem like I can do that." He could — three clicks stores three
+                        points — but NOTHING on the canvas said how to END the road, and the instinctive
+                        Esc THREW IT AWAY. So the last placed point now carries a real Done button
+                        (and the hint names the two keyboard ways out). Takes pointer events; sits on
+                        the last point so the mouse is already there. */}
+                    {draftRoadPts.length >= 2 && (() => {
+                      const c = f2p(draftRoadPts[draftRoadPts.length - 1]);
+                      return (
+                        <g data-testid="road-draft-finish" pointerEvents="all" style={{ cursor: "pointer" }}
+                           onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                           onClick={(e) => { e.stopPropagation(); finishRoad(); }}>
+                          <title>Finish this road (or press Enter). Esc throws the draft away; Backspace removes the last point.</title>
+                          <rect x={c.x + 12} y={c.y - 11} width={58} height={22} rx={11} fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5} />
+                          <text x={c.x + 41} y={c.y + 4} textAnchor="middle" fontSize="11" fontWeight="800" fill={PAL.paper}>✓ Done</text>
+                          <text x={c.x + 41} y={c.y + 26} textAnchor="middle" fontSize="10" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="600">or press Enter</text>
+                        </g>
+                      );
+                    })()}
                   </g>
                 );
               })()}
