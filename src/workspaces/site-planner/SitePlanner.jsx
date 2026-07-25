@@ -109,7 +109,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon } from "./lib/roadGeometry.js";
+import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD } from "./lib/roadNetwork.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
@@ -1090,10 +1090,17 @@ function teeJunctionsOf(els, settings) {
       const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangent at the vertex
       const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;
       const throughDir = { x: din.x / li + dout.x / lo, y: din.y / li + dout.y / lo };
+      // NEW-4 — the OPEN side of a tee is the side the side-road (and therefore the return wedges) sits on.
+      const uT = { x: throughDir.x, y: throughDir.y };
+      const uTl = Math.hypot(uT.x, uT.y) || 1; uT.x /= uTl; uT.y /= uTl;
+      const nrmT = { x: -uT.y, y: uT.x };
+      const openSign = Math.sign(sideDir.x * nrmT.x + sideDir.y * nrmT.y) || 1;
+      const nOpenT = { x: nrmT.x * openSign, y: nrmT.y * openSign };
       const clsS = roadClassOf(settings, S.roadClass);
       const teeOverride = S.tee && S.tee.throughId === G.id ? S.tee : null;
       const R = teeOverride && teeOverride.returnR > 0 ? teeOverride.returnR : classReturnRadius(clsS);
       const flare = teeOverride && teeOverride.flare > 0 ? teeOverride.flare : 0;
+      const teeObstacle = buildingRunLimit(els, P, uT, nOpenT, R);
       const geom = teeGeometry({
         T: { x: P.x, y: P.y }, throughDir, sideDir,
         // NEW-1 — half-widths at BACK OF CURB (roadOuterHalf), not face of curb. The union takes the
@@ -1103,7 +1110,10 @@ function teeJunctionsOf(els, settings) {
         phT: roadOuterHalf(G), phS: roadOuterHalf(S),
         R, flare, curbT: roadCurbWidth(G), curbS: roadCurbWidth(S),
         // `throughDir` points a→b (backRun.far → fwdRun.far), so +u is the forward run and -u the back run.
-        throughAvailPos: fwdRun.dist, throughAvailNeg: backRun.dist, sideAvail: sideRun.dist,
+        // NEW-4 — and neither direction may run under a building (see buildingRunLimit).
+        throughAvailPos: Math.min(fwdRun.dist, teeObstacle.pos),
+        throughAvailNeg: Math.min(backRun.dist, teeObstacle.neg),
+        sideAvail: sideRun.dist,
       });
       if (geom) out.push({ sideId: S.id, throughId: G.id, T: { x: P.x, y: P.y }, geom });
     }
@@ -1121,6 +1131,35 @@ function teeJunctionsOf(els, settings) {
 // drive via the tight throughAvail below, so the return can neither span the whole connect edge nor
 // reach across the court's depth to the building.
 const DRIVE_RETURN_SEED = { parking: 15, truckcourt: 24 }; // B1005 — tidy default; teeGeometry now caps the return REACH to R itself (≤ half a drive-width here), so a small seed reads as a rounded corner, not a scoop. Editable up per-junction for a real WB-62 turn.
+// NEW-4 — how far a junction's curb return may RUN along the through edge before it would reach a
+// BUILDING, in each direction. B959 let the return sweep the whole edge and relied on the building
+// painting OVER it (z-order) — which hides the overlap instead of preventing it: the pavement is still
+// there, it still counts in the paved-area total, and on the owner's plan it reads exactly as what it
+// is, a drive running underneath his dock dog-ears. A curb return is pavement; pavement cannot exist
+// under a building, so the reach is clamped by geometry, not by paint order.
+//
+// Works in the junction's edge frame: `u` along the through edge, `nOpen` the OPEN side (away from the
+// target rect / toward the side road) — the only side a return wedge occupies. A building is in the way
+// only if it reaches into that side within `reach` of the edge.
+const BUILDING_CLEAR_FT = 2;   // stop this far short, so the curb line never kisses the wall
+function buildingRunLimit(els, P, u, nOpen, reach) {
+  let pos = Infinity, neg = Infinity;
+  for (const b of els || []) {
+    if (!b || b.type !== "building" || b.points || !(b.w > 0) || !(b.h > 0) || typeof b.cx !== "number") continue;
+    const rad = ((b.rot || 0) * Math.PI) / 180, c = Math.cos(rad), sn = Math.sin(rad);
+    let sMin = Infinity, sMax = -Infinity, tMax = -Infinity, tMin = Infinity;
+    for (const [lx, ly] of [[-b.w / 2, -b.h / 2], [b.w / 2, -b.h / 2], [b.w / 2, b.h / 2], [-b.w / 2, b.h / 2]]) {
+      const dx = b.cx + (lx * c - ly * sn) - P.x, dy = b.cy + (lx * sn + ly * c) - P.y;
+      const sa = dx * u.x + dy * u.y, ta = dx * nOpen.x + dy * nOpen.y;
+      if (sa < sMin) sMin = sa; if (sa > sMax) sMax = sa;
+      if (ta < tMin) tMin = ta; if (ta > tMax) tMax = ta;
+    }
+    if (tMax <= 0 || tMin > reach) continue;                 // behind the edge, or clear of the return's depth
+    if (sMax > 0) pos = Math.min(pos, sMin > 0 ? sMin : 0);  // straddles the junction → no room at all
+    if (sMin < 0) neg = Math.min(neg, sMax < 0 ? -sMax : 0);
+  }
+  return { pos: Math.max(0, pos - BUILDING_CLEAR_FT), neg: Math.max(0, neg - BUILDING_CLEAR_FT) };
+}
 function driveJunctionsOf(els, settings) {
   const out = [];
   const byId = new Map((els || []).map((e) => [e.id, e]));
@@ -1141,7 +1180,18 @@ function driveJunctionsOf(els, settings) {
     const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1);
     const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
     const kind = S.driveTee.kind === "truckcourt" ? "truckcourt" : "parking";
-    const Rseed = S.driveTee.returnR > 0 ? S.driveTee.returnR : DRIVE_RETURN_SEED[kind];
+    // NEW-4 — the curb return is sized by the DESIGN VEHICLE OF THE DRIVE (its road class), the same
+    // source road→road tees already use, NOT by what it happens to be driving into. A fire lane entering
+    // employee parking still has to turn a fire apparatus; an auto aisle entering the same field does not.
+    // The old per-target seed table also went stale: a value stamped onto `driveTee` at connect time kept
+    // driving the geometry long after the seed changed, so a plan carried yesterday's default forever.
+    // A truck court additionally floors the return at truck scale — a car aisle serving a dock still has
+    // to admit the truck that uses the court.
+    const clsDrive = roadClassOf(settings, S.roadClass);
+    const Rclass = classReturnRadius(clsDrive);
+    const Rseed = S.driveTee.returnR > 0
+      ? S.driveTee.returnR
+      : (kind === "truckcourt" ? Math.max(Rclass, DRIVE_RETURN_SEED.truckcourt) : Rclass);
     const flare = S.driveTee.flare > 0 ? S.driveTee.flare : 0;
     // B959/NEW-1 feasibility clamp — the single curb-return fillet must FIT the actual drive, not sprawl:
     // teeGeometry already clamps the return to the run it's given, so feed it the court's real limits —
@@ -1150,6 +1200,7 @@ function driveJunctionsOf(els, settings) {
     const perpDepth = hit.edge.axis === "y" ? T.h : T.w;           // court depth behind the connect edge (see rectEdges axis)
     const edgeRunPos = (hit.edge.b.x - P.x) * hit.edge.dir.x + (hit.edge.b.y - P.y) * hit.edge.dir.y;   // T → edge end b
     const edgeRunNeg = (P.x - hit.edge.a.x) * hit.edge.dir.x + (P.y - hit.edge.a.y) * hit.edge.dir.y;   // T → edge end a
+    const obstacle = buildingRunLimit(els, P, hit.edge.dir, hit.edge.outN, Rseed);   // NEW-4 — never under a building
     const geom = teeGeometry({
       T: { x: P.x, y: P.y }, throughDir: hit.edge.dir, sideDir,
       // phS at BACK-OF-CURB (roadOuterHalf), not face-of-curb: the cover unions with the drive's
@@ -1163,7 +1214,9 @@ function driveJunctionsOf(els, settings) {
       // Per-direction run along the target EDGE from the weld point — a drive landing near the end of a
       // parking field has plenty of edge one way and a couple of feet the other, and a symmetric clamp
       // let the short-side return sweep off the end of the field into open ground (owner shot 1).
-      throughAvailPos: Math.max(0, edgeRunPos), throughAvailNeg: Math.max(0, edgeRunNeg),
+      // NEW-4 folds in the building clamp so the return can never run under a dock bump-out.
+      throughAvailPos: Math.max(0, Math.min(edgeRunPos, obstacle.pos)),
+      throughAvailNeg: Math.max(0, Math.min(edgeRunNeg, obstacle.neg)),
       sideAvail: sideRun.dist,
     });
     if (geom) out.push({ sideId: S.id, targetId: T.id, kind, geom });
@@ -13877,7 +13930,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // for why every patch-based attempt (B953…B1006) had to fail on topologies it wasn't tuned for.
   const roadNet = useMemo(() => {
     const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
-    if (!roads.length) return { regions: [], stripes: new Map(), memberIds: new Set() };
+    if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set() };
     const byId = new Map(roads.map((r) => [r.id, r]));
     const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings)]));
     // Extra pavement contributed by each junction, indexed by the road that owns the junction.
@@ -13929,8 +13982,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     regions.sort((a, b) => a.zKey - b.zKey);
-    return { regions, stripes, memberIds: new Set(roads.map((r) => r.id)) };
+    // NEW-4 — a road that TEES INTO A RECT (a parking field, a truck court) leaves that rect's own
+    // outline drawn straight across the drive opening: the owner's screenshot, and the same defect the
+    // road↔road case already fixed, one layer out. A junction reads as one continuous curb around the
+    // entrance, never a line ruled across it. Road↔road dissolves because both sides are pavement; a
+    // court is a different element with its own fill, so instead of merging we INTERRUPT the target's
+    // outline where the drive's pavement crosses it. Map<targetId, cutter rings>.
+    const outlineCuts = new Map();
+    for (const dj of driveJunctions) {
+      const cutters = regions.filter((r) => r.ids.includes(dj.sideId)).map((r) => r.region.outer).filter(Boolean);
+      if (!cutters.length) continue;
+      outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
+    }
+    return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)) };
   }, [els, settings, teeJunctions, driveJunctions, weldJunctions]);
+  // NEW-4 — corners the app had to draw TIGHTER than the road's own civil minimum. `arcCorner`
+  // feasibility-clamps a corner's radius to half the shorter adjacent leg; that clamp is geometrically
+  // necessary (without it two corners overrun each other and the strip self-intersects) but it used to
+  // happen SILENTLY. On the owner's plan a fire lane whose corner was set to the 28 ft inside radius its
+  // class requires was drawing at 11 — a compliance problem, and the visible cause of "that shape is
+  // wrong". The geometry still can't lie, so the app says so instead: a flag on the offending vertex,
+  // on the canvas, without having to select the road first. Review chrome — never exported.
+  const roadRadiusFlags = useMemo(() => {
+    const out = [];
+    for (const el of els || []) {
+      if (!isCenterlineRoad(el) || el.attachedTo) continue;
+      const cls = roadClassOf(settings, el.roadClass);
+      const conflicts = roadRadiusConflicts(el.pts, el.vtx, classMinRadius(cls), { defaultRadius: roadDefaultRadius(el, settings) });
+      for (const c of conflicts) out.push({ id: el.id, label: cls && cls.label ? cls.label : "Road", ...c });
+    }
+    return out;
+  }, [els, settings]);
   // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as above; never runs in production) — lets the
   // headless regression assert the DISSOLVED geometry (region count, holes, curb-return radii) directly
   // instead of inferring it from pixels.
@@ -14610,6 +14692,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </g>
               )}
               {[...els].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet))}
+              {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
+                  ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
+                  chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
+              {roadRadiusFlags.length > 0 && (
+                <g data-testid="road-radius-flags" data-export="skip" pointerEvents="none">
+                  {roadRadiusFlags.map((f, i) => {
+                    const q = f2p(f.pt);
+                    return (
+                      <g key={`rrf${f.id}-${f.i}-${i}`} data-road-radius-flag={`${f.id}:${f.i}`}>
+                        <title>{`${f.label}: this corner draws at ${Math.round(f.rendered)}\u2032 but needs ${Math.round(f.minRadius)}\u2032 \u2014 the leg after it is too short to hold the turn. Move the corner or lengthen the leg.`}</title>
+                        <circle cx={q.x} cy={q.y} r={8} fill={PAL.paper} stroke={PAL.warn} strokeWidth={2} />
+                        <text x={q.x} y={q.y + 4} textAnchor="middle" style={{ fontSize: 11, fontWeight: 800, fill: PAL.warn }}>!</text>
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
               {/* v3 D3 — INWARD pond berm ring: the earthen embankment sits INSIDE the drawn outline
                   (the fixed outer toe), between the boundary and the inset crest (where the water
                   begins). Drawn OVER the pond (a ground surface, below the building layer) so the water
@@ -19235,8 +19334,23 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   // the cartographic gradient by default; the added ring gets the lighter solid tint.
   const rectExistF = el.det?.existFill ?? waterFill;
   const rectAddF = el.det?.addFill ?? POND_ADD_FILL_DEFAULT;
+  // NEW-4 — a rect a drive tees into paints its FILL here but its OUTLINE as interrupted edges below,
+  // so the entrance reads as one continuous curb instead of a line ruled across the opening.
+  const outlineCut = roadNet && roadNet.outlineCuts ? roadNet.outlineCuts.get(el.id) : null;
+  const rectStrokeW = st.cartoWater ? (isSel ? 3 : 2) : el.type === "road" ? curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX) /* B719: legacy rect road border to scale */ : (isSel ? st.weight + 0.75 : st.weight);
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : waterFill} fillOpacity={waterOp}
-    stroke={st.stroke /* B619: no accent recolor on select */} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : el.type === "road" ? curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX) /* B719: legacy rect road border to scale */ : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
+    stroke={outlineCut ? "none" : st.stroke /* B619: no accent recolor on select */} strokeWidth={outlineCut ? 0 : rectStrokeW} rx={rx} />);
+  if (outlineCut) {
+    const rad = ((el.rot || 0) * Math.PI) / 180, cc = Math.cos(rad), ss = Math.sin(rad);
+    const corner = (lx, ly) => ({ x: el.cx + (lx * cc - ly * ss), y: el.cy + (lx * ss + ly * cc) });
+    const cs = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
+    for (let e = 0; e < 4; e++) {
+      const segs = clipPolylineOutside([cs[e], cs[(e + 1) % 4]], outlineCut);
+      segs.forEach((seg, k) => parts.push(
+        <polyline key={`ol${e}-${k}`} points={seg.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")}
+          fill="none" stroke={st.stroke} strokeWidth={rectStrokeW} strokeLinecap="butt" pointerEvents="none" />));
+    }
+  }
   // Baseline ghost fill (existing basin) sits on top of the added-tint rect; stroke layer added below.
   if (ghostPath) parts.push(<g key="ghostfill" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}><path d={ghostPath} fill={rectExistF} fillOpacity={waterOp} stroke="none" pointerEvents="none" /></g>);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);

@@ -593,6 +593,54 @@ export function fixRoadRadii(pts, vtx, threshold, opts = {}) {
   };
 }
 
+
+/* Per-INTERIOR-VERTEX corner radius: what the vertex ASKED for vs what actually gets DRAWN (NEW-4).
+ *
+ * `arcCorner` silently feasibility-clamps a corner's radius to half the shorter adjacent leg, so a
+ * corner set to a code minimum (a fire lane's 28 ft inside radius, a truck route's 50 ft) can render
+ * far tighter with nothing said. On the owner's real plan a 28 ft fire-lane corner was drawing at 11 —
+ * not a cosmetic difference but a compliance one, and the visible cause of "that shape is wrong".
+ * This exposes the clamp so the app can SAY SO instead of quietly drawing a corner no engineer would.
+ *
+ * Returns one row per interior vertex: { i, treatment, requested, rendered, limited }.
+ *   requested — the radius the vertex carries (or the class default).
+ *   rendered  — the radius the tessellated centerline actually turns at (Infinity for a straight or
+ *               folded vertex — nothing is being clamped there).
+ *   limited   — true when the leg length forced `rendered` below `requested`.
+ * A `smooth` vertex has no circular radius, so it reports rendered: null and never flags. */
+export function roadCornerRadii(pts, vtx, opts = {}) {
+  const P = Array.isArray(pts) ? pts : [];
+  if (P.length < 3) return [];
+  const fallback = opts.defaultRadius > 0 ? opts.defaultRadius : DEFAULT_ARC_RADIUS;
+  const out = [];
+  for (let i = 1; i < P.length - 1; i++) {
+    const treatment = treatmentAt(vtx, i);
+    const requested = radiusAt(vtx, i, fallback);
+    if (treatment !== "arc") { out.push({ i, treatment, requested, rendered: null, limited: false }); continue; }
+    const vA = sub(P[i - 1], P[i]), vC = sub(P[i + 1], P[i]);
+    const lA = len(vA), lC = len(vC);
+    if (lA < EPS || lC < EPS) { out.push({ i, treatment, requested, rendered: Infinity, limited: false }); continue; }
+    const c = Math.max(-1, Math.min(1, dot(mul(vA, 1 / lA), mul(vC, 1 / lC))));
+    const theta = Math.PI - Math.acos(c);                 // deflection / turn angle
+    if (theta < 1e-4 || theta > Math.PI - 1e-4) { out.push({ i, treatment, requested, rendered: Infinity, limited: false }); continue; }
+    const tanHalf = Math.tan(theta / 2);
+    const maxT = 0.5 * Math.min(lA, lC);                  // same feasibility clamp arcCorner applies
+    const T = Math.min(requested * tanHalf, maxT);
+    const rendered = tanHalf > EPS ? T / tanHalf : Infinity;
+    out.push({ i, treatment, requested, rendered, limited: rendered < requested - 1e-6 });
+  }
+  return out;
+}
+
+/* Interior vertices whose DRAWN corner falls below `minRadius` (a road class's civil threshold).
+ * `minRadius <= 0` (the Custom class) never flags. */
+export function roadRadiusConflicts(pts, vtx, minRadius, opts = {}) {
+  if (!(minRadius > 0)) return [];
+  return roadCornerRadii(pts, vtx, opts)
+    .filter((c) => c.rendered !== null && Number.isFinite(c.rendered) && c.rendered < minRadius - 1e-6)
+    .map((c) => ({ ...c, minRadius, pt: pts[c.i] }));
+}
+
 /* ---- Clean T-intersection geometry at a road tee (B953/NEW-1) -------------------------
  * When a road tees into another (the B945/B949 tee: a side road's endpoint welded onto a
  * through road's centerline), render a real intersection instead of the side road's pavement
