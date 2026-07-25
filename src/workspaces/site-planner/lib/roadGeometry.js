@@ -739,6 +739,43 @@ export function roadRadiusConflicts(pts, vtx, minRadius, opts = {}) {
  *
  * Pure. `pts` are never moved, only the two ENDPOINTS may be pushed outward along their own leg.
  * Returns { pts, vtx, extended:[{index, ft}], residual:[{index, achievable, shortfallFt}], changed }. */
+/* ---- Undo a radius the old auto-fixer BAKED IN (NEW-6) --------------------------------
+ *
+ * Owner, 2026-07-25, looking at his live plan: "it seems like it's not shaped right." He was right,
+ * and the cause is stored data, not the renderer. The pre-B1013 auto-fixer wrote the *clamped* value
+ * back onto the vertex — his fire lane carries `radius: 11.532635922052066` — so the corner draws as
+ * a blob no matter how much room the fix later frees up, and nothing ever raises it again. It reads
+ * as a radius he chose. He never chose it; a person types 12, not 11.532635922052066.
+ *
+ * That non-roundness IS the signature, and it is what makes this safe to repair automatically. A
+ * stored radius is treated as machine-written only when BOTH hold:
+ *   • it sits below the class minimum (a compliant radius is never "damage"), and
+ *   • it is not a round value — every path a HUMAN radius can arrive by lands on a whole or half
+ *     foot (typed into the vertex editor, or seeded from a class default like 25 / 50 / 120). Only
+ *     the old clamp produced numbers like 11.532635922052066.
+ * Deliberately NOT keyed on "does it equal the clamp for the CURRENT geometry" — the owner has moved
+ * points since the bake, so the baked number no longer matches any clamp, which is precisely why it
+ * is stuck. Repaired vertices are re-asked at the class radius; the render still clamps to whatever
+ * fits, so this can only IMPROVE a drawn corner and it NEVER moves a point.
+ * Returns a fresh { pts, vtx, repaired:[i] } or null when nothing matched. Pure — unit-tested. */
+export function repairBakedRadii(pts, vtx, minRadius, opts = {}) {
+  const P = Array.isArray(pts) ? pts : [];
+  if (P.length < 3 || !(minRadius > 0)) return null;
+  const target = opts.targetRadius > 0 ? opts.targetRadius : minRadius;
+  const v = normVtx(P, vtx);
+  const repaired = [];
+  for (let i = 1; i < P.length - 1; i++) {
+    const cur = v[i] || {};
+    if (cur.treatment !== "arc" || !(cur.radius > 0)) continue;   // no stored radius → nothing baked
+    if (cur.radius >= minRadius - 1e-6) continue;                 // already at/above the standard
+    if (Math.abs(cur.radius * 2 - Math.round(cur.radius * 2)) <= 1e-6) continue; // a round, human value
+    v[i] = { ...cur, radius: target };
+    repaired.push(i);
+  }
+  if (!repaired.length) return null;
+  return { pts: P.map((p) => ({ x: p.x, y: p.y })), vtx: v, repaired };
+}
+
 export function fitRoadCorners(pts, vtx, minRadius, opts = {}) {
   const clean = (pts || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
   const N = clean.length;

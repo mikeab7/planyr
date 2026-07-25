@@ -12,9 +12,9 @@ const site = { id: SITE_ID, groupId: SITE_ID, site: "Tsakiris", name: "Concept A
   parcels: [], els: fixture.els, measures: [], callouts: [], markups: [], settings: {}, underlay: null,
   parcelDrawings: [], updatedAt: Date.now() };
 const SPOTS = [
-  { key: "FLAG-fire-parking", x: -217, y: 450, ppf: 2.2 },
-  { key: "FLAG-truck-stub", x: 560, y: -350, ppf: 1.6 },
-  { key: "OVERVIEW", x: 200, y: 100, ppf: 0.34 },
+  { key: "OWNERZOOM", x: -100, y: 200, ppf: 0.2 },      // roughly the zoom his screenshot was at
+  { key: "MIDZOOM", x: -216, y: 450, ppf: 0.7 },
+  { key: "FLAG-fire-parking", x: -216, y: 450, ppf: 2.2 },
 ];
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", args: ["--no-sandbox","--ignore-certificate-errors"] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, ignoreHTTPSErrors: true });

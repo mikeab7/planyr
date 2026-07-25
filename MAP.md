@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-25 @ `06357a2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-25 @ `b3a7e63` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -514,7 +514,7 @@ _313 source files mapped._
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)
   - _exports_: `classDefaultRadius`, `classMinRadius`, `classReturnRadius`, `DEFAULT_ROAD_CLASS`, `ROAD_CLASS_SEEDS`, `roadClassesOf`, `roadClassOf`, `speedMinRadius`
 - **`src/workspaces/site-planner/lib/roadGeometry.js`** — Pure centerline road geometry: tessellate clicked alignment into arc fillets/smooth splines/sharp corners, min radius of curvature
-  - _exports_: `canRemoveRoadVertex`, `concatRoads`, `cornerApproachShortfall`, `cornerShares`, `curbStrokePx`, `dedupeRoadVertices`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fitRoadCorners`, `fixRoadRadii`, `insertRoadVertex`, `minRadiusOfCurvature`, `nearestRectEdge`, `planRoadConnect`, `polylineLength`, `rectEdges`, `removeRoadVertex`, `ROAD_VERTEX_COLLAPSE_FT`, `roadCenterline`, `roadCornerRadii`, `roadMinRadius`, `roadRadiusConflicts`, `roadsMergeCompatible`, `teeGeometry`, `weldCoverPolygon`
+  - _exports_: `canRemoveRoadVertex`, `concatRoads`, `cornerApproachShortfall`, `cornerShares`, `curbStrokePx`, `dedupeRoadVertices`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fitRoadCorners`, `fixRoadRadii`, `insertRoadVertex`, `minRadiusOfCurvature`, `nearestRectEdge`, `planRoadConnect`, `polylineLength`, `rectEdges`, `removeRoadVertex`, `repairBakedRadii`, `ROAD_VERTEX_COLLAPSE_FT`, `roadCenterline`, `roadCornerRadii`, `roadMinRadius`, `roadRadiusConflicts`, `roadsMergeCompatible`, `teeGeometry`, `weldCoverPolygon`
 - **`src/workspaces/site-planner/lib/roadNetwork.js`** — Dissolves connected road strips + curb-return wedges into ONE pavement region per cluster (clipper union, orientation-normalised, morphologically closed), and trims curb stripes at junctions. The topology replacement for the old per-junction cover patches.
   - _exports_: `clipPolylineOutside`, `clusterIds`, `dissolveRings`, `regionPathD`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache

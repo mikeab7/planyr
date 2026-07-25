@@ -24,10 +24,15 @@ await page.goto("http://localhost:4173/", { waitUntil: "load" });
 await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 20000 });
 await page.waitForFunction(() => !!window.__plannerView, null, { timeout: 20000 });
 
+// NEW-5 — the label folds away below ROAD_FLAG_LABEL_PPF so it can't sprawl across a whole-site
+// view; park the viewport at a working zoom before reading the label text.
+const zoomIn = (x, y, p = 1.2) => page.evaluate(([a, b, c]) => window.__plannerView.centerOn(a, b, c), [x, y, p]);
 const readFlags = () => page.evaluate(() => [...document.querySelectorAll("[data-road-radius-flag]")]
   .map((n) => ({ f: n.getAttribute("data-road-radius-flag"), short: n.getAttribute("data-road-radius-shortfall"),
                  label: [...n.querySelectorAll("text")].map((t) => t.textContent).join(" ") })));
 
+await zoomIn(-216, 450, 1.2);
+await page.waitForTimeout(400);
 const before = await readFlags();
 console.log("BEFORE — flags on the owner's real plan:");
 for (const f of before) console.log(`  ${f.f.padEnd(20)} “${f.label}”  (needs ${f.short}′ more approach)`);
@@ -38,13 +43,13 @@ if (!chipTexts.every((t) => /Fix/.test(t) && /more approach|tighter/.test(t))) {
 }
 
 // Click every flag's Fix chip, in place, on the real canvas.
-const spots = [{ f: "e1454682splyoj:3", x: -217, y: 450, ppf: 2.0 }, { f: "e54duuwgj:1", x: 560, y: -350, ppf: 1.6 }];
+const spots = [{ f: "e1454682splyoj:3", x: -216, y: 450, ppf: 2.0 }, { f: "e54duuwgj:1", x: 554, y: -340, ppf: 1.6 }];
 for (const s of spots) {
   await page.evaluate(([x, y, p]) => window.__plannerView.centerOn(x, y, p), [s.x, s.y, s.ppf]);
   await page.waitForTimeout(400);
   const chip = page.locator(`[data-road-radius-flag="${s.f}"]`);
   if (await chip.count() === 0) { console.log(`  (${s.f} already clear)`); continue; }
-  await chip.locator("rect").click({ force: true });
+  await chip.locator("circle").click({ force: true });      // the corner dot IS the click target
   await page.waitForTimeout(500);
   console.log(`  clicked Fix on ${s.f}`);
 }

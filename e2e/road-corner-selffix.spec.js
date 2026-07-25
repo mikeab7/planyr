@@ -80,9 +80,23 @@ test.describe("NEW-3/NEW-4 — a corner that can't hold its class fixes itself",
     await loadOwnerPlan(page);
     const flags = page.locator("[data-road-radius-flag]");
     await expect.poll(async () => flags.count(), { timeout: 20_000 }).toBeGreaterThan(0);
+    await page.waitForFunction(() => !!window.__plannerView, null, { timeout: 20_000 });
+    const view = (x, y, p) => page.evaluate(([a, b, c]) => window.__plannerView.centerOn(a, b, c), [x, y, p]);
 
-    // It must SAY what it needs — a bare "!" is the thing being replaced.
+    // NEW-5 — on a WHOLE-SITE view the label folds away to just the corner dot. A fixed-pixel pill at
+    // that zoom sprawled across two buildings and read as attached to nothing (owner, 2026-07-25).
+    await view(-216, 450, 0.2);
+    await page.waitForTimeout(300);
+    await expect(flags.first()).toHaveAttribute("data-road-radius-open", "0");
+    await expect(page.getByTestId("road-radius-flag-label")).toHaveCount(0);
+    // …but the remedy is never lost — the folded dot still carries it in its tooltip.
+    await expect(flags.first().locator("title")).toHaveText(/turns at .* where the class asks for/);
+
+    // Zoomed in to where you can act on it, it unfolds and SAYS what it needs.
+    await view(-216, 450, 1.2);
+    await page.waitForTimeout(300);
     const first = flags.first();
+    await expect(first).toHaveAttribute("data-road-radius-open", "1");
     await expect(first).toContainText(/more approach|tighter than/);
     await expect(first, "and offer the fix in place").toContainText("Fix");
     expect(Number(await first.getAttribute("data-road-radius-shortfall"))).toBeGreaterThan(0);
@@ -90,9 +104,19 @@ test.describe("NEW-3/NEW-4 — a corner that can't hold its class fixes itself",
     const fire = (await roads(page)).find((r) => r.cls === "fire");
     const bearingBefore = Math.atan2(fire.pts[3].y - fire.pts[2].y, fire.pts[3].x - fire.pts[2].x);
 
+    // Each remaining corner may be anywhere on the plan, so park the viewport on it before clicking.
     let guard = 0;
     while (await flags.count() > 0 && guard++ < 6) {
-      await flags.first().locator("rect").click({ force: true });
+      const target = flags.first();
+      const at = await target.evaluate((n) => { const c = n.querySelector("circle"); const b = c.getBoundingClientRect(); return [b.x, b.y]; });
+      const world = await page.evaluate(([sx, sy]) => {
+        const v = window.__plannerView.get();
+        const svg = document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect();
+        return [(sx - svg.left - v.offX) / v.ppf, (sy - svg.top - v.offY) / v.ppf];
+      }, at);
+      await page.evaluate(([x, y]) => window.__plannerView.centerOn(x, y, 1.2), world);
+      await page.waitForTimeout(350);
+      await flags.first().locator("circle").click({ force: true });
       await page.waitForTimeout(400);
     }
     await expect(flags, "every corner holds its class turn after the fix").toHaveCount(0);

@@ -1021,6 +1021,9 @@ const ROAD_FIX_MAX_NUDGE_FT = 50;
 // Bounded so a road never grows an arbitrary tail; the extension follows the leg's own bearing, so
 // the alignment is unchanged and a weld at that end just slides along the pavement it already meets.
 const ROAD_FIX_MAX_EXTEND_FT = 25;
+// NEW-5 — below this zoom a radius flag folds to just its corner dot. A fixed-pixel label on a
+// whole-site view sprawls across the plan and reads as attached to nothing (owner, 2026-07-25).
+const ROAD_FLAG_LABEL_PPF = 0.5;
 // Default Arc radius for a road's new vertices = its class default (settings-resolved).
 const roadDefaultRadius = (el, settings) => classDefaultRadius(roadClassOf(settings, el && el.roadClass));
 // The dense, tessellated centerline (the rendered alignment) for a centerline road.
@@ -14744,19 +14747,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {roadRadiusFlags.map((f, i) => {
                     const q = f2p(f.pt);
                     const el = (els || []).find((x) => x.id === f.id);
+                    const act = () => { if (el) fixRoadRadiusFor(el); };
                     const short = f.shortfallFt > 0.5 ? `needs ${f0(f.shortfallFt)}\u2032 more approach` : `turns tighter than ${f0(f.minRadius)}\u2032`;
-                    const w = 9 + short.length * 5.6 + 30;
+                    const tip = `${f.label}: this corner turns at ${Math.round(f.rendered)}\u2032 where the class asks for ${Math.round(f.minRadius)}\u2032. Click to run its approach out far enough to hold the turn.`;
+                    // NEW-5, owner 2026-07-25 ("the prompt's text is so far off"): the label used to be
+                    // anchored AT the vertex and sprawl right, so at a whole-site zoom a fixed-pixel pill
+                    // ran clear across two buildings and read as attached to nothing — and its width was
+                    // under-measured, so "Fix" printed on top of the label. Now: a small dot always marks
+                    // the CORNER ITSELF, the label is a separate pill offset above-right on a short
+                    // leader, and it only unfolds once the plan is zoomed in enough to act on it. The dot
+                    // carries the same click + tooltip, so nothing is lost when it is folded.
+                    const open = view.ppf >= ROAD_FLAG_LABEL_PPF;
+                    // Width measured the way the text actually sets: "! " glyph, the label at ~0.58em of
+                    // 10.5px, a gap, then "Fix". Padding on both ends. (The old estimate omitted the
+                    // glyph and the inter-word gap, which is exactly how "Fix" ended up overlapping.)
+                    const labelW = short.length * 6.1;
+                    const w = 12 + 9 + 6 + labelW + 10 + 20 + 12;
+                    const bx = q.x + 14, by = q.y - 30;                     // pill origin, up and to the right
                     return (
                       <g key={`rrf${f.id}-${f.i}-${i}`} data-road-radius-flag={`${f.id}:${f.i}`}
                          data-road-radius-shortfall={Math.round(f.shortfallFt || 0)}
+                         data-road-radius-open={open ? "1" : "0"}
                          style={{ cursor: el ? "pointer" : "default" }}
                          onPointerDown={(e) => { e.stopPropagation(); }}
-                         onClick={(e) => { e.stopPropagation(); if (el) fixRoadRadiusFor(el); }}>
-                        <title>{`${f.label}: this corner turns at ${Math.round(f.rendered)}\u2032 where the class asks for ${Math.round(f.minRadius)}\u2032. Click Fix and the road runs its approach out far enough to hold the turn.`}</title>
-                        <rect x={q.x - 10} y={q.y - 11} width={w} height={22} rx={11} fill={PAL.paper} stroke={PAL.warn} strokeWidth={1.75} />
-                        <text x={q.x - 1} y={q.y + 4} style={{ fontSize: 11, fontWeight: 800, fill: PAL.warn }}>!</text>
-                        <text x={q.x + 7} y={q.y + 4} style={{ fontSize: 10.5, fontWeight: 600, fill: PAL.warn }}>{short}</text>
-                        <text x={q.x + w - 32} y={q.y + 4} style={{ fontSize: 10.5, fontWeight: 800, fill: PAL.accent, textDecoration: "underline" }}>Fix</text>
+                         onClick={(e) => { e.stopPropagation(); act(); }}>
+                        <title>{tip}</title>
+                        {open && <line x1={q.x} y1={q.y} x2={bx + 6} y2={by + 11} stroke={PAL.warn} strokeWidth={1.25} />}
+                        {open && (
+                          <g data-testid="road-radius-flag-label">
+                            <rect x={bx} y={by} width={w} height={22} rx={11} fill={PAL.paper} stroke={PAL.warn} strokeWidth={1.75} />
+                            <text x={bx + 12} y={by + 15} style={{ fontSize: 11, fontWeight: 800, fill: PAL.warn }}>!</text>
+                            <text x={bx + 12 + 9 + 6} y={by + 15} style={{ fontSize: 10.5, fontWeight: 600, fill: PAL.warn }}>{short}</text>
+                            <text x={bx + w - 12 - 20} y={by + 15} style={{ fontSize: 10.5, fontWeight: 800, fill: PAL.accent, textDecoration: "underline" }}>Fix</text>
+                          </g>
+                        )}
+                        {/* the corner marker itself — always drawn, always the click target */}
+                        <circle cx={q.x} cy={q.y} r={7} fill={PAL.paper} stroke={PAL.warn} strokeWidth={2} />
+                        <text x={q.x} y={q.y + 4} textAnchor="middle" style={{ fontSize: 10.5, fontWeight: 800, fill: PAL.warn }}>!</text>
                       </g>
                     );
                   })}

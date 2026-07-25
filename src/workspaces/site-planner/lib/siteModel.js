@@ -16,9 +16,9 @@
  */
 
 import { dogEarGeom, dogEarSize, isDogEarSide } from "./dogEar.js";
-import { roadCenterline, dedupeRoadVertices, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
+import { roadCenterline, dedupeRoadVertices, repairBakedRadii, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
-import { DEFAULT_ROAD_CLASS } from "./roadClasses.js";
+import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ } from "./zOrder.js";
 
 // v12 (B671): every drawn element carries an explicit `z` — the within-type-layer stacking
@@ -660,6 +660,17 @@ function migrateRoad(el, opts) {
     pinned: opts && Array.isArray(opts.pinned) ? opts.pinned : [],
   });
   if (deduped) out = { ...out, pts: deduped.pts, vtx: deduped.vtx };
+  // NEW-6 — undo a radius the PRE-B1013 auto-fixer baked onto a vertex. It wrote the clamped value
+  // back, so the corner drew as a blob forever and read as a radius the owner had chosen. Only a
+  // BELOW-CLASS, non-round value is touched (see repairBakedRadii) and no point ever moves, so this
+  // can only improve a drawn corner. Lives in migrateRoad, not a call site, so BOTH read paths get it
+  // (the B1012 lesson: two code paths for the same data drift unless they share the function).
+  const cls = roadClassOf(opts && opts.settings, out.roadClass);
+  const min = cls && cls.minRadius > 0 ? cls.minRadius : 0;
+  if (min > 0) {
+    const fixed = repairBakedRadii(out.pts, out.vtx, min, { targetRadius: cls.defaultRadius > 0 ? cls.defaultRadius : min });
+    if (fixed) out = { ...out, pts: fixed.pts, vtx: fixed.vtx };
+  }
   return out;
 }
 export function migrateRoads(els) {
