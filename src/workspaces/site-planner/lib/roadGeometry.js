@@ -292,18 +292,43 @@ export function canRemoveRoadVertex(pts, index) {
  * hugs the far endpoint within tol, the endpoint wins (that clutter is dropped too) — but index 0 never
  * goes. Idempotent: a cleaned road has no sub-tol interior gap, so a re-run returns null (no churn).
  * Returns a fresh { pts, vtx } when it collapsed anything, else null. Pure — unit-tested. */
-export function dedupeRoadVertices(pts, vtx, tol = ROAD_VERTEX_COLLAPSE_FT) {
+export function dedupeRoadVertices(pts, vtx, tol = ROAD_VERTEX_COLLAPSE_FT, opts = {}) {
   if (!Array.isArray(pts) || pts.length < 3) return null;   // a 2-pt road has no interior to collapse
   const t = tol > 0 ? tol : ROAD_VERTEX_COLLAPSE_FT;
+  // NEW-5 — DISTANCE IS THE WRONG TEST on its own. B1008 collapsed vertices within ~1.5 ft, and the
+  // owner's very next connect dropped one 3.4 ft away — through which the alignment swung 37°. A 40 ft
+  // truck road cannot bend 37° in 3.4 ft, so that is not a segment, it is connect debris: it starved the
+  // corner to a 5 ft radius (against a 50 ft class minimum) and, because the junction reads its tangent
+  // off whatever segment it is standing on, aimed the entrance 37° wrong and threw a spike. Meanwhile
+  // the SAME road carries harmless 2 ft stubs further east — harmless precisely because it runs dead
+  // straight through them. What makes a stub dangerous is a stub CARRYING A TURN. So the second test is
+  // geometric: a segment shorter than a quarter of the road's own width, across which the alignment
+  // deflects materially, collapses too. `pinned` protects any point another road welds to, so cleaning
+  // debris can never break a tee.
+  const dfl = opts.deflectFt > 0 ? opts.deflectFt : 0;
+  const pinned = Array.isArray(opts.pinned) ? opts.pinned : [];
+  const isPinned = (p) => pinned.some((q) => q && Math.hypot(q.x - p.x, q.y - p.y) <= Math.max(t, 0.75));
+  const bearing = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
+  const deflectAt = (i) => {
+    if (i <= 0 || i >= pts.length - 1) return 0;
+    let d = bearing(pts[i], pts[i + 1]) - bearing(pts[i - 1], pts[i]);
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    return Math.abs(d);
+  };
+  const MIN_DEFLECT = (5 * Math.PI) / 180;                  // below this the stub is collinear → harmless
   const v = normVtx(pts, vtx);
   const last = pts.length - 1;
   const keep = [0];
   for (let i = 1; i < last; i++) {
     const prev = pts[keep[keep.length - 1]];
-    if (Math.hypot(pts[i].x - prev.x, pts[i].y - prev.y) > t) keep.push(i);  // else: drop interior near-dup
+    const gap = Math.hypot(pts[i].x - prev.x, pts[i].y - prev.y);
+    if (gap <= t) continue;                                                  // near-duplicate (B1008)
+    if (dfl > 0 && gap < dfl && deflectAt(i) > MIN_DEFLECT && !isPinned(pts[i])) continue; // turning stub
+    keep.push(i);
   }
   // The far endpoint always survives; peel back any kept interior clutter hugging it (never index 0).
-  while (keep.length >= 2 && keep[keep.length - 1] !== 0 &&
+  while (keep.length >= 2 && keep[keep.length - 1] !== 0 && !isPinned(pts[keep[keep.length - 1]]) &&
          Math.hypot(pts[last].x - pts[keep[keep.length - 1]].x, pts[last].y - pts[keep[keep.length - 1]].y) <= t) {
     keep.pop();
   }
@@ -449,7 +474,12 @@ export function planRoadConnect(movingEl, movingIndex, targetEl, candidate, join
     if (!targetEl || !Array.isArray(targetEl.pts)) return null;
     // NEW-3 — reuse an existing through-road vertex within collapse distance instead of near-duplicating
     // one, and weld the moving endpoint to that RESOLVED node so both roads meet at a single point.
-    const ins = insertRoadVertex(targetEl.pts, targetEl.vtx, candidate.index, weldPt, { collapseFt: ROAD_VERTEX_COLLAPSE_FT });
+    // NEW-5 — reuse an existing control point far more readily than B1008's flat 1.5 ft. A tee node
+    // dropped a few feet from one already there creates a stub the road then has to turn through, which
+    // starves the corner and mis-aims the junction tangent (the owner's spike). The tolerance scales with
+    // the road, because that is what decides whether a stub can carry a bend at all.
+    const collapseFt = Math.max(ROAD_VERTEX_COLLAPSE_FT, (+targetEl.travelW || 0) / 4);
+    const ins = insertRoadVertex(targetEl.pts, targetEl.vtx, candidate.index, weldPt, { collapseFt });
     if (!ins) return { action: "weld", moving: weldMoving() };   // out-of-range → fall back to a plain weld
     const teePt = ins.pts[ins.index];
     return { action: "tee", moving: weldMovingTo(teePt), target: { pts: ins.pts, vtx: ins.vtx } };

@@ -22,7 +22,8 @@ const LABEL = process.env.LABEL || "before";
 const OUT = new URL("./screens/road-junctions/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
-const fixture = JSON.parse(readFileSync(new URL("./fixtures/tsakiris-concept-a.json", import.meta.url), "utf8"));
+const FIXTURE = process.env.FIXTURE || "tsakiris-concept-a.json";
+const fixture = JSON.parse(readFileSync(new URL(`./fixtures/${FIXTURE}`, import.meta.url), "utf8"));
 const SITE_ID = "tsakiris-concept-a";
 const site = {
   id: SITE_ID, groupId: SITE_ID, site: "Tsakiris", name: "Concept A",
@@ -37,6 +38,7 @@ const JUNCTIONS = [
   { key: "J4-drive-to-parking", x: -216.8, y: 446.0, ppf: 1.6, note: "fire lane drive onto the parking field" },
   { key: "J5-road-road-weld", x: 549.4, y: -321.7, ppf: 1.6, note: "aisle welds end-to-end onto the truck stub" },
   { key: "OVERVIEW-east", x: 470, y: 330, ppf: 0.42, note: "the whole east cluster the owner screenshotted" },
+  { key: "J6-pond-west-skew-tee", x: 240, y: 300, ppf: 1.6, note: "36' aisle into the truck loop by the pond (the redrawn one)" },
 ];
 
 const browser = await chromium.launch({

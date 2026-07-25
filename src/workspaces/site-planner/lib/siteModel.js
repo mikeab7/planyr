@@ -639,7 +639,7 @@ export function roadStripBBox(pts, vtx, travelW, curb, opts = {}) {
 // that already carries `pts`) and additive (keeps cx/cy/w/h/rot as the tight bbox of the
 // straight road, so it renders identically). A BONDED dock-layer road (attachedTo set) is
 // left as a rect — the relayout engine still owns its geometry.
-function migrateRoad(el) {
+function migrateRoad(el, opts) {
   if (!el || el.type !== "road" || el.attachedTo != null) return el;
   let out = el;
   if (!(Array.isArray(el.pts) && el.pts.length >= 2)) {       // legacy rotated-rect → centerline
@@ -652,13 +652,26 @@ function migrateRoad(el) {
   // NEW-3 — collapse near-duplicate control-point clutter left by earlier connect attempts (the
   // B1005/B1006 root cause), keeping pts/vtx index-aligned. Idempotent: a clean road returns null → no
   // churn, so `out === el` stays reference-stable for already-migrated data.
-  const deduped = dedupeRoadVertices(out.pts, out.vtx, ROAD_VERTEX_COLLAPSE_FT);
+  // NEW-5 — plus the deflection test: a stub shorter than a quarter of the road's own width that the
+  // alignment TURNS through is connect debris, not geometry (see dedupeRoadVertices). `pinned` carries
+  // every other road's endpoints so cleaning debris can never drop a vertex a tee is welded to.
+  const deduped = dedupeRoadVertices(out.pts, out.vtx, ROAD_VERTEX_COLLAPSE_FT, {
+    deflectFt: Math.max(ROAD_VERTEX_COLLAPSE_FT, (+out.travelW || 0) / 4),
+    pinned: opts && Array.isArray(opts.pinned) ? opts.pinned : [],
+  });
   if (deduped) out = { ...out, pts: deduped.pts, vtx: deduped.vtx };
   return out;
 }
 function migrateRoads(els) {
   let changed = false;
-  const out = (els || []).map((e) => { const m = migrateRoad(e); if (m !== e) changed = true; return m; });
+  // Every road ENDPOINT on the site is a pinned point: another road may tee/weld onto it, and a cleanup
+  // that dropped one would silently break the junction.
+  const pinned = [];
+  for (const e of els || []) {
+    if (!e || !Array.isArray(e.pts) || e.pts.length < 2) continue;
+    pinned.push({ x: e.pts[0].x, y: e.pts[0].y }, { x: e.pts[e.pts.length - 1].x, y: e.pts[e.pts.length - 1].y });
+  }
+  const out = (els || []).map((e) => { const m = migrateRoad(e, { pinned }); if (m !== e) changed = true; return m; });
   return changed ? out : (els || []);
 }
 // Placed site-plan overlays (B72) — immutable backdrop sheets over the map.
