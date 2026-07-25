@@ -121,6 +121,35 @@ test.describe("NEW-1/NEW-2 — road connections on the owner's real plan", () =>
     expect(fire.R).toBeGreaterThan(2);      // but still a rounded corner, not a square one
   });
 
+  /* B1011 — the junction the owner reported AFTER the dissolve landed: the 36' aisle meets the truck
+     loop AT A BEND. teeGeometry took one `throughDir`, so both returns were built against the bisector
+     of two tangents the pavement never follows — one proud (a dart), one shy (a notch). The arms model
+     measures each corner against its OWN arm, so both are real returns. */
+  test("a tee landing ON A BEND solves a REAL return on BOTH sides, not one proud and one shy", async ({ page }) => {
+    await loadOwnerPlan(page);
+    const net = await roadNetwork(page);
+    const bendTees = net.tees.filter((t) => t.throughId === "e38duuwgj");
+    expect(bendTees.length, "the pond-west and loop tees must both be detected").toBeGreaterThan(0);
+    for (const t of bendTees) {
+      expect(t.wedges, "both armpits contribute additive pavement").toBe(2);
+      expect(t.R, "a real rounded return, not a collapsed corner").toBeGreaterThan(1);
+      for (const arcLen of t.returns) expect(arcLen, "each return is a tessellated arc, not a chamfer").toBeGreaterThan(2);
+    }
+  });
+
+  /* B1011 round 2 — the SAME family: a junction the owner drew was not recognised at all because the
+     endpoint sat 0.86 ft from the through road's vertex against a flat 0.75 ft tolerance, so no returns
+     were added and the two strips simply butted (a squared-off notch). The tolerance now scales with
+     the narrower road's width. */
+  test("a junction drawn with sub-foot slack is still recognised and gets its returns", async ({ page }) => {
+    await loadOwnerPlan(page);
+    const net = await roadNetwork(page);
+    const slack = net.tees.find((t) => t.sideId === "e1454692rfhccx" && t.throughId === "e1454683splyoj");
+    expect(slack, "the 36' aisle meets the 40' aisle 0.86 ft off its vertex — still a junction").toBeTruthy();
+    expect(slack.wedges).toBe(2);
+    expect(slack.R).toBeGreaterThan(1);
+  });
+
   test("a building over a junction still paints OVER the pavement (z-clip preserved)", async ({ page }) => {
     await loadOwnerPlan(page);
     const order = await page.evaluate(() => {

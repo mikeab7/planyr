@@ -39,6 +39,7 @@ const JUNCTIONS = [
   { key: "J5-road-road-weld", x: 549.4, y: -321.7, ppf: 1.6, note: "aisle welds end-to-end onto the truck stub" },
   { key: "OVERVIEW-east", x: 470, y: 330, ppf: 0.42, note: "the whole east cluster the owner screenshotted" },
   { key: "J6-pond-west-skew-tee", x: 240, y: 300, ppf: 1.6, note: "36' aisle into the truck loop by the pond (the redrawn one)" },
+  { key: "J6z-fork-crotch", x: 232, y: 292, ppf: 5.5, note: "the crotch of the pond-west fork, zoomed hard" },
 ];
 
 const browser = await chromium.launch({
