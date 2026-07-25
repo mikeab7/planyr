@@ -662,7 +662,7 @@ function migrateRoad(el, opts) {
   if (deduped) out = { ...out, pts: deduped.pts, vtx: deduped.vtx };
   return out;
 }
-function migrateRoads(els) {
+export function migrateRoads(els) {
   let changed = false;
   // Every road ENDPOINT on the site is a pinned point: another road may tee/weld onto it, and a cleanup
   // that dropped one would silently break the junction.

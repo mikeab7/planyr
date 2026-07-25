@@ -30,6 +30,8 @@ const arr = (x) => (Array.isArray(x) ? x : []);
 // mergeSiteContent's filter + the SQL backfill) and lands as a tombstone row instead.
 // Returns { rows, problems }: problems lists items skipped for having no string id —
 // callers must surface a non-empty problems list loudly (LOUD-FAILURE), never drop it.
+import { migrateRoads } from "./siteModel.js";
+
 export function explodeModel(model) {
   const m = model || {};
   const siteId = m.id || null;
@@ -99,6 +101,14 @@ export function rowsToModel(header, rows) {
   const dead = new Set(arr(h.deletedIds).filter((x) => typeof x === "string"));
   for (const r of arr(rows)) if (r && r.deleted_at) dead.add(r.id);
   out.deletedIds = [...dead].filter((id) => !liveIds.has(id)).sort();
+  // NEW-6 — run the ROAD MIGRATION here too. This is the bug that made B1010 look like it did nothing
+  // on the owner's live plan. A site has TWO read paths: the site-record blob (which goes through
+  // siteModel's `migrate`, where the road cleanup lived) and — for a signed-in, element-synced site —
+  // these `site_elements` ROWS, which are folded straight to the model and never saw it. The owner is
+  // element-synced, so his canvas kept rendering the un-cleaned geometry (24 stored points, connect
+  // debris intact) while the localStorage cache showed the cleaned 18. Same function, both paths, so
+  // the two can never disagree again — which is exactly the failure mode that produced this line.
+  out.els = migrateRoads(out.els);
   return out;
 }
 

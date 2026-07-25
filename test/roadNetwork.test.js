@@ -11,6 +11,8 @@ import { describe, it, expect } from "vitest";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD } from "../src/workspaces/site-planner/lib/roadNetwork.js";
 import { teeGeometry, roadCornerRadii, roadRadiusConflicts, dedupeRoadVertices } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import { bufferPolyline } from "../src/workspaces/site-planner/lib/metesAndBounds.js";
+import { rowsToModel } from "../src/workspaces/site-planner/lib/elementRows.js";
+import { migrate } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 const area = (r) => { let s = 0; for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; s += a.x * b.y - b.x * a.y; } return Math.abs(s / 2); };
 const pointInRing = (p, ring) => {
@@ -256,5 +258,41 @@ describe("dedupeRoadVertices — a stub that CARRIES A TURN is debris; a straigh
     const pts = [{ x: 0, y: 0 }, { x: 180, y: 96 }, { x: 183, y: 97.6 }, { x: 252, y: 250 }];
     const once = dedupeRoadVertices(pts, [{}, {}, {}, {}], 1.5, pinnedNone);
     expect(dedupeRoadVertices(once.pts, once.vtx, 1.5, pinnedNone)).toBeNull();
+  });
+});
+
+/* NEW-6 — BOTH read paths must clean roads. A site reaches the canvas either as a site-record blob
+ * (siteModel.migrate) or, when element-synced, as site_elements ROWS folded by rowsToModel. B1010's
+ * cleanup lived only on the first, so the owner — who is element-synced — kept rendering un-cleaned
+ * geometry and reported the fix as doing nothing. These lock both paths to the same result. */
+describe("road cleanup runs on BOTH read paths, not just the site-record blob", () => {
+  // The owner's live shape: a long run, a stub the alignment turns through, then a long run.
+  const debrisRoad = {
+    id: "r1", type: "road", travelW: 40, curb: 0.5, roadClass: "truck",
+    pts: [{ x: 0, y: 0 }, { x: 180, y: 96 }, { x: 183, y: 97.6 }, { x: 252, y: 250 }],
+    vtx: [{}, {}, {}, {}],
+  };
+
+  it("rowsToModel (the element-synced path) collapses connect debris", () => {
+    const rows = [{ kind: "el", id: "r1", data: debrisRoad, deleted_at: null }];
+    const model = rowsToModel({}, rows);
+    const road = model.els.find((e) => e.id === "r1");
+    expect(road.pts).toHaveLength(3);
+    expect(road.pts[1]).toEqual({ x: 180, y: 96 });
+  });
+
+  it("both paths agree — the rows fold and the site-record migrate produce identical geometry", () => {
+    const viaRows = rowsToModel({}, [{ kind: "el", id: "r1", data: debrisRoad, deleted_at: null }]);
+    const viaBlob = migrate({ els: [debrisRoad] });
+    const a = viaRows.els.find((e) => e.id === "r1");
+    const b = viaBlob.els.find((e) => e.id === "r1");
+    expect(a.pts).toEqual(b.pts);
+    expect(a.vtx).toEqual(b.vtx);
+  });
+
+  it("a clean road is untouched by the rows fold (no churn)", () => {
+    const clean = { ...debrisRoad, pts: [{ x: 0, y: 0 }, { x: 180, y: 96 }, { x: 252, y: 250 }], vtx: [{}, {}, {}] };
+    const model = rowsToModel({}, [{ kind: "el", id: "r1", data: clean, deleted_at: null }]);
+    expect(model.els.find((e) => e.id === "r1").pts).toHaveLength(3);
   });
 });
