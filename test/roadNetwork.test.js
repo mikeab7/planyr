@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD } from "../src/workspaces/site-planner/lib/roadNetwork.js";
-import { teeGeometry } from "../src/workspaces/site-planner/lib/roadGeometry.js";
+import { teeGeometry, roadCornerRadii, roadRadiusConflicts } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import { bufferPolyline } from "../src/workspaces/site-planner/lib/metesAndBounds.js";
 
 const area = (r) => { let s = 0; for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; s += a.x * b.y - b.x * a.y; } return Math.abs(s / 2); };
@@ -173,5 +173,50 @@ describe("clusterIds — connected roads render as one surface", () => {
   it("ignores pairs naming an unknown id", () => {
     const idx = clusterIds(["a", "b"], [["a", "zz"]]);
     expect(idx.get("a")).not.toBe(idx.get("b"));
+  });
+});
+
+/* NEW-4 — the three defects the owner reported off his live plan, and the silent clamp behind them. */
+describe("roadCornerRadii / roadRadiusConflicts — a corner the app had to shrink must SAY SO", () => {
+  it("reports the DRAWN radius, not the requested one, when the leg is too short to hold it", () => {
+    // A 28 ft corner (a fire lane's inside minimum) on a leg far too short to carry it. arcCorner
+    // silently clamps the run to half the shorter leg; this is what surfaces that.
+    const pts = [{ x: -200, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 22 }];
+    const vtx = [{}, { treatment: "arc", radius: 28 }, {}];
+    const [corner] = roadCornerRadii(pts, vtx);
+    expect(corner.requested).toBe(28);
+    expect(corner.rendered).toBeLessThan(28);
+    expect(corner.rendered).toBeCloseTo(11, 0);      // half the 22 ft leg, at a 90° deflection
+    expect(corner.limited).toBe(true);
+  });
+
+  it("does NOT flag a corner the geometry can actually hold", () => {
+    const pts = [{ x: -300, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 300 }];
+    const vtx = [{}, { treatment: "arc", radius: 28 }, {}];
+    const [corner] = roadCornerRadii(pts, vtx);
+    expect(corner.limited).toBe(false);
+    expect(corner.rendered).toBeCloseTo(28, 6);
+    expect(roadRadiusConflicts(pts, vtx, 28)).toHaveLength(0);
+  });
+
+  it("flags every interior corner drawn below the class minimum, and carries the vertex point", () => {
+    const pts = [{ x: -200, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 22 }];
+    const vtx = [{}, { treatment: "arc", radius: 28 }, {}];
+    const [bad] = roadRadiusConflicts(pts, vtx, 28);
+    expect(bad.i).toBe(1);
+    expect(bad.minRadius).toBe(28);
+    expect(bad.pt).toEqual({ x: 0, y: 0 });
+  });
+
+  it("a straight or smooth vertex is never a radius conflict", () => {
+    const straight = [{ x: -100, y: 0 }, { x: 0, y: 0 }, { x: 100, y: 0 }];
+    expect(roadRadiusConflicts(straight, [{}, { treatment: "arc", radius: 28 }, {}], 28)).toHaveLength(0);
+    const smooth = [{ x: -100, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 22 }];
+    expect(roadRadiusConflicts(smooth, [{}, { treatment: "smooth" }, {}], 28)).toHaveLength(0);
+  });
+
+  it("the Custom class (no threshold) never flags", () => {
+    const pts = [{ x: -200, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 22 }];
+    expect(roadRadiusConflicts(pts, [{}, { treatment: "arc", radius: 28 }, {}], 0)).toHaveLength(0);
   });
 });
