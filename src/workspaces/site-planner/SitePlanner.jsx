@@ -109,7 +109,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners } from "./lib/roadGeometry.js";
+import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD } from "./lib/roadNetwork.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
@@ -1052,6 +1052,18 @@ const roadStripArea = (el, settings) => {
 // The return radius seeds from the side road's class (classReturnRadius) unless the side road stores
 // an explicit el.tee override for this through road. Pure over (els, settings); memoized at the call site.
 const TEE_COINCIDE_FT = 0.75;
+// B1011 round 2 — a FLAT 0.75 ft is too tight to recognise a junction the owner actually drew. On his
+// plan the 36' aisle's endpoint sits 0.86 ft from the 40' aisle's vertex — a tenth of a foot over the
+// line — so the app saw no tee there at all, added no curb returns, and the two strips simply butted:
+// the squared-off notch at that junction. Sub-foot slack is normal in hand-drawn geometry (grid snap,
+// migration rounding, a nudged vertex), and it is NOT a meaningful separation on a 40 ft road. So the
+// tolerance scales with the narrower road's own width, exactly like the B1010 debris rule, and stays
+// bounded so two genuinely distinct vertices can never be welded by accident.
+const TEE_COINCIDE_MAX_FT = 4;
+const teeCoincideFt = (a, b) => {
+  const w = Math.min(+a?.travelW || 0, +b?.travelW || 0);
+  return Math.max(TEE_COINCIDE_FT, Math.min(w > 0 ? w / 8 : 0, TEE_COINCIDE_MAX_FT));
+};
 // How far a road RUNS from vertex `i` in direction `step` (+1/-1) along its own polyline, and the
 // first point far enough away to give an honest tangent.
 //
@@ -1093,7 +1105,7 @@ function teeJunctionsOf(els, settings) {
       for (const H of roads) {
         if (H.id === S.id) continue;
         for (let i = 1; i < H.pts.length - 1; i++) {
-          if (Math.hypot(H.pts[i].x - P.x, H.pts[i].y - P.y) <= TEE_COINCIDE_FT) { G = H; gvi = i; break; }
+          if (Math.hypot(H.pts[i].x - P.x, H.pts[i].y - P.y) <= teeCoincideFt(S, H)) { G = H; gvi = i; break; }
         }
         if (G) break;
       }
@@ -1102,10 +1114,13 @@ function teeJunctionsOf(els, settings) {
       const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
       const backRun = roadRunFrom(G.pts, gvi, -1, roadTangentNoise(G)), fwdRun = roadRunFrom(G.pts, gvi, 1, roadTangentNoise(G));
       const a = backRun.far, b = fwdRun.far;
-      const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangent at the vertex
+      const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangents at the vertex
       const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;
+      // The BISECTOR is kept ONLY for the frame the building clamp and the stripe cut work in. It is no
+      // longer the line the returns are built against — that was B1011: at a node that is also a BEND the
+      // through road has two tangents and the bisector follows neither, so one return sat proud of the
+      // real edge (a dart) and the other fell shy of it (a notch).
       const throughDir = { x: din.x / li + dout.x / lo, y: din.y / li + dout.y / lo };
-      // NEW-4 — the OPEN side of a tee is the side the side-road (and therefore the return wedges) sits on.
       const uT = { x: throughDir.x, y: throughDir.y };
       const uTl = Math.hypot(uT.x, uT.y) || 1; uT.x /= uTl; uT.y /= uTl;
       const nrmT = { x: -uT.y, y: uT.x };
@@ -1116,20 +1131,28 @@ function teeJunctionsOf(els, settings) {
       const R = teeOverride && teeOverride.returnR > 0 ? teeOverride.returnR : classReturnRadius(clsS);
       const flare = teeOverride && teeOverride.flare > 0 ? teeOverride.flare : 0;
       const teeObstacle = buildingRunLimit(els, P, uT, nOpenT, R);
-      const geom = teeGeometry({
-        T: { x: P.x, y: P.y }, throughDir, sideDir,
-        // NEW-1 — half-widths at BACK OF CURB (roadOuterHalf), not face of curb. The union takes the
-        // curb-return wedge tangent to the strip OUTLINES, so measuring to the face of curb left the
-        // wedge starting a curb-width inside the painted edge and the dissolved outline showed a small
-        // step where each return landed. driveJunctionsOf already used back-of-curb for the same reason.
-        phT: roadOuterHalf(G), phS: roadOuterHalf(S),
-        R, flare, curbT: roadCurbWidth(G), curbS: roadCurbWidth(S),
-        // `throughDir` points a→b (backRun.far → fwdRun.far), so +u is the forward run and -u the back run.
-        // NEW-4 — and neither direction may run under a building (see buildingRunLimit).
-        throughAvailPos: Math.min(fwdRun.dist, teeObstacle.pos),
-        throughAvailNeg: Math.min(backRun.dist, teeObstacle.neg),
-        sideAvail: sideRun.dist,
+      // B1011 — model the node as ARMS, each measured against ITS OWN tangent: the through road's back
+      // run, its forward run, and the side road. Arm order here is [back, fwd, side] and the ids are what
+      // stop the road's own bend being mistaken for a junction corner.
+      const halfG = roadOuterHalf(G), halfS = roadOuterHalf(S);
+      const nj = nodeJunction({
+        node: { x: P.x, y: P.y }, R, flatDeg: 178,
+        arms: [
+          { dir: { x: a.x - P.x, y: a.y - P.y }, half: halfG, avail: Math.min(backRun.dist, teeObstacle.neg), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
+          { dir: { x: b.x - P.x, y: b.y - P.y }, half: halfG, avail: Math.min(fwdRun.dist, teeObstacle.pos), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
+          { dir: sideDir, half: halfS + Math.max(0, flare), avail: sideRun.dist, road: S.id, deep: Math.max(1, Math.min(halfS * 0.5, 12)) },
+        ],
       });
+      if (!nj) continue;
+      // The THROAT on the through road — the span its near curb stripe must be interrupted across — is
+      // between the tangent points the two side-arm corners left on the two THROUGH arms.
+      const sideGaps = nj.gaps.filter((g) => g.a === 2 || g.b === 2);
+      const throughTangents = sideGaps.map((g) => (g.a === 2 ? g.tanB : g.tanA));
+      const geom = {
+        R: nj.R, wedges: nj.wedges, returns: nj.gaps.map((g) => g.arc), corners: nj.corners,
+        throughTangents, nTee: nOpenT, gaps: nj.gaps,
+        throatWidth: throughTangents.length === 2 ? Math.hypot(throughTangents[0].x - throughTangents[1].x, throughTangents[0].y - throughTangents[1].y) : 0,
+      };
       if (geom) out.push({ sideId: S.id, throughId: G.id, T: { x: P.x, y: P.y }, geom });
     }
   }

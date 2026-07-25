@@ -1110,3 +1110,105 @@ export function weldCoverPolygon(P, arms, opts = {}) {
   }
   return convexHull(cloud);
 }
+
+/* ---- A junction as N ARMS around a NODE (B1011) --------------------------------------
+ *
+ * `teeGeometry` privileges one road as "the through road" and takes a SINGLE `throughDir`. That is a
+ * fine model for a tee onto a straight run and a wrong one the moment the tee node is also a BEND: the
+ * through road has TWO tangents there (incoming and outgoing), the caller could only hand over their
+ * bisector, and both curb returns were then built against a line the pavement never follows — one
+ * return sits proud of the real edge (a thin dart), the other falls shy of it (a notch). That is the
+ * artifact left at the owner's pond-west junction after B1010 cleaned the vertex debris.
+ *
+ * The honest model has no "through road" at all. A junction is a NODE with N ARMS radiating from it,
+ * each with its own bearing, its own pavement half-width and its own run. Sort the arms by bearing and
+ * every ADJACENT PAIR defines one corner — the reflex armpit where those two pavements meet — which
+ * gets one curb-return fillet. That single rule reproduces the straight tee (two 90° corners plus one
+ * 180° gap that needs nothing), and also handles the Y, the bend-with-branch, and a 4-way, without any
+ * arm being special. Each fillet is built against the arm's OWN edge, so nothing is measured against a
+ * line the pavement doesn't follow — which is precisely the dart and the notch, gone by construction.
+ *
+ * arms: [{ dir, half, avail, deep? }] — dir points AWAY from the node into that road's body (need not
+ * be unit); half is the pavement half-width at BACK OF CURB; avail is how far that arm runs before it
+ * must stop (its next vertex, or a building); `road` identifies which road the arm belongs to, so the
+ * two arms of one road's own bend are not treated as a corner (its polyline buffer already joins them). opts.R is the desired return radius, clamped per corner
+ * exactly as teeGeometry clamps: never more than R, never more than what either arm has room for.
+ *
+ * Returns { wedges, corners, gaps, R } where `gaps[k] = { a, b, corner, tanA, tanB, arc, R }` names the
+ * two ARM INDICES it joins, so a caller can find (say) the two arms of one road and read the throat
+ * span between them. `wedges` are ADDITIVE pavement polygons for the boolean union — same contract as
+ * teeGeometry.wedges: never painted over a seam, always unioned. Pure — unit-tested. */
+export function nodeJunction(params) {
+  const { node, arms, R = 0, tessDeg = DEFAULT_TESS_DEG, flatDeg = 178 } = params || {};
+  if (!node || !Array.isArray(arms) || arms.length < 2) return null;
+  const prepped = [];
+  for (let i = 0; i < arms.length; i++) {
+    const a = arms[i];
+    if (!a || !a.dir) continue;
+    const L = len(a.dir);
+    if (!(L > EPS)) continue;
+    prepped.push({
+      i, u: mul(a.dir, 1 / L), half: Math.max(0, +a.half || 0), road: a.road != null ? a.road : null,
+      avail: Number.isFinite(a.avail) ? Math.max(0, a.avail) : Infinity,
+      deep: Number.isFinite(a.deep) ? a.deep : Math.max(1, Math.min(Math.max(0, +a.half || 0) * 0.5, 12)),
+      bearing: Math.atan2(a.dir.y, a.dir.x),
+    });
+  }
+  if (prepped.length < 2) return null;
+  prepped.sort((p, q) => p.bearing - q.bearing);
+  const TAU = Math.PI * 2;
+  const flat = (flatDeg * Math.PI) / 180;
+  const wedges = [], gaps = [], corners = [];
+
+  for (let k = 0; k < prepped.length; k++) {
+    const A = prepped[k], B = prepped[(k + 1) % prepped.length];
+    if (prepped.length === 2 && k === 1) break;              // two arms share ONE gap on each side; do both
+    let sweep = B.bearing - A.bearing;
+    while (sweep <= 0) sweep += TAU;
+    // A gap at/beyond `flatDeg` is a straight run-through (or the outside of the fan): the two strips
+    // already meet flush there, so there is no armpit to round and nothing to add.
+    if (sweep >= flat) continue;
+    // Two arms of the SAME road are the two sides of that road's own bend — its polyline buffer already
+    // joins them. Adding a return there would stack pavement on a corner that is not a junction at all.
+    if (A.road != null && A.road === B.road) continue;
+    // Each arm's edge FACING this gap: A's left (+90° CCW), B's right (−90°).
+    const nA = { x: -A.u.y, y: A.u.x }, nB = { x: B.u.y, y: -B.u.x };
+    const corner = lineX(add(node, mul(nA, A.half)), A.u, add(node, mul(nB, B.half)), B.u);
+    if (!corner) continue;
+    corners.push(corner);
+    // Room left along each arm BEYOND the corner (the corner already sits some way out).
+    const alongA = dot(sub(corner, node), A.u), alongB = dot(sub(corner, node), B.u);
+    const tMax = Math.max(0, Math.min((A.avail - alongA) * 0.9, (B.avail - alongB) * 0.9, R > 0 ? R : 0));
+    const phi = Math.acos(Math.max(-1, Math.min(1, dot(A.u, B.u))));
+    let f = null;
+    if (tMax > EPS && phi > 1e-3 && phi < Math.PI - 1e-3) {
+      let Rc = R > 0 ? R : 0;
+      f = rayFillet(corner, A.u, B.u, Rc, tessDeg);
+      if (f && f.t > tMax) { Rc = tMax * Math.tan(phi / 2); f = rayFillet(corner, A.u, B.u, Rc, tessDeg); }
+      if (f && !(Rc > EPS)) f = null;
+    }
+    if (!f) { gaps.push({ a: A.i, b: B.i, corner, tanA: corner, tanB: corner, arc: [corner], R: 0 }); continue; }
+    // The ADDITIVE wedge, thick into BOTH pavements — same shape and the same reason as teeGeometry's:
+    // only the arc is a real boundary, and reaching well inside both strips bridges any tessellation
+    // mismatch on a curved arm instead of leaving a hair-thin hole that strokes as a seam.
+    // OVERSHOOT past each tangent point (B1011 round 2). The fillet is tangent to the arm's STRAIGHT
+    // edge line at the node, but a real strip edge is the tessellated buffer of a polyline that may BEND
+    // right here — so a wedge that stopped exactly at the tangent point ended a hair off the real edge
+    // and the union outline showed a sub-foot STEP there. Running the flank a little further along the
+    // arm, and a hair INSIDE the edge, tucks it under the strip: the two boundaries now CROSS instead of
+    // one stopping, so the outline stays continuous. Everything inside the union is invisible, so the
+    // overshoot costs nothing; the inward bias is what guarantees it can never poke out past the edge.
+    const ovA = Math.min(Math.max(1, A.half * 0.25), Math.max(0, A.avail - alongA), 6);
+    const ovB = Math.min(Math.max(1, B.half * 0.25), Math.max(0, B.avail - alongB), 6);
+    const tuckA = Math.min(0.35, A.deep * 0.5), tuckB = Math.min(0.35, B.deep * 0.5);
+    const lipA = add(add(f.tan1, mul(A.u, ovA)), mul(nA, -tuckA));
+    const lipB = add(add(f.tan2, mul(B.u, ovB)), mul(nB, -tuckB));
+    const back1 = add(lipA, mul(nA, -A.deep));
+    const back2 = add(lipB, mul(nB, -B.deep));
+    const heel = add(add(corner, mul(nA, -A.deep)), mul(nB, -B.deep));
+    const poly = [...f.arc.map((p) => ({ x: p.x, y: p.y })), lipB, back2, heel, back1, lipA];
+    if (poly.length >= 3) wedges.push(poly);
+    gaps.push({ a: A.i, b: B.i, corner, tanA: f.tan1, tanB: f.tan2, arc: f.arc, R: f.R });
+  }
+  return { wedges, corners, gaps, R: gaps.reduce((m, g) => Math.max(m, g.R || 0), 0) };
+}
