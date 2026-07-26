@@ -179,3 +179,30 @@ export const DIM_FONT_BASE_PX = 11;
 export const DIM_FONT_MIN_SCALE = 0.26;
 export const dimFontScale = (ppf) => Math.max(DIM_FONT_MIN_SCALE, Math.min(1, ppf / 0.45));
 export const dimFontPx = (ppf) => DIM_FONT_BASE_PX * dimFontScale(ppf);
+
+// NEW-1 — POND DESIGN-PARAMETER tier: the engineering numbers that annotate a pond's grading
+// section in plan view — the berm-height tag ("berm 8.2 ft"), the water-surface / floor
+// elevation callouts ("Floor 145.1"), and the stage-storage line ("Holds … · 16.2′ rim to
+// floor"). These are INSPECT-zoom information: you read them while looking at one pond, never
+// while scanning the whole site. They are NOT the pond's identity (its name + footprint acreage
+// stay on the normal overview label stack, exactly like a building's name + sf).
+//
+// Owner report (2026-07-26): at site-overview zoom the berm tag and the floor elevation painted
+// at a FIXED size with a heavy halo, so they out-shouted the building dimension numbers on a
+// view where the pond's grading detail isn't legible anyway — "that stuff is bigger than the
+// building numbers … does not need to be that big or even visible at that zoom."
+//
+// Two defences, both self-tuning (no per-zoom breakpoints), mirroring B149 + B911:
+//   (1) VISIBILITY — the vertical thing the number measures has to project to a readable BAND
+//       on screen first. `featureFt` is that band's plan-view width in feet: the berm's
+//       exterior face run (extSlope × berm height) for the berm tag, and the interior side-slope
+//       run (slope × depth below top of bank) for an elevation / storage callout. A taller berm
+//       or a deeper basin therefore reveals sooner — the number appears exactly when the grading
+//       it describes is actually visible. The floor is deliberately ABOVE the detail tier's
+//       (DETAIL_LABEL_MIN_PX): a pond parameter is a rung quieter than a sidewalk width.
+//   (2) SIZE — the font rides the shared dimension-number zoom scale, so a big feature that does
+//       reveal early can never paint a full-size number over a small-on-screen pond.
+export const POND_PARAM_LABEL_MIN_PX = 40; // min on-screen width (px) of the band being measured
+export const pondParamLabelVisible = (featureFt, ppf) =>
+  dimCalloutVisible(ppf) && Number.isFinite(featureFt) && featureFt * ppf >= POND_PARAM_LABEL_MIN_PX;
+export const pondParamFontPx = (ppf, basePx) => basePx * dimFontScale(ppf);

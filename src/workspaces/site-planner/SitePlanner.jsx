@@ -115,7 +115,7 @@ import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, suppressedDimIds, dimFontScale, dimFontPx, boxOf } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf } from "./lib/labelLayout.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
@@ -11090,16 +11090,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // Gated on the contours toggle (default on) AND the same zoom floor as the depth-ring
         // overlay (detailLabelVisible on the pond's smaller plan dimension), so the storage line
         // declutters and reveals exactly when the rings do.
+        // NEW-1 — plus the pond-design-parameter tier: "…′ rim to floor" is the same floor number
+        // the contour callout paints, so it reveals with it (keyed on the interior side-slope
+        // band) instead of at overview zoom. The pond's NAME + footprint acreage above are its
+        // identity and stay on the overview tier, exactly like a building's name + sf.
         if (el.det?.contours !== false) {
           const pminFt = poly
             ? (() => { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } return Math.min(hi - lo, hi2 - lo2); })()
             : Math.min(el.w, el.h);
-          if (detailLabelVisible(pminFt, view.ppf)) {
+          const dw = detWithAuto(el.det);
+          const slopeBandFt = (Number.isFinite(dw.slope) ? dw.slope : 3) * (Number.isFinite(dw.depth) ? dw.depth : 8);
+          if (detailLabelVisible(pminFt, view.ppf) && pondParamLabelVisible(slopeBandFt, view.ppf)) {
             // PR-Q/O3 — ONE source of truth: the map "Holds" reports the SAME USABLE/achievable storage
             // the panel + verdict report (pondSplitFor.usableCf), NOT the gross geometric tub volume
             // (which over-stated it ~4x). Depth is the rim-to-floor the SECTION shows (det.depth), so
             // the map, the panel, and the section can never disagree. 1dp everywhere (matches the panel).
-            const dw = detWithAuto(el.det);
             const usableAcFt = Number.isFinite(pondSplit.usableCf) ? pondSplit.usableCf / 43560 : null;
             const rimToFloorFt = Number.isFinite(dw.depth) ? dw.depth : null;
             if (usableAcFt != null && usableAcFt >= 0.05 && rimToFloorFt != null) {
@@ -14835,11 +14840,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <g key={e.id}>
                         <path d={annulus} fillRule="evenodd" fill="url(#pat-berm)" stroke="#7a5f36" strokeWidth={strokeZoom(1.5, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.9} />
                         {crestRings.map((r, i) => <path key={i} d={ringPath(r)} fill="none" stroke="#7a5f36" strokeWidth={strokeZoom(1, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.6} />)}
-                        {view.ppf > 0.16 && (
-                          <text x={top.x} y={top.y + 13} textAnchor="middle" style={{ fontSize: 11, fontWeight: 700, fill: "#5c4626", paintOrder: "stroke", stroke: "#f4ecdd", strokeWidth: 3, strokeLinejoin: "round" }}>
-                            berm {(Math.round(bermH * 10) / 10).toFixed(1)} ft
-                          </text>
-                        )}
+                        {/* NEW-1 — the berm HEIGHT tag is pond-design-parameter tier, not overview
+                            tier: it reveals only once the berm's exterior face (extSlope × height)
+                            reads as a real band on screen, and its font rides the shared dimension
+                            zoom scale. The hatched ring itself still draws at every zoom, so the
+                            berm remains visible at overview — only its number waits for inspect
+                            zoom. (Was a flat ppf>0.16 gate at a FIXED 11px, which painted a tag
+                            louder than the building dimensions over a hairline-thin band.) */}
+                        {pondParamLabelVisible(EXT_BERM_SLOPE * bermH, view.ppf) && (() => {
+                          const fs = pondParamFontPx(view.ppf, 11);
+                          return (
+                            <text x={top.x} y={top.y + fs + 2} textAnchor="middle" style={{ fontSize: fs, fontWeight: 700, fill: "#5c4626", paintOrder: "stroke", stroke: "#f4ecdd", strokeWidth: fs * 0.27, strokeLinejoin: "round" }}>
+                              berm {(Math.round(bermH * 10) / 10).toFixed(1)} ft
+                            </text>
+                          );
+                        })()}
                       </g>
                     );
                   })}
@@ -19159,18 +19174,24 @@ function pondContourEls(el, f2p, ppf, keyPfx = "") {
   // Labels — only the two callouts that matter: the water surface (anchored to the top of its
   // largest ring) and the basin floor (anchored to the bottom), so they frame the centred pond
   // name instead of stacking on it. Real elevation when a datum is set, else depth below top.
+  // NEW-1 — the ELEVATION callouts are pond-design-parameter tier (labelLayout): each reveals
+  // only once its own side-slope band (slope × depth below top of bank) reads on screen, and the
+  // font + halo ride the shared dimension zoom scale. The rings keep their own sub-pixel gate and
+  // still draw at overview zoom — only the numbers wait until you're actually inspecting the basin.
   cont.levels.forEach((lv, idx) => {
     if (lv.down <= 0 || slope * lv.down * ppf < 2) return;
     if (!lv.isWater && !lv.isBottom) return;
+    if (!pondParamLabelVisible(slope * lv.down, ppf)) return;
     const lp = contourLabelPoint(largestRing(lv.rings), lv.isBottom ? "bottom" : "top");
     if (!lp) return;
     const q = f2p(lp);
     const lead = lv.isWater ? "WS " : "Floor ";
     const txt = lv.elev != null ? `${lead}${f1(lv.elev)}` : `${lead}−${f1(lv.down)}′`;
+    const fs = pondParamFontPx(ppf, 9);
     out.push(
       <text key={`${keyPfx}t${idx}`} x={q.x} y={q.y} textAnchor="middle" dominantBaseline="middle"
-        fontSize={9} fontFamily="Inter, system-ui, sans-serif" fill="#0E2E36"
-        stroke="#fff" strokeWidth={2.6} paintOrder="stroke" pointerEvents="none"
+        fontSize={fs} fontFamily="Inter, system-ui, sans-serif" fill="#0E2E36"
+        stroke="#fff" strokeWidth={fs * 0.29} paintOrder="stroke" pointerEvents="none"
         data-contour-label={lv.isWater ? "water" : "bottom"}
         style={{ fontWeight: 700 }}>{txt}</text>,
     );
