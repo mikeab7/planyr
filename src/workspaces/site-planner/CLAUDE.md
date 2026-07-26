@@ -32,7 +32,9 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
   a markup can also be sent behind the elements). Wired via `arrangeSel` + the right-click menus + the
   ⌘/Ctrl+]/[ chords in `SitePlanner.jsx`.
-- `labelLayout.js` — LOD label tiering + the shared dimension-number zoom→font scale (`dimFontPx`, B911).
+- `labelLayout.js` — LOD label tiering + the shared dimension-number zoom→font scale (`dimFontPx`, B911)
+  + the quieter pond design-parameter tier (`pondParamLabelVisible`/`pondParamFontPx`, B1016 — the berm
+  tag, floor/WS elevations and the rim-to-floor line reveal only when the band they measure reads on screen).
   `calloutLayout.js` — pure text-box/callout box geometry: auto-size or wrap-to-width (B913).
   `roadGeometry.js` — centerline road curves + junction primitives (pure): `teeGeometry` returns the
   ADDITIVE curb-return `wedges` a junction contributes. `roadNetwork.js` — the DISSOLVED road surface

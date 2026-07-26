@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines, dimCalloutVisible, DIM_CALLOUT_MIN_PPF, detailLabelVisible, DETAIL_LABEL_MIN_PX, suppressedDimIds, dimFontScale, dimFontPx, DIM_FONT_BASE_PX, DIM_FONT_MIN_SCALE } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines, dimCalloutVisible, DIM_CALLOUT_MIN_PPF, detailLabelVisible, DETAIL_LABEL_MIN_PX, suppressedDimIds, dimFontScale, dimFontPx, DIM_FONT_BASE_PX, DIM_FONT_MIN_SCALE, pondParamLabelVisible, pondParamFontPx, POND_PARAM_LABEL_MIN_PX } from "../src/workspaces/site-planner/lib/labelLayout.js";
 
 describe("labelLayout — shared label level-of-detail + collision engine (B121)", () => {
   it("boxOf centres a box on its point; boxesOverlap respects pad", () => {
@@ -269,6 +269,33 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     // A SHORT side hides sooner (its on-screen length falls below the legibility threshold first).
     expect(detailLabelVisible(40, 0.2)).toBe(false);         // 40×0.2 = 8px → hidden
     expect(detailLabelVisible(40, 0.8)).toBe(true);          // 40×0.8 = 32px ≥ 30 → shown
+  });
+
+  it("NEW-1: pond design-parameter labels are a rung QUIETER than the detail tier", () => {
+    // The tier exists so the berm-height tag / floor elevation / rim-to-floor line stop shouting at
+    // site-overview zoom. Its threshold must sit ABOVE the detail tier's, never at or below it.
+    expect(POND_PARAM_LABEL_MIN_PX).toBeGreaterThan(DETAIL_LABEL_MIN_PX);
+    // The owner's repro (2026-07-26): a 6.58-ac pond at the default working zoom (ppf 0.35) with an
+    // 8.2 ft berm on a 3:1 exterior face (24.6 ft band) and a 16.2 ft basin on 3:1 interiors (48.6 ft
+    // band). Both numbers painted; both must now be HIDDEN at that zoom.
+    expect(pondParamLabelVisible(3 * 8.2, 0.35)).toBe(false);   // berm tag — 8.6px band
+    expect(pondParamLabelVisible(3 * 16.2, 0.35)).toBe(false);  // floor / rim-to-floor — 17px band
+    // …and both return once you zoom into the pond, the deeper feature first (self-tuning: a bigger
+    // band earns its number sooner).
+    expect(pondParamLabelVisible(3 * 16.2, 0.9)).toBe(true);    // 43.7px band ≥ 40
+    expect(pondParamLabelVisible(3 * 8.2, 0.9)).toBe(false);    // 22.1px — the thin berm still waits
+    expect(pondParamLabelVisible(3 * 8.2, 1.7)).toBe(true);     // 41.8px — pond fills the view
+    // The global declutter floor still binds: a huge band can't sneak a number onto a zoomed-out site.
+    expect(pondParamLabelVisible(5000, 0.05)).toBe(false);      // below DIM_CALLOUT_MIN_PPF
+    expect(pondParamLabelVisible(NaN, 2)).toBe(false);          // no measurable band → no label
+    expect(pondParamLabelVisible(undefined, 2)).toBe(false);
+    // Size defence: the font rides the SHARED dimension zoom scale, so a big feature that does reveal
+    // early can never out-shout the building dimension numbers (the owner's "bigger than the building
+    // numbers" complaint). At/above working zoom it is exactly its base size.
+    expect(pondParamFontPx(0.45, 11)).toBe(11);
+    expect(pondParamFontPx(2, 9)).toBe(9);
+    expect(pondParamFontPx(0.225, 11)).toBeCloseTo(5.5, 5);
+    expect(pondParamFontPx(0.3, 11)).toBeLessThan(dimFontPx(0.3) + 1e-9); // never larger than a dim number
   });
 
   it("B121: buildingLabelLines omits the sf line when sqft is falsy (Show areas off)", () => {
