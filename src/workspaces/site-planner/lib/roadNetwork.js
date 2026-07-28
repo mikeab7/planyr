@@ -160,6 +160,32 @@ export function clipPolylineOutside(line, rings) {
   }
 }
 
+/* NEW-1 (junction outline-cut rotation) — the INTERRUPTED outline of a RECT element a drive tees into.
+ *
+ * A road that tees into a parking field / truck court / paving pad is not pavement the field can
+ * dissolve with (the field has its own fill), so instead of merging we INTERRUPT the field's own
+ * outline where the drive's pavement crosses it — the entrance then reads as one continuous curb
+ * instead of a line ruled across the mouth.
+ *
+ * ⚠ FRAME: the returned polylines are in WORLD feet with `el.rot` ALREADY BAKED IN (the corners are
+ * built by rotating the local half-extents about the element centre). The canvas draws a rect element
+ * inside a `rotate(el.rot, c)` group, so a consumer MUST counter-rotate these polylines by `-el.rot`
+ * — exactly like the pond baseline ghost and the stage contours already do. Skipping that applies the
+ * rotation twice: at rot 90/270 the doubled 540° ≡ 180° draws a w×h footprint as h×w about the same
+ * centre, throwing element-coloured lines far outside the true footprint. That was the bug.
+ *
+ * `cutters` are the dissolved pavement rings of the drive; with none, the full (uninterrupted) outline
+ * comes back. Pure: world feet in, world feet out. */
+export function rectOutlineCutSegments(el, cutters) {
+  if (!el || el.points || !(el.w > 0) || !(el.h > 0) || typeof el.cx !== "number" || typeof el.cy !== "number") return [];
+  const rad = ((el.rot || 0) * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
+  const corner = (lx, ly) => ({ x: el.cx + (lx * c - ly * s), y: el.cy + (lx * s + ly * c) });
+  const cs = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
+  const out = [];
+  for (let e = 0; e < 4; e++) for (const seg of clipPolylineOutside([cs[e], cs[(e + 1) % 4]], cutters)) if (seg.length >= 2) out.push(seg);
+  return out;
+}
+
 /* Connected-cluster labelling over a set of ids and the pairs that connect them (a tee, a weld, a
  * shared drive junction). Returns Map<id, clusterIndex>. Ids with no pair still get their own cluster,
  * so a lone road is simply a one-member cluster and takes the identical render path. */
