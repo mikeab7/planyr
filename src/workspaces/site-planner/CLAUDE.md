@@ -73,6 +73,17 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   constraints (max depth, Phase-B groundwater ceiling, 30-ft maintenance berm, pipeline-corridor
   exclusions) and ranks by earthwork $, land-take acres, and buildable-SF recovered — reusing
   pondGeom/pondSizing machinery. Pure/Node-tested.
+- Yield storage-truth tier (Cowork review B1019–B1028): `pondStageModel.js` is **THE** per-pond
+  stage-storage / elevation-band representation — stage table, the declared non-overlapping
+  detention/mitigation duty split, the outfall-invert split, both gravity-drain tests, and the
+  prism-vs-extrusion delta. Detention, mitigation, drawdown, gravity and cut/fill all READ it;
+  nothing re-derives storage from a footprint. Its consumers: `storageReconcile.js` (claimed
+  service vs storage that physically exists — a hard FAIL on a double-count), `drawdownTime.js`
+  (time-to-empty at the allowable release rate), `mitigationBands.js` (the 1-ft hydraulic-equivalence
+  band ledger, fed by `floodplainMitigation`'s opt-in `bandSpans`), `floodAdministrator.js` (who
+  governs the floodplain + the BFE implied by an FFE), `apronElevation.js` (the truck court, checked
+  apart from the pad), `cutFillBalance.js` (borrow-driven vs genuine storage slack). All pure/Node-tested
+  (one suite + one headless render harness, both named "yield-storage-review").
 - `detentionRules.js` — Houston-MSA detention criteria as versioned rule records + the
   drainage-authority resolver, tier/regime assessors, pond auto-size solvers (B636–B642,
   code-labeled B629–B635; pure, injectable fetch/cache — mirror of `jurisdiction.js`). `pondGeom.js` holds

@@ -38,15 +38,29 @@ const detReqPoint = (acft) => ({ kind: "point", requiredAcFt: acft });
 const detReqBand = (lo, hi) => ({ kind: "band", bandAcFt: [lo, hi] });
 
 describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
-  it("detention COVERED → OK pill, '{label}: 34.0 of 33.8 ac-ft', no action button", () => {
+  // NEW-7 (Cowork yield review) — a covered check is no longer a flat green OK: the chip is BANDED
+  // by signed margin, so 34.0 of 33.8 (+0.6% headroom) reads THIN, not OK. A margin that thin is
+  // erased by a side-slope change or an as-built survey, and the reader has to be able to see that.
+  // The sentence, label and no-action behaviour are unchanged.
+  it("detention COVERED but THIN → THIN pill, '{label}: 34.0 of 33.8 ac-ft', no action button", () => {
     const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 34.0 * AC_FT });
-    expect(det.pill).toBe("OK");
-    expect(det.tone).toBe("good");
+    expect(det.pill).toBe("THIN");
+    expect(det.tone).toBe("warn");
+    expect(det.thin).toBe(true);
+    expect(det.marginText).toBe("+0.2 ac-ft (+0.6%)");
     expect(det.label).toBe("Detention");
     expect(det.sentence).toBe("34.0 of 33.8 ac-ft");
     expect(det.text).toBe("Detention: 34.0 of 33.8 ac-ft");
     expect(det.short).toBeFalsy();
     expect(det.action).toBeFalsy();
+  });
+
+  it("detention COVERED with real headroom → green OK", () => {
+    const [det] = yieldVerdictStrip({ req: detReqPoint(33.8), providedUsableCf: 60 * AC_FT });
+    expect(det.pill).toBe("OK");
+    expect(det.tone).toBe("good");
+    expect(det.thin).toBe(false);
+    expect(det.margin.band).toBe("ok");
   });
 
   it("detention SHORT → SHORT pill, '0.0 of 33.8 ac-ft', action button", () => {
@@ -59,8 +73,10 @@ describe("A2 — verdict-strip grammar: label + pill + sentence", () => {
   });
 
   it("a screening BAND uses its conservative (upper) end as the single required number", () => {
+    // NEW-7: 34.0 against 33.8 is covered but THIN (+0.6%) — the banded chip, not a flat OK.
     const covered = yieldVerdictStrip({ req: detReqBand(28.6, 33.8), providedUsableCf: 34 * AC_FT })[0];
-    expect(covered.pill).toBe("OK");
+    expect(covered.pill).toBe("THIN");
+    expect(covered.short).toBeFalsy();
     expect(covered.sentence).toBe("34.0 of 33.8 ac-ft");
     const short = yieldVerdictStrip({ req: detReqBand(28.6, 33.8), providedUsableCf: 30 * AC_FT })[0];
     expect(short.pill).toBe("SHORT");

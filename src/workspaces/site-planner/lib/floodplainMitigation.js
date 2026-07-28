@@ -23,7 +23,7 @@ import { pointInRing } from "./pondGeom.js";
 import { lngLatRingToFeet } from "./arcgis.js";
 import { isSFHA } from "./siteAnalysis.js";
 import { SQFT_PER_ACRE } from "../../../shared/coordinates/index.js";
-import { triggerClasses } from "./floodplainRules.js";
+import { triggerClasses, mitigationOffsetBasis } from "./floodplainRules.js";
 
 // NFHL publishes -9999 for "no static BFE" / "no depth" (same sentinel detentionRules guards).
 export const BFE_SENTINEL_MIN = -9000;
@@ -161,6 +161,11 @@ export function gridIntersect(ring, zone, depthAt = null, opts = {}) {
   const nx = Math.max(1, Math.ceil(w / cell)), ny = Math.max(1, Math.ceil(h / cell));
   const dx = w / nx, dy = h / ny, cellArea = dx * dy;
   const cells = retain ? [] : undefined;
+  // NEW-3 — optional per-cell ELEVATION SPAN collection ({loFt: existing grade, hiFt: top of fill}).
+  // Hydraulic equivalence is an elevation-matched test, so the band ledger needs to know WHERE in
+  // the column each cell's fill sits, not just how deep it is. Off unless the caller asks (opts.spanAt).
+  const spanAt = typeof opts.spanAt === "function" ? opts.spanAt : null;
+  const spans = spanAt ? [] : undefined;
   let areaSf = 0, sumDepthArea = 0, pricedCells = 0, voidCells = 0;
   for (let i = 0; i < nx; i++) {
     for (let j = 0; j < ny; j++) {
@@ -175,13 +180,17 @@ export function gridIntersect(ring, zone, depthAt = null, opts = {}) {
         if (d > 0) {
           sumDepthArea += cellArea * d;
           if (retain) cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, depthFt: d });
+          if (spanAt) {
+            const s = spanAt(pt);
+            if (s && isFinite(s.loFt) && isFinite(s.hiFt) && s.hiFt > s.loFt) spans.push({ loFt: s.loFt, hiFt: s.hiFt, areaSf: cellArea });
+          }
         }
       } else if (retain) {
         cells.push({ x: pt.x, y: pt.y, wFt: dx, hFt: dy, depthFt: null });
       }
     }
   }
-  return { areaSf, sumDepthArea, pricedCells, voidCells, cells };
+  return { areaSf, sumDepthArea, pricedCells, voidCells, cells, spans };
 }
 
 /* ---------------------------------------------------------------------------------
@@ -672,6 +681,15 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   const derived1pct = realElev(elev.derivedWse1pctFt); // DERIVED 1% WSE — engine seam (B807, e.g. the FBCDD Atlas-14 DRAFT rasters)
   const wseProviders = new Set();
   const wse02Providers = new Set(); // tracked SEPARATELY so the 0.2% "manual" never collides with the 1% "manual"
+  // NEW-4 — which flood line the offset is owed to, per the JURISDICTION rule (not a hardcoded
+  // 100-yr). "1pct" = the 100-yr surface; "02pct" = the 0.2% (500-yr) surface (FBC Interim Atlas-14
+  // §9 / COH Ch. 19). Defaults to the trigger's own top band when the rule doesn't say.
+  const offsetBasis = mitigationOffsetBasis(rule);
+  let offsetBasisUsed = "1pct";      // what actually priced (may fall short of what's required)
+  let offsetBasisMissing = false;    // the required surface was unavailable — flagged, never silent
+  // NEW-3 — collect per-cell elevation SPANS for the hydraulic-equivalence band ledger.
+  const wantSpans = !!opts.bandSpans;
+  const allSpans = wantSpans ? [] : undefined;
 
   for (const z of zones) {
     const bucket = perClass[z.cls];
@@ -679,7 +697,26 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
 
     // The zone's water surface — the shared provider chain (extracted for B833's
     // wedgeMitigation so the wedge cells price against the SAME precedence).
-    const { wse, wseSrc } = zoneWaterSurface(z, { grade, wse02, manualBfe, manualBfeSrc: elev.bfeSrc || null, derivedXsWsel, derivedBfe, derived1pct, derived02, derivedWse1pctSrc: elev.derivedWse1pctSrc, derivedWse02Src: elev.derivedWse02Src });
+    const zw = zoneWaterSurface(z, { grade, wse02, manualBfe, manualBfeSrc: elev.bfeSrc || null, derivedXsWsel, derivedBfe, derived1pct, derived02, derivedWse1pctSrc: elev.derivedWse1pctSrc, derivedWse02Src: elev.derivedWse02Src });
+    let wse = zw.wse, wseSrc = zw.wseSrc;
+    // NEW-4 — the OFFSET SURFACE follows the JURISDICTION, not a hardcoded 100-yr line. FBC's
+    // Interim Atlas-14 criteria require offsetting any storage reduction within the existing
+    // (pre-Atlas-14) 500-YR floodplain, so on a rule whose `offsetElevBasis` is "02pct" the fill in
+    // a 1%-class zone must be measured up to the 0.2% surface — which is HIGHER, so pricing it at
+    // the BFE understates the requirement. When the 0.2% surface is not resolvable we do NOT
+    // silently substitute the 100-yr and call it compliant: the volume still prices on what we have
+    // (better than nothing), but the result is flagged and NAMES the line it was actually computed
+    // from, so the panel can say so rather than imply the stricter test was met.
+    if (offsetBasis === "02pct" && z.cls === "1pct") {
+      const surf02 = wse02 != null ? wse02 : derived02;
+      if (surf02 != null && (wse == null || surf02 > wse + 0.01)) {
+        wse = surf02;
+        wseSrc = wse02 != null ? "manual-02pct" : (elev.derivedWse02Src || "derived-02pct");
+        offsetBasisUsed = "02pct";
+      } else if (surf02 == null) {
+        offsetBasisMissing = true;
+      }
+    }
 
     for (const fp of footprints) {
       const ring = fp.ring;
@@ -735,7 +772,19 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
           : (topAt
               ? (pt) => { const p = topAt(pt); return p == null ? null : Math.max(0, Math.min(wse, p) - grade); }
               : () => Math.max(0, Math.min(wse, pad) - grade));
-      const { areaSf, sumDepthArea, pricedCells, voidCells, cells } = gridIntersect(ring, z, depthAt, { ...opts, retainCells });
+      // NEW-3 — the per-cell elevation SPAN (existing grade → top of fill, capped at the flood
+      // surface): what the band ledger needs to test hydraulic equivalence foot by foot. Built from
+      // the SAME grade/top/WSE the depth math uses, so a band can never disagree with the total.
+      const spanAt = !wantSpans || !priceable ? null : (pt) => {
+        const g = gradeAt != null ? gradeAt(pt) : grade;
+        if (g == null || !isFinite(g)) return null;
+        const p = topAt ? topAt(pt) : pad;
+        if (p == null || !isFinite(p)) return null;
+        const hi = aoPerCell ? Math.min(g + z.aoDepthFt, p) : Math.min(wse, p);
+        return hi > g ? { loFt: g, hiFt: hi } : null;
+      };
+      const { areaSf, sumDepthArea, pricedCells, voidCells, cells, spans } = gridIntersect(ring, z, depthAt, { ...opts, retainCells, spanAt });
+      if (wantSpans && spans && spans.length) for (const s of spans) allSpans.push(s);
       if (!(areaSf > 0)) continue;
       bucket.acres += areaSf / SQFT_PER_ACRE;
       if (priceable) {
@@ -774,6 +823,9 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   // surface on the same reach. A DERIVED 0.2% reading lower than the best-known 1% WSE is a
   // study/vintage mismatch (e.g. an Atlas-14 draft grid against an older effective profile) —
   // FLAG it loudly, never clamp: the value still shows, labeled, and the user decides.
+  // NEW-4 — the required offset surface was the 0.2% line but no 0.2% water surface was resolvable,
+  // so the volume priced against the 100-yr. LOUD: the number understates the obligation.
+  if (offsetBasis === "02pct" && offsetBasisMissing) flags.add("offset-basis-unresolved");
   if (derived02 != null) {
     const ref1 = Math.max(
       ...zones.filter((z) => z.cls === "1pct" && z.staticBfeFt != null).map((z) => z.staticBfeFt),
@@ -824,6 +876,17 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
     pricedCells: pricedCellsTotal,
     ...(retainCells ? { cells: allCells } : {}),
     trigger: rule ? rule.trigger : "1pct",
+    // NEW-4 — which flood LINE the offset was owed to vs. which one it could actually be priced
+    // against. `matched:false` means the panel must say the requirement was computed off a lower
+    // line than the jurisdiction requires (so the figure understates), never imply compliance.
+    offsetBasis: {
+      required: offsetBasis,
+      used: offsetBasis === "02pct" && !offsetBasisMissing ? offsetBasisUsed : offsetBasis === "02pct" ? "1pct" : "1pct",
+      matched: offsetBasis === "1pct" ? true : !offsetBasisMissing && offsetBasisUsed === "02pct",
+      label: offsetBasis === "02pct" ? "0.2% (500-yr) flood elevation" : "1% (100-yr) flood elevation",
+    },
+    // NEW-3 — per-cell fill spans for the elevation-band ledger (only when asked; they are bulky).
+    ...(wantSpans ? { spans: allSpans } : {}),
     ratio,
     perClass,
     intersectAcres: totalAcres,
@@ -962,16 +1025,27 @@ export function combineMitigation(results) {
   // B808/B809 — retained heat-map cells are big flat arrays: concat them OUTSIDE the
   // JSON deep copy (stringifying tens of thousands of cells per render would jank;
   // the copy only needs the scalars) and reattach at the end.
+  // NEW-3 — the per-cell elevation SPANS ride the same fast path as the cells (concatenated
+  // outside the deep copy, reattached at the end): they are the band ledger's only input, so
+  // losing them here would silently disable the elevation-matched test.
   const allCells = [];
-  let anyCells = false;
+  const allSpans = [];
+  let anyCells = false, anySpans = false;
   const stripped = list.map((r) => {
-    if (r.cells) {
-      anyCells = true;
-      if (r.cells.length) allCells.push(...r.cells);
-      const { cells, ...rest } = r;
-      return rest;
+    let rest = r;
+    if (rest.spans) {
+      anySpans = true;
+      if (rest.spans.length) allSpans.push(...rest.spans);
+      const { spans, ...s } = rest;
+      rest = s;
     }
-    return r;
+    if (rest.cells) {
+      anyCells = true;
+      if (rest.cells.length) allCells.push(...rest.cells);
+      const { cells, ...s } = rest;
+      rest = s;
+    }
+    return rest;
   });
   const out = JSON.parse(JSON.stringify(stripped[0]));
   for (const r of stripped.slice(1)) {
@@ -1016,6 +1090,11 @@ export function combineMitigation(results) {
   // comparison an expected difference, not a data warning.
   if (out.padBasis !== "surface" && out.volumeCf != null && out.volumeFlatCf != null && out.volumeFlatCf > 0 && Math.abs(out.volumeCf - out.volumeFlatCf) / out.volumeFlatCf > 0.15) out.flags.push("grid-median-delta");
   if (anyCells) out.cells = allCells;
+  if (anySpans) out.spans = allSpans; // NEW-3 — the band ledger's input
+  // NEW-4 — the offset-surface basis is a property of the RULE, identical across footprints, so the
+  // first result's is the combined one. Carried explicitly rather than left to the deep copy, so a
+  // future field reorder can't silently drop the line that names which flood line priced this.
+  if (list[0] && list[0].offsetBasis) out.offsetBasis = list[0].offsetBasis;
   return out;
 }
 

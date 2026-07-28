@@ -44,10 +44,54 @@ export function fmtSignedAcFt(v) {
   return n === 0 ? mag : `${n < 0 ? "−" : "+"}${mag}`;
 }
 
+/* NEW-7 — SIGNED MARGIN instead of a flat OK/FAIL chip.
+ *
+ * On Bain, Detention at +97% surplus and Mitigation at +0.5% surplus (98.2 vs 97.7 — half an
+ * acre-foot) rendered IDENTICAL green OK chips. A 0.5% margin is erased by any side-slope change, a
+ * six-inch pad bump, or an as-built survey, and the reader could not see that from the panel.
+ *
+ * Every check therefore carries its margin as BOTH a percentage and an absolute, and the chip is
+ * BANDED: a surplus under `thinPct` reads amber "THIN", not green "OK". Thresholds are per-check —
+ * a mitigation ledger built on grid-sampled fill deserves more headroom than a detention volume
+ * computed off a rate. */
+export const DEFAULT_THIN_PCT = 0.05; // 5% surplus or less = thin
+export const THIN_PCT_BY_CHECK = { det: 0.05, mit: 0.05 };
+
+export function thinThresholdFor(key, overrides = null) {
+  const o = overrides && Number.isFinite(overrides[key]) ? overrides[key] : null;
+  if (o != null) return o;
+  return THIN_PCT_BY_CHECK[key] != null ? THIN_PCT_BY_CHECK[key] : DEFAULT_THIN_PCT;
+}
+
+/* The signed margin for a provided/required pair. `pct` is null when the requirement is zero (no
+ * meaningful percentage of nothing). `band`: "short" | "thin" | "ok". Pure. */
+export function marginFor(provided, required, { key = null, thinPct = null, overrides = null } = {}) {
+  if (!Number.isFinite(provided) || !Number.isFinite(required)) return null;
+  const absAcFt = provided - required;
+  const pct = required > EPS ? absAcFt / required : null;
+  const thin = thinPct != null ? thinPct : thinThresholdFor(key, overrides);
+  const band = absAcFt < -EPS ? "short"
+    : pct != null && pct <= thin ? "thin"
+    : absAcFt <= EPS && required > EPS ? "thin"
+    : "ok";
+  return { absAcFt, pct, band, thinPct: thin, thin: band === "thin" };
+}
+
+// The margin as the panel says it: "+0.5 ac-ft (+0.5%)" / "−12.3 ac-ft (−16%)". Pure.
+export function fmtMargin(margin) {
+  if (!margin) return null;
+  const abs = fmtSignedAcFt(margin.absAcFt);
+  if (margin.pct == null) return `${abs} ac-ft`;
+  const p = Math.abs(margin.pct * 100);
+  const pStr = p >= 10 ? Math.round(p) : (Math.round(p * 10) / 10).toFixed(1);
+  const sign = margin.absAcFt < -EPS ? "−" : margin.absAcFt > EPS ? "+" : "";
+  return `${abs} ac-ft (${sign}${pStr}%)`;
+}
+
 const finish = (v) => ({ ...v, text: `${v.label}: ${v.sentence}` });
 const loadingRow = (key, label) => finish({ key, label, pill: "…", tone: "neutral", sentence: "checking flood data", loading: true, sortRank: 1 });
 const okRow = (key, label, sentence) => finish({ key, label, pill: "OK", tone: "good", sentence, sortRank: 2 });
-const pairRow = (key, label, provided, required, short) => {
+const pairRow = (key, label, provided, required, short, opts = {}) => {
   // NEW-16 display invariant: a SHORT pair must NEVER show two identical numbers (the
   // "0.0 of 0.0" danger pill). When the 1-dp strings collide on a real shortfall, bump both
   // sides to 2 dp so the gap is visible; if even 2 dp ties (sub-cent residue) fall back to 1 dp.
@@ -57,11 +101,17 @@ const pairRow = (key, label, provided, required, short) => {
     const r2 = (Math.round(required * 100) / 100).toFixed(2);
     if (p2 !== r2) { provStr = p2; reqStr = r2; }
   }
+  // NEW-7 — the signed margin + banded chip. A thin surplus is amber "THIN", never green "OK":
+  // the reader must be able to see that half an acre-foot of headroom is not a passing design.
+  const margin = marginFor(provided, required, { key, overrides: opts.thinOverrides });
+  const thin = !short && margin && margin.band === "thin";
   return finish({
     key, label,
-    pill: short ? "SHORT" : "OK", tone: short ? "danger" : "good",
+    pill: short ? "SHORT" : thin ? "THIN" : "OK",
+    tone: short ? "danger" : thin ? "warn" : "good",
     pair: { provided, required }, sentence: `${provStr} of ${reqStr} ac-ft`,
-    short, action: short, sortRank: short ? 0 : 2,
+    margin, marginText: fmtMargin(margin), thin,
+    short, action: short, sortRank: short ? 0 : thin ? 1.5 : 2,
   });
 };
 
@@ -79,7 +129,7 @@ function detentionVerdict(d) {
   }
   if (usableAcFt == null) return loadingRow("det", "Detention");
   const short = usableAcFt < requiredAcFt - EPS || inundated;
-  const v = pairRow("det", "Detention", usableAcFt, requiredAcFt, short);
+  const v = pairRow("det", "Detention", usableAcFt, requiredAcFt, short, { thinOverrides: d.thinMarginPct });
   // R1 — when the (ASSUMED) coincident-storm policy MATERIALLY drives this usable number, the
   // verdict carries the assumption (R-PRINCIPLE: an assumed criterion never silently drives a
   // number). The default ship is non-coincident (the pond recovers to normal tailwater between
@@ -116,7 +166,24 @@ function mitigationVerdict(d) {
       return finish({ key: "mit", label: "Mitigation", pill: "SHORT", tone: "danger", sentence: "fill in the floodway (stop)", short: true, action: true, sortRank: 0 });
     }
     const provAcFt = provCf / AC_FT;
-    return pairRow("mit", "Mitigation", provAcFt, mitV.volumeAcFt, provAcFt < mitV.volumeAcFt - EPS);
+    const row = pairRow("mit", "Mitigation", provAcFt, mitV.volumeAcFt, provAcFt < mitV.volumeAcFt - EPS, { thinOverrides: d.thinMarginPct });
+    // NEW-3 — a total that ties is NOT compliance: FBC's offset is hydraulically equivalent, an
+    // elevation-matched test. A band ledger that fails demotes the row to SHORT even when the
+    // acre-foot totals net positive, and says which is which.
+    if (d.mitBands && d.mitBands.known && d.mitBands.overallPass === false) {
+      const n = d.mitBands.shortBands.length;
+      row.pill = "SHORT"; row.tone = "danger"; row.short = true; row.action = true; row.sortRank = 0;
+      row.bandFail = { shortBands: n, totalWouldPass: d.mitBands.totalWouldPass, shortCf: d.mitBands.totals.shortCf };
+      row.sentence = `${row.sentence} — ${n} elevation band${n === 1 ? "" : "s"} short`;
+      row.text = `${row.label}: ${row.sentence}`;
+    }
+    // NEW-4 — the requirement could not be priced against the flood line the jurisdiction requires
+    // (no 0.2% surface resolvable), so it UNDERSTATES. Never let that read as a clean pass.
+    if (d.mitigation && Array.isArray(d.mitigation.flags) && d.mitigation.flags.includes("offset-basis-unresolved")) {
+      row.understated = true;
+      if (row.pill === "OK") { row.pill = "THIN"; row.tone = "warn"; row.thin = true; row.sortRank = 1.5; }
+    }
+    return row;
   }
   if (mitV && mitV.intersectAcres === 0) return notRequired();
   if (mitV || d.mitRememberedMissing || (d.floodGeo && d.floodGeo.state === "failed")) return loadingRow("mit", "Mitigation");
@@ -139,11 +206,40 @@ function buildabilityVerdict(d) {
   return row("…", "neutral", "set BFE to screen FFE");
 }
 
+/* NEW-1 — the RECONCILIATION override. Two ledgers can each add up correctly on their own terms
+ * while together claiming more storage than physically exists (Bain: 150.9 + 98.2 = 249.1 ac-ft of
+ * service against 206.3 ac-ft of pond). No single-ledger verdict can see that, so when the site
+ * reconciliation FAILS both storage verdicts are forced to a hard FAIL — never a pair of green OKs
+ * over a 42.8 ac-ft double-count. The row carries the overlap volume and the ponds involved. */
+function applyReconciliation(rows, d) {
+  const rec = d.reconcile;
+  if (!rec || rec.state !== "fail") return rows;
+  return rows.map((r) => {
+    if (r.key !== "det" && r.key !== "mit") return r;
+    const v = {
+      ...r,
+      pill: "FAIL", tone: "danger", short: true, action: true, sortRank: -1,
+      reconcileFail: {
+        overlapAcFt: rec.overlapCf != null ? rec.overlapCf / AC_FT : null,
+        physicalAcFt: rec.physicalCf != null ? rec.physicalCf / AC_FT : null,
+        claimedAcFt: rec.claimedCf != null ? rec.claimedCf / AC_FT : null,
+        ponds: (rec.offenders && rec.offenders.length ? rec.offenders : rec.undeclared || []).map((p) => p.name || p.id),
+        undeclared: (rec.undeclared || []).length > 0,
+        message: rec.message,
+      },
+      sentence: rec.overlapCf > 0
+        ? `${r.sentence} — ${fmtAcFt(rec.overlapCf / AC_FT)} ac-ft counted twice`
+        : `${r.sentence} — duty split not declared`,
+    };
+    return { ...v, text: `${v.label}: ${v.sentence}` };
+  });
+}
+
 // The strip: up to three one-line verdicts (detention · mitigation · buildability). Nulls drop.
 // Sorted SHORT-first, then loading, then OK (A2), stable within a rank.
 export function yieldVerdictStrip(d) {
   if (!d) return [];
-  const rows = [detentionVerdict(d), mitigationVerdict(d), buildabilityVerdict(d)].filter(Boolean);
+  const rows = applyReconciliation([detentionVerdict(d), mitigationVerdict(d), buildabilityVerdict(d)].filter(Boolean), d);
   return rows
     .map((r, i) => ({ r, i }))
     .sort((a, b) => a.r.sortRank - b.r.sortRank || a.i - b.i)
