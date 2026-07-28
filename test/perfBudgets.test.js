@@ -1,0 +1,100 @@
+/* Performance-budget guards (NEW-8 / NEW-9).
+ *
+ * Two jobs, both cheap enough to sit in the pure-logic vitest tier:
+ *
+ *  1. The committed budgets file stays well-formed. A typo'd key or a target above its own
+ *     ceiling would make a budget silently unenforceable, which is the one failure mode a
+ *     budget system must not have.
+ *
+ *  2. No module warms a workspace at boot again (the NEW-9 regression). The bundle audit walks
+ *     STATIC import edges and the runtime harness needs a browser, so neither is positioned to
+ *     catch a boot-time `import()` in the required CI check — this is. It is a source-level
+ *     guard, which is the honest trade for catching the class in `npm test`.
+ */
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
+const budgets = JSON.parse(read("ui-audit/perf-budgets.json"));
+
+describe("perf budgets file is well-formed", () => {
+  const groups = ["bundle", "runtime"];
+
+  it("has both budget groups", () => {
+    for (const g of groups) expect(budgets[g], `missing group: ${g}`).toBeTruthy();
+  });
+
+  it("every metric carries a numeric ceiling, and a target that is not above it", () => {
+    for (const g of groups) {
+      for (const [key, spec] of Object.entries(budgets[g])) {
+        if (key.startsWith("$") || key === "siteRouteAllowlist") continue;
+        expect(typeof spec.ceiling, `${g}.${key}.ceiling must be a number`).toBe("number");
+        expect(Number.isFinite(spec.ceiling), `${g}.${key}.ceiling must be finite`).toBe(true);
+        if (spec.target != null) {
+          // A target ABOVE its ceiling is nonsense — it would mean the aspiration is slower than
+          // the maximum, and the "above target" report could never fire.
+          expect(spec.target, `${g}.${key}.target must not exceed its ceiling`).toBeLessThanOrEqual(spec.ceiling);
+        }
+        expect(typeof spec.what, `${g}.${key} needs a "what" describing the metric`).toBe("string");
+      }
+    }
+  });
+
+  it("every ABOVE-TARGET metric names the backlog item that owns closing the gap", () => {
+    const owners = budgets.targetOwner || {};
+    for (const g of groups) {
+      for (const [key, spec] of Object.entries(budgets[g])) {
+        if (key.startsWith("$") || key === "siteRouteAllowlist") continue;
+        if (spec.target != null && spec.target < spec.ceiling) {
+          expect(owners[`${g}.${key}`], `${g}.${key} is above target but has no targetOwner entry`).toBeTruthy();
+        }
+      }
+    }
+  });
+
+  it("the Site-route allowlist is a non-empty list of chunk stems", () => {
+    const allow = budgets.bundle.siteRouteAllowlist?.allow;
+    expect(Array.isArray(allow)).toBe(true);
+    expect(allow.length).toBeGreaterThan(0);
+    // Stems only — a content hash here would break on the next build.
+    for (const s of allow) expect(s, `allowlist entry "${s}" looks hashed`).not.toMatch(/-[A-Za-z0-9_-]{8,}$/);
+  });
+
+  it("siteRouteChunks ceiling matches the allowlist length", () => {
+    // If these drift apart, one of the two guards stops meaning what it says.
+    expect(budgets.bundle.siteRouteChunks.ceiling).toBe(budgets.bundle.siteRouteAllowlist.allow.length);
+  });
+});
+
+describe("no workspace is warmed at boot (NEW-9)", () => {
+  it("modulePrefetch exposes no idle/boot warm entry point", () => {
+    const src = read("src/app/modulePrefetch.js");
+    // prefetchOnIdle was the boot-time warm that fetched ~805 KB of route-irrelevant chunks
+    // ahead of first paint. Its absence is the invariant; prefetchModule (intent-driven) stays.
+    expect(src).not.toMatch(/export\s+function\s+prefetchOnIdle/);
+    expect(src).toMatch(/export\s+function\s+prefetchModule/);
+  });
+
+  it("the Shell does not schedule a prefetch from a timer or idle callback", () => {
+    const src = read("src/app/Shell.jsx");
+    const offenders = [];
+    // Strip comments first: the file explains the removed behaviour in prose, and prose must
+    // not trip the guard.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    if (/requestIdleCallback/.test(code)) offenders.push("requestIdleCallback");
+    if (/prefetchOnIdle/.test(code)) offenders.push("prefetchOnIdle");
+    if (/setTimeout\s*\([^)]*prefetch/i.test(code)) offenders.push("setTimeout(...prefetch)");
+    expect(offenders, `Shell.jsx schedules a boot-time prefetch via: ${offenders.join(", ")}`).toEqual([]);
+  });
+
+  it("workspace warming is still wired to navigation intent, so switching stays fast", () => {
+    // The counterpart assertion: having removed the boot warm, the intent-driven warm must
+    // survive, or module switching silently regresses instead.
+    const header = read("src/shared/ui/AppHeader.jsx");
+    expect(header).toMatch(/onMouseEnter[^\n]*prefetchModule/);
+    expect(header).toMatch(/onPointerDown[^\n]*prefetchModule/);
+  });
+});

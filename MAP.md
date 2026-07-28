@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-28 @ `a3c67e8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-28 @ `d1af5bc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -29,8 +29,8 @@ _321 source files mapped._
   - _exports_: `_flushers`, `flushAll`, `registerFlush`
 - **`src/app/lastRoute.js`** — "Open where I left off": last {module,projectId,cross} pointer written on every navigate; pickBootRoute/seedBootRoute seed an empty-hash boot pre-render (deep links win)
   - _exports_: `pickBootRoute`, `readLastRoute`, `RESTORE_LAST_MODULE`, `seedBootRoute`, `writeLastRoute`
-- **`src/app/modulePrefetch.js`** — Warm non-active workspace chunks on idle/hover and prefetch the heavy /sequence/ Gantt iframe doc so tab switches feel instant
-  - _exports_: `prefetchModule`, `prefetchOnIdle`
+- **`src/app/modulePrefetch.js`** — Warm a non-active workspace chunk (and the heavy /sequence/ Gantt iframe doc) on NAVIGATION INTENT only — tab hover/pointerdown, never at boot (NEW-9) — so tab switches feel instant without taxing a Site-only session
+  - _exports_: `prefetchModule`
 - **`src/app/route.js`** — Hash-route model: parseRoute/buildHash for {module,projectId,cross}, slug maps, useHashRoute hook with merge-navigate, INITIAL_HASH_EMPTY resume flag
   - _exports_: `buildHash`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `MODULE_BY_SLUG`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `useHashRoute`
 - **`src/app/Shell.jsx`** — App shell: auth state, hash-driven module switching, lazy workspace registry with per-id ErrorBoundary+Suspense, builds the AccountControl auth slot, cross-workspace intents
