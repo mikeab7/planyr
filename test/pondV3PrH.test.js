@@ -10,6 +10,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { detentionVerdict } from "../src/workspaces/site-planner/lib/pondVerdict.js";
+
 const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 const at = (needle) => { const i = src.indexOf(needle); if (i < 0) throw new Error(`marker not found: ${needle}`); return i; };
 const dp = src.slice(at("const designPond = () => {"), at("// (B789: drainChannelRelevant now computed up"));
@@ -40,7 +42,11 @@ describe("PR-K — the VERDICT keys the floodway off the precise tier and treats
   it("the status card demotes to amber on a HARD block OR an outstanding no-rise requirement", () => {
     expect(src).toContain("const hardBlocked = !bld.buildable;");
     expect(src).toContain("const needsNoRise = bld.requirements.length > 0;");
-    expect(src).toContain("const amber = hardBlocked || needsNoRise;");
+    // NEW-1 — the amber rule moved (unchanged) into the ONE pure verdict derivation, which the
+    // card now calls with these two facts; the buildability answer is demoted off the headline.
+    expect(src).toContain("hardBlocked,\n                      needsNoRise,");
+    expect(detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7, hardBlocked: true }).tone).toBe("amber");
+    expect(detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7, needsNoRise: true }).tone).toBe("amber");
     // the PR-H "floodplain forbids the berm" gate is gone
     expect(src.includes("const envelopeBlocked = short && inFw;")).toBe(false);
   });

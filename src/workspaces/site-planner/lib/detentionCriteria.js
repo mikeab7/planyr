@@ -105,6 +105,13 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      // NEW-2 — the OVER-PROVISION slack: how far past the required volume is normal
+      // freeboard-and-rounding headroom rather than dirt that buys nothing. CRITERIA-
+      // CONFIGURABLE by design (never an inline constant at a UI call site); the defaults
+      // match the shipped site-level mitigation rule, required + max(1 ac-ft, 10%). No code
+      // publishes an over-provision tolerance — this is a screening convention, so ASSUMED.
+      overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
+      overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       coincidentStorm: COINCIDENT_ASSUMED("Waller Appendix E DCM Sec 5 + BKDD Rules & Regulations 22-01 pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search targets: Waller Appendix E DCM Sec 5 + BKDD Rules & Regulations 22-01"),
     },
@@ -145,6 +152,13 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      // NEW-2 — the OVER-PROVISION slack: how far past the required volume is normal
+      // freeboard-and-rounding headroom rather than dirt that buys nothing. CRITERIA-
+      // CONFIGURABLE by design (never an inline constant at a UI call site); the defaults
+      // match the shipped site-level mitigation rule, required + max(1 ac-ft, 10%). No code
+      // publishes an over-provision tolerance — this is a screening convention, so ASSUMED.
+      overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
+      overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       // §5.D.2/§5.D.3 — outfall design head H = 100-yr facility WSE MINUS the 25-YR receiving-ditch WSE
       // (or the orifice centroid for a roadside ditch / storm sewer). So the basin is NOT designed
       // coincident with the 100-yr receiving flood — the receiving tailwater is the 25-yr level.
@@ -184,6 +198,13 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      // NEW-2 — the OVER-PROVISION slack: how far past the required volume is normal
+      // freeboard-and-rounding headroom rather than dirt that buys nothing. CRITERIA-
+      // CONFIGURABLE by design (never an inline constant at a UI call site); the defaults
+      // match the shipped site-level mitigation rule, required + max(1 ac-ft, 10%). No code
+      // publishes an over-provision tolerance — this is a screening convention, so ASSUMED.
+      overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
+      overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       maxSideSlope: c(3, false, "3:1 interior — commonly cited; verify vs the DCM"),
       maintBermFt: c(30, false, "maintenance shelf — screening convention; verify"),
       orificeC: c(STD_ORIFICE_C, true, "sharp-edged orifice (standard hydraulics)"),
@@ -227,6 +248,13 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      // NEW-2 — the OVER-PROVISION slack: how far past the required volume is normal
+      // freeboard-and-rounding headroom rather than dirt that buys nothing. CRITERIA-
+      // CONFIGURABLE by design (never an inline constant at a UI call site); the defaults
+      // match the shipped site-level mitigation rule, required + max(1 ac-ft, 10%). No code
+      // publishes an over-provision tolerance — this is a screening convention, so ASSUMED.
+      overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
+      overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       coincidentStorm: COINCIDENT_ASSUMED("HCFCD PCPM / HCED coincident-storm provision pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "owner recollection: HCFCD allows ~50% of detention outflow to be pumped. Named search targets: HCFCD Policy, Criteria & Procedure Manual + 2016 Supplemental Guidelines (pumped-detention allowance)"),
     },
@@ -261,6 +289,13 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      // NEW-2 — the OVER-PROVISION slack: how far past the required volume is normal
+      // freeboard-and-rounding headroom rather than dirt that buys nothing. CRITERIA-
+      // CONFIGURABLE by design (never an inline constant at a UI call site); the defaults
+      // match the shipped site-level mitigation rule, required + max(1 ac-ft, 10%). No code
+      // publishes an over-provision tolerance — this is a screening convention, so ASSUMED.
+      overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
+      overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       coincidentStorm: COINCIDENT_ASSUMED("City of Houston IDM Ch. 9 coincident-storm provision pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(25, "City of Houston IDM Ch. 9 restricts pumped detention more tightly; conservative screening ceiling ASSUMED. Named search target: City of Houston Infrastructure Design Manual Ch. 9 (Stormwater Detention) pumped-detention provisions"),
     },
@@ -295,6 +330,13 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      // NEW-2 — the OVER-PROVISION slack: how far past the required volume is normal
+      // freeboard-and-rounding headroom rather than dirt that buys nothing. CRITERIA-
+      // CONFIGURABLE by design (never an inline constant at a UI call site); the defaults
+      // match the shipped site-level mitigation rule, required + max(1 ac-ft, 10%). No code
+      // publishes an over-provision tolerance — this is a screening convention, so ASSUMED.
+      overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
+      overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       coincidentStorm: COINCIDENT_ASSUMED("Montgomery County DCM §6.3 coincident-storm provision pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search target: Montgomery County Drainage Criteria Manual"),
     },
@@ -329,6 +371,13 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      // NEW-2 — the OVER-PROVISION slack: how far past the required volume is normal
+      // freeboard-and-rounding headroom rather than dirt that buys nothing. CRITERIA-
+      // CONFIGURABLE by design (never an inline constant at a UI call site); the defaults
+      // match the shipped site-level mitigation rule, required + max(1 ac-ft, 10%). No code
+      // publishes an over-provision tolerance — this is a screening convention, so ASSUMED.
+      overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
+      overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       coincidentStorm: COINCIDENT_ASSUMED("Chambers County DCM coincident-storm provision pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search target: Chambers County Drainage Criteria Manual"),
     },
@@ -358,6 +407,13 @@ export const DETENTION_CRITERIA = {
       tcUrbanAdjustment: c(0.4, false, "Kirpich paved-channel adjustment at full imperviousness — commonly cited"),
       tcFlowPathKFactor: c(1.5, false, "L≈k·√area screening factor — no traced flow path"),
       screeningPondDepthFt: c(8, false, "typical screening pond depth — estimates land take from a volume shortfall only, never sizes a pond"),
+      // NEW-2 — the OVER-PROVISION slack: how far past the required volume is normal
+      // freeboard-and-rounding headroom rather than dirt that buys nothing. CRITERIA-
+      // CONFIGURABLE by design (never an inline constant at a UI call site); the defaults
+      // match the shipped site-level mitigation rule, required + max(1 ac-ft, 10%). No code
+      // publishes an over-provision tolerance — this is a screening convention, so ASSUMED.
+      overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
+      overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       coincidentStorm: COINCIDENT_ASSUMED("no jurisdiction matched — confirm the reviewing authority's coincident-storm provision"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "no jurisdiction matched; regional Houston-MSA screening practice ~50%. Confirm the reviewing authority's pumped-detention policy"),
     },
@@ -433,6 +489,8 @@ export function criteriaFor(jurKey, { onDate = null, overrides = null } = {}) {
     tcUrbanAdjustment: pick("tcUrbanAdjustment", null, cr.tcUrbanAdjustment),
     tcFlowPathKFactor: pick("tcFlowPathKFactor", null, cr.tcFlowPathKFactor),
     screeningPondDepthFt: pick("screeningPondDepthFt", null, cr.screeningPondDepthFt),
+    overdugSlackAcFt: pick("overdugSlackAcFt", null, cr.overdugSlackAcFt),
+    overdugSlackPct: pick("overdugSlackPct", null, cr.overdugSlackPct),
     coincidentStorm: pick("coincidentStorm", null, cr.coincidentStorm),
     pumpedShareOfReleasePct: pick("pumpedShareOfReleasePct", null, cr.pumpedShareOfReleasePct),
     minDetentionRateAcFtPerAc: pick("minDetentionRateAcFtPerAc", null, cr.minDetentionRateAcFtPerAc),

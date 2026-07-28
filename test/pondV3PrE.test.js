@@ -9,6 +9,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { usablePondVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
 
+import { detentionVerdict, mitigationVerdict } from "../src/workspaces/site-planner/lib/pondVerdict.js";
+
 const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 const at = (needle) => {
   const i = src.indexOf(needle);
@@ -62,10 +64,13 @@ describe("E2 — mitigation status-card regression at requirement 0", () => {
   });
 
   it("cards carry a kind so detention leads (findIndex → detention when it is short)", () => {
-    expect(src).toContain('kind: "detention"');
-    expect(src).toContain('kind: "mitigation"');
-    const detKind = src.indexOf('kind: "detention"');
-    const mitKind = src.indexOf('kind: "mitigation"');
+    // NEW-1 — the `kind` now rides the pure verdict objects; the push ORDER (detention first,
+    // so it is statusCards[0]) is still the SitePlanner wiring this guards.
+    expect(detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7 }).kind).toBe("detention");
+    expect(mitigationVerdict({ providedAcFt: 98.2, requiredAcFt: 97.7 }).kind).toBe("mitigation");
+    const detKind = src.indexOf("const dv = detentionVerdict({");
+    const mitKind = src.indexOf("mitigationVerdict({ providedAcFt: provMitAcFt");
+    expect(detKind).toBeGreaterThan(0);
     expect(detKind).toBeLessThan(mitKind); // detention pushed first → it is statusCards[0]
   });
 });

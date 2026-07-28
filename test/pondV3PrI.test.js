@@ -10,6 +10,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { detentionVerdict } from "../src/workspaces/site-planner/lib/pondVerdict.js";
+
 const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 const chip = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/components/Chip.jsx", import.meta.url)), "utf8");
 
@@ -72,14 +74,17 @@ describe("I4 — chips WRAP within the panel, never run off the right edge", () 
 
 describe("I5 — the verdict is a HEADLINE + a separate achieved/required sub-line (no dangling paren)", () => {
   it("the card carries a subline distinct from the heading", () => {
-    expect(src).toContain('heading: hardBlocked\n                        ? (short ? `Not buildable to reach ${f1(detReqAcFt)} ac-ft` : unbuildableHeading({ requiredAcFt: detReqAcFt }))');
-    expect(src).toContain("subline: hardBlocked && short");
-    expect(src).toContain("`${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft achievable`");
-    // the green case is a plain "Buildable" headline
-    expect(src).toContain('  : "Buildable",');
+    // NEW-1 — the heading/sub-line pair still exists, but both now come from the ONE pure
+    // derivation (lib/pondVerdict.js) and the heading NAMES its ledger instead of headlining
+    // the buildability answer. The "achievable" qualifier on the sub-line is preserved there
+    // (test/pondVerdict.test.js asserts the strings themselves).
+    expect(src).toContain("const dv = detentionVerdict({");
+    expect(src).toContain("out.push({ ...dv, body });");
+    expect(detentionVerdict({ providedAcFt: 40, requiredAcFt: 76.7, hardBlocked: true }).subline).toBe("40.0 of 76.7 ac-ft achievable");
+    expect(detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7 }).heading).toBe("Detention covered");
   });
   it("the render draws heading and sub-line as SEPARATE elements, wrap-safe", () => {
-    expect(src).toContain("{c.subline ? <div style={{ fontSize: 11, color: PAL.muted");
+    expect(src).toContain("{c.subline ? <div title={c.basisNote || undefined} style={{ fontSize: 11, color: PAL.muted");
     expect(src).toContain('overflowWrap: "anywhere" }}>{c.heading}</div>');
     // the old wrapped parenthetical form is gone
     expect(src.includes("ac-ft (${f1(provAcFt)} of ${f1(detReqAcFt)})`")).toBe(false);

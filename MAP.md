@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-28 @ `abdd35b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-28 @ `1e0c151` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_320 source files mapped._
+_321 source files mapped._
 
 ## infra
 
@@ -503,6 +503,8 @@ _320 source files mapped._
   - _exports_: `applyPondSizingActions`, `scaleRing`, `sizePondForTargets`, `solveMitigationDepth`, `solveMitigationGrow`, `solveTobRaise`
 - **`src/workspaces/site-planner/lib/pondStageModel.js`** — THE shared per-pond stage-storage / elevation-band model (NEW-1/3/5/6): stage table, the declared non-overlapping detention/mitigation duty split, the outfall-invert split, both gravity-drain tests, and the prism-vs-extrusion honesty delta
   - _exports_: `areaAtElev`, `CF_PER_ACFT`, `DEFAULT_MIN_GRAVITY_SHARE`, `dutySplit`, `gravityTests`, `outfallSplit`, `pondElevations`, `pondStageModel`, `prismVsExtrusion`, `SQFT_PER_ACRE`, `stageTable`
+- **`src/workspaces/site-planner/lib/pondVerdict.js`** — The ONE derivation of the pond inspector's detention + mitigation verdict rows: the heading names its own ledger, buildability and the over-provision (over-dug) state ride a demoted qualifier line, and the criteria-configurable over-provision slack + its screening dirt/cost note live here (shared with the ledger balancer and the print sheet).
+  - _exports_: `detentionVerdict`, `mitigationVerdict`, `OVERDUG_SLACK_FALLBACK`, `overdugAcFt`, `overProvision`
 - **`src/workspaces/site-planner/lib/powerScreen.js`** — PHASE 5 power screening (pure): turns HIFLD transmission lines + substations near the parcel into findings — a line crossing the footprint flags a likely transmission easement (present), the nearest substation is a service/interconnect proxy (info); cleans the dataset's withheld voltages and anonymized ("UNKNOWN…") substation names
   - _exports_: `ownerLabel`, `subName`, `summarizeSubstations`, `summarizeTransmission`, `voltLabel`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names

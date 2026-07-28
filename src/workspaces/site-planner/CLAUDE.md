@@ -96,6 +96,10 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `pondSizing.js` (NEW-4 two-target pond sizing assistant over the B708 bands),
   `pondChangeSummary.js` (B909 round 4 — pure before/after delta rows + the atomic gap-proposal
   sentence for the persistent "what changed" card after ⚡ Design pond),
+  `pondVerdict.js` (the ONE derivation of the pond inspector's detention + mitigation verdict rows:
+  the headline NAMES its ledger, buildability + the over-provision "over-dug" state ride a demoted
+  qualifier line, and the criteria-configurable over-provision slack `overdugAcFt` lives here —
+  `ledgerBalancer.js` re-exports it and the print sheet reads it, so screen/print/balancer can't drift),
   `pondSectionModel.js` + `components/PondSection.jsx` (PR-L — the ONE developer-readable pond
   cross-section: pure geometry + collision-free labels → responsive SVG, used by BOTH the Optimize
   card and the pond inspector),

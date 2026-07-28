@@ -14,6 +14,7 @@
 import { usablePondVolume } from "./pondGeom.js";
 import { computeRequiredDetention, computePumpedCredit } from "./detentionRules.js";
 import { effectivePondRole } from "./pondLedger.js";
+import { overdugAcFt } from "./pondVerdict.js";
 
 export const BERM_MAX_RAISE_FT = 4; // screening convention — no published berm-height cap is modeled yet (label it)
 const AC_FT = 43560;
@@ -26,10 +27,12 @@ const short = (s, n = 22) => {
   return t.length > n ? t.slice(0, n - 1) + "…" : t;
 };
 
-/* Over-dug threshold (shared with the Yield Balance row): beyond required +
- * max(1 ac-ft, 10%) the extra cut buys nothing. */
-export const overdugAcFt = (providedAcFt, requiredAcFt) =>
-  Math.max(0, providedAcFt - requiredAcFt - Math.max(1, requiredAcFt * 0.1));
+/* Over-dug threshold (shared with the Yield Balance row AND the pond inspector's detention
+ * row): beyond required + max(1 ac-ft, 10%) the extra cut buys nothing. NEW-2 moved the ONE
+ * derivation to pondVerdict.js (where the criteria-configurable slack is applied) and
+ * re-exports it here so the existing callers/tests keep their import; the default slack is
+ * unchanged. */
+export { overdugAcFt };
 
 /* A pond raised by a berm of height h: the floor stays, the top of bank and the water
  * surface rise together (same freeboard), depth grows by h. Screening: the footprint
