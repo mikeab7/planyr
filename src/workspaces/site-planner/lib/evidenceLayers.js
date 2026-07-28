@@ -36,7 +36,7 @@ const COL = {
 const bboxKey = (b) => [b.s, b.w, b.n, b.e].map((x) => x.toFixed(3)).join(",");
 
 // ---- OSM Overpass ----
-export async function fetchOverpass(bounds, want) {
+export async function fetchOverpass(bounds, want, signal) {
   const bbox = `${bounds.s},${bounds.w},${bounds.n},${bounds.e}`;
   const p = [];
   if (want.lines) { p.push(`way["power"="line"](${bbox});`); p.push(`way["power"="minor_line"](${bbox});`); }
@@ -44,7 +44,8 @@ export async function fetchOverpass(bounds, want) {
   if (want.substations) { p.push(`way["power"="substation"](${bbox});`); p.push(`node["power"="substation"](${bbox});`); }
   if (want.hydrants) { p.push(`node["emergency"="fire_hydrant"](${bbox});`); }
   const q = `[out:json][timeout:25];(${p.join("")});out geom;`;
-  const r = await fetch(OVERPASS_URL, { method: "POST", body: "data=" + encodeURIComponent(q) });
+  const init = { method: "POST", body: "data=" + encodeURIComponent(q) };
+  const r = await fetch(OVERPASS_URL, signal ? { ...init, signal } : init);
   if (!r.ok) throw new Error(`Overpass HTTP ${r.status}`);
   const j = await r.json();
   return j.elements || [];
@@ -79,7 +80,7 @@ function renderOverpass(els, group, opacity) {
  * msg)` reports loading | loaded | empty | failed for the Layers panel. */
 export function overpassLayer(want, onStatus) {
   const group = L.layerGroup();
-  let map = null, lastKey = null, opacity = 0.9, busy = false, pending = false, lastEls = [];
+  let map = null, lastKey = null, opacity = 0.9, lastEls = [], ctrl = null;
   // Re-render at the new opacity so each feature keeps its RELATIVE fill (substations
   // faint, nodes solid) instead of being flattened to one uniform fillOpacity (B36b).
   group.setOpacity = (o) => { opacity = o; group.clearLayers(); renderOverpass(lastEls, group, opacity); };
@@ -92,39 +93,41 @@ export function overpassLayer(want, onStatus) {
   };
   const refresh = async () => {
     if (!map) return;
-    if (busy) { pending = true; return; } // a moveend arrived mid-fetch — serve the latest view after (B56d)
     if (map.getZoom() < MIN_ZOOM) { group.clearLayers(); lastEls = []; lastKey = "zoomed-out"; onStatus && onStatus("empty", `Zoom in to ≥ ${MIN_ZOOM} to load`); return; }
     const b = map.getBounds();
     const bb = { s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast() };
     const key = "overpass:" + bboxKey(bb) + ":" + JSON.stringify(want);
     if (key === lastKey) return;
     lastKey = key;
+    // NEW-6 — a pan SUPERSEDES whatever is still in flight, so cancel it now instead of
+    // letting it land and be thrown away. This used to queue behind a `busy` flag: the
+    // superseded request ran to completion (a full Overpass query, sometimes many seconds)
+    // and only THEN did the view the user is actually looking at get requested. Aborting is
+    // safe here because gisCache.swr writes only on success — an aborted attempt lands in
+    // its catch, writes nothing, and leaves the last-good copy exactly as it was.
+    if (ctrl) ctrl.abort();
+    ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const sig = ctrl && ctrl.signal;
     // Stale-while-revalidate (B75): paint the cached copy NOW (its age is shown), then
     // refresh in the background and swap fresh data in when it returns.
-    const { cached, stale, fresh } = gisCache.swr(key, () => fetchOverpass(bb, want), { ttl: OVERPASS_TTL });
+    const { cached, stale, fresh } = gisCache.swr(key, () => fetchOverpass(bb, want, sig), { ttl: OVERPASS_TTL });
     if (cached) paint(cached.data, cached.ts, { stale });
     else onStatus && onStatus("loading");
-    busy = true;
     const r = await fresh;
-    busy = false;
     // B36e: the layer may have been toggled off / the map torn down while the request was
     // in flight (onRemove nulls `map`). Bail before painting or reporting status, so a stale
     // response never renders into a detached group or fires a "loaded" for an off layer.
-    if (!map) return;
+    // A superseded request bails the same way — the newer view owns the UI now.
+    if (!map || (sig && sig.aborted)) return;
     if (r.updated) paint(r.data, r.ts);
     else if (r.error && !cached) { lastKey = null; onStatus && onStatus("failed", `OSM Overpass: ${(r.error && r.error.message) || "request failed"}`); }
     else if (r.error && cached) paint(cached.data, cached.ts, { stale: true, note: "Showing last-good — refresh failed" }); // keep last-known-good
-    if (pending) { pending = false; refresh(); } // trailing-edge refresh for the view that moved during the fetch
   };
+  group.abortPending = () => { if (ctrl) { try { ctrl.abort(); } catch (_) {} } };
   group.onAdd = function (m) { L.LayerGroup.prototype.onAdd.call(this, m); map = m; m.on("moveend", refresh); refresh(); return this; };
-  group.onRemove = function (m) { m.off("moveend", refresh); map = null; lastKey = null; pending = false; L.LayerGroup.prototype.onRemove.call(this, m); };
+  group.onRemove = function (m) { group.abortPending(); m.off("moveend", refresh); map = null; lastKey = null; L.LayerGroup.prototype.onRemove.call(this, m); };
   return group;
 }
-// NOTE (B36e): the Overpass fetch rides gisCache.swr (which owns + caches the request), so it
-// is NOT aborted on removal — aborting a cached fetch would poison the shared SWR cache. The
-// post-await `if (!map) return` guard above is enough there: the request completes and warms the
-// cache for next time, but never renders into a detached group. The Mapillary path is a direct
-// fetch with no cache, so it DOES abort.
 
 // ---- Mapillary (crowdsourced detections) ----
 export const mapillaryToken = () => {
@@ -161,11 +164,10 @@ async function fetchMapillary(bounds, token, signal) {
 
 export function mapillaryLayer(onStatus) {
   const group = L.layerGroup();
-  let map = null, lastKey = null, opacity = 0.95, busy = false, pending = false, ctrl = null;
+  let map = null, lastKey = null, opacity = 0.95, ctrl = null;
   group.setOpacity = (o) => { opacity = o; group.eachLayer((l) => l.setStyle && l.setStyle({ opacity: o, fillOpacity: o })); };
   const refresh = async () => {
     if (!map) return;
-    if (busy) { pending = true; return; } // a moveend arrived mid-fetch — serve the latest view after (B56d)
     const token = mapillaryToken(); // empty = use the server-side proxy (B308); set = optional override
     if (map.getZoom() < MLY_MIN_ZOOM) { group.clearLayers(); lastKey = "zoomed-out"; onStatus && onStatus("empty", `Zoom in to ≥ ${MLY_MIN_ZOOM} to load`); return; }
     const b = map.getBounds();
@@ -175,9 +177,12 @@ export function mapillaryLayer(onStatus) {
     const key = bboxKey(bb);
     if (key === lastKey) return;
     lastKey = key;
-    let feats = null; busy = true; onStatus && onStatus("loading");
+    let feats = null; onStatus && onStatus("loading");
     // B36e: abort a slow request the moment the layer is toggled off (onRemove aborts `ctrl`),
     // so it never renders into a detached group and stops wasting the network round-trip.
+    // NEW-6: the same abort now also runs on PAN SUPERSESSION. It used to queue behind a
+    // `busy` flag, so a pan let the stale request finish before the current view was even
+    // asked for; now the superseded request is cancelled the moment the view moves.
     if (ctrl) ctrl.abort();
     ctrl = new AbortController();
     const sig = ctrl.signal;
@@ -189,9 +194,8 @@ export function mapillaryLayer(onStatus) {
       if (e && e.unconfigured) onStatus && onStatus("unconfigured", e.message);
       else onStatus && onStatus("failed", `Mapillary: ${(e && e.message) || "request failed"}`);
     }
-    finally { busy = false; }
-    if (!map) return; // B36e: removed mid-fetch — don't render/report into a detached group
-    if (feats === null) { if (pending) { pending = false; refresh(); } return; }
+    if (!map || sig.aborted) return; // B36e: removed / superseded mid-fetch — don't render into a detached or stale group
+    if (feats === null) return;
     group.clearLayers();
     onStatus && onStatus(feats.length ? "loaded" : "empty", feats.length ? null : "No detections in view");
     feats.forEach((f) => {
@@ -201,9 +205,9 @@ export function mapillaryLayer(onStatus) {
       L.circleMarker([lat, lon], { radius: 4, color: COL.mly, weight: 1.4, opacity, fillColor: isHyd ? COL.hydrant : COL.mly, fillOpacity: opacity })
         .bindTooltip(`${isHyd ? "Hydrant" : "Pole"} · crowdsourced detection (Mapillary)`).addTo(group);
     });
-    if (pending) { pending = false; refresh(); } // trailing-edge refresh for the view that moved during the fetch (B56d)
   };
+  group.abortPending = () => { if (ctrl) { try { ctrl.abort(); } catch (_) {} } };
   group.onAdd = function (m) { L.LayerGroup.prototype.onAdd.call(this, m); map = m; m.on("moveend", refresh); refresh(); return this; };
-  group.onRemove = function (m) { if (ctrl) ctrl.abort(); m.off("moveend", refresh); map = null; lastKey = null; pending = false; L.LayerGroup.prototype.onRemove.call(this, m); };
+  group.onRemove = function (m) { group.abortPending(); m.off("moveend", refresh); map = null; lastKey = null; L.LayerGroup.prototype.onRemove.call(this, m); };
   return group;
 }

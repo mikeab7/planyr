@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-28 @ `d1af5bc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-28 @ `4fbe5cf` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_321 source files mapped._
+_327 source files mapped._
 
 ## infra
 
@@ -383,10 +383,12 @@ _321 source files mapped._
   - _exports_: `clipSegmentToRing`, `convertBuildingToPolygon`, `distToLine`, `dockEdgeLine`, `dockLineAt`, `dockLinesFor`, `dockSegExtent`, `frameBBox`, `pointInRing`, `projectOntoLine`, `rectRing`, `rotateDockLines`, `translateDockLines`
 - **`src/workspaces/site-planner/lib/geocode.js`** — Shared address geocoder (Esri World primary, Nominatim fallback) with honest hit/not-found/service-down return contract, used by map and planner
   - _exports_: `geocodeAddress`
+- **`src/workspaces/site-planner/lib/ghostSnapshot.js`** — Frozen visible-tile snapshot held over an unavoidable basemap wipe — flat, viewport-only, replacing the whole-container deep clone
+  - _exports_: `buildGhost`, `visibleTiles`
 - **`src/workspaces/site-planner/lib/gisCache.js`** — Browser-local stale-while-revalidate cache for GIS responses: L1 memo plus byte-capped oldest-evicted localStorage, age-aware, injectable store/clock
   - _exports_: `createGisCache`, `formatAge`, `gisCache`, `isStale`, `NS`
 - **`src/workspaces/site-planner/lib/gisFetch.js`** — Resilient ArcGIS fetch substrate: honest error taxonomy, timeout plus jittered-backoff retry, auto GET-to-POST for long geometry, pLimit concurrency pool
-  - _exports_: `backoffMs`, `classifyGisError`, `fetchArcgisJson`, `GIS_FETCH_RETRIES`, `GIS_FETCH_TIMEOUT_MS`, `GIS_MAX_GET_URL`, `gisErrorMessage`, `GisFetchError`, `pLimit`
+  - _exports_: `backoffMs`, `classifyGisError`, `clearCoalesced`, `COALESCE_TTL_MS`, `coalesceRequest`, `fetchArcgisJson`, `GIS_FETCH_RETRIES`, `GIS_FETCH_TIMEOUT_MS`, `GIS_MAX_GET_URL`, `gisErrorMessage`, `GisFetchError`, `pLimit`
 - **`src/workspaces/site-planner/lib/gradingRules.js`** — Grading-standards registry (B825): per-surface-class slope limits with provenance (verified/basis/source), override merge, percent/ratio validation seam, chip labels
   - _exports_: `chipLabel`, `GRADING_RULES`, `gradingRuleFor`, `JURISDICTION_OVERRIDES`, `mergeGradeOverride`, `validateSlopeAgainstRule`
 - **`src/workspaces/site-planner/lib/groundwater.js`** — Depth-to-water screen for pond feasibility (NEW-B3): combines SSURGO seasonal-high water table + TWDB well signals (provenanced), screens wet-vs-dry pond (permanent-pool depth, suggested pool elev). Pure.
@@ -417,6 +419,8 @@ _321 source files mapped._
   - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
   - _exports_: `AHJ_LAYERS`, `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `gisProxyEnabled`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_GROUP_LABEL`, `LAYER_GROUP_ORDER`, `LAYER_VINTAGE`, `layerVintage`, `MERGE_GROUPS`, `probeService`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
+- **`src/workspaces/site-planner/lib/layerSchedule.js`** — GIS overlay load ORDER + staging policy so the map is interactive before the overlay fan-out starts
+  - _exports_: `admittedAfter`, `LAYER_STAGE_SIZE`, `layerTier`, `orderLayersByPriority`
 - **`src/workspaces/site-planner/lib/ledgerBalancer.js`** — Ledger balancer (B830): ranks screening moves that close detention + mitigation together (shrink over-dug, joint berm solve with apply payload, parcel phase-out, building-to-basin, pumped what-if). Exports `rankLedgerMoves`, `solveBermRaise`.
   - _exports_: `BERM_MAX_RAISE_FT`, `overdugAcFt`, `rankLedgerMoves`, `solveBermRaise`
 - **`src/workspaces/site-planner/lib/lineZoom.js`** — B880: dash-period + inset-visibility zoom helpers (the B617 siblings for dashed feet-frame lines) — `dashZoom` scales an SVG dash spec with zoom (floored sub-pixel, capped), `insetRingVisible` suppresses a setback/inset ring when it collapses onto its boundary. Exports: `dashZoom`, `insetRingVisible`, `DASH_ZOOM_FLOOR_PX`, `DASH_ZOOM_CEIL`, `INSET_MIN_VISIBLE_PX`.
@@ -425,6 +429,8 @@ _321 source files mapped._
   - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbGet`, `idbPersist`, `idbPut`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
+- **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
+  - _exports_: `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `zoomToPpf`
 - **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)
   - _exports_: `boxCorners`, `distToPolyline`, `distToRing`, `ellipseRing`, `markupHitModel`, `markupsUnderPoint`, `markupUnderPoint`, `nextMarkupSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureHit.js`** — Pure hit-test + z-order cycling for on-canvas measurements (B910): which measurement a feet-space click lands on (smaller-area-wins), and the next selection when a stack is re-clicked (wraps)
@@ -561,6 +567,10 @@ _321 source files mapped._
   - _exports_: `contourLayer`, `fetchSiteGrid`, `flowLayer`, `sampleTerrainGrids`, `siteGridZoom`, `TERRAIN_MIN_ZOOM`
 - **`src/workspaces/site-planner/lib/terrainWorker.js`** — Terrain Web Worker (B704/B705): LERC decode -> masked smooth -> contours + flow arrows off the main thread; imports pure modules only (guarded by test/terrainWorker.test.js)
   - _exports_: _(none)_
+- **`src/workspaces/site-planner/lib/tileBudget.js`** — Pure tile/overscan budget: how much basemap is held off-screen, how many tiles are retained, and when the retina uplift is worth its cost
+  - _exports_: `keepBufferFor`, `OVERSCAN_FULL`, `OVERSCAN_MIN`, `OVERSCAN_REDUCED`, `overscanPx`, `RETINA_MIN_ZOOM`, `retinaForZoom`, `tileCacheLimit`, `tilesToEvict`, `tileWeight`
+- **`src/workspaces/site-planner/lib/tileLifecycle.js`** — Leaflet-bound tile + overlay lifecycle — keep tiles across a same-grid setView, bound the tile cache, and release a toggled-off overlay for real
+  - _exports_: `announceSetView`, `boundTileCache`, `capTileCache`, `preserveTilesAcrossSetView`, `releaseLayer`
 - **`src/workspaces/site-planner/lib/timeOfConcentration.js`** — Computed time of concentration (B905, CE roadmap #3): Kirpich formula + a criteria-configurable urban adjustment/floor, with an area-based flow-path-length fallback and a default-slope fallback when real geometry/grade aren't resolved — replaces the flat 15-min screening assumption everywhere Tc feeds the routing chain.
   - _exports_: `computeTimeOfConcentration`, `DEFAULT_FLOW_PATH_K_FACTOR`, `DEFAULT_KIRPICH_URBAN_ADJUSTMENT`, `DEFAULT_TC_DEFAULT_SLOPE_PCT`, `DEFAULT_TC_FLOOR_MIN`, `estimateFlowPathLengthFt`, `kirpichTcMin`
 - **`src/workspaces/site-planner/lib/titleReader.js`** — Client-side title-commitment reader: sends an uploaded PDF to the Claude API with a Schedule-B JSON schema to extract exceptions plus the metes-and-bounds legal description
@@ -573,6 +583,8 @@ _321 source files mapped._
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
   - _exports_: `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`
+- **`src/workspaces/site-planner/lib/viewCull.js`** — Viewport culling for the feet-frame SVG (screen only — the export always renders the complete model)
+  - _exports_: `boundsIntersect`, `CULL_MARGIN`, `CULL_MIN_ELEMENTS`, `cullToView`, `elementBounds`, `shouldCull`, `visibleWorldRect`
 - **`src/workspaces/site-planner/lib/wellStatus.js`** — Pure RRC well status classifier (PHASE 4): SYMNUM/description → producing/plugged/dry/abandoned/injection, and `summarizeWells` turns a proximity result into a status breakdown + an on-site offset/replug risk flag
   - _exports_: `classifyWell`, `summarizeWells`
 - **`src/workspaces/site-planner/lib/wseProviders.js`** — the pluggable estimated-WSE provider registry (B882, pure): per-county precedence (district model → FEMA InFRM EBFE → grade) + provenance labels; `resolveEstimatedWse` picks the winning 1%/0.2% source and reports cross-provider disagreement.
