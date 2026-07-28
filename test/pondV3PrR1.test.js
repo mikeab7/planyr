@@ -8,24 +8,32 @@ import { fileURLToPath } from "node:url";
 const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 
 describe("NEW-15 — the detention explainer matches the numbers above it (partial vs total dead)", () => {
-  it("computes the dead share and branches on total-vs-partial dead", () => {
-    // NEW-1 (B1032) — renamed `gapAcFt`: the difference between what the outline could hold and
-    // what counts is NOT all dead storage (berm ring, dedicated compensating storage), and calling
-    // it "dead" is what produced the wrong "17.4 sits below the flood level" sentence.
+  // NEW-2 (2026-07-28, PANEL-BREVITY) — the explainer is no longer a SENTENCE with a partial /
+  // total-dead branch. Both cases are now carried by one number pair ("0.0 of 63.4 ac-ft held"
+  // says "none counts yet" without spending a clause on it), and the term-by-term account folds
+  // into "Assumptions & method ▸". What NEW-15 and B1032 actually bought — that the gap is
+  // accounted for TERM BY TERM and never blamed wholesale on the flood level — is unchanged and
+  // is what these tests now guard.
+  it("still computes the gap as holds-minus-counts (never 'dead', which was the wrong word)", () => {
+    // NEW-1 (B1032) — the difference between what the outline could hold and what counts is NOT
+    // all dead storage (berm ring, dedicated compensating storage); calling it "dead" is what
+    // produced the wrong "17.4 sits below the flood level" sentence on Tsakiris.
     expect(src).toContain("const gapAcFt = siteCounts != null ? siteHolds - siteCounts : null;");
-    expect(src).toContain("const totalDead = siteCounts < ACFT_EPS;");
   });
-  it("the PARTIAL sentence names the dead share and its holds total (no more 'none counts' lie)", () => {
-    // NEW-1 (B1032) — the partial sentence now names each term of the gap and closes on what is
-    // left to count, so it can never claim volume is "below the flood level" when it isn't.
-    expect(src).toContain("Of the ${f1(siteHolds)} ac-ft the outline could hold, ${terms.join(\", \")}");
-    expect(src).toContain("left to count for detention.${rimClause}");
+  it("the visible line is the counted-of-held pair, which covers partial AND total dead alike", () => {
+    expect(src).toContain("{f1(siteCounts)} of {f1(siteHolds)} ac-ft held");
+    // the old prose branches are gone from the default view
+    expect(src.includes("All of its storage sits below the flood level, so none counts yet.")).toBe(false);
+    expect(src.includes("left to count for detention.")).toBe(false);
   });
-  it("the TOTAL-dead sentence keeps the original 'none counts yet' wording", () => {
-    expect(src).toContain("`All of its storage sits below the flood level, so none counts yet.${rimClause}`");
+  it("every term of the gap survives, folded — brevity is never bought with accuracy", () => {
+    for (const term of ["berm ring", "permanent water", "floodplain compensation", "below flood level"]) {
+      expect(src.includes(term), term).toBe(true);
+    }
+    expect(src).toContain('`Not counted: ${terms.join(" · ")} ac-ft.');
   });
-  it("the 'raising the rim' clause is gated on rimRaiseFeasible (never an empty promise)", () => {
-    expect(src).toContain('const rimClause = d.rimRaiseFeasible ? " Raising the rim adds storage above the flood level." : "";');
+  it("the 'raising the rim' clause is still gated on rimRaiseFeasible (never an empty promise)", () => {
+    expect(src).toContain('${d.rimRaiseFeasible ? " Raising the rim adds storage above the flood level." : ""}');
     // rimRaiseFeasible is computed on the drainage object from dead-but-upland ponds
     expect(src).toContain("rimRaiseFeasible: pondLedgerEntries.some((p) => {");
     expect(src).toContain("return holds - counts > 0.05 * 43560 && !p.inTrigger;");

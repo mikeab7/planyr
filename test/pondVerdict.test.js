@@ -119,9 +119,12 @@ describe("NEW-2 — the over-provision (over-dug) state", () => {
     expect(detentionVerdict({ providedAcFt: 150.9, requiredAcFt: 76.7, hardBlocked: true }).over).toBe(false);
   });
 
-  it("an over-provision never changes the card tone — the ⚡ Optimize button must not ride it", () => {
+  it("an over-provision never changes the card tone (a surplus must not out-shout a shortfall)", () => {
     const v = detentionVerdict({ providedAcFt: 150.9, requiredAcFt: 76.7 });
-    expect(v.tone).toBe("ok"); // SitePlanner hangs Optimize on the first non-ok card
+    // NEW-1 (2026-07-28): this used to read "…the ⚡ Optimize button must not ride it" — the
+    // optimizer WAS hung on the first non-ok card, so keeping this green here is precisely what
+    // made the optimizer vanish. The tone rule stands; the affordance no longer depends on it.
+    expect(v.tone).toBe("ok");
   });
 
   it("unknown provided/required is honest: no verdict numbers invented", () => {

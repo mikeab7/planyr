@@ -51,16 +51,22 @@ describe("E1 — Optimize NEVER creates geometry when a pond already exists", ()
 describe("E2 — mitigation status-card regression at requirement 0", () => {
   // These live in the pond-inspector RENDER (the statusCards block), below designPond.
   it("(a) neither status card renders when its requirement rounds to 0 at 1dp (>= 0.05 floor)", () => {
-    expect(src).toContain("detReqRaw != null && detReqRaw >= 0.05 ? detReqRaw : null");
-    expect(src).toContain("mit.volumeCf > 0 && mit.volumeAcFt >= 0.05 ? mit.volumeAcFt : null");
+    // NEW-1 hoisted the two requirement figures out of the statusCards IIFE (the optimizer
+    // affordance reads the SAME numbers), but the 0.05 floor itself is unchanged.
+    expect(src).toContain("sc_detReqRaw != null && sc_detReqRaw >= 0.05 ? sc_detReqRaw : null");
+    expect(src).toContain("drainMitDisplay.volumeCf > 0 && drainMitDisplay.volumeAcFt >= 0.05 ? drainMitDisplay.volumeAcFt : null");
   });
 
-  it("(c) EXACTLY ONE Optimize button: it rides only the first NON-OK card (short or PR-G amber)", () => {
-    // PR-G — the button now rides the first non-OK card (short OR the AMBER "not buildable").
-    expect(src).toContain('const optimizeIdx = statusCards.findIndex((c) => (c.tone ?? (c.short ? "short" : "ok")) !== "ok");');
-    expect(src).toContain('i === optimizeIdx && (c.tone ?? (c.short ? "short" : "ok")) !== "ok"');
-    // still exactly one button (a single conditional, not one per card)
-    expect(src.split("⚡ Optimize pond</button>").length - 1).toBe(1);
+  // NEW-1 (2026-07-28) — E2(c) is SUPERSEDED. There is no per-card Optimize button any more: the
+  // owner asked for no control to hunt for, so the optimizer is ONE suggestion line whose condition
+  // never mentions tone. Guarding the count of a button that no longer exists would guard nothing;
+  // what matters now is that exactly one suggestion renders and that it is tone-free.
+  it("(c) EXACTLY ONE optimizer affordance in the inspector, and its condition is tone-free", () => {
+    expect(src.split('data-testid="pond-rightsize"').length - 1).toBe(1);
+    const line = src.slice(src.indexOf("const aff = optimizeAffordance({"), src.indexOf('data-testid="pond-rightsize"'));
+    for (const forbidden of ["tone", "PAL.danger", "PAL.warn", "c.short", "statusCards"]) {
+      expect(line.includes(forbidden), forbidden).toBe(false);
+    }
   });
 
   it("cards carry a kind so detention leads (findIndex → detention when it is short)", () => {

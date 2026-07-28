@@ -53,6 +53,15 @@ const STD_WEIR_C = 3.33;
  * readability convention, so ASSUMED: no code publishes one. */
 const MARGIN_PCT_FLOOR = () => c(1.0, false, "screening readability floor — below this required volume a percentage margin is meaningless, so the absolute delta is shown instead. No code publishes one.");
 
+/* NEW-4 — the flood-level SENSITIVITY steps: how far above the governing flood water surface the
+ * "what if the flood level is higher than we think?" sweep reaches, in feet. This is an
+ * UNDERWRITING question, not a design one — in unstudied Zone A the flood level is an estimate
+ * standing in for a number FEMA never published, and on a flat site a foot of it can be the whole
+ * mitigation obligation. Criteria-configurable (never an inline constant) because a jurisdiction
+ * with a published freeboard/uncertainty convention should sweep to ITS number; no code publishes
+ * a screening sensitivity range, so all eight seed the same unverified default. */
+const WSE_SENSITIVITY = () => c([0, 1, 2, 5], false, "screening sensitivity sweep above the governing flood water surface (ft) — no code publishes an uncertainty range for an estimated Zone A flood level; these steps show how fast the obligation moves, they are not a design allowance.");
+
 /* R1 (dead-storage-vs-tailwater) — the COINCIDENT-STORM design policy. Does the jurisdiction
  * require the pond's design storm to be assumed COINCIDENT with the receiving flood (so the
  * 100-yr flood WSE permanently floors the usable detention band — usable is only the storage
@@ -120,6 +129,7 @@ export const DETENTION_CRITERIA = {
       overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       marginPctFloorAcFt: MARGIN_PCT_FLOOR(),
+      wseSensitivityStepsFt: WSE_SENSITIVITY(),
       coincidentStorm: COINCIDENT_ASSUMED("Waller Appendix E DCM Sec 5 + BKDD Rules & Regulations 22-01 pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search targets: Waller Appendix E DCM Sec 5 + BKDD Rules & Regulations 22-01"),
     },
@@ -168,6 +178,7 @@ export const DETENTION_CRITERIA = {
       overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       marginPctFloorAcFt: MARGIN_PCT_FLOOR(),
+      wseSensitivityStepsFt: WSE_SENSITIVITY(),
       // §5.D.2/§5.D.3 — outfall design head H = 100-yr facility WSE MINUS the 25-YR receiving-ditch WSE
       // (or the orifice centroid for a roadside ditch / storm sewer). So the basin is NOT designed
       // coincident with the 100-yr receiving flood — the receiving tailwater is the 25-yr level.
@@ -215,6 +226,7 @@ export const DETENTION_CRITERIA = {
       overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       marginPctFloorAcFt: MARGIN_PCT_FLOOR(),
+      wseSensitivityStepsFt: WSE_SENSITIVITY(),
       maxSideSlope: c(3, false, "3:1 interior — commonly cited; verify vs the DCM"),
       maintBermFt: c(30, false, "maintenance shelf — screening convention; verify"),
       orificeC: c(STD_ORIFICE_C, true, "sharp-edged orifice (standard hydraulics)"),
@@ -266,6 +278,7 @@ export const DETENTION_CRITERIA = {
       overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       marginPctFloorAcFt: MARGIN_PCT_FLOOR(),
+      wseSensitivityStepsFt: WSE_SENSITIVITY(),
       coincidentStorm: COINCIDENT_ASSUMED("HCFCD PCPM / HCED coincident-storm provision pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "owner recollection: HCFCD allows ~50% of detention outflow to be pumped. Named search targets: HCFCD Policy, Criteria & Procedure Manual + 2016 Supplemental Guidelines (pumped-detention allowance)"),
     },
@@ -308,6 +321,7 @@ export const DETENTION_CRITERIA = {
       overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       marginPctFloorAcFt: MARGIN_PCT_FLOOR(),
+      wseSensitivityStepsFt: WSE_SENSITIVITY(),
       coincidentStorm: COINCIDENT_ASSUMED("City of Houston IDM Ch. 9 coincident-storm provision pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(25, "City of Houston IDM Ch. 9 restricts pumped detention more tightly; conservative screening ceiling ASSUMED. Named search target: City of Houston Infrastructure Design Manual Ch. 9 (Stormwater Detention) pumped-detention provisions"),
     },
@@ -350,6 +364,7 @@ export const DETENTION_CRITERIA = {
       overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       marginPctFloorAcFt: MARGIN_PCT_FLOOR(),
+      wseSensitivityStepsFt: WSE_SENSITIVITY(),
       coincidentStorm: COINCIDENT_ASSUMED("Montgomery County DCM §6.3 coincident-storm provision pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search target: Montgomery County Drainage Criteria Manual"),
     },
@@ -392,6 +407,7 @@ export const DETENTION_CRITERIA = {
       overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       marginPctFloorAcFt: MARGIN_PCT_FLOOR(),
+      wseSensitivityStepsFt: WSE_SENSITIVITY(),
       coincidentStorm: COINCIDENT_ASSUMED("Chambers County DCM coincident-storm provision pending"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "code silent on pumped detention; regional Houston-MSA screening practice ~50%. Named search target: Chambers County Drainage Criteria Manual"),
     },
@@ -429,6 +445,7 @@ export const DETENTION_CRITERIA = {
       overdugSlackAcFt: c(1.0, false, "screening over-provision tolerance (absolute) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       overdugSlackPct: c(10, false, "screening over-provision tolerance (percent of required) — no code publishes one; matches the shipped mitigation ledger's required + max(1 ac-ft, 10%) rule"),
       marginPctFloorAcFt: MARGIN_PCT_FLOOR(),
+      wseSensitivityStepsFt: WSE_SENSITIVITY(),
       coincidentStorm: COINCIDENT_ASSUMED("no jurisdiction matched — confirm the reviewing authority's coincident-storm provision"),
       pumpedShareOfReleasePct: PUMPED_SHARE_ASSUMED(50, "no jurisdiction matched; regional Houston-MSA screening practice ~50%. Confirm the reviewing authority's pumped-detention policy"),
     },
@@ -507,6 +524,7 @@ export function criteriaFor(jurKey, { onDate = null, overrides = null } = {}) {
     overdugSlackAcFt: pick("overdugSlackAcFt", null, cr.overdugSlackAcFt),
     overdugSlackPct: pick("overdugSlackPct", null, cr.overdugSlackPct),
     marginPctFloorAcFt: pick("marginPctFloorAcFt", null, cr.marginPctFloorAcFt),
+    wseSensitivityStepsFt: pick("wseSensitivityStepsFt", null, cr.wseSensitivityStepsFt),
     coincidentStorm: pick("coincidentStorm", null, cr.coincidentStorm),
     pumpedShareOfReleasePct: pick("pumpedShareOfReleasePct", null, cr.pumpedShareOfReleasePct),
     minDetentionRateAcFtPerAc: pick("minDetentionRateAcFtPerAc", null, cr.minDetentionRateAcFtPerAc),

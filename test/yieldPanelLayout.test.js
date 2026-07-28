@@ -102,15 +102,19 @@ describe("punch 4 — DETENTION DETAIL: prior detail folds into Assumptions & me
     expect(src).toContain("method: detR");
     expect(src).toContain("Requirement basis");
     expect(src).toContain("ac-ft counts");
-    // NEW-15 — the explainer has partial + total variants; the total-dead branch keeps the
-    // original "none counts yet" wording (the rim clause is feasibility-gated, not unconditional).
-    // NEW-1 (B1032) — the PARTIAL branch now ACCOUNTS for the gap term by term (berm ring / below
-    // the standing water level / dedicated to compensating storage) instead of blaming all of it
-    // on the flood level, which on Tsakiris was flatly untrue (that pond has zero dead storage).
-    expect(src).toContain("All of its storage sits below the flood level, so none counts yet.");
-    expect(src).toContain("Of the ${f1(siteHolds)} ac-ft the outline could hold");
-    expect(src).toContain("is taken up by the earthen berm ring built inside the outline");
-    expect(src).toContain("is set aside for floodplain compensating storage");
+    // NEW-2 (2026-07-28, PANEL-BREVITY) — B1032's term-by-term account is KEPT but no longer
+    // spent as prose in the default view. The visible line is the counted-of-held NUMBER PAIR
+    // (which covers the partial and total-dead cases alike — "0.0 of 63.4" says "none counts"
+    // without a sentence), each deduction is a short labelled term, and the account itself moves
+    // into "Assumptions & method ▸". Nothing was deleted: assert the terms still exist.
+    expect(src).toContain("{f1(siteCounts)} of {f1(siteHolds)} ac-ft held");
+    expect(src).toContain("berm ring ${f1(bermAcFt)}");
+    expect(src).toContain("permanent water ${f1(deadAcFt)}");
+    expect(src).toContain("floodplain compensation ${f1(mitAcFt)}");
+    expect(src).toContain("below flood level ${f1(unusedAcFt)}");
+    // …and they are FOLDED (keyedNote → opts.method), not inline.
+    expect(src).toContain('`Not counted: ${terms.join(" · ")} ac-ft.');
+    expect(src).toContain('"det-terms"');
   });
 });
 

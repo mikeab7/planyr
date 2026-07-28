@@ -1,0 +1,40 @@
+{
+  "_": [
+    "NEW-5 \u2014 the PANEL-BREVITY budgets. See /CLAUDE.md \u2192 PANEL-BREVITY for the rule.",
+    "Set at the measured value with ZERO headroom, deliberately: adding a visible sentence to any",
+    "of these surfaces turns CI red, so the accumulation has to be a decision instead of a drift.",
+    "",
+    "To get back under budget, COLLAPSE \u2014 move the sentence into the group's 'Assumptions & method'",
+    "disclosure (keyedNote), into a title=/basis= hover, or inside a <Collapse>. All three are",
+    "budget-exempt because all three keep the fact reachable. DELETING a fact to fit is forbidden.",
+    "",
+    "Raising a number here is allowed but never silent: it requires a line on the BACKLOG item",
+    "saying which sentence was added, why it must be visible by default, and what was removed.",
+    "",
+    "Baseline history (jsx regions, total): 171 lines / 14728 chars before NEW-2's consolidation;",
+    "156 / 13002 after \u2014 a net reduction even though NEW-4 added the flood-level sensitivity ladder."
+  ],
+  "measuredOn": "2026-07-28",
+  "regions": {
+    "pond-inspector-default": {
+      "maxLines": 0,
+      "maxChars": 0
+    },
+    "yield-detention-detail": {
+      "maxLines": 11,
+      "maxChars": 500
+    },
+    "yield-stormwater-notes": {
+      "maxLines": 145,
+      "maxChars": 12502
+    },
+    "lib-pond-verdict": {
+      "maxLines": 5,
+      "maxChars": 258
+    },
+    "lib-yield-verdicts": {
+      "maxLines": 12,
+      "maxChars": 595
+    }
+  }
+}
