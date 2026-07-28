@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _79 open · 154 awaiting live verification._
+> _79 open · 156 awaiting live verification._
 
 ## 🔲 Open
 
@@ -94,6 +94,8 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B1038 | NEW-2: wall sidewalks drift off the bump-out-extended side on a HOST RESIZE (only re-laid on bump-out add/delete/resize) | [Site Planner / refitChildren] | #site-planner #selection | ⏳ live — awaiting |
+| B1039 | NEW-3: side parking drifts off the sidewalk it should be flush against (stale `perpGap` replayed by `fitKid`) | [Site Planner / refitChildren] | #site-planner #selection | ⏳ live — awaiting |
 | B1032 | NEW-1: the SAME below-flood storage was credited to BOTH the detention and the mitigation ledger (Tsakiris: 29.65 ac-ft counted twice, reported as 12.2) | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
 | B1036 | NEW-5 (owner amendment): a pond-berm contribution to the mitigation REQUIREMENT that cannot be priced looked identical to a confident zero | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
 | B1030 | NEW-1: the pond's detention verdict row headlined "Buildable" and never named its own ledger | [Site Planner / pond · ui] | #site-planner #pond #yield #ui #floodplain | ⏳ live — awaiting |
@@ -272,8 +274,8 @@
 - **#pond** — B1000, B1001, B1002, B1003, B1004, B993, B995, B986, B988, B954, B950, B943, B937, B934, B906, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1023, B1024, B1028, B1016, B1007, B999, B997, B996, B990, B992, B983, B982, B987, B980, B981, B978, B977, B976, B975, B974, B973, B972, B970, B969, B968, B967, B965, B963, B958, B957, B909, B907, B905, B904, B903, B902, B901, B900, B888, B884, B883, B870, B871, B707
 - **#road** — B1017, B1005, B1006, B1010, B1011, B1015, B1014, B1013, B1012, B1009, B1008, B989, B971, B964, B961, B960, B959, B955, B953, B945, B946, B742
 - **#scheduler** — B908, B818, B778, B495, B865, B863, B864, B836, B816
-- **#selection** — B948, B912, B880, B820, B746, B742, B743, B737, B682, B651
-- **#site-planner** — B998, B1000, B1001, B1002, B1003, B1004, B993, B994, B995, B986, B985, B988, B966, B954, B950, B944, B943, B937, B936, B934, B906, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1022, B1023, B1024, B1025, B1026, B1027, B1028, B1029, B1017, B1016, B1007, B1005, B1006, B1010, B1011, B1015, B1014, B1013, B1012, B1009, B1008, B999, B997, B996, B990, B992, B983, B982, B987, B984, B989, B980, B981, B978, B977, B976, B975, B974, B973, B972, B971, B970, B969, B968, B967, B965, B842, B964, B963, B961, B960, B959, B958, B957, B956, B955, B953, B951, B952, B947, B948, B945, B946, B919, B911, B912, B913, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B880, B879, B878, B868, B870, B871, B860, B861, B862, B839, B840, B837, B832, B821, B691, B820, B802, B793, B789, B787, B784, B785, B786, B812, B811, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B738, B737, B716, B707, B712, B692, B684, B682, B651, B673, B674, B714
+- **#selection** — B1038, B1039, B948, B912, B880, B820, B746, B742, B743, B737, B682, B651
+- **#site-planner** — B998, B1000, B1001, B1002, B1003, B1004, B993, B994, B995, B986, B985, B988, B966, B954, B950, B944, B943, B937, B936, B934, B906, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B1038, B1039, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1022, B1023, B1024, B1025, B1026, B1027, B1028, B1029, B1017, B1016, B1007, B1005, B1006, B1010, B1011, B1015, B1014, B1013, B1012, B1009, B1008, B999, B997, B996, B990, B992, B983, B982, B987, B984, B989, B980, B981, B978, B977, B976, B975, B974, B973, B972, B971, B970, B969, B968, B967, B965, B842, B964, B963, B961, B960, B959, B958, B957, B956, B955, B953, B951, B952, B947, B948, B945, B946, B919, B911, B912, B913, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B880, B879, B878, B868, B870, B871, B860, B861, B862, B839, B840, B837, B832, B821, B691, B820, B802, B793, B789, B787, B784, B785, B786, B812, B811, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B738, B737, B716, B707, B712, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413, B839
 - **#sync** — B1012
 - **#testing** — B966, B269, B63, B878, B863, B836, B743

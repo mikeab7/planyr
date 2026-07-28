@@ -15,7 +15,9 @@
  * `kind` into their semantic meaning.
  */
 
-import { dogEarGeom, dogEarSize, isDogEarSide } from "./dogEar.js";
+import { dogEarGeom, dogEarSize, isDogEarSide,
+  wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
+  sideOfBondedBox, localToWorld } from "./dogEar.js";
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
@@ -280,6 +282,71 @@ function normalizeDogEarPositions(list) {
   return changed ? out : els;
 }
 
+/* One-time repair: re-flush a building's WALL-HUGGING children — sidewalk / landscape strips and
+ * side-parking rows — to the host's CURRENT footprint (NEW-2 / NEW-3). Same shape and the same
+ * idempotency contract as the dog-ear pass above, and the same reason: the runtime now derives
+ * these on every host geometry change, but a record written BEFORE that fix carries the drift on
+ * disk, so it would keep rendering wrong until something happened to be resized.
+ *
+ * The two axes are healed differently, deliberately (owner rule + owner amendment):
+ *   • A wall STRIP is fully derived — it spans exactly the extended side (building depth + the
+ *     projection of any corner bump-out that lengthens that wall), centred on that span, flush to
+ *     the wall. The span rule is absolute, so this is a pure function of the host + its bumps.
+ *   • A SIDE-PARKING row is healed ONLY on the perpendicular axis — pulled flush against the
+ *     sidewalk on its side (or the wall when there is none). Its position and run ALONG the wall
+ *     are user intent (the owner slides a field to get a curb return right where a drive ties in)
+ *     and are never normalised here.
+ * Only touches children of a real building host; a stack member (truck court / trailer / buffer /
+ * appended "Add layer" zone, all `noFit`) is positioned by its own layout and is left alone. */
+const WALL_STRIP_TYPES = new Set(["sidewalk", "landscape"]);
+const isStackMember = (e) => !!(e.noFit || e.truckCourt || e.forCourt || e.forTrailer || e.prevZone);
+function normalizeWallKids(list) {
+  const els = arr(list);
+  if (els.length < 2) return els;
+  const byId = new Map();
+  for (const e of els) if (e && e.id != null) byId.set(e.id, e);
+  const finiteBox = (o) => o && ["cx", "cy", "w", "h"].every((k) => Number.isFinite(o[k]));
+  // The building host a wall kid hangs off, or null if it isn't one.
+  const hostOf = (e) => {
+    if (!e || e.points || e.attachedTo == null || isStackMember(e) || !finiteBox(e)) return null;
+    const isStrip = WALL_STRIP_TYPES.has(e.type), isPark = !!e.sideParkSide;
+    if (!isStrip && !isPark) return null;
+    const host = byId.get(e.attachedTo);
+    return host && host.type === "building" && !host.dogEar && !host.points && finiteBox(host) ? host : null;
+  };
+  const sideOf = (host, e) => (e.sideParkSide || e.sidewalkSide || sideOfBondedBox(host, e));
+  // The strip a parking row on `side` of `host` has to clear (first one wins, as on the canvas).
+  const stripFor = (host, side) => els.find((x) => {
+    const h = hostOf(x);
+    return h && h.id === host.id && WALL_STRIP_TYPES.has(x.type) && sideOf(h, x) === side;
+  });
+  let changed = false;
+  const out = els.map((e) => {
+    const host = hostOf(e);
+    if (!host) return e;
+    const side = sideOf(host, e);
+    const { cross, dimBX, dimBY } = hostAxisExtents(host, e);
+    const isVert = side === "left" || side === "right";
+    const depth = isVert ? dimBX : dimBY;
+    let box;
+    if (WALL_STRIP_TYPES.has(e.type)) {
+      box = wallStripBox(host, side, bumpsOfHost(els, host), depth);
+    } else {
+      const strip = stripFor(host, side);
+      const gap = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
+      const cur = wallKidAlong(host, side, e);            // along-wall position + run kept verbatim
+      box = wallKidBox(host, side, { depth, gap, run: cur.run, alongShift: cur.alongShift });
+    }
+    const c = localToWorld(host, box.lx, box.ly);
+    const g = { cx: c.x, cy: c.y, ...ownExtents(cross, box.dimBX, box.dimBY) };
+    const near = (a, b) => Math.abs(a - b) <= 1e-6;
+    if (near(e.cx, g.cx) && near(e.cy, g.cy) && near(e.w, g.w) && near(e.h, g.h)) return e;
+    changed = true;
+    return { ...e, ...g };
+  });
+  return changed ? out : els;
+}
+
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
  * lossless, idempotent migration. */
@@ -331,7 +398,7 @@ export function createSiteModel(p = {}) {
     // each only touching records that need it: legacy rect roads → centerline model (B596);
     // bonded children re-anchored to their host's angle (B363); dog-ear children snapped to
     // their host's current edge (B487, Jacintoport orphan-bumpout).
-    els: ensureZ(normalizeDogEarPositions(normalizeBondedRotations(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements))))),
+    els: ensureZ(normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements)))))),
     markups: ensureZ(objArr(p.markups)),
     measures: ensureZ(objArr(p.measures)),
     callouts: ensureZ(objArr(p.callouts)),

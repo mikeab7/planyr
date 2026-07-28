@@ -132,7 +132,10 @@ describe("the outline-cut group counter-rotates, so the composed transform is th
 
   it("renderElPx returns every rect element's parts inside a rotate(el.rot) group", () => {
     // The premise of the whole bug: `parts` is rotated by the element group on the way out.
-    expect(src).toMatch(/return <g key=\{el\.id\} transform=\{`rotate\(\$\{el\.rot\} \$\{c\.x\} \$\{c\.y\}\)`\}/);
+    // Inert attributes may sit between `key` and `transform` (NEW-2/NEW-3 added `data-el-id` so a
+    // headless harness can measure one element's real geometry) — what must not change is that the
+    // group still applies rotate(el.rot) about the element centre.
+    expect(src).toMatch(/return <g key=\{el\.id\}[^>]*? transform=\{`rotate\(\$\{el\.rot\} \$\{c\.x\} \$\{c\.y\}\)`\}/);
   });
 
   it("the outline-cut polylines are wrapped in rotate(-el.rot) — NOT pushed bare into parts", () => {
