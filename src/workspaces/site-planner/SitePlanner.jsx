@@ -127,7 +127,17 @@ import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
 import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
-import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt, TRACE_ACFT } from "./lib/yieldVerdicts.js";
+import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt, TRACE_ACFT, fmtMargin } from "./lib/yieldVerdicts.js";
+// Cowork yield review (NEW-1 … NEW-10) — the ONE per-pond stage/elevation model and the checks
+// that read from it, so detention, mitigation, drawdown, gravity-drain and cut/fill never
+// re-derive storage from footprints independently.
+import { pondStageModel } from "./lib/pondStageModel.js";
+import { reconcileStorage } from "./lib/storageReconcile.js";
+import { allowableReleaseCfs, assessDrawdown, fmtDrawdown, DEFAULT_DRAWDOWN_MAX_HR } from "./lib/drawdownTime.js";
+import { bandSpans, createdBands, bandLedger } from "./lib/mitigationBands.js";
+import { assessAdministrator } from "./lib/floodAdministrator.js";
+import { assessApron } from "./lib/apronElevation.js";
+import { assessCutFill } from "./lib/cutFillBalance.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
@@ -156,7 +166,7 @@ import {
   isEstimatedWseSrc, estWseNote,
   wseProvLabel, ffeBasisText,
 } from "./lib/floodplainMitigation.js";
-import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses } from "./lib/floodplainRules.js";
+import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses, offsetSurfaceBasis } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
@@ -804,7 +814,10 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
     return hit;
   }
   // B809 — retain the priced cells: the heat map renders the SAME array that summed.
-  const val = computeMitigation({ footprints: [fp], zones, rule, elev, opts: { retainCells: true } });
+  // NEW-3 — also retain each cell's elevation SPAN (grade → top of fill), which is what the
+  // hydraulic-equivalence band ledger needs; the totals are computed in the same pass, so a band
+  // can never disagree with the volume it came from.
+  const val = computeMitigation({ footprints: [fp], zones, rule, elev, opts: { retainCells: true, bandSpans: true } });
   _mitMemo.set(sig, val);
   if (_mitMemo.size > MIT_MEMO_MAX) _mitMemo.delete(_mitMemo.keys().next().value);
   return val;
@@ -9383,6 +9396,102 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const coincidentAssumption = coincidentAssumed && coincidentMaterial
     ? { coincident: coincidentStorm, source: coincidentPolicy.source }
     : null;
+  /* ── Cowork yield review (NEW-1 … NEW-10) ──────────────────────────────────────────────────
+   * ONE pass over the pond ledger builds the shared stage/elevation model, and every check below
+   * reads it — no consumer re-derives storage from a footprint. Ordered deliberately: the models
+   * first, then reconciliation (NEW-1), drawdown (NEW-2), the mitigation band ledger (NEW-3/4),
+   * the administrator + apron (NEW-8/9), and the cut/fill balance (NEW-10).
+   * Everything degrades to an explicit unknown rather than a fabricated pass. */
+  const ycriteria = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+  // The governing flood surface at each pond, and its lowest outlet invert — the two facts the
+  // duty split and the gravity tests turn on.
+  // NEW-6 — the gravity share the jurisdiction requires. FBCDD's Interim Atlas-14 §5 record already
+  // carries the VERIFIED 0.5 ("≥50% drains by gravity"); it had no consumer until now.
+  const yGravityShare = ycriteria.gravityDrainFraction?.value ?? 0.5;
+  const yPondModels = pondLedgerEntries.map((p) => {
+    const stages = p.det && p.det.outlet && Array.isArray(p.det.outlet.stages) ? p.det.outlet.stages : [];
+    const inverts = stages.map((s) => s.invertElevFt).filter((n) => Number.isFinite(n));
+    const model = pondStageModel(p.ring, p.det || {}, {
+      floodElevFt: Number.isFinite(p.wseFt) ? p.wseFt : null,
+      outletInvertFt: inverts.length ? Math.min(...inverts) : null,
+      minGravityShare: yGravityShare,
+      id: p.id, name: p.name,
+    });
+    return { entry: p, model };
+  });
+  // NEW-1 — claimed detention + claimed mitigation vs storage that physically exists. The credited
+  // mitigation is apportioned across the ponds by their below-flood candidate volume, so the
+  // reconciliation compares the SAME numbers the two ledgers actually credited.
+  const yMitCreditTotalCf = pondLedgerEntries.reduce((s, p) => s + (p.bands && Number.isFinite(p.bands.mitigationCandidateCf) ? p.bands.mitigationCandidateCf : 0), 0);
+  const yCreditedMitCf = pondLedger.creditedMitCf;
+  const yReconcile = pondLedgerEntries.length ? reconcileStorage(pondLedgerEntries.map((p, i) => {
+    const m = yPondModels[i] ? yPondModels[i].model : null;
+    const candCf = p.bands && Number.isFinite(p.bands.mitigationCandidateCf) ? p.bands.mitigationCandidateCf : 0;
+    const share = yCreditedMitCf != null && yMitCreditTotalCf > 0 ? (candCf / yMitCreditTotalCf) * yCreditedMitCf : 0;
+    return {
+      id: p.id, name: p.name,
+      known: p.factsKnown !== false,
+      // Physical = what the pond actually holds (the drawn-ring gross, the same "holds" the panel shows).
+      physicalCf: p.drawnGrossCf != null ? p.drawnGrossCf : p.grossCf,
+      detentionCountedCf: p.usableCf,
+      mitigationCountedCf: share,
+      boundaryElevFt: m && m.duty && m.duty.declared ? m.duty.boundaryElevFt : null,
+    };
+  })) : null;
+  // NEW-2 — drawdown at the jurisdiction's allowable release rate.
+  const yReleaseRate = ycriteria.allowableReleaseCfsPerAc?.value ?? null;
+  const yRelease = allowableReleaseCfs({ rateCfsPerAc: yReleaseRate, acres: acresActive });
+  const yDrawdown = assessDrawdown({
+    ponds: pondLedgerEntries.map((p) => ({ id: p.id, name: p.name, volumeCf: p.usableCf != null ? p.usableCf : p.grossCf })),
+    siteVolumeCf: providedUsableCf != null ? providedUsableCf : null,
+    release: yRelease,
+    maxHr: ycriteria.drawdownMaxHr?.value ?? DEFAULT_DRAWDOWN_MAX_HR,
+  });
+  // NEW-3/4 — the elevation-matched (hydraulically equivalent) band ledger. The governing offset
+  // surface follows the JURISDICTION (Fort Bend: the pre-Atlas-14 500-yr line), not a hardcoded 100-yr.
+  const yOffsetBasis = offsetSurfaceBasis(fmRule);
+  const yOffsetElevFt = yOffsetBasis.basis === "02pct"
+    ? (fmElev.wse02Ft ?? fmElev.derivedWse02Ft ?? fmElev.bfeFt ?? fmElev.derivedWse1pctFt ?? null)
+    : (fmElev.bfeFt ?? fmElev.derivedWse1pctFt ?? fmElev.derivedBfeFt ?? null);
+  const yMitSpans = drainMitDisplay && Array.isArray(drainMitDisplay.spans) ? drainMitDisplay.spans : null;
+  const yMitBands = yMitSpans && yMitSpans.length ? bandLedger({
+    lost: bandSpans(yMitSpans, { bandFt: 1 }),
+    created: createdBands(
+      pondLedgerEntries.map((p) => ({ id: p.id, ring: p.ring, det: p.det })),
+      { bandFt: 1, floodElevFt: yOffsetElevFt, floodplainBottomFt: Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null },
+    ),
+    ratio: fmRule && Number.isFinite(fmRule.ratio) ? fmRule.ratio : 1,
+  }) : null;
+  // NEW-8 — WHO administers the floodplain here, and the FFE rule that implies. The candidates come
+  // from the same signals the header shows (resolved rules key, county, ETJ overlays).
+  const yAdmin = assessAdministrator({
+    signals: {
+      floodJurKey,
+      authorityId: drainAuthorityId,
+      county: restored?.county || null,
+      etjLabel: (drainCtxData?.authority?.overlays || []).find((o) => o.kind === "etj")?.city || null,
+      edgeLabels: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind !== "etj").map((o) => o.city).filter(Boolean),
+    },
+    rules: buildRules,
+    ffeFt: fmBuild && fmBuild.ffe ? fmBuild.ffe.requiredFfeFt : null,
+  });
+  // NEW-9 — the truck court sits a dock drop BELOW finished floor, so it gets its own check against
+  // the governing flood elevation. Exposure, not a code verdict (pavement is not a structure).
+  const yApron = fmBuild && fmBuild.ffe && Number.isFinite(fmBuild.ffe.requiredFfeFt) ? assessApron({
+    ffeFt: fmBuild.ffe.requiredFfeFt,
+    dockDropFt: Number.isFinite(fmSettings.dockDropFt) ? fmSettings.dockDropFt : 4,
+    floodElevFt: yOffsetElevFt,
+    floodLabel: yOffsetBasis.label,
+  }) : null;
+  // NEW-10 — is the detention surplus hydraulic slack, or the hole the pad fill came out of?
+  const yCutFill = assessCutFill({
+    cutCf: Number.isFinite(pondExcavationCf) ? pondExcavationCf : null,
+    fillCf: gradeSurface && gradeSurface.grid && Number.isFinite(gradeSurface.grid.fillCf) ? gradeSurface.grid.fillCf : null,
+    shrinkFactor: Number.isFinite(fmSettings.shrinkFactor) ? fmSettings.shrinkFactor : 1,
+    requiredCf: detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt * 43560 : null,
+    providedCf: providedUsableCf,
+  });
+
   const drainage = siteSqft > 0 && origin ? {
     status: drainCtx?.busy ? "busy" : drainCtx?.error ? "error" : drainViewCtx ? "ready" : "idle",
     error: drainCtx?.error || null,
@@ -9476,6 +9585,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // R1 — the ASSUMED coincident-storm policy, present only when it materially drives usable
     // detention (a flood-affected pond crediting below-flood storage). The verdict states it.
     coincidentAssumption,
+    // ── Cowork yield review (NEW-1 … NEW-10) — all read the ONE per-pond stage model above ──
+    reconcile: yReconcile,          // NEW-1: claimed service vs storage that physically exists
+    drawdown: yDrawdown,            // NEW-2: time-to-empty at the allowable release rate
+    mitBands: yMitBands,            // NEW-3: the 1-ft elevation-matched cut/fill band ledger
+    offsetSurface: yOffsetBasis,    // NEW-4: WHICH flood line the offset is owed to, per jurisdiction
+    offsetElevFt: yOffsetElevFt,
+    pondModels: yPondModels.map(({ entry, model }) => ({
+      id: entry.id,
+      name: entry.name,
+      // NEW-5: what a straight-down footprint × depth read would have over-stated.
+      prism: model ? model.prism : null,
+      // NEW-6: the outfall-invert split and both gravity-drain tests.
+      outfall: model ? model.outfall : null,
+      gravity: model ? model.gravity : null,
+      duty: model ? model.duty : null,
+    })),
+    gravityShareRequired: yGravityShare,
+    administrator: yAdmin,          // NEW-8: who governs, and the BFE implied by the shown FFE
+    apron: yApron,                  // NEW-9: the truck court, checked apart from the pad
+    cutFill: yCutFill,              // NEW-10: the dirt balance + borrow-vs-slack surplus label
     unanchoredInTrigger,
     anchoredNoWseInTrigger, // B822 — anchored (manual or auto TOB) but the reach WSE is unknown
     pondAutoAnchored, // B822 — ponds anchored by the AUTO top-of-bank (3DEP site median)
@@ -20704,6 +20833,71 @@ function YieldPanel({
                 if (d.floodGeo?.bfeLineFlags && d.floodGeo.bfeLineFlags.usable === 0 && d.floodGeo.bfeLineFlags.datumExcluded > 0) mitR.push(warnNote("FEMA BFE lines here publish a non-NAVD88 datum — no auto-derive; enter one manually.", "mit-bfe-datum", "Deriving from a mixed datum would be a multi-foot silent error, so the tool refuses. Convert the published lines to NAVD88 and enter a BFE below."));
                 if (d.mitigationStraddle) mitR.push(warnNote(`Jurisdiction straddle — every candidate priced, worst case shown${d.mitigationStraddle.anyUnknown ? " (one UNKNOWN)" : ""}.`, "mit-straddle-detail", `Candidates: ${d.mitigationStraddle.candidates.map((c) => `${c.rule.label} ${c.result.volumeCf != null ? f1(c.result.volumeCf / 43560) + " ac-ft" : "unknown"}`).join(" · ")}.`));
                 if (mit.expertBypass) mitR.push(keyedNote("Expert bypass in use — volume = intersect area × the entered average fill depth.", "mit-bypass"));
+                // ── NEW-4 — WHICH flood line this requirement was computed from. Fort Bend owes the
+                // offset up to the pre-Atlas-14 500-yr line, not the 100-yr; the reader must be able
+                // to see which one produced the number, and when the stricter one wasn't available.
+                if (d.offsetSurface) {
+                  const ob = mit.offsetBasis || null;
+                  const mismatch = ob && ob.matched === false;
+                  mitR.push(
+                    <div key="mit-offset-surface" data-testid="yield-offset-surface" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "5px 0" }}>
+                      <span style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 12, color: Y.rowLabel }}>
+                        Measured up to
+                        <RowInfo label="Which flood line the offset is owed to" sections={[
+                          { text: `${d.offsetSurface.authority || "This county"} sets the level that storage has to be replaced up to. It is not always the 100-year line — ${d.offsetSurface.note || "check the county's own rule."}` },
+                          { text: "It matters because the higher line means more storage was taken away, so more has to be given back. A design that is barely over the requirement can flip to short on this one choice." },
+                        ]} />
+                      </span>
+                      <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: mismatch ? Y.warnText : Y.text, whiteSpace: "nowrap" }}>
+                          {d.offsetSurface.label}{d.offsetElevFt != null ? ` · ${f1(d.offsetElevFt)}′` : ""}
+                        </span>
+                        <SourceTag code="code" label="Offset surface" basis={`${d.offsetSurface.authority || "Jurisdiction"} — ${d.offsetSurface.source || "rule not transcribed"}`} />
+                      </span>
+                    </div>
+                  );
+                  if (mismatch) mitR.push(warnNote(`No ${d.offsetSurface.basis === "02pct" ? "500-year" : "100-year"} level known here — the requirement is understated.`, "mit-offset-mismatch", `${d.offsetSurface.authority || "This jurisdiction"} owes the offset up to the ${d.offsetSurface.label}, but no such water surface was available this check, so the volume priced against the ${ob.used === "02pct" ? "500-year" : "100-year"} line instead. ${d.offsetSurface.note || ""}`));
+                }
+                // ── NEW-3 — the ELEVATION-MATCHED (hydraulically equivalent) band ledger. A matching
+                // total is not compliance: storage has to come back in the band it was taken from.
+                if (d.mitBands && d.mitBands.known) {
+                  const bl = d.mitBands;
+                  mitR.push(
+                    <div key="mit-bands-head" data-testid="yield-mit-bands" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "5px 0", borderTop: `1px solid ${Y.hairline}` }}>
+                      <span style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 12, color: Y.rowLabel }}>
+                        Replaced at the right levels
+                        <RowInfo label="Storage replaced level by level" sections={[
+                          { text: "A one-to-one offset has to be matched level by level, not just in total. Water sitting at one level can't be stored by a hole dug lower down — so the storage you take away in each one-foot slice has to be given back in that same slice." },
+                          { text: "The totals can tie while every foot of the match is in the wrong place. That is why this check exists separately from the acre-foot figure above." },
+                          { text: "Digging below the bottom of the floodplain makes useful dirt, but it replaces no floodwater, so it earns no credit here." },
+                        ]} />
+                      </span>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, color: bl.overallPass ? "var(--success-text)" : Y.dangerText, whiteSpace: "nowrap" }}>
+                        {bl.overallPass ? "every level covered" : `${bl.shortBands.length} level${bl.shortBands.length === 1 ? "" : "s"} short`}
+                      </span>
+                    </div>
+                  );
+                  if (!bl.overallPass) {
+                    mitR.push(
+                      <div key="mit-bands-tbl" style={{ padding: "2px 0 5px" }}>
+                        {bl.shortBands.slice(0, 6).map((b) => (
+                          <div key={`bnd-${b.loFt}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, fontSize: 11, color: Y.rowLabel, lineHeight: 1.6 }}>
+                            <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f1(b.loFt)}′–{f1(b.hiFt)}′</span>
+                            <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: Y.dangerText, whiteSpace: "nowrap" }}>
+                              {f1(b.createdCf / 43560)} given back of {f1(b.requiredCf / 43560)} taken
+                            </span>
+                          </div>
+                        ))}
+                        {bl.shortBands.length > 6 && <div style={{ fontSize: 10.5, color: Y.muted, marginTop: 2 }}>…and {bl.shortBands.length - 6} more.</div>}
+                        {bl.totalWouldPass && <div style={{ fontSize: 11, color: Y.dangerText, lineHeight: 1.5, marginTop: 3 }}>The acre-foot totals tie — but the levels do not, so this would not survive review.</div>}
+                      </div>
+                    );
+                  }
+                  if (bl.excludedBelowBottomCf > 0.05 * 43560) mitR.push(keyedNote(`${f1(bl.excludedBelowBottomCf / 43560)} ac-ft was dug below the bottom of the floodplain — useful dirt, but it replaces no floodwater, so it earns no credit here.`, "mit-below-bottom"));
+                  if (bl.unanchoredIds.length) mitR.push(warnNote(`${bl.unanchoredIds.length} pond${bl.unanchoredIds.length === 1 ? " has" : "s have"} no top-of-bank elevation set.`, "mit-band-unanchored", "A pond with no top-of-bank elevation has no known position in the column, so it can contribute nothing to the level-by-level check. Set its top-of-bank elevation in the pond inspector."));
+                } else if (d.mitBands && d.mitBands.known === false) {
+                  mitR.push(keyedNote("The level-by-level check can't run yet — it needs the governing flood level and a top-of-bank elevation on each pond.", "mit-bands-unk"));
+                }
                 mitR.push(keyedNote(`Rule: ${d.mitigationRule?.label} — ${mit.trigger === "1pct_plus_02pct" ? "1% + 0.2% trigger" : "1% trigger"} @ ${mit.ratio}:1${d.mitigationRule?.offsetScope === "storage_and_conveyance" ? " (offsets storage AND conveyance — large contiguous fringe fill can trigger a no-rise/hydraulic analysis beyond this volume screen)" : ""}.`, "mit-rule"));
                 mitR.push(keyedNote(`Providers: pad FFE ${{ "proposed-surface": "proposed surface (auto-grade)" }[mit.providers.padElev] || mit.providers.padElev || "—"} · grade ${{ "3dep-grid": "3DEP per-cell grid", "3dep": "3DEP median" }[mit.providers.existGrade] || mit.providers.existGrade || "—"} · 1% WSE ${wseProvLabel(mit.providers.wse1pct)} · 0.2% WSE ${wseProvLabel(mit.providers.wse02pct)}${d.floodGeo && d.floodGeo.ts != null ? ` · flood data ${formatAge(Date.now() - d.floodGeo.ts)}` : ""}`, "mit-providers"));
                 // B826 — surface-basis honesty: when the proposed-surface engine priced the
@@ -21401,6 +21595,90 @@ function YieldPanel({
                   </div>
                 );
               }
+              // ── NEW-1 — STORAGE RECONCILIATION. Two ledgers can each add up on their own terms
+              // while together claiming more water than the ponds hold. This row is the only place
+              // that cross-check is visible, so it renders whenever it has an answer — a green tie-out
+              // as much as a red double-count (a silent pass would teach the reader nothing).
+              if (d.reconcile && d.reconcile.state !== "unknown") {
+                const rc = d.reconcile;
+                const bad = rc.state === "fail";
+                rows.push(
+                  <div key="rec-row" data-testid="yield-reconcile-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "5px 0", borderTop: `1px solid ${Y.hairline}` }}>
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 12, color: Y.rowLabel }}>
+                      Storage reconciles
+                      <RowInfo label="Storage reconciliation" sections={[{ text: "Detention counts the storage above the flood level; mitigation counts the storage below it. Both are real, but they have to fit inside the same ponds. This row adds up everything the two checks claim and holds it against what the ponds physically hold. If the claim is bigger, the same water is being counted twice — and both checks above are wrong, however green they look." }]} />
+                    </span>
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
+                      <span style={{ fontFamily: NUM_FONT, fontSize: 13, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS, color: bad ? Y.dangerText : "var(--success-text)" }}>
+                        {f1(rc.claimedCf / 43560)} claimed / {f1(rc.physicalCf / 43560)} exists
+                      </span>
+                    </span>
+                  </div>
+                );
+                if (bad) rows.push(
+                  <div key="rec-msg" style={{ fontSize: 12, color: Y.dangerText, lineHeight: 1.5, padding: "2px 0 5px" }}>{rc.message}</div>
+                );
+              } else if (d.reconcile && d.reconcile.state === "unknown") {
+                rows.push(warnNote("Storage can't be reconciled until every pond's flood split is known — re-check the flood data.", "rec-unk", d.reconcile.message));
+              }
+              // ── NEW-2 — DRAWDOWN, per pond and site-wide.
+              if (d.drawdown && d.drawdown.known && d.drawdown.site && d.drawdown.site.label) {
+                const dd = d.drawdown;
+                rows.push(
+                  <div key="dd-row" data-testid="yield-drawdown-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "5px 0" }}>
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 12, color: Y.rowLabel }}>
+                      Time to empty
+                      <RowInfo label="Time to empty" sections={[
+                        { text: `Ponds are only allowed to let water out at a set rate, so a big pond takes a long time to drain. This is how long the counted storage takes to empty at that allowed rate${dd.acres ? ` for this site's acreage` : ""}.` },
+                        { text: "It is the best case: water leaves faster when the pond is full and slows as the level drops, so the real time is longer." },
+                        { text: `Anything past ${dd.maxHr >= 48 ? `${Math.round(dd.maxHr / 24)} days` : `${dd.maxHr} hours`} is flagged. It matters twice over — a pond still full when the next storm arrives isn't really available, and a pond doing double duty as flood mitigation has to be empty again before the next flood.` },
+                      ]} />
+                    </span>
+                    <span style={{ fontFamily: NUM_FONT, fontSize: 13, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS, color: dd.site.tone === "ok" ? Y.text : dd.site.tone === "red" ? Y.dangerText : Y.warnText, whiteSpace: "nowrap" }}>{dd.site.label}</span>
+                  </div>
+                );
+                if (dd.ponds.length > 1) rows.push(
+                  <div key="dd-per" style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.5, padding: "0 0 4px" }}>
+                    Per pond: {dd.ponds.filter((p) => p.label).map((p) => `${p.name} ${p.label}`).join(" · ")}
+                  </div>
+                );
+              } else if (d.drawdown && !d.drawdown.known && (d.pondCount || 0) > 0) {
+                rows.push(keyedNote("Time to empty needs the allowed release rate — set it in Standards or give the pond an outlet.", "dd-unk"));
+              }
+              // ── NEW-6 — the two gravity-drain tests, and NEW-5's prism-vs-extrusion honesty delta.
+              {
+                const models = (d.pondModels || []).filter((m) => m.gravity || m.prism);
+                const gravFails = models.filter((m) => m.gravity && m.gravity.known && (m.gravity.detention.pass === false || m.gravity.mitigation.pass === false));
+                const gravUnknown = models.filter((m) => m.gravity && !m.gravity.known);
+                for (const m of gravFails) {
+                  const g = m.gravity;
+                  const parts = [];
+                  if (g.detention.pass === false) parts.push(`only ${Math.round((g.detention.share || 0) * 100)}% of its detention storage sits high enough to drain out by gravity (the rule wants at least ${Math.round((d.gravityShareRequired || 0.5) * 100)}%)`);
+                  if (g.mitigation.pass === false) parts.push(`${f1(g.mitigation.deadCf / 43560)} ac-ft of its flood-mitigation storage sits below the outlet and can never drain back out — that volume earns no credit, and pumping it is not allowed`);
+                  rows.push(warnNote(`${m.name}: ${parts.join("; ")}.`, `grav-${m.id}`, g.detention.basis + " " + g.mitigation.basis));
+                }
+                if (gravUnknown.length && !gravFails.length) {
+                  rows.push(keyedNote(`Gravity drainage isn't screened yet — ${gravUnknown.length === 1 ? `${gravUnknown[0].name} has` : `${gravUnknown.length} ponds have`} no outlet elevation set.`, "grav-unk"));
+                }
+                // NEW-5 — only worth saying when a straight-down read would have been materially wrong.
+                const worst = models.filter((m) => m.prism && m.prism.deltaPct != null).sort((a, b) => b.prism.deltaPct - a.prism.deltaPct)[0];
+                if (worst && worst.prism.deltaPct > 0.15) {
+                  rows.push(
+                    <div key="prism-note" title={`Sloped sides at ${worst.prism.slopeRatio}:1 with ${worst.prism.freeboardFt} ft of freeboard. Average depth over the drawn outline works out at ${f1(worst.prism.avgDepthFt)} ft.`} style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.5, padding: "2px 0", cursor: "help" }}>
+                      Storage is measured as a real basin with sloping sides, not a straight-sided box — on {worst.name} that is {Math.round(worst.prism.deltaPct * 100)}% less than the outline would suggest.
+                      {worst.prism.pinched ? " Its sides also meet before it reaches the depth set for it, so it can't actually be dug that deep." : ""}
+                    </div>
+                  );
+                }
+              }
+              // ── NEW-10 — is the surplus real slack, or the hole the pad fill came out of?
+              if (d.cutFill && d.cutFill.surplus && d.cutFill.surplus.driver === "borrow") {
+                rows.push(
+                  <div key="borrow-note" data-testid="yield-borrow-note" style={{ fontSize: 12, color: Y.warnText, lineHeight: 1.5, padding: "3px 0" }}>
+                    This extra storage is dirt-driven, not drainage-driven: the ponds are big because the pads needed the fill. Shrinking them toward the bare requirement would mean buying and hauling in roughly {Math.round(d.cutFill.surplus.importIfShrunkCy).toLocaleString("en-US")} cubic yards of fill instead.
+                  </div>
+                );
+              }
               if (req && req.rule) {
                 const shortAuth = AUTHORITY_SHORT[req.rule.authority] || req.rule.authorityLabel || "criteria";
                 // v3 B4 — some rules cite the appendix on `source.section` (e.g. Waller's
@@ -21539,7 +21817,9 @@ function YieldPanel({
               fits. A loading row shows "↻ retrying". Sorted shortfalls-first by yieldVerdictStrip.
               The freshness line lives in the header (A1). */}
           {verdictStrip.length > 0 && (() => {
-            const pillCol = { danger: ["var(--danger-bg)", "var(--danger-text)"], good: ["var(--success-bg)", "var(--success-text)"], neutral: ["var(--planner-panel)", Y.muted] };
+            // NEW-7 — the banded chip needs a THIRD tone: "warn" (amber) for a surplus too thin to
+            // rely on. Green now means real headroom, not merely "not short".
+            const pillCol = { danger: ["var(--danger-bg)", "var(--danger-text)"], good: ["var(--success-bg)", "var(--success-text)"], warn: ["rgba(234,179,8,0.16)", "var(--warn-text)"], neutral: ["var(--planner-panel)", Y.muted] };
             const pillStyle = (tone) => {
               const [bg, fg] = pillCol[tone] || pillCol.neutral;
               return { width: 40, boxSizing: "border-box", flex: "none", textAlign: "center", fontSize: 9, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: fg, background: bg, borderRadius: 5, padding: "3px 0", whiteSpace: "nowrap" };
@@ -21577,6 +21857,74 @@ function YieldPanel({
                     {v.assumption && (
                       <div data-testid={`yield-verdict-assumption-${v.key}`} title={v.assumptionSource || undefined} style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 2, whiteSpace: "normal" }}>
                         Assumed: {v.assumption}.
+                      </div>
+                    )}
+                    {/* NEW-2 — the drawdown time sits DIRECTLY under the recovery assumption it lets you
+                        evaluate. Without it the assumption is unfalsifiable; with it a multi-day empty
+                        time is visible on the same line of sight. */}
+                    {v.assumption && v.key === "det" && drainage.drawdown && drainage.drawdown.known && drainage.drawdown.site && drainage.drawdown.site.label && (
+                      <div data-testid="yield-drawdown-line" title={`${drainage.drawdown.note} Allowable release ${drainage.drawdown.releaseCfs.toFixed(2)} cfs.`} style={{ fontSize: 10.5, color: drainage.drawdown.site.tone === "ok" ? Y.muted : "var(--warn-text)", lineHeight: 1.4, marginTop: 2, whiteSpace: "normal", cursor: "help" }}>
+                        At the allowed release rate the ponds take about <b>{drainage.drawdown.site.label}</b> to empty
+                        {drainage.drawdown.site.tone !== "ok" ? " — longer than the recovery this assumption relies on, and longer than a shared flood-mitigation pond can be full between events." : "."}
+                      </div>
+                    )}
+                    {/* NEW-7 — the signed margin, so a 97% surplus and a half-acre-foot surplus can
+                        never look alike. Amber when thin. */}
+                    {v.marginText && (
+                      <div data-testid={`yield-verdict-margin-${v.key}`} title={v.thin ? `Only ${(v.margin.thinPct * 100).toFixed(0)}% headroom or less — a side-slope change, a small pad raise, or an as-built survey erases this.` : "Headroom over the requirement."} style={{ fontSize: 10.5, color: v.thin || v.short ? "var(--warn-text)" : Y.muted, lineHeight: 1.4, marginTop: 2, cursor: "help" }}>
+                        Margin {v.marginText}{v.thin ? " — thin" : ""}
+                      </div>
+                    )}
+                    {/* NEW-1 — the reconciliation failure, spelled out on the row it invalidates. */}
+                    {v.reconcileFail && (
+                      <div data-testid={`yield-reconcile-fail-${v.key}`} style={{ fontSize: 10.5, color: "var(--danger-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}>
+                        {v.reconcileFail.message}
+                      </div>
+                    )}
+                    {/* NEW-3 — a total that ties while the elevations do not. */}
+                    {v.bandFail && (
+                      <div data-testid="yield-band-fail" style={{ fontSize: 10.5, color: "var(--danger-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}>
+                        The acre-foot totals {v.bandFail.totalWouldPass ? "tie, but the elevations do not" : "and the elevations both fall short"}: {v.bandFail.shortBands} one-foot band{v.bandFail.shortBands === 1 ? "" : "s"} of lost storage {v.bandFail.shortBands === 1 ? "is" : "are"} not replaced where {v.bandFail.shortBands === 1 ? "it was" : "they were"} taken. A one-to-one offset has to be matched foot for foot.
+                      </div>
+                    )}
+                    {/* ── NEW-8 — NAME the entity whose floodplain standard produced the FFE. Three
+                        candidate authorities on one site (county · city ETJ · edge city) with
+                        materially different rules is not a footnote — it IS the elevation. This
+                        rides the Buildability strip row because the old Buildability GROUP was
+                        deleted (v3 B2) and buildability now lives here. */}
+                    {v.key === "ffe" && drainage.administrator && drainage.administrator.governingLabel && (
+                      <div data-testid="yield-ffe-administrator" style={{ fontSize: 10.5, color: drainage.administrator.ambiguous ? "var(--warn-text)" : Y.muted, lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
+                        title={`${drainage.administrator.selectionReason} Candidates: ${drainage.administrator.candidates.map((c) => c.label).join(" · ")}. ${drainage.administrator.governingSource || ""}`}>
+                        Rule applied: <b>{drainage.administrator.governingLabel}</b>
+                        {drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""}
+                        {drainage.administrator.ambiguous ? " — more than one authority could govern here, so the stricter rule was used. Confirm who issues the permit." : ""}
+                        {drainage.administrator.impliedFlood ? ` That floor implies the flood level here is at or below ${f1(drainage.administrator.impliedFlood.impliedFloodElevFt)}′ — worth checking against the FIRM panel.` : ""}
+                      </div>
+                    )}
+                    {/* NEW-9 — the truck court sits below the finished floor and is checked apart
+                        from the pad. Pavement is not a structure, so this is exposure, never a code
+                        verdict — the copy says so. */}
+                    {v.key === "ffe" && drainage.apron && drainage.apron.status !== "unknown" && (
+                      <div data-testid="yield-apron-row" style={{ fontSize: 10.5, color: drainage.apron.status === "exposed" ? "var(--danger-text)" : drainage.apron.status === "thin" ? "var(--warn-text)" : Y.muted, lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
+                        title="Truck-court and paving fill is priced into the compensating-storage requirement, not only the building pads.">
+                        Truck court: {drainage.apron.note}
+                      </div>
+                    )}
+                    {/* AUDIT-FIRST fix found while wiring NEW-8/9: the Buildability DETAIL rows
+                        (`ffeR` — the required-FFE basis, the DRAFT/estimated-WSE warnings, the
+                        LOMR-F pathway note, the SITE-BASED suggested-pad chip) were still being
+                        BUILT but never rendered anywhere: v3 B2 deleted the Buildability GROUP that
+                        used to host them and nothing re-homed its contents, so every one of those
+                        honesty lines had been silently invisible. Buildability now lives on this
+                        strip row, so its detail renders here — no second header, nothing restated. */}
+                    {v.key === "ffe" && drainageBlocks && drainageBlocks.ffeR && drainageBlocks.ffeR.length > 0 && (
+                      <div data-testid="yield-ffe-detail" style={{ marginTop: 3 }}>{drainageBlocks.ffeR}</div>
+                    )}
+                    {/* NEW-4 — the requirement could not be priced against the flood line the
+                        jurisdiction actually requires, so it understates. Say so. */}
+                    {v.understated && (
+                      <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}>
+                        This requirement was worked out from the 100-year flood line because no 500-year level is known here — {drainage.offsetSurface ? drainage.offsetSurface.authority : "this county"} owes the offset up to the 500-year line, so the figure is understated.
                       </div>
                     )}
                     </div>

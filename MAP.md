@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-28 @ `20f997f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-28 @ `abdd35b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_313 source files mapped._
+_320 source files mapped._
 
 ## infra
 
@@ -259,6 +259,8 @@ _313 source files mapped._
   - _exports_: `airportTypeLabel`, `railroadName`, `summarizeAadt`, `summarizeAirports`, `summarizeRail`
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
   - _exports_: `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `prettyKey`
+- **`src/workspaces/site-planner/lib/apronElevation.js`** — NEW-9 dock apron / truck court elevation checked separately from the building pad: apron elevation from FFE + dock drop, exposure banding against the governing flood elevation (exposure language, never code language), and the pavement/court fill set the mitigation demand must include
+  - _exports_: `APRON_FILL_TYPES`, `apronElevFt`, `apronFillIncluded`, `assessApron`, `DEFAULT_DOCK_DROP_FT`
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
   - _exports_: `aerialPlacement`, `aerialTileGrid`, `BACKUP_GRACE_MS`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `lngLatToGlobalPixel`, `outerRingsLngLat`, `overlayExportPlacement`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `pickAerialTileZoom`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
 - **`src/workspaces/site-planner/lib/arrange.js`** — element/markup z-order "Arrange" (B820): `reorderByZ`/`arrangeFlags`/`ARRANGE_MODES` — pure z-based Bring-to-Front/Send-to-Back over a peer set (within a type-layer band for elements, the markup layer for markups)
@@ -303,6 +305,8 @@ _313 source files mapped._
   - _exports_: `_resetCoverageCache`, `_resetRelevancePrefs`, `boundsFromLeaflet`, `boundsIntersect`, `bufferBounds`, `computeCoverage`, `COVERAGE_STATE`, `DEFAULT_RADIUS_MI`, `DEFAULT_RELEVANCE`, `displayCoverage`, `esriExtentToBounds`, `getCachedExtent`, `getNearbyRadiusMiles`, `getRelevanceMode`, `isRegional`, `LAYER_SCOPE`, `layerScope`, `normalizeMode`, `normalizeRadius`, `prefetchExtents`, `regionCoverage`, `RELEVANCE_MODES`, `setLayerExtent`, `setNearbyRadiusMiles`, `setRelevanceMode`, `srPointToLatLon`, `subscribeRelevance`
 - **`src/workspaces/site-planner/lib/curveNumber.js`** — SCS/NRCS Curve-Number runoff method (NEW-B1): composite CN from hydrologic soil group + impervious %, runoff depth/volume from an Atlas-14 rainfall depth, post-minus-pre increase. Pure TR-55.
   - _exports_: `compositeCn`, `COVER_CN`, `excessRainfallSeries`, `HSG`, `IMPERVIOUS_CN`, `normalizeHsg`, `perviousCn`, `runoffDepthIn`, `screenRunoff`
+- **`src/workspaces/site-planner/lib/cutFillBalance.js`** — NEW-10 site cut-vs-fill balance with a configurable shrink factor, plus the borrow-driven-vs-hydraulic classification of a detention storage surplus (and the fill import a naive right-sizing would create)
+  - _exports_: `assessCutFill`, `BALANCE_EXPLAINS_TOL`, `classifyStorageSurplus`, `cutFillBalance`, `DEFAULT_SHRINK_FACTOR`, `padFillDemandCf`
 - **`src/workspaces/site-planner/lib/deedAlign.js`** — Deed-to-parcel basis-of-bearings fix: rigid rotate+translate best-fit overlay plus theoretical grid-convergence fallback
   - _exports_: `CONFIDENT_FRAC`, `describeRotation`, `gridConvergenceDeg`, `MAX_ALIGN_ROT_DEG`, `openRing`, `ringCentroid`, `rotatePointsAbout`, `solveDeedAlignment`
 - **`src/workspaces/site-planner/lib/demGrid.js`** — Pure DEM grid plumbing (B704/B706): deterministic snapped-tile exportImage requests, LERC sniff/decode to survey-feet with validity mask, masked gaussian smooth, cell-center pixel/mercator/WGS84 transforms, mask-aware bilinear sampling
@@ -323,6 +327,8 @@ _313 source files mapped._
   - _exports_: `bumpSidewalkSide`, `DOGEAR_D`, `DOGEAR_W`, `dogEarGeom`, `dogEarSize`, `isDogEarSide`, `sidewalkSpanForBumps`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
   - _exports_: `resolveDraftStepBack`
+- **`src/workspaces/site-planner/lib/drawdownTime.js`** — NEW-2 drawdown time at the jurisdiction's allowable release rate: allowable release from the per-acre criterion (or an outlet override), optimistic time-to-empty per pond and site-wide with a prorated capped outfall, and threshold banding
+  - _exports_: `allowableReleaseCfs`, `assessDrawdown`, `DEFAULT_DRAWDOWN_MAX_HR`, `drawdownHours`, `drawdownTone`, `fmtDrawdown`
 - **`src/workspaces/site-planner/lib/dxf/dxfGeom.js`** — B747 pure DXF geometry primitives (bulge/arc/ellipse flattening, INSERT affine composition, $INSUNITS→feet); no imports, worker-safe, unit-tested.
   - _exports_: `arcPoints`, `bulgeArcPoints`, `dxfArcPoints`, `ellipsePoints`, `IDENTITY`, `insertMatrix`, `insunitsToFeet`, `matApply`, `matMul`, `r3`
 - **`src/workspaces/site-planner/lib/dxf/dxfOverlay.js`** — B747 main-thread DXF glue: runs the parse/render in the DXF worker, rasterizes the returned SVG to a transparent PNG, and exposes openDxfFile/rasterizeStoredDxf for the overlay + reload paths.
@@ -365,10 +371,12 @@ _313 source files mapped._
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
 - **`src/workspaces/site-planner/lib/ffeBalance.js`** — grading milestone (DECISION 3): the balance-optimal finished-floor solver (`solveBalanceFfe` floats the pad UP off the regulatory code minimum to reuse basin spoil as fill, never below it) + the dual FFE readout (`ffeDualDisplay`, "FFE X (code floor Y + Z for balance)"). The net earthwork residual is reported in CY (owner preference), not truckloads. Pure, Node-tested.
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
+- **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
+  - _exports_: `administratorCandidates`, `assessAdministrator`, `ffeSummary`, `impliedFloodElevation`, `resolveAdministrator`, `ruleKeyFor`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
   - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
-  - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `saveFloodplainRules`, `triggerClasses`
+  - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `mitigationOffsetBasis`, `offsetSurfaceBasis`, `offsetSurfaceLabel`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed
   - _exports_: `d8Direction`, `flowArrows`
 - **`src/workspaces/site-planner/lib/footprintEdit.js`** — Building footprint reshape (NEW-1/B872): rect→polygon promotion + dock-frame preservation — pins loaded walls as fixed lines, projects/clips vertex drags, recomputes the dock-frame bbox, and repoints doors/grid to the true wall (pure geometry)
@@ -423,6 +431,8 @@ _313 source files mapped._
   - _exports_: `distToPolyline`, `measModeOf`, `measPoints`, `measuresUnderPoint`, `nextMeasureSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure metes-and-bounds engine: parses Texas deed bearing/distance calls (curves, SAVE-AND-EXCEPT tracts) to planner-feet paths, closure/misclosure, polyline offset/buffer, ring overlap
   - _exports_: `arcChordPoints`, `bufferPolyline`, `callsToPath`, `misclosure`, `offsetPolyline`, `parseCalls`, `parseTracts`, `pathCloses`, `ringsOverlap`, `VARA_FT`
+- **`src/workspaces/site-planner/lib/mitigationBands.js`** — NEW-3 hydraulic-equivalence band ledger: per-cell fill spans bucketed into 1-ft elevation bands, pond-side created storage from the stage model (excluding below-floodplain-bottom borrow), and per-band pass/fail that fails a short band even when the totals net positive
+  - _exports_: `BAND_TOL_CF`, `bandLedger`, `bandSpans`, `createdBands`, `DEFAULT_BAND_FT`
 - **`src/workspaces/site-planner/lib/mitigationHeatmap.js`** — Fill-depth heat map (B809): bins/ramp/hatch classing, legend, tie-out totals, hover lookup, and the one-canvas painter over the engine-retained cells (engine truth — never re-derives)
   - _exports_: `binIndex`, `cellAt`, `cellPaint`, `CUT_RAMP`, `cutFillLegend`, `cutFillPaint`, `cutFillTotals`, `DEPTH_BIN_FT`, `FILL_RAMP`, `FLOODWAY_FILL`, `HEAT_RAMP`, `heatmapBBox`, `heatmapLegend`, `heatmapTotals`, `paintHeatmap`, `UNKNOWN_FILL`, `ZERO_BAND_FT`
 - **`src/workspaces/site-planner/lib/multiStyle.js`** — B740 multi-selection shared styling (pure): `styleCapsOf` (per-item editable props), `commonStyleState` (common set + uniform-or-mixed per property), `selectionRingFeet` (rotation-aware per-member outline).
@@ -491,6 +501,8 @@ _313 source files mapped._
   - _exports_: `boxesIntersect`, `f1`, `labelBBox`, `labelWidth`, `placeColumn`, `pondSectionModel`
 - **`src/workspaces/site-planner/lib/pondSizing.js`** — NEW-4 pond sizing assistant: solves an anchored pond's two banded targets (below-WSE mitigation depth/footprint growth, above-WSE usable via TOB raise) through the same pondGeom bands the audit reads, with the berm-as-fill fixed-point feedback and honest pinch-off/inundated/estimated states
   - _exports_: `applyPondSizingActions`, `scaleRing`, `sizePondForTargets`, `solveMitigationDepth`, `solveMitigationGrow`, `solveTobRaise`
+- **`src/workspaces/site-planner/lib/pondStageModel.js`** — THE shared per-pond stage-storage / elevation-band model (NEW-1/3/5/6): stage table, the declared non-overlapping detention/mitigation duty split, the outfall-invert split, both gravity-drain tests, and the prism-vs-extrusion honesty delta
+  - _exports_: `areaAtElev`, `CF_PER_ACFT`, `DEFAULT_MIN_GRAVITY_SHARE`, `dutySplit`, `gravityTests`, `outfallSplit`, `pondElevations`, `pondStageModel`, `prismVsExtrusion`, `SQFT_PER_ACRE`, `stageTable`
 - **`src/workspaces/site-planner/lib/powerScreen.js`** — PHASE 5 power screening (pure): turns HIFLD transmission lines + substations near the parcel into findings — a line crossing the footprint flags a likely transmission easement (present), the nearest substation is a service/interconnect proxy (info); cleans the dataset's withheld voltages and anonymized ("UNKNOWN…") substation names
   - _exports_: `ownerLabel`, `subName`, `summarizeSubstations`, `summarizeTransmission`, `voltLabel`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
@@ -533,6 +545,8 @@ _313 source files mapped._
   - _exports_: `buildStageStorageDischarge`, `dischargeAtElev`, `dischargeAtStorage`, `elevAtStorage`, `storageAtElev`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
   - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
+- **`src/workspaces/site-planner/lib/storageReconcile.js`** — NEW-1 site storage reconciliation: counted detention plus counted mitigation against total physical pond storage, with a hard FAIL naming the overlap volume and the ponds involved (and undeclared dual-duty ponds)
+  - _exports_: `OVERLAP_TOL_CF`, `reconcilePond`, `reconcileStorage`
 - **`src/workspaces/site-planner/lib/subsidence.js`** — Harris-Galveston / Fort Bend subsidence-district cited registry (NEW-B4): county→district flag (groundwater-pumping permit + surface-water-conversion context) with citations + audit. Pure.
   - _exports_: `problems`, `SUBSIDENCE_DISTRICTS`, `subsidenceFlag`, `subsidenceFor`
 - **`src/workspaces/site-planner/lib/supabase.js`** — Supabase anon client factory from build-time env, connection/health test, and synchronous access-token read for the keepalive cloud push
@@ -564,7 +578,7 @@ _313 source files mapped._
 - **`src/workspaces/site-planner/lib/yieldBar.js`** — B862: the shared required-vs-provided bullet-bar geometry + primitive marks for the Yield → Stormwater readout; one source consumed by the on-screen SVG (SitePlanner `BulletBar`) AND the PDF export string (`printSheet.bulletBarSvg`) so they can't drift (PDF-PARITY). `bulletBarLayout`/`stackedBarLayout` (pure geometry), `bulletBarMarks`/`stackedBarMarks` (render primitives), `bulletBarSvg` (PDF string), `stormwaterBarSpecs` (the det/mit bar specs from the drainage object).
   - _exports_: `ACFT_EPS`, `bulletBarLayout`, `bulletBarMarks`, `bulletBarSvg`, `stackedBarLayout`, `stackedBarMarks`, `stormwaterBarSpecs`
 - **`src/workspaces/site-planner/lib/yieldVerdicts.js`** — FINAL UI SPEC Part B pure Yield-panel verdict strip (B1.1) + number format (B2/B3): maps the drainage object to up-to-four one-line detention/mitigation/buildability verdicts, and `fmtAcFt` (1 decimal, signed-zero collapsed so −0.00 never renders)
-  - _exports_: `fmtAcFt`, `fmtProvidedOfRequired`, `fmtSignedAcFt`, `TRACE_ACFT`, `yieldVerdictStrip`
+  - _exports_: `DEFAULT_THIN_PCT`, `fmtAcFt`, `fmtMargin`, `fmtProvidedOfRequired`, `fmtSignedAcFt`, `marginFor`, `THIN_PCT_BY_CHECK`, `thinThresholdFor`, `TRACE_ACFT`, `yieldVerdictStrip`
 - **`src/workspaces/site-planner/lib/zOrder.js`** — explicit z_index utilities (B671): assign/sort/renormalize the within-type-layer stacking tiebreak that replaced implicit array position
   - _exports_: `byZAsc`, `ensureZ`, `needsZ`, `nextZ`, `normalizeZ`, `sortByZ`, `Z_GAP`
 - **`src/workspaces/site-planner/MapFinder.jsx`** — Leaflet map finder: aerial basemaps + labels, GIS overlay panel, eager county/statewide parcel identify, and status-pinned site markers for picking/opening sites

@@ -68,6 +68,9 @@ export const DEFAULT_FLOODPLAIN_RULES = {
     ratio: 1,
     floodwayPolicy: "prohibit_fill",
     offsetScope: "storage_and_conveyance",
+    // NEW-4 — the offset is owed up to the pre-Atlas-14 500-yr surface, not the 100-yr line.
+    offsetElevBasis: "02pct",
+    offsetElevNote: "FBCDD Interim Atlas-14 Criteria §9: offset any reduction in floodplain storage within the EXISTING (pre-Atlas-14) 500-yr (0.2%) floodplain. A requirement computed off the 100-yr line understates the obligation.",
     locationRule: "Hydraulically-equivalent compensating storage in the SAME watershed — on the same property / sub-watershed, or a County-Engineer-approved alternate location.",
     source: "FBC Flood Damage Prevention Regs §5.02(h)(1) (adopted 3/4/2014, am. 10/8/2024) + FBCDD Interim Atlas-14 Criteria §9 (eff. 2020-01-01, rev. 9/2021).",
     sourceDate: "2024-10-08",
@@ -164,6 +167,43 @@ export const defaultFloodJurForCounty = (county) =>
 /* The zone classes a rule's trigger obligates (feeds computeMitigation). */
 export const triggerClasses = (rule) =>
   rule && rule.trigger === "1pct_plus_02pct" ? ["1pct", "02pct"] : ["1pct"];
+
+/* NEW-4 — the mitigation TRIGGER / OFFSET SURFACE: the flood ELEVATION the lost storage must be
+ * replaced up to. This is a per-jurisdiction standard, NOT a hardcoded 100-yr line.
+ *
+ * The distinction the old code collapsed: `trigger` says WHICH MAPPED ZONES obligate mitigation
+ * (the 1% SFHA, or the SFHA plus the 0.2% shaded band); `offsetElevBasis` says WHICH WATER SURFACE
+ * the offset volume is measured to inside those zones. A rule can trigger on the 1% zone and still
+ * owe the offset up to the 500-yr elevation — which is exactly the Fort Bend case:
+ *
+ *   FBC Interim Atlas-14 Criteria §9 — offset any reduction in floodplain storage within the
+ *   EXISTING (pre-Atlas-14) 500-YR floodplain. Measuring to the 100-yr line UNDERSTATES the
+ *   requirement, and on a design sitting +0.5% over the requirement the sign flips.
+ *
+ * A rule may declare `offsetElevBasis` explicitly. Absent that, it is inferred from the trigger: a
+ * rule that reaches into the 0.2% band owes its offset to the 0.2% surface. Pure. */
+export const mitigationOffsetBasis = (rule) => {
+  if (rule && (rule.offsetElevBasis === "1pct" || rule.offsetElevBasis === "02pct")) return rule.offsetElevBasis;
+  return rule && rule.trigger === "1pct_plus_02pct" ? "02pct" : "1pct";
+};
+
+/* The plain-English name of that surface, for the panel line that STATES which flood line the
+ * requirement was computed from (NEW-4's visible half). Pure. */
+export const offsetSurfaceLabel = (basis) => (basis === "02pct" ? "0.2% (500-yr) flood elevation" : "1% (100-yr) flood elevation");
+
+/* The jurisdiction's own citation for its offset surface, so the panel names the authority AND the
+ * rule rather than asserting a number. Pure. */
+export function offsetSurfaceBasis(rule) {
+  const basis = mitigationOffsetBasis(rule);
+  return {
+    basis,
+    label: offsetSurfaceLabel(basis),
+    authority: rule ? rule.label : null,
+    source: rule ? rule.source : null,
+    verified: rule ? rule.verified !== false : false,
+    note: rule && rule.offsetElevNote ? rule.offsetElevNote : null,
+  };
+}
 
 /* B790 — the county a rules key IMPLIES (lowercase display name), for the picker's
  * county-mismatch warning: a hand-picked "harris" rule on a site whose identify county

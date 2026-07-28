@@ -30,7 +30,9 @@ describe("NEW-15 — the detention explainer matches the numbers above it (parti
 
 describe("NEW-16 — a trace mitigation requirement carries its raw ac-ft in the ⓘ", () => {
   it("imports the materiality floor and renders a trace ⓘ with the raw value", () => {
-    expect(src).toContain('import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt, TRACE_ACFT } from "./lib/yieldVerdicts.js";');
+    // NEW-7 added fmtMargin to the same import — assert the SYMBOLS, not the exact line, so a
+    // later addition to this import can't fail a test about the trace ⓘ.
+    expect(src).toMatch(/import \{[^}]*\byieldVerdictStrip\b[^}]*\bTRACE_ACFT\b[^}]*\} from "\.\/lib\/yieldVerdicts\.js";/);
     expect(src).toContain("{v.trace && v.traceAcFt != null && (");
     expect(src).toContain("about ${v.traceAcFt.toFixed(3)} ac-ft of storage");
     expect(src).toContain("below the ${TRACE_ACFT.toFixed(2)}-ac-ft materiality floor");
