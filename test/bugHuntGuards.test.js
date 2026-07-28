@@ -299,24 +299,30 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(sp).not.toMatch(/tw = Math\.max\(fontPx, \.\.\.lines\.map\(\(l\) => l\.length \* charW\)\)/);
   });
 
-  it("B567: every Site Planner color input picks live via livePick (onInput), with one-frame undo", () => {
+  it("B567 + NEW-4: every Site Planner color control picks live (onInput) with one-frame undo, and carries the shared recents row", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // livePick now takes an optional hist flag (default on); Standards-default swatches pass false
     // so a settings-only pick doesn't leave a dead undo frame (RC-6). Element/markup pickers are
     // unchanged — they still push one frame per picking session.
     expect(src).toMatch(/const livePick = \(apply, hist = true\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // all 18 native color controls still spread livePick instead of a bare onChange
-    // (B740 added the shared multi-selection Fill/Outline pickers — one colorField reused twice;
-    //  the parcel Boundary panel added a per-parcel Outline-color picker → 14th;
-    //  B929 added the Standards → Parcels default Outline-color + Fill-color swatches → 15th/16th;
-    //  FINAL UI SPEC A1.6 moved the pond Properties into the inspector's "Appearance" group —
-    //  its Fill + Outline pickers are a second copy alongside the non-pond Properties section → 17th/18th)
-    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(18);
+    // NEW-4 — the 18 controls now go through `colorCtl`, which IS livePick plus the shared
+    // recently-used swatch row (one wheel + one recents row per control). 17 are the full
+    // <ColorField> control; the 18th is the multi-selection "Mixed" picker, whose wheel is a
+    // bespoke hidden overlay, so it spreads livePick directly and gets ColorRecentsRow beside it.
+    expect(src).toMatch(/const colorCtl = \(apply, hist = true\) => \(\{\s*\n\s*pick: livePick\(apply, hist\),/);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(17);
+    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(1);
+    expect((src.match(/<ColorField /g) || []).length).toBe(17);
+    expect(src).toMatch(/<ColorRecentsRow seed=\{COLOR_SEED\}/);
+    // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
+    expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\); \}/);
+    // The wheel records into recents once, on `change` (when it closes) — not per drag frame.
+    expect(src).toMatch(/onChange: \(e\) => \{ if \(hist && !pickSnapRef\.current\).*pushRecent\(e\.target\.value\); \}/);
     // the two Standards element-Colors swatches opt out of history (settings-only, RC-6)
-    expect((src.match(/\{\.\.\.livePick\(\(v\) => liveTypeStyle\([^)]*\), false\)\}/g) || []).length).toBe(2);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) => liveTypeStyle\([^)]*\), false\)\}/g) || []).length).toBe(2);
     // B929: the two Standards → Parcels default swatches are settings-only too (hist=false)
-    expect((src.match(/\{\.\.\.livePick\(\(v\) => setParcelStd\([^)]*\), false\)\}/g) || []).length).toBe(2);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) => setParcelStd\([^)]*\), false\)\}/g) || []).length).toBe(2);
     // the per-pixel undo floods are gone: the OLD color-input handlers (inline pushHistory) no
     // longer exist (discrete controls like the "Fill the parcel" checkbox keep their pushHistory)
     expect(src).not.toMatch(/onChange=\{\(e\) => \{ pushHistory\(\); setSelEl\(\{ fill: e\.target\.value/);

@@ -6231,3 +6231,114 @@ Origin: filed 2026-07-11 from owner chat (screenshot of the ＋ Add parcel menu)
 - **Enforced, because a markdown rule rots** — the owner's explicit instruction. `ui-audit/panel-copy-budget.mjs --check` + `test/panelBrevity.test.js` measure the visible DEFAULT-VIEW copy of five regions against ZERO-headroom budgets in `ui-audit/panel-copy-budget.json`, so an accumulating change goes red in CI. Extends the existing per-line caps (B823's 110-char `warnNote` cap, `pondCopyLint`) from "no one line may be a paragraph" to "no group may accumulate lines".
 - **The escape valves are the point:** copy inside a `<Collapse>`, a `title=`/`basis=` hover, or a `keyedNote(...)` method note is EXEMPT — so collapsing gets you under budget and deleting a fact is never necessary. The guard self-tests this (moving a sentence into a fold provably reduces the count; leaving it inline provably raises it) and throws rather than reporting a comfortable zero if a region anchor ever moves.
 - **Budgets as committed:** pond-inspector-default 0 lines/0 chars · yield-detention-detail 11/500 · yield-stormwater-notes 145/12502 · lib/pondVerdict.js 5/258 · lib/yieldVerdicts.js 12/595.
+
+### B1058 — Measurements and callout leaders carry an × delete badge on the canvas `[Site Planner / measure · callout]` (bug) #site-planner #ui #markup #selection  *(owner chat block 2026-07-28, provisional NEW-1 + NEW-5 — arrived as two reports seconds apart and fixed as one item. Minted **B1058** via `npm run next-id -- --against-main`. DEDUPE-FIRST: searched Open / ⏳ Verify / Done for an existing ×-badge item — none; B910 and B230 touch the same selected-measurement chrome but are about selection and vertex handles, not the delete affordance.)*
+`[ ]` Remove the × delete affordance from every canvas object that renders one; delete via selection + Delete (and the right-click menu).
+- Verify: sandbox
+- Origin: filed 2026-07-28 from chat (NEW-1 + NEW-5)
+- **AUDIT — the "shared affordance" premise is FALSE.** NEW-5 asked to fix this "at the common source if it
+  comes from a shared affordance." It does not: there were THREE hand-rolled call sites in
+  `SitePlanner.jsx`, no shared component — the count-mode measurement badge and the line/area
+  measurement badge (a `<circle>` + a `×` `<text>`, `PAL.accent`), and the callout leader badge (a
+  `<circle>` + two crossed `<line>`s, `PAL.danger`, at the leader midpoint). Fixed as one change across
+  all three; there is no common source to fix instead.
+- **FULL ENUMERATION of on-object × delete badges (asked for in NEW-5).** Site Planner canvas: exactly
+  the three above — all removed. Nothing else on the planner canvas renders one: a road, building,
+  parking, pond, paving, markup or parcel has never had one (they delete via Delete / the right-click
+  menu / the panel's Delete button). **Doc Review is a DIFFERENT convention and was left alone** (noted,
+  not silently widened, per the brief): `DocReview.jsx` and `Stitcher.jsx` put their delete control in a
+  floating selection TOOLBAR beside the object (an HTML `<button>` in a control strip), not as a badge
+  stuck on the drawing. If the owner wants that changed too it is its own item.
+- **Precondition checked BEFORE removing anything** (so nothing is stranded): the Delete key already
+  removed both. `deleteSel` handles `sel.kind === "measure"` (index-keyed, tombstoned) and
+  `sel.kind === "callout"`; the keydown at the Delete/Backspace branch reads the LIVE selection refs.
+  Both paths were driven headless to confirm. The right-click menus already carry
+  "Delete measurement" / "Delete callout" — and, for a SINGLE leader on a multi-leader callout,
+  "Delete Leader" (wired with the leader index from the leader's own `onContextMenu`), which is now
+  the only per-leader removal path and is deliberately kept.
+- Files: `src/workspaces/site-planner/SitePlanner.jsx`.
+- **Verified in the sandbox 2026-07-28** — build green, full unit suite green (5784), and a new logged-out
+  Playwright drive (`e2e/clipboard-standards-swatches.spec.js`): a selected measurement renders its
+  square control points with no `×` glyph and Delete removes it; a selected callout renders the leader
+  re-aim grip with `[data-testid^="callout-delete-leader-"]` absent, the leader itself still present,
+  and Delete removes the callout. Zero page errors.
+
+### B1059 — Ctrl+C on a building leaves behind the elements bonded to it; and most object types can't be copied at all `[Site Planner / selection]` (bug) #site-planner #selection #ui #markup  *(owner chat block 2026-07-28, provisional NEW-2, SUPERSEDED in scope by the NEW-6 amendment minutes later — filed as ONE item because NEW-6 explicitly reconciles them as two halves of one general clipboard. Minted **B1059** via `npm run next-id -- --against-main`. DEDUPE-FIRST: no existing clipboard/copy-paste item across Open / ⏳ Verify / Done; B417 is paste-at-cursor PLACEMENT (kept), B261 is explicit Groups, B740 is multi-select shared STYLE editing — none of them own the clipboard.)*
+`[ ]` One clipboard driven by the selection: every drawn kind copies, an element brings its bonded assembly, paste re-mints ids and preserves relative geometry in one undo frame.
+- Verify: sandbox
+- Origin: filed 2026-07-28 from chat (NEW-2 + NEW-6)
+- **AUDIT — NEW-2's two flagged premises, resolved before building.**
+  **(a) Does a Ctrl+C/Ctrl+V path exist?** YES — this was a PARTIAL feature, not net-new. `copySel` /
+  `pasteClip` existed but `copySel` was literally `els.find(...)`: a single-element clipboard. So the
+  narrow framing was right about the mechanism and wrong about the scope.
+  **(b) Is there an explicit host relation, or only geometric coincidence?** There IS an explicit one, and
+  it is not limited to dog-ears: **`attachedTo`** bonds truck courts, trailer parking, dock-zone stacks,
+  side parking, wall sidewalks AND dog-ear bump-outs to their host building. `deleteSel`, `nudgeSel`,
+  `assemblyOf` and `duplicateGroup` already cascade over it. **No geometric-containment inference was
+  invented** — the new code uses that same relation and nothing else.
+  **The actual root cause** was the opposite of "no relation exists": `ORPHAN_TAGS` / `detachClone`
+  DELIBERATELY stripped `attachedTo` on paste (a correct rule for a lone child pasted on its own,
+  wrongly applied to a whole assembly). That branch is preserved for the lone-child case.
+- **Coverage (NEW-6).** `CLIP_KINDS = el · markup · measure · callout · parcel` — every drawn kind,
+  including a mixed multi-selection. **Deliberate, documented exclusions:** imported backdrops
+  (`sheetOverlays` / the site underlay) keep their existing dedicated `copyOverlay`/`pasteOverlay` path,
+  because copying one has to clone the raster/PDF payload and its calibration, not just geometry;
+  road junctions, dock frames and dog-ears are never standalone and ride along inside their host's
+  assembly. Nothing else is un-copyable.
+- **The parcel trap, decided explicitly (not hand-waved).** A pasted parcel arrives **`active: false`**.
+  Active parcels drive every area/yield number (B100/B170) and the copy lands on or beside the original,
+  so counting both would silently double the site area the plan is sized against. Inactive = visible,
+  editable, excluded from the math; one click on the Active toggle counts it when that is really wanted,
+  and a toast says so on paste. `gisKey` is dropped with it — the copy is a drawn shape, not the county's
+  record for that account, and two shapes must not claim one parcel id. Child elements do not attach to
+  parcels (`attachedTo` is building-scoped), so nothing cascades; an easement MARKUP carrying `parcelId`
+  is remapped to the copied parcel when both are copied together, and otherwise keeps pointing at the
+  live parcel it was drawn on.
+- **Paste contract, all four parts:** fresh ids for every object · relative geometry preserved (the whole
+  set moves by ONE delta, landing bbox-centred under the cursor, honoring grid/snap) · the pasted set is
+  selected afterward · ONE undo frame. Group membership is preserved under a NEW group id when the
+  group-mates are copied together, and dropped when a member is copied alone. Bonded children are folded
+  into their host's selection ref, so a pasted building reads as one object, not eight.
+- Files: new pure `src/workspaces/site-planner/lib/planClipboard.js` (+ `test/planClipboard.test.js`, 26
+  tests); `SitePlanner.jsx` — `copySel` / `copyRef` / `cutSel` / `pasteClip` rewritten, the Ctrl+C/X/V
+  handlers now gate on `hasCopyableSel()`, Copy rows added to the markup / measure / callout right-click
+  menus, and the multi-selection delete / nudge / outline paths extended to callouts + parcels (they can
+  now ride in a multi-selection because a pasted mixed set selects itself).
+- **Verified in the sandbox 2026-07-28** — build green, 5784 unit tests green, and five logged-out
+  Playwright drives: a callout copies + pastes with a fresh id and its text, undone by one Ctrl+Z; a
+  measurement copies + pastes; a parcel copies and the copy is `active:false` with no `gisKey`; and a
+  building with REAL dock zones bonded through the app's own "＋ Add dock zone" control copies with every
+  bonded child, each re-bonded to the COPY (never the original), role tags intact, in one undo frame.
+
+### B1061 — No fast way to re-use a colour: every pick means re-finding the shade in the wheel `[Site Planner / color]` (feature) #site-planner #ui #markup  *(owner chat block 2026-07-28, provisional NEW-4. Minted **B1061** via `npm run next-id -- --against-main`. DEDUPE-FIRST: B567 is live picking + the one-undo-frame rule this must respect (it does); B615 is the callout swatch captions; B736 is the shared markup style model. No existing recents item.)*
+`[ ]` A shared recently-used swatch row beside every colour wheel: last ~10 distinct colours, most-recent first, seeded from the app palette, applying on click.
+- Verify: sandbox
+- Origin: filed 2026-07-28 from chat (NEW-4)
+- **AUDIT — one premise in the brief is FALSE: there is no "ParcelDrawing 6-swatch row."** The brief
+  cited it as the precedent for "applies on click, unlike the native picker". `ParcelDrawing` is not a
+  component in this repo (the only mention is a comment in `shared/markup/PropertyPanel.jsx` describing
+  the Site Planner's parcel overlay), and a repo-wide search found NO row of fixed colour buttons
+  anywhere — every colour control was a bare native `<input type="color">`. So there was no precedent to
+  follow; the click-to-apply behaviour was built here rather than copied. (The B567 count also moved:
+  it was 12 native colour inputs, now 19 in the planner + 2 in the shared property panel.)
+- **The wheel stays**, as instructed — this is purely additive next to it.
+- ONE shared list across the app, not per control (a colour just used on a parcel is one click away on a
+  markup, a callout, an element fill or a pond band). Nothing in the audit argued for splitting it, so it
+  is not split. 10 entries, distinct (re-using a colour MOVES it up, never doubles it), most-recent
+  first, persisted across sessions (`planyr:colorRecents:v1`), and seeded from the app's own default
+  palette — derived from `TYPE`, not a second hardcoded list — so it is never blank on first run.
+- **B567's rule is respected, and asserted in CI.** The wheel keeps live picking with ONE history frame
+  per picking session, and records into recents once on `change` (when the wheel closes) — dragging
+  through 40 shades does not flood the row. A recents-swatch click is a DISCRETE commit: exactly one undo
+  frame, like a dash change or a Reset. The existing B567 guard test was rewritten (not weakened) to
+  assert the new `colorCtl` = `livePick` + recents shape, the 17 `ColorField` call sites, and the single
+  bespoke-wheel case.
+- Files: new `src/shared/ui/colorRecents.js` (pure MRU/seed math + persistence + a subscription so every
+  open picker stays in step) and `src/shared/ui/ColorField.jsx` (wheel + row; `ColorRecentsRow` for the
+  multi-selection "Mixed" picker, whose wheel is a hidden overlay); `SitePlanner.jsx` — all 19 colour
+  controls converted. `test/colorRecents.test.js` — 18 tests.
+- **Verified in the sandbox 2026-07-28** — build green, 5784 unit tests green, and a logged-out Playwright
+  drive: the row renders beside the wheel in a building's Properties, is non-empty on a fresh browser,
+  a swatch click applies the colour to the selected element immediately, and that colour becomes first in
+  the shared persisted list.
+
